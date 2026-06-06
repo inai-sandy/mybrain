@@ -9,6 +9,7 @@ import { Tasks } from './pages/Tasks';
 import { Find } from './pages/Find';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
+import { DocDetail } from './pages/DocDetail';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
@@ -60,6 +61,7 @@ function Root() {
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
           <Route path="capture" element={<Capture />} />
+          <Route path="doc/:id" element={<DocDetail />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="find" element={<Find />} />
           <Route path="settings" element={<Settings email={email} />} />

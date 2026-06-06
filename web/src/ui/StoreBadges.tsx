@@ -1,31 +1,24 @@
-import { Check } from 'lucide-react';
-
-function Badge({ on, label }: { on?: boolean; label: string }) {
+function Letter({ on, label, letter }: { on?: boolean; label: string; letter: string }) {
   return (
     <span
-      className={
-        'inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full ' +
-        (on ? 'bg-emerald-500/15 text-emerald-500' : 'bg-zinc-500/15 text-zinc-400')
-      }
       title={on ? `In ${label}` : `Not yet in ${label}`}
+      className={
+        'inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold ' +
+        (on ? 'bg-emerald-500/15 text-emerald-500' : 'bg-zinc-500/10 text-zinc-400')
+      }
     >
-      {on && <Check size={10} />}
-      {label}
+      {letter}
     </span>
   );
 }
 
-/** Where a document is stored: SuperMemory / RAG, and whether it's chunked. */
+/** Compact store indicators: S = SuperMemory, R = RAG, C = Chunked. */
 export function StoreBadges({ supermemory, rag, chunked }: { supermemory?: boolean; rag?: boolean; chunked?: boolean }) {
   return (
-    <span className="inline-flex flex-wrap gap-1 justify-end">
-      <Badge on={supermemory} label="SuperMemory" />
-      <Badge on={rag} label="RAG" />
-      {chunked && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400" title="Chunked for retrieval">
-          chunked
-        </span>
-      )}
+    <span className="inline-flex gap-1">
+      <Letter on={supermemory} label="SuperMemory" letter="S" />
+      <Letter on={rag} label="RAG" letter="R" />
+      <Letter on={chunked} label="Chunked" letter="C" />
     </span>
   );
 }
