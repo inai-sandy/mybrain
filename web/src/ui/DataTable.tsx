@@ -8,7 +8,12 @@ export type Column<T> = {
   render?: (row: T) => ReactNode;
 };
 
-export type Filter = { key: string; label: string; options: { value: string; label: string }[] };
+export type Filter = {
+  key: string;
+  label: string;
+  options: { value: string; label: string }[];
+  match?: (row: any, value: string) => boolean;
+};
 
 /**
  * Standard list: search, sortable columns, filters, pagination, total count,
@@ -44,14 +49,16 @@ export function DataTable<T extends Record<string, any>>({
       const s = q.toLowerCase();
       r = r.filter((row) => columns.some((c) => String(row[c.key] ?? '').toLowerCase().includes(s)));
     }
-    for (const [key, val] of Object.entries(active)) {
-      if (val) r = r.filter((row) => String(row[key]) === val);
+    for (const f of filters) {
+      const val = active[f.key];
+      if (!val) continue;
+      r = f.match ? r.filter((row) => f.match!(row, val)) : r.filter((row) => String(row[f.key]) === val);
     }
     if (sort) {
       r = [...r].sort((a, b) => (a[sort.key] > b[sort.key] ? 1 : a[sort.key] < b[sort.key] ? -1 : 0) * sort.dir);
     }
     return r;
-  }, [rows, q, active, sort, columns]);
+  }, [rows, q, active, sort, columns, filters]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages - 1);

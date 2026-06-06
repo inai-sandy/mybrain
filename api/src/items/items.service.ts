@@ -4,9 +4,24 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
+import { EnrichmentService } from './enrichment.service';
 
 function itemsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'items');
+}
+
+/** Merge tag lists: lowercase, trim, dedupe, manual first, cap at 8. */
+export function mergeTags(manual: string[] = [], generated: string[] = []): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of [...manual, ...generated]) {
+    const v = String(t || '').toLowerCase().trim();
+    if (v && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out.slice(0, 8);
 }
 
 @Injectable()
@@ -14,6 +29,7 @@ export class ItemsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
+    private readonly enrichment: EnrichmentService,
   ) {}
 
   private hash(s: string): string {
@@ -27,10 +43,12 @@ export class ItemsService {
 
   /** Cheap tag suggestion from the title + opening text. */
   private suggestTags(title: string, content: string): string[] {
-    const words = (title + ' ' + content.slice(0, 600)).toLowerCase().match(/[a-z]{4,}/g) || [];
-    const stop = new Set(['this', 'that', 'with', 'from', 'your', 'have', 'will', 'about', 'into', 'they', 'them', 'were', 'what', 'when', 'then', 'than', 'also']);
+    const words = (title + ' ' + content.slice(0, 600)).toLowerCase().match(/[a-z]{4,14}/g) || [];
+    const stop = new Set(['this', 'that', 'with', 'from', 'your', 'have', 'will', 'about', 'into', 'they', 'them', 'were', 'what', 'when', 'then', 'than', 'also', 'gitignore']);
     const freq: Record<string, number> = {};
-    for (const w of words) if (!stop.has(w)) freq[w] = (freq[w] || 0) + 1;
+    // skip random-looking tokens (no vowel) so junk like "nirgxlxruu" doesn't become a tag.
+    const looksWord = (w: string) => /[aeiou]/.test(w);
+    for (const w of words) if (!stop.has(w) && looksWord(w)) freq[w] = (freq[w] || 0) + 1;
     return Object.entries(freq)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
@@ -38,7 +56,7 @@ export class ItemsService {
   }
 
   /** Store markdown: dedup by content hash + source; file is the source of truth; enqueue dual-write. */
-  async store(content: string, source: string, title?: string, sourceUrl?: string) {
+  async store(content: string, source: string, title?: string, sourceUrl?: string, manualTags: string[] = []) {
     const contentHash = this.hash(content);
     const existing = await this.prisma.item.findUnique({
       where: { contentHash_source: { contentHash, source } },
@@ -46,9 +64,13 @@ export class ItemsService {
     if (existing) return { item: existing, deduped: true };
 
     const finalTitle = title?.trim() || this.titleFrom(content, source);
-    const tags = this.suggestTags(finalTitle, content);
+    // AI summary + tags via Haiku; fall back to the keyword heuristic.
+    const enriched = await this.enrichment.enrich(finalTitle, content);
+    const generated = enriched?.tags?.length ? enriched.tags : this.suggestTags(finalTitle, content);
+    const tags = mergeTags(manualTags, generated);
+    const summary = enriched?.summary || null;
     const item = await this.prisma.item.create({
-      data: { contentHash, source, title: finalTitle, tags: JSON.stringify(tags), sourceUrl: sourceUrl || null },
+      data: { contentHash, source, title: finalTitle, summary, tags: JSON.stringify(tags), sourceUrl: sourceUrl || null },
     });
 
     const dir = itemsDir();
@@ -71,6 +93,7 @@ export class ItemsService {
         title: i.title,
         source: i.source,
         tags: i.tags ? JSON.parse(i.tags) : [],
+        summary: i.summary,
         createdAt: i.createdAt,
         sourceUrl: i.sourceUrl,
         supermemory,
@@ -87,7 +110,7 @@ export class ItemsService {
     if (!item || !item.filePath) return null;
     const content = await fs.readFile(item.filePath, 'utf8').catch(() => null);
     if (content == null) return null;
-    return { title: item.title, source: item.source, sourceUrl: item.sourceUrl, content };
+    return { title: item.title, summary: item.summary, source: item.source, sourceUrl: item.sourceUrl, content };
   }
 
   async remove(id: string) {

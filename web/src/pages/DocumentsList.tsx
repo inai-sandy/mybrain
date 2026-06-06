@@ -15,7 +15,13 @@ export type Doc = {
   chunked: boolean;
   memoryStatus: string;
   sourceUrl?: string | null;
+  tags: string[];
+  summary?: string | null;
 };
+
+function Chip({ t }: { t: string }) {
+  return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-200/70 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">{t}</span>;
+}
 
 /** Notion docs open the original Notion page; everything else opens the markdown viewer. */
 function openDoc(r: Doc) {
@@ -52,8 +58,20 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
     } else toast('error', 'Could not delete');
   }
 
+  const allTags = Array.from(new Set(items.flatMap((i) => i.tags || []))).sort();
+
   const cols: Column<Doc>[] = [
-    { key: 'title', label: 'Title', sortable: true },
+    { key: 'title', label: 'Title', sortable: true, render: (r) => (
+      <div className="min-w-0">
+        <div className="font-medium">{r.title}</div>
+        {r.summary && <div className="text-xs text-zinc-500 truncate max-w-md">{r.summary}</div>}
+        {r.tags?.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {r.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
+          </div>
+        )}
+      </div>
+    ) },
     { key: 'source', label: 'Source', sortable: true, render: (r) => <span className="capitalize">{r.source}</span> },
     { key: 'createdAt', label: 'Added', sortable: true, render: (r) => new Date(r.createdAt).toLocaleDateString() },
     { key: 'memoryStatus', label: 'Stored in', align: 'right', render: (r) => <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} /> },
@@ -72,6 +90,9 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
   const filters: Filter[] = [
     { key: 'source', label: 'Source', options: [{ value: 'upload', label: 'Upload' }, { value: 'url', label: 'Link' }, { value: 'notion', label: 'Notion' }] },
     { key: 'memoryStatus', label: 'Store', options: [{ value: 'synced', label: 'Synced' }, { value: 'pending', label: 'Pending' }] },
+    ...(allTags.length
+      ? [{ key: 'tags', label: 'Tag', options: allTags.map((t) => ({ value: t, label: t })), match: (row: Doc, val: string) => (row.tags || []).includes(val) } as Filter]
+      : []),
   ];
 
   function card(r: Doc) {
@@ -86,6 +107,12 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
           </div>
           <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} />
         </div>
+        {r.summary && <p className="mt-2 text-xs text-zinc-500">{r.summary}</p>}
+        {r.tags?.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {r.tags.slice(0, 5).map((t) => <Chip key={t} t={t} />)}
+          </div>
+        )}
         <div className="mt-2 flex items-center justify-end gap-3">
           <button onClick={() => openDoc(r)} className="inline-flex items-center gap-1 text-xs text-emerald-600">
             <Eye size={14} /> View

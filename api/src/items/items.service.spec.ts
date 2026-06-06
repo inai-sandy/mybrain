@@ -1,4 +1,4 @@
-import { ItemsService } from './items.service';
+import { ItemsService, mergeTags } from './items.service';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -35,7 +35,8 @@ function fakeDeps() {
     },
   };
   const memory: any = { enqueue: jest.fn(async () => undefined) };
-  return { svc: new ItemsService(prisma, memory), rows, memory };
+  const enrichment: any = { enrich: async () => null }; // no Anthropic → heuristic fallback
+  return { svc: new ItemsService(prisma, memory, enrichment), rows, memory };
 }
 
 describe('ItemsService', () => {
@@ -63,5 +64,19 @@ describe('ItemsService', () => {
     const list = await svc.list();
     expect(list.length).toBe(1);
     expect(list[0].title).toBe('My Note');
+  });
+
+  it('keeps manual tags (lowercased) merged with generated', async () => {
+    const { svc } = fakeDeps();
+    const res: any = await svc.store('# Widgets\n\nwidgets and gadgets', 'upload', 'widgets', undefined, ['Mine', 'Important']);
+    const tags = JSON.parse(res.item.tags);
+    expect(tags).toContain('mine');
+    expect(tags).toContain('important');
+  });
+});
+
+describe('mergeTags', () => {
+  it('dedupes, lowercases, manual first', () => {
+    expect(mergeTags(['Foo', 'bar'], ['foo', 'baz'])).toEqual(['foo', 'bar', 'baz']);
   });
 });

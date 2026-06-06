@@ -12,6 +12,7 @@ export function Capture() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [url, setUrl] = useState('');
   const [notionUrl, setNotionUrl] = useState('');
+  const [tags, setTags] = useState('');
 
   function done(r: Response, d: any) {
     if (r.ok) {
@@ -19,9 +20,19 @@ export function Capture() {
       setDoor(null);
       setUrl('');
       setNotionUrl('');
+      setTags('');
       setRefreshKey((k) => k + 1);
     } else toast('error', d?.message || 'Something went wrong');
   }
+
+  const TagsField = (
+    <input
+      value={tags}
+      onChange={(e) => setTags(e.target.value)}
+      placeholder="Tags (comma-separated, optional)"
+      className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+    />
+  );
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -30,6 +41,7 @@ export function Capture() {
     try {
       const fd = new FormData();
       fd.append('file', file);
+      fd.append('tags', tags);
       const r = await fetch('/api/items/upload', { method: 'POST', body: fd });
       done(r, await r.json().catch(() => ({})));
     } catch {
@@ -83,6 +95,7 @@ export function Capture() {
             <input type="file" accept=".md,.markdown,.txt" onChange={handleFile} disabled={busy} className="hidden" />
             <span className={btn + ' cursor-pointer'}>{busy ? 'Working…' : 'Choose file'}</span>
           </label>
+          {TagsField}
         </Modal>
       )}
 
@@ -96,8 +109,9 @@ export function Capture() {
             autoFocus
             className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
           />
+          {TagsField}
           <div className="mt-4 text-right">
-            <button onClick={() => url.trim() && post('/api/items/url', { url })} disabled={busy} className={btn}>
+            <button onClick={() => url.trim() && post('/api/items/url', { url, tags })} disabled={busy} className={btn}>
               {busy ? 'Saving…' : 'Save'}
             </button>
           </div>
@@ -117,8 +131,9 @@ export function Capture() {
             autoFocus
             className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
           />
+          {TagsField}
           <div className="mt-4 text-right">
-            <button onClick={() => notionUrl.trim() && post('/api/items/notion', { url: notionUrl })} disabled={busy} className={btn}>
+            <button onClick={() => notionUrl.trim() && post('/api/items/notion', { url: notionUrl, tags })} disabled={busy} className={btn}>
               {busy ? 'Importing…' : 'Import'}
             </button>
           </div>
