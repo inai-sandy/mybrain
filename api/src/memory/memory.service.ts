@@ -87,6 +87,15 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return { processed };
   }
 
+  /** Browse the user's existing SuperMemory documents (graceful on failure). */
+  async browseSuperMemory(limit = 50, page = 1): Promise<{ total: number; docs: any[] }> {
+    try {
+      return await this.sm.list(limit, page);
+    } catch {
+      return { total: 0, docs: [] };
+    }
+  }
+
   /** Delete a doc from both stores (best-effort; never throws). */
   async deleteDoc(supermemoryId?: string | null, ragId?: string | null): Promise<void> {
     if (supermemoryId) await this.sm.delete(supermemoryId).catch(() => undefined);

@@ -19,6 +19,12 @@ export class MemoryController {
     return { outbox: await this.mem.status() };
   }
 
+  /** Browse the user's existing SuperMemory documents + total count. */
+  @Get('browse')
+  async browse(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.mem.browseSuperMemory(Number(limit) || 50, Number(page) || 1);
+  }
+
   @Get('search')
   async search(@Query('q') q: string) {
     return this.mem.searchBoth(q || 'test');

@@ -36,6 +36,31 @@ export class SuperMemoryStore {
     return d.id;
   }
 
+  /** Browse existing SuperMemory documents (the user's whole cloud memory). */
+  async list(limit = 50, page = 1): Promise<{ total: number; docs: any[] }> {
+    const { apiKey, project } = await this.creds();
+    const res = await fetch(`${BASE}/v3/documents/list`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ limit, page, containerTags: [project] }),
+    });
+    if (!res.ok) return { total: 0, docs: [] };
+    const d: any = await res.json();
+    const mems = d.memories || [];
+    const docs = mems.map((m: any) => ({
+      id: m.id,
+      title: m.title && m.title !== 'Untitled Document' ? m.title : m.summary ? String(m.summary).slice(0, 70) + '…' : 'Untitled',
+      summary: m.summary || '',
+      tags: m.metadata?.tags
+        ? String(m.metadata.tags).split(',').map((t: string) => t.trim()).filter(Boolean)
+        : (m.containerTags || []).filter((t: string) => t !== project),
+      createdAt: m.createdAt,
+      status: m.status,
+      url: m.url || null,
+    }));
+    return { total: d.pagination?.totalItems ?? docs.length, docs };
+  }
+
   async delete(id: string): Promise<void> {
     const { apiKey } = await this.creds();
     await fetch(`${BASE}/v3/documents/${encodeURIComponent(id)}`, {

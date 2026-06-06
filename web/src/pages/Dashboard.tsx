@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bookmark, CheckSquare, FileText, Brain, type LucideIcon } from 'lucide-react';
 import { DocumentsList } from './DocumentsList';
 
@@ -17,6 +17,15 @@ function Stat({ icon: Icon, label, value, hint }: { icon: LucideIcon; label: str
 
 export function Dashboard() {
   const [notes, setNotes] = useState<number | null>(null);
+  const [smTotal, setSmTotal] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('/api/memory/browse?limit=1')
+      .then((r) => r.json())
+      .then((d) => setSmTotal(d.total ?? 0))
+      .catch(() => undefined);
+  }, []);
+
   return (
     <div className="space-y-6">
       <div>
@@ -27,7 +36,7 @@ export function Dashboard() {
         <Stat icon={FileText} label="Notes" value={notes == null ? '—' : String(notes)} hint="captured" />
         <Stat icon={CheckSquare} label="Open tasks" value="0" hint="to do" />
         <Stat icon={Bookmark} label="Bookmarks" value="0" hint="from Raindrop" />
-        <Stat icon={Brain} label="Memory" value="2" hint="stores synced" />
+        <Stat icon={Brain} label="In SuperMemory" value={smTotal == null ? '—' : String(smTotal)} hint="documents" />
       </div>
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recent captures</h2>
