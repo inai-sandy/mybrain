@@ -1,56 +1,262 @@
 import { useEffect, useState } from 'react';
-import { User, Plug } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Sparkles, Check, type LucideIcon } from 'lucide-react';
+import { useTheme } from '../ui/theme';
+import { useToast } from '../ui/Toast';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
+
+type FieldDef = { key: string; label: string; type?: string };
+type Integration = { name: string; label: string; desc: string; icon: LucideIcon; managed?: boolean; fields?: FieldDef[] };
+
+const INTEGRATIONS: Integration[] = [
+  { name: 'supermemory', label: 'SuperMemory', desc: 'Cloud memory — primary store', icon: Brain, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }, { key: 'project', label: 'Project' }] },
+  { name: 'rag', label: 'RAG (on-server)', desc: 'Self-hosted vector memory — second store', icon: Database, managed: true },
+  { name: 'notion', label: 'Notion', desc: 'Pull pages into your brain', icon: FileText, fields: [{ key: 'token', label: 'Integration token', type: 'password' }] },
+  { name: 'telegram', label: 'Telegram', desc: 'Tasks + daily digests', icon: Send, fields: [{ key: 'botToken', label: 'Bot token', type: 'password' }] },
+  { name: 'raindrop', label: 'Raindrop', desc: 'Bookmarks & highlights', icon: Bookmark, fields: [{ key: 'token', label: 'API token', type: 'password' }] },
+  { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Powers the chat assistant', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+];
+
+type Tab = 'account' | 'integrations' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
-  const [connectors, setConnectors] = useState<{ name: string; configured: boolean }[]>([]);
-
-  useEffect(() => {
-    fetch('/api/connectors')
-      .then((r) => (r.ok ? r.json() : { connectors: [] }))
-      .then((d) => setConnectors(d.connectors || []))
-      .catch(() => undefined);
-  }, []);
+  const [tab, setTab] = useState<Tab>('integrations');
+  const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
+    { id: 'account', label: 'Account', icon: User },
+    { id: 'integrations', label: 'Integrations', icon: Plug },
+    { id: 'appearance', label: 'Appearance', icon: Palette },
+  ];
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-extrabold">Settings</h1>
-        <p className="text-zinc-500">Your account and connected services.</p>
+        <p className="text-zinc-500">Your account, connected services, and appearance.</p>
       </div>
 
-      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-        <h2 className="flex items-center gap-2 font-semibold mb-3">
-          <User size={18} className="text-emerald-600" /> Account
-        </h2>
-        <p className="text-sm text-zinc-500">
-          Signed in as <span className="text-zinc-900 dark:text-zinc-100 font-medium">{email || '—'}</span>
-        </p>
-        <p className="text-xs text-zinc-400 mt-2">Change-password is coming soon.</p>
-      </section>
+      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={
+              'flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ' +
+              (tab === t.id
+                ? 'border-emerald-600 text-emerald-600'
+                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')
+            }
+          >
+            <t.icon size={16} /> {t.label}
+          </button>
+        ))}
+      </div>
 
-      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-        <h2 className="flex items-center gap-2 font-semibold mb-3">
-          <Plug size={18} className="text-emerald-600" /> Connectors
-        </h2>
-        <ul className="space-y-2">
-          {connectors.map((c) => (
-            <li key={c.name} className="flex items-center justify-between text-sm">
-              <span className="capitalize">{c.name}</span>
-              <span
-                className={
-                  'text-xs px-2 py-0.5 rounded-full ' +
-                  (c.configured
-                    ? 'bg-emerald-500/15 text-emerald-500'
-                    : 'bg-zinc-500/15 text-zinc-400')
-                }
-              >
-                {c.configured ? 'Connected' : 'Not set'}
-              </span>
-            </li>
-          ))}
-          {connectors.length === 0 && <li className="text-sm text-zinc-400">Loading…</li>}
-        </ul>
-      </section>
+      {tab === 'account' && <AccountSection email={email} />}
+      {tab === 'integrations' && <IntegrationsSection />}
+      {tab === 'appearance' && <AppearanceSection />}
+    </div>
+  );
+}
+
+function AccountSection({ email }: { email?: string }) {
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 max-w-xl">
+      <h2 className="font-semibold mb-3">Account</h2>
+      <p className="text-sm text-zinc-500">
+        Signed in as <span className="text-zinc-900 dark:text-zinc-100 font-medium">{email || '—'}</span>
+      </p>
+      <p className="text-xs text-zinc-400 mt-2">Change-password is coming soon.</p>
+    </section>
+  );
+}
+
+function AppearanceSection() {
+  const { theme, toggle } = useTheme();
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 max-w-xl">
+      <h2 className="font-semibold mb-3">Appearance</h2>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-zinc-500">Theme</span>
+        <button onClick={toggle} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm capitalize">
+          {theme} mode
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function IntegrationsSection() {
+  const [status, setStatus] = useState<Record<string, boolean>>({});
+  const [editing, setEditing] = useState<Integration | null>(null);
+  const [disconnecting, setDisconnecting] = useState<Integration | null>(null);
+  const toast = useToast();
+
+  async function refresh() {
+    const r = await fetch('/api/connectors');
+    if (r.ok) {
+      const d = await r.json();
+      const m: Record<string, boolean> = {};
+      (d.connectors || []).forEach((c: any) => (m[c.name] = c.configured));
+      setStatus(m);
+    }
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function disconnect(it: Integration) {
+    const r = await fetch(`/api/connectors/${it.name}`, { method: 'DELETE' });
+    setDisconnecting(null);
+    if (r.ok) {
+      toast('success', `${it.label} disconnected`);
+      refresh();
+    } else toast('error', `Could not disconnect ${it.label}`);
+  }
+
+  return (
+    <>
+      <div className="grid sm:grid-cols-2 gap-3">
+        {INTEGRATIONS.map((it) => {
+          const connected = !!status[it.name];
+          return (
+            <div key={it.name} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-600">
+                    <it.icon size={18} />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm">{it.label}</div>
+                    <div className="text-xs text-zinc-500">{it.desc}</div>
+                  </div>
+                </div>
+                <span
+                  className={
+                    'text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ' +
+                    (connected ? 'bg-emerald-500/15 text-emerald-500' : 'bg-zinc-500/15 text-zinc-400')
+                  }
+                >
+                  {connected ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Check size={11} /> Connected
+                    </span>
+                  ) : (
+                    'Not set'
+                  )}
+                </span>
+              </div>
+              <div className="mt-4 flex gap-2">
+                {it.managed ? (
+                  <span className="text-xs text-zinc-400">Managed automatically on your server.</span>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setEditing(it)}
+                      className="text-sm rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5"
+                    >
+                      {connected ? 'Manage' : 'Connect'}
+                    </button>
+                    {connected && (
+                      <button
+                        onClick={() => setDisconnecting(it)}
+                        className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5"
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {editing && (
+        <ConnectModal
+          integration={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            toast('success', `${editing.label} connected`);
+            refresh();
+          }}
+          onError={() => toast('error', `Could not save ${editing.label}`)}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!disconnecting}
+        title={`Disconnect ${disconnecting?.label ?? ''}?`}
+        message="The stored key will be removed. You can reconnect anytime."
+        confirmLabel="Disconnect"
+        onCancel={() => setDisconnecting(null)}
+        onConfirm={() => disconnecting && disconnect(disconnecting)}
+      />
+    </>
+  );
+}
+
+function ConnectModal({
+  integration,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  integration: Integration;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/connectors/${integration.name}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      if (r.ok) onSaved();
+      else onError();
+    } catch {
+      onError();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-sm rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl">
+        <h3 className="font-bold mb-1">Connect {integration.label}</h3>
+        <p className="text-xs text-zinc-500 mb-4">{integration.desc}. Keys are stored encrypted and never shown again.</p>
+        {(integration.fields || []).map((f) => (
+          <label key={f.key} className="block mb-3 text-sm">
+            <span className="block mb-1 text-zinc-600 dark:text-zinc-400">{f.label}</span>
+            <input
+              type={f.type || 'text'}
+              autoComplete="off"
+              value={values[f.key] || ''}
+              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 outline-none focus:border-emerald-500"
+            />
+          </label>
+        ))}
+        <div className="flex justify-end gap-2 mt-2">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm">
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm disabled:opacity-60"
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

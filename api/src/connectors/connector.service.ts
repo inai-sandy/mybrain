@@ -4,6 +4,12 @@ import { encrypt, decrypt } from './crypto.util';
 
 export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'anthropic';
 
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'anthropic'];
+
+export function isKnownConnector(n: string): n is ConnectorName {
+  return (KNOWN_CONNECTORS as string[]).includes(n);
+}
+
 @Injectable()
 export class ConnectorService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
@@ -37,6 +43,11 @@ export class ConnectorService implements OnModuleInit {
     if (!existing) await this.set(name, secrets);
   }
 
+  /** Disconnect a connector (delete its stored secrets). */
+  async remove(name: ConnectorName): Promise<void> {
+    await this.prisma.connector.deleteMany({ where: { name } });
+  }
+
   /** Get a connector's decrypted secrets, or null if not configured. */
   async get<T = Record<string, any>>(name: ConnectorName): Promise<T | null> {
     const row = await this.prisma.connector.findUnique({ where: { name } });
@@ -46,9 +57,8 @@ export class ConnectorService implements OnModuleInit {
 
   /** List connector names + whether each is configured (never returns secrets). */
   async listStatus(): Promise<{ name: string; configured: boolean }[]> {
-    const all: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'anthropic'];
     const rows = await this.prisma.connector.findMany({ select: { name: true } });
     const have = new Set(rows.map((r) => r.name));
-    return all.map((name) => ({ name, configured: have.has(name) }));
+    return KNOWN_CONNECTORS.map((name) => ({ name, configured: have.has(name) }));
   }
 }
