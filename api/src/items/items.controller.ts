@@ -70,6 +70,11 @@ export class ItemsController {
     return { items: await this.items.list() };
   }
 
+  @Get('supermemory-sync-status')
+  async syncStatus() {
+    return { lastSync: await this.items.lastSuperMemorySync() };
+  }
+
   @Get(':id/content')
   async content(@Param('id') id: string) {
     const doc = await this.items.getContent(id);

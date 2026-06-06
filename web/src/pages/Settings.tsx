@@ -201,14 +201,25 @@ function AiModelCard() {
 
 function SuperMemorySyncCard() {
   const [busy, setBusy] = useState(false);
+  const [lastSync, setLastSync] = useState<string | null>(null);
   const toast = useToast();
+
+  useEffect(() => {
+    fetch('/api/items/supermemory-sync-status')
+      .then((r) => r.json())
+      .then((d) => setLastSync(d.lastSync))
+      .catch(() => undefined);
+  }, []);
+
   async function run() {
     setBusy(true);
     try {
       const r = await fetch('/api/items/import-supermemory', { method: 'POST' });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) toast('success', `Imported ${d.imported} new document${d.imported === 1 ? '' : 's'} (${d.skipped} already here)`);
-      else toast('error', 'Sync failed');
+      if (r.ok) {
+        toast('success', `Imported ${d.imported} new document${d.imported === 1 ? '' : 's'} (${d.skipped} already here)`);
+        if (d.lastSync) setLastSync(d.lastSync);
+      } else toast('error', 'Sync failed');
     } catch {
       toast('error', 'Sync failed');
     } finally {
@@ -223,9 +234,12 @@ function SuperMemorySyncCard() {
       <p className="text-sm text-zinc-500 mb-4">
         Pull everything you've saved to SuperMemory (Claude Code, Claude chat, etc.) into your documents — as cards you can view, chat with, and manage.
       </p>
-      <button onClick={run} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-        {busy ? 'Syncing…' : 'Sync now'}
-      </button>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={run} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          {busy ? 'Syncing…' : 'Sync now'}
+        </button>
+        <span className="text-xs text-zinc-400">{lastSync ? `Last synced: ${new Date(lastSync).toLocaleString()}` : 'Never synced yet'}</span>
+      </div>
     </section>
   );
 }

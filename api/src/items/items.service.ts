@@ -169,7 +169,16 @@ export class ItemsService {
       await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
       imported++;
     }
-    return { imported, skipped, total: docs.length };
+    const lastSync = new Date().toISOString();
+    await this.prisma.setting
+      .upsert({ where: { key: 'supermemory.lastSync' }, create: { key: 'supermemory.lastSync', value: lastSync }, update: { value: lastSync } })
+      .catch(() => undefined);
+    return { imported, skipped, total: docs.length, lastSync };
+  }
+
+  async lastSuperMemorySync(): Promise<string | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'supermemory.lastSync' } });
+    return row?.value || null;
   }
 
   /** Re-fetch the latest content from the source and refresh both memory stores. */
