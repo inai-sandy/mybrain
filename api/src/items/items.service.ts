@@ -5,6 +5,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { EnrichmentService } from './enrichment.service';
+import { NotionService } from './notion.service';
 
 function itemsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'items');
@@ -30,6 +31,7 @@ export class ItemsService {
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly enrichment: EnrichmentService,
+    private readonly notion: NotionService,
   ) {}
 
   private hash(s: string): string {
@@ -113,10 +115,63 @@ export class ItemsService {
     return { title: item.title, summary: item.summary, source: item.source, sourceUrl: item.sourceUrl, content };
   }
 
+  /** Permanent delete: flush both memory stores, remove the file, delete the row. */
   async remove(id: string) {
     const item = await this.prisma.item.findUnique({ where: { id } });
     if (!item) return;
+    // Cancel any pending memory writes for this item so nothing lands after delete.
+    await this.prisma.memoryOutbox.deleteMany({ where: { itemId: id } }).catch(() => undefined);
+    await this.memory.deleteDoc(item.supermemoryId, item.ragId);
     if (item.filePath) await fs.unlink(item.filePath).catch(() => undefined);
     await this.prisma.item.delete({ where: { id } });
+  }
+
+  /** Re-fetch the latest content from the source and refresh both memory stores. */
+  async sync(id: string) {
+    const item = await this.prisma.item.findUnique({ where: { id } });
+    if (!item) return null;
+
+    let content: string | null = null;
+    if (item.source === 'url' && item.sourceUrl) {
+      content = await fetch(item.sourceUrl).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+    } else if (item.source === 'notion' && item.sourceUrl) {
+      content = await this.notion.fetchMarkdown(item.sourceUrl).then((d) => d.markdown).catch(() => null);
+    } else if (item.filePath) {
+      content = await fs.readFile(item.filePath, 'utf8').catch(() => null); // upload: re-index current content
+    }
+    if (!content || !content.trim()) return { ok: false, reason: 'Could not fetch the latest content' };
+
+    // flush old memory, refresh file + hash, re-write to both stores
+    await this.memory.deleteDoc(item.supermemoryId, item.ragId);
+    const dir = itemsDir();
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = item.filePath || join(dir, `${item.id}.md`);
+    await fs.writeFile(filePath, content, 'utf8');
+    await this.prisma.item.update({
+      where: { id },
+      data: { contentHash: this.hash(content), filePath, supermemoryId: null, ragId: null },
+    });
+    await this.memory.enqueue(content, { itemId: id, title: item.title || undefined, tags: item.tags ? JSON.parse(item.tags) : [] });
+    return { ok: true };
+  }
+
+  /** Full detail for the document page. */
+  async getDetail(id: string) {
+    const item = await this.prisma.item.findUnique({ where: { id } });
+    if (!item) return null;
+    const content = item.filePath ? await fs.readFile(item.filePath, 'utf8').catch(() => '') : '';
+    return {
+      id: item.id,
+      title: item.title,
+      summary: item.summary,
+      source: item.source,
+      sourceUrl: item.sourceUrl,
+      tags: item.tags ? JSON.parse(item.tags) : [],
+      createdAt: item.createdAt,
+      supermemory: !!item.supermemoryId,
+      rag: !!item.ragId,
+      chunked: !!item.supermemoryId,
+      content,
+    };
   }
 }

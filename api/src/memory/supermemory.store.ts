@@ -26,6 +26,14 @@ export class SuperMemoryStore {
     return d.id;
   }
 
+  async delete(id: string): Promise<void> {
+    const { apiKey } = await this.creds();
+    await fetch(`${BASE}/v3/documents/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${apiKey}` },
+    }).catch(() => undefined);
+  }
+
   async search(q: string, limit = 5): Promise<any[]> {
     const { apiKey } = await this.creds();
     const res = await fetch(`${BASE}/v3/search`, {

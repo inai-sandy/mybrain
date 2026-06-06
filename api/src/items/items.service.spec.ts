@@ -33,10 +33,12 @@ function fakeDeps() {
         if (i >= 0) rows.splice(i, 1);
       },
     },
+    memoryOutbox: { deleteMany: async () => ({ count: 0 }) },
   };
-  const memory: any = { enqueue: jest.fn(async () => undefined) };
+  const memory: any = { enqueue: jest.fn(async () => undefined), deleteDoc: jest.fn(async () => undefined) };
   const enrichment: any = { enrich: async () => null }; // no Anthropic → heuristic fallback
-  return { svc: new ItemsService(prisma, memory, enrichment), rows, memory };
+  const notion: any = { fetchMarkdown: async () => ({ markdown: '' }) };
+  return { svc: new ItemsService(prisma, memory, enrichment, notion), rows, memory };
 }
 
 describe('ItemsService', () => {
@@ -64,6 +66,16 @@ describe('ItemsService', () => {
     const list = await svc.list();
     expect(list.length).toBe(1);
     expect(list[0].title).toBe('My Note');
+  });
+
+  it('flushes both memory stores on delete', async () => {
+    const { svc, memory, rows } = fakeDeps();
+    const res: any = await svc.store('# X\n\nbody', 'upload', 'x');
+    rows[0].supermemoryId = 'sm1';
+    rows[0].ragId = 'rag1';
+    await svc.remove(res.item.id);
+    expect(memory.deleteDoc).toHaveBeenCalledWith('sm1', 'rag1');
+    expect(rows.length).toBe(0);
   });
 
   it('keeps manual tags (lowercased) merged with generated', async () => {

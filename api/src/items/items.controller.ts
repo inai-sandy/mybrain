@@ -72,6 +72,21 @@ export class ItemsController {
     return doc;
   }
 
+  @Get(':id')
+  async detail(@Param('id') id: string) {
+    const doc = await this.items.getDetail(id);
+    if (!doc) throw new BadRequestException('Document not found');
+    return doc;
+  }
+
+  @Post(':id/sync')
+  async sync(@Param('id') id: string) {
+    const res = await this.items.sync(id);
+    if (!res) throw new BadRequestException('Document not found');
+    if (!res.ok) throw new BadRequestException(res.reason || 'Sync failed');
+    return res;
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string) {
     await this.items.remove(id);

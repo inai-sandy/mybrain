@@ -37,6 +37,12 @@ export class RagStore {
     });
   }
 
+  async delete(id: string): Promise<void> {
+    await this.withClient(async (c) => {
+      await c.callTool({ name: 'delete_doc', arguments: { id, doc_id: id } }).catch(() => undefined);
+    }).catch(() => undefined);
+  }
+
   async search(query: string, limit = 5): Promise<any[]> {
     return this.withClient(async (c) => {
       const r = await c.callTool({ name: 'search_docs', arguments: { query, limit } });

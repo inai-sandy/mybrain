@@ -87,6 +87,12 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return { processed };
   }
 
+  /** Delete a doc from both stores (best-effort; never throws). */
+  async deleteDoc(supermemoryId?: string | null, ragId?: string | null): Promise<void> {
+    if (supermemoryId) await this.sm.delete(supermemoryId).catch(() => undefined);
+    if (ragId) await this.rag.delete(ragId).catch(() => undefined);
+  }
+
   async status() {
     const grouped = await this.prisma.memoryOutbox.groupBy({ by: ['status'], _count: { _all: true } });
     return grouped.map((g) => ({ status: g.status, count: g._count._all }));
