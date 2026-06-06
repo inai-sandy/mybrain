@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# healthcheck.sh — confirm the deploy is actually LIVE. Copy to healthcheck.sh and fill in the URL.
+set -euo pipefail
+
+URL="https://PROJECT.example.com/"     # the live URL to check
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || echo 000)"
+if [ "$code" -ge 200 ] && [ "$code" -lt 400 ]; then
+  echo "live: $URL -> $code"
+else
+  echo "!! NOT live: $URL returned $code" >&2
+  exit 1
+fi

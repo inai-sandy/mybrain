@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# deploy.sh — the EXACT steps to put this project live on the VPS.
+# Captured ONCE at setup so deploy is a fixed routine, never a guess. Copy to deploy.sh and fill in.
+set -euo pipefail
+
+# Typical VPS deploy for a Docker-Compose project behind Caddy (srv929020 / 31.97.226.201).
+# Replace the placeholders with this project's real values.
+
+SERVER="beakn@31.97.226.201"          # ssh target
+APP_DIR="/home/beakn/PROJECT_NAME"    # project dir on the server
+BRANCH="main"
+
+# 1) merge already done on main locally; push it
+git push origin "$BRANCH"
+
+# 2) update + rebuild + restart on the server
+ssh "$SERVER" "cd $APP_DIR && git pull --ff-only origin $BRANCH && docker compose up -d --build"
+
+echo "deploy: pushed + rebuilt on server"
