@@ -1,0 +1,74 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// A stored piece of content (research md, bookmark, etc.). Source of truth is the file on disk.
+model Item {
+  id            String   @id @default(uuid())
+  contentHash   String
+  source        String // upload | url | notion | raindrop
+  title         String?
+  filePath      String?
+  tags          String? // JSON array of strings
+  supermemoryId String?
+  ragId         String?
+  createdAt     DateTime @default(now())
+
+  @@unique([contentHash, source])
+}
+
+/// A task in the daily loop.
+model Task {
+  id            String    @id @default(uuid())
+  title         String
+  note          String?
+  dueDate       DateTime?
+  status        String    @default("open") // open | done
+  rolloverCount Int       @default(0)
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+}
+
+/// Outbox: every memory write is queued here, then a worker drains it to both stores with retries.
+model MemoryOutbox {
+  id        String   @id @default(uuid())
+  itemId    String?
+  target    String // supermemory | rag
+  op        String   @default("upsert")
+  payload   String // JSON
+  status    String   @default("pending") // pending | done | failed
+  attempts  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Generic polling/sync cursor (e.g. id="raindrop").
+model SyncState {
+  id        String   @id
+  cursor    String?
+  updatedAt DateTime @updatedAt
+}
+
+/// A chat conversation with the assistant.
+model ChatSession {
+  id        String   @id @default(uuid())
+  title     String?
+  createdAt DateTime @default(now())
+}
+
+/// Audit log of every action the agent takes.
+model AgentActionLog {
+  id        String   @id @default(uuid())
+  sessionId String?
+  tool      String
+  args      String? // JSON
+  result    String?
+  createdAt DateTime @default(now())
+}

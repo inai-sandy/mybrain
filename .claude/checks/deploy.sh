@@ -17,6 +17,7 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   --network mcp-network \
   -v mybrain-data:/app/data \
   -e NODE_ENV=production -e PORT="$PORT" \
+  -e DATABASE_URL="file:/app/data/mybrain.db" \
   "$IMAGE"
 
 echo "-> ensure Caddy route"

@@ -4,7 +4,7 @@ One flat Linear issue per task. Never sub-tickets. "Done" = merged AND deployed 
 Linear project: **My Brain — Personal Second Brain** (team BEA).
 
 ## Batch 1 — Groundwork  *(issues created)*
-- [ ] **BEA-5** — Project skeleton live at mybrain.1site.ai  · branch `sandypublic/bea-5-…`  *(in progress)*
+- [x] **BEA-5** — Project skeleton live at mybrain.1site.ai  ✅ deployed + verified live
 - [ ] **BEA-6** — Database schema (SQLite + Prisma)
 - [ ] **BEA-7** — Single-user authentication
 - [ ] **BEA-8** — Connector Registry (encrypted credential store)
