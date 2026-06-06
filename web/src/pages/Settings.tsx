@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Sparkles, Check, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Sparkles, Boxes, Check, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -13,8 +13,23 @@ const INTEGRATIONS: Integration[] = [
   { name: 'notion', label: 'Notion', desc: 'Pull pages into your brain', icon: FileText, fields: [{ key: 'token', label: 'Integration token', type: 'password' }] },
   { name: 'telegram', label: 'Telegram', desc: 'Tasks + daily digests', icon: Send, fields: [{ key: 'botToken', label: 'Bot token', type: 'password' }] },
   { name: 'raindrop', label: 'Raindrop', desc: 'Bookmarks & highlights', icon: Bookmark, fields: [{ key: 'token', label: 'API token', type: 'password' }] },
-  { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Powers the chat assistant', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude models direct', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'openrouter', label: 'OpenRouter', desc: 'One gateway to many models (Claude, GPT, Gemini…)', icon: Boxes, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
 ];
+
+const MODELS: Record<string, { value: string; label: string }[]> = {
+  anthropic: [
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku (fast, cheap)' },
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet (balanced)' },
+    { value: 'claude-opus-4-8', label: 'Claude Opus (most capable)' },
+  ],
+  openrouter: [
+    { value: 'anthropic/claude-3.5-haiku', label: 'Claude Haiku' },
+    { value: 'openai/gpt-4o-mini', label: 'GPT-4o mini' },
+    { value: 'google/gemini-flash-1.5', label: 'Gemini Flash' },
+    { value: 'meta-llama/llama-3.1-70b-instruct', label: 'Llama 3.1 70B' },
+  ],
+};
 
 type Tab = 'account' | 'integrations' | 'appearance';
 
@@ -84,6 +99,106 @@ function AppearanceSection() {
   );
 }
 
+function AiModelCard() {
+  const [cfg, setCfg] = useState<any>(null);
+  const [provider, setProvider] = useState('anthropic');
+  const [model, setModel] = useState('');
+  const [custom, setCustom] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    fetch('/api/llm-config')
+      .then((r) => r.json())
+      .then((d) => {
+        setCfg(d);
+        if (d.provider) setProvider(d.provider);
+        if (d.model) {
+          const known = (MODELS[d.provider] || []).some((m) => m.value === d.model);
+          setCustom(!known);
+          setModel(d.model);
+        }
+      })
+      .catch(() => setCfg({ providers: {} }));
+  }, []);
+
+  if (!cfg) return null;
+  const avail = cfg.providers || {};
+  const models = MODELS[provider] || [];
+
+  async function save() {
+    const r = await fetch('/api/llm-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model }),
+    });
+    if (r.ok) toast('success', 'AI model saved');
+    else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
+  }
+
+  const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
+
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Sparkles size={18} className="text-emerald-600" /> Default AI model
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">Used for tagging &amp; summaries (and the chat assistant later). Connect the provider's key below first.</p>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="text-sm text-zinc-600 dark:text-zinc-400">
+          Provider
+          <select
+            value={provider}
+            onChange={(e) => {
+              setProvider(e.target.value);
+              setModel('');
+              setCustom(false);
+            }}
+            className={sel}
+          >
+            <option value="anthropic" disabled={!avail.anthropic}>Anthropic{avail.anthropic ? '' : ' (connect key)'}</option>
+            <option value="openrouter" disabled={!avail.openrouter}>OpenRouter{avail.openrouter ? '' : ' (connect key)'}</option>
+          </select>
+        </label>
+        <label className="text-sm text-zinc-600 dark:text-zinc-400">
+          Model
+          <select
+            value={custom ? '__custom__' : model}
+            onChange={(e) => {
+              if (e.target.value === '__custom__') {
+                setCustom(true);
+                setModel('');
+              } else {
+                setCustom(false);
+                setModel(e.target.value);
+              }
+            }}
+            className={sel}
+          >
+            <option value="">Choose…</option>
+            {models.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+            <option value="__custom__">Custom…</option>
+          </select>
+        </label>
+      </div>
+      {custom && (
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="model id (e.g. openai/gpt-4o)"
+          className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+        />
+      )}
+      <div className="mt-4 text-right">
+        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          Save
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function IntegrationsSection() {
   const [status, setStatus] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Integration | null>(null);
@@ -113,7 +228,8 @@ function IntegrationsSection() {
   }
 
   return (
-    <>
+    <div className="space-y-4">
+      <AiModelCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {
           const managed = !!it.managed;
@@ -193,7 +309,7 @@ function IntegrationsSection() {
         onCancel={() => setDisconnecting(null)}
         onConfirm={() => disconnecting && disconnect(disconnecting)}
       />
-    </>
+    </div>
   );
 }
 

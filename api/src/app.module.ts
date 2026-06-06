@@ -5,9 +5,10 @@ import { AuthModule } from './auth/auth.module';
 import { ConnectorModule } from './connectors/connector.module';
 import { MemoryModule } from './memory/memory.module';
 import { ItemsModule } from './items/items.module';
+import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, MemoryModule, ItemsModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule],
   controllers: [HealthController],
 })
 export class AppModule {}

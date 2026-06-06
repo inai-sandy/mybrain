@@ -2,9 +2,9 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
-export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'anthropic';
+export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'anthropic' | 'openrouter';
 
-export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'anthropic'];
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'anthropic', 'openrouter'];
 
 export function isKnownConnector(n: string): n is ConnectorName {
   return (KNOWN_CONNECTORS as string[]).includes(n);
@@ -26,6 +26,7 @@ export class ConnectorService implements OnModuleInit {
     if (process.env.TELEGRAM_BOT_TOKEN) await this.setIfAbsent('telegram', { botToken: process.env.TELEGRAM_BOT_TOKEN });
     if (process.env.RAINDROP_TOKEN) await this.setIfAbsent('raindrop', { token: process.env.RAINDROP_TOKEN });
     if (process.env.ANTHROPIC_API_KEY) await this.setIfAbsent('anthropic', { apiKey: process.env.ANTHROPIC_API_KEY });
+    if (process.env.OPENROUTER_API_KEY) await this.setIfAbsent('openrouter', { apiKey: process.env.OPENROUTER_API_KEY });
   }
 
   /** Store/replace a connector's secrets (encrypted at rest). */

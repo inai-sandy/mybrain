@@ -16,6 +16,12 @@ model User {
   createdAt    DateTime @default(now())
 }
 
+/// Simple key/value app settings (e.g. the chosen LLM provider+model).
+model Setting {
+  key   String @id
+  value String
+}
+
 /// A service connector whose secrets are stored encrypted at rest.
 model Connector {
   id        String   @id @default(uuid())
