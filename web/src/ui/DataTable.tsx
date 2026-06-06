@@ -74,7 +74,7 @@ export function DataTable<T extends Record<string, any>>({
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {searchable && (
           <input
             aria-label="Search"
@@ -84,7 +84,7 @@ export function DataTable<T extends Record<string, any>>({
               setQ(e.target.value);
               setPage(0);
             }}
-            className={inputCls + ' flex-1 min-w-[10rem] sm:flex-none sm:w-64'}
+            className={inputCls + ' col-span-2 w-full min-w-0 sm:flex-none sm:w-64'}
           />
         )}
         {filters.map((f) => (
@@ -96,7 +96,7 @@ export function DataTable<T extends Record<string, any>>({
               setActive((a) => ({ ...a, [f.key]: e.target.value }));
               setPage(0);
             }}
-            className={inputCls}
+            className={inputCls + ' w-full min-w-0 sm:w-auto'}
           >
             <option value="">{f.label}: all</option>
             {f.options.map((o) => (
@@ -114,7 +114,7 @@ export function DataTable<T extends Record<string, any>>({
               const [key, dir] = e.target.value.split(':');
               setSort(key ? { key, dir: Number(dir) as 1 | -1 } : null);
             }}
-            className={inputCls}
+            className={inputCls + ' w-full min-w-0 sm:w-auto'}
           >
             <option value="">Sort: default</option>
             {sortOptions.map((s) => (

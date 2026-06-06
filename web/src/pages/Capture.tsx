@@ -68,19 +68,19 @@ export function Capture() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-extrabold">Capture</h1>
           <p className="text-zinc-500">Add to your brain — stored safely and remembered.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => setDoor('upload')} className={btn}>
+        <div className="flex w-full sm:w-auto gap-2">
+          <button onClick={() => setDoor('upload')} className={btn + ' flex-1 sm:flex-none justify-center min-w-0'}>
             <Upload size={16} /> Upload
           </button>
-          <button onClick={() => setDoor('url')} className={btn}>
-            <Link2 size={16} /> Paste link
+          <button onClick={() => setDoor('url')} className={btn + ' flex-1 sm:flex-none justify-center min-w-0'}>
+            <Link2 size={16} className="shrink-0" /> <span className="truncate">Paste link</span>
           </button>
-          <button onClick={() => setDoor('notion')} className={btn}>
+          <button onClick={() => setDoor('notion')} className={btn + ' flex-1 sm:flex-none justify-center min-w-0'}>
             <FileText size={16} /> Notion
           </button>
         </div>
