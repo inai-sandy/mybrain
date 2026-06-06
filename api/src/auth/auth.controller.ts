@@ -31,4 +31,11 @@ export class AuthController {
   me(@Req() req: Request) {
     return { user: (req as any).user };
   }
+
+  @Post('change-password')
+  async changePassword(@Req() req: Request, @Body() body: { currentPassword?: string; newPassword?: string }) {
+    const email = (req as any).user?.email;
+    await this.auth.changePassword(email, body?.currentPassword || '', body?.newPassword || '');
+    return { ok: true };
+  }
 }

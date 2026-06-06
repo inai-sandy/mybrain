@@ -73,13 +73,58 @@ export function Settings({ email }: { email?: string }) {
 }
 
 function AccountSection({ email }: { email?: string }) {
+  const [cur, setCur] = useState('');
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: cur, newPassword: next }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast('success', 'Password changed');
+        setCur('');
+        setNext('');
+      } else toast('error', d.message || 'Could not change password');
+    } catch {
+      toast('error', 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inp = 'w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500';
+
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 max-w-xl">
       <h2 className="font-semibold mb-3">Account</h2>
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-zinc-500 mb-4">
         Signed in as <span className="text-zinc-900 dark:text-zinc-100 font-medium">{email || '—'}</span>
       </p>
-      <p className="text-xs text-zinc-400 mt-2">Change-password is coming soon.</p>
+      <form onSubmit={submit} className="space-y-3">
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Current password</label>
+          <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" className={inp} />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">New password (min 8 characters)</label>
+          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" className={inp} />
+        </div>
+        <button
+          type="submit"
+          disabled={busy || !cur || next.length < 8}
+          className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50"
+        >
+          {busy ? 'Saving…' : 'Change password'}
+        </button>
+      </form>
     </section>
   );
 }

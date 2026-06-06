@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
@@ -29,6 +29,16 @@ export class AuthService implements OnModuleInit {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) throw new UnauthorizedException('Incorrect email or password.');
     return { id: user.id, email: user.email };
+  }
+
+  async changePassword(email: string, current: string, newPassword: string): Promise<void> {
+    if (!newPassword || newPassword.length < 8) throw new BadRequestException('New password must be at least 8 characters.');
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) throw new UnauthorizedException('Not signed in.');
+    const ok = await bcrypt.compare(current, user.passwordHash);
+    if (!ok) throw new BadRequestException('Current password is incorrect.');
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await this.prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
   }
 
   issueToken(payload: { id: string; email: string }): string {
