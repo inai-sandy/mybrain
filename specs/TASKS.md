@@ -9,7 +9,7 @@ Linear project: **My Brain — Personal Second Brain** (team BEA).
 - [x] **BEA-7** — Single-user authentication  ✅ deployed + verified (login live)
 - [x] **BEA-8** — Connector Registry (encrypted credential store)  ✅ deployed + verified
 - [x] **BEA-9** — Memory dual-write engine (SuperMemory + RAG via outbox)  ✅ deployed + verified (both stores)
-- [ ] **BEA-10** — Responsive app shell + standards baseline
+- [x] **BEA-10** — Responsive app shell + standards baseline  ✅ deployed + verified
 
 ## Batch 2 — Markdown files  *(issues created when Batch 1 ships)*
 - [ ] Upload a markdown file → store on filesystem + DB metadata + dedup by hash
