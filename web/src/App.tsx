@@ -8,6 +8,7 @@ import { Capture } from './pages/Capture';
 import { Tasks } from './pages/Tasks';
 import { Find } from './pages/Find';
 import { Settings } from './pages/Settings';
+import { Viewer } from './pages/Viewer';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
@@ -55,6 +56,7 @@ function Root() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/view/:id" element={<Viewer />} />
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
           <Route path="capture" element={<Capture />} />

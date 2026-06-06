@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Eye } from 'lucide-react';
 import { DataTable, Column, Filter } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -13,7 +14,14 @@ export type Doc = {
   rag: boolean;
   chunked: boolean;
   memoryStatus: string;
+  sourceUrl?: string | null;
 };
+
+/** Notion docs open the original Notion page; everything else opens the markdown viewer. */
+function openDoc(r: Doc) {
+  if (r.source === 'notion' && r.sourceUrl) window.open(r.sourceUrl, '_blank', 'noopener');
+  else window.open(`/view/${r.id}`, '_blank', 'noopener');
+}
 
 export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
   const [items, setItems] = useState<Doc[]>([]);
@@ -50,9 +58,14 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
     { key: 'createdAt', label: 'Added', sortable: true, render: (r) => new Date(r.createdAt).toLocaleDateString() },
     { key: 'memoryStatus', label: 'Stored in', align: 'right', render: (r) => <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} /> },
     { key: 'id', label: '', align: 'right', render: (r) => (
-      <button onClick={() => setDel(r)} className="text-xs text-red-500 hover:underline">
-        Delete
-      </button>
+      <div className="inline-flex items-center gap-3 justify-end">
+        <button onClick={() => openDoc(r)} title="View" className="text-zinc-400 hover:text-emerald-600">
+          <Eye size={16} />
+        </button>
+        <button onClick={() => setDel(r)} className="text-xs text-red-500 hover:underline">
+          Delete
+        </button>
+      </div>
     ) },
   ];
 
@@ -73,7 +86,10 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
           </div>
           <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} />
         </div>
-        <div className="mt-2 text-right">
+        <div className="mt-2 flex items-center justify-end gap-3">
+          <button onClick={() => openDoc(r)} className="inline-flex items-center gap-1 text-xs text-emerald-600">
+            <Eye size={14} /> View
+          </button>
           <button onClick={() => setDel(r)} className="text-xs text-red-500">
             Delete
           </button>

@@ -38,7 +38,7 @@ export class ItemsService {
   }
 
   /** Store markdown: dedup by content hash + source; file is the source of truth; enqueue dual-write. */
-  async store(content: string, source: string, title?: string) {
+  async store(content: string, source: string, title?: string, sourceUrl?: string) {
     const contentHash = this.hash(content);
     const existing = await this.prisma.item.findUnique({
       where: { contentHash_source: { contentHash, source } },
@@ -48,7 +48,7 @@ export class ItemsService {
     const finalTitle = title?.trim() || this.titleFrom(content, source);
     const tags = this.suggestTags(finalTitle, content);
     const item = await this.prisma.item.create({
-      data: { contentHash, source, title: finalTitle, tags: JSON.stringify(tags) },
+      data: { contentHash, source, title: finalTitle, tags: JSON.stringify(tags), sourceUrl: sourceUrl || null },
     });
 
     const dir = itemsDir();
@@ -72,12 +72,22 @@ export class ItemsService {
         source: i.source,
         tags: i.tags ? JSON.parse(i.tags) : [],
         createdAt: i.createdAt,
+        sourceUrl: i.sourceUrl,
         supermemory,
         rag,
         chunked: supermemory, // SuperMemory chunks server-side
         memoryStatus: supermemory && rag ? 'synced' : 'pending',
       };
     });
+  }
+
+  /** Return a stored item's markdown content + meta. */
+  async getContent(id: string) {
+    const item = await this.prisma.item.findUnique({ where: { id } });
+    if (!item || !item.filePath) return null;
+    const content = await fs.readFile(item.filePath, 'utf8').catch(() => null);
+    if (content == null) return null;
+    return { title: item.title, source: item.source, sourceUrl: item.sourceUrl, content };
   }
 
   async remove(id: string) {

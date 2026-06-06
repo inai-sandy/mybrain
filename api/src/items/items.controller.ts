@@ -43,18 +43,25 @@ export class ItemsController {
       throw new BadRequestException('Could not fetch that URL');
     }
     if (!content.trim()) throw new BadRequestException('That URL returned no content');
-    return this.items.store(content, 'url', url.split('/').filter(Boolean).pop() || url);
+    return this.items.store(content, 'url', url.split('/').filter(Boolean).pop() || url, url);
   }
 
   @Post('notion')
   async fromNotion(@Body() body: { url?: string }) {
     const { title, markdown } = await this.notion.fetchMarkdown(body?.url || '');
-    return this.items.store(markdown, 'notion', title);
+    return this.items.store(markdown, 'notion', title, body?.url);
   }
 
   @Get()
   async list() {
     return { items: await this.items.list() };
+  }
+
+  @Get(':id/content')
+  async content(@Param('id') id: string) {
+    const doc = await this.items.getContent(id);
+    if (!doc) throw new BadRequestException('Document not found');
+    return doc;
   }
 
   @Delete(':id')

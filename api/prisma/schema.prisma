@@ -30,6 +30,7 @@ model Item {
   contentHash   String
   source        String // upload | url | notion | raindrop
   title         String?
+  sourceUrl     String? // original link for url / notion sources
   filePath      String?
   tags          String? // JSON array of strings
   supermemoryId String?
