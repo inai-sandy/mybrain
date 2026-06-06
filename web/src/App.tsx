@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react';
+import { AppShell } from './ui/AppShell';
+import { DataTable, Column } from './ui/DataTable';
+import { ToastProvider } from './ui/Toast';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
 export default function App() {
+  return (
+    <ToastProvider>
+      <Root />
+    </ToastProvider>
+  );
+}
+
+function Root() {
   const [auth, setAuth] = useState<AuthState>('loading');
   const [email, setEmail] = useState('');
 
@@ -13,9 +24,7 @@ export default function App() {
         const d = await r.json();
         setEmail(d.user?.email || '');
         setAuth('authed');
-      } else {
-        setAuth('anon');
-      }
+      } else setAuth('anon');
     } catch {
       setAuth('anon');
     }
@@ -25,18 +34,12 @@ export default function App() {
     refresh();
   }, []);
 
-  if (auth === 'loading') {
-    return (
-      <Shell>
-        <p className="text-zinc-400">Loading…</p>
-      </Shell>
-    );
-  }
+  if (auth === 'loading') return <Centered>Loading…</Centered>;
   if (auth === 'anon') return <Login onSignedIn={refresh} />;
   return <Home email={email} onSignedOut={() => setAuth('anon')} />;
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Centered({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6">
       <div className="w-full max-w-md text-center">{children}</div>
@@ -60,9 +63,8 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      if (r.ok) {
-        onSignedIn();
-      } else {
+      if (r.ok) onSignedIn();
+      else {
         const d = await r.json().catch(() => ({}));
         setError(d.message || 'Incorrect email or password.');
       }
@@ -74,7 +76,7 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
   }
 
   return (
-    <Shell>
+    <Centered>
       <div className="text-5xl mb-3">🧠</div>
       <h1 className="text-2xl font-bold mb-6">My Brain</h1>
       <form onSubmit={submit} className="space-y-3 text-left">
@@ -104,34 +106,32 @@ function Login({ onSignedIn }: { onSignedIn: () => void }) {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-    </Shell>
+    </Centered>
   );
 }
+
+type Capture = { title: string; source: string; added: string };
 
 function Home({ email, onSignedOut }: { email: string; onSignedOut: () => void }) {
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     onSignedOut();
   }
+
+  const columns: Column<Capture>[] = [
+    { key: 'title', label: 'Title', sortable: true },
+    { key: 'source', label: 'Source', sortable: true },
+    { key: 'added', label: 'Added', sortable: true },
+  ];
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-        <div className="flex items-center gap-2 font-bold">
-          <span className="text-xl">🧠</span> My Brain
-        </div>
-        <div className="flex items-center gap-3 text-sm text-zinc-400">
-          <span className="hidden sm:inline">{email}</span>
-          <button onClick={logout} className="rounded-lg border border-zinc-700 px-3 py-1 hover:bg-zinc-800">
-            Sign out
-          </button>
-        </div>
-      </header>
-      <main className="max-w-3xl mx-auto p-6">
-        <h1 className="text-3xl font-extrabold mb-2">Welcome back</h1>
-        <p className="text-zinc-400">
-          Your second brain is ready. Capture, tasks, and search are coming as we build them out.
-        </p>
-      </main>
-    </div>
+    <AppShell email={email} onSignOut={logout}>
+      <h1 className="text-2xl font-extrabold mb-1">Welcome back</h1>
+      <p className="text-zinc-500 dark:text-zinc-400 mb-6">
+        Your second brain is ready. Capture, tasks, and search land here as we build them out.
+      </p>
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recent captures</h2>
+      <DataTable<Capture> columns={columns} rows={[]} emptyText="No captures yet — add your first markdown to get started." />
+    </AppShell>
   );
 }

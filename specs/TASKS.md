@@ -8,7 +8,7 @@ Linear project: **My Brain — Personal Second Brain** (team BEA).
 - [x] **BEA-6** — Database schema (SQLite + Prisma)  ✅ deployed + verified
 - [x] **BEA-7** — Single-user authentication  ✅ deployed + verified (login live)
 - [x] **BEA-8** — Connector Registry (encrypted credential store)  ✅ deployed + verified
-- [ ] **BEA-9** — Memory dual-write engine (SuperMemory + RAG via outbox)
+- [x] **BEA-9** — Memory dual-write engine (SuperMemory + RAG via outbox)  ✅ deployed + verified (both stores)
 - [ ] **BEA-10** — Responsive app shell + standards baseline
 
 ## Batch 2 — Markdown files  *(issues created when Batch 1 ships)*

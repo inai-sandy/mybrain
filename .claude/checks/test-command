@@ -1,1 +1,1 @@
-cd api && npm test --silent
+( cd api && npm test --silent ) && ( cd web && npm test )
