@@ -118,9 +118,9 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
             {r.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
           </div>
         )}
-        <div className="mt-auto pt-3 flex items-center justify-between">
+        <div className="mt-auto pt-3 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
           <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} />
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 shrink-0">
             <button onClick={() => navigate(`/chat/${r.id}`)} title="Chat with this document" className={iconBtn + ' hover:text-emerald-600'}>
               <MessageCircle size={16} />
             </button>

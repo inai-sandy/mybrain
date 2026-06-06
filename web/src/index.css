@@ -1,3 +1,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Prevent stray horizontal scroll at the viewport edge only —
+   never on the padded content column, so cards are never clipped. */
+@layer base {
+  html,
+  body {
+    overflow-x: hidden;
+    max-width: 100%;
+  }
+}
