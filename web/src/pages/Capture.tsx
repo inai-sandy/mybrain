@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Upload, Link2, FileText } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { DocumentsList } from './DocumentsList';
 
 export function Capture() {
   const toast = useToast();
@@ -134,6 +135,11 @@ export function Capture() {
             </button>
           </div>
         </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-2">Your documents</h2>
+        <DocumentsList />
       </div>
     </div>
   );
