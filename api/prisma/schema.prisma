@@ -16,6 +16,14 @@ model User {
   createdAt    DateTime @default(now())
 }
 
+/// A service connector whose secrets are stored encrypted at rest.
+model Connector {
+  id        String   @id @default(uuid())
+  name      String   @unique // supermemory | rag | notion | telegram | raindrop | anthropic
+  secrets   String // AES-256-GCM encrypted JSON
+  updatedAt DateTime @updatedAt
+}
+
 /// A stored piece of content (research md, bookmark, etc.). Source of truth is the file on disk.
 model Item {
   id            String   @id @default(uuid())

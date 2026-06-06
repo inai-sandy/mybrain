@@ -24,6 +24,13 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -e ADMIN_EMAIL="${ADMIN_EMAIL:-}" \
   -e ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" \
   -e SESSION_SECRET="${SESSION_SECRET:-}" \
+  -e CONNECTOR_KEY="${CONNECTOR_KEY:-}" \
+  -e SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}" \
+  -e SUPERMEMORY_PROJECT="${SUPERMEMORY_PROJECT:-}" \
+  -e NOTION_TOKEN="${NOTION_TOKEN:-}" \
+  -e TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
+  -e RAINDROP_TOKEN="${RAINDROP_TOKEN:-}" \
+  -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
   "$IMAGE"
 
 echo "-> ensure Caddy route"
