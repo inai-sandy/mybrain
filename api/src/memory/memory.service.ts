@@ -58,9 +58,19 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     for (const row of pending) {
       const p = JSON.parse(row.payload);
       try {
-        if (row.target === 'supermemory') await this.sm.save(p.content, p.tags ?? []);
-        else await this.rag.save(p.content, p.title, p.tags ?? []);
+        let resultId: string | undefined;
+        if (row.target === 'supermemory') resultId = await this.sm.save(p.content, p.tags ?? []);
+        else resultId = await this.rag.save(p.content, p.title, p.tags ?? []);
         await this.prisma.memoryOutbox.update({ where: { id: row.id }, data: { status: 'done' } });
+        // Record where it landed so the UI can show per-store status.
+        if (row.itemId && resultId) {
+          await this.prisma.item
+            .update({
+              where: { id: row.itemId },
+              data: row.target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId },
+            })
+            .catch(() => undefined);
+        }
         processed++;
       } catch (e: any) {
         const attempts = row.attempts + 1;

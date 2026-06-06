@@ -63,13 +63,21 @@ export class ItemsService {
 
   async list() {
     const items = await this.prisma.item.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
-    return items.map((i) => ({
-      id: i.id,
-      title: i.title,
-      source: i.source,
-      tags: i.tags ? JSON.parse(i.tags) : [],
-      createdAt: i.createdAt,
-    }));
+    return items.map((i) => {
+      const supermemory = !!i.supermemoryId;
+      const rag = !!i.ragId;
+      return {
+        id: i.id,
+        title: i.title,
+        source: i.source,
+        tags: i.tags ? JSON.parse(i.tags) : [],
+        createdAt: i.createdAt,
+        supermemory,
+        rag,
+        chunked: supermemory, // SuperMemory chunks server-side
+        memoryStatus: supermemory && rag ? 'synced' : 'pending',
+      };
+    });
   }
 
   async remove(id: string) {

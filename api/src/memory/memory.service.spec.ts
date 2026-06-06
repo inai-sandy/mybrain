@@ -2,7 +2,7 @@ import { MemoryService } from './memory.service';
 
 function fakePrisma() {
   const rows: any[] = [];
-  return {
+  const prisma: any = {
     rows,
     memoryOutbox: {
       createMany: async ({ data }: any) => {
@@ -17,7 +17,15 @@ function fakePrisma() {
       },
       groupBy: async () => [],
     },
-  } as any;
+    itemUpdates: [] as any[],
+    item: {
+      update: async ({ where, data }: any) => {
+        (prisma.itemUpdates as any[]).push({ id: where.id, data });
+        return {};
+      },
+    },
+  };
+  return prisma as any;
 }
 
 describe('MemoryService outbox', () => {
@@ -51,5 +59,18 @@ describe('MemoryService outbox', () => {
     expect(ragRow.status).toBe('done'); // the good store committed
     expect(smRow.status).toBe('pending'); // the bad one is retryable, not lost
     expect(smRow.attempts).toBe(1);
+  });
+
+  it('records the returned store ids onto the item', async () => {
+    const prisma = fakePrisma();
+    const sm: any = { save: jest.fn(async () => 'sm-id-1') };
+    const rag: any = { save: jest.fn(async () => 'rag-id-1') };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    await svc.enqueue('hi', { itemId: 'item-1' });
+    await svc.drain();
+
+    expect(prisma.itemUpdates.some((u: any) => u.data.supermemoryId === 'sm-id-1')).toBe(true);
+    expect(prisma.itemUpdates.some((u: any) => u.data.ragId === 'rag-id-1')).toBe(true);
   });
 });
