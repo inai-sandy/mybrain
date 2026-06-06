@@ -5,6 +5,7 @@ import { useToast } from '../ui/Toast';
 export function Capture() {
   const toast = useToast();
   const [url, setUrl] = useState('');
+  const [notionUrl, setNotionUrl] = useState('');
   const [busy, setBusy] = useState(false);
 
   function notify(r: Response, d: any, okWord = 'Saved to your brain ✓') {
@@ -43,6 +44,25 @@ export function Capture() {
       if (r.ok) setUrl('');
     } catch {
       toast('error', 'Could not fetch that link');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleNotion() {
+    if (!notionUrl.trim()) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/items/notion', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: notionUrl }),
+      });
+      const d = await r.json().catch(() => ({}));
+      notify(r, d);
+      if (r.ok) setNotionUrl('');
+    } catch {
+      toast('error', 'Could not import that Notion page');
     } finally {
       setBusy(false);
     }
@@ -90,8 +110,29 @@ export function Capture() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-5 sm:col-span-2 text-center text-zinc-400">
-          <FileText size={20} className="mx-auto mb-2" /> Pull a Notion page — coming next.
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:col-span-2">
+          <div className="flex items-center gap-2 font-semibold mb-1">
+            <FileText size={18} className="text-emerald-600" /> Pull a Notion page
+          </div>
+          <p className="text-sm text-zinc-500 mb-4">
+            Paste a Notion page link. (First time: add your Notion token in Settings → Integrations, and share the page with that
+            integration.)
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={notionUrl}
+              onChange={(e) => setNotionUrl(e.target.value)}
+              placeholder="https://www.notion.so/…"
+              className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500"
+            />
+            <button
+              onClick={handleNotion}
+              disabled={busy}
+              className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-60"
+            >
+              Import
+            </button>
+          </div>
         </div>
       </div>
     </div>

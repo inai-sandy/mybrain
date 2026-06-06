@@ -11,10 +11,14 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ItemsService } from './items.service';
+import { NotionService } from './notion.service';
 
 @Controller('items')
 export class ItemsController {
-  constructor(private readonly items: ItemsService) {}
+  constructor(
+    private readonly items: ItemsService,
+    private readonly notion: NotionService,
+  ) {}
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
@@ -40,6 +44,12 @@ export class ItemsController {
     }
     if (!content.trim()) throw new BadRequestException('That URL returned no content');
     return this.items.store(content, 'url', url.split('/').filter(Boolean).pop() || url);
+  }
+
+  @Post('notion')
+  async fromNotion(@Body() body: { url?: string }) {
+    const { title, markdown } = await this.notion.fetchMarkdown(body?.url || '');
+    return this.items.store(markdown, 'notion', title);
   }
 
   @Get()
