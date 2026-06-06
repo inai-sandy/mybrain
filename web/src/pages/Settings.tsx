@@ -199,6 +199,37 @@ function AiModelCard() {
   );
 }
 
+function SuperMemorySyncCard() {
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  async function run() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/items/import-supermemory', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) toast('success', `Imported ${d.imported} new document${d.imported === 1 ? '' : 's'} (${d.skipped} already here)`);
+      else toast('error', 'Sync failed');
+    } catch {
+      toast('error', 'Sync failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Brain size={18} className="text-indigo-500" /> Sync from SuperMemory
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">
+        Pull everything you've saved to SuperMemory (Claude Code, Claude chat, etc.) into your documents — as cards you can view, chat with, and manage.
+      </p>
+      <button onClick={run} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+        {busy ? 'Syncing…' : 'Sync now'}
+      </button>
+    </section>
+  );
+}
+
 function IntegrationsSection() {
   const [status, setStatus] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Integration | null>(null);
@@ -229,6 +260,7 @@ function IntegrationsSection() {
 
   return (
     <div className="space-y-4">
+      <SuperMemorySyncCard />
       <AiModelCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {

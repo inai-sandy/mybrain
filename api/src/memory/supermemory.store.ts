@@ -36,6 +36,24 @@ export class SuperMemoryStore {
     return d.id;
   }
 
+  /** Full content + meta of one SuperMemory document. */
+  async getContent(id: string): Promise<{ content: string; title: string; summary: string; tags: string[] } | null> {
+    const { apiKey, project } = await this.creds();
+    const res = await fetch(`${BASE}/v3/documents/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const m: any = await res.json();
+    return {
+      content: m.content || m.raw || '',
+      title: m.title && m.title !== 'Untitled Document' ? m.title : '',
+      summary: m.summary || '',
+      tags: m.metadata?.tags
+        ? String(m.metadata.tags).split(',').map((t: string) => t.trim()).filter(Boolean)
+        : (m.containerTags || []).filter((t: string) => t !== project),
+    };
+  }
+
   /** Browse existing SuperMemory documents (the user's whole cloud memory). */
   async list(limit = 50, page = 1): Promise<{ total: number; docs: any[] }> {
     const { apiKey, project } = await this.creds();

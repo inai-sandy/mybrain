@@ -60,6 +60,11 @@ export class ItemsController {
     return this.items.store(markdown, 'notion', title, body?.url, this.parseTags(body?.tags));
   }
 
+  @Post('import-supermemory')
+  async importSuperMemory() {
+    return this.items.importFromSuperMemory();
+  }
+
   @Get()
   async list() {
     return { items: await this.items.list() };

@@ -87,6 +87,15 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return { processed };
   }
 
+  /** Full content of one SuperMemory doc (graceful). */
+  async getSuperMemoryContent(id: string) {
+    try {
+      return await this.sm.getContent(id);
+    } catch {
+      return null;
+    }
+  }
+
   /** Browse the user's existing SuperMemory documents (graceful on failure). */
   async browseSuperMemory(limit = 50, page = 1): Promise<{ total: number; docs: any[] }> {
     try {

@@ -126,6 +126,52 @@ export class ItemsService {
     await this.prisma.item.delete({ where: { id } });
   }
 
+  /** Import the user's SuperMemory documents as app items (linked to the existing SM entry; no re-write). */
+  async importFromSuperMemory() {
+    const { docs } = await this.memory.browseSuperMemory(500, 1);
+    const existing = await this.prisma.item.findMany({ where: { supermemoryId: { not: null } }, select: { supermemoryId: true } });
+    const have = new Set(existing.map((e) => e.supermemoryId));
+    const dir = itemsDir();
+    await fs.mkdir(dir, { recursive: true });
+
+    let imported = 0;
+    let skipped = 0;
+    for (const sm of docs) {
+      if (have.has(sm.id)) {
+        skipped++;
+        continue;
+      }
+      const full = await this.memory.getSuperMemoryContent(sm.id);
+      if (!full || !full.content.trim()) {
+        skipped++;
+        continue;
+      }
+      const title = (full.title || sm.title || 'Untitled').slice(0, 200);
+      const tags = full.tags?.length ? full.tags : sm.tags || [];
+      const item = await this.prisma.item
+        .create({
+          data: {
+            contentHash: this.hash(full.content),
+            source: 'supermemory',
+            title,
+            summary: sm.summary || full.summary || null,
+            tags: JSON.stringify(tags),
+            supermemoryId: sm.id, // already in SuperMemory → S✓, no re-write
+          },
+        })
+        .catch(() => null);
+      if (!item) {
+        skipped++;
+        continue;
+      }
+      const filePath = join(dir, `${item.id}.md`);
+      await fs.writeFile(filePath, full.content, 'utf8');
+      await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
+      imported++;
+    }
+    return { imported, skipped, total: docs.length };
+  }
+
   /** Re-fetch the latest content from the source and refresh both memory stores. */
   async sync(id: string) {
     const item = await this.prisma.item.findUnique({ where: { id } });

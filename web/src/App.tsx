@@ -6,7 +6,6 @@ import { Login } from './ui/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Capture } from './pages/Capture';
 import { Tasks } from './pages/Tasks';
-import { Find } from './pages/Find';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
 import { DocDetail } from './pages/DocDetail';
@@ -65,7 +64,6 @@ function Root() {
           <Route path="doc/:id" element={<DocDetail />} />
           <Route path="chat/:id" element={<ChatDoc />} />
           <Route path="tasks" element={<Tasks />} />
-          <Route path="find" element={<Find />} />
           <Route path="settings" element={<Settings email={email} />} />
           <Route path="*" element={<Dashboard />} />
         </Route>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Trash2, RefreshCw, MessageCircle, Upload, Link2, FileText, type LucideIcon } from 'lucide-react';
+import { Eye, Trash2, RefreshCw, MessageCircle, Upload, Link2, FileText, Brain, type LucideIcon } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -24,6 +24,7 @@ const SOURCE: Record<string, { icon: LucideIcon; color: string }> = {
   upload: { icon: Upload, color: 'text-blue-500 bg-blue-500/10' },
   url: { icon: Link2, color: 'text-emerald-500 bg-emerald-500/10' },
   notion: { icon: FileText, color: 'text-purple-500 bg-purple-500/10' },
+  supermemory: { icon: Brain, color: 'text-indigo-500 bg-indigo-500/10' }, // synced from SuperMemory
 };
 
 function Chip({ t }: { t: string }) {

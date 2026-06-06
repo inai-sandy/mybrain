@@ -71,7 +71,10 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       </div>
 
       {/* Bottom tab bar — mobile */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 grid grid-cols-5 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
+        style={{ gridTemplateColumns: `repeat(${NAV.length}, minmax(0, 1fr))` }}
+      >
         {NAV.map((n) => (
           <NavLink
             key={n.to}
