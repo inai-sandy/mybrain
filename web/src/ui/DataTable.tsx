@@ -19,6 +19,8 @@ export type Filter = {
  * Standard list: search, sortable columns, filters, pagination, total count,
  * loading + empty states, and an optional mobile card layout.
  */
+export type SortOption = { label: string; key: string; dir: 1 | -1 };
+
 export function DataTable<T extends Record<string, any>>({
   columns,
   rows,
@@ -28,6 +30,8 @@ export function DataTable<T extends Record<string, any>>({
   pageSize = 10,
   emptyText = 'Nothing here yet.',
   renderCard,
+  cardsOnly = false,
+  sortOptions = [],
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -37,6 +41,8 @@ export function DataTable<T extends Record<string, any>>({
   pageSize?: number;
   emptyText?: string;
   renderCard?: (row: T) => ReactNode;
+  cardsOnly?: boolean;
+  sortOptions?: SortOption[];
 }) {
   const [q, setQ] = useState('');
   const [active, setActive] = useState<Record<string, string>>({});
@@ -100,22 +106,41 @@ export function DataTable<T extends Record<string, any>>({
             ))}
           </select>
         ))}
+        {sortOptions.length > 0 && (
+          <select
+            aria-label="Sort"
+            value={sort ? `${sort.key}:${sort.dir}` : ''}
+            onChange={(e) => {
+              const [key, dir] = e.target.value.split(':');
+              setSort(key ? { key, dir: Number(dir) as 1 | -1 } : null);
+            }}
+            className={inputCls}
+          >
+            <option value="">Sort: default</option>
+            {sortOptions.map((s) => (
+              <option key={s.label} value={`${s.key}:${s.dir}`}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
-      {/* Mobile cards */}
+      {/* Cards (mobile always; all sizes when cardsOnly) */}
       {renderCard && (
-        <div className="sm:hidden space-y-2">
+        <div className={cardsOnly ? 'grid gap-3 sm:grid-cols-2' : 'sm:hidden space-y-2'}>
           {loading ? (
-            <div className="py-10 text-center text-zinc-400" data-testid="dt-loading">Loading…</div>
+            <div className="py-10 text-center text-zinc-400 sm:col-span-2" data-testid="dt-loading">Loading…</div>
           ) : pageRows.length === 0 ? (
-            <div className="py-10 text-center text-zinc-400" data-testid="dt-empty">{emptyText}</div>
+            <div className="py-10 text-center text-zinc-400 sm:col-span-2" data-testid="dt-empty">{emptyText}</div>
           ) : (
             pageRows.map((row, i) => <div key={i}>{renderCard(row)}</div>)
           )}
         </div>
       )}
 
-      {/* Desktop table */}
+      {/* Desktop table (hidden in cardsOnly mode) */}
+      {!cardsOnly && (
       <div className={(renderCard ? 'hidden sm:block ' : '') + 'overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800'}>
         <table className="w-full text-sm">
           <thead className="bg-zinc-50 dark:bg-zinc-900 text-left">
@@ -167,6 +192,7 @@ export function DataTable<T extends Record<string, any>>({
           </tbody>
         </table>
       </div>
+      )}
 
       <div className="flex items-center justify-between mt-3 text-sm text-zinc-500">
         <span data-testid="dt-count">{loading ? '' : `${filtered.length} ${filtered.length === 1 ? 'result' : 'results'}`}</span>
