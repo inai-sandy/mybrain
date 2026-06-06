@@ -5,7 +5,7 @@ Linear project: **My Brain — Personal Second Brain** (team BEA).
 
 ## Batch 1 — Groundwork  *(issues created)*
 - [x] **BEA-5** — Project skeleton live at mybrain.1site.ai  ✅ deployed + verified live
-- [ ] **BEA-6** — Database schema (SQLite + Prisma)
+- [x] **BEA-6** — Database schema (SQLite + Prisma)  ✅ deployed + verified
 - [ ] **BEA-7** — Single-user authentication
 - [ ] **BEA-8** — Connector Registry (encrypted credential store)
 - [ ] **BEA-9** — Memory dual-write engine (SuperMemory + RAG via outbox)

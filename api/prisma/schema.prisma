@@ -8,6 +8,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// The single owner of this brain.
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
 /// A stored piece of content (research md, bookmark, etc.). Source of truth is the file on disk.
 model Item {
   id            String   @id @default(uuid())

@@ -8,6 +8,9 @@ NAME="mybrain-app"
 PORT="8080"
 CADDYFILE="/opt/beakn-home-visit-app/infra/caddy/Caddyfile"
 
+# Load server-side secrets (admin login, session secret, service keys) — never committed.
+if [ -f .claude/checks/secrets.env ]; then set -a; . .claude/checks/secrets.env; set +a; fi
+
 echo "-> build image"
 sudo docker build -t "$IMAGE" .
 
@@ -18,6 +21,9 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -v mybrain-data:/app/data \
   -e NODE_ENV=production -e PORT="$PORT" \
   -e DATABASE_URL="file:/app/data/mybrain.db" \
+  -e ADMIN_EMAIL="${ADMIN_EMAIL:-}" \
+  -e ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" \
+  -e SESSION_SECRET="${SESSION_SECRET:-}" \
   "$IMAGE"
 
 echo "-> ensure Caddy route"

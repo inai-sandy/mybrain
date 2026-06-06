@@ -3,11 +3,13 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 import * as express from 'express';
+import cookieParser from 'cookie-parser';
 import { existsSync } from 'fs';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.use(cookieParser());
   app.setGlobalPrefix('api');
 
   // Serve the built React app (copied to ../public in the Docker image).
