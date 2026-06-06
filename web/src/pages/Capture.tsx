@@ -1,17 +1,26 @@
-import { useState } from 'react';
-import { Upload, Link2, FileText } from 'lucide-react';
+import { ReactNode, useState } from 'react';
+import { Upload, Link2, FileText, X } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { DocumentsList } from './DocumentsList';
 
+type Door = 'upload' | 'url' | 'notion' | null;
+
 export function Capture() {
   const toast = useToast();
+  const [door, setDoor] = useState<Door>(null);
+  const [busy, setBusy] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [url, setUrl] = useState('');
   const [notionUrl, setNotionUrl] = useState('');
-  const [busy, setBusy] = useState(false);
 
-  function notify(r: Response, d: any, okWord = 'Saved to your brain ✓') {
-    if (r.ok) toast('success', d?.deduped ? 'Already saved — no duplicate' : okWord);
-    else toast('error', d?.message || 'Something went wrong');
+  function done(r: Response, d: any) {
+    if (r.ok) {
+      toast('success', d?.deduped ? 'Already saved — no duplicate' : 'Saved to your brain ✓');
+      setDoor(null);
+      setUrl('');
+      setNotionUrl('');
+      setRefreshKey((k) => k + 1);
+    } else toast('error', d?.message || 'Something went wrong');
   }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -22,7 +31,7 @@ export function Capture() {
       const fd = new FormData();
       fd.append('file', file);
       const r = await fetch('/api/items/upload', { method: 'POST', body: fd });
-      notify(r, await r.json().catch(() => ({})));
+      done(r, await r.json().catch(() => ({})));
     } catch {
       toast('error', 'Upload failed');
     } finally {
@@ -31,115 +40,105 @@ export function Capture() {
     }
   }
 
-  async function handleUrl() {
-    if (!url.trim()) return;
+  async function post(path: string, body: any) {
     setBusy(true);
     try {
-      const r = await fetch('/api/items/url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      const d = await r.json().catch(() => ({}));
-      notify(r, d);
-      if (r.ok) setUrl('');
+      const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      done(r, await r.json().catch(() => ({})));
     } catch {
-      toast('error', 'Could not fetch that link');
+      toast('error', 'Something went wrong');
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleNotion() {
-    if (!notionUrl.trim()) return;
-    setBusy(true);
-    try {
-      const r = await fetch('/api/items/notion', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: notionUrl }),
-      });
-      const d = await r.json().catch(() => ({}));
-      notify(r, d);
-      if (r.ok) setNotionUrl('');
-    } catch {
-      toast('error', 'Could not import that Notion page');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const btn = 'inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm';
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-extrabold">Capture</h1>
-        <p className="text-zinc-500">Add to your brain — it’s stored safely and remembered in both memory stores.</p>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold">Capture</h1>
+          <p className="text-zinc-500">Add to your brain — stored safely and remembered.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setDoor('upload')} className={btn}>
+            <Upload size={16} /> Upload
+          </button>
+          <button onClick={() => setDoor('url')} className={btn}>
+            <Link2 size={16} /> Paste link
+          </button>
+          <button onClick={() => setDoor('notion')} className={btn}>
+            <FileText size={16} /> Notion
+          </button>
+        </div>
       </div>
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <div className="flex items-center gap-2 font-semibold mb-1">
-            <Upload size={18} className="text-emerald-600" /> Upload markdown
-          </div>
+
+      <DocumentsList key={refreshKey} />
+
+      {door === 'upload' && (
+        <Modal title="Upload markdown" onClose={() => setDoor(null)}>
           <p className="text-sm text-zinc-500 mb-4">Pick a .md file from your device.</p>
           <label className="inline-block">
             <input type="file" accept=".md,.markdown,.txt" onChange={handleFile} disabled={busy} className="hidden" />
-            <span className="cursor-pointer inline-block rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">
-              {busy ? 'Working…' : 'Choose file'}
-            </span>
+            <span className={btn + ' cursor-pointer'}>{busy ? 'Working…' : 'Choose file'}</span>
           </label>
-        </div>
+        </Modal>
+      )}
 
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-          <div className="flex items-center gap-2 font-semibold mb-1">
-            <Link2 size={18} className="text-emerald-600" /> Paste a public link
-          </div>
+      {door === 'url' && (
+        <Modal title="Paste a public link" onClose={() => setDoor(null)}>
           <p className="text-sm text-zinc-500 mb-4">A public URL to a markdown or text file.</p>
-          <div className="flex gap-2">
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://…"
-              className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500"
-            />
-            <button
-              onClick={handleUrl}
-              disabled={busy}
-              className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-60"
-            >
-              Save
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://…"
+            autoFocus
+            className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          />
+          <div className="mt-4 text-right">
+            <button onClick={() => url.trim() && post('/api/items/url', { url })} disabled={busy} className={btn}>
+              {busy ? 'Saving…' : 'Save'}
             </button>
           </div>
-        </div>
+        </Modal>
+      )}
 
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 sm:col-span-2">
-          <div className="flex items-center gap-2 font-semibold mb-1">
-            <FileText size={18} className="text-emerald-600" /> Pull a Notion page
-          </div>
+      {door === 'notion' && (
+        <Modal title="Import a Notion page" onClose={() => setDoor(null)}>
           <p className="text-sm text-zinc-500 mb-4">
-            Paste a Notion page link. (First time: add your Notion token in Settings → Integrations, and share the page with that
+            Paste a Notion page link. (First time: add your Notion token in Settings → Integrations and share the page with the
             integration.)
           </p>
-          <div className="flex gap-2">
-            <input
-              value={notionUrl}
-              onChange={(e) => setNotionUrl(e.target.value)}
-              placeholder="https://www.notion.so/…"
-              className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500"
-            />
-            <button
-              onClick={handleNotion}
-              disabled={busy}
-              className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-60"
-            >
-              Import
+          <input
+            value={notionUrl}
+            onChange={(e) => setNotionUrl(e.target.value)}
+            placeholder="https://www.notion.so/…"
+            autoFocus
+            className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          />
+          <div className="mt-4 text-right">
+            <button onClick={() => notionUrl.trim() && post('/api/items/notion', { url: notionUrl })} disabled={busy} className={btn}>
+              {busy ? 'Importing…' : 'Import'}
             </button>
           </div>
-        </div>
-      </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
 
-      <div>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-2">Your documents</h2>
-        <DocumentsList />
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-sm rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold">{title}</h3>
+          <button onClick={onClose} aria-label="Close" className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+            <X size={18} />
+          </button>
+        </div>
+        {children}
       </div>
     </div>
   );
