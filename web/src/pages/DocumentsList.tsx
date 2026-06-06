@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Trash2, RefreshCw, Upload, Link2, FileText, type LucideIcon } from 'lucide-react';
+import { Eye, Trash2, RefreshCw, MessageCircle, Upload, Link2, FileText, type LucideIcon } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -120,6 +120,9 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
         <div className="mt-auto pt-3 flex items-center justify-between">
           <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} />
           <div className="flex items-center gap-0.5">
+            <button onClick={() => navigate(`/chat/${r.id}`)} title="Chat with this document" className={iconBtn + ' hover:text-emerald-600'}>
+              <MessageCircle size={16} />
+            </button>
             <button onClick={() => navigate(`/doc/${r.id}`)} title="View" className={iconBtn + ' hover:text-emerald-600'}>
               <Eye size={16} />
             </button>

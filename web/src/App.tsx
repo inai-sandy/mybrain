@@ -10,6 +10,7 @@ import { Find } from './pages/Find';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
 import { DocDetail } from './pages/DocDetail';
+import { ChatDoc } from './pages/ChatDoc';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
@@ -62,6 +63,7 @@ function Root() {
           <Route index element={<Dashboard />} />
           <Route path="capture" element={<Capture />} />
           <Route path="doc/:id" element={<DocDetail />} />
+          <Route path="chat/:id" element={<ChatDoc />} />
           <Route path="tasks" element={<Tasks />} />
           <Route path="find" element={<Find />} />
           <Route path="settings" element={<Settings email={email} />} />
