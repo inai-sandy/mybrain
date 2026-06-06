@@ -3,6 +3,15 @@ import { ConnectorService } from '../connectors/connector.service';
 
 const BASE = process.env.SUPERMEMORY_BASE || 'https://api.supermemory.ai';
 
+/** SuperMemory containerTags allow only [a-z0-9_:-] (no spaces). Make a tag safe. */
+export function safeContainerTag(t: string): string {
+  return String(t)
+    .toLowerCase()
+    .replace(/[^a-z0-9_:-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
 /** SuperMemory (cloud) store — primary. Key from the Connector Registry. */
 @Injectable()
 export class SuperMemoryStore {
@@ -16,10 +25,11 @@ export class SuperMemoryStore {
 
   async save(content: string, tags: string[] = []): Promise<string> {
     const { apiKey, project } = await this.creds();
+    const containerTags = [project, ...tags.map(safeContainerTag).filter(Boolean)];
     const res = await fetch(`${BASE}/v3/documents`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, containerTags: [project, ...tags] }),
+      body: JSON.stringify({ content, containerTags, metadata: { tags: tags.join(', ') } }),
     });
     if (!res.ok) throw new Error(`SuperMemory save ${res.status}: ${await res.text()}`);
     const d: any = await res.json();
