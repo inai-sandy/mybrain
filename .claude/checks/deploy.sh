@@ -27,6 +27,7 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -e CONNECTOR_KEY="${CONNECTOR_KEY:-}" \
   -e SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}" \
   -e SUPERMEMORY_PROJECT="${SUPERMEMORY_PROJECT:-}" \
+  -e RAG_MCP_URL="http://rag-mcp:8050/sse" \
   -e NOTION_TOKEN="${NOTION_TOKEN:-}" \
   -e TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
   -e RAINDROP_TOKEN="${RAINDROP_TOKEN:-}" \
