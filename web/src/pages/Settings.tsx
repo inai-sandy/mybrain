@@ -116,7 +116,8 @@ function IntegrationsSection() {
     <>
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {
-          const connected = !!status[it.name];
+          const managed = !!it.managed;
+          const connected = managed || !!status[it.name];
           return (
             <div key={it.name} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
               <div className="flex items-start justify-between">
@@ -137,7 +138,7 @@ function IntegrationsSection() {
                 >
                   {connected ? (
                     <span className="inline-flex items-center gap-1">
-                      <Check size={11} /> Connected
+                      <Check size={11} /> {managed ? 'Connected · managed' : 'Connected'}
                     </span>
                   ) : (
                     'Not set'
