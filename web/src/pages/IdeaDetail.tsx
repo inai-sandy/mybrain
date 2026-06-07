@@ -93,7 +93,7 @@ export function IdeaDetail() {
       {d && (
         <>
           <header>
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2 text-xs mb-2">
                   <span className={'rounded-full px-2.5 py-1 font-medium ' + (done ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600')}>{done ? 'Done' : 'Open'}</span>
