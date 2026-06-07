@@ -7,10 +7,11 @@ import { MemoryModule } from './memory/memory.module';
 import { ItemsModule } from './items/items.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { IdeasModule } from './ideas/ideas.module';
+import { SkillsModule } from './skills/skills.module';
 import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
