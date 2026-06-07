@@ -42,6 +42,7 @@ model Item {
   tags          String? // JSON array of strings
   supermemoryId String?
   ragId         String?
+  readFailed    Boolean  @default(false) // bookmark whose page could not be read (summary from metadata only)
   createdAt     DateTime @default(now())
 
   @@unique([contentHash, source])
