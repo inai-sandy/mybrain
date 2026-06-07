@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
@@ -31,9 +31,10 @@ export function cleanTags(tags: string[] = []): string[] {
 type ExistingRow = { id: string; sourceUrl: string | null; readFailed: boolean; supermemoryId: string | null; ragId: string | null; filePath: string | null };
 
 @Injectable()
-export class BookmarksService {
+export class BookmarksService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private prog = { imported: 0, flagged: 0, total: 0, startedAt: '' };
+  private tick: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,6 +42,47 @@ export class BookmarksService {
     private readonly summarizer: SummarizerService,
     private readonly raindrop: RaindropClient,
   ) {}
+
+  onModuleInit() {
+    // Check once a minute whether an auto-sync is due (cheap; the real work only fires when due).
+    this.tick = setInterval(() => this.autoTick().catch(() => undefined), 60_000);
+  }
+  onModuleDestroy() {
+    if (this.tick) clearInterval(this.tick);
+  }
+
+  /** Auto-sync config (default ON, hourly). */
+  async getAutoSync(): Promise<{ enabled: boolean; intervalMinutes: number }> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'bookmarks.autosync' } });
+    if (row) {
+      try {
+        const v = JSON.parse(row.value);
+        return { enabled: !!v.enabled, intervalMinutes: Number(v.intervalMinutes) || 60 };
+      } catch {
+        /* ignore */
+      }
+    }
+    return { enabled: true, intervalMinutes: 60 };
+  }
+
+  async setAutoSync(enabled: boolean, intervalMinutes: number): Promise<void> {
+    const value = JSON.stringify({ enabled: !!enabled, intervalMinutes: Math.max(15, Number(intervalMinutes) || 60) });
+    await this.prisma.setting.upsert({ where: { key: 'bookmarks.autosync' }, create: { key: 'bookmarks.autosync', value }, update: { value } });
+  }
+
+  /** Fire a sync when enabled, keys present, not already running, and the interval has elapsed. */
+  private async autoTick(): Promise<void> {
+    if (this.running) return;
+    const cfg = await this.getAutoSync();
+    if (!cfg.enabled) return;
+    if (!(await this.raindrop.hasKey()) || !(await this.summarizer.hasKey())) return;
+    const last = await this.lastSync();
+    if (last) {
+      const lastMs = Date.parse(last);
+      if (Number.isFinite(lastMs) && Date.now() - lastMs < cfg.intervalMinutes * 60_000) return; // not due yet
+    }
+    await this.start();
+  }
 
   // ---- content helpers -----------------------------------------------------
 
