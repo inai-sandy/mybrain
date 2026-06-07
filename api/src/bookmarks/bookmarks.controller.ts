@@ -38,6 +38,12 @@ export class BookmarksController {
     return { ok: true, provider: 'openrouter', model };
   }
 
+  /** Every Gemini model available on OpenRouter, for the bookmarks model picker. */
+  @Get('models')
+  async models() {
+    return { models: await this.summarizer.listGeminiModels() };
+  }
+
   /** Find bookmarks by meaning (ranked list of links + descriptions). */
   @Get('search')
   async search(@Query('q') q: string) {

@@ -267,25 +267,30 @@ function SyncSection() {
 }
 
 function BookmarksModelCard() {
-  const OPTS = [
-    { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash — fast, reads video (recommended)' },
-    { value: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro — most capable' },
-    { value: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash — newest' },
+  const FALLBACK = [
+    { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
+    { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro Preview' },
+    { id: 'google/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
   ];
+  const [opts, setOpts] = useState<{ id: string; name: string }[]>([]);
   const [model, setModel] = useState('');
   const [custom, setCustom] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
-    fetch('/api/bookmarks/model')
-      .then((r) => r.json())
-      .then((d) => {
-        const m = d.model || '';
+    Promise.all([
+      fetch('/api/bookmarks/model').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/bookmarks/models').then((r) => r.json()).catch(() => ({ models: [] })),
+    ])
+      .then(([cfg, list]) => {
+        const models = ((list.models || []) as { id: string; name: string }[]);
+        const finalOpts = models.length ? models : FALLBACK;
+        setOpts(finalOpts);
+        const m = cfg.model || '';
         setModel(m);
-        setCustom(!!m && !OPTS.some((o) => o.value === m));
+        setCustom(!!m && !finalOpts.some((o) => o.id === m));
       })
-      .catch(() => undefined)
       .finally(() => setLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -323,8 +328,8 @@ function BookmarksModelCard() {
           className={sel}
         >
           <option value="">Choose…</option>
-          {OPTS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
+          {opts.map((o) => (
+            <option key={o.id} value={o.id}>{o.name}</option>
           ))}
           <option value="__custom__">Custom…</option>
         </select>
