@@ -45,9 +45,24 @@ model Item {
   readFailed    Boolean  @default(false) // bookmark whose page could not be read (summary from metadata only)
   shared        Boolean  @default(false) // publicly viewable via /view/:id when true
   thumbnail     String? // cover image / YouTube thumbnail for bookmark cards
+  ideaId        String? // links an uploaded research doc to an Idea
   createdAt     DateTime @default(now())
 
   @@unique([contentHash, source])
+}
+
+/// A captured idea: a brain-dump cleaned up by the LLM, with a /deep-research prompt.
+model Idea {
+  id             String    @id @default(uuid())
+  rawDump        String
+  title          String
+  content        String
+  researchPrompt String
+  status         String    @default("open") // open | done
+  supermemoryId  String?
+  ragId          String?
+  createdAt      DateTime  @default(now())
+  completedAt    DateTime?
 }
 
 /// A task in the daily loop.

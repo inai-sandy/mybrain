@@ -1,0 +1,105 @@
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { MemoryService } from '../memory/memory.service';
+import { LlmService } from '../llm/llm.service';
+
+@Injectable()
+export class IdeasService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly memory: MemoryService,
+    private readonly llm: LlmService,
+  ) {}
+
+  /** Turn a raw brain-dump into {title, content, research} via the default model. */
+  private async craft(dump: string): Promise<{ title: string; content: string; research: string } | null> {
+    const prompt =
+      `Organize this raw brain-dump into a research idea. Respond with ONLY JSON: {"title":"...","content":"...","research":"..."}\n` +
+      `- title: a concise idea title (max 80 chars).\n` +
+      `- content: the idea rewritten as clear, well-structured Markdown — keep the user's substance, organize it, expand only to clarify.\n` +
+      `- research: a thorough deep-research brief to investigate this idea — the objective, 4-8 key questions to answer, what to look for, scope/constraints — and explicitly ask for the final answer as a structured Markdown research report. Do NOT include the literal text "/deep-research".\n\n` +
+      `Brain-dump:\n${dump.slice(0, 6000)}`;
+    const text = await this.llm.complete(prompt, 1200);
+    if (!text) return null;
+    try {
+      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+      return {
+        title: String(json.title || '').trim().slice(0, 120),
+        content: String(json.content || '').trim(),
+        research: String(json.research || '').trim(),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private snippet(content: string): string {
+    return (content || '').replace(/[#*`>_-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+  }
+
+  async create(dump: string) {
+    const clean = (dump || '').trim();
+    const crafted = await this.craft(clean);
+    const title = crafted?.title || clean.split('\n')[0].slice(0, 80) || 'Untitled idea';
+    const content = crafted?.content || clean;
+    const research = crafted?.research || `Research this idea thoroughly and produce a structured Markdown report.\n\n${clean}`;
+    const researchPrompt = `/deep-research\n\n${research}`;
+    const idea = await this.prisma.idea.create({ data: { rawDump: clean, title, content, researchPrompt, status: 'open' } });
+    // Index the idea text so even un-researched ideas are searchable by meaning (stamped "idea").
+    await this.memory.enqueue(`${title}\n\n${content}`, { title, tags: ['idea'] });
+    return { id: idea.id, title, snippet: this.snippet(content), researchPrompt, status: 'open', createdAt: idea.createdAt, linkedCount: 0 };
+  }
+
+  async list() {
+    const ideas = await this.prisma.idea.findMany({ orderBy: { createdAt: 'desc' }, take: 500 });
+    const counts = await this.prisma.item.groupBy({ by: ['ideaId'], where: { ideaId: { not: null } }, _count: { _all: true } });
+    const cmap = new Map(counts.map((c) => [c.ideaId, c._count._all]));
+    return ideas.map((i) => ({
+      id: i.id,
+      title: i.title,
+      snippet: this.snippet(i.content),
+      researchPrompt: i.researchPrompt,
+      status: i.status,
+      createdAt: i.createdAt,
+      completedAt: i.completedAt,
+      linkedCount: cmap.get(i.id) || 0,
+    }));
+  }
+
+  async get(id: string) {
+    const i = await this.prisma.idea.findUnique({ where: { id } });
+    if (!i) return null;
+    const docs = await this.prisma.item.findMany({ where: { ideaId: id }, orderBy: { createdAt: 'desc' }, select: { id: true, title: true, createdAt: true } });
+    return {
+      id: i.id,
+      title: i.title,
+      content: i.content,
+      researchPrompt: i.researchPrompt,
+      status: i.status,
+      createdAt: i.createdAt,
+      completedAt: i.completedAt,
+      docs,
+    };
+  }
+
+  async setStatus(id: string, status: string) {
+    const idea = await this.prisma.idea.findUnique({ where: { id } });
+    if (!idea) return null;
+    const done = status === 'done';
+    await this.prisma.idea.update({ where: { id }, data: { status: done ? 'done' : 'open', completedAt: done ? new Date() : null } });
+    return { status: done ? 'done' : 'open' };
+  }
+
+  async update(id: string, data: { title?: string; content?: string }) {
+    const idea = await this.prisma.idea.findUnique({ where: { id } });
+    if (!idea) return null;
+    await this.prisma.idea.update({
+      where: { id },
+      data: {
+        title: data.title?.trim() ? data.title.trim().slice(0, 120) : idea.title,
+        content: typeof data.content === 'string' ? data.content : idea.content,
+      },
+    });
+    return this.get(id);
+  }
+}

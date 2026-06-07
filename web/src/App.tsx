@@ -6,6 +6,8 @@ import { Login } from './ui/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Capture } from './pages/Capture';
 import { Bookmarks } from './pages/Bookmarks';
+import { Ideas } from './pages/Ideas';
+import { IdeaDetail } from './pages/IdeaDetail';
 import { Tasks } from './pages/Tasks';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
@@ -66,6 +68,8 @@ function AuthedApp() {
         <Route index element={<Dashboard />} />
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />
+        <Route path="ideas" element={<Ideas />} />
+        <Route path="ideas/:id" element={<IdeaDetail />} />
         <Route path="doc/:id" element={<DocDetail />} />
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="tasks" element={<Tasks />} />
