@@ -44,6 +44,25 @@ export class SummarizerService {
     return !!c?.apiKey;
   }
 
+  /** Every Gemini model available on OpenRouter (newest first), for the picker. Empty on failure. */
+  async listGeminiModels(): Promise<{ id: string; name: string }[]> {
+    const c = await this.connectors.get<{ apiKey: string }>('openrouter');
+    try {
+      const r = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: c?.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {},
+      });
+      if (!r.ok) return [];
+      const d: any = await r.json();
+      const list: any[] = Array.isArray(d.data) ? d.data : [];
+      return list
+        .filter((m) => typeof m.id === 'string' && m.id.startsWith('google/gemini'))
+        .map((m) => ({ id: m.id as string, name: (m.name as string) || (m.id as string) }))
+        .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)); // gemini-3* before gemini-2*
+    } catch {
+      return [];
+    }
+  }
+
   /** YouTube / Shorts / youtu.be — summarized natively by Gemini (no page read needed). */
   isVideo(url: string): boolean {
     return /(?:youtube\.com\/(?:watch|shorts\/|live\/)|youtu\.be\/)/i.test(url || '');
