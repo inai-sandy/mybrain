@@ -127,9 +127,10 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
    * What we send to the memory stores. Plain text leading with the TITLE — never a bare URL,
    * because SuperMemory auto-crawls content that starts with a URL (storing page junk instead of our summary).
    */
-  buildMemoryText(title: string, summary: string, tags: string[]): string {
-    const tagLine = tags.length ? `\n\nTags: ${tags.join(', ')}` : '';
-    return `${title}\n\n${summary}${tagLine}`;
+  buildMemoryText(title: string, summary: string, tags: string[], url?: string): string {
+    // Title first (never a bare URL — that makes SuperMemory crawl the page). Link goes at the END, labeled.
+    const meta = [tags.length ? `Tags: ${tags.join(', ')}` : '', url ? `Link: ${url}` : ''].filter(Boolean).join('\n');
+    return `${title}\n\n${summary}${meta ? `\n\n${meta}` : ''}`;
   }
 
   /** Pull the summary body back out of a stored .md file (for re-indexing without re-summarizing). */
@@ -253,7 +254,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       await this.memory.deleteDoc(it.supermemoryId, it.ragId);
       await this.prisma.memoryOutbox.deleteMany({ where: { itemId: it.id } }).catch(() => undefined);
       await this.prisma.item.update({ where: { id: it.id }, data: { supermemoryId: null, ragId: null } });
-      await this.memory.enqueue(this.buildMemoryText(it.title || '', summary, tags), { itemId: it.id, title: it.title || undefined, tags: [...tags, 'bookmark'] });
+      await this.memory.enqueue(this.buildMemoryText(it.title || '', summary, tags, it.sourceUrl || undefined), { itemId: it.id, title: it.title || undefined, tags: [...tags, 'bookmark'] });
       n++;
     }
     return { reindexed: n };
@@ -329,7 +330,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
         where: { id: ex.id },
         data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, thumbnail: this.thumbFor(b.link, b.cover), supermemoryId: null, ragId: null },
       });
-      await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags), { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
+      await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags, b.link), { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
       return readFailed ? 'flagged' : 'imported';
     }
 
@@ -355,7 +356,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     const filePath = join(dir, `${item.id}.md`);
     await fs.writeFile(filePath, md, 'utf8');
     await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
-    await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags), { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
+    await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags, b.link), { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
     return readFailed ? 'flagged' : 'imported';
   }
 
