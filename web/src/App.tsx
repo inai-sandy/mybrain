@@ -13,6 +13,7 @@ import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
+import { SkillViewer } from './pages/SkillViewer';
 import { DocDetail } from './pages/DocDetail';
 import { ChatDoc } from './pages/ChatDoc';
 
@@ -25,6 +26,7 @@ export default function App() {
         <Routes>
           {/* Public, no login required — shared links must open for anyone. */}
           <Route path="/view/:id" element={<Viewer />} />
+          <Route path="/skill/:id" element={<SkillViewer />} />
           {/* Everything else is behind auth. */}
           <Route path="/*" element={<AuthedApp />} />
         </Routes>
