@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2 } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play } from 'lucide-react';
 import { DataTable, Column, Filter } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
@@ -14,6 +14,7 @@ type BM = {
   tags: string[];
   readFailed: boolean;
   createdAt: string;
+  thumbnail: string | null;
   supermemory: boolean;
   rag: boolean;
   chunked: boolean;
@@ -49,6 +50,27 @@ function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onS
   const date = shortDate(b.createdAt);
   return (
     <div className="group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
+      {b.thumbnail && (
+        <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="relative mb-3 block rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 aspect-video">
+          <img
+            src={b.thumbnail}
+            alt=""
+            loading="lazy"
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              const p = e.currentTarget.parentElement as HTMLElement | null;
+              if (p) p.style.display = 'none';
+            }}
+          />
+          {yt && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="rounded-full bg-black/60 p-2.5">
+                <Play size={20} className="text-white fill-white" />
+              </span>
+            </span>
+          )}
+        </a>
+      )}
       {/* Title row — source chip + title (links to original) + meta line (matches the document card) */}
       <div className="flex items-start gap-3">
         <div className={'shrink-0 rounded-lg p-2 ' + chip}>

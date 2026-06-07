@@ -44,6 +44,7 @@ model Item {
   ragId         String?
   readFailed    Boolean  @default(false) // bookmark whose page could not be read (summary from metadata only)
   shared        Boolean  @default(false) // publicly viewable via /view/:id when true
+  thumbnail     String? // cover image / YouTube thumbnail for bookmark cards
   createdAt     DateTime @default(now())
 
   @@unique([contentHash, source])

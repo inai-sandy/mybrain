@@ -62,6 +62,12 @@ export class BookmarksController {
     return this.bookmarks.reindexMemory();
   }
 
+  /** Backfill cover/YouTube thumbnails for existing bookmarks. */
+  @Post('backfill-thumbnails')
+  async backfillThumbnails() {
+    return this.bookmarks.backfillThumbnails();
+  }
+
   /** Find bookmarks by meaning (ranked list of links + descriptions). */
   @Get('search')
   async search(@Query('q') q: string) {

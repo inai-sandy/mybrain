@@ -245,6 +245,7 @@ export class ItemsService {
       rag: !!item.ragId,
       chunked: !!item.supermemoryId,
       shared: item.shared,
+      thumbnail: item.thumbnail,
       content,
     };
   }
