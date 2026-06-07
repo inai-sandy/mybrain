@@ -161,7 +161,7 @@ export class ItemsService {
       }
       // App-generated entries (bookmarks, ideas) are written to SuperMemory by us — never round-trip them
       // back in as documents, or each sync would create duplicates.
-      if ((sm.tags || []).includes('idea') || (sm.tags || []).includes('bookmark')) {
+      if ((sm.tags || []).includes('idea') || (sm.tags || []).includes('bookmark') || (sm.tags || []).includes('skill')) {
         skipped++;
         continue;
       }

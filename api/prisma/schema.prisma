@@ -65,6 +65,28 @@ model Idea {
   completedAt    DateTime?
 }
 
+/// A Claude skill the user tracks (created on Claude Code/Chat, or downloaded).
+model Skill {
+  id            String    @id @default(uuid())
+  title         String
+  description   String
+  content       String? // the SKILL.md content (pasted/uploaded) — served as the download
+  origin        String    @default("created") // created | downloaded
+  platform      String    @default("code") // code | chat
+  downloadUrl   String? // external link when not app-hosted
+  filePath      String? // app-hosted uploaded file (Skills ②)
+  slug          String? // skill folder name (auto-scan match)
+  source        String? // where it was found (auto-scan)
+  inUse         Boolean? // manual using/not-using flag
+  installed     Boolean   @default(false) // detected on the server (auto-scan)
+  lastUsedAt    DateTime? // from transcripts (auto-scan)
+  usageCount    Int       @default(0)
+  shared        Boolean   @default(false)
+  supermemoryId String?
+  ragId         String?
+  createdAt     DateTime  @default(now())
+}
+
 /// A task in the daily loop.
 model Task {
   id            String    @id @default(uuid())

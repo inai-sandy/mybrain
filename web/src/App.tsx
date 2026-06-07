@@ -8,6 +8,8 @@ import { Capture } from './pages/Capture';
 import { Bookmarks } from './pages/Bookmarks';
 import { Ideas } from './pages/Ideas';
 import { IdeaDetail } from './pages/IdeaDetail';
+import { Skills } from './pages/Skills';
+import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
@@ -70,6 +72,8 @@ function AuthedApp() {
         <Route path="bookmarks" element={<Bookmarks />} />
         <Route path="ideas" element={<Ideas />} />
         <Route path="ideas/:id" element={<IdeaDetail />} />
+        <Route path="skills" element={<Skills />} />
+        <Route path="skills/:id" element={<SkillDetail />} />
         <Route path="doc/:id" element={<DocDetail />} />
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="tasks" element={<Tasks />} />
