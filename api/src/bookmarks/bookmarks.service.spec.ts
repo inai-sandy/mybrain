@@ -3,35 +3,50 @@ import { join } from 'path';
 import { promises as fs } from 'fs';
 import { BookmarksService, cleanTags } from './bookmarks.service';
 
+const YT = 'https://www.youtube.com/watch?v=abc123';
+const WEB = 'https://nonexistent.invalid.example/page'; // fetch fails → treated as unreadable
+
 function makeService(over: any = {}) {
   const created: any[] = [];
+  const updated: any[] = [];
   const enqueued: any[] = [];
   const prisma: any = {
     item: {
-      findMany: async () => over.existing ?? [],
+      findMany: async () => over.existingRows ?? [],
       create: async ({ data }: any) => {
         const row = { id: `id${created.length + 1}`, ...data };
         created.push(row);
         return row;
       },
-      update: async () => ({}),
+      update: async ({ where, data }: any) => {
+        updated.push({ where, data });
+        return { id: where.id, ...data };
+      },
       count: async () => created.length,
     },
+    memoryOutbox: { deleteMany: async () => ({}) },
     setting: { upsert: async () => ({}), findUnique: async () => null },
   };
-  const memory: any = { enqueue: async (content: string, opts: any) => enqueued.push({ content, opts }) };
-  const llm: any = { complete: async () => over.summary ?? 'A clear ~250 word summary of the page.' };
+  const memory: any = {
+    enqueue: async (content: string, opts: any) => enqueued.push({ content, opts }),
+    deleteDoc: async () => undefined,
+    searchBoth: async () => ({ supermemory: [], rag: [] }),
+  };
+  const summarizer: any = {
+    isVideo: (url: string) => /youtube\.com|youtu\.be/.test(url),
+    summarizeYouTube: async () => over.ytSummary ?? 'A clear summary of the video.',
+    summarizeText: async () => over.textSummary ?? 'A clear summary of the page.',
+    hasKey: async () => over.hasModel ?? true,
+  };
   const raindrop: any = {
     hasKey: async () => over.hasRaindrop ?? true,
     recent: async () => over.recent ?? [],
   };
-  const tavily: any = {
-    hasKey: async () => over.hasTavily ?? true,
-    extract: async (url: string) => (over.unreadable?.includes(url) ? null : 'real page text'),
-  };
-  const svc = new BookmarksService(prisma, memory, llm, raindrop, tavily);
-  return { svc, created, enqueued };
+  const svc = new BookmarksService(prisma, memory, summarizer, raindrop);
+  return { svc, created, updated, enqueued };
 }
+
+const bm = (over: any) => ({ id: 1, title: 'T', link: '', excerpt: '', note: '', tags: [], created: '2026-05-10T00:00:00Z', ...over });
 
 describe('BookmarksService', () => {
   beforeAll(() => {
@@ -42,62 +57,46 @@ describe('BookmarksService', () => {
     expect(cleanTags([' SEO', 'seo', 'Cloud '])).toEqual(['seo', 'cloud']);
   });
 
-  it('buildMarkdown puts the URL on the first line + includes tags and date', () => {
+  it('buildMarkdown puts the URL on the first line + marks YouTube source', () => {
     const { svc } = makeService();
-    const md = svc.buildMarkdown(
-      { id: 1, title: 'Cloud SEO', link: 'https://x.com/a', excerpt: '', note: '', tags: ['seo', 'cloud'], created: '2026-05-01T00:00:00Z' } as any,
-      'Body summary.',
-      false,
-    );
-    expect(md.split('\n')[0]).toBe('https://x.com/a');
+    const md = svc.buildMarkdown(bm({ title: 'Cloud SEO', link: YT, tags: ['seo'] }) as any, 'Body.', false);
+    expect(md.split('\n')[0]).toBe(YT);
     expect(md).toContain('# Cloud SEO');
-    expect(md).toContain('**Tags:** seo, cloud');
-    expect(md).toContain('2026-05-01');
+    expect(md).toContain('**Tags:** seo');
+    expect(md).toContain('**Source:** YouTube');
   });
 
-  it('flags unreadable pages and marks them in the markdown, never dropping them', () => {
+  it('flags unreadable items in the markdown', () => {
     const { svc } = makeService();
-    const md = svc.buildMarkdown(
-      { id: 1, title: 'Paywalled', link: 'https://p.com', excerpt: '', note: '', tags: [], created: '2026-05-01' } as any,
-      'From metadata.',
-      true,
-    );
-    expect(md).toContain("couldn't be fully read");
+    const md = svc.buildMarkdown(bm({ title: 'X', link: 'https://x.com' }) as any, 'From metadata.', true);
+    expect(md).toContain("couldn't be read");
   });
 
-  it('requires Raindrop and Tavily to be connected', async () => {
-    const a = await makeService({ hasRaindrop: false }).svc.sync();
-    expect(a).toMatchObject({ ok: false, code: 'no_raindrop' });
-    const b = await makeService({ hasTavily: false }).svc.sync();
-    expect(b).toMatchObject({ ok: false, code: 'no_tavily' });
+  it('start() requires Raindrop and OpenRouter', async () => {
+    expect(await makeService({ hasRaindrop: false }).svc.start()).toMatchObject({ ok: false, code: 'no_raindrop' });
+    expect(await makeService({ hasModel: false }).svc.start()).toMatchObject({ ok: false, code: 'no_model' });
   });
 
-  it('imports new bookmarks, flags unreadable ones, and stamps "bookmark" into memory', async () => {
-    const recent = [
-      { id: 1, title: 'Readable', link: 'https://ok.com', excerpt: '', note: '', tags: ['seo'], created: '2026-05-10T00:00:00Z' },
-      { id: 2, title: 'Blocked', link: 'https://paywall.com', excerpt: 'ex', note: 'mine', tags: ['cloud'], created: '2026-05-11T00:00:00Z' },
-    ];
-    const { svc, created, enqueued } = makeService({ recent, unreadable: ['https://paywall.com'] });
-    const res = await svc.sync();
-
-    expect(res).toMatchObject({ ok: true, imported: 2, flagged: 1, total: 2, skipped: 0 });
-    // both items stored as raindrop source
-    expect(created.every((c) => c.source === 'raindrop')).toBe(true);
-    // the blocked one is flagged readFailed
-    expect(created.find((c) => c.sourceUrl === 'https://paywall.com').readFailed).toBe(true);
-    expect(created.find((c) => c.sourceUrl === 'https://ok.com').readFailed).toBe(false);
-    // every memory write carries the "bookmark" stamp
+  it('summarizes a YouTube link via Gemini and a dead web link as flagged; both stamped "bookmark"', async () => {
+    const list = [bm({ id: 1, title: 'Vid', link: YT, tags: ['seo'] }), bm({ id: 2, title: 'Dead', link: WEB, excerpt: 'fallback', tags: ['x'] })];
+    const { svc, created, enqueued } = makeService();
+    const res = await svc.importBatch(list as any);
+    expect(res).toMatchObject({ imported: 2, flagged: 1 });
+    expect(created.find((c) => c.sourceUrl === YT).readFailed).toBe(false);
+    expect(created.find((c) => c.sourceUrl === WEB).readFailed).toBe(true);
     expect(enqueued.length).toBe(2);
     expect(enqueued.every((e) => e.opts.tags.includes('bookmark'))).toBe(true);
-  });
+  }, 15000);
 
-  it('skips bookmarks already imported (dedup by link)', async () => {
-    const recent = [{ id: 1, title: 'Dup', link: 'https://dup.com', excerpt: '', note: '', tags: [], created: '2026-05-10T00:00:00Z' }];
-    const { svc, created } = makeService({ recent, existing: [{ sourceUrl: 'https://dup.com' }] });
-    const res = await svc.sync();
-    expect(res).toMatchObject({ ok: true, imported: 0, skipped: 1 });
-    expect(created.length).toBe(0);
-  });
+  it('re-summarizes an existing unreadable bookmark in place (no duplicate)', async () => {
+    const existing = new Map<string, any>([[YT, { id: 'old1', sourceUrl: YT, readFailed: true, supermemoryId: null, ragId: null, filePath: null }]]);
+    const { svc, created, updated } = makeService();
+    const res = await svc.importBatch([bm({ id: 1, title: 'Vid', link: YT }) as any], existing);
+    expect(res).toMatchObject({ imported: 1, flagged: 0 });
+    expect(created.length).toBe(0); // updated, not created
+    expect(updated[0].where.id).toBe('old1');
+    expect(updated[0].data.readFailed).toBe(false);
+  }, 15000);
 
   afterAll(async () => {
     await fs.rm(join(tmpdir(), 'mybrain-bm-test'), { recursive: true, force: true }).catch(() => undefined);

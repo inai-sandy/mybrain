@@ -4,17 +4,15 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
-import { LlmService } from '../llm/llm.service';
+import { SummarizerService } from './summarizer.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
-import { TavilyClient } from './tavily.client';
 
-/** Bookmarks live alongside other items on disk so the existing view/delete/sync endpoints work. */
+/** Bookmarks live alongside other items on disk so the existing view/delete endpoints work. */
 function itemsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'items');
 }
 
 const DEFAULT_SINCE_DAYS = 90;
-const MAX_PER_RUN = Number(process.env.BOOKMARKS_MAX_PER_RUN) || 25;
 
 /** lowercase, trim, dedupe; keep Raindrop order; cap at 12. */
 export function cleanTags(tags: string[] = []): string[] {
@@ -30,40 +28,44 @@ export function cleanTags(tags: string[] = []): string[] {
   return out.slice(0, 12);
 }
 
-export type SyncResult = {
-  ok: boolean;
-  code?: string;
-  message?: string;
-  imported?: number;
-  skipped?: number;
-  flagged?: number;
-  total?: number;
-  remaining?: number;
-  lastSync?: string;
-};
+type ExistingRow = { id: string; sourceUrl: string | null; readFailed: boolean; supermemoryId: string | null; ragId: string | null; filePath: string | null };
 
 @Injectable()
 export class BookmarksService {
+  private running = false;
+  private prog = { imported: 0, flagged: 0, total: 0, startedAt: '' };
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
-    private readonly llm: LlmService,
+    private readonly summarizer: SummarizerService,
     private readonly raindrop: RaindropClient,
-    private readonly tavily: TavilyClient,
   ) {}
 
-  /** A ~250-word plain-prose summary of the page text via the configured LLM (null if unavailable). */
-  async longSummary(title: string, pageText: string): Promise<string | null> {
-    const doc = pageText.slice(0, 8000);
-    const prompt =
-      `Write a clear, self-contained summary of the web page below in about 250 words (do not exceed 280). ` +
-      `Use plain prose — no markdown headings, no bullet lists. Capture what the page is about, its key points / tools / steps, ` +
-      `and who would find it useful, so it can be found later by meaning.\n\nTitle: ${title}\n\nPage content:\n${doc}`;
-    const text = await this.llm.complete(prompt, 500);
-    return text ? text.trim() : null;
+  // ---- content helpers -----------------------------------------------------
+
+  /** Lightweight server-side page read for non-video links (no third-party reader). */
+  private async fetchPageText(url: string): Promise<string | null> {
+    try {
+      const r = await fetch(url, { redirect: 'follow', headers: { 'user-agent': 'Mozilla/5.0 (compatible; MyBrainBot/1.0)' } });
+      if (!r.ok) return null;
+      const ct = r.headers.get('content-type') || '';
+      if (!/html|text|xml/i.test(ct)) return null;
+      const html = await r.text();
+      const text = html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&[a-z]+;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return text.length > 200 ? text : null;
+    } catch {
+      return null;
+    }
   }
 
-  /** Summary built from Raindrop metadata only — used when the page can't be read or no model is set. */
+  /** Summary built from Raindrop metadata only — used when the page/video can't be read. */
   fallbackSummary(b: RaindropItem): string {
     const parts: string[] = [];
     if (b.excerpt) parts.push(b.excerpt);
@@ -83,18 +85,44 @@ export class BookmarksService {
   buildMarkdown(b: RaindropItem, summary: string, readFailed: boolean): string {
     const tagLine = b.tags.length ? b.tags.join(', ') : '—';
     const date = (b.created || '').slice(0, 10) || 'unknown';
+    const kind = this.summarizer.isVideo(b.link) ? 'YouTube' : 'Raindrop';
     const flag = readFailed
-      ? `\n> ⚠️ The page couldn't be fully read — this summary is based on the title, tags and your note.\n`
+      ? `\n> ⚠️ This page/video couldn't be read — the summary is based on the title, tags and your note.\n`
       : '';
-    return `${b.link}\n\n# ${b.title}\n\n**Tags:** ${tagLine}  \n**Saved:** ${date}  \n**Source:** Raindrop\n${flag}\n${summary}\n`;
+    return `${b.link}\n\n# ${b.title}\n\n**Tags:** ${tagLine}  \n**Saved:** ${date}  \n**Source:** ${kind}\n${flag}\n${summary}\n`;
   }
+
+  /** Produce a summary for one bookmark: YouTube → Gemini video; else fetch page → Gemini text. */
+  private async makeSummary(b: RaindropItem): Promise<{ summary: string; readFailed: boolean }> {
+    if (this.summarizer.isVideo(b.link)) {
+      const s = await this.summarizer.summarizeYouTube(b.link, b.title);
+      if (s) return { summary: s, readFailed: false };
+      return { summary: this.fallbackSummary(b), readFailed: true };
+    }
+    const text = await this.fetchPageText(b.link);
+    if (text) {
+      const s = await this.summarizer.summarizeText(b.title, text);
+      // page WAS read; if the model hiccupped, fall back to metadata but don't flag as unreadable.
+      return { summary: s || this.fallbackSummary(b), readFailed: false };
+    }
+    return { summary: this.fallbackSummary(b), readFailed: true };
+  }
+
+  // ---- status / listing ----------------------------------------------------
 
   async lastSync(): Promise<string | null> {
     const row = await this.prisma.setting.findUnique({ where: { key: 'bookmarks.lastSync' } });
     return row?.value || null;
   }
 
-  /** All stored bookmarks (newest first) shaped for the page. */
+  async count(): Promise<number> {
+    return this.prisma.item.count({ where: { source: 'raindrop' } });
+  }
+
+  getState() {
+    return { running: this.running, imported: this.prog.imported, flagged: this.prog.flagged, total: this.prog.total };
+  }
+
   async listItems() {
     const rows = await this.prisma.item.findMany({ where: { source: 'raindrop' }, orderBy: { createdAt: 'desc' }, take: 1000 });
     return rows.map((i) => ({
@@ -110,12 +138,7 @@ export class BookmarksService {
     }));
   }
 
-  /**
-   * Find bookmarks by MEANING. Uses the semantic stores (SuperMemory + RAG) to rank,
-   * then maps the ranked snippets back to real bookmark items by matching their link/title
-   * (every bookmark's summary — which we indexed — starts with its URL + title).
-   * Keyword overlap is a safety net so the box always returns sensible results.
-   */
+  /** Find bookmarks by meaning (semantic stores ranked, mapped back to real bookmarks; keyword safety net). */
   async search(q: string, limit = 20) {
     const all = await this.listItems();
     const query = q.trim();
@@ -136,7 +159,6 @@ export class BookmarksService {
       .map((it) => {
         const url = (it.sourceUrl || '').toLowerCase();
         const title = (it.title || '').toLowerCase();
-        // Semantic rank: earliest store snippet that mentions this bookmark's link or title.
         let semIdx = -1;
         for (let i = 0; i < ranked.length; i++) {
           if ((url && ranked[i].includes(url)) || (title.length > 6 && ranked[i].includes(title))) {
@@ -155,91 +177,117 @@ export class BookmarksService {
     return scored.slice(0, limit).map((s) => s.it);
   }
 
-  async count(): Promise<number> {
-    return this.prisma.item.count({ where: { source: 'raindrop' } });
+  // ---- the sync job --------------------------------------------------------
+
+  /** Bookmarks from the last `sinceDays` that still need work: never-imported OR previously unreadable (retry). */
+  private async eligible(sinceDays: number): Promise<{ list: RaindropItem[]; existing: Map<string, ExistingRow> }> {
+    const recent = await this.raindrop.recent(sinceDays);
+    const rows = (await this.prisma.item.findMany({
+      where: { source: 'raindrop' },
+      select: { id: true, sourceUrl: true, readFailed: true, supermemoryId: true, ragId: true, filePath: true },
+    })) as ExistingRow[];
+    const existing = new Map<string, ExistingRow>(rows.map((r) => [r.sourceUrl || '', r]));
+    const list = recent.filter((b) => b.link && (!existing.has(b.link) || existing.get(b.link)!.readFailed));
+    return { list, existing };
+  }
+
+  /** Import (or re-summarize) one bookmark. Returns the outcome for progress counting. */
+  private async importOne(b: RaindropItem, dir: string, existing: Map<string, ExistingRow>): Promise<'imported' | 'flagged' | 'skip'> {
+    const { summary, readFailed } = await this.makeSummary(b);
+    const md = this.buildMarkdown(b, summary, readFailed);
+    const tags = cleanTags(b.tags);
+    const ex = existing.get(b.link);
+
+    if (ex) {
+      // Retry/upgrade an existing (previously unreadable) bookmark in place — no duplicate, refresh memory.
+      const filePath = ex.filePath || join(dir, `${ex.id}.md`);
+      await fs.writeFile(filePath, md, 'utf8');
+      await this.memory.deleteDoc(ex.supermemoryId, ex.ragId);
+      await this.prisma.memoryOutbox.deleteMany({ where: { itemId: ex.id } }).catch(() => undefined);
+      await this.prisma.item.update({
+        where: { id: ex.id },
+        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, supermemoryId: null, ragId: null },
+      });
+      await this.memory.enqueue(md, { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
+      return readFailed ? 'flagged' : 'imported';
+    }
+
+    const contentHash = createHash('sha256').update(`raindrop:${b.link}`).digest('hex');
+    const created = new Date(b.created);
+    const item = await this.prisma.item
+      .create({
+        data: {
+          contentHash,
+          source: 'raindrop',
+          title: b.title.slice(0, 200),
+          summary: this.shortDesc(summary),
+          sourceUrl: b.link,
+          tags: JSON.stringify(tags),
+          readFailed,
+          ...(isNaN(created.getTime()) ? {} : { createdAt: created }),
+        },
+      })
+      .catch(() => null);
+    if (!item) return 'skip';
+
+    const filePath = join(dir, `${item.id}.md`);
+    await fs.writeFile(filePath, md, 'utf8');
+    await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
+    await this.memory.enqueue(md, { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
+    return readFailed ? 'flagged' : 'imported';
+  }
+
+  /** Process a list of bookmarks, updating live progress. Used by the background job (and tests). */
+  async importBatch(list: RaindropItem[], existing: Map<string, ExistingRow> = new Map(), cap = list.length): Promise<{ imported: number; flagged: number }> {
+    const dir = itemsDir();
+    await fs.mkdir(dir, { recursive: true });
+    let imported = 0;
+    let flagged = 0;
+    for (const b of list.slice(0, cap)) {
+      const r = await this.importOne(b, dir, existing);
+      if (r === 'skip') continue;
+      imported++;
+      if (r === 'flagged') flagged++;
+      this.prog.imported = imported;
+      this.prog.flagged = flagged;
+    }
+    return { imported, flagged };
   }
 
   /**
-   * Pull the last `sinceDays` of Raindrop bookmarks, read each with Tavily, summarize to a .md,
-   * and index stamped "bookmark". Capped per run to stay within request limits; returns counts.
+   * Kick off a background sync of the last `sinceDays` of Raindrop bookmarks.
+   * Returns immediately; progress is read via getState()/status. Idempotent while running.
    */
-  async sync(opts: { sinceDays?: number; cap?: number } = {}): Promise<SyncResult> {
-    if (!(await this.raindrop.hasKey()))
-      return { ok: false, code: 'no_raindrop', message: 'Connect Raindrop in Settings first.' };
-    if (!(await this.tavily.hasKey()))
-      return { ok: false, code: 'no_tavily', message: 'Connect Tavily in Settings first.' };
+  async start(opts: { sinceDays?: number } = {}): Promise<{ ok: boolean; started?: boolean; running?: boolean; total?: number; code?: string; message?: string }> {
+    if (!(await this.raindrop.hasKey())) return { ok: false, code: 'no_raindrop', message: 'Connect Raindrop in Settings first.' };
+    if (!(await this.summarizer.hasKey())) return { ok: false, code: 'no_model', message: 'Connect OpenRouter (for Gemini summaries) in Settings first.' };
+    if (this.running) return { ok: true, started: false, running: true, total: this.prog.total };
 
     const sinceDays = opts.sinceDays ?? DEFAULT_SINCE_DAYS;
-    const maxPerRun = opts.cap ?? MAX_PER_RUN;
-
-    let recent: RaindropItem[];
+    let work: { list: RaindropItem[]; existing: Map<string, ExistingRow> };
     try {
-      recent = await this.raindrop.recent(sinceDays);
+      work = await this.eligible(sinceDays);
     } catch {
       return { ok: false, code: 'raindrop_error', message: 'Could not reach Raindrop — check the key and try again.' };
     }
 
-    // Dedup against bookmarks already pulled in (by original link).
-    const existing = await this.prisma.item.findMany({ where: { source: 'raindrop' }, select: { sourceUrl: true } });
-    const have = new Set(existing.map((e) => e.sourceUrl).filter(Boolean));
-    const eligible = recent.filter((b) => b.link && !have.has(b.link));
+    this.running = true;
+    this.prog = { imported: 0, flagged: 0, total: work.list.length, startedAt: new Date().toISOString() };
+    void this.runJob(work.list, work.existing);
+    return { ok: true, started: true, running: true, total: work.list.length };
+  }
 
-    const dir = itemsDir();
-    await fs.mkdir(dir, { recursive: true });
-
-    let imported = 0;
-    let flagged = 0;
-    for (const b of eligible) {
-      if (imported >= maxPerRun) break;
-
-      const pageText = await this.tavily.extract(b.link);
-      let summary: string | null = null;
-      if (pageText) summary = await this.longSummary(b.title, pageText);
-      // Flag only when the PAGE itself couldn't be read (not merely a missing model).
-      const readFailed = !pageText;
-      if (!summary) summary = this.fallbackSummary(b);
-
-      const md = this.buildMarkdown(b, summary, readFailed);
-      const contentHash = createHash('sha256').update(`raindrop:${b.link}`).digest('hex');
-      const tags = cleanTags(b.tags);
-      const created = new Date(b.created);
-      const item = await this.prisma.item
-        .create({
-          data: {
-            contentHash,
-            source: 'raindrop',
-            title: b.title.slice(0, 200),
-            summary: this.shortDesc(summary),
-            sourceUrl: b.link,
-            tags: JSON.stringify(tags),
-            readFailed,
-            ...(isNaN(created.getTime()) ? {} : { createdAt: created }),
-          },
-        })
-        .catch(() => null);
-      if (!item) continue; // unique (link) clash → already imported
-
-      const filePath = join(dir, `${item.id}.md`);
-      await fs.writeFile(filePath, md, 'utf8');
-      await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
-
-      // Summary only (no full page text), stamped "bookmark" in both stores.
-      await this.memory.enqueue(md, { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
-
-      imported++;
-      if (readFailed) flagged++;
+  private async runJob(list: RaindropItem[], existing: Map<string, ExistingRow>) {
+    try {
+      await this.importBatch(list, existing);
+    } catch {
+      /* swallow — the job is best-effort; dedup makes a re-run safe */
+    } finally {
+      this.running = false;
+      const lastSync = new Date().toISOString();
+      await this.prisma.setting
+        .upsert({ where: { key: 'bookmarks.lastSync' }, create: { key: 'bookmarks.lastSync', value: lastSync }, update: { value: lastSync } })
+        .catch(() => undefined);
     }
-
-    const remaining = Math.max(0, eligible.length - imported);
-    const lastSync = new Date().toISOString();
-    await this.prisma.setting
-      .upsert({
-        where: { key: 'bookmarks.lastSync' },
-        create: { key: 'bookmarks.lastSync', value: lastSync },
-        update: { value: lastSync },
-      })
-      .catch(() => undefined);
-
-    return { ok: true, imported, skipped: recent.length - eligible.length, flagged, total: recent.length, remaining, lastSync };
   }
 }
