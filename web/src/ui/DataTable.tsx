@@ -31,6 +31,7 @@ export function DataTable<T extends Record<string, any>>({
   emptyText = 'Nothing here yet.',
   renderCard,
   cardsOnly = false,
+  gridClassName,
   sortOptions = [],
 }: {
   columns: Column<T>[];
@@ -42,6 +43,7 @@ export function DataTable<T extends Record<string, any>>({
   emptyText?: string;
   renderCard?: (row: T) => ReactNode;
   cardsOnly?: boolean;
+  gridClassName?: string;
   sortOptions?: SortOption[];
 }) {
   const [q, setQ] = useState('');
@@ -128,7 +130,7 @@ export function DataTable<T extends Record<string, any>>({
 
       {/* Cards (mobile always; all sizes when cardsOnly) */}
       {renderCard && (
-        <div className={cardsOnly ? 'grid gap-3 sm:grid-cols-2' : 'sm:hidden space-y-2'}>
+        <div className={cardsOnly ? gridClassName || 'grid gap-3 sm:grid-cols-2' : 'sm:hidden space-y-2'}>
           {loading ? (
             <div className="py-10 text-center text-zinc-400 sm:col-span-2" data-testid="dt-loading">Loading…</div>
           ) : pageRows.length === 0 ? (
