@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, ExternalLink, List } from 'lucide-react';
+import { ArrowLeft, ExternalLink, List, Share2 } from 'lucide-react';
 import { StoreBadges } from '../ui/StoreBadges';
+import { useToast } from '../ui/Toast';
+import { shareItem } from '../ui/share';
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -98,6 +100,15 @@ export function DocDetail() {
   const { id } = useParams();
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState('');
+  const toast = useToast();
+
+  async function share() {
+    if (!d) return;
+    const r = await shareItem(d.id, d.title);
+    if (r === 'copied') toast('success', 'Public link copied — anyone with it can read this');
+    else if (r === 'shared') toast('success', 'Shared');
+    else if (r === 'error') toast('error', 'Could not share');
+  }
 
   useEffect(() => {
     fetch(`/api/items/${id}`)
@@ -149,16 +160,24 @@ export function DocDetail() {
                   ))}
                 </div>
               )}
-              {d.sourceUrl && (
-                <a
-                  href={d.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 break-all"
+              <div className="mt-4 flex flex-wrap gap-2">
+                {d.sourceUrl && (
+                  <a
+                    href={d.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 break-all"
+                  >
+                    Open original <ExternalLink size={14} className="shrink-0" />
+                  </a>
+                )}
+                <button
+                  onClick={share}
+                  className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 ' + (d.shared ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700')}
                 >
-                  Open original <ExternalLink size={14} className="shrink-0" />
-                </a>
-              )}
+                  <Share2 size={14} /> {d.shared ? 'Shared' : 'Share'}
+                </button>
+              </div>
               {d.summary && (
                 <p className="mt-4 text-zinc-600 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4">
                   {d.summary}

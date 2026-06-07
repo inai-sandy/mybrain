@@ -199,6 +199,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       supermemory: !!i.supermemoryId,
       rag: !!i.ragId,
       chunked: !!i.supermemoryId, // SuperMemory chunks server-side
+      shared: i.shared,
     }));
   }
 

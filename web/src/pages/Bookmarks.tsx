@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2 } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2 } from 'lucide-react';
 import { DataTable, Column, Filter } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
+import { shareItem } from '../ui/share';
 
 type BM = {
   id: string;
@@ -16,6 +17,7 @@ type BM = {
   supermemory: boolean;
   rag: boolean;
   chunked: boolean;
+  shared: boolean;
 };
 
 const isYouTube = (u: string | null) => !!u && /youtube\.com|youtu\.be/.test(u);
@@ -39,7 +41,7 @@ function Chip({ t }: { t: string }) {
   );
 }
 
-function Card({ b, onOpen }: { b: BM; onOpen: (id: string) => void }) {
+function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void }) {
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
   const yt = isYouTube(b.sourceUrl);
   const Icon = yt ? Youtube : Link2;
@@ -74,6 +76,9 @@ function Card({ b, onOpen }: { b: BM; onOpen: (id: string) => void }) {
       <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
         <StoreBadges supermemory={b.supermemory} rag={b.rag} chunked={b.chunked} />
         <div className="flex items-center gap-0.5 shrink-0">
+          <button onClick={() => onShare(b)} title="Share" className={iconBtn + (b.shared ? ' text-emerald-600' : '')}>
+            <Share2 size={16} />
+          </button>
           <button onClick={() => onOpen(b.id)} title="Open summary in app" className={iconBtn}>
             <Eye size={16} />
           </button>
@@ -98,6 +103,13 @@ export function Bookmarks() {
   const toast = useToast();
   const navigate = useNavigate();
   const onOpen = (id: string) => navigate(`/doc/${id}`);
+  async function onShare(b: BM) {
+    const r = await shareItem(b.id, b.title);
+    if (r === 'copied') toast('success', 'Public link copied — anyone with it can read this');
+    else if (r === 'shared') toast('success', 'Shared');
+    else if (r === 'error') toast('error', 'Could not share');
+    if (r !== 'cancelled' && r !== 'error') load();
+  }
 
   async function load() {
     setLoading(true);
@@ -254,7 +266,7 @@ export function Bookmarks() {
             <div className="py-10 text-center text-zinc-400">No matches — try different words, or Sync more bookmarks.</div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
-              {results.map((b) => <Card key={b.id} b={b} onOpen={onOpen} />)}
+              {results.map((b) => <Card key={b.id} b={b} onOpen={onOpen} onShare={onShare} />)}
             </div>
           )}
         </div>
@@ -264,7 +276,7 @@ export function Bookmarks() {
           rows={items}
           loading={loading}
           filters={filters}
-          renderCard={(b) => <Card b={b} onOpen={onOpen} />}
+          renderCard={(b) => <Card b={b} onOpen={onOpen} onShare={onShare} />}
           cardsOnly
           pageSize={12}
           emptyText={

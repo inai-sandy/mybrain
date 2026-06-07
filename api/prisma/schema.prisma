@@ -43,6 +43,7 @@ model Item {
   supermemoryId String?
   ragId         String?
   readFailed    Boolean  @default(false) // bookmark whose page could not be read (summary from metadata only)
+  shared        Boolean  @default(false) // publicly viewable via /view/:id when true
   createdAt     DateTime @default(now())
 
   @@unique([contentHash, source])
