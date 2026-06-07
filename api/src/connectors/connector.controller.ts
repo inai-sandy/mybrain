@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { ConnectorService, isKnownConnector } from './connector.service';
 
 @Controller('connectors')
@@ -21,6 +21,13 @@ export class ConnectorController {
     if (Object.keys(secrets).length === 0) throw new BadRequestException('No values provided');
     await this.connectors.set(name, secrets);
     return { ok: true, name, configured: true };
+  }
+
+  /** Live-test a connector's saved key against the real service. Returns ok + a plain message. */
+  @Post(':name/test')
+  async test(@Param('name') name: string) {
+    if (!isKnownConnector(name)) throw new BadRequestException('Unknown connector');
+    return this.connectors.test(name);
   }
 
   /** Disconnect a connector. */
