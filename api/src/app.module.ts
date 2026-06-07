@@ -6,10 +6,11 @@ import { ConnectorModule } from './connectors/connector.module';
 import { MemoryModule } from './memory/memory.module';
 import { ItemsModule } from './items/items.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
+import { IdeasModule } from './ideas/ideas.module';
 import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule],
   controllers: [HealthController],
 })
 export class AppModule {}
