@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { promises as fs } from 'fs';
+import { promises as fs, createWriteStream } from 'fs';
 import { join } from 'path';
+// archiver's runtime is callable as archiver('zip', …); @types/archiver v8 omits that signature, so type it loosely.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const archiver: any = require('archiver');
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
@@ -165,5 +168,82 @@ export class SkillsService {
     await this.memory.deleteDoc(s.supermemoryId, s.ragId);
     if (s.filePath) await fs.unlink(s.filePath).catch(() => undefined);
     await this.prisma.skill.delete({ where: { id } });
+  }
+
+  private zipFolder(srcDir: string, destZip: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      try {
+        const output = createWriteStream(destZip);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        output.on('close', () => resolve(true));
+        archive.on('error', () => resolve(false));
+        archive.pipe(output);
+        archive.directory(srcDir, false);
+        archive.finalize();
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  async lastScan(): Promise<string | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'skills.lastScan' } });
+    return row?.value || null;
+  }
+
+  /** Scan the mounted server skill dirs, AI-describe + zip each, upsert (deduped by skill name). */
+  async scan(): Promise<{ created: number; updated: number; total: number; lastScan: string }> {
+    const dirs = (process.env.SKILLS_SCAN_DIRS || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const zipDir = skillsDir();
+    await fs.mkdir(zipDir, { recursive: true });
+    const seen = new Set<string>();
+    let created = 0;
+    let updated = 0;
+    let total = 0;
+    for (const base of dirs) {
+      let entries: string[] = [];
+      try {
+        entries = await fs.readdir(base);
+      } catch {
+        continue;
+      }
+      for (const slug of entries) {
+        if (seen.has(slug)) continue;
+        const folder = join(base, slug);
+        let md: string;
+        try {
+          const st = await fs.stat(folder);
+          if (!st.isDirectory()) continue;
+          md = await fs.readFile(join(folder, 'SKILL.md'), 'utf8');
+        } catch {
+          continue;
+        }
+        seen.add(slug);
+        total++;
+        const parsed = parseSkillMd(md);
+        const title = (parsed.name || slug).slice(0, 120);
+        const existing = await this.prisma.skill.findFirst({ where: { origin: 'created', slug } });
+        // Only call the LLM for new or empty descriptions — keep existing ones on re-scan.
+        const description = existing?.description?.trim() ? existing.description : await this.aiDescribe(md, parsed.description);
+        const zipPath = join(zipDir, `scan-${slug}.zip`);
+        const zipped = await this.zipFolder(folder, zipPath);
+        if (existing) {
+          await this.prisma.skill.update({
+            where: { id: existing.id },
+            data: { title, description, content: md, installed: true, source: base, filePath: zipped ? zipPath : existing.filePath },
+          });
+          updated++;
+        } else {
+          const skill = await this.prisma.skill.create({
+            data: { title, description, content: md, origin: 'created', platform: 'code', slug, source: base, installed: true, filePath: zipped ? zipPath : null },
+          });
+          await this.memory.enqueue(`${title}\n\n${description}`, { itemId: undefined, title, tags: ['skill', 'created'] });
+          created++;
+        }
+      }
+    }
+    const lastScan = new Date().toISOString();
+    await this.prisma.setting.upsert({ where: { key: 'skills.lastScan' }, create: { key: 'skills.lastScan', value: lastScan }, update: { value: lastScan } }).catch(() => undefined);
+    return { created, updated, total, lastScan };
   }
 }

@@ -19,6 +19,14 @@ sudo docker rm -f "$NAME" >/dev/null 2>&1 || true
 sudo docker run -d --name "$NAME" --restart unless-stopped \
   --network mcp-network \
   -v mybrain-data:/app/data \
+  -v /home/sandy/.claude/skills:/scan/sandy/skills:ro \
+  -v /home/beakn/.claude/skills:/scan/beakn/skills:ro \
+  -v /root/.claude/skills:/scan/root/skills:ro \
+  -v /home/sandy/.claude/projects:/scan/sandy/projects:ro \
+  -v /home/beakn/.claude/projects:/scan/beakn/projects:ro \
+  -v /root/.claude/projects:/scan/root/projects:ro \
+  -e SKILLS_SCAN_DIRS="/scan/sandy/skills,/scan/beakn/skills,/scan/root/skills" \
+  -e TRANSCRIPT_SCAN_DIRS="/scan/sandy/projects,/scan/beakn/projects,/scan/root/projects" \
   -e NODE_ENV=production -e PORT="$PORT" \
   -e DATABASE_URL="file:/app/data/mybrain.db" \
   -e ADMIN_EMAIL="${ADMIN_EMAIL:-}" \

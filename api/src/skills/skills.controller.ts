@@ -18,6 +18,17 @@ export class SkillsController {
     return { skills: await this.skills.list() };
   }
 
+  /** Scan the server's ~/.claude/skills and pull in new ones (AI-described, zipped). */
+  @Post('scan')
+  async scan() {
+    return this.skills.scan();
+  }
+
+  @Get('scan-status')
+  async scanStatus() {
+    return { lastScan: await this.skills.lastScan() };
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const s = await this.skills.get(id);
