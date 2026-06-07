@@ -16,6 +16,7 @@ const INTEGRATIONS: Integration[] = [
   { name: 'tavily', label: 'Tavily', desc: 'Reads web pages so bookmarks can be summarized', icon: Globe, testable: true, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude models direct', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openrouter', label: 'OpenRouter', desc: 'One gateway to many models (Claude, GPT, Gemini…)', icon: Boxes, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'openai', label: 'OpenAI', desc: 'Transcribes your Telegram voice notes (Whisper)', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
 ];
 
 const MODELS: Record<string, { value: string; label: string }[]> = {

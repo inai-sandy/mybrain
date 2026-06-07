@@ -14,6 +14,11 @@ const COMMANDS = [
   { command: 'add', description: 'Add a single task' },
   { command: 'today', description: "See today's tasks" },
   { command: 'done', description: 'Mark a task done (e.g. /done 2)' },
+  { command: 'insights', description: 'Streak, follow-through, time' },
+  { command: 'me', description: 'Your personality snapshot' },
+  { command: 'activity', description: "Today's summary" },
+  { command: 'skip', description: 'Rest day — mute nudges today' },
+  { command: 'snooze', description: 'Quiet nudges for a while' },
   { command: 'help', description: 'List all commands' },
 ];
 
@@ -26,8 +31,14 @@ const HELP =
   '/add — add a single task\n\n' +
   '🔵 <b>Check &amp; complete</b>\n' +
   '/today — see today\'s tasks\n' +
-  '/done 2 — mark task #2 done\n\n' +
-  'Tip: send a command alone (e.g. /dump) and I\'ll take your next message — or put it all on one line.';
+  '/done 2 — mark task #2 done\n' +
+  '/activity — today\'s summary\n' +
+  '/insights — streak, follow-through, time\n' +
+  '/me — your personality snapshot\n\n' +
+  '⚙️ <b>Control</b>\n' +
+  '/skip — rest day (no nudges today)\n' +
+  '/snooze — quiet nudges for an hour\n\n' +
+  'Tip: send a command alone (e.g. /dump) and I\'ll take your next message or voice note — or put it all on one line.';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
@@ -43,6 +54,27 @@ export class TelegramService implements OnModuleInit {
   async onModuleInit() {
     // If a token is already configured, make sure the webhook + command menu are registered.
     if (await this.token()) this.setup().catch((e) => this.log.warn(`setup on boot failed: ${e?.message}`));
+    // Outbound nudges: morning dump, evening story, task reminders, mid-day motivation, nightly summary.
+    setInterval(() => this.nudgeTick().catch((e) => this.log.warn(`nudgeTick: ${e?.message}`)), 60_000);
+  }
+
+  // ---- time helpers (user timezone) ----
+  private async tz(): Promise<string> {
+    return (await this.getSetting('tasks.tz')) || 'Asia/Kolkata';
+  }
+  private dayKey(tz: string, d = new Date()): string {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    } catch {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+  private localHM(tz: string, d = new Date()): string {
+    try {
+      return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    } catch {
+      return d.toISOString().slice(11, 16);
+    }
   }
 
   // ---- config / settings helpers ----
@@ -182,8 +214,14 @@ export class TelegramService implements OnModuleInit {
       }
 
       if (msg.voice || msg.audio) {
-        await this.send(chatId, '🎙️ Voice notes are coming soon — please type for now.');
-        return;
+        const fileId = msg.voice?.file_id || msg.audio?.file_id;
+        const transcript = await this.transcribe(fileId);
+        if (!transcript) {
+          await this.send(chatId, '🎙️ Couldn\'t transcribe that — add a valid OpenAI key (Settings → Integrations) or type it instead.');
+          return;
+        }
+        await this.send(chatId, `🎙️ <i>${transcript.slice(0, 200)}</i>`);
+        return this.handlePlain(chatId, transcript);
       }
       if (!text) return;
 
@@ -226,6 +264,17 @@ export class TelegramService implements OnModuleInit {
         return this.doToday(chatId);
       case 'done':
         return this.doDone(chatId, arg);
+      case 'activity':
+        return this.doActivity(chatId);
+      case 'insights':
+      case 'stats':
+        return this.doInsights(chatId);
+      case 'me':
+        return this.doMe(chatId);
+      case 'skip':
+        return this.doSkip(chatId);
+      case 'snooze':
+        return this.doSnooze(chatId, arg);
       default:
         return this.send(chatId, `Unknown command. Try /help.`);
     }
@@ -327,5 +376,177 @@ export class TelegramService implements OnModuleInit {
     if (task.status === 'done') return this.send(chatId, `“${task.title}” is already done. ✅`);
     await this.tasks.setDone(task.id, true);
     return this.send(chatId, `✅ Done: <b>${task.title}</b>. Nice.`);
+  }
+
+  private async doActivity(chatId: string) {
+    const a = await this.daily.activity();
+    const lines = [`<b>Today — ${a.stats.tasksDone}/${a.stats.tasksTotal} done · ${a.stats.minutesSpent}m</b>`];
+    if (a.summary) {
+      lines.push('', a.summary.text);
+    } else {
+      lines.push('', '<i>Summary auto-writes at 9:30 PM. So far today:</i>');
+      lines.push(...a.timeline.slice(0, 8).map((e: any) => `• ${e.title}`));
+      if (!a.timeline.length) lines.push('• nothing yet');
+    }
+    return this.send(chatId, lines.join('\n'));
+  }
+
+  private async doInsights(chatId: string) {
+    const d = await this.daily.dashboard(30);
+    const cats = d.categoryTime.slice(0, 3).map((c: any) => `${c.category} ${Math.round(c.minutes)}m`).join(', ') || 'n/a';
+    return this.send(
+      chatId,
+      `<b>Last 30 days</b>\n🔥 Dump streak: <b>${d.streak}</b>\n✅ Follow-through: <b>${d.totals.followThrough}%</b> (${d.totals.tasksDone}/${d.totals.tasksTotal})\n⏱ Time logged: <b>${d.minutesSpent}m</b>\n📊 Top: ${cats}`,
+    );
+  }
+
+  private async doMe(chatId: string) {
+    const p = await this.daily.getPersonality();
+    if (!p.unlocked) return this.send(chatId, `🔍 Still getting to know you — <b>${p.daysCovered}/${p.minDays}</b> active days. Your portrait unlocks at ${p.minDays}.`);
+    const lines = [p.summary || 'Building your portrait…'];
+    if (p.insights.length) lines.push('', ...p.insights.slice(0, 5).map((i: any) => `• <b>${i.dimension}:</b> ${i.claim}`));
+    return this.send(chatId, lines.join('\n'));
+  }
+
+  private async doSkip(chatId: string) {
+    await this.setSetting('telegram.skipDay', this.dayKey(await this.tz()));
+    return this.send(chatId, '🌴 Rest day — no nudges today. See you tomorrow.');
+  }
+
+  private async doSnooze(chatId: string, arg: string) {
+    const mins = Math.max(5, Math.min(720, parseInt(arg, 10) || 60));
+    await this.setSetting('telegram.snoozeUntil', String(Date.now() + mins * 60_000));
+    return this.send(chatId, `🔕 Nudges quiet for ${mins} minutes.`);
+  }
+
+  // ---- outbound nudge scheduler ----
+  private async firedSet(day: string): Promise<Set<string>> {
+    try {
+      const raw = JSON.parse((await this.getSetting('telegram.fired')) || '{}');
+      if (raw.day === day && Array.isArray(raw.keys)) return new Set(raw.keys);
+    } catch {
+      /* ignore */
+    }
+    return new Set();
+  }
+  private async saveFired(day: string, set: Set<string>) {
+    await this.setSetting('telegram.fired', JSON.stringify({ day, keys: [...set] }));
+  }
+
+  async nudgeTick(): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner || !(await this.token())) return;
+    const tz = await this.tz();
+    const day = this.dayKey(tz);
+    const hm = this.localHM(tz);
+
+    if ((await this.getSetting('telegram.skipDay')) === day) return; // rest day
+    const snooze = Number((await this.getSetting('telegram.snoozeUntil')) || 0);
+    if (snooze && Date.now() < snooze) return;
+
+    const fired = await this.firedSet(day);
+    const fireOnce = async (key: string, fn: () => Promise<any>) => {
+      if (fired.has(key)) return;
+      fired.add(key);
+      await this.saveFired(day, fired);
+      await fn();
+    };
+
+    // morning dump nudges (until dumped or 9 AM)
+    if (['07:00', '07:30', '08:00', '08:30'].includes(hm)) {
+      if (!(await this.prisma.brainDump.findFirst({ where: { day } }))) {
+        await fireOnce(`dump:${hm}`, () => this.send(owner, "🌅 Morning! What's on your mind today? Send /dump and I'll build your task list."));
+      }
+    }
+    // evening story nudges (until told or 11 PM)
+    if (['21:00', '21:30', '22:00', '22:30'].includes(hm)) {
+      if (!(await this.prisma.story.findFirst({ where: { day } }))) {
+        await fireOnce(`story:${hm}`, () => this.send(owner, '🌙 How was your day? Tell me the story — send /story.'));
+      }
+    }
+
+    const today = await this.tasks.today();
+
+    // per-task reminders at their smart times
+    for (const t of today.tasks) {
+      if (t.status !== 'open' || !t.reminders?.length) continue;
+      if (t.reminders.includes(hm)) {
+        await fireOnce(`task:${t.id}:${hm}`, () => this.send(owner, `⏰ Reminder: <b>${t.title}</b>${t.estimateMin ? ` (~${t.estimateMin}m)` : ''}`));
+      }
+    }
+
+    // mid-day motivation (progress-driven, Honest-coach)
+    if (hm === '12:30' || hm === '15:30') {
+      await fireOnce(`motivate:${hm}`, () => this.send(owner, this.motivation(today)));
+    }
+
+    // nightly summary push (once the 9:30 summary exists)
+    if (hm >= '21:30') {
+      const summary = await this.prisma.daySummary.findUnique({ where: { day } });
+      if (summary) await fireOnce('summary', () => this.send(owner, `🌙 <b>Your day</b>\n\n${summary.text}`));
+    }
+  }
+
+  private motivation(today: any): string {
+    const done = today.counts.done;
+    const total = today.counts.total;
+    const pinnedOpen = today.tasks.filter((t: any) => t.pinned && t.status === 'open');
+    const carried = today.tasks.filter((t: any) => t.status === 'open' && t.rolloverCount >= 2);
+    if (total === 0) return '💭 Nothing planned yet — a 30-second /dump sets up your day.';
+    if (done / total >= 0.6) return `🔥 ${done}/${total} done — you're crushing it. Keep the momentum.`;
+    if (carried.length) return `👀 "${carried[0].title}" has followed you ${carried[0].rolloverCount} days. 15 minutes now and it's gone for good.`;
+    if (pinnedOpen.length) return `⏳ Your must-do "${pinnedOpen[0].title}" is still open. Start it now — the rest can wait.`;
+    return `You're at ${done}/${total}. Pick the next one and go — momentum beats motivation.`;
+  }
+
+  // ---- voice transcription (Whisper, with a Gemini-via-OpenRouter fallback) ----
+  private async transcribe(fileId?: string): Promise<string | null> {
+    const t = await this.token();
+    if (!fileId || !t) return null;
+    const f = await this.api('getFile', { file_id: fileId });
+    const path = f?.result?.file_path;
+    if (!path) return null;
+    let buf: Buffer;
+    try {
+      const r = await fetch(`https://api.telegram.org/file/bot${t}/${path}`);
+      if (!r.ok) return null;
+      buf = Buffer.from(await r.arrayBuffer());
+    } catch {
+      return null;
+    }
+    const name = path.split('/').pop() || 'voice.oga';
+    const oa = await this.connectors.get<{ apiKey: string }>('openai');
+    if (oa?.apiKey) {
+      const w = await this.whisper(buf, name, oa.apiKey).catch(() => null);
+      if (w) return w;
+    }
+    return this.geminiTranscribe(buf, name).catch(() => null);
+  }
+
+  private async whisper(buf: Buffer, name: string, apiKey: string): Promise<string | null> {
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(buf)]), name);
+    form.append('model', 'whisper-1');
+    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form as any });
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    return d?.text?.trim() || null;
+  }
+
+  private async geminiTranscribe(buf: Buffer, name: string): Promise<string | null> {
+    const or = await this.connectors.get<{ apiKey: string }>('openrouter');
+    if (!or?.apiKey) return null;
+    const ext = (name.split('.').pop() || 'ogg').toLowerCase();
+    const format = ext === 'oga' ? 'ogg' : ext;
+    const body = {
+      model: 'google/gemini-3-flash-preview',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Transcribe this audio verbatim. Output only the transcription, nothing else.' }, { type: 'input_audio', input_audio: { data: buf.toString('base64'), format } }] }],
+    };
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${or.apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    const text = d?.choices?.[0]?.message?.content;
+    return typeof text === 'string' && text.trim() ? text.trim() : null;
   }
 }

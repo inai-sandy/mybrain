@@ -18,7 +18,13 @@ function make() {
     today: jest.fn(async () => ({ dumped: true, counts: { done: 0, total: 1 }, tasks: [{ id: 't1', title: 'Finish proposal', status: 'open', pinned: true }] })),
     setDone: jest.fn(async () => ({ id: 't1', status: 'done' })),
   };
-  const daily: any = { submitStory: jest.fn(async () => ({})), addNote: jest.fn(async () => ({})) };
+  const daily: any = {
+    submitStory: jest.fn(async () => ({})),
+    addNote: jest.fn(async () => ({})),
+    dashboard: jest.fn(async () => ({ streak: 4, totals: { followThrough: 67, tasksDone: 8, tasksTotal: 12 }, minutesSpent: 240, categoryTime: [{ category: 'Beakn', minutes: 120 }] })),
+    getPersonality: jest.fn(async () => ({ unlocked: false, daysCovered: 3, minDays: 10, summary: null, insights: [] })),
+    activity: jest.fn(async () => ({ stats: { tasksDone: 1, tasksTotal: 2, minutesSpent: 25 }, summary: { text: 'You had a focused day.' }, timeline: [] })),
+  };
   const sent: any[] = [];
   // stub the Telegram HTTP layer
   (global as any).fetch = jest.fn(async (_url: string, opts: any) => {
@@ -70,6 +76,35 @@ describe('TelegramService', () => {
     await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
     await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/done 1' } });
     expect(tasks.setDone).toHaveBeenCalledWith('t1', true);
+  });
+
+  it('/skip sets a rest day and /snooze quiets nudges', async () => {
+    const { svc, settings } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/skip' } });
+    expect(settings['telegram.skipDay']).toBeTruthy();
+    await svc.handleUpdate({ update_id: 3, message: { chat: { id: 5 }, text: '/snooze 30' } });
+    expect(Number(settings['telegram.snoozeUntil'])).toBeGreaterThan(0);
+  });
+
+  it('/insights, /me and /activity read from the daily service', async () => {
+    const { svc, daily, sent } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/insights' } });
+    expect(daily.dashboard).toHaveBeenCalled();
+    expect(sent.some((m) => /streak/i.test(m.text))).toBe(true);
+    await svc.handleUpdate({ update_id: 3, message: { chat: { id: 5 }, text: '/me' } });
+    expect(daily.getPersonality).toHaveBeenCalled();
+    await svc.handleUpdate({ update_id: 4, message: { chat: { id: 5 }, text: '/activity' } });
+    expect(daily.activity).toHaveBeenCalled();
+  });
+
+  it('picks a progress-aware motivation line', () => {
+    const { svc } = make();
+    const m = svc as any;
+    expect(m.motivation({ counts: { done: 5, total: 6 }, tasks: [] })).toMatch(/crushing/i);
+    expect(m.motivation({ counts: { done: 0, total: 3 }, tasks: [{ pinned: true, status: 'open', title: 'Proposal', rolloverCount: 0 }] })).toMatch(/must-do/i);
+    expect(m.motivation({ counts: { done: 0, total: 2 }, tasks: [{ status: 'open', title: 'Taxes', rolloverCount: 3 }] })).toMatch(/followed you/i);
   });
 
   it('ignores a duplicate update_id', async () => {
