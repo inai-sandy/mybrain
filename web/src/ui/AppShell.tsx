@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle } from 'lucide-react';
+import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink } from 'lucide-react';
 import { NAV } from './nav';
+import { HELP_DOCS } from './help';
 import { useTheme } from './theme';
 
 export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () => void }) {
   const { theme, toggle } = useTheme();
   const [drawer, setDrawer] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [help, setHelp] = useState(false);
   const navigate = useNavigate();
 
   const itemCls = ({ isActive }: { isActive: boolean }) =>
@@ -52,6 +54,14 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
               <NavLink to="/settings" onClick={() => setDrawer(false)} className={itemCls}>
                 <SettingsIcon size={18} /> Settings
               </NavLink>
+              <div className="pt-3 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+                <div className="px-3 pb-1 text-xs text-zinc-400">Help</div>
+                {HELP_DOCS.map((d) => (
+                  <a key={d.href} href={d.href} target="_blank" rel="noopener noreferrer" onClick={() => setDrawer(false)} className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                    <HelpCircle size={18} /> {d.title}
+                  </a>
+                ))}
+              </div>
             </nav>
           </aside>
         </div>
@@ -76,8 +86,32 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
             </div>
           </div>
 
+          <div className="flex items-center gap-1 shrink-0">
+          {/* Help / support menu */}
+          <div className="relative">
+            <button onClick={() => setHelp((h) => !h)} aria-label="Help" className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <HelpCircle size={22} className="text-zinc-500" />
+              <span className="hidden sm:inline text-sm text-zinc-500">Help</span>
+            </button>
+            {help && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setHelp(false)} />
+                <div className="absolute right-0 mt-2 w-60 z-40 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-lg p-1.5">
+                  <div className="px-3 py-2 text-xs text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 mb-1">Guides &amp; help</div>
+                  {HELP_DOCS.map((d) => (
+                    <a key={d.href} href={d.href} target="_blank" rel="noopener noreferrer" onClick={() => setHelp(false)} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                      <FileText size={16} className="text-zinc-400 shrink-0" />
+                      <span className="flex-1 truncate">{d.title}</span>
+                      <ExternalLink size={13} className="text-zinc-400 shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
           {/* Account & settings menu */}
-          <div className="relative shrink-0">
+          <div className="relative">
             <button onClick={() => setMenu((m) => !m)} aria-label="Account menu" className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800">
               <UserCircle size={22} className="text-zinc-500" />
               <span className="hidden sm:inline text-sm text-zinc-500">Settings</span>
@@ -101,6 +135,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
                 </div>
               </>
             )}
+          </div>
           </div>
         </header>
 

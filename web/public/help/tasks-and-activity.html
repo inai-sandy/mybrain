@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Brain — Tasks &amp; Activity · User Manual</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html{scroll-behavior:smooth}
+  body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .prose-li{position:relative;padding-left:1.25rem}
+  .prose-li:before{content:"";position:absolute;left:0;top:.55rem;width:.4rem;height:.4rem;border-radius:9999px;background:#10b981}
+  section{scroll-margin-top:5rem}
+  table{border-collapse:collapse}
+  td,th{border:1px solid #e5e7eb;padding:.5rem .75rem;text-align:left;vertical-align:top;font-size:.9rem}
+  th{background:#f0fdf4;font-weight:600}
+  code{background:#f1f5f9;border-radius:.3rem;padding:.05rem .35rem;font-size:.85em}
+  .nav-a{display:block;padding:.3rem .6rem;border-radius:.45rem;color:#475569;font-size:.86rem}
+  .nav-a:hover{background:#f0fdf4;color:#047857}
+</style>
+</head>
+<body class="bg-white text-slate-800">
+
+<!-- Hero -->
+<header class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white">
+  <div class="max-w-5xl mx-auto px-6 py-14">
+    <div class="text-emerald-200 text-sm font-medium tracking-wide uppercase">My Brain · User Manual</div>
+    <h1 class="text-4xl sm:text-5xl font-extrabold mt-3">Tasks &amp; Activity</h1>
+    <p class="mt-4 text-lg text-emerald-50 max-w-2xl">Your daily loop — and how the app comes to understand who you are. Dump your brain in the morning, tell your story at night, and let it learn you.</p>
+    <div class="mt-6 flex flex-wrap gap-2 text-sm">
+      <span class="bg-white/15 rounded-full px-3 py-1">mybrain.1site.ai</span>
+      <span class="bg-white/15 rounded-full px-3 py-1">Telegram: @Itsmybeakn_bot</span>
+      <span class="bg-white/15 rounded-full px-3 py-1">By Sandeep Karnati</span>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-5xl mx-auto px-6 py-10 grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-10">
+  <!-- TOC -->
+  <aside class="hidden lg:block">
+    <nav class="sticky top-6 space-y-0.5">
+      <div class="text-xs font-semibold text-slate-400 uppercase px-2 mb-1">Contents</div>
+      <a class="nav-a" href="#idea">1 · The big idea</a>
+      <a class="nav-a" href="#day">2 · A day in the life</a>
+      <a class="nav-a" href="#start">3 · Getting started</a>
+      <a class="nav-a" href="#today">4 · The Today screen</a>
+      <a class="nav-a" href="#task">5 · Understanding a task</a>
+      <a class="nav-a" href="#story">6 · Story &amp; notes</a>
+      <a class="nav-a" href="#activity">7 · The Activity section</a>
+      <a class="nav-a" href="#engine">8 · Personality engine</a>
+      <a class="nav-a" href="#telegram">9 · Telegram</a>
+      <a class="nav-a" href="#settings">10 · Settings</a>
+      <a class="nav-a" href="#tips">11 · Tips</a>
+      <a class="nav-a" href="#faq">12 · FAQ</a>
+    </nav>
+  </aside>
+
+  <main class="space-y-12 min-w-0">
+
+    <section id="idea">
+      <h2 class="text-2xl font-bold text-slate-900">1 · The big idea</h2>
+      <p class="mt-3 text-slate-600">Tasks &amp; Activity isn't a to-do list. It's a daily loop designed so the app gradually understands <b>who you are</b> — where your time goes, what you finish, what you avoid, and how you feel about your days.</p>
+      <div class="mt-4 grid sm:grid-cols-2 gap-4">
+        <div class="rounded-xl border border-amber-200 bg-amber-50 p-4"><div class="font-semibold">🌅 Morning — the plan</div><p class="text-sm text-slate-600 mt-1">You <i>dump your brain</i> and the AI turns the mess into a clean, prioritized task list.</p></div>
+        <div class="rounded-xl border border-indigo-200 bg-indigo-50 p-4"><div class="font-semibold">🌙 Night — the understanding</div><p class="text-sm text-slate-600 mt-1">You <i>tell the story</i> of your day — the human context tasks alone can't give.</p></div>
+      </div>
+      <p class="mt-4 text-slate-600">Everything in between is captured automatically and woven into a daily story and, over time, an honest portrait of you. Run it all <b>inside the app</b> or entirely from <b>Telegram</b>.</p>
+    </section>
+
+    <section id="day">
+      <h2 class="text-2xl font-bold text-slate-900">2 · A day in the life</h2>
+      <table class="mt-4 w-full">
+        <tr><th>Time</th><th>What happens</th></tr>
+        <tr><td><b>7:00–8:30 AM</b></td><td>The bot nudges you to dump your brain (stops the moment you do, or at 9 AM).</td></tr>
+        <tr><td><b>You dump</b></td><td>Type or speak everything on your mind → the AI makes your tasks.</td></tr>
+        <tr><td><b>Through the day</b></td><td>Tick tasks off; speak quick notes; get reminders and a mid-day motivational nudge.</td></tr>
+        <tr><td><b>9:00–10:30 PM</b></td><td>The bot nudges you to tell the day's story (until you do, or 11 PM).</td></tr>
+        <tr><td><b>9:30 PM</b></td><td>The AI writes your day summary and sends it to you.</td></tr>
+        <tr><td><b>Every 3 days</b></td><td>Your personality portrait refreshes (once you've used it 10 days).</td></tr>
+      </table>
+    </section>
+
+    <section id="start">
+      <h2 class="text-2xl font-bold text-slate-900">3 · Getting started</h2>
+      <ol class="mt-3 space-y-1.5 text-slate-600 list-decimal pl-5">
+        <li>Open <b>mybrain.1site.ai</b> and sign in.</li>
+        <li>Tap <b>Tasks</b> in the menu — this is your <b>Today</b> screen.</li>
+        <li>Tap <b>🧠 Dump my brain</b>, type or speak what's on your mind, then <b>Make my tasks</b>.</li>
+        <li><i>(Recommended)</i> Connect Telegram — see §9.</li>
+      </ol>
+    </section>
+
+    <section id="today">
+      <h2 class="text-2xl font-bold text-slate-900">4 · The Today screen</h2>
+      <p class="mt-3 text-slate-600">Your daily cockpit:</p>
+      <ul class="mt-3 space-y-2 text-slate-600">
+        <li class="prose-li"><b>🧠 Dump my brain</b> — type <b>or tap the mic to speak</b>. The AI turns rambling sentences into concrete tasks, removes duplicates, guesses a category, priority &amp; time estimate, <b>pins your top 1–3 must-dos ⭐️</b>, and asks <b>one clarifying question</b> if your dump is too vague.</li>
+        <li class="prose-li"><b>＋ Add task</b> — add a single task by hand.</li>
+        <li class="prose-li"><b>Your task list</b> — full search, filters, sorting, and a progress bar.</li>
+        <li class="prose-li"><b>Tap the circle</b> to finish a task — it asks <b>"how long did it really take?"</b> in one tap.</li>
+      </ul>
+    </section>
+
+    <section id="task">
+      <h2 class="text-2xl font-bold text-slate-900">5 · Understanding a task</h2>
+      <table class="mt-4 w-full">
+        <tr><th>Field</th><th>Meaning</th></tr>
+        <tr><td><b>Title</b></td><td>What to do.</td></tr>
+        <tr><td><b>Category</b></td><td>A bucket the AI learns (Beakn, Admin, Health…).</td></tr>
+        <tr><td><b>Priority</b></td><td>High / Medium / Low.</td></tr>
+        <tr><td><b>⭐️ Pinned</b></td><td>One of your 1–3 must-dos for the day.</td></tr>
+        <tr><td><b>Estimate</b></td><td>The AI's guess at how long it'll take.</td></tr>
+        <tr><td><b>Actual</b></td><td>What it <i>really</i> took (you tap this when you finish).</td></tr>
+        <tr><td><b>Reminders</b></td><td>0–4 per task; the AI picks smart times. Delivered via Telegram.</td></tr>
+      </table>
+      <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-slate-700"><b>Carry-over:</b> unfinished tasks roll to tomorrow automatically. Keep carrying the same one and it gets flagged <b>"carried 3d"</b> in red — one of the most honest signals about you, and the coach will call it out.</div>
+    </section>
+
+    <section id="story">
+      <h2 class="text-2xl font-bold text-slate-900">6 · The nightly story &amp; quick notes</h2>
+      <ul class="mt-3 space-y-2 text-slate-600">
+        <li class="prose-li"><b>🌙 Tonight's story</b> — <i>mandatory by design.</i> A free narrative of your day: problems, wins, what happened. Type or speak it and tap a mood. This is the emotional layer that lets the app truly understand you — and it shapes tomorrow's priorities.</li>
+        <li class="prose-li"><b>📝 Quick notes</b> — speak or type little notes through the day; they land in your timeline.</li>
+      </ul>
+    </section>
+
+    <section id="activity">
+      <h2 class="text-2xl font-bold text-slate-900">7 · The Activity section</h2>
+      <p class="mt-3 text-slate-600">Four tabs:</p>
+      <div class="mt-4 space-y-3">
+        <div class="rounded-xl border border-slate-200 p-4"><div class="font-semibold">🗓 Day</div><p class="text-sm text-slate-600 mt-1">Date navigator, stat cards (done / time / follow-through), the <b>AI day-summary</b> (auto-written 9:30 PM, saved to your memory), your story, and an <b>auto-captured timeline</b> of everything you did that day.</p></div>
+        <div class="rounded-xl border border-slate-200 p-4"><div class="font-semibold">📊 Insights</div><p class="text-sm text-slate-600 mt-1">🔥 dump streak, follow-through %, <b>where your time went</b> (by category), <b>estimate vs reality</b>, and a tasks-per-day chart. 7 / 30 / 90 days.</p></div>
+        <div class="rounded-xl border border-slate-200 p-4"><div class="font-semibold">📆 Calendar</div><p class="text-sm text-slate-600 mt-1">A GitHub-style <b>heatmap</b> — darker = more done. Tap any day to open it.</p></div>
+        <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div class="font-semibold">👤 Me — your portrait &amp; Validate</div><p class="text-sm text-slate-600 mt-1">Locked until <b>10 real days</b>, then an <b>honest, evidence-grounded portrait</b> of you, refreshed every 3 days. <b>Validate each insight</b> with ✓ correct / ✗ not me — the app respects your feedback forever, so it sharpens and never drifts.</p></div>
+      </div>
+    </section>
+
+    <section id="engine">
+      <h2 class="text-2xl font-bold text-slate-900">8 · The personality engine</h2>
+      <p class="mt-3 text-slate-600">The real point of the whole feature. Every 3 days an AI "coach" reads across your tasks, stories, moods, and activity, cross-checks <b>what you planned vs what you did vs how you felt</b>, and builds a validated picture of you — deliberately <b>honest, not flattering</b>, so you see yourself clearly. Runs on <b>Claude Sonnet</b> by default.</p>
+    </section>
+
+    <section id="telegram">
+      <h2 class="text-2xl font-bold text-slate-900">9 · Telegram — run everything from your phone</h2>
+      <p class="mt-3 text-slate-600">Your bot is <b>@Itsmybeakn_bot</b>. Open it and tap <b>Start</b> to claim it (only your chat can control it).</p>
+      <table class="mt-4 w-full">
+        <tr><th>Command</th><th>What it does</th></tr>
+        <tr><td><code>/dump</code></td><td>Dump your brain → today's tasks</td></tr>
+        <tr><td><code>/story</code></td><td>Tell tonight's story</td></tr>
+        <tr><td><code>/note</code></td><td>Jot a quick note</td></tr>
+        <tr><td><code>/add</code></td><td>Add a single task</td></tr>
+        <tr><td><code>/today</code></td><td>See today's tasks (numbered)</td></tr>
+        <tr><td><code>/done 2</code></td><td>Mark task #2 done</td></tr>
+        <tr><td><code>/activity</code></td><td>Today's summary</td></tr>
+        <tr><td><code>/insights</code></td><td>Streak, follow-through, time</td></tr>
+        <tr><td><code>/me</code></td><td>Your personality snapshot</td></tr>
+        <tr><td><code>/skip</code></td><td>Rest day — mute nudges today</td></tr>
+        <tr><td><code>/snooze</code></td><td>Quiet nudges for a while (<code>/snooze 30</code>)</td></tr>
+        <tr><td><code>/help</code></td><td>List every command</td></tr>
+      </table>
+      <div class="mt-4 grid sm:grid-cols-2 gap-3 text-sm text-slate-600">
+        <div class="rounded-xl border border-slate-200 p-4"><b>Two ways to capture</b><br>One line: <code>/dump finish proposal, gym</code><br>Two steps: send <code>/dump</code> → "go ahead" → your next message or voice note.</div>
+        <div class="rounded-xl border border-slate-200 p-4"><b>🎙️ Voice notes</b><br>Send a voice note — it's transcribed (OpenAI Whisper) and handled like text.</div>
+        <div class="rounded-xl border border-slate-200 p-4"><b>Plain messages</b><br>Send a loose message and the bot asks <b>Dump · Note · Task</b> so nothing is misfiled.</div>
+        <div class="rounded-xl border border-slate-200 p-4"><b>Nudges</b><br>Morning dump · task reminders · mid-day motivation · evening story · 9:30 PM summary. Use <code>/skip</code> or <code>/snooze</code> for quiet.</div>
+      </div>
+      <p class="mt-4 text-sm text-slate-500"><b>Security:</b> only the first chat to <code>/start</code> owns the bot. Re-link via Settings → Sync → Telegram → Unlink, then <code>/start</code> again.</p>
+    </section>
+
+    <section id="settings">
+      <h2 class="text-2xl font-bold text-slate-900">10 · Settings worth knowing</h2>
+      <ul class="mt-3 space-y-2 text-slate-600">
+        <li class="prose-li"><b>Models</b> — the Tasks AI model runs the whole engine. Defaults to <b>Claude Sonnet</b>; pick any OpenAI or Anthropic model.</li>
+        <li class="prose-li"><b>Prompts</b> — read and edit the exact instructions the AI follows for every feature. Save, or Reset to default, any time.</li>
+        <li class="prose-li"><b>Integrations</b> — your API keys (OpenRouter, Anthropic, OpenAI for voice, Telegram).</li>
+        <li class="prose-li"><b>Sync → Telegram</b> — connection status, connect / re-register, unlink.</li>
+      </ul>
+    </section>
+
+    <section id="tips">
+      <h2 class="text-2xl font-bold text-slate-900">11 · Tips</h2>
+      <ul class="mt-3 space-y-2 text-slate-600">
+        <li class="prose-li"><b>Dump fast and messy.</b> Don't organize as you type — that's the AI's job.</li>
+        <li class="prose-li"><b>Always log the real time</b> when you finish a task — that's what powers the time insights.</li>
+        <li class="prose-li"><b>Tell the story even on bad days.</b> The rough days teach the app the most.</li>
+        <li class="prose-li"><b>Use Telegram on busy days</b> — the days you won't open the app are the most revealing.</li>
+        <li class="prose-li"><b>Validate your portrait</b> — a few ✓/✗ taps make it sharper every cycle.</li>
+        <li class="prose-li"><b>Rest days are fine.</b> <code>/skip</code> means the streak never becomes a stick.</li>
+      </ul>
+    </section>
+
+    <section id="faq">
+      <h2 class="text-2xl font-bold text-slate-900">12 · Quick FAQ</h2>
+      <div class="mt-3 space-y-3 text-sm">
+        <div><b>Will syncing my memory create duplicates?</b><br><span class="text-slate-600">No — everything the app generates is stamped and skipped on sync.</span></div>
+        <div><b>What if my brain-dump is vague?</b><br><span class="text-slate-600">The AI asks one clarifying question instead of inventing tasks.</span></div>
+        <div><b>Can I edit what the AI says?</b><br><span class="text-slate-600">Yes — Settings → Prompts lets you rewrite any instruction, with a Reset button.</span></div>
+        <div><b>When does the personality portrait appear?</b><br><span class="text-slate-600">After 10 active days, then it refreshes every 3 days.</span></div>
+        <div><b>Do I have to use Telegram?</b><br><span class="text-slate-600">No — everything works in the app. Telegram just makes it effortless on the go.</span></div>
+      </div>
+    </section>
+
+    <footer class="pt-8 border-t border-slate-200 text-sm text-slate-400">
+      My Brain is your private second brain. Everything here is yours. · Tasks &amp; Activity User Manual
+    </footer>
+  </main>
+</div>
+</body>
+</html>
