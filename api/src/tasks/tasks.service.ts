@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 
@@ -17,11 +17,53 @@ type CraftedTask = {
 };
 
 @Injectable()
-export class TasksService {
+export class TasksService implements OnModuleInit, OnModuleDestroy {
+  private tick: NodeJS.Timeout | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
   ) {}
+
+  onModuleInit() {
+    // Once a minute, check whether the local day has rolled over and carry unfinished tasks forward.
+    this.tick = setInterval(() => this.rolloverTick().catch(() => undefined), 60_000);
+  }
+  onModuleDestroy() {
+    if (this.tick) clearInterval(this.tick);
+  }
+
+  /** Carry yesterday's open tasks into today (flagged via rolloverCount) when the day changes. */
+  async rolloverTick(): Promise<{ rolled: number } | null> {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const row = await this.prisma.setting.findUnique({ where: { key: 'tasks.lastRollDay' } });
+    const last = row?.value || null;
+    if (last === today) return null;
+    let rolled = 0;
+    if (last) {
+      // Only roll on a genuine day change (skip on first boot so we don't touch a fresh DB).
+      const stale = await this.prisma.task.findMany({ where: { status: 'open', day: { not: null, lt: today } } });
+      for (const t of stale) {
+        await this.prisma.task.update({ where: { id: t.id }, data: { day: today, rolloverCount: (t.rolloverCount || 0) + 1 } });
+        rolled++;
+      }
+    }
+    await this.prisma.setting.upsert({ where: { key: 'tasks.lastRollDay' }, create: { key: 'tasks.lastRollDay', value: today }, update: { value: today } });
+    return { rolled };
+  }
+
+  /** Smart-spaced reminder times (local HH:MM) for a task, weighted by priority. Delivery wired in the Telegram phase. */
+  private computeReminders(count: number, priority: string): string[] {
+    const n = Math.max(0, Math.min(4, Math.round(count || 0)));
+    if (!n) return [];
+    const schedule: Record<string, string[]> = {
+      high: ['09:30', '12:00', '15:00', '17:30'],
+      medium: ['11:00', '15:00', '18:00', '20:00'],
+      low: ['16:00', '19:00', '20:30', '21:00'],
+    };
+    return (schedule[priority] || schedule.medium).slice(0, n);
+  }
 
   // ---- config (the Tasks engine runs on its own model, default Sonnet) ----
 
@@ -155,6 +197,8 @@ export class TasksService {
       pinned: t.pinned,
       estimateMin: t.estimateMin,
       actualMin: t.actualMin,
+      reminderCount: t.reminderCount,
+      reminders: t.reminders ? (() => { try { return JSON.parse(t.reminders); } catch { return []; } })() : [],
       day: t.day,
       status: t.status,
       rolloverCount: t.rolloverCount,
@@ -196,38 +240,50 @@ export class TasksService {
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
+    const priority = this.normPriority(data.priority);
+    const reminderCount = Number.isFinite(data.reminderCount as any) ? Math.max(0, Math.min(4, Math.round(Number(data.reminderCount)))) : 0;
+    const reminders = this.computeReminders(reminderCount, priority);
     const t = await this.prisma.task.create({
       data: {
         title,
         category: data.category ? String(data.category).trim().slice(0, 40) : null,
         tags: Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null,
-        priority: this.normPriority(data.priority),
+        priority,
         estimateMin: Number.isFinite(data.estimateMin as any) ? Math.max(1, Math.round(Number(data.estimateMin))) : null,
         note: data.note ? String(data.note).trim().slice(0, 500) : null,
         pinned: !!data.pinned,
+        reminderCount,
+        reminders: reminders.length ? JSON.stringify(reminders) : null,
         day: this.dayKey(tz),
       },
     });
     return this.shape(t);
   }
 
-  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean }) {
+  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
+    const priority = data.priority !== undefined ? this.normPriority(data.priority) : t.priority;
+    // Recompute reminder times when the count or priority changes.
+    const reminderCount = data.reminderCount !== undefined ? Math.max(0, Math.min(4, Math.round(Number(data.reminderCount) || 0))) : t.reminderCount;
+    const remindersChanged = data.reminderCount !== undefined || (data.priority !== undefined && data.priority !== t.priority);
+    const reminders = remindersChanged ? this.computeReminders(reminderCount, priority) : (t.reminders ? JSON.parse(t.reminders) : []);
     const upd = await this.prisma.task.update({
       where: { id },
       data: {
         title: data.title?.trim() ? data.title.trim().slice(0, 160) : t.title,
         category: data.category !== undefined ? (data.category ? String(data.category).trim().slice(0, 40) : null) : t.category,
         tags: data.tags !== undefined ? (Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null) : t.tags,
-        priority: data.priority !== undefined ? this.normPriority(data.priority) : t.priority,
+        priority,
         estimateMin: data.estimateMin !== undefined ? (Number.isFinite(data.estimateMin as any) ? Math.max(1, Math.round(Number(data.estimateMin))) : null) : t.estimateMin,
         note: data.note !== undefined ? (data.note ? String(data.note).trim().slice(0, 500) : null) : t.note,
         pinned: data.pinned !== undefined ? !!data.pinned : t.pinned,
+        reminderCount,
+        reminders: reminders.length ? JSON.stringify(reminders) : null,
       },
     });
     return this.shape(upd);

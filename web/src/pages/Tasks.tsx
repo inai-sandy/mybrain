@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Brain, Plus, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Sparkles } from 'lucide-react';
+import { Brain, Plus, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Sparkles, Bell, RotateCcw } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -14,6 +14,8 @@ type Task = {
   pinned: boolean;
   estimateMin?: number | null;
   actualMin?: number | null;
+  reminderCount?: number;
+  reminders?: string[];
   day?: string | null;
   status: 'open' | 'done';
   rolloverCount: number;
@@ -168,6 +170,7 @@ function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; onClose:
   const [tags, setTags] = useState((task?.tags || []).join(', '));
   const [note, setNote] = useState(task?.note || '');
   const [pinned, setPinned] = useState(!!task?.pinned);
+  const [reminders, setReminders] = useState(task?.reminderCount ?? 0);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -182,6 +185,7 @@ function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; onClose:
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       note: note.trim() || undefined,
       pinned,
+      reminderCount: reminders,
     };
     try {
       const r = editing
@@ -227,7 +231,17 @@ function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; onClose:
           <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Tags
             <input value={tags} onChange={(e) => setTags(e.target.value)} className={inp} placeholder="comma, separated" />
           </label>
+          <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Reminders
+            <select value={reminders} onChange={(e) => setReminders(Number(e.target.value))} className={inp}>
+              <option value={0}>None</option>
+              <option value={1}>1 reminder</option>
+              <option value={2}>2 reminders</option>
+              <option value={3}>3 reminders</option>
+              <option value={4}>4 reminders</option>
+            </select>
+          </label>
         </div>
+        <p className="text-[11px] text-zinc-400 mt-1">The AI picks smart times based on priority. Reminders are delivered once Telegram is connected.</p>
         <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Notes
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className={inp} placeholder="Any extra context…" />
         </label>
@@ -377,7 +391,18 @@ export function Tasks() {
           {t.note && <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2">{t.note}</p>}
           <div className="flex items-center flex-wrap gap-1.5 mt-2 text-[11px]">
             <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + p.cls}><span className={'h-1.5 w-1.5 rounded-full ' + p.dot} />{p.label}</span>
+            {!done && t.rolloverCount > 0 && (
+              <span
+                title={`Carried forward ${t.rolloverCount} day${t.rolloverCount === 1 ? '' : 's'}`}
+                className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + (t.rolloverCount >= 2 ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}
+              >
+                <RotateCcw size={10} /> {t.rolloverCount >= 2 ? `carried ${t.rolloverCount}d` : 'carried'}
+              </span>
+            )}
             {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+            {!!t.reminderCount && t.reminderCount > 0 && (
+              <span title={(t.reminders || []).join(', ')} className="inline-flex items-center gap-0.5 text-zinc-400"><Bell size={10} /> {t.reminderCount}</span>
+            )}
             {t.tags?.map((tag) => <span key={tag} className="text-zinc-400">#{tag}</span>)}
             {done && t.actualMin ? (
               <span className="ml-auto text-zinc-400">took {mins(t.actualMin)}{t.estimateMin ? ` · est ${mins(t.estimateMin)}` : ''}</span>

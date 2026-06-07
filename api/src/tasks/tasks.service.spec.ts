@@ -27,7 +27,20 @@ function makeService(llmText: string | null) {
         tasks.push(row);
         return row;
       },
-      findMany: async ({ where }: any) => tasks.filter((t) => !where?.day || t.day === where.day),
+      findMany: async ({ where }: any = {}) =>
+        tasks.filter((t) => {
+          if (where?.status && t.status !== where.status) return false;
+          const d = where?.day;
+          if (d !== undefined) {
+            if (typeof d === 'string') {
+              if (t.day !== d) return false;
+            } else {
+              if (d.not === null && (t.day === null || t.day === undefined)) return false;
+              if (d.lt && !(t.day && t.day < d.lt)) return false;
+            }
+          }
+          return true;
+        }),
       findUnique: async ({ where }: any) => tasks.find((t) => t.id === where.id) || null,
       update: async ({ where, data }: any) => {
         const t = tasks.find((x) => x.id === where.id);
@@ -97,5 +110,34 @@ describe('TasksService', () => {
     const res = await svc.dump('one big messy thought');
     expect(res.tasks).toHaveLength(1);
     expect(res.tasks[0].title).toContain('one big messy thought');
+  });
+
+  it('schedules N smart reminder times when a task asks for reminders', async () => {
+    const { svc } = makeService(null);
+    const t = await svc.create({ title: 'Pay rent', priority: 'high', reminderCount: 2 });
+    expect(t!.reminderCount).toBe(2);
+    expect(t!.reminders).toHaveLength(2);
+    expect(t!.reminders[0]).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it('does not roll tasks on first boot, but carries open tasks forward on a day change', async () => {
+    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Yesterday job' }] }));
+    const { tasks: made } = await svc.dump('job');
+    const id = made[0].id;
+
+    // First boot: no lastRollDay yet -> it just records today, rolls nothing.
+    const first = await svc.rolloverTick();
+    expect(first!.rolled).toBe(0);
+
+    // Simulate the task being left open from a previous day, and a stale roll marker.
+    const row = tasks.find((x) => x.id === id);
+    row.day = '2000-01-01';
+    row.status = 'open';
+    await (svc as any).prisma.setting.upsert({ where: { key: 'tasks.lastRollDay' }, create: { key: 'tasks.lastRollDay', value: '2000-01-01' }, update: { value: '2000-01-01' } });
+
+    const second = await svc.rolloverTick();
+    expect(second!.rolled).toBe(1);
+    expect(row.day).not.toBe('2000-01-01');
+    expect(row.rolloverCount).toBe(1);
   });
 });
