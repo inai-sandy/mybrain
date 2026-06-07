@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, Trash2, RefreshCw, MessageCircle, Upload, Link2, FileText, Brain, type LucideIcon } from 'lucide-react';
+import { Eye, Trash2, RefreshCw, MessageCircle, Share2, Upload, Link2, FileText, Brain, type LucideIcon } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/Toast';
+import { shareItem } from '../ui/share';
 
 export type Doc = {
   id: string;
@@ -78,6 +79,13 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
     } else toast('error', 'Could not delete');
   }
 
+  async function share(it: Doc) {
+    const r = await shareItem(it.id, it.title);
+    if (r === 'copied') toast('success', 'Public link copied — anyone with it can read this');
+    else if (r === 'shared') toast('success', 'Shared');
+    else if (r === 'error') toast('error', 'Could not share');
+  }
+
   async function sync(it: Doc) {
     setSyncing(it.id);
     const r = await fetch(`/api/items/${it.id}/sync`, { method: 'POST' });
@@ -142,6 +150,9 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
         <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
           <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} />
           <div className="flex items-center gap-0.5 shrink-0">
+            <button onClick={() => share(r)} title="Share" className={iconBtn + ' hover:text-emerald-600'}>
+              <Share2 size={16} />
+            </button>
             <button onClick={() => navigate(`/chat/${r.id}`)} title="Chat with this document" className={iconBtn + ' hover:text-emerald-600'}>
               <MessageCircle size={16} />
             </button>

@@ -103,8 +103,25 @@ export class ItemsService {
         rag,
         chunked: supermemory, // SuperMemory chunks server-side
         memoryStatus: supermemory && rag ? 'synced' : 'pending',
+        shared: i.shared,
       };
     });
+  }
+
+  /** Publish/unpublish an item as a public share. */
+  async setShared(id: string, shared: boolean) {
+    const item = await this.prisma.item.findUnique({ where: { id } });
+    if (!item) return null;
+    await this.prisma.item.update({ where: { id }, data: { shared } });
+    return { shared };
+  }
+
+  /** Public read: content + meta, ONLY if the item is shared. */
+  async getShared(id: string) {
+    const item = await this.prisma.item.findUnique({ where: { id } });
+    if (!item || !item.shared) return null;
+    const content = item.filePath ? await fs.readFile(item.filePath, 'utf8').catch(() => '') : '';
+    return { title: item.title, summary: item.summary, source: item.source, sourceUrl: item.sourceUrl, content };
   }
 
   /** Return a stored item's markdown content + meta. */
@@ -227,6 +244,7 @@ export class ItemsService {
       supermemory: !!item.supermemoryId,
       rag: !!item.ragId,
       chunked: !!item.supermemoryId,
+      shared: item.shared,
       content,
     };
   }

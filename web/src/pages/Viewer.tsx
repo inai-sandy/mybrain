@@ -11,13 +11,13 @@ export function Viewer() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch(`/api/items/${id}/content`)
+    fetch(`/api/share/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error();
         return r.json();
       })
       .then(setDoc)
-      .catch(() => setError('Could not load this document.'));
+      .catch(() => setError('This link is private or no longer shared.'));
   }, [id]);
 
   return (

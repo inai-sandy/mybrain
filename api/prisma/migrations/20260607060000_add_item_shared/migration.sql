@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Item" ADD COLUMN "shared" BOOLEAN NOT NULL DEFAULT false;

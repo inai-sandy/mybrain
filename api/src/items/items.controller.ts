@@ -89,6 +89,13 @@ export class ItemsController {
     return doc;
   }
 
+  @Post(':id/share')
+  async share(@Param('id') id: string, @Body() body: { shared?: boolean }) {
+    const res = await this.items.setShared(id, body?.shared ?? true);
+    if (!res) throw new BadRequestException('Document not found');
+    return res;
+  }
+
   @Post(':id/sync')
   async sync(@Param('id') id: string) {
     const res = await this.items.sync(id);
