@@ -4,6 +4,8 @@ import { join } from 'path';
 // archiver's runtime is callable as archiver('zip', …); @types/archiver v8 omits that signature, so type it loosely.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const archiver: any = require('archiver');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AdmZip: any = require('adm-zip');
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
@@ -160,6 +162,43 @@ export class SkillsService {
     const ext = filePath.split('.').pop() || 'md';
     const base = (s.slug || s.title || 'skill').toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/^-+|-+$/g, '') || 'skill';
     return { filePath, name: `${base}.${ext}` };
+  }
+
+  /** Configured deploy targets, e.g. { sandy: '/scan/sandy/skills', beakn: '/scan/beakn/skills' }. */
+  deployTargets(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const pair of (process.env.DEPLOY_SKILLS_DIRS || '').split(',')) {
+      const [k, v] = pair.split(':');
+      if (k?.trim() && v?.trim()) out[k.trim()] = v.trim();
+    }
+    return out;
+  }
+
+  /** Install a skill into the chosen server Claude Code skills folder. */
+  async deploy(id: string, target: string): Promise<{ ok: boolean; message: string }> {
+    const s = await this.prisma.skill.findUnique({ where: { id } });
+    if (!s) return { ok: false, message: 'Skill not found' };
+    const baseDir = this.deployTargets()[target];
+    if (!baseDir) return { ok: false, message: 'Unknown deploy target' };
+    const slug = (s.slug || s.title || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 80);
+    if (!slug || slug.includes('..')) return { ok: false, message: 'Invalid skill name' };
+    const destDir = join(baseDir, slug);
+    try {
+      await fs.mkdir(destDir, { recursive: true });
+      if (s.filePath && s.filePath.toLowerCase().endsWith('.zip')) {
+        new AdmZip(s.filePath).extractAllTo(destDir, true);
+      } else if (s.content) {
+        await fs.writeFile(join(destDir, 'SKILL.md'), s.content, 'utf8');
+      } else if (s.filePath) {
+        await fs.writeFile(join(destDir, 'SKILL.md'), await fs.readFile(s.filePath));
+      } else {
+        return { ok: false, message: 'Nothing to deploy — add the skill file or paste its content first.' };
+      }
+      await this.prisma.skill.update({ where: { id }, data: { installed: true, slug, source: baseDir } });
+      return { ok: true, message: `Deployed to ${target} → ~/.claude/skills/${slug}` };
+    } catch (e: any) {
+      return { ok: false, message: 'Deploy failed: ' + (e?.message || 'error') };
+    }
   }
 
   async remove(id: string) {
