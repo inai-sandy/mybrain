@@ -35,6 +35,7 @@ function makeService(over: any = {}) {
   const summarizer: any = {
     isVideo: (url: string) => /youtube\.com|youtu\.be/.test(url),
     summarizeYouTube: async () => over.ytSummary ?? 'A clear summary of the video.',
+    summarizeUrl: async () => over.urlSummary ?? null,
     summarizeText: async () => over.textSummary ?? 'A clear summary of the page.',
     hasKey: async () => over.hasModel ?? true,
   };

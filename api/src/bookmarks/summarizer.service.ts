@@ -103,6 +103,17 @@ export class SummarizerService {
     ]);
   }
 
+  /** Hand a plain web URL to Gemini to read + summarize. Returns null if it can't access the page. */
+  async summarizeUrl(url: string, title: string): Promise<string | null> {
+    const text = await this.call(
+      `${this.prompt(title)}\n\nRead the web page at this URL and summarize it. ` +
+        `If you genuinely cannot access the page, reply with exactly NO_ACCESS and nothing else.\n\nURL: ${url}`,
+    );
+    if (!text) return null;
+    if (text.trim().toUpperCase().startsWith('NO_ACCESS')) return null;
+    return text;
+  }
+
   /** Summarize already-extracted page text. */
   async summarizeText(title: string, text: string): Promise<string | null> {
     const doc = (text || '').slice(0, 8000);
