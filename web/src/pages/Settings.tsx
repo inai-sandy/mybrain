@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Sparkles, Boxes, Check, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 type FieldDef = { key: string; label: string; type?: string };
-type Integration = { name: string; label: string; desc: string; icon: LucideIcon; managed?: boolean; fields?: FieldDef[] };
+type Integration = { name: string; label: string; desc: string; icon: LucideIcon; managed?: boolean; testable?: boolean; fields?: FieldDef[] };
 
 const INTEGRATIONS: Integration[] = [
   { name: 'supermemory', label: 'SuperMemory', desc: 'Cloud memory — primary store', icon: Brain, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }, { key: 'project', label: 'Project' }] },
   { name: 'rag', label: 'RAG (on-server)', desc: 'Self-hosted vector memory — second store', icon: Database, managed: true },
   { name: 'notion', label: 'Notion', desc: 'Pull pages into your brain', icon: FileText, fields: [{ key: 'token', label: 'Integration token', type: 'password' }] },
   { name: 'telegram', label: 'Telegram', desc: 'Tasks + daily digests', icon: Send, fields: [{ key: 'botToken', label: 'Bot token', type: 'password' }] },
-  { name: 'raindrop', label: 'Raindrop', desc: 'Bookmarks & highlights', icon: Bookmark, fields: [{ key: 'token', label: 'API token', type: 'password' }] },
+  { name: 'raindrop', label: 'Raindrop', desc: 'Your bookmarks — pull them in & search by meaning', icon: Bookmark, testable: true, fields: [{ key: 'token', label: 'API token', type: 'password' }] },
+  { name: 'tavily', label: 'Tavily', desc: 'Reads web pages so bookmarks can be summarized', icon: Globe, testable: true, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude models direct', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openrouter', label: 'OpenRouter', desc: 'One gateway to many models (Claude, GPT, Gemini…)', icon: Boxes, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
 ];
@@ -293,7 +294,22 @@ function IntegrationsSection() {
   const [status, setStatus] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Integration | null>(null);
   const [disconnecting, setDisconnecting] = useState<Integration | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
   const toast = useToast();
+
+  async function test(it: Integration) {
+    setTesting(it.name);
+    try {
+      const r = await fetch(`/api/connectors/${it.name}/test`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (d.ok) toast('success', d.message || `${it.label} works`);
+      else toast('error', d.message || `${it.label} test failed`);
+    } catch {
+      toast('error', `Could not test ${it.label}`);
+    } finally {
+      setTesting(null);
+    }
+  }
 
   async function refresh() {
     const r = await fetch('/api/connectors');
@@ -363,6 +379,15 @@ function IntegrationsSection() {
                     >
                       {connected ? 'Manage' : 'Connect'}
                     </button>
+                    {it.testable && connected && (
+                      <button
+                        onClick={() => test(it)}
+                        disabled={testing === it.name}
+                        className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 disabled:opacity-50"
+                      >
+                        {testing === it.name ? 'Testing…' : 'Test'}
+                      </button>
+                    )}
                     {connected && (
                       <button
                         onClick={() => setDisconnecting(it)}
