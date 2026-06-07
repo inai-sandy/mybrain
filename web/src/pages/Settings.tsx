@@ -258,7 +258,46 @@ function ModelsSection() {
       <AiModelCard />
       <BookmarksModelCard />
       <TasksModelCard />
+      <VoiceModelCard />
     </div>
+  );
+}
+
+function VoiceModelCard() {
+  const [provider, setProvider] = useState('openai');
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/telegram/voice').then((r) => r.json()).then((d) => setProvider(d.provider || 'openai')).catch(() => undefined).finally(() => setLoaded(true));
+  }, []);
+  if (!loaded) return null;
+  async function save(p: string) {
+    setProvider(p);
+    const r = await fetch('/api/telegram/voice', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: p }) });
+    if (r.ok) toast('success', 'Voice model saved');
+  }
+  const OPTS = [
+    { id: 'openai', label: 'OpenAI Whisper', desc: 'Most accurate. Needs your OpenAI key.' },
+    { id: 'gemini', label: 'Gemini (via OpenRouter)', desc: 'No separate key — uses your OpenRouter key.' },
+  ];
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Send size={18} className="text-sky-500" /> Voice transcription
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">Which model transcribes your Telegram voice notes. The other is used automatically as a fallback if the first can't.</p>
+      <div className="space-y-2">
+        {OPTS.map((o) => (
+          <label key={o.id} className={'flex items-start gap-3 rounded-lg border p-3 cursor-pointer ' + (provider === o.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
+            <input type="radio" name="voice" checked={provider === o.id} onChange={() => save(o.id)} className="mt-1 accent-emerald-600" />
+            <div>
+              <div className="text-sm font-medium">{o.label}</div>
+              <div className="text-xs text-zinc-500">{o.desc}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </section>
   );
 }
 

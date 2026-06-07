@@ -499,7 +499,16 @@ export class TelegramService implements OnModuleInit {
     return `You're at ${done}/${total}. Pick the next one and go — momentum beats motivation.`;
   }
 
-  // ---- voice transcription (Whisper, with a Gemini-via-OpenRouter fallback) ----
+  // ---- voice transcription (provider chosen in Settings; the other is a fallback) ----
+  async getVoiceProvider(): Promise<'openai' | 'gemini'> {
+    return (await this.getSetting('voice.provider')) === 'gemini' ? 'gemini' : 'openai';
+  }
+  async setVoiceProvider(p: string): Promise<{ provider: 'openai' | 'gemini' }> {
+    const provider = p === 'gemini' ? 'gemini' : 'openai';
+    await this.setSetting('voice.provider', provider);
+    return { provider };
+  }
+
   private async transcribe(fileId?: string): Promise<string | null> {
     const t = await this.token();
     if (!fileId || !t) return null;
@@ -515,12 +524,15 @@ export class TelegramService implements OnModuleInit {
       return null;
     }
     const name = path.split('/').pop() || 'voice.oga';
-    const oa = await this.connectors.get<{ apiKey: string }>('openai');
-    if (oa?.apiKey) {
-      const w = await this.whisper(buf, name, oa.apiKey).catch(() => null);
-      if (w) return w;
-    }
-    return this.geminiTranscribe(buf, name).catch(() => null);
+    const provider = await this.getVoiceProvider();
+    const tryWhisper = async () => {
+      const oa = await this.connectors.get<{ apiKey: string }>('openai');
+      return oa?.apiKey ? this.whisper(buf, name, oa.apiKey).catch(() => null) : null;
+    };
+    const tryGemini = () => this.geminiTranscribe(buf, name).catch(() => null);
+    // chosen provider first, the other as fallback
+    if (provider === 'gemini') return (await tryGemini()) || (await tryWhisper());
+    return (await tryWhisper()) || (await tryGemini());
   }
 
   private async whisper(buf: Buffer, name: string, apiKey: string): Promise<string | null> {

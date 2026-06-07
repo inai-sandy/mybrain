@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Post, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { Public } from '../auth/public.decorator';
 import { TelegramService } from './telegram.service';
@@ -28,6 +28,17 @@ export class TelegramController {
   @Get('status')
   async status() {
     return this.telegram.status();
+  }
+
+  /** Voice-transcription provider: openai (Whisper) or gemini (OpenRouter). */
+  @Get('voice')
+  async getVoice() {
+    return { provider: await this.telegram.getVoiceProvider() };
+  }
+
+  @Put('voice')
+  async setVoice(@Body() body: { provider?: string }) {
+    return this.telegram.setVoiceProvider(body?.provider || 'openai');
   }
 
   /** Unlink the owner chat so a fresh /start can re-claim the bot. */
