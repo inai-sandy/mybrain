@@ -191,6 +191,65 @@ export class SkillsService {
     return row?.value || null;
   }
 
+  /** Recursively collect .jsonl transcript files (dir names may start with '-'). */
+  private async walkJsonl(dir: string, out: string[], depth = 0): Promise<void> {
+    if (depth > 6) return;
+    let entries: any[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await this.walkJsonl(p, out, depth + 1);
+      else if (e.name.endsWith('.jsonl')) out.push(p);
+    }
+  }
+
+  /** Parse Claude Code transcripts for `/skill` invocations → { slug: {count, last} }. */
+  private async parseUsage(): Promise<Map<string, { count: number; last: string }>> {
+    const dirs = (process.env.TRANSCRIPT_SCAN_DIRS || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const files: string[] = [];
+    for (const d of dirs) await this.walkJsonl(d, files);
+    const usage = new Map<string, { count: number; last: string }>();
+    const re = /<command-name>\/([a-zA-Z0-9_-]+)/g;
+    for (const f of files) {
+      let text: string;
+      try {
+        text = await fs.readFile(f, 'utf8');
+      } catch {
+        continue;
+      }
+      for (const line of text.split('\n')) {
+        if (!line.includes('<command-name>/')) continue;
+        const ts = line.match(/"timestamp":"([0-9T:.+-]+)/)?.[1] || '';
+        re.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(line))) {
+          const slug = m[1];
+          const cur = usage.get(slug) || { count: 0, last: '' };
+          cur.count++;
+          if (ts && ts > cur.last) cur.last = ts;
+          usage.set(slug, cur);
+        }
+      }
+    }
+    return usage;
+  }
+
+  private async applyUsage() {
+    const usage = await this.parseUsage();
+    const installed = await this.prisma.skill.findMany({ where: { installed: true }, select: { id: true, slug: true } });
+    for (const s of installed) {
+      const u = s.slug ? usage.get(s.slug) : undefined;
+      await this.prisma.skill.update({
+        where: { id: s.id },
+        data: { usageCount: u?.count ?? 0, lastUsedAt: u?.last ? new Date(u.last) : null },
+      });
+    }
+  }
+
   /** Scan the mounted server skill dirs, AI-describe + zip each, upsert (deduped by skill name). */
   async scan(): Promise<{ created: number; updated: number; total: number; lastScan: string }> {
     const dirs = (process.env.SKILLS_SCAN_DIRS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -242,6 +301,8 @@ export class SkillsService {
         }
       }
     }
+    // Update last-used + usage counts from the Claude Code transcripts.
+    await this.applyUsage().catch(() => undefined);
     const lastScan = new Date().toISOString();
     await this.prisma.setting.upsert({ where: { key: 'skills.lastScan' }, create: { key: 'skills.lastScan', value: lastScan }, update: { value: lastScan } }).catch(() => undefined);
     return { created, updated, total, lastScan };
