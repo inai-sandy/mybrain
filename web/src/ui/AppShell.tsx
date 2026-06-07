@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink } from 'lucide-react';
-import { NAV } from './nav';
+import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { useTheme } from './theme';
 
@@ -144,12 +144,12 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </main>
       </div>
 
-      {/* Bottom tab bar — mobile */}
+      {/* Bottom tab bar — mobile (5 primary tabs; the rest are in the drawer) */}
       <nav
         className="md:hidden fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
-        style={{ gridTemplateColumns: `repeat(${NAV.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))` }}
       >
-        {NAV.map((n) => (
+        {BOTTOM_NAV.map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
