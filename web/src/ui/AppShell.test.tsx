@@ -21,6 +21,8 @@ describe('AppShell', () => {
 
     // Default theme is dark; toggle flips it.
     expect(document.documentElement.classList.contains('dark')).toBe(true);
+    // Theme toggle lives in the account menu now — open it first.
+    fireEvent.click(screen.getByLabelText('Account menu'));
     fireEvent.click(screen.getByLabelText('Toggle dark mode'));
     expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
