@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
 type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number };
 type Summary = { day: string; text: string; stats: Stats | null } | null;
 type Story = { text: string; mood?: string | null } | null;
-type ActivityData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; timeline: Ev[] };
+type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; timeline: Ev[] };
+
+type Dash = {
+  days: number;
+  totals: { tasksTotal: number; tasksDone: number; followThrough: number };
+  minutesSpent: number;
+  categoryTime: { category: string; minutes: number }[];
+  estimateVsActual: { estimated: number; actual: number; count: number };
+  streak: number;
+  perDay: { day: string; done: number; total: number }[];
+};
+type Cal = { start: string; end: string; days: { day: string; done: number; total: number; dumped: boolean; story: boolean }[] };
 
 const ICON: Record<string, any> = { capture: FileText, bookmark: Bookmark, idea: Lightbulb, skill: Wand2, task: CheckCircle2, dump: Brain, story: Moon, note: MessageSquare };
 const TINT: Record<string, string> = {
@@ -16,12 +27,12 @@ const TINT: Record<string, string> = {
 };
 
 function addDays(day: string, n: number): string {
-  const d = new Date(day + 'T12:00:00');
-  d.setDate(d.getDate() + n);
+  const d = new Date(day + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 function prettyDay(day: string): string {
-  const d = new Date(day + 'T12:00:00');
+  const d = new Date(day + 'T12:00:00Z');
   return d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 }
 function timeOf(iso: string): string {
@@ -35,9 +46,9 @@ function mins(n: number): string {
   return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
 }
 
-export function Activity() {
-  const [day, setDay] = useState<string | null>(null);
-  const [data, setData] = useState<ActivityData | null>(null);
+// ---------- Day view ----------
+function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => void }) {
+  const [data, setData] = useState<DayData | null>(null);
   const [loading, setLoading] = useState(true);
   const [gen, setGen] = useState(false);
   const toast = useToast();
@@ -49,15 +60,16 @@ export function Activity() {
       if (r.ok) {
         const j = await r.json();
         setData(j);
-        setDay(j.day);
+        if (j.day !== day) onDay(j.day);
       }
     } finally {
       setLoading(false);
     }
   }
   useEffect(() => {
-    load();
-  }, []);
+    load(day || undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day]);
 
   async function generate(force = false) {
     if (!day) return;
@@ -68,8 +80,6 @@ export function Activity() {
         toast('success', force ? 'Summary rebuilt' : 'Summary generated');
         load(day);
       } else toast('error', 'Could not generate');
-    } catch {
-      toast('error', 'Could not generate');
     } finally {
       setGen(false);
     }
@@ -80,40 +90,23 @@ export function Activity() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-extrabold flex items-center gap-2"><ActivityIcon className="text-emerald-500" /> Activity</h1>
-        <p className="text-zinc-500 text-sm">Your day, captured — what you did, finished, and felt.</p>
-      </div>
-
-      {/* Day navigator */}
       <div className="flex items-center justify-between gap-2">
-        <button onClick={() => day && load(addDays(day, -1))} className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500"><ChevronLeft size={16} /></button>
+        <button onClick={() => day && onDay(addDays(day, -1))} className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500"><ChevronLeft size={16} /></button>
         <div className="flex items-center gap-2 text-center">
           <div className="font-semibold">{day ? prettyDay(day) : '—'}{data?.isToday && <span className="ml-2 text-xs text-emerald-600">Today</span>}</div>
-          <input type="date" value={day || ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => e.target.value && load(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs" />
+          <input type="date" value={day || ''} max={new Date().toISOString().slice(0, 10)} onChange={(e) => e.target.value && onDay(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs" />
         </div>
-        <button disabled={!!data?.isToday} onClick={() => day && load(addDays(day, 1))} className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 disabled:opacity-30"><ChevronRight size={16} /></button>
+        <button disabled={!!data?.isToday} onClick={() => day && onDay(addDays(day, 1))} className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 disabled:opacity-30"><ChevronRight size={16} /></button>
       </div>
 
-      {/* Stats */}
       {st && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-center">
-            <div className="text-xl font-extrabold tabular-nums">{st.tasksDone}<span className="text-zinc-400 text-sm">/{st.tasksTotal}</span></div>
-            <div className="text-[11px] text-zinc-400">tasks done</div>
-          </div>
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-center">
-            <div className="text-xl font-extrabold tabular-nums">{mins(st.minutesSpent)}</div>
-            <div className="text-[11px] text-zinc-400">time spent</div>
-          </div>
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-center">
-            <div className="text-xl font-extrabold tabular-nums">{pct}%</div>
-            <div className="text-[11px] text-zinc-400">follow-through</div>
-          </div>
+          <Stat big={`${st.tasksDone}/${st.tasksTotal}`} label="tasks done" />
+          <Stat big={mins(st.minutesSpent)} label="time spent" />
+          <Stat big={`${pct}%`} label="follow-through" />
         </div>
       )}
 
-      {/* AI summary */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
         <div className="flex items-center justify-between mb-2">
           <h2 className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-emerald-500" /> Day summary</h2>
@@ -124,14 +117,11 @@ export function Activity() {
         ) : (
           <div className="text-sm text-zinc-500">
             <p className="mb-3">{data?.isToday ? 'Auto-generates at 9:30 PM — or build it now.' : 'No summary was generated for this day.'}</p>
-            <button onClick={() => generate(false)} disabled={gen} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-              {gen ? 'Generating…' : 'Generate summary'}
-            </button>
+            <button onClick={() => generate(false)} disabled={gen} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{gen ? 'Generating…' : 'Generate summary'}</button>
           </div>
         )}
       </section>
 
-      {/* Story */}
       {data?.story && (
         <section className="rounded-xl border border-indigo-300/40 dark:border-indigo-500/30 bg-indigo-500/5 p-4">
           <h2 className="flex items-center gap-2 font-semibold text-sm mb-1.5"><Moon size={15} className="text-indigo-400" /> Your story {data.story.mood && <span className="text-xs font-normal">· {data.story.mood}</span>}</h2>
@@ -139,7 +129,6 @@ export function Activity() {
         </section>
       )}
 
-      {/* Timeline */}
       <section>
         <h2 className="font-semibold text-sm mb-2 text-zinc-500">Timeline</h2>
         {loading ? (
@@ -164,6 +153,208 @@ export function Activity() {
           <p className="text-sm text-zinc-400 rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 p-6 text-center">Nothing captured for this day yet.</p>
         )}
       </section>
+    </div>
+  );
+}
+
+function Stat({ big, label }: { big: string; label: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-center">
+      <div className="text-xl font-extrabold tabular-nums">{big}</div>
+      <div className="text-[11px] text-zinc-400">{label}</div>
+    </div>
+  );
+}
+
+// ---------- Insights view ----------
+function InsightsView() {
+  const [d, setD] = useState<Dash | null>(null);
+  const [range, setRange] = useState(30);
+  useEffect(() => {
+    fetch(`/api/daily/dashboard?days=${range}`).then((r) => r.json()).then(setD).catch(() => undefined);
+  }, [range]);
+  if (!d) return <p className="text-sm text-zinc-400">Loading…</p>;
+
+  const maxCat = Math.max(1, ...d.categoryTime.map((c) => c.minutes));
+  const eva = d.estimateVsActual;
+  const ratio = eva.estimated ? Math.round((eva.actual / eva.estimated) * 100) : 0;
+  const maxDone = Math.max(1, ...d.perDay.map((p) => p.done));
+
+  return (
+    <div className="space-y-5">
+      <div className="flex justify-end">
+        <select value={range} onChange={(e) => setRange(Number(e.target.value))} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-amber-300/40 bg-amber-500/5 p-3 text-center">
+          <div className="text-xl font-extrabold tabular-nums flex items-center justify-center gap-1"><Flame size={16} className="text-amber-500" />{d.streak}</div>
+          <div className="text-[11px] text-zinc-400">dump streak</div>
+        </div>
+        <Stat big={`${d.totals.tasksDone}/${d.totals.tasksTotal}`} label="tasks done" />
+        <Stat big={`${d.totals.followThrough}%`} label="follow-through" />
+        <Stat big={mins(d.minutesSpent)} label="time spent" />
+      </div>
+
+      {/* time by category */}
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="font-semibold text-sm mb-3">Where your time went</h2>
+        {d.categoryTime.length ? (
+          <div className="space-y-2.5">
+            {d.categoryTime.map((c) => (
+              <div key={c.category}>
+                <div className="flex justify-between text-xs mb-1"><span className="text-zinc-600 dark:text-zinc-300">{c.category}</span><span className="text-zinc-400 tabular-nums">{mins(c.minutes)}</span></div>
+                <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${Math.round((c.minutes / maxCat) * 100)}%` }} /></div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-400">Finish some tasks with a logged time to see this.</p>
+        )}
+      </section>
+
+      {/* estimate vs actual */}
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="font-semibold text-sm mb-2">Estimate vs reality</h2>
+        {eva.count ? (
+          <div className="text-sm text-zinc-600 dark:text-zinc-300">
+            <p>You estimated <b>{mins(eva.estimated)}</b> and actually spent <b>{mins(eva.actual)}</b> across {eva.count} task{eva.count === 1 ? '' : 's'}.</p>
+            <p className="mt-1 text-zinc-500">{ratio > 115 ? `You tend to under-estimate — things take ~${ratio}% of your guess.` : ratio < 85 ? `You tend to over-estimate — things take ~${ratio}% of your guess.` : 'Your estimates are pretty accurate. 👌'}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-400">Log actual times on finished tasks to compare.</p>
+        )}
+      </section>
+
+      {/* per-day bars */}
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="font-semibold text-sm mb-3">Tasks finished per day</h2>
+        <div className="flex items-end gap-0.5 h-24">
+          {d.perDay.map((p) => (
+            <div key={p.day} title={`${p.day}: ${p.done}/${p.total}`} className="flex-1 bg-emerald-500/80 hover:bg-emerald-500 rounded-t" style={{ height: `${Math.max(3, Math.round((p.done / maxDone) * 100))}%` }} />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ---------- Calendar view ----------
+function CalendarView({ onPick }: { onPick: (day: string) => void }) {
+  const [cal, setCal] = useState<Cal | null>(null);
+  const [months, setMonths] = useState(3);
+  useEffect(() => {
+    fetch(`/api/daily/calendar?months=${months}`).then((r) => r.json()).then(setCal).catch(() => undefined);
+  }, [months]);
+  if (!cal) return <p className="text-sm text-zinc-400">Loading…</p>;
+
+  const map = new Map(cal.days.map((d) => [d.day, d]));
+  // build weeks from the Sunday on/before start, to today
+  const startD = new Date(cal.start + 'T12:00:00Z');
+  startD.setUTCDate(startD.getUTCDate() - startD.getUTCDay()); // back to Sunday
+  const cells: { day: string }[] = [];
+  let cursor = startD.toISOString().slice(0, 10);
+  while (cursor <= cal.end) {
+    cells.push({ day: cursor });
+    cursor = addDays(cursor, 1);
+  }
+  const weeks: { day: string }[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+
+  function tint(day: string): string {
+    const e = map.get(day);
+    if (!e) return 'bg-zinc-100 dark:bg-zinc-800/50';
+    if (e.done >= 5) return 'bg-emerald-600';
+    if (e.done >= 3) return 'bg-emerald-500';
+    if (e.done >= 1) return 'bg-emerald-400/70';
+    if (e.total > 0 || e.dumped || e.story) return 'bg-emerald-300/40';
+    return 'bg-zinc-100 dark:bg-zinc-800/50';
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <select value={months} onChange={(e) => setMonths(Number(e.target.value))} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
+          <option value={3}>3 months</option>
+          <option value={6}>6 months</option>
+          <option value={12}>12 months</option>
+        </select>
+      </div>
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 overflow-x-auto">
+        <div className="flex gap-1">
+          {weeks.map((w, wi) => (
+            <div key={wi} className="flex flex-col gap-1">
+              {w.map((c) => {
+                const e = map.get(c.day);
+                const future = c.day > cal.end;
+                return (
+                  <button
+                    key={c.day}
+                    disabled={future}
+                    onClick={() => onPick(c.day)}
+                    title={future ? '' : `${c.day} — ${e ? `${e.done}/${e.total} done` : 'nothing'}${e?.dumped ? ' · dumped' : ''}${e?.story ? ' · story' : ''}`}
+                    className={'h-3.5 w-3.5 rounded-sm transition-transform hover:scale-125 ' + (future ? 'opacity-0' : tint(c.day))}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-end gap-1.5 mt-3 text-[11px] text-zinc-400">
+          <span>less</span>
+          <span className="h-3 w-3 rounded-sm bg-zinc-100 dark:bg-zinc-800/50" />
+          <span className="h-3 w-3 rounded-sm bg-emerald-300/40" />
+          <span className="h-3 w-3 rounded-sm bg-emerald-400/70" />
+          <span className="h-3 w-3 rounded-sm bg-emerald-500" />
+          <span className="h-3 w-3 rounded-sm bg-emerald-600" />
+          <span>more</span>
+        </div>
+      </section>
+      <p className="text-xs text-zinc-400 text-center">Tap any day to open it.</p>
+    </div>
+  );
+}
+
+// ---------- Shell with tabs ----------
+type TabId = 'day' | 'insights' | 'calendar';
+
+export function Activity() {
+  const [tab, setTab] = useState<TabId>('day');
+  const [day, setDay] = useState<string | null>(null);
+
+  const tabs: { id: TabId; label: string; icon: any }[] = [
+    { id: 'day', label: 'Day', icon: ListTree },
+    { id: 'insights', label: 'Insights', icon: BarChart3 },
+    { id: 'calendar', label: 'Calendar', icon: CalendarDays },
+  ];
+
+  function openDay(d: string) {
+    setDay(d);
+    setTab('day');
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-extrabold flex items-center gap-2"><ActivityIcon className="text-emerald-500" /> Activity</h1>
+        <p className="text-zinc-500 text-sm">Your day, captured — what you did, finished, and felt.</p>
+      </div>
+
+      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+        {tabs.map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={'inline-flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 -mb-px ' + (tab === t.id ? 'border-emerald-500 text-emerald-600 font-medium' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
+            <t.icon size={15} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'day' && <DayView day={day} onDay={setDay} />}
+      {tab === 'insights' && <InsightsView />}
+      {tab === 'calendar' && <CalendarView onPick={openDay} />}
     </div>
   );
 }

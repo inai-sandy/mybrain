@@ -16,6 +16,18 @@ export class DailyController {
     return this.daily.activity(day);
   }
 
+  /** Aggregate insights (Dashboard). */
+  @Get('dashboard')
+  async dashboard(@Query('days') days?: string) {
+    return this.daily.dashboard(days ? Number(days) : 30);
+  }
+
+  /** Per-day counts for the calendar heatmap. */
+  @Get('calendar')
+  async calendar(@Query('months') months?: string) {
+    return this.daily.calendar(months ? Number(months) : 3);
+  }
+
   /** Generate (or rebuild) the AI day-summary on demand. */
   @Post('summary')
   async summary(@Body() body: { day?: string; force?: boolean }) {

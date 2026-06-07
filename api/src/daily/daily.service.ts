@@ -41,6 +41,13 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Add n days to a YYYY-MM-DD key (n can be negative). */
+  private dayAdd(day: string, n: number): string {
+    const d = new Date(day + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
   /** Local HH:MM in the user's timezone. */
   private localHM(tz: string, d = new Date()): string {
     try {
@@ -202,6 +209,88 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       /* ignore */
     }
     return { day: s.day, text: s.text, stats, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+
+  /** Aggregate insights over the last `days` (Dashboard). */
+  async dashboard(days = 30) {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const span = Math.max(1, Math.min(365, days));
+    const start = this.dayAdd(today, -(span - 1));
+    const tasks = await this.prisma.task.findMany({ where: { day: { gte: start } } });
+    const done = tasks.filter((t) => t.status === 'done');
+
+    // time by category (actual where known, else estimate)
+    const catMap: Record<string, number> = {};
+    for (const t of done) {
+      const c = t.category || 'Uncategorized';
+      catMap[c] = (catMap[c] || 0) + (t.actualMin || t.estimateMin || 0);
+    }
+    const categoryTime = Object.entries(catMap)
+      .map(([category, minutes]) => ({ category, minutes }))
+      .sort((a, b) => b.minutes - a.minutes);
+
+    // estimate vs actual (only tasks with both)
+    const withBoth = done.filter((t) => t.estimateMin && t.actualMin);
+    const estimated = withBoth.reduce((s, t) => s + (t.estimateMin || 0), 0);
+    const actual = withBoth.reduce((s, t) => s + (t.actualMin || 0), 0);
+
+    // per-day done/total for the bar strip
+    const perDay: { day: string; done: number; total: number }[] = [];
+    for (let i = span - 1; i >= 0; i--) {
+      const d = this.dayAdd(today, -i);
+      perDay.push({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length });
+    }
+
+    // brain-dump streak (consecutive days ending today or yesterday)
+    const dumpDays = new Set((await this.prisma.brainDump.findMany({ select: { day: true } })).map((d) => d.day));
+    let streak = 0;
+    let cur = dumpDays.has(today) ? today : this.dayAdd(today, -1);
+    while (dumpDays.has(cur)) {
+      streak++;
+      cur = this.dayAdd(cur, -1);
+    }
+
+    return {
+      days: span,
+      totals: { tasksTotal: tasks.length, tasksDone: done.length, followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : 0 },
+      minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
+      categoryTime,
+      estimateVsActual: { estimated, actual, count: withBoth.length },
+      streak,
+      perDay,
+    };
+  }
+
+  /** Per-day done/total counts across a range, for the calendar heatmap. */
+  async calendar(months = 3) {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const span = Math.max(28, Math.min(370, Math.round(months * 31)));
+    const start = this.dayAdd(today, -(span - 1));
+    const tasks = await this.prisma.task.findMany({ where: { day: { gte: start } } });
+    const dumps = new Set((await this.prisma.brainDump.findMany({ where: { day: { gte: start } }, select: { day: true } })).map((d) => d.day));
+    const stories = new Set((await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true } })).map((d) => d.day));
+    const byDay: Record<string, { done: number; total: number }> = {};
+    for (const t of tasks) {
+      const k = t.day || '';
+      if (!k) continue;
+      byDay[k] = byDay[k] || { done: 0, total: 0 };
+      byDay[k].total++;
+      if (t.status === 'done') byDay[k].done++;
+    }
+    const all = new Set([...Object.keys(byDay), ...dumps, ...stories]);
+    return {
+      start,
+      end: today,
+      days: [...all].sort().map((day) => ({
+        day,
+        done: byDay[day]?.done || 0,
+        total: byDay[day]?.total || 0,
+        dumped: dumps.has(day),
+        story: stories.has(day),
+      })),
+    };
   }
 
   /** Everything for the Activity screen for a given day (defaults to today). */

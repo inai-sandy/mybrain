@@ -5,12 +5,14 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const notes: any[] = [];
   const tasks: any[] = [];
   const summaries: any[] = [];
+  const dumps: any[] = [];
   let seq = 0;
   const enqueued: any[] = [];
   const prisma: any = {
     setting: { findUnique: async () => null },
     story: {
       findFirst: async ({ where }: any) => stories.filter((s) => s.day === where.day).slice(-1)[0] || null,
+      findMany: async ({ where }: any = {}) => stories.filter((s) => !where?.day?.gte || s.day >= where.day.gte),
       create: async ({ data }: any) => {
         const row = { id: `s${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...data };
         stories.push(row);
@@ -36,12 +38,26 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
     task: {
-      findMany: async ({ where }: any = {}) => tasks.filter((t) => (!where?.day || t.day === where.day) && (!where?.status || t.status === where.status)),
+      findMany: async ({ where }: any = {}) =>
+        tasks.filter((t) => {
+          if (where?.status && t.status !== where.status) return false;
+          const d = where?.day;
+          if (d !== undefined) {
+            if (typeof d === 'string') return t.day === d;
+            if (d.gte && !(t.day && t.day >= d.gte)) return false;
+          }
+          return true;
+        }),
     },
     item: { findMany: async () => [] },
     idea: { findMany: async () => [] },
     skill: { findMany: async () => [] },
-    brainDump: { findMany: async () => [] },
+    brainDump: {
+      findMany: async ({ where }: any = {}) => {
+        const filtered = dumps.filter((d) => !where?.day?.gte || d.day >= where.day.gte);
+        return filtered;
+      },
+    },
     daySummary: {
       findUnique: async ({ where }: any) => summaries.find((s) => s.day === where.day) || null,
       upsert: async ({ where, create, update }: any) => {
@@ -59,7 +75,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }) };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc), stories, notes, tasks, summaries, enqueued };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc), stories, notes, tasks, summaries, dumps, enqueued };
 }
 
 describe('DailyService', () => {
@@ -114,5 +130,40 @@ describe('DailyService', () => {
     const { svc } = makeService({ llmText: null });
     const out = await svc.generateSummary('2026-06-07');
     expect(out.text).toMatch(/finished/i);
+  });
+
+  it('dashboard aggregates follow-through, time-by-category and dump streak', async () => {
+    const { svc, tasks, dumps } = makeService();
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const yest = new Date(today + 'T12:00:00Z');
+    yest.setUTCDate(yest.getUTCDate() - 1);
+    const yKey = yest.toISOString().slice(0, 10);
+    tasks.push({ day: today, status: 'done', category: 'Beakn', actualMin: 60, estimateMin: 30 });
+    tasks.push({ day: today, status: 'done', category: 'Admin', actualMin: 20, estimateMin: 20 });
+    tasks.push({ day: today, status: 'open', category: 'Beakn', estimateMin: 40 });
+    dumps.push({ day: today });
+    dumps.push({ day: yKey });
+    const d = await svc.dashboard(30);
+    expect(d.totals.tasksTotal).toBe(3);
+    expect(d.totals.tasksDone).toBe(2);
+    expect(d.totals.followThrough).toBe(67);
+    expect(d.categoryTime[0].category).toBe('Beakn'); // 60 > 20
+    expect(d.streak).toBe(2); // today + yesterday
+    expect(d.estimateVsActual.actual).toBe(80);
+  });
+
+  it('calendar reports per-day done/total plus dumped/story flags', async () => {
+    const { svc, tasks, dumps, stories } = makeService();
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    tasks.push({ day: today, status: 'done' });
+    tasks.push({ day: today, status: 'open' });
+    dumps.push({ day: today });
+    stories.push({ day: today, rawText: 'x', createdAt: new Date(), updatedAt: new Date() });
+    const c = await svc.calendar(3);
+    const t = c.days.find((x: any) => x.day === today);
+    expect(t.done).toBe(1);
+    expect(t.total).toBe(2);
+    expect(t.dumped).toBe(true);
+    expect(t.story).toBe(true);
   });
 });
