@@ -177,7 +177,13 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       createdAt: i.createdAt,
       supermemory: !!i.supermemoryId,
       rag: !!i.ragId,
+      chunked: !!i.supermemoryId, // SuperMemory chunks server-side
     }));
+  }
+
+  /** Re-queue any failed memory writes (e.g. the few bookmark SuperMemory writes that errored). */
+  async retryFailedMemory(): Promise<{ retried: number }> {
+    return this.memory.retryFailed();
   }
 
   /** Find bookmarks by meaning (semantic stores ranked, mapped back to real bookmarks; keyword safety net). */

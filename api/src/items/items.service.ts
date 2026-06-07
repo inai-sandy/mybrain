@@ -86,7 +86,8 @@ export class ItemsService {
   }
 
   async list() {
-    const items = await this.prisma.item.findMany({ orderBy: { createdAt: 'desc' }, take: 200 });
+    // Bookmarks (source='raindrop') live on their own Bookmarks page — keep them out of the documents list.
+    const items = await this.prisma.item.findMany({ where: { source: { not: 'raindrop' } }, orderBy: { createdAt: 'desc' }, take: 200 });
     return items.map((i) => {
       const supermemory = !!i.supermemoryId;
       const rag = !!i.ragId;
