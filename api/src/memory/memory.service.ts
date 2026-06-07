@@ -157,7 +157,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return {
       memId: r.documentId || r.id || r.memoryId || r.memory?.id || undefined,
       title: r.title || r.metadata?.title || r.document?.title || '',
-      content: String(content).slice(0, 1500),
+      content: String(content).slice(0, 2200),
       url: r.url || r.metadata?.url || undefined,
       score: typeof r.score === 'number' ? r.score : undefined,
       source: 'supermemory',
@@ -169,7 +169,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return {
       memId: r.id || r.doc_id || undefined,
       title: r.title || r.metadata?.title || '',
-      content: String(content).slice(0, 1500),
+      content: String(content).slice(0, 2200),
       url: r.url || r.metadata?.url || undefined,
       score: typeof r.score === 'number' ? r.score : undefined,
       source: 'rag',

@@ -140,19 +140,23 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
   private buildAnswerPrompt(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): string {
     const convo = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n').slice(-3000);
-    const ctx = hits.map((h, i) => `[${i + 1}] ${h.title ? h.title + ': ' : ''}${h.content}`).join('\n\n');
+    const ctx = hits.map((h, i) => `[${i + 1}] ${h.title || 'Saved item'}\n${h.content}`).join('\n\n');
     const sys =
-      `You are the user's "second brain" — answer from their saved memory and this conversation only. Be concise and direct; use clean Markdown (short paragraphs, bold, bullet lists) when it helps. ` +
-      (hits.length ? `Cite the snippets you use inline as [1], [2]. ` : '') +
-      (didSearch && !hits.length ? `Nothing relevant was found in their memory for this — tell them you don't have anything saved about that; do NOT invent facts. ` : '') +
-      `Never fabricate.`;
+      `You are the user's personal "second brain" assistant. You answer using (a) this conversation and (b) the MEMORY EXCERPTS below — passages from the user's OWN saved bookmarks, notes, ideas, documents and activity that have ALREADY been retrieved for you.\n\n` +
+      `Hard rules:\n` +
+      `- The excerpts ARE available to you. NEVER say you can't access, browse, fetch or open anything. NEVER mention URLs, links, Caddy, servers, subdomains, proxies, or your own limitations.\n` +
+      `- Answer the user's question DIRECTLY and helpfully in clean Markdown (short paragraphs, **bold**, bullet lists). Synthesize across excerpts; don't just quote fragments.\n` +
+      (hits.length ? `- Cite the excerpts you actually use inline as [1], [2].\n` : '') +
+      `- If the user pasted a link, the matching excerpt IS that page's saved content — answer from it.\n` +
+      `- If the excerpts genuinely don't contain the answer, say briefly: "I don't have anything saved about that in your ${session.scope === 'everything' ? 'memory' : session.scope + 's'}." Then stop — no tangents, no infrastructure talk.\n` +
+      `- Never invent facts that aren't in the excerpts or conversation.`;
     return (
       `${sys}\n\n` +
-      (session.summary ? `Earlier summary: ${session.summary}\n\n` : '') +
-      `Conversation so far:\n${convo || '(none)'}\n\n` +
-      (hits.length ? `Memory snippets:\n${ctx}\n\n` : '') +
-      `User: ${text}\n\n` +
-      `After your answer, on a new line output exactly "FOLLOWUPS:" then 2-3 short follow-up questions the user might ask next, separated by " | ".`
+      (session.summary ? `Earlier summary of this chat: ${session.summary}\n\n` : '') +
+      (convo ? `Conversation so far:\n${convo}\n\n` : '') +
+      (hits.length ? `MEMORY EXCERPTS (the user's saved content):\n${ctx}\n\n` : didSearch ? `MEMORY EXCERPTS: (none found)\n\n` : '') +
+      `User's message: ${text}\n\n` +
+      `Write the answer now. After it, on a new line output exactly "FOLLOWUPS:" then 2-3 short natural follow-up questions the user might ask next, separated by " | ".`
     );
   }
 
