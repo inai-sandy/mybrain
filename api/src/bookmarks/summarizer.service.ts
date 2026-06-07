@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /** Default bookmarks summarizer — Gemini via OpenRouter (handles YouTube natively). */
 const DEFAULT_MODEL = process.env.BOOKMARKS_MODEL || 'google/gemini-3-flash-preview';
@@ -17,6 +18,7 @@ export class SummarizerService {
   constructor(
     private readonly connectors: ConnectorService,
     private readonly prisma: PrismaService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** The bookmarks-specific model (falls back to the Gemini default). */
@@ -68,12 +70,9 @@ export class SummarizerService {
     return /(?:youtube\.com\/(?:watch|shorts\/|live\/)|youtu\.be\/)/i.test(url || '');
   }
 
-  private prompt(title: string): string {
-    return (
-      `Write a clear, self-contained summary in about 250 words (do not exceed 280). ` +
-      `Use plain prose — no markdown headings, no bullet lists. Capture what it is about, the key points / tools / steps, ` +
-      `and who would find it useful, so it can be found later by meaning.\n\nTitle: ${title}`
-    );
+  private async promptFor(title: string): Promise<string> {
+    const tmpl = await this.prompts.get('bookmarks.summary');
+    return `${tmpl}\n\nTitle: ${title}`;
   }
 
   private async call(content: any, maxTokens = 600): Promise<string | null> {
@@ -98,7 +97,7 @@ export class SummarizerService {
   /** Hand the YouTube URL straight to Gemini (it watches the video). */
   async summarizeYouTube(url: string, title: string): Promise<string | null> {
     return this.call([
-      { type: 'text', text: this.prompt(title) + '\n\nSummarize the linked video.' },
+      { type: 'text', text: (await this.promptFor(title)) + '\n\nSummarize the linked video.' },
       { type: 'video_url', video_url: { url } },
     ]);
   }
@@ -106,7 +105,7 @@ export class SummarizerService {
   /** Hand a plain web URL to Gemini to read + summarize. Returns null if it can't access the page. */
   async summarizeUrl(url: string, title: string): Promise<string | null> {
     const text = await this.call(
-      `${this.prompt(title)}\n\nRead the web page at this URL and summarize it. ` +
+      `${await this.promptFor(title)}\n\nRead the web page at this URL and summarize it. ` +
         `If you genuinely cannot access the page, reply with exactly NO_ACCESS and nothing else.\n\nURL: ${url}`,
     );
     if (!text) return null;
@@ -118,6 +117,6 @@ export class SummarizerService {
   async summarizeText(title: string, text: string): Promise<string | null> {
     const doc = (text || '').slice(0, 8000);
     if (!doc.trim()) return null;
-    return this.call(`${this.prompt(title)}\n\nContent:\n${doc}`);
+    return this.call(`${await this.promptFor(title)}\n\nContent:\n${doc}`);
   }
 }

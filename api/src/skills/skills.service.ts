@@ -9,6 +9,7 @@ const AdmZip: any = require('adm-zip');
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /** Parse a SKILL.md's frontmatter for name + description. */
 export function parseSkillMd(md: string): { name?: string; description?: string } {
@@ -32,15 +33,15 @@ export class SkillsService {
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** AI-write a short description of a skill from its SKILL.md (falls back to the given text). */
   async aiDescribe(content: string, fallback?: string): Promise<string> {
     const fb = (fallback || '').trim();
     if (!content?.trim()) return fb;
-    const prompt =
-      `In 1-2 plain sentences, describe what this Claude skill does and when it's useful. ` +
-      `No preamble, no "This skill…", just the description.\n\nSKILL.md:\n${content.slice(0, 5000)}`;
+    const tmpl = await this.prompts.get('skills.describe');
+    const prompt = `${tmpl}\n\nSKILL.md:\n${content.slice(0, 5000)}`;
     const text = await this.llm.complete(prompt, 200);
     return (text?.trim() || fb).slice(0, 600);
   }

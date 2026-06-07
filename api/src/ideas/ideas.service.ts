@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 @Injectable()
 export class IdeasService {
@@ -11,6 +12,7 @@ export class IdeasService {
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
     private readonly items: ItemsService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** Attach an uploaded research doc to an idea: store it as a Capture item, then link it. */
@@ -24,12 +26,8 @@ export class IdeasService {
 
   /** Turn a raw brain-dump into {title, content, research} via the default model. */
   private async craft(dump: string): Promise<{ title: string; content: string; research: string } | null> {
-    const prompt =
-      `Organize this raw brain-dump into a research idea. Respond with ONLY JSON: {"title":"...","content":"...","research":"..."}\n` +
-      `- title: a concise idea title (max 80 chars).\n` +
-      `- content: the idea rewritten as clear, well-structured Markdown — keep the user's substance, organize it, expand only to clarify.\n` +
-      `- research: a thorough deep-research brief to investigate this idea — the objective, 4-8 key questions to answer, what to look for, scope/constraints — and explicitly ask for the final answer as a structured Markdown research report. Do NOT include the literal text "/deep-research".\n\n` +
-      `Brain-dump:\n${dump.slice(0, 6000)}`;
+    const tmpl = await this.prompts.get('ideas.organize');
+    const prompt = `${tmpl}\n\nBrain-dump:\n${dump.slice(0, 6000)}`;
     const text = await this.llm.complete(prompt, 1200);
     if (!text) return null;
     try {

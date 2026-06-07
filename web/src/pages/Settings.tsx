@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -32,7 +32,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'models' | 'sync' | 'appearance';
+type Tab = 'account' | 'integrations' | 'models' | 'prompts' | 'sync' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
@@ -40,6 +40,7 @@ export function Settings({ email }: { email?: string }) {
     { id: 'account', label: 'Account', icon: User },
     { id: 'integrations', label: 'Integrations', icon: Plug },
     { id: 'models', label: 'Models', icon: Cpu },
+    { id: 'prompts', label: 'Prompts', icon: MessageSquare },
     { id: 'sync', label: 'Sync', icon: RefreshCw },
     { id: 'appearance', label: 'Appearance', icon: Palette },
   ];
@@ -71,6 +72,7 @@ export function Settings({ email }: { email?: string }) {
       {tab === 'account' && <AccountSection email={email} />}
       {tab === 'integrations' && <IntegrationsSection />}
       {tab === 'models' && <ModelsSection />}
+      {tab === 'prompts' && <PromptsSection />}
       {tab === 'sync' && <SyncSection />}
       {tab === 'appearance' && <AppearanceSection />}
     </div>
@@ -255,6 +257,75 @@ function ModelsSection() {
       <AiModelCard />
       <BookmarksModelCard />
       <TasksModelCard />
+    </div>
+  );
+}
+
+type PromptItem = { key: string; label: string; description: string; default: string; value: string; customized: boolean };
+
+function PromptsSection() {
+  const [items, setItems] = useState<PromptItem[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/prompts').then((x) => x.json()).catch(() => ({ prompts: [] }));
+    const list: PromptItem[] = r.prompts || [];
+    setItems(list);
+    setDrafts(Object.fromEntries(list.map((p) => [p.key, p.value])));
+    setLoaded(true);
+  }
+  useEffect(() => {
+    load();
+  }, []);
+  if (!loaded) return null;
+
+  async function save(key: string) {
+    const r = await fetch(`/api/prompts/${key}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: drafts[key] }) });
+    if (r.ok) {
+      toast('success', 'Prompt saved');
+      load();
+    } else toast('error', 'Could not save');
+  }
+  async function reset(key: string) {
+    const r = await fetch(`/api/prompts/${key}/reset`, { method: 'POST' });
+    if (r.ok) {
+      toast('success', 'Reset to default');
+      const d = await r.json();
+      setDrafts((prev) => ({ ...prev, [key]: d.value }));
+      load();
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="flex items-center gap-2 font-semibold mb-1"><MessageSquare size={18} className="text-emerald-600" /> AI prompts</h2>
+        <p className="text-sm text-zinc-500">Tune the exact instructions the AI follows across the app. Your edits apply immediately; the dynamic data (your dump, your day's tasks, etc.) is added automatically below each instruction. Use <b>Reset</b> any time to restore the original.</p>
+      </section>
+
+      {items.map((p) => {
+        const dirty = drafts[p.key] !== p.value;
+        return (
+          <section key={p.key} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <h3 className="font-semibold text-sm">{p.label} {p.customized && <span className="ml-1 text-[10px] uppercase tracking-wide text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">customized</span>}</h3>
+              <button onClick={() => reset(p.key)} title="Reset to default" className="text-xs text-zinc-400 hover:text-rose-600 inline-flex items-center gap-1"><RotateCcw size={12} /> reset</button>
+            </div>
+            <p className="text-xs text-zinc-500 mb-2">{p.description}</p>
+            <textarea
+              value={drafts[p.key] ?? ''}
+              onChange={(e) => setDrafts((prev) => ({ ...prev, [p.key]: e.target.value }))}
+              rows={Math.min(16, Math.max(5, (drafts[p.key] || '').split('\n').length + 1))}
+              className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-mono leading-relaxed outline-none focus:border-emerald-500"
+            />
+            <div className="mt-2 flex justify-end">
+              <button onClick={() => save(p.key)} disabled={!dirty} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
+            </div>
+          </section>
+        );
+      })}
     </div>
   );
 }

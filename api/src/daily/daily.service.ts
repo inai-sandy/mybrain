@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
@@ -18,6 +19,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     private readonly llm: LlmService,
     private readonly memory: MemoryService,
     private readonly tasks: TasksService,
+    private readonly prompts: PromptsService,
   ) {}
 
   onModuleInit() {
@@ -179,9 +181,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const openList = dayTasks.filter((t) => t.status !== 'done').map((t) => `○ ${t.title}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
     const activityLines = timeline.filter((e) => e.type !== 'task').map((e) => `- ${e.title}`);
 
+    const tmpl = await this.prompts.get('daily.summary');
     const prompt =
-      `Write a warm but honest end-of-day summary addressed to Sandeep ("you"). 2-4 short paragraphs.\n` +
-      `Cover: what he got done, what's still pending, and reflect briefly on his own story of the day if present. Be specific and concrete; do not invent anything not listed. No headings, no markdown bullets — flowing prose.\n\n` +
+      `${tmpl}\n\n` +
       `Tasks done (${st.tasksDone}/${st.tasksTotal}, ~${st.minutesSpent}m):\n${doneList.join('\n') || '(none)'}\n\n` +
       `Still pending:\n${openList.join('\n') || '(none)'}\n\n` +
       `Other activity in the app:\n${activityLines.join('\n') || '(none)'}\n\n` +
@@ -281,15 +283,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Recent day-summaries:\n${summaries.map((s) => '• ' + s.text.slice(0, 200)).join('\n') || '(none)'}\n` +
       (mem ? `Memory hits: ${mem}\n` : '');
 
+    const tmpl = await this.prompts.get('daily.personality');
     const prompt =
-      `You are an HONEST, direct personal coach building a portrait of Sandeep from his own data. Be candid and a little challenging — not flattering. ` +
-      `CRITICAL: every claim MUST be grounded in the EVIDENCE below; cite the specific number/fact in the "evidence" field. Never invent. If evidence is thin for a dimension, omit it.\n` +
-      `Respect prior feedback — KEEP building on what he CONFIRMED, and DO NOT repeat what he REJECTED.\n` +
-      (confirmed.length ? `Confirmed about him:\n${confirmed.join('\n')}\n` : '') +
+      `${tmpl}\n` +
+      (confirmed.length ? `\nConfirmed about him:\n${confirmed.join('\n')}\n` : '') +
       (rejected.length ? `Rejected (do not repeat):\n${rejected.join('\n')}\n` : '') +
-      `\nRespond with ONLY JSON: {"summary":"2-3 sentence honest portrait addressed to 'you'","insights":[{"dimension":"short label","claim":"one direct sentence","evidence":"the concrete data point"}]}\n` +
-      `Give 4-6 insights across dimensions like follow-through, time allocation, estimation, consistency, focus, procrastination, mood patterns.\n\n` +
-      `EVIDENCE:\n${evidence}`;
+      `\nEVIDENCE:\n${evidence}`;
 
     const text = await this.llm.completeWith(await this.tasks.getModel(), prompt, 1500);
     let parsed: { summary?: string; insights?: { dimension: string; claim: string; evidence?: string }[] } | null = null;

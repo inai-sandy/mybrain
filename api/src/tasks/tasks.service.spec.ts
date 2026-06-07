@@ -55,7 +55,8 @@ function makeService(llmText: string | null) {
     },
   };
   const llm: any = { completeWith: async () => llmText, listOpenRouterModels: async () => [] };
-  return { svc: new TasksService(prisma, llm), tasks };
+  const prompts: any = { get: async () => 'Turn this brain-dump into tasks as JSON.' };
+  return { svc: new TasksService(prisma, llm, prompts), tasks };
 }
 
 describe('TasksService', () => {

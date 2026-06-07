@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const DEFAULT_TASKS_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -23,6 +24,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
   ) {}
 
   onModuleInit() {
@@ -106,20 +108,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   // ---- brain dump -> tasks ----
 
   private async craft(dump: string): Promise<{ question?: string; tasks: CraftedTask[] } | null> {
-    const prompt =
-      `You are a sharp daily planner. Turn this raw morning brain-dump into clean, actionable tasks for today.\n` +
-      `Respond with ONLY JSON, no prose, in this exact shape:\n` +
-      `{"question": null, "tasks": [{"title":"...","category":"...","tags":["..."],"priority":"high|medium|low","estimateMin": 30,"note":"...","pinned": false}]}\n\n` +
-      `Rules:\n` +
-      `- Extract concrete, imperative tasks ("Call the accountant", not "accountant"). Merge duplicates and overlapping items.\n` +
-      `- category: a short bucket inferred from the task (e.g. Beakn, Learning, Admin, Health, Personal). 1-2 words.\n` +
-      `- tags: 1-3 lowercase keywords.\n` +
-      `- priority: high / medium / low based on urgency + importance.\n` +
-      `- estimateMin: a realistic time estimate in whole minutes.\n` +
-      `- note: optional one-line context pulled from the dump (omit if none).\n` +
-      `- pinned: mark ONLY the 1-3 most important "must-do today" tasks as true.\n` +
-      `- If the dump is too vague or empty to extract any real task, return {"question":"<one short clarifying question>","tasks":[]}.\n\n` +
-      `Brain-dump:\n${dump.slice(0, 8000)}`;
+    const tmpl = await this.prompts.get('tasks.dump');
+    const prompt = `${tmpl}\n\nBrain-dump:\n${dump.slice(0, 8000)}`;
     const text = await this.llm.completeWith(await this.getModel(), prompt, 2000);
     if (!text) return null;
     try {

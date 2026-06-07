@@ -99,7 +99,8 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }) };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc), stories, notes, tasks, summaries, dumps, insights, enqueued };
+  const prompts: any = { get: async (k: string) => `[${k} instruction]` };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dumps, insights, enqueued };
 }
 
 describe('DailyService', () => {
