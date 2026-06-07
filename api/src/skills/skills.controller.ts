@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { SkillsService } from './skills.service';
 
 @Controller('skills')
@@ -35,6 +37,29 @@ export class SkillsController {
     const r = await this.skills.setUsing(id, !!body?.inUse);
     if (!r) throw new BadRequestException('Skill not found');
     return r;
+  }
+
+  @Post(':id/share')
+  async share(@Param('id') id: string, @Body() body: { shared?: boolean }) {
+    const r = await this.skills.setShared(id, body?.shared ?? true);
+    if (!r) throw new BadRequestException('Skill not found');
+    return r;
+  }
+
+  @Post(':id/upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async upload(@Param('id') id: string, @UploadedFile() file: any) {
+    if (!file?.buffer) throw new BadRequestException('No file provided');
+    const r = await this.skills.addFile(id, file.buffer, String(file.originalname || 'skill.md'));
+    if (!r) throw new BadRequestException('Skill not found');
+    return r;
+  }
+
+  @Get(':id/download')
+  async download(@Param('id') id: string, @Res() res: Response) {
+    const f = await this.skills.fileFor(id);
+    if (!f) throw new NotFoundException('No file for this skill');
+    res.download(f.filePath, f.name);
   }
 
   @Delete(':id')

@@ -12,23 +12,28 @@ export function ShareDialog({
   initialShared,
   onClose,
   onChanged,
+  shareEndpoint,
+  publicLink,
 }: {
   id: string;
   title: string;
   initialShared: boolean;
   onClose: () => void;
   onChanged?: (shared: boolean) => void;
+  shareEndpoint?: string;
+  publicLink?: string;
 }) {
   const [shared, setShared] = useState(initialShared);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const toast = useToast();
-  const url = `${location.origin}/view/${id}`;
+  const url = publicLink || `${location.origin}/view/${id}`;
+  const endpoint = shareEndpoint || `/api/items/${id}/share`;
 
   async function setSharedState(next: boolean) {
     setBusy(true);
     try {
-      const r = await fetch(`/api/items/${id}/share`, {
+      const r = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ shared: next }),

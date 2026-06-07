@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Wand2, Check, Circle, Pencil, Download } from 'lucide-react';
+import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload } from 'lucide-react';
+import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
 
 export function SkillDetail() {
@@ -11,6 +12,9 @@ export function SkillDetail() {
   const [eTitle, setETitle] = useState('');
   const [eDesc, setEDesc] = useState('');
   const [eUrl, setEUrl] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   function load() {
@@ -46,9 +50,26 @@ export function SkillDetail() {
       toast('success', 'Skill updated');
     } else toast('error', 'Could not save');
   }
+  async function onUpload(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`/api/skills/${id}/upload`, { method: 'POST', body: fd });
+      if (r.ok) {
+        toast('success', 'File attached');
+        load();
+      } else toast('error', (await r.json().catch(() => ({}))).message || 'Upload failed');
+    } catch {
+      toast('error', 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
 
   const inp = 'w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
-  const done = d?.inUse;
+  const using = d?.inUse;
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
@@ -76,19 +97,24 @@ export function SkillDetail() {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {!editing && (
-                <button onClick={startEdit} title="Edit" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-emerald-600 hover:border-emerald-500">
-                  <Pencil size={15} />
-                </button>
+                <>
+                  <button onClick={() => setSharing(true)} title="Share" className={'p-2 rounded-lg border ' + (d.shared ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-emerald-600 hover:border-emerald-500')}>
+                    <Share2 size={15} />
+                  </button>
+                  <button onClick={startEdit} title="Edit" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-emerald-600 hover:border-emerald-500">
+                    <Pencil size={15} />
+                  </button>
+                </>
               )}
-              <button onClick={toggleUsing} className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (done ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600')}>
-                {done ? <><Check size={15} /> Using</> : <><Circle size={15} /> Mark as using</>}
+              <button onClick={toggleUsing} className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (using ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600')}>
+                {using ? <><Check size={15} /> Using</> : <><Circle size={15} /> Mark as using</>}
               </button>
             </div>
           </header>
 
           {editing ? (
             <div className="space-y-3">
-              <label className="block text-xs text-zinc-500">What it does / why<textarea value={eDesc} onChange={(e) => setEDesc(e.target.value)} rows={4} className={inp + ' mt-1'} /></label>
+              <label className="block text-xs text-zinc-500">Description<textarea value={eDesc} onChange={(e) => setEDesc(e.target.value)} rows={4} className={inp + ' mt-1'} /></label>
               <label className="block text-xs text-zinc-500">Download / source link<input value={eUrl} onChange={(e) => setEUrl(e.target.value)} className={inp + ' mt-1'} /></label>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEditing(false)} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
@@ -98,11 +124,24 @@ export function SkillDetail() {
           ) : (
             <>
               {d.description && <p className="border-l-4 border-violet-500 bg-violet-500/5 rounded-r-lg p-4 text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">{d.description}</p>}
-              {d.downloadUrl && (
-                <a href={d.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 break-all">
-                  <Download size={14} /> Download / open source
-                </a>
-              )}
+
+              <div className="flex flex-wrap gap-2">
+                {d.hasFile && (
+                  <a href={`/api/skills/${id}/download`} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">
+                    <Download size={14} /> Download skill
+                  </a>
+                )}
+                {d.downloadUrl && (
+                  <a href={d.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 break-all">
+                    <Download size={14} /> Open source link
+                  </a>
+                )}
+                <button onClick={() => fileRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50">
+                  <Upload size={14} /> {uploading ? 'Uploading…' : d.hasFile ? 'Replace file' : 'Upload .zip/.md'}
+                </button>
+                <input ref={fileRef} type="file" accept=".zip,.md,.markdown,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); }} />
+              </div>
+
               {d.content && (
                 <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4">
                   <h2 className="font-semibold text-sm mb-2">SKILL.md</h2>
@@ -114,6 +153,18 @@ export function SkillDetail() {
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
+
+      {sharing && d && (
+        <ShareDialog
+          id={d.id}
+          title={d.title}
+          initialShared={!!d.shared}
+          shareEndpoint={`/api/skills/${d.id}/share`}
+          publicLink={`${location.origin}/skill/${d.id}`}
+          onClose={() => setSharing(false)}
+          onChanged={(s) => setD((prev: any) => (prev ? { ...prev, shared: s } : prev))}
+        />
+      )}
     </div>
   );
 }

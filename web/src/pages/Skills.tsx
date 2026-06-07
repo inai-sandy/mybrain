@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wand2, Plus, X, Check, Circle, Download } from 'lucide-react';
+import { Wand2, Plus, X, Check, Circle, Download, Share2 } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
+import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
 
 type Skill = {
@@ -13,6 +14,7 @@ type Skill = {
   downloadUrl: string | null;
   hasFile: boolean;
   inUse: boolean | null;
+  shared: boolean;
   createdAt: string;
 };
 
@@ -111,6 +113,7 @@ export function Skills() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [sharing, setSharing] = useState<Skill | null>(null);
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -158,13 +161,18 @@ export function Skills() {
             <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{s.title}</h3>
             <p className="mt-0.5 text-xs text-zinc-400 capitalize">{s.origin} · {s.platform === 'chat' ? 'Claude Chat' : 'Claude Code'}</p>
           </button>
-          <button
-            onClick={() => toggleUsing(s)}
-            title={s.inUse ? 'Using' : 'Mark as using'}
-            className={'shrink-0 p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (s.inUse ? 'text-emerald-600' : 'text-zinc-400 hover:text-emerald-600')}
-          >
-            {s.inUse ? <Check size={16} /> : <Circle size={16} />}
-          </button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button onClick={() => setSharing(s)} title="Share" className={'p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (s.shared ? 'text-emerald-600' : 'text-zinc-400 hover:text-emerald-600')}>
+              <Share2 size={16} />
+            </button>
+            <button
+              onClick={() => toggleUsing(s)}
+              title={s.inUse ? 'Using' : 'Mark as using'}
+              className={'p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (s.inUse ? 'text-emerald-600' : 'text-zinc-400 hover:text-emerald-600')}
+            >
+              {s.inUse ? <Check size={16} /> : <Circle size={16} />}
+            </button>
+          </div>
         </div>
         {s.description && (
           <button onClick={() => navigate(`/skills/${s.id}`)} className="text-left">
@@ -172,12 +180,14 @@ export function Skills() {
           </button>
         )}
         <div className="mt-auto pt-3 flex items-center justify-between text-xs">
-          {s.downloadUrl ? (
-            <a href={s.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-600 hover:underline">
+          {s.hasFile ? (
+            <a href={`/api/skills/${s.id}/download`} className="inline-flex items-center gap-1 text-emerald-600 hover:underline">
               <Download size={13} /> Download
             </a>
-          ) : s.hasFile ? (
-            <span className="inline-flex items-center gap-1 text-emerald-600"><Download size={13} /> File</span>
+          ) : s.downloadUrl ? (
+            <a href={s.downloadUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-600 hover:underline">
+              <Download size={13} /> Open link
+            </a>
           ) : (
             <span className="text-zinc-400">No link</span>
           )}
@@ -218,6 +228,17 @@ export function Skills() {
       </button>
 
       {adding && <AddSkillModal onClose={() => setAdding(false)} onCreated={load} />}
+      {sharing && (
+        <ShareDialog
+          id={sharing.id}
+          title={sharing.title}
+          initialShared={sharing.shared}
+          shareEndpoint={`/api/skills/${sharing.id}/share`}
+          publicLink={`${location.origin}/skill/${sharing.id}`}
+          onClose={() => setSharing(null)}
+          onChanged={() => load()}
+        />
+      )}
     </div>
   );
 }
