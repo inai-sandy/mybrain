@@ -131,7 +131,10 @@ export function Ideas() {
   function card(it: Idea) {
     return (
       <div className={'group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 flex flex-col transition-all hover:border-emerald-500/40 hover:shadow-md ' + (it.status === 'done' ? 'opacity-70' : '')}>
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 rounded-lg p-2 bg-amber-500/10 text-amber-500">
+            <Lightbulb size={18} />
+          </div>
           <button onClick={() => navigate(`/ideas/${it.id}`)} className="min-w-0 flex-1 text-left">
             <h3 className={'font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600 ' + (it.status === 'done' ? 'line-through text-zinc-400' : '')}>{it.title}</h3>
           </button>
