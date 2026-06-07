@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, AlertTriangle } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2 } from 'lucide-react';
 import { DataTable, Column, Filter } from '../ui/DataTable';
+import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
 
 type BM = {
@@ -12,7 +13,12 @@ type BM = {
   tags: string[];
   readFailed: boolean;
   createdAt: string;
+  supermemory: boolean;
+  rag: boolean;
+  chunked: boolean;
 };
+
+const isYouTube = (u: string | null) => !!u && /youtube\.com|youtu\.be/.test(u);
 
 function shortDate(iso: string): string {
   const d = new Date(iso);
@@ -35,28 +41,38 @@ function Chip({ t }: { t: string }) {
 
 function Card({ b, onOpen }: { b: BM; onOpen: (id: string) => void }) {
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
+  const yt = isYouTube(b.sourceUrl);
+  const Icon = yt ? Youtube : Link2;
+  const chip = yt ? 'text-red-500 bg-red-500/10' : 'text-emerald-500 bg-emerald-500/10';
+  const date = shortDate(b.createdAt);
   return (
     <div className="group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
-      <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="min-w-0">
-        <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600 inline-flex items-start gap-1">
-          <span className="min-w-0">{b.title}</span>
-          <ExternalLink size={13} className="mt-1 shrink-0 opacity-40" />
-        </h3>
-      </a>
-      {b.readFailed && (
-        <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-600">
-          <AlertTriangle size={12} /> couldn't fully read
-        </span>
-      )}
-      {b.summary && <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400 line-clamp-3">{b.summary}</p>}
+      {/* Title row — source chip + title (links to original) + meta line (matches the document card) */}
+      <div className="flex items-start gap-3">
+        <div className={'shrink-0 rounded-lg p-2 ' + chip}>
+          <Icon size={18} />
+        </div>
+        <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+          <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{b.title}</h3>
+          <p className="mt-0.5 text-xs text-zinc-400">
+            {yt ? 'YouTube' : 'Link'}
+            {date && <> · {date}</>}
+            {b.readFailed && <> · <span className="text-amber-600">couldn't read</span></>}
+          </p>
+        </a>
+      </div>
+
+      {b.summary && <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 line-clamp-3">{b.summary}</p>}
+
       {b.tags?.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {b.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
-          {b.tags.length > 4 && <Chip t={`+${b.tags.length - 4}`} />}
+          {b.tags.slice(0, 3).map((t) => <Chip key={t} t={t} />)}
+          {b.tags.length > 3 && <Chip t={`+${b.tags.length - 3}`} />}
         </div>
       )}
-      <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
-        <span className="text-xs text-zinc-400">{shortDate(b.createdAt)}</span>
+
+      <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
+        <StoreBadges supermemory={b.supermemory} rag={b.rag} chunked={b.chunked} />
         <div className="flex items-center gap-0.5 shrink-0">
           <button onClick={() => onOpen(b.id)} title="Open summary in app" className={iconBtn}>
             <Eye size={16} />

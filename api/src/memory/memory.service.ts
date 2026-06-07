@@ -116,6 +116,15 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return grouped.map((g) => ({ status: g.status, count: g._count._all }));
   }
 
+  /** Reset failed outbox rows back to pending so the drain reprocesses them. */
+  async retryFailed(): Promise<{ retried: number }> {
+    const res = await this.prisma.memoryOutbox.updateMany({
+      where: { status: 'failed' },
+      data: { status: 'pending', attempts: 0, lastError: null },
+    });
+    return { retried: res.count };
+  }
+
   /** Search both stores (for verification / the search feature). */
   async searchBoth(q: string) {
     const [sm, rag] = await Promise.allSettled([this.sm.search(q, 3), this.rag.search(q, 3)]);
