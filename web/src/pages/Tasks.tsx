@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Brain, Plus, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Sparkles, Bell, RotateCcw } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { useDictation } from '../ui/useDictation';
+import { StorySection } from './DailyStory';
 
 type Task = {
   id: string;
@@ -43,39 +45,6 @@ function mins(n?: number | null): string {
   const h = Math.floor(n / 60);
   const m = n % 60;
   return m ? `${h}h ${m}m` : `${h}h`;
-}
-
-// ---- voice-to-text (browser Web Speech API; graceful if unsupported) ----
-function useDictation(onText: (chunk: string) => void) {
-  const recRef = useRef<any>(null);
-  const [listening, setListening] = useState(false);
-  const SR = typeof window !== 'undefined' ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition : null;
-  const supported = !!SR;
-
-  function toggle() {
-    if (!supported) return;
-    if (listening) {
-      recRef.current?.stop();
-      return;
-    }
-    const rec = new SR();
-    rec.lang = 'en-US';
-    rec.interimResults = false;
-    rec.continuous = true;
-    rec.onresult = (e: any) => {
-      let chunk = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) chunk += e.results[i][0].transcript;
-      }
-      if (chunk.trim()) onText(chunk.trim() + ' ');
-    };
-    rec.onend = () => setListening(false);
-    rec.onerror = () => setListening(false);
-    recRef.current = rec;
-    rec.start();
-    setListening(true);
-  }
-  return { supported, listening, toggle };
 }
 
 function DumpModal({ onClose, onDone, initialQuestion }: { onClose: () => void; onDone: () => void; initialQuestion: string | null }) {
@@ -458,6 +427,9 @@ export function Tasks() {
         pageSize={20}
         emptyText={data?.dumped ? 'All clear — no tasks today.' : 'No tasks yet — dump your brain to build today’s list.'}
       />
+
+      {/* Daytime notes + nightly story */}
+      <StorySection />
 
       {/* Floating actions */}
       <div className="fixed right-4 bottom-20 md:bottom-6 md:right-6 z-30 flex flex-col items-end gap-3">

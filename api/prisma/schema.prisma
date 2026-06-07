@@ -98,6 +98,26 @@ model BrainDump {
   createdAt   DateTime @default(now())
 }
 
+/// The mandatory nightly story — the user's free narrative of the day (problems, joy, events).
+model Story {
+  id        String   @id @default(uuid())
+  day       String // local day key YYYY-MM-DD
+  rawText   String
+  source    String   @default("app") // app | telegram | voice
+  mood      String? // optional one-tap mood/energy
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// A quick note the user speaks/types during the day (daytime oral capture).
+model DayNote {
+  id        String   @id @default(uuid())
+  day       String // local day key YYYY-MM-DD
+  text      String
+  source    String   @default("app") // app | telegram | voice
+  createdAt DateTime @default(now())
+}
+
 /// A task in the daily loop.
 model Task {
   id            String    @id @default(uuid())

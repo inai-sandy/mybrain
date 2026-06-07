@@ -9,10 +9,11 @@ import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { IdeasModule } from './ideas/ideas.module';
 import { SkillsModule } from './skills/skills.module';
 import { TasksModule } from './tasks/tasks.module';
+import { DailyModule } from './daily/daily.module';
 import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule],
   controllers: [HealthController],
 })
 export class AppModule {}

@@ -1,0 +1,176 @@
+import { useEffect, useState } from 'react';
+import { Moon, X, Mic, BookOpen, Plus, Trash2, MessageSquare } from 'lucide-react';
+import { useToast } from '../ui/Toast';
+import { useDictation } from '../ui/useDictation';
+
+type Story = { id: string; text: string; mood?: string | null; createdAt: string; updatedAt?: string };
+type Note = { id: string; text: string; source: string; createdAt: string };
+type DailyToday = { day: string; storyDone: boolean; story: Story | null; notes: Note[] };
+
+const MOODS = ['😣 Rough', '😐 Okay', '🙂 Good', '🤩 Great'];
+
+function timeOf(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function StoryModal({ initial, onClose, onSaved }: { initial: Story | null; onClose: () => void; onSaved: () => void }) {
+  const [text, setText] = useState(initial?.text || '');
+  const [mood, setMood] = useState(initial?.mood || '');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const { supported, listening, toggle } = useDictation((chunk) => setText((t) => (t ? t + ' ' : '') + chunk));
+
+  async function save() {
+    if (!text.trim()) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/daily/story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mood: mood || undefined }) });
+      if (r.ok) {
+        toast('success', 'Story saved — sleep well 🌙');
+        onSaved();
+        onClose();
+      } else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
+    } catch {
+      toast('error', 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> Tonight's story</h3>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">Tell the story of your day — the problems, the wins, what happened. Type or speak it. This is how the app comes to understand you.</p>
+        <div className="relative">
+          <textarea
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            placeholder="Today started slow… the proposal took longer than I thought but I finally cracked the pricing section. Felt good. Skipped the gym again though…"
+            className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-12 text-sm outline-none focus:border-indigo-500"
+          />
+          {supported && (
+            <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-indigo-500')}>
+              <Mic size={16} />
+            </button>
+          )}
+        </div>
+        <div className="mt-3">
+          <p className="text-xs text-zinc-500 mb-1.5">How did the day feel?</p>
+          <div className="flex flex-wrap gap-2">
+            {MOODS.map((m) => (
+              <button key={m} onClick={() => setMood(mood === m ? '' : m)} className={'rounded-full border px-3 py-1 text-sm ' + (mood === m ? 'border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+          <button onClick={save} disabled={busy || !text.trim()} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+            {busy ? 'Saving…' : 'Save story'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Nightly story card + daytime quick-notes, shown on the Today page. */
+export function StorySection() {
+  const [data, setData] = useState<DailyToday | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [note, setNote] = useState('');
+  const toast = useToast();
+  const { supported, listening, toggle } = useDictation((chunk) => setNote((t) => (t ? t + ' ' : '') + chunk));
+
+  async function load() {
+    try {
+      const r = await fetch('/api/daily/today');
+      if (r.ok) setData(await r.json());
+    } catch {
+      /* ignore */
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function addNote() {
+    if (!note.trim()) return;
+    const r = await fetch('/api/daily/note', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: note }) });
+    if (r.ok) {
+      setNote('');
+      load();
+    } else toast('error', 'Could not save note');
+  }
+  async function delNote(id: string) {
+    const r = await fetch(`/api/daily/note/${id}`, { method: 'DELETE' });
+    if (r.ok) load();
+  }
+
+  const story = data?.story;
+  const notes = data?.notes || [];
+
+  return (
+    <div className="space-y-3">
+      {/* Daytime quick notes */}
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+        <h2 className="flex items-center gap-2 font-semibold text-sm mb-2"><MessageSquare size={15} className="text-emerald-500" /> Quick notes <span className="text-xs font-normal text-zinc-400">— capture what you're doing</span></h2>
+        <div className="flex items-center gap-2">
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addNote()}
+            placeholder="Speak or type a quick note…"
+            className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          />
+          {supported && (
+            <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'p-2 rounded-lg ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-emerald-600')}>
+              <Mic size={16} />
+            </button>
+          )}
+          <button onClick={addNote} disabled={!note.trim()} className="p-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"><Plus size={16} /></button>
+        </div>
+        {notes.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {notes.map((n) => (
+              <li key={n.id} className="group flex items-start gap-2 text-sm">
+                <span className="text-[11px] text-zinc-400 tabular-nums pt-0.5 w-12 shrink-0">{timeOf(n.createdAt)}</span>
+                <span className="flex-1 text-zinc-700 dark:text-zinc-300">{n.text}</span>
+                <button onClick={() => delNote(n.id)} className="opacity-0 group-hover:opacity-100 p-0.5 text-zinc-400 hover:text-rose-600"><Trash2 size={13} /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Nightly story */}
+      {story ? (
+        <section className="rounded-xl border border-indigo-300/40 dark:border-indigo-500/30 bg-indigo-500/5 p-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <h2 className="flex items-center gap-2 font-semibold text-sm"><BookOpen size={15} className="text-indigo-400" /> Tonight's story {story.mood && <span className="text-xs font-normal">· {story.mood}</span>}</h2>
+            <button onClick={() => setEditing(true)} className="text-xs text-indigo-500 hover:underline">Edit</button>
+          </div>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap line-clamp-4">{story.text}</p>
+        </section>
+      ) : (
+        <button onClick={() => setEditing(true)} className="w-full rounded-xl border border-dashed border-indigo-400/40 bg-indigo-500/5 hover:bg-indigo-500/10 p-4 text-left transition-colors flex items-center gap-3">
+          <Moon className="text-indigo-400 shrink-0" size={22} />
+          <div>
+            <div className="font-semibold text-sm">🌙 Tell tonight's story</div>
+            <p className="text-xs text-zinc-500">Your account of the day — type or speak it. This is how the AI learns who you are.</p>
+          </div>
+        </button>
+      )}
+
+      {editing && <StoryModal initial={story} onClose={() => setEditing(false)} onSaved={load} />}
+    </div>
+  );
+}
