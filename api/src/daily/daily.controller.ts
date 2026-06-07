@@ -41,6 +41,24 @@ export class DailyController {
     return this.daily.submitStory(body.text, body.source || 'app', body.mood);
   }
 
+  // ---- agentic personality engine + Validate ----
+  @Get('personality')
+  async personality() {
+    return this.daily.getPersonality();
+  }
+
+  @Post('personality/regenerate')
+  async regeneratePersonality() {
+    return this.daily.regeneratePersonality();
+  }
+
+  @Post('personality/insight/:id')
+  async validateInsight(@Param('id') id: string, @Body() body: { status?: string }) {
+    const r = await this.daily.validateInsight(id, body?.status || 'pending');
+    if (!r) throw new BadRequestException('Insight not found');
+    return r;
+  }
+
   @Post('note')
   async note(@Body() body: { text?: string; source?: string }) {
     if (!body?.text?.trim()) throw new BadRequestException('Add a note');

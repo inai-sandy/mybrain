@@ -121,6 +121,17 @@ model DaySummary {
   updatedAt     DateTime @updatedAt
 }
 
+/// One evidence-grounded read of the user's personality — confirmable in the Validate panel.
+model PersonalityInsight {
+  id         String   @id @default(uuid())
+  generation Int      @default(1) // bumped each regeneration
+  dimension  String // e.g. "Follow-through", "Peak hours", "Procrastination"
+  claim      String // the honest observation
+  evidence   String? // the concrete data it's grounded in
+  status     String   @default("pending") // pending | confirmed | rejected
+  createdAt  DateTime @default(now())
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())

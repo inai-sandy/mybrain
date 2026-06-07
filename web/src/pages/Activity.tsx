@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
@@ -319,8 +319,107 @@ function CalendarView({ onPick }: { onPick: (day: string) => void }) {
   );
 }
 
+// ---------- Me (personality + Validate) ----------
+type Insight = { id: string; dimension: string; claim: string; evidence?: string | null; status: 'pending' | 'confirmed' | 'rejected' };
+type Persona = { daysCovered: number; minDays: number; unlocked: boolean; summary: string | null; generation: number; generatedAt: string | null; lastRun: string | null; insights: Insight[] };
+
+function MeView() {
+  const [p, setP] = useState<Persona | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/daily/personality');
+    if (r.ok) setP(await r.json());
+  }
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function regenerate() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/daily/personality/regenerate', { method: 'POST' });
+      if (r.ok) {
+        setP(await r.json());
+        toast('success', 'Profile refreshed');
+      } else toast('error', 'Could not refresh');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function validate(id: string, status: 'confirmed' | 'rejected') {
+    const cur = p?.insights.find((i) => i.id === id);
+    const next = cur?.status === status ? 'pending' : status;
+    const r = await fetch(`/api/daily/personality/insight/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
+    if (r.ok) setP((prev) => (prev ? { ...prev, insights: prev.insights.map((i) => (i.id === id ? { ...i, status: next as any } : i)) } : prev));
+  }
+
+  if (!p) return <p className="text-sm text-zinc-400">Loading…</p>;
+
+  if (!p.unlocked) {
+    const pct = Math.round((p.daysCovered / p.minDays) * 100);
+    return (
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 text-center">
+        <Fingerprint className="mx-auto text-emerald-500 mb-2" size={28} />
+        <h2 className="font-semibold">Getting to know you</h2>
+        <p className="text-sm text-zinc-500 mt-1">Your honest personality read unlocks after <b>{p.minDays} days</b> of real use — so it's built on evidence, not guesswork.</p>
+        <div className="mt-4 h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden max-w-xs mx-auto">
+          <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+        </div>
+        <p className="text-xs text-zinc-400 mt-2">{p.daysCovered} / {p.minDays} active days</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-gradient-to-br from-emerald-500/5 to-transparent p-5">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="flex items-center gap-2 font-semibold"><Fingerprint size={17} className="text-emerald-500" /> Your portrait</h2>
+          <button onClick={regenerate} disabled={busy} className="text-xs text-zinc-400 hover:text-emerald-600 inline-flex items-center gap-1"><RefreshCw size={12} className={busy ? 'animate-spin' : ''} /> refresh</button>
+        </div>
+        {p.summary ? (
+          <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap">{p.summary}</p>
+        ) : (
+          <div className="text-sm text-zinc-500">
+            <p className="mb-3">Enough data to build your profile. Generate it now.</p>
+            <button onClick={regenerate} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{busy ? 'Thinking…' : 'Build my profile'}</button>
+          </div>
+        )}
+        {p.generatedAt && <p className="text-[11px] text-zinc-400 mt-3">Updated {new Date(p.generatedAt).toLocaleDateString()} · refreshes every 3 days</p>}
+      </section>
+
+      {p.insights.length > 0 && (
+        <section>
+          <h2 className="font-semibold text-sm mb-1 text-zinc-500">Is this you?</h2>
+          <p className="text-xs text-zinc-400 mb-3">Confirm or reject each read so it sharpens over time and never drifts.</p>
+          <ul className="space-y-2.5">
+            {p.insights.map((i) => (
+              <li key={i.id} className={'rounded-xl border bg-white dark:bg-zinc-900 p-3.5 ' + (i.status === 'confirmed' ? 'border-emerald-500/50' : i.status === 'rejected' ? 'border-rose-500/40 opacity-70' : 'border-zinc-200 dark:border-zinc-800')}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-wide text-emerald-600 font-medium">{i.dimension}</div>
+                    <div className={'text-sm font-medium mt-0.5 ' + (i.status === 'rejected' ? 'line-through text-zinc-400' : '')}>{i.claim}</div>
+                    {i.evidence && <div className="text-xs text-zinc-400 mt-1">📊 {i.evidence}</div>}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => validate(i.id, 'confirmed')} title="Correct" className={'p-1.5 rounded-md ' + (i.status === 'confirmed' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600')}><Check size={15} /></button>
+                    <button onClick={() => validate(i.id, 'rejected')} title="Not me" className={'p-1.5 rounded-md ' + (i.status === 'rejected' ? 'bg-rose-600 text-white' : 'text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-600')}><X size={15} /></button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
 // ---------- Shell with tabs ----------
-type TabId = 'day' | 'insights' | 'calendar';
+type TabId = 'day' | 'insights' | 'calendar' | 'me';
 
 export function Activity() {
   const [tab, setTab] = useState<TabId>('day');
@@ -330,6 +429,7 @@ export function Activity() {
     { id: 'day', label: 'Day', icon: ListTree },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
     { id: 'calendar', label: 'Calendar', icon: CalendarDays },
+    { id: 'me', label: 'Me', icon: Fingerprint },
   ];
 
   function openDay(d: string) {
@@ -355,6 +455,7 @@ export function Activity() {
       {tab === 'day' && <DayView day={day} onDay={setDay} />}
       {tab === 'insights' && <InsightsView />}
       {tab === 'calendar' && <CalendarView onPick={openDay} />}
+      {tab === 'me' && <MeView />}
     </div>
   );
 }

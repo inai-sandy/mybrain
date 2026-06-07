@@ -6,10 +6,18 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const tasks: any[] = [];
   const summaries: any[] = [];
   const dumps: any[] = [];
+  const insights: any[] = [];
+  const settings: Record<string, string> = {};
   let seq = 0;
   const enqueued: any[] = [];
   const prisma: any = {
-    setting: { findUnique: async () => null },
+    setting: {
+      findUnique: async ({ where }: any) => (settings[where.key] !== undefined ? { key: where.key, value: settings[where.key] } : null),
+      upsert: async ({ where, create, update }: any) => {
+        settings[where.key] = update?.value ?? create.value;
+        return { key: where.key, value: settings[where.key] };
+      },
+    },
     story: {
       findFirst: async ({ where }: any) => stories.filter((s) => s.day === where.day).slice(-1)[0] || null,
       findMany: async ({ where }: any = {}) => stories.filter((s) => !where?.day?.gte || s.day >= where.day.gte),
@@ -52,6 +60,21 @@ function makeService(opts: { llmText?: string | null } = {}) {
     item: { findMany: async () => [] },
     idea: { findMany: async () => [] },
     skill: { findMany: async () => [] },
+    personalityInsight: {
+      findMany: async ({ where }: any = {}) => insights.filter((i) => (!where?.status?.not || i.status !== where.status.not) && (where?.generation === undefined || i.generation === where.generation)),
+      findFirst: async () => insights.slice().sort((a, b) => b.generation - a.generation)[0] || null,
+      findUnique: async ({ where }: any) => insights.find((i) => i.id === where.id) || null,
+      create: async ({ data }: any) => {
+        const row = { id: `pi${++seq}`, createdAt: new Date(), status: 'pending', ...data };
+        insights.push(row);
+        return row;
+      },
+      update: async ({ where, data }: any) => {
+        const i = insights.find((x) => x.id === where.id);
+        Object.assign(i, data);
+        return i;
+      },
+    },
     brainDump: {
       findMany: async ({ where }: any = {}) => {
         const filtered = dumps.filter((d) => !where?.day?.gte || d.day >= where.day.gte);
@@ -59,6 +82,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
     daySummary: {
+      findMany: async () => summaries.slice(),
       findUnique: async ({ where }: any) => summaries.find((s) => s.day === where.day) || null,
       upsert: async ({ where, create, update }: any) => {
         const ex = summaries.find((s) => s.day === where.day);
@@ -75,7 +99,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }) };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc), stories, notes, tasks, summaries, dumps, enqueued };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc), stories, notes, tasks, summaries, dumps, insights, enqueued };
 }
 
 describe('DailyService', () => {
@@ -150,6 +174,38 @@ describe('DailyService', () => {
     expect(d.categoryTime[0].category).toBe('Beakn'); // 60 > 20
     expect(d.streak).toBe(2); // today + yesterday
     expect(d.estimateVsActual.actual).toBe(80);
+  });
+
+  it('keeps the personality read locked until 10 active days', async () => {
+    const { svc, dumps } = makeService();
+    for (let i = 0; i < 4; i++) dumps.push({ day: `2026-05-0${i + 1}` });
+    const p = await svc.getPersonality();
+    expect(p.daysCovered).toBe(4);
+    expect(p.unlocked).toBe(false);
+    expect(p.insights).toHaveLength(0);
+  });
+
+  it('builds evidence-grounded insights once unlocked, and lets the user validate them', async () => {
+    const persona = JSON.stringify({
+      summary: 'You ship consistently but dodge admin work.',
+      insights: [
+        { dimension: 'Follow-through', claim: 'You finish most of what you plan.', evidence: '67% follow-through' },
+        { dimension: 'Procrastination', claim: 'You avoid admin tasks.', evidence: 'admin carried 3 days' },
+      ],
+    });
+    const { svc, dumps, insights } = makeService({ llmText: persona });
+    for (let i = 1; i <= 12; i++) dumps.push({ day: `2026-05-${String(i).padStart(2, '0')}` });
+
+    const p = await svc.regeneratePersonality();
+    expect(p.unlocked).toBe(true);
+    expect(p.summary).toContain('admin');
+    expect(p.insights.length).toBe(2);
+
+    const id = insights[0].id;
+    const v = await svc.validateInsight(id, 'confirmed');
+    expect(v!.status).toBe('confirmed');
+    const after = await svc.getPersonality();
+    expect(after.insights.find((x: any) => x.id === id)!.status).toBe('confirmed');
   });
 
   it('calendar reports per-day done/total plus dumped/story flags', async () => {

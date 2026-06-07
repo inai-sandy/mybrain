@@ -21,7 +21,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.tick = setInterval(() => this.summaryTick().catch(() => undefined), 60_000);
+    this.tick = setInterval(() => {
+      this.summaryTick().catch(() => undefined);
+      this.personalityTick().catch(() => undefined);
+    }, 60_000);
   }
   onModuleDestroy() {
     if (this.tick) clearInterval(this.tick);
@@ -209,6 +212,140 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       /* ignore */
     }
     return { day: s.day, text: s.text, stats, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+
+  // ---- agentic personality engine ----
+  private readonly PERSONALITY_MIN_DAYS = 10;
+  private readonly PERSONALITY_EVERY_MS = 3 * 24 * 60 * 60 * 1000; // every 3 days
+
+  /** Distinct days the user has actually engaged (dumped, told a story, or finished a task). */
+  async daysCovered(): Promise<number> {
+    const [dumps, stories, doneTasks] = await Promise.all([
+      this.prisma.brainDump.findMany({ select: { day: true } }),
+      this.prisma.story.findMany({ select: { day: true } }),
+      this.prisma.task.findMany({ where: { status: 'done' }, select: { day: true } }),
+    ]);
+    const set = new Set<string>();
+    for (const r of [...dumps, ...stories, ...doneTasks]) if (r.day) set.add(r.day);
+    return set.size;
+  }
+
+  /** Re-run the personality read every 3 days once there's enough data. */
+  async personalityTick(): Promise<void> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'personality.lastRun' } });
+    if (row?.value) {
+      const last = new Date(row.value).getTime();
+      if (Number.isFinite(last) && Date.now() - last < this.PERSONALITY_EVERY_MS) return;
+    }
+    if ((await this.daysCovered()) < this.PERSONALITY_MIN_DAYS) return;
+    await this.regeneratePersonality().catch(() => undefined);
+  }
+
+  private async setSetting(key: string, value: string) {
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  }
+
+  /** The agentic read: gather evidence (DB + memory), respect prior validations, ask the Honest-coach model. */
+  async regeneratePersonality() {
+    const covered = await this.daysCovered();
+    await this.setSetting('personality.lastRun', new Date().toISOString());
+    if (covered < this.PERSONALITY_MIN_DAYS) {
+      return this.getPersonality();
+    }
+
+    const [dash, stories, summaries, prior] = await Promise.all([
+      this.dashboard(30),
+      this.prisma.story.findMany({ orderBy: { createdAt: 'desc' }, take: 14 }),
+      this.prisma.daySummary.findMany({ orderBy: { day: 'desc' }, take: 14 }),
+      this.prisma.personalityInsight.findMany({ where: { status: { not: 'pending' } }, orderBy: { createdAt: 'desc' }, take: 30 }),
+    ]);
+
+    // Agentic step: pull broader context from memory (best-effort).
+    let mem = '';
+    try {
+      const s: any = await this.memory.searchBoth('Sandeep work habits focus follow-through procrastination patterns mood');
+      mem = JSON.stringify(s).slice(0, 1500);
+    } catch {
+      /* ignore */
+    }
+
+    const confirmed = prior.filter((p) => p.status === 'confirmed').map((p) => `+ ${p.claim}`);
+    const rejected = prior.filter((p) => p.status === 'rejected').map((p) => `- ${p.claim}`);
+    const evidence =
+      `Window: last ${dash.days} days · ${covered} active days.\n` +
+      `Follow-through: ${dash.totals.followThrough}% (${dash.totals.tasksDone}/${dash.totals.tasksTotal} done). Dump streak: ${dash.streak}.\n` +
+      `Time by category: ${dash.categoryTime.map((c) => `${c.category} ${c.minutes}m`).join(', ') || 'n/a'}.\n` +
+      `Estimate vs actual: estimated ${dash.estimateVsActual.estimated}m, actual ${dash.estimateVsActual.actual}m over ${dash.estimateVsActual.count} tasks.\n` +
+      `Recent moods: ${stories.map((s) => s.mood).filter(Boolean).join(', ') || 'n/a'}.\n` +
+      `Recent stories (excerpts):\n${stories.map((s) => '• ' + s.rawText.slice(0, 240)).join('\n') || '(none)'}\n` +
+      `Recent day-summaries:\n${summaries.map((s) => '• ' + s.text.slice(0, 200)).join('\n') || '(none)'}\n` +
+      (mem ? `Memory hits: ${mem}\n` : '');
+
+    const prompt =
+      `You are an HONEST, direct personal coach building a portrait of Sandeep from his own data. Be candid and a little challenging — not flattering. ` +
+      `CRITICAL: every claim MUST be grounded in the EVIDENCE below; cite the specific number/fact in the "evidence" field. Never invent. If evidence is thin for a dimension, omit it.\n` +
+      `Respect prior feedback — KEEP building on what he CONFIRMED, and DO NOT repeat what he REJECTED.\n` +
+      (confirmed.length ? `Confirmed about him:\n${confirmed.join('\n')}\n` : '') +
+      (rejected.length ? `Rejected (do not repeat):\n${rejected.join('\n')}\n` : '') +
+      `\nRespond with ONLY JSON: {"summary":"2-3 sentence honest portrait addressed to 'you'","insights":[{"dimension":"short label","claim":"one direct sentence","evidence":"the concrete data point"}]}\n` +
+      `Give 4-6 insights across dimensions like follow-through, time allocation, estimation, consistency, focus, procrastination, mood patterns.\n\n` +
+      `EVIDENCE:\n${evidence}`;
+
+    const text = await this.llm.completeWith(await this.tasks.getModel(), prompt, 1500);
+    let parsed: { summary?: string; insights?: { dimension: string; claim: string; evidence?: string }[] } | null = null;
+    try {
+      parsed = text ? JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) : null;
+    } catch {
+      parsed = null;
+    }
+    if (!parsed?.insights?.length) return this.getPersonality();
+
+    const lastGen = (await this.prisma.personalityInsight.findFirst({ orderBy: { generation: 'desc' } }))?.generation || 0;
+    const generation = lastGen + 1;
+    for (const ins of parsed.insights.slice(0, 8)) {
+      if (!ins?.claim?.trim()) continue;
+      await this.prisma.personalityInsight.create({
+        data: { generation, dimension: String(ins.dimension || 'Pattern').slice(0, 60), claim: String(ins.claim).slice(0, 400), evidence: ins.evidence ? String(ins.evidence).slice(0, 400) : null },
+      });
+    }
+    await this.setSetting('personality.summary', JSON.stringify({ text: parsed.summary || '', daysCovered: covered, generation, generatedAt: new Date().toISOString() }));
+    // Index the portrait so it deepens over time (stamped "activity" → never re-imported by SuperMemory sync).
+    await this.memory.enqueue(`Personality portrait of Sandeep\n\n${parsed.summary || ''}\n\n${parsed.insights.map((i) => `${i.dimension}: ${i.claim}`).join('\n')}`, { title: 'Personality portrait', tags: ['activity'] }).catch(() => undefined);
+    return this.getPersonality();
+  }
+
+  async getPersonality() {
+    const covered = await this.daysCovered();
+    const sumRow = await this.prisma.setting.findUnique({ where: { key: 'personality.summary' } });
+    let summary: any = null;
+    try {
+      summary = sumRow?.value ? JSON.parse(sumRow.value) : null;
+    } catch {
+      /* ignore */
+    }
+    const lastGen = (await this.prisma.personalityInsight.findFirst({ orderBy: { generation: 'desc' } }))?.generation || 0;
+    const insights = lastGen
+      ? await this.prisma.personalityInsight.findMany({ where: { generation: lastGen }, orderBy: { createdAt: 'asc' } })
+      : [];
+    const lastRun = (await this.prisma.setting.findUnique({ where: { key: 'personality.lastRun' } }))?.value || null;
+    return {
+      daysCovered: covered,
+      minDays: this.PERSONALITY_MIN_DAYS,
+      unlocked: covered >= this.PERSONALITY_MIN_DAYS,
+      summary: summary?.text || null,
+      generation: lastGen,
+      generatedAt: summary?.generatedAt || null,
+      lastRun,
+      insights: insights.map((i) => ({ id: i.id, dimension: i.dimension, claim: i.claim, evidence: i.evidence, status: i.status })),
+    };
+  }
+
+  async validateInsight(id: string, status: string) {
+    const s = status === 'confirmed' || status === 'rejected' ? status : 'pending';
+    const i = await this.prisma.personalityInsight.findUnique({ where: { id } });
+    if (!i) return null;
+    await this.prisma.personalityInsight.update({ where: { id }, data: { status: s } });
+    return { id, status: s };
   }
 
   /** Aggregate insights over the last `days` (Dashboard). */
