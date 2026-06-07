@@ -233,6 +233,11 @@ export class ItemsService {
     const item = await this.prisma.item.findUnique({ where: { id } });
     if (!item) return null;
     const content = item.filePath ? await fs.readFile(item.filePath, 'utf8').catch(() => '') : '';
+    let idea: { id: string; title: string } | null = null;
+    if (item.ideaId) {
+      const i = await this.prisma.idea.findUnique({ where: { id: item.ideaId }, select: { id: true, title: true } });
+      if (i) idea = { id: i.id, title: i.title };
+    }
     return {
       id: item.id,
       title: item.title,
@@ -246,6 +251,8 @@ export class ItemsService {
       chunked: !!item.supermemoryId,
       shared: item.shared,
       thumbnail: item.thumbnail,
+      ideaId: item.ideaId,
+      idea,
       content,
     };
   }
