@@ -29,6 +29,11 @@ export class SkillsController {
     return { lastScan: await this.skills.lastScan() };
   }
 
+  @Get('deploy-targets')
+  async deployTargets() {
+    return { targets: Object.keys(this.skills.deployTargets()) };
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const s = await this.skills.get(id);
@@ -64,6 +69,11 @@ export class SkillsController {
     const r = await this.skills.addFile(id, file.buffer, String(file.originalname || 'skill.md'));
     if (!r) throw new BadRequestException('Skill not found');
     return r;
+  }
+
+  @Post(':id/deploy')
+  async deploy(@Param('id') id: string, @Body() body: { target?: string }) {
+    return this.skills.deploy(id, body?.target || '');
   }
 
   @Get(':id/download')
