@@ -56,10 +56,10 @@ export class BookmarksController {
     return { ok: true, ...(await this.bookmarks.getAutoSync()) };
   }
 
-  /** Re-queue any failed memory writes so every bookmark lands in both stores. */
-  @Post('retry-memory')
-  async retryMemory() {
-    return this.bookmarks.retryFailedMemory();
+  /** Re-write every bookmark's memory (crawl-safe) so all land correctly in both stores. */
+  @Post('reindex-memory')
+  async reindexMemory() {
+    return this.bookmarks.reindexMemory();
   }
 
   /** Find bookmarks by meaning (ranked list of links + descriptions). */

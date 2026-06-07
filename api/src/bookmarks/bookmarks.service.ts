@@ -123,6 +123,23 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     return one.slice(0, 197).replace(/\s+\S*$/, '') + '…';
   }
 
+  /**
+   * What we send to the memory stores. Plain text leading with the TITLE — never a bare URL,
+   * because SuperMemory auto-crawls content that starts with a URL (storing page junk instead of our summary).
+   */
+  buildMemoryText(title: string, summary: string, tags: string[]): string {
+    const tagLine = tags.length ? `\n\nTags: ${tags.join(', ')}` : '';
+    return `${title}\n\n${summary}${tagLine}`;
+  }
+
+  /** Pull the summary body back out of a stored .md file (for re-indexing without re-summarizing). */
+  private extractSummary(md: string): string {
+    const lines = md.split('\n');
+    const idx = lines.findIndex((l) => l.startsWith('**Source:**'));
+    const body = (idx >= 0 ? lines.slice(idx + 1) : lines).filter((l) => !l.trim().startsWith('>'));
+    return body.join('\n').trim();
+  }
+
   /** The .md file: URL on the first line, then title / tags / date, then the summary. */
   buildMarkdown(b: RaindropItem, summary: string, readFailed: boolean): string {
     const tagLine = b.tags.length ? b.tags.join(', ') : '—';
@@ -181,9 +198,25 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     }));
   }
 
-  /** Re-queue any failed memory writes (e.g. the few bookmark SuperMemory writes that errored). */
-  async retryFailedMemory(): Promise<{ retried: number }> {
-    return this.memory.retryFailed();
+  /**
+   * Re-write every bookmark's memory in BOTH stores using the crawl-safe text format.
+   * Fixes prior SuperMemory docs that stored crawled page junk + the writes that failed.
+   * Reuses the existing summaries from the .md files (no re-summarizing).
+   */
+  async reindexMemory(): Promise<{ reindexed: number }> {
+    const items = await this.prisma.item.findMany({ where: { source: 'raindrop' } });
+    let n = 0;
+    for (const it of items) {
+      const md = it.filePath ? await fs.readFile(it.filePath, 'utf8').catch(() => '') : '';
+      const summary = this.extractSummary(md) || it.summary || it.title || '';
+      const tags = it.tags ? (JSON.parse(it.tags) as string[]) : [];
+      await this.memory.deleteDoc(it.supermemoryId, it.ragId);
+      await this.prisma.memoryOutbox.deleteMany({ where: { itemId: it.id } }).catch(() => undefined);
+      await this.prisma.item.update({ where: { id: it.id }, data: { supermemoryId: null, ragId: null } });
+      await this.memory.enqueue(this.buildMemoryText(it.title || '', summary, tags), { itemId: it.id, title: it.title || undefined, tags: [...tags, 'bookmark'] });
+      n++;
+    }
+    return { reindexed: n };
   }
 
   /** Find bookmarks by meaning (semantic stores ranked, mapped back to real bookmarks; keyword safety net). */
@@ -256,7 +289,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
         where: { id: ex.id },
         data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, supermemoryId: null, ragId: null },
       });
-      await this.memory.enqueue(md, { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
+      await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags), { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
       return readFailed ? 'flagged' : 'imported';
     }
 
@@ -281,7 +314,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     const filePath = join(dir, `${item.id}.md`);
     await fs.writeFile(filePath, md, 'utf8');
     await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
-    await this.memory.enqueue(md, { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
+    await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags), { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
     return readFailed ? 'flagged' : 'imported';
   }
 
