@@ -433,10 +433,48 @@ function TelegramCard() {
   );
 }
 
+function ChatRetentionCard() {
+  const [months, setMonths] = useState(2);
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/chat/retention').then((r) => r.json()).then((d) => setMonths(typeof d.months === 'number' ? d.months : 2)).catch(() => undefined).finally(() => setLoaded(true));
+  }, []);
+  if (!loaded) return null;
+  async function save(v: number) {
+    setMonths(v);
+    const r = await fetch('/api/chat/retention', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ months: v }) });
+    if (r.ok) toast('success', 'Chat retention saved');
+  }
+  const OPTS = [
+    { v: 1, label: '1 month' },
+    { v: 2, label: '2 months' },
+    { v: 3, label: '3 months' },
+    { v: 6, label: '6 months' },
+    { v: 12, label: '12 months' },
+    { v: 0, label: 'Keep forever' },
+  ];
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <MessageSquare size={18} className="text-emerald-600" /> Chat history
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">How long to keep your chat threads before they're auto-cleaned. <b>Pinned threads and starred messages are always kept.</b></p>
+      <label className="flex items-center justify-between py-1">
+        <span className="text-sm">Keep threads for</span>
+        <select value={months} onChange={(e) => save(Number(e.target.value))} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">
+          {OPTS.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
+      </label>
+    </section>
+  );
+}
+
 function SyncSection() {
   return (
     <div className="space-y-4">
       <TelegramCard />
+      <ChatRetentionCard />
       <RaindropSyncCard />
       <SkillsSyncCard />
       <SuperMemorySyncCard />

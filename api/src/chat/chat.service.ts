@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService, MemHit } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
@@ -25,12 +25,22 @@ function scopeTags(scope: string): string[] {
 type Source = { title: string; url?: string; itemId?: string };
 
 @Injectable()
-export class ChatService {
+export class ChatService implements OnModuleInit, OnModuleDestroy {
+  private tick: NodeJS.Timeout | null = null;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
   ) {}
+
+  onModuleInit() {
+    // Hourly: clean up threads past the retention window (starred copies are preserved separately).
+    this.tick = setInterval(() => this.retentionTick().catch(() => undefined), 60 * 60 * 1000);
+  }
+  onModuleDestroy() {
+    if (this.tick) clearInterval(this.tick);
+  }
 
   // ---- sessions ----
   async createSession(scope?: string) {
@@ -176,5 +186,71 @@ export class ChatService {
       out.push({ title: title || 'Memory', url, itemId });
     }
     return out;
+  }
+
+  // ---- threads: pin + search ----
+  async setPinned(id: string, pinned: boolean) {
+    await this.prisma.chatSession.update({ where: { id }, data: { pinned: !!pinned } }).catch(() => null);
+    return { ok: true, pinned: !!pinned };
+  }
+
+  async searchSessions(q: string) {
+    const s = (q || '').trim();
+    if (!s) return this.listSessions();
+    const rows = await this.prisma.chatSession.findMany({ orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }, { createdAt: 'desc' }], take: 500 });
+    const hitMsgs = await this.prisma.chatMessage.findMany({ where: { content: { contains: s } }, select: { sessionId: true } });
+    const ids = new Set(hitMsgs.map((m) => m.sessionId));
+    const low = s.toLowerCase();
+    return rows.filter((r) => (r.title || '').toLowerCase().includes(low) || ids.has(r.id)).map((r) => this.shapeSession(r, []));
+  }
+
+  // ---- star (preserved copy survives retention) ----
+  async setStar(messageId: string, on: boolean) {
+    const m = await this.prisma.chatMessage.findUnique({ where: { id: messageId } });
+    if (!m) return null;
+    await this.prisma.chatMessage.update({ where: { id: messageId }, data: { starred: !!on } });
+    if (on) {
+      const session = await this.prisma.chatSession.findUnique({ where: { id: m.sessionId } });
+      await this.prisma.chatStar.upsert({
+        where: { messageId },
+        create: { messageId, sessionId: m.sessionId, sessionTitle: session?.title || 'Chat', scope: session?.scope || 'everything', role: m.role, content: m.content, sources: m.sources },
+        update: {},
+      });
+    } else {
+      await this.prisma.chatStar.deleteMany({ where: { messageId } });
+    }
+    return { starred: !!on };
+  }
+
+  async listStarred() {
+    const rows = await this.prisma.chatStar.findMany({ orderBy: { createdAt: 'desc' }, take: 500 });
+    const j = (v: string | null) => { try { return v ? JSON.parse(v) : []; } catch { return []; } };
+    return rows.map((r) => ({ id: r.id, messageId: r.messageId, sessionId: r.sessionId, sessionTitle: r.sessionTitle, scope: r.scope, role: r.role, content: r.content, sources: j(r.sources), createdAt: r.createdAt }));
+  }
+
+  // ---- retention ----
+  async getRetention() {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'chat.retentionMonths' } });
+    return { months: row ? Number(row.value) || 2 : 2 }; // 0 = keep forever
+  }
+  async setRetention(months: number) {
+    const v = Math.max(0, Math.min(24, Math.round(Number(months) || 0)));
+    await this.prisma.setting.upsert({ where: { key: 'chat.retentionMonths' }, create: { key: 'chat.retentionMonths', value: String(v) }, update: { value: String(v) } });
+    return { months: v };
+  }
+
+  async retentionTick() {
+    const { months } = await this.getRetention();
+    if (!months) return; // forever
+    const cutoff = new Date(Date.now() - months * 30 * 24 * 60 * 60 * 1000);
+    const old = await this.prisma.chatSession.findMany({ where: { pinned: false }, select: { id: true, lastMessageAt: true, createdAt: true } });
+    for (const s of old) {
+      const when = s.lastMessageAt || s.createdAt;
+      if (when && new Date(when) < cutoff) {
+        await this.prisma.chatMessage.deleteMany({ where: { sessionId: s.id } });
+        await this.prisma.chatSession.delete({ where: { id: s.id } }).catch(() => null);
+        // ChatStar rows are NOT touched — starred messages are kept forever.
+      }
+    }
   }
 }
