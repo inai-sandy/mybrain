@@ -56,7 +56,8 @@ function make(opts: { session?: any; hits?: any[]; answer?: string; item?: any; 
     },
   };
   const memory: any = { searchScoped: jest.fn(async () => opts.hits ?? []) };
-  const llm: any = { complete: jest.fn(async () => opts.answer ?? 'An answer.\nFOLLOWUPS: a? | b?'), getConfig: async () => ({ provider: 'openrouter', model: 'x' }) };
+  const reply = async () => opts.answer ?? 'An answer.\nFOLLOWUPS: a? | b?';
+  const llm: any = { complete: jest.fn(reply), completeWith: jest.fn(reply), getConfig: async () => ({ provider: 'openrouter', model: 'x' }), listOpenRouterModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
   return { svc: new ChatService(prisma, memory, llm, prompts), memory, llm, messages, stars, sessions };
 }
@@ -98,8 +99,8 @@ describe('ChatService', () => {
     await svc.sendMessage('s1', 'first question');
     expect(memory.searchScoped).toHaveBeenCalledTimes(1);
     // now a follow-up with the router saying no-search
-    llm.complete.mockResolvedValueOnce('{"search": false, "query": ""}'); // router
-    llm.complete.mockResolvedValueOnce('Follow-up answer.\nFOLLOWUPS: x?'); // answer
+    llm.completeWith.mockResolvedValueOnce('{"search": false, "query": ""}'); // router
+    llm.completeWith.mockResolvedValueOnce('Follow-up answer.\nFOLLOWUPS: x?'); // answer
     void messages;
     await svc.sendMessage('s1', 'explain that simpler');
     expect(memory.searchScoped).toHaveBeenCalledTimes(1); // not called again

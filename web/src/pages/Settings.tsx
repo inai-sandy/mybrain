@@ -256,10 +256,68 @@ function ModelsSection() {
   return (
     <div className="space-y-4">
       <AiModelCard />
+      <ChatModelCard />
       <BookmarksModelCard />
       <TasksModelCard />
       <VoiceModelCard />
     </div>
+  );
+}
+
+function ChatModelCard() {
+  const FALLBACK = [
+    { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (fast, recommended)' },
+    { id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash (fastest)' },
+    { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 mini (fast)' },
+    { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6 (best, slower)' },
+  ];
+  const [opts, setOpts] = useState<{ id: string; name: string }[]>([]);
+  const [model, setModel] = useState('');
+  const [custom, setCustom] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/chat/model').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/chat/models').then((r) => r.json()).catch(() => ({ models: [] })),
+    ])
+      .then(([cfg, list]) => {
+        const models = ((list.models || []) as { id: string; name: string }[]);
+        const finalOpts = models.length ? models : FALLBACK;
+        setOpts(finalOpts);
+        const m = cfg.model || '';
+        setModel(m);
+        setCustom(!!m && !finalOpts.some((o) => o.id === m));
+      })
+      .finally(() => setLoaded(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (!loaded) return null;
+  async function save() {
+    const r = await fetch('/api/chat/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (r.ok) toast('success', 'Chat model saved');
+    else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
+  }
+  const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <MessageSquare size={18} className="text-emerald-600" /> Chat AI model
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">Runs “talk to my brain”. Pick a <b>fast</b> model — a slow one makes replies take ages. Defaults to Claude Haiku. Uses your OpenRouter key.</p>
+      <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
+        Model
+        <select value={custom ? '__custom__' : model} onChange={(e) => { if (e.target.value === '__custom__') { setCustom(true); setModel(''); } else { setCustom(false); setModel(e.target.value); } }} className={sel}>
+          <option value="">Choose…</option>
+          {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          <option value="__custom__">Custom…</option>
+        </select>
+      </label>
+      {custom && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openrouter model id (e.g. anthropic/claude-haiku-4.5)" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
+      <div className="mt-4 text-right">
+        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
+      </div>
+    </section>
   );
 }
 

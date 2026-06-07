@@ -1,8 +1,10 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService, MemHit } from '../memory/memory.service';
-import { LlmService } from '../llm/llm.service';
+import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+
+const DEFAULT_CHAT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
 
 export const SCOPES = ['everything', 'bookmark', 'idea', 'activity', 'document', 'skill'] as const;
 export type Scope = (typeof SCOPES)[number];
@@ -127,7 +129,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const convo = recent.map((m) => `${m.role}: ${m.content}`).join('\n').slice(-2000);
     const tmpl = await this.prompts.get('chat.router');
     const prompt = `${tmpl}\n\n` + (session.summary ? `Earlier summary: ${session.summary}\n` : '') + `Conversation:\n${convo}\n\nNew message: ${text}`;
-    const out = await this.llm.complete(prompt, 150);
+    const out = await this.llm.completeWith(await this.getModel(), prompt, 150);
     try {
       const j = JSON.parse(out!.slice(out!.indexOf('{'), out!.lastIndexOf('}') + 1));
       return { search: !!j.search, query: String(j.query || text) };
@@ -161,7 +163,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async answer(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<{ answer: string; followups: string[] }> {
-    const raw = (await this.llm.complete(await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800)) || '';
+    const raw = (await this.llm.completeWith(await this.getModel(), await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800)) || '';
     return this.splitAnswer(raw);
   }
 
@@ -182,7 +184,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const sources = await this.toSources(hits);
 
     const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, route.search);
-    const cfg = await this.llm.getConfig();
+    const cfg = await this.getModel();
     const full = (await this.llm.completeStream(cfg, prompt, 800, onToken)) || '';
     const { answer, followups } = this.splitAnswer(full);
 
@@ -258,6 +260,26 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.prisma.chatStar.findMany({ orderBy: { createdAt: 'desc' }, take: 500 });
     const j = (v: string | null) => { try { return v ? JSON.parse(v) : []; } catch { return []; } };
     return rows.map((r) => ({ id: r.id, messageId: r.messageId, sessionId: r.sessionId, sessionTitle: r.sessionTitle, scope: r.scope, role: r.role, content: r.content, sources: j(r.sources), createdAt: r.createdAt }));
+  }
+
+  // ---- chat model (its own, fast by default — the app default can be slow) ----
+  async getModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'chat.llm' } });
+    if (!row) return DEFAULT_CHAT_MODEL;
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : DEFAULT_CHAT_MODEL;
+    } catch {
+      return DEFAULT_CHAT_MODEL;
+    }
+  }
+  async setModel(provider: string, model: string): Promise<LlmConfig> {
+    const value = JSON.stringify({ provider: provider || 'openrouter', model });
+    await this.prisma.setting.upsert({ where: { key: 'chat.llm' }, create: { key: 'chat.llm', value }, update: { value } });
+    return { provider: provider || 'openrouter', model } as LlmConfig;
+  }
+  async listModels() {
+    return this.llm.listOpenRouterModels(['openai/', 'anthropic/', 'google/']);
   }
 
   // ---- retention ----

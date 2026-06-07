@@ -64,8 +64,8 @@ function NewChatModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
 function SourceChip({ s }: { s: Source }) {
   const inner = (
-    <span className="inline-flex items-center gap-1 rounded-full bg-zinc-200/70 dark:bg-zinc-700/60 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300 hover:text-emerald-600">
-      <ExternalLink size={10} /> {s.title}
+    <span className="inline-flex items-center gap-1 max-w-[70vw] md:max-w-[220px] rounded-full bg-zinc-200/70 dark:bg-zinc-700/60 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300 hover:text-emerald-600">
+      <ExternalLink size={10} className="shrink-0" /> <span className="truncate">{s.title}</span>
     </span>
   );
   if (s.itemId) return <Link to={`/doc/${s.itemId}`}>{inner}</Link>;
@@ -84,9 +84,9 @@ function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => void; on
     <div className={'group ' + (user ? 'flex justify-end' : '')}>
       <div className={user ? 'max-w-[82%]' : 'w-full'}>
         {user ? (
-          <div className="rounded-2xl rounded-br-md bg-emerald-600 text-white px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed">{m.content}</div>
+          <div className="rounded-2xl rounded-br-md bg-emerald-600 text-white px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed break-words">{m.content}</div>
         ) : (
-          <div className="text-[14px] leading-[1.7] text-zinc-800 dark:text-zinc-100 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-1 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:mt-4 [&_h3]:font-semibold [&_h3]:mt-3 [&_pre]:rounded-lg [&_pre]:bg-zinc-100 dark:[&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:my-2.5 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-zinc-100 dark:[&_:not(pre)>code]:bg-zinc-800 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-[12.5px] [&_a]:text-emerald-600 [&_a]:underline [&_strong]:font-semibold">
+          <div className="text-[14px] leading-[1.7] text-zinc-800 dark:text-zinc-100 break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-1 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:mt-4 [&_h3]:font-semibold [&_h3]:mt-3 [&_pre]:rounded-lg [&_pre]:bg-zinc-100 dark:[&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:my-2.5 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-zinc-100 dark:[&_:not(pre)>code]:bg-zinc-800 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-[12.5px] [&_a]:text-emerald-600 [&_a]:underline [&_strong]:font-semibold">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{m.content || '…'}</ReactMarkdown>
           </div>
         )}
@@ -273,7 +273,7 @@ export function Chat() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
         <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-6">
           {active.messages.length === 0 && !streaming && (
             <div className="text-center text-sm text-zinc-400 mt-10">

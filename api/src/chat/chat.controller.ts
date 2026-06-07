@@ -16,6 +16,22 @@ export class ChatController {
     return { starred: await this.chat.listStarred() };
   }
 
+  @Get('model')
+  async getModel() {
+    return this.chat.getModel();
+  }
+
+  @Put('model')
+  async setModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.chat.setModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('models')
+  async models() {
+    return { models: await this.chat.listModels() };
+  }
+
   @Get('retention')
   async getRetention() {
     return this.chat.getRetention();
