@@ -295,8 +295,8 @@ export function Bookmarks() {
           </h1>
           <p className="text-zinc-500 text-sm">Ask in plain English — your saved links, found by meaning.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 overflow-hidden">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 overflow-hidden shrink-0">
             <button onClick={() => changeView('grid')} title="Grid view" className={'p-2 ' + (view === 'grid' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
               <LayoutGrid size={16} />
             </button>
@@ -304,13 +304,22 @@ export function Bookmarks() {
               <List size={16} />
             </button>
           </div>
-          <span className="text-xs text-zinc-400 whitespace-nowrap">
+          <span className="hidden md:inline text-xs text-zinc-400 whitespace-nowrap">
             {status?.count ? `${status.count} saved` : ''}
             {status?.lastSync ? ` · synced ${shortDate(status.lastSync)}` : ''}
           </span>
-          <button onClick={sync} disabled={syncing} className={btn}>
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{' '}
-            {progress ? `Syncing… ${progress.imported}/${progress.total}` : syncing ? 'Starting…' : 'Sync last 3 months'}
+          <button onClick={sync} disabled={syncing} className={btn + ' flex-1 sm:flex-none justify-center min-w-0'}>
+            <RefreshCw size={16} className={(syncing ? 'animate-spin ' : '') + 'shrink-0'} />
+            {progress ? (
+              <span className="truncate">Syncing… {progress.imported}/{progress.total}</span>
+            ) : syncing ? (
+              <span className="truncate">Starting…</span>
+            ) : (
+              <>
+                <span className="sm:hidden">Sync</span>
+                <span className="hidden sm:inline">Sync last 3 months</span>
+              </>
+            )}
           </button>
         </div>
       </div>
