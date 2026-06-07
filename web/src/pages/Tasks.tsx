@@ -67,15 +67,7 @@ export function Tasks() {
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
   const hasFilters = !!(q || fPriority || fCategory);
-  const chip = (active: boolean) =>
-    'shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs border transition-colors ' +
-    (active ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 font-medium' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-emerald-500/40');
-  const PR = [
-    { v: '', label: 'All' },
-    { v: 'high', label: 'High' },
-    { v: 'medium', label: 'Med' },
-    { v: 'low', label: 'Low' },
-  ];
+  const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500';
 
   return (
     <div className="space-y-3">
@@ -103,25 +95,20 @@ export function Tasks() {
         </div>
       )}
 
-      {/* Always-visible filters: priority + category */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <span className="text-[11px] text-zinc-400 shrink-0 mr-0.5">Priority</span>
-          {PR.map((p) => (
-            <button key={p.v} onClick={() => setFPriority(p.v)} className={chip(fPriority === p.v)}>{p.label}</button>
-          ))}
-        </div>
-        {categories.length > 0 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <span className="text-[11px] text-zinc-400 shrink-0 mr-0.5">Category</span>
-            <button onClick={() => setFCategory('')} className={chip(fCategory === '')}>All</button>
-            {categories.map((c) => (
-              <button key={c} onClick={() => setFCategory(c)} className={chip(fCategory === c)}>{c}</button>
-            ))}
-          </div>
-        )}
+      {/* Always-visible dropdown filters: priority + category */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <select aria-label="Filter by priority" value={fPriority} onChange={(e) => setFPriority(e.target.value)} className={sel}>
+          <option value="">All priorities</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+        <select aria-label="Filter by category" value={fCategory} onChange={(e) => setFCategory(e.target.value)} className={sel}>
+          <option value="">All categories</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
         {hasFilters && (
-          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear filters</button>
+          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
         )}
       </div>
 
