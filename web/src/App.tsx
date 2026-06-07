@@ -11,6 +11,7 @@ import { IdeaDetail } from './pages/IdeaDetail';
 import { Skills } from './pages/Skills';
 import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
+import { Activity } from './pages/Activity';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
 import { SkillViewer } from './pages/SkillViewer';
@@ -79,6 +80,7 @@ function AuthedApp() {
         <Route path="doc/:id" element={<DocDetail />} />
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="tasks" element={<Tasks />} />
+        <Route path="activity" element={<Activity />} />
         <Route path="settings" element={<Settings email={email} />} />
         <Route path="*" element={<Dashboard />} />
       </Route>

@@ -109,6 +109,18 @@ model Story {
   updatedAt DateTime @updatedAt
 }
 
+/// The AI's end-of-day summary of everything the user did — stored to Activity + RAG/SuperMemory.
+model DaySummary {
+  id            String   @id @default(uuid())
+  day           String   @unique // local day key YYYY-MM-DD
+  text          String
+  stats         String? // JSON: { tasksDone, tasksOpen, minutesSpent, ... }
+  supermemoryId String?
+  ragId         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())

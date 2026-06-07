@@ -1,4 +1,4 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -10,4 +10,5 @@ export const NAV: NavItem[] = [
   { to: '/ideas', label: 'Ideas', icon: Lightbulb },
   { to: '/skills', label: 'Skills', icon: Wand2 },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
+  { to: '/activity', label: 'Activity', icon: Activity },
 ];
