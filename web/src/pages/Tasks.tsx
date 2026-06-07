@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckSquare, Plus, Sparkles, SlidersHorizontal, Search, X } from 'lucide-react';
+import { CheckSquare, Plus, Sparkles, Search, X } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Task, TaskCard, DumpModal, TaskFormModal, DoneModal, useToday } from './taskShared';
 
@@ -12,7 +12,7 @@ export function Tasks() {
   const [delFor, setDelFor] = useState<Task | null>(null);
 
   const [showDone, setShowDone] = useState(false);
-  const [showControls, setShowControls] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [q, setQ] = useState('');
   const [fPriority, setFPriority] = useState('');
   const [fCategory, setFCategory] = useState('');
@@ -67,52 +67,63 @@ export function Tasks() {
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
   const hasFilters = !!(q || fPriority || fCategory);
-  const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm';
+  const chip = (active: boolean) =>
+    'shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs border transition-colors ' +
+    (active ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 font-medium' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-emerald-500/40');
+  const PR = [
+    { v: '', label: 'All' },
+    { v: 'high', label: 'High' },
+    { v: 'medium', label: 'Med' },
+    { v: 'low', label: 'Low' },
+  ];
 
   return (
-    <div className="space-y-4">
-      {/* Header: title + count + a single tucked-away controls icon */}
+    <div className="space-y-3">
+      {/* Header: title + count + search/done toggles */}
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><CheckSquare className="text-emerald-500" /> Tasks</h1>
           <p className="text-zinc-500 text-sm">{openCount} to do{data && data.counts.done ? ` · ${data.counts.done} done today` : ''}</p>
         </div>
         <div className="flex items-center gap-1">
+          <button onClick={() => setShowSearch((v) => !v)} aria-label="Search" className={'p-2 rounded-lg border ' + (showSearch || q ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
+            <Search size={16} />
+          </button>
           <button onClick={() => setShowDone((v) => !v)} className={'rounded-lg px-2.5 py-1.5 text-xs border ' + (showDone ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
             {showDone ? 'Hide done' : 'Show done'}
-          </button>
-          <button onClick={() => setShowControls((v) => !v)} aria-label="Search & filter" className={'p-2 rounded-lg border ' + (showControls || hasFilters ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
-            <SlidersHorizontal size={16} />
           </button>
         </div>
       </div>
 
-      {/* Controls panel — hidden until you tap the icon */}
-      {showControls && (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 space-y-2">
-          <div className="relative">
-            <Search size={15} className="absolute left-2.5 top-2.5 text-zinc-400" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-8 pr-3 py-2 text-sm outline-none focus:border-emerald-500" />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <select value={fPriority} onChange={(e) => setFPriority(e.target.value)} className={sel}>
-              <option value="">Any priority</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-            {categories.length > 0 && (
-              <select value={fCategory} onChange={(e) => setFCategory(e.target.value)} className={sel}>
-                <option value="">Any category</option>
-                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            )}
-            {hasFilters && (
-              <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
-            )}
-          </div>
+      {/* Optional search box (behind the icon) */}
+      {showSearch && (
+        <div className="relative">
+          <Search size={15} className="absolute left-2.5 top-2.5 text-zinc-400" />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search tasks…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-8 pr-3 py-2 text-sm outline-none focus:border-emerald-500" />
         </div>
       )}
+
+      {/* Always-visible filters: priority + category */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <span className="text-[11px] text-zinc-400 shrink-0 mr-0.5">Priority</span>
+          {PR.map((p) => (
+            <button key={p.v} onClick={() => setFPriority(p.v)} className={chip(fPriority === p.v)}>{p.label}</button>
+          ))}
+        </div>
+        {categories.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <span className="text-[11px] text-zinc-400 shrink-0 mr-0.5">Category</span>
+            <button onClick={() => setFCategory('')} className={chip(fCategory === '')}>All</button>
+            {categories.map((c) => (
+              <button key={c} onClick={() => setFCategory(c)} className={chip(fCategory === c)}>{c}</button>
+            ))}
+          </div>
+        )}
+        {hasFilters && (
+          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear filters</button>
+        )}
+      </div>
 
       {/* The list — clean, grouped, must-dos on top */}
       {loading ? (
