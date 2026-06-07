@@ -321,8 +321,10 @@ export class SkillsService {
         const parsed = parseSkillMd(md);
         const title = (parsed.name || slug).slice(0, 120);
         const existing = await this.prisma.skill.findFirst({ where: { origin: 'created', slug } });
-        // Only call the LLM for new or empty descriptions — keep existing ones on re-scan.
-        const description = existing?.description?.trim() ? existing.description : await this.aiDescribe(md, parsed.description);
+        // Re-describe only when the skill is new OR its SKILL.md changed since last scan
+        // (keeps existing descriptions on unchanged skills → no needless LLM calls).
+        const changed = !existing || (existing.content || '') !== md || !existing.description?.trim();
+        const description = changed ? await this.aiDescribe(md, existing?.description || parsed.description) : existing.description;
         const zipPath = join(zipDir, `scan-${slug}.zip`);
         const zipped = await this.zipFolder(folder, zipPath);
         if (existing) {
