@@ -10,5 +10,6 @@ import { MemoryModule } from '../memory/memory.module';
   imports: [MemoryModule],
   controllers: [ItemsController, ShareController],
   providers: [ItemsService, NotionService, EnrichmentService],
+  exports: [ItemsService],
 })
 export class ItemsModule {}

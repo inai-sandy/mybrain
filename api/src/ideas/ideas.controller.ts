@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { IdeasService } from './ideas.service';
 
 @Controller('ideas')
@@ -35,6 +36,19 @@ export class IdeasController {
   @Put(':id')
   async update(@Param('id') id: string, @Body() body: { title?: string; content?: string }) {
     const r = await this.ideas.update(id, body || {});
+    if (!r) throw new BadRequestException('Idea not found');
+    return r;
+  }
+
+  /** Upload a research .md → becomes a Capture doc linked to this idea. */
+  @Post(':id/upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async upload(@Param('id') id: string, @UploadedFile() file: any) {
+    if (!file?.buffer) throw new BadRequestException('No file provided');
+    const content = file.buffer.toString('utf8');
+    if (!content.trim()) throw new BadRequestException('That file is empty');
+    const title = String(file.originalname || '').replace(/\.(md|markdown|txt)$/i, '');
+    const r = await this.ideas.addDoc(id, content, title);
     if (!r) throw new BadRequestException('Idea not found');
     return r;
   }

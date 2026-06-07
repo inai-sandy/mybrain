@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
+import { ItemsService } from '../items/items.service';
 
 @Injectable()
 export class IdeasService {
@@ -9,7 +10,17 @@ export class IdeasService {
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
+    private readonly items: ItemsService,
   ) {}
+
+  /** Attach an uploaded research doc to an idea: store it as a Capture item, then link it. */
+  async addDoc(ideaId: string, content: string, title: string) {
+    const idea = await this.prisma.idea.findUnique({ where: { id: ideaId } });
+    if (!idea) return null;
+    const { item } = await this.items.store(content, 'upload', title || 'Research notes', undefined, ['research']);
+    await this.prisma.item.update({ where: { id: item.id }, data: { ideaId } });
+    return { id: item.id, title: item.title };
+  }
 
   /** Turn a raw brain-dump into {title, content, research} via the default model. */
   private async craft(dump: string): Promise<{ title: string; content: string; research: string } | null> {

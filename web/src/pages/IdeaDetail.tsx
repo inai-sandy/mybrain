@@ -1,15 +1,21 @@
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Copy, Check, Circle } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Circle, Pencil, Upload, FileText } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 export function IdeaDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState('');
   const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [eTitle, setETitle] = useState('');
+  const [eContent, setEContent] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
   function load() {
@@ -42,6 +48,38 @@ export function IdeaDetail() {
     if (r.ok) setD({ ...d, status: next });
   }
 
+  function startEdit() {
+    setETitle(d.title);
+    setEContent(d.content);
+    setEditing(true);
+  }
+  async function saveEdit() {
+    const r = await fetch(`/api/ideas/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: eTitle, content: eContent }) });
+    if (r.ok) {
+      setD(await r.json());
+      setEditing(false);
+      toast('success', 'Idea updated');
+    } else toast('error', 'Could not save');
+  }
+
+  async function onUpload(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch(`/api/ideas/${id}/upload`, { method: 'POST', body: fd });
+      if (r.ok) {
+        toast('success', 'Research doc added & saved to Capture');
+        load();
+      } else toast('error', (await r.json().catch(() => ({}))).message || 'Upload failed');
+    } catch {
+      toast('error', 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
   return (
     <div className="space-y-5 max-w-3xl mx-auto">
       <Link to="/ideas" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
@@ -53,27 +91,48 @@ export function IdeaDetail() {
       {d && (
         <>
           <div className="flex items-start justify-between gap-3">
-            <h1 className={'text-2xl font-extrabold ' + (d.status === 'done' ? 'line-through text-zinc-400' : '')}>{d.title}</h1>
-            <button
-              onClick={toggleDone}
-              className={'shrink-0 inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (d.status === 'done' ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600')}
-            >
-              {d.status === 'done' ? (
-                <>
-                  <Check size={15} /> Done
-                </>
-              ) : (
-                <>
-                  <Circle size={15} /> Mark as done
-                </>
+            {editing ? (
+              <input value={eTitle} onChange={(e) => setETitle(e.target.value)} className="flex-1 text-xl font-extrabold rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5" />
+            ) : (
+              <h1 className={'text-2xl font-extrabold ' + (d.status === 'done' ? 'line-through text-zinc-400' : '')}>{d.title}</h1>
+            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {!editing && (
+                <button onClick={startEdit} title="Edit" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-emerald-600 hover:border-emerald-500">
+                  <Pencil size={15} />
+                </button>
               )}
-            </button>
+              <button
+                onClick={toggleDone}
+                className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (d.status === 'done' ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600')}
+              >
+                {d.status === 'done' ? (
+                  <>
+                    <Check size={15} /> Done
+                  </>
+                ) : (
+                  <>
+                    <Circle size={15} /> Mark as done
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
-          {d.content && (
-            <article className="prose prose-zinc dark:prose-invert max-w-none">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{d.content}</ReactMarkdown>
-            </article>
+          {editing ? (
+            <div className="space-y-3">
+              <textarea value={eContent} onChange={(e) => setEContent(e.target.value)} rows={10} className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-mono" />
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setEditing(false)} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+                <button onClick={saveEdit} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">Save</button>
+              </div>
+            </div>
+          ) : (
+            d.content && (
+              <article className="prose prose-zinc dark:prose-invert max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{d.content}</ReactMarkdown>
+              </article>
+            )
           )}
 
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4">
@@ -93,6 +152,39 @@ export function IdeaDetail() {
             </div>
             <p className="text-xs text-zinc-400 mb-2">Paste this into Claude Code or Claude chat to run your /deep-research skill.</p>
             <pre className="whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300 font-mono max-h-72 overflow-auto bg-white dark:bg-zinc-950 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">{d.researchPrompt}</pre>
+          </div>
+
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-sm">Research docs</h2>
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50">
+                <Upload size={14} /> {uploading ? 'Uploading…' : 'Upload .md'}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".md,.markdown,.txt"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUpload(f);
+                }}
+              />
+            </div>
+            {d.docs?.length ? (
+              <ul className="space-y-1.5">
+                {d.docs.map((doc: any) => (
+                  <li key={doc.id}>
+                    <button onClick={() => navigate(`/doc/${doc.id}`)} className="w-full flex items-center gap-2 text-left text-sm text-zinc-600 dark:text-zinc-300 hover:text-emerald-600 rounded-lg px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                      <FileText size={15} className="shrink-0 text-zinc-400" />
+                      <span className="truncate">{doc.title || 'Untitled'}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-zinc-400">No research docs yet. After running deep-research, upload the report here — it'll also appear in Capture.</p>
+            )}
           </div>
         </>
       )}
