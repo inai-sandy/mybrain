@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lightbulb, Plus, X, Sparkles, Check, Circle } from 'lucide-react';
+import { Lightbulb, Plus, X, Sparkles, Check, Circle, Link2 } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 
@@ -136,6 +136,11 @@ export function Ideas() {
             <h3 className={'font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600 ' + (it.status === 'done' ? 'line-through text-zinc-400' : '')}>{it.title}</h3>
           </button>
           <div className="flex items-center gap-0.5 shrink-0">
+            {it.linkedCount > 0 && (
+              <button onClick={() => navigate(`/ideas/${it.id}`)} title={`${it.linkedCount} research doc${it.linkedCount === 1 ? '' : 's'}`} className="p-1.5 rounded-md text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <Link2 size={16} />
+              </button>
+            )}
             <button onClick={() => copyPrompt(it)} title="Copy /deep-research prompt" className="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600">
               <Sparkles size={16} />
             </button>
