@@ -4,8 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, ExternalLink, List, Share2 } from 'lucide-react';
 import { StoreBadges } from '../ui/StoreBadges';
-import { useToast } from '../ui/Toast';
-import { shareItem } from '../ui/share';
+import { ShareDialog } from '../ui/ShareDialog';
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -105,15 +104,7 @@ export function DocDetail() {
   const { id } = useParams();
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState('');
-  const toast = useToast();
-
-  async function share() {
-    if (!d) return;
-    const r = await shareItem(d.id, d.title);
-    if (r === 'copied') toast('success', 'Public link copied — anyone with it can read this');
-    else if (r === 'shared') toast('success', 'Shared');
-    else if (r === 'error') toast('error', 'Could not share');
-  }
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     fetch(`/api/items/${id}`)
@@ -177,7 +168,7 @@ export function DocDetail() {
                   </a>
                 )}
                 <button
-                  onClick={share}
+                  onClick={() => setSharing(true)}
                   className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 ' + (d.shared ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700')}
                 >
                   <Share2 size={14} /> {d.shared ? 'Shared' : 'Share'}
@@ -231,6 +222,16 @@ export function DocDetail() {
         </div>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
+
+      {sharing && d && (
+        <ShareDialog
+          id={d.id}
+          title={d.title}
+          initialShared={!!d.shared}
+          onClose={() => setSharing(false)}
+          onChanged={(s) => setD((prev: any) => (prev ? { ...prev, shared: s } : prev))}
+        />
+      )}
     </div>
   );
 }
