@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { BookmarksService } from './bookmarks.service';
 
 @Controller('bookmarks')
@@ -17,5 +17,17 @@ export class BookmarksController {
   @Get('status')
   async status() {
     return { lastSync: await this.bookmarks.lastSync(), count: await this.bookmarks.count() };
+  }
+
+  /** Find bookmarks by meaning (ranked list of links + descriptions). */
+  @Get('search')
+  async search(@Query('q') q: string) {
+    return { items: await this.bookmarks.search(q || '') };
+  }
+
+  /** Browse all stored bookmarks. */
+  @Get()
+  async list() {
+    return { items: await this.bookmarks.listItems() };
   }
 }

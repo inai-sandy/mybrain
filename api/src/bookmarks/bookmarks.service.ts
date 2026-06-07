@@ -94,6 +94,67 @@ export class BookmarksService {
     return row?.value || null;
   }
 
+  /** All stored bookmarks (newest first) shaped for the page. */
+  async listItems() {
+    const rows = await this.prisma.item.findMany({ where: { source: 'raindrop' }, orderBy: { createdAt: 'desc' }, take: 1000 });
+    return rows.map((i) => ({
+      id: i.id,
+      title: i.title,
+      sourceUrl: i.sourceUrl,
+      summary: i.summary,
+      tags: i.tags ? (JSON.parse(i.tags) as string[]) : [],
+      readFailed: i.readFailed,
+      createdAt: i.createdAt,
+      supermemory: !!i.supermemoryId,
+      rag: !!i.ragId,
+    }));
+  }
+
+  /**
+   * Find bookmarks by MEANING. Uses the semantic stores (SuperMemory + RAG) to rank,
+   * then maps the ranked snippets back to real bookmark items by matching their link/title
+   * (every bookmark's summary — which we indexed — starts with its URL + title).
+   * Keyword overlap is a safety net so the box always returns sensible results.
+   */
+  async search(q: string, limit = 20) {
+    const all = await this.listItems();
+    const query = q.trim();
+    if (!query) return all.slice(0, limit);
+
+    let ranked: string[] = [];
+    try {
+      const res = await this.memory.searchBoth(query);
+      const sm = Array.isArray((res as any).supermemory) ? (res as any).supermemory : [];
+      const rg = Array.isArray((res as any).rag) ? (res as any).rag : [];
+      ranked = [...sm, ...rg].map((r) => JSON.stringify(r).toLowerCase());
+    } catch {
+      ranked = [];
+    }
+
+    const terms = query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+    const scored = all
+      .map((it) => {
+        const url = (it.sourceUrl || '').toLowerCase();
+        const title = (it.title || '').toLowerCase();
+        // Semantic rank: earliest store snippet that mentions this bookmark's link or title.
+        let semIdx = -1;
+        for (let i = 0; i < ranked.length; i++) {
+          if ((url && ranked[i].includes(url)) || (title.length > 6 && ranked[i].includes(title))) {
+            semIdx = i;
+            break;
+          }
+        }
+        const semScore = semIdx >= 0 ? 1000 - semIdx : 0;
+        const hay = (title + ' ' + (it.summary || '') + ' ' + it.tags.join(' ')).toLowerCase();
+        const kwScore = terms.reduce((n, t) => n + (hay.includes(t) ? 1 : 0), 0);
+        return { it, score: semScore * 10 + kwScore };
+      })
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return scored.slice(0, limit).map((s) => s.it);
+  }
+
   async count(): Promise<number> {
     return this.prisma.item.count({ where: { source: 'raindrop' } });
   }
