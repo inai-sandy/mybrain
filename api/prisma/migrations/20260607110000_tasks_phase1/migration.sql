@@ -1,0 +1,22 @@
+-- Enrich Task for the daily loop
+ALTER TABLE "Task" ADD COLUMN "category" TEXT;
+ALTER TABLE "Task" ADD COLUMN "tags" TEXT;
+ALTER TABLE "Task" ADD COLUMN "priority" TEXT NOT NULL DEFAULT 'medium';
+ALTER TABLE "Task" ADD COLUMN "pinned" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Task" ADD COLUMN "estimateMin" INTEGER;
+ALTER TABLE "Task" ADD COLUMN "actualMin" INTEGER;
+ALTER TABLE "Task" ADD COLUMN "reminderCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Task" ADD COLUMN "reminders" TEXT;
+ALTER TABLE "Task" ADD COLUMN "day" TEXT;
+ALTER TABLE "Task" ADD COLUMN "dumpId" TEXT;
+
+-- CreateTable
+CREATE TABLE "BrainDump" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "day" TEXT NOT NULL,
+    "rawText" TEXT NOT NULL,
+    "source" TEXT NOT NULL DEFAULT 'app',
+    "question" TEXT,
+    "taskCount" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

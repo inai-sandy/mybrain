@@ -26,9 +26,32 @@ export class LlmService {
     await this.prisma.setting.upsert({ where: { key: 'llm' }, create: { key: 'llm', value }, update: { value } });
   }
 
-  /** Single-shot completion via the configured provider+model. Returns text, or null if unavailable. */
+  /** Live OpenRouter model list, optionally restricted to id prefixes (e.g. ['openai/','anthropic/']). */
+  async listOpenRouterModels(prefixes: string[] = []): Promise<{ id: string; name: string }[]> {
+    try {
+      const c = await this.connectors.get<{ apiKey: string }>('openrouter');
+      const r = await fetch('https://openrouter.ai/api/v1/models', {
+        headers: c?.apiKey ? { Authorization: `Bearer ${c.apiKey}` } : {},
+      });
+      if (!r.ok) return [];
+      const d: any = await r.json();
+      const list = Array.isArray(d.data) ? d.data : [];
+      return list
+        .filter((m: any) => !prefixes.length || prefixes.some((p) => String(m.id).startsWith(p)))
+        .map((m: any) => ({ id: m.id, name: m.name || m.id }))
+        .sort((a: any, b: any) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Single-shot completion via the app's default provider+model. Returns text, or null if unavailable. */
   async complete(prompt: string, maxTokens = 400): Promise<string | null> {
-    const cfg = await this.getConfig();
+    return this.completeWith(await this.getConfig(), prompt, maxTokens);
+  }
+
+  /** Single-shot completion forcing a specific provider+model (e.g. the Tasks engine's Sonnet). */
+  async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     try {
       if (cfg.provider === 'anthropic') {

@@ -8,10 +8,11 @@ import { ItemsModule } from './items/items.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { IdeasModule } from './ideas/ideas.module';
 import { SkillsModule } from './skills/skills.module';
+import { TasksModule } from './tasks/tasks.module';
 import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule],
   controllers: [HealthController],
 })
 export class AppModule {}
