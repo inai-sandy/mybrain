@@ -330,9 +330,73 @@ function PromptsSection() {
   );
 }
 
+function TelegramCard() {
+  const [st, setSt] = useState<{ configured: boolean; linked: boolean; username: string | null; webhookOk: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/telegram/status').then((x) => x.json()).catch(() => null);
+    setSt(r);
+  }
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/telegram/connect', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.ok) toast('success', 'Telegram connected');
+      else toast('error', d.message || 'Could not connect — is the bot token saved under Integrations?');
+      load();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function unlink() {
+    const r = await fetch('/api/telegram/disconnect', { method: 'POST' });
+    if (r.ok) {
+      toast('success', 'Unlinked — send /start again to re-claim');
+      load();
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Send size={18} className="text-sky-500" /> Telegram bot
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">
+        Run your whole daily loop from Telegram — dump, story, notes, tasks, and all your nudges. Paste the bot token under <b>Integrations → Telegram</b> first, then connect here.
+      </p>
+      {!st ? (
+        <p className="text-xs text-zinc-400">Checking…</p>
+      ) : (
+        <>
+          <div className="text-sm space-y-1 mb-4">
+            <div className="flex items-center gap-2"><span className={st.configured ? 'text-emerald-600' : 'text-zinc-400'}>{st.configured ? '●' : '○'}</span> Bot token {st.configured ? 'saved' : 'not set'}</div>
+            <div className="flex items-center gap-2"><span className={st.webhookOk ? 'text-emerald-600' : 'text-zinc-400'}>{st.webhookOk ? '●' : '○'}</span> Webhook {st.webhookOk ? 'registered' : 'not registered'}</div>
+            <div className="flex items-center gap-2"><span className={st.linked ? 'text-emerald-600' : 'text-zinc-400'}>{st.linked ? '●' : '○'}</span> {st.linked ? 'Linked to your chat' : 'Not linked yet'}</div>
+            {st.username && <div className="text-xs text-zinc-400 pt-1">Your bot: <b>@{st.username}</b> — open it in Telegram and send <code>/start</code>.</div>}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <button onClick={connect} disabled={busy || !st.configured} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+              {busy ? 'Connecting…' : st.webhookOk ? 'Re-register' : 'Connect'}
+            </button>
+            {st.linked && <button onClick={unlink} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Unlink</button>}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 function SyncSection() {
   return (
     <div className="space-y-4">
+      <TelegramCard />
       <RaindropSyncCard />
       <SkillsSyncCard />
       <SuperMemorySyncCard />
