@@ -5,6 +5,7 @@ import { AppShell } from './ui/AppShell';
 import { Login } from './ui/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Capture } from './pages/Capture';
+import { Bookmarks } from './pages/Bookmarks';
 import { Tasks } from './pages/Tasks';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
@@ -61,6 +62,7 @@ function Root() {
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
           <Route path="capture" element={<Capture />} />
+          <Route path="bookmarks" element={<Bookmarks />} />
           <Route path="doc/:id" element={<DocDetail />} />
           <Route path="chat/:id" element={<ChatDoc />} />
           <Route path="tasks" element={<Tasks />} />
