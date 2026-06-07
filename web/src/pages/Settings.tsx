@@ -245,6 +245,86 @@ function AiModelCard() {
   );
 }
 
+function BookmarksModelCard() {
+  const OPTS = [
+    { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash — fast, reads video (recommended)' },
+    { value: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro — most capable' },
+    { value: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash — newest' },
+  ];
+  const [model, setModel] = useState('');
+  const [custom, setCustom] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    fetch('/api/bookmarks/model')
+      .then((r) => r.json())
+      .then((d) => {
+        const m = d.model || '';
+        setModel(m);
+        setCustom(!!m && !OPTS.some((o) => o.value === m));
+      })
+      .catch(() => undefined)
+      .finally(() => setLoaded(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!loaded) return null;
+
+  async function save() {
+    const r = await fetch('/api/bookmarks/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (r.ok) toast('success', 'Bookmarks model saved');
+    else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
+  }
+
+  const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Bookmark size={18} className="text-emerald-600" /> Bookmarks AI model
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">
+        Used only to summarize your bookmarks (separate from the default model above). YouTube links are watched &amp; summarized natively — pick a Gemini model. Uses your OpenRouter key.
+      </p>
+      <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
+        Model
+        <select
+          value={custom ? '__custom__' : model}
+          onChange={(e) => {
+            if (e.target.value === '__custom__') {
+              setCustom(true);
+              setModel('');
+            } else {
+              setCustom(false);
+              setModel(e.target.value);
+            }
+          }}
+          className={sel}
+        >
+          <option value="">Choose…</option>
+          {OPTS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+          <option value="__custom__">Custom…</option>
+        </select>
+      </label>
+      {custom && (
+        <input
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          placeholder="openrouter model id (e.g. google/gemini-3-pro-preview)"
+          className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+        />
+      )}
+      <div className="mt-4 text-right">
+        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          Save
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function SuperMemorySyncCard() {
   const [busy, setBusy] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
@@ -337,6 +417,7 @@ function IntegrationsSection() {
     <div className="space-y-4">
       <SuperMemorySyncCard />
       <AiModelCard />
+      <BookmarksModelCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {
           const managed = !!it.managed;
