@@ -121,7 +121,7 @@ export class ItemsService {
     const item = await this.prisma.item.findUnique({ where: { id } });
     if (!item || !item.shared) return null;
     const content = item.filePath ? await fs.readFile(item.filePath, 'utf8').catch(() => '') : '';
-    return { title: item.title, summary: item.summary, source: item.source, sourceUrl: item.sourceUrl, content };
+    return { title: item.title, summary: item.summary, source: item.source, sourceUrl: item.sourceUrl, thumbnail: item.thumbnail, content };
   }
 
   /** Return a stored item's markdown content + meta. */
