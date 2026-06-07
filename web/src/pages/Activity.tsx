@@ -444,9 +444,9 @@ export function Activity() {
         <p className="text-zinc-500 text-sm">Your day, captured — what you did, finished, and felt.</p>
       </div>
 
-      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)} className={'inline-flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 -mb-px ' + (tab === t.id ? 'border-emerald-500 text-emerald-600 font-medium' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
+          <button key={t.id} onClick={() => setTab(t.id)} className={'shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-3 py-2 text-sm border-b-2 -mb-px ' + (tab === t.id ? 'border-emerald-500 text-emerald-600 font-medium' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
             <t.icon size={15} /> {t.label}
           </button>
         ))}

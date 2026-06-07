@@ -53,13 +53,13 @@ export function Settings({ email }: { email?: string }) {
         <p className="text-zinc-500">Your account, connected services, and appearance.</p>
       </div>
 
-      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={
-              'flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ' +
+              'shrink-0 whitespace-nowrap flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ' +
               (tab === t.id
                 ? 'border-emerald-600 text-emerald-600'
                 : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')
