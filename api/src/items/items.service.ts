@@ -159,6 +159,12 @@ export class ItemsService {
         skipped++;
         continue;
       }
+      // App-generated entries (bookmarks, ideas) are written to SuperMemory by us — never round-trip them
+      // back in as documents, or each sync would create duplicates.
+      if ((sm.tags || []).includes('idea') || (sm.tags || []).includes('bookmark')) {
+        skipped++;
+        continue;
+      }
       const full = await this.memory.getSuperMemoryContent(sm.id);
       if (!full || !full.content.trim()) {
         skipped++;
