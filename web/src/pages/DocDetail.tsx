@@ -11,6 +11,11 @@ function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+function youtubeId(url: string): string | null {
+  const m = (url || '').match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([\w-]{6,})/i);
+  return m ? m[1] : null;
+}
+
 function nodeText(node: any): string {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -184,6 +189,29 @@ export function DocDetail() {
                 </p>
               )}
             </div>
+
+            {(() => {
+              const ytId = d.sourceUrl ? youtubeId(d.sourceUrl) : null;
+              if (ytId)
+                return (
+                  <div className="aspect-video w-full rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
+                    <iframe
+                      className="w-full h-full"
+                      src={`https://www.youtube.com/embed/${ytId}`}
+                      title={d.title}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                );
+              if (d.thumbnail && d.source === 'raindrop')
+                return (
+                  <a href={d.sourceUrl || '#'} target="_blank" rel="noreferrer" className="block rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
+                    <img src={d.thumbnail} alt="" className="w-full max-h-80 object-cover" />
+                  </a>
+                );
+              return null;
+            })()}
 
             {showToc && (
               <details className="lg:hidden rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">

@@ -9,6 +9,7 @@ export type RaindropItem = {
   note: string;
   tags: string[];
   created: string; // ISO
+  cover: string; // page cover image (may be empty)
 };
 
 const BASE = process.env.RAINDROP_BASE || 'https://api.raindrop.io/rest/v1';
@@ -63,6 +64,7 @@ export class RaindropClient {
           note: String(it.note || '').trim(),
           tags: Array.isArray(it.tags) ? it.tags.map((t: any) => String(t)) : [],
           created: it.created || new Date(0).toISOString(),
+          cover: String(it.cover || '').trim(),
         });
       }
       if (crossed) break;

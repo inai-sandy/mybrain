@@ -140,6 +140,19 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     return body.join('\n').trim();
   }
 
+  /** YouTube video id from common URL shapes. */
+  private youtubeId(url: string): string | null {
+    const m = (url || '').match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([\w-]{6,})/i);
+    return m ? m[1] : null;
+  }
+
+  /** Best card thumbnail: YouTube poster for videos, else the Raindrop cover image. */
+  private thumbFor(url: string, cover?: string): string | null {
+    const yt = this.youtubeId(url);
+    if (yt) return `https://img.youtube.com/vi/${yt}/hqdefault.jpg`;
+    return cover && cover.trim() ? cover.trim() : null;
+  }
+
   /** The .md file: URL on the first line, then title / tags / date, then the summary. */
   buildMarkdown(b: RaindropItem, summary: string, readFailed: boolean): string {
     const tagLine = b.tags.length ? b.tags.join(', ') : '—';
@@ -196,11 +209,33 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       tags: i.tags ? (JSON.parse(i.tags) as string[]) : [],
       readFailed: i.readFailed,
       createdAt: i.createdAt,
+      thumbnail: i.thumbnail,
       supermemory: !!i.supermemoryId,
       rag: !!i.ragId,
       chunked: !!i.supermemoryId, // SuperMemory chunks server-side
       shared: i.shared,
     }));
+  }
+
+  /** Backfill thumbnails for existing bookmarks (YouTube poster from the URL; Raindrop cover for the rest). */
+  async backfillThumbnails(): Promise<{ updated: number }> {
+    const coverByLink = new Map<string, string>();
+    try {
+      const recent = await this.raindrop.recent(90);
+      for (const b of recent) if (b.cover) coverByLink.set(b.link, b.cover);
+    } catch {
+      /* ignore — YouTube thumbnails still resolve from the URL alone */
+    }
+    const items = await this.prisma.item.findMany({ where: { source: 'raindrop' }, select: { id: true, sourceUrl: true, thumbnail: true } });
+    let updated = 0;
+    for (const it of items) {
+      const thumb = this.thumbFor(it.sourceUrl || '', coverByLink.get(it.sourceUrl || ''));
+      if (thumb && thumb !== it.thumbnail) {
+        await this.prisma.item.update({ where: { id: it.id }, data: { thumbnail: thumb } });
+        updated++;
+      }
+    }
+    return { updated };
   }
 
   /**
@@ -292,7 +327,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.memoryOutbox.deleteMany({ where: { itemId: ex.id } }).catch(() => undefined);
       await this.prisma.item.update({
         where: { id: ex.id },
-        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, supermemoryId: null, ragId: null },
+        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, thumbnail: this.thumbFor(b.link, b.cover), supermemoryId: null, ragId: null },
       });
       await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags), { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
       return readFailed ? 'flagged' : 'imported';
@@ -310,6 +345,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
           sourceUrl: b.link,
           tags: JSON.stringify(tags),
           readFailed,
+          thumbnail: this.thumbFor(b.link, b.cover),
           ...(isNaN(created.getTime()) ? {} : { createdAt: created }),
         },
       })
