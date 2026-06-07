@@ -184,11 +184,42 @@ model SyncState {
   updatedAt DateTime @updatedAt
 }
 
-/// A chat conversation with the assistant.
+/// A chat conversation with the assistant ("talk to my brain"), scoped to one memory tag.
 model ChatSession {
+  id            String    @id @default(uuid())
+  title         String?
+  scope         String    @default("everything") // everything | bookmark | idea | activity | document | skill
+  summary       String? // rolling summary of older turns (keeps long threads cheap)
+  pinned        Boolean   @default(false) // protected from retention auto-clean
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+/// One message in a chat thread.
+model ChatMessage {
   id        String   @id @default(uuid())
-  title     String?
+  sessionId String
+  role      String // user | assistant
+  content   String
+  sources   String? // JSON array of {title, url?, itemId?}
+  followups String? // JSON array of suggested next questions
+  starred   Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+/// A starred message — a preserved copy that is NEVER auto-deleted by retention.
+model ChatStar {
+  id           String   @id @default(uuid())
+  messageId    String   @unique
+  sessionId    String?
+  sessionTitle String?
+  scope        String   @default("everything")
+  role         String
+  content      String
+  sources      String?
+  createdAt    DateTime @default(now())
 }
 
 /// Audit log of every action the agent takes.

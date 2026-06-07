@@ -87,12 +87,14 @@ export class SuperMemoryStore {
     }).catch(() => undefined);
   }
 
-  async search(q: string, limit = 5): Promise<any[]> {
-    const { apiKey } = await this.creds();
+  /** Semantic search, optionally scoped to a tag (e.g. 'bookmark'). Stays within the project. */
+  async search(q: string, limit = 5, tags: string[] = []): Promise<any[]> {
+    const { apiKey, project } = await this.creds();
+    const containerTags = [project, ...tags.map(safeContainerTag).filter(Boolean)];
     const res = await fetch(`${BASE}/v3/search`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q, limit }),
+      body: JSON.stringify({ q, limit, containerTags }),
     });
     if (!res.ok) throw new Error(`SuperMemory search ${res.status}`);
     const d: any = await res.json();

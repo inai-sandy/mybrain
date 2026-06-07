@@ -13,6 +13,7 @@ import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
+import { Chat } from './pages/Chat';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
 import { SkillViewer } from './pages/SkillViewer';
@@ -82,6 +83,7 @@ function AuthedApp() {
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="today" element={<Today />} />
         <Route path="tasks" element={<Tasks />} />
+        <Route path="chat" element={<Chat />} />
         <Route path="activity" element={<Activity />} />
         <Route path="settings" element={<Settings email={email} />} />
         <Route path="*" element={<Dashboard />} />

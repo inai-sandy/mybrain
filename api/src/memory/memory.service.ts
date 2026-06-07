@@ -133,4 +133,48 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       rag: rag.status === 'fulfilled' ? rag.value : { error: String((rag as any).reason?.message ?? rag) },
     };
   }
+
+  /** Scoped semantic search for the chat: SuperMemory (tag-filtered) first, RAG as fallback. Returns normalized snippets. */
+  async searchScoped(q: string, tags: string[] = [], limit = 5): Promise<MemHit[]> {
+    try {
+      const sm = await this.sm.search(q, limit, tags);
+      const norm = (sm || []).map((r) => this.normSm(r)).filter((x) => x.content);
+      if (norm.length) return norm;
+    } catch {
+      /* fall through to RAG */
+    }
+    try {
+      const rag = await this.rag.search(q, limit);
+      return (rag || []).map((r) => this.normRag(r)).filter((x) => x.content);
+    } catch {
+      return [];
+    }
+  }
+
+  private normSm(r: any): MemHit {
+    const content =
+      r.content || r.chunk || (Array.isArray(r.chunks) ? r.chunks.map((c: any) => c.content || c.text || '').join(' ') : '') || r.summary || (typeof r.memory === 'string' ? r.memory : '') || '';
+    return {
+      memId: r.documentId || r.id || r.memoryId || r.memory?.id || undefined,
+      title: r.title || r.metadata?.title || r.document?.title || '',
+      content: String(content).slice(0, 1500),
+      url: r.url || r.metadata?.url || undefined,
+      score: typeof r.score === 'number' ? r.score : undefined,
+      source: 'supermemory',
+    };
+  }
+
+  private normRag(r: any): MemHit {
+    const content = r.content || r.text || r.chunk || r.document || (typeof r === 'string' ? r : '') || '';
+    return {
+      memId: r.id || r.doc_id || undefined,
+      title: r.title || r.metadata?.title || '',
+      content: String(content).slice(0, 1500),
+      url: r.url || r.metadata?.url || undefined,
+      score: typeof r.score === 'number' ? r.score : undefined,
+      source: 'rag',
+    };
+  }
 }
+
+export type MemHit = { memId?: string; title: string; content: string; url?: string; score?: number; source: 'supermemory' | 'rag' };
