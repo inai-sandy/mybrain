@@ -75,6 +75,7 @@ export function Bookmarks() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<{ lastSync: string | null; count: number } | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState<{ imported: number; total: number } | null>(null);
   const [q, setQ] = useState('');
   const [asking, setAsking] = useState(false);
   const [results, setResults] = useState<BM[] | null>(null);
@@ -96,23 +97,64 @@ export function Bookmarks() {
     load();
   }, []);
 
+  // If a sync is already running (e.g. page reopened), resume showing live progress.
+  useEffect(() => {
+    (async () => {
+      const r = await fetch('/api/bookmarks/status');
+      if (!r.ok) return;
+      const s = await r.json();
+      if (s.running && !syncing) {
+        setSyncing(true);
+        setProgress({ imported: s.imported || 0, total: s.total || 0 });
+        const final = await pollUntilDone();
+        setSyncing(false);
+        setProgress(null);
+        await load();
+        if (final) toast('success', `Done — ${final.imported} bookmark${final.imported === 1 ? '' : 's'} summarized`);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Poll status every 3s until the background job finishes; returns the final status.
+  async function pollUntilDone(): Promise<{ imported: number; flagged: number } | null> {
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const r = await fetch('/api/bookmarks/status');
+      if (!r.ok) return null;
+      const s = await r.json();
+      setProgress({ imported: s.imported || 0, total: s.total || 0 });
+      if (!s.running) return s;
+    }
+  }
+
   async function sync() {
     setSyncing(true);
     try {
       const r = await fetch('/api/bookmarks/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) {
-        const more = d.remaining > 0 ? ` · ${d.remaining} more left — tap Sync again` : '';
-        const flagged = d.flagged ? ` (${d.flagged} couldn't be read)` : '';
-        toast('success', `Synced ${d.imported} new bookmark${d.imported === 1 ? '' : 's'}${flagged}${more}`);
-        load();
-      } else {
+      if (!r.ok) {
         toast('error', d.message || 'Sync failed');
+        return;
+      }
+      if (d.total === 0) {
+        toast('success', 'Already up to date — no new bookmarks to pull.');
+        await load();
+        return;
+      }
+      toast('success', `Reading ${d.total} bookmark${d.total === 1 ? '' : 's'} in the background…`);
+      setProgress({ imported: 0, total: d.total });
+      const final = await pollUntilDone();
+      await load();
+      if (final) {
+        const flagged = final.flagged ? ` · ${final.flagged} couldn't be read` : '';
+        toast('success', `Done — ${final.imported} bookmark${final.imported === 1 ? '' : 's'} summarized${flagged}`);
       }
     } catch {
       toast('error', 'Sync failed');
     } finally {
       setSyncing(false);
+      setProgress(null);
     }
   }
 
@@ -161,7 +203,8 @@ export function Bookmarks() {
             {status?.lastSync ? ` · synced ${shortDate(status.lastSync)}` : ''}
           </span>
           <button onClick={sync} disabled={syncing} className={btn}>
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Syncing…' : 'Sync last 3 months'}
+            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />{' '}
+            {progress ? `Syncing… ${progress.imported}/${progress.total}` : syncing ? 'Starting…' : 'Sync last 3 months'}
           </button>
         </div>
       </div>
