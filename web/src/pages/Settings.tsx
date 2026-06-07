@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -262,8 +262,52 @@ function SyncSection() {
   return (
     <div className="space-y-4">
       <RaindropSyncCard />
+      <SkillsSyncCard />
       <SuperMemorySyncCard />
     </div>
+  );
+}
+
+function SkillsSyncCard() {
+  const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState<string | null>(null);
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/skills/scan-status')
+      .then((r) => r.json())
+      .then((d) => setLast(d.lastScan))
+      .catch(() => undefined);
+  }, []);
+  async function run() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/skills/scan', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast('success', `Synced — ${d.created} new, ${d.updated} updated (${d.total} found)`);
+        if (d.lastScan) setLast(d.lastScan);
+      } else toast('error', d.message || 'Scan failed');
+    } catch {
+      toast('error', 'Scan failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Wand2 size={18} className="text-violet-500" /> Sync Claude skills
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">
+        Scan your server's Claude Code skills (<code>~/.claude/skills</code>) and pull in new ones — each described by AI and packaged for download.
+      </p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={run} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          {busy ? 'Syncing…' : 'Sync now'}
+        </button>
+        <span className="text-xs text-zinc-400">{last ? `Last synced: ${new Date(last).toLocaleString()}` : 'Never synced yet'}</span>
+      </div>
+    </section>
   );
 }
 
