@@ -44,6 +44,18 @@ export class BookmarksController {
     return { models: await this.summarizer.listGeminiModels() };
   }
 
+  /** Raindrop auto-sync config (default ON, hourly). */
+  @Get('autosync')
+  async getAutoSync() {
+    return this.bookmarks.getAutoSync();
+  }
+
+  @Put('autosync')
+  async setAutoSync(@Body() body: { enabled?: boolean; intervalMinutes?: number }) {
+    await this.bookmarks.setAutoSync(body?.enabled ?? true, body?.intervalMinutes ?? 60);
+    return { ok: true, ...(await this.bookmarks.getAutoSync()) };
+  }
+
   /** Find bookmarks by meaning (ranked list of links + descriptions). */
   @Get('search')
   async search(@Query('q') q: string) {

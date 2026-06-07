@@ -261,8 +261,88 @@ function ModelsSection() {
 function SyncSection() {
   return (
     <div className="space-y-4">
+      <RaindropSyncCard />
       <SuperMemorySyncCard />
     </div>
+  );
+}
+
+function RaindropSyncCard() {
+  const INTERVALS = [
+    { v: 60, label: 'Every hour' },
+    { v: 360, label: 'Every 6 hours' },
+    { v: 1440, label: 'Once a day' },
+  ];
+  const [enabled, setEnabled] = useState(true);
+  const [intervalM, setIntervalM] = useState(60);
+  const [status, setStatus] = useState<{ lastSync: string | null; count: number } | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/bookmarks/autosync').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/bookmarks/status').then((r) => r.json()).catch(() => ({})),
+    ])
+      .then(([a, s]) => {
+        if (typeof a.enabled === 'boolean') setEnabled(a.enabled);
+        if (a.intervalMinutes) setIntervalM(a.intervalMinutes);
+        setStatus(s);
+      })
+      .finally(() => setLoaded(true));
+  }, []);
+  if (!loaded) return null;
+
+  async function save(next: { enabled?: boolean; intervalMinutes?: number }) {
+    const body = { enabled: next.enabled ?? enabled, intervalMinutes: next.intervalMinutes ?? intervalM };
+    const r = await fetch('/api/bookmarks/autosync', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (r.ok) toast('success', 'Auto-sync settings saved');
+    else toast('error', 'Could not save');
+  }
+
+  const sel = 'mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm';
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">
+        <Bookmark size={18} className="text-emerald-600" /> Raindrop bookmarks
+      </h2>
+      <p className="text-sm text-zinc-500 mb-4">
+        Automatically pull your latest Raindrop bookmarks (last 3 months) and summarize them. You can also sync manually on the Bookmarks page.
+      </p>
+      <label className="flex items-center justify-between py-2">
+        <span className="text-sm">Auto-sync</span>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => {
+            setEnabled(e.target.checked);
+            save({ enabled: e.target.checked });
+          }}
+          className="h-4 w-4 accent-emerald-600"
+        />
+      </label>
+      <label className="flex items-center justify-between py-2">
+        <span className="text-sm">How often</span>
+        <select
+          disabled={!enabled}
+          value={intervalM}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            setIntervalM(v);
+            save({ intervalMinutes: v });
+          }}
+          className={sel + (enabled ? '' : ' opacity-50')}
+        >
+          {INTERVALS.map((i) => (
+            <option key={i.v} value={i.v}>{i.label}</option>
+          ))}
+        </select>
+      </label>
+      <p className="text-xs text-zinc-400 mt-2">
+        {status?.count ? `${status.count} bookmarks` : 'No bookmarks yet'}
+        {status?.lastSync ? ` · last synced ${new Date(status.lastSync).toLocaleString()}` : ' · never synced'}
+      </p>
+    </section>
   );
 }
 

@@ -98,6 +98,11 @@ describe('BookmarksService', () => {
     expect(updated[0].data.readFailed).toBe(false);
   }, 15000);
 
+  it('auto-sync defaults to enabled, hourly', async () => {
+    const { svc } = makeService();
+    expect(await svc.getAutoSync()).toEqual({ enabled: true, intervalMinutes: 60 });
+  });
+
   afterAll(async () => {
     await fs.rm(join(tmpdir(), 'mybrain-bm-test'), { recursive: true, force: true }).catch(() => undefined);
   });
