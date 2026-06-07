@@ -56,8 +56,9 @@ function make(opts: { session?: any; hits?: any[]; answer?: string; item?: any; 
     },
   };
   const memory: any = { searchScoped: jest.fn(async () => opts.hits ?? []) };
-  const llm: any = { complete: jest.fn(async () => opts.answer ?? 'An answer.\nFOLLOWUPS: a? | b?') };
-  return { svc: new ChatService(prisma, memory, llm), memory, llm, messages, stars, sessions };
+  const llm: any = { complete: jest.fn(async () => opts.answer ?? 'An answer.\nFOLLOWUPS: a? | b?'), getConfig: async () => ({ provider: 'openrouter', model: 'x' }) };
+  const prompts: any = { get: async (k: string) => `[${k} instruction]` };
+  return { svc: new ChatService(prisma, memory, llm, prompts), memory, llm, messages, stars, sessions };
 }
 
 describe('ChatService', () => {

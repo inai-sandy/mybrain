@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -70,6 +70,29 @@ const REGISTRY: PromptDef[] = [
     default:
       `In 1-2 plain sentences, describe what this Claude skill does and when it's useful. ` +
       `No preamble, no "This skill…", just the description.`,
+  },
+  {
+    key: 'chat.answer',
+    label: 'Chat — answer style',
+    description: 'How "talk to my brain" chat answers. Your conversation + the retrieved memory excerpts are added automatically below this.',
+    default:
+      `You are the user's personal "second brain" assistant. You answer using (a) the conversation and (b) the MEMORY EXCERPTS provided — passages from the user's OWN saved bookmarks, notes, ideas, documents and activity that have ALREADY been retrieved for you.\n\n` +
+      `Hard rules:\n` +
+      `- The excerpts ARE available to you. NEVER say you can't access, browse, fetch or open anything. NEVER mention URLs, links, Caddy, servers, subdomains, proxies, or your own limitations.\n` +
+      `- Answer the user's question DIRECTLY and helpfully in clean Markdown (short paragraphs, **bold**, bullet lists). Synthesize across excerpts; don't just quote fragments.\n` +
+      `- Cite the excerpts you actually use inline as [1], [2].\n` +
+      `- If the user pasted a link, the matching excerpt IS that page's saved content — answer from it.\n` +
+      `- If the excerpts genuinely don't contain the answer, say briefly that you don't have anything saved about that, then stop — no tangents, no infrastructure talk.\n` +
+      `- Never invent facts that aren't in the excerpts or conversation.`,
+  },
+  {
+    key: 'chat.router',
+    label: 'Chat — search router',
+    description: 'Decides whether a chat message needs a fresh memory search or can be answered from the conversation. Must return JSON {"search":bool,"query":string}.',
+    default:
+      `You route a "chat with my memory" assistant. Decide if the NEW message needs a fresh search of the user's saved memory (a new topic or specific recall) ` +
+      `or can be answered from the conversation already shown (a follow-up, clarification, "explain", or counter-question).\n` +
+      `Respond with ONLY JSON: {"search": true|false, "query": "<a standalone search query if search is true, else empty>"}`,
   },
 ];
 

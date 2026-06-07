@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MessageCircle, Plus, Send, X, ArrowLeft, ExternalLink, Sparkles, Trash2, Globe, Bookmark, Lightbulb, Activity as ActivityIcon, FileText, Wand2, Star, Search, Pin, PanelLeft } from 'lucide-react';
+import { MessageCircle, Plus, Send, X, ArrowLeft, ExternalLink, Sparkles, Trash2, Globe, Bookmark, Lightbulb, Activity as ActivityIcon, FileText, Wand2, Star, Search, Pin, PanelLeft, Copy, Check } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { mdComponents } from '../ui/markdown';
@@ -75,26 +75,32 @@ function SourceChip({ s }: { s: Source }) {
 
 function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => void; onFollow?: (q: string) => void }) {
   const user = m.role === 'user';
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try { await navigator.clipboard.writeText(m.content); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* ignore */ }
+  }
+  const temp = m.id === 'tmp-u' || m.id === 'tmp-a';
   return (
-    <div className={'group flex ' + (user ? 'justify-end' : 'justify-start')}>
-      <div className={'relative max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ' + (user ? 'bg-emerald-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800')}>
+    <div className={'group ' + (user ? 'flex justify-end' : '')}>
+      <div className={user ? 'max-w-[82%]' : 'w-full'}>
         {user ? (
-          <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+          <div className="rounded-2xl rounded-br-md bg-emerald-600 text-white px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed">{m.content}</div>
         ) : (
-          <div className="chat-md text-[13.5px] leading-relaxed [&_p]:my-1.5 [&_ul]:my-1.5 [&_ol]:my-1.5 [&_li]:my-0.5 [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_pre]:text-xs [&_pre]:overflow-x-auto">
+          <div className="text-[14px] leading-[1.7] text-zinc-800 dark:text-zinc-100 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_ul]:pl-5 [&_ol]:pl-5 [&_li]:my-1 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:mt-4 [&_h3]:font-semibold [&_h3]:mt-3 [&_pre]:rounded-lg [&_pre]:bg-zinc-100 dark:[&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:my-2.5 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-zinc-100 dark:[&_:not(pre)>code]:bg-zinc-800 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-[12.5px] [&_a]:text-emerald-600 [&_a]:underline [&_strong]:font-semibold">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{m.content || '…'}</ReactMarkdown>
           </div>
         )}
-        {!user && m.sources?.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{m.sources.map((s, i) => <SourceChip key={i} s={s} />)}</div>}
+        {!user && m.sources?.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{m.sources.map((s, i) => <SourceChip key={i} s={s} />)}</div>}
         {!user && m.followups?.length > 0 && onFollow && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {m.followups.map((f, i) => <button key={i} onClick={() => onFollow(f)} className="rounded-full border border-emerald-500/40 text-emerald-600 px-2.5 py-0.5 text-[11px] hover:bg-emerald-500/10">{f}</button>)}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {m.followups.map((f, i) => <button key={i} onClick={() => onFollow(f)} className="rounded-full border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 px-3 py-1 text-xs hover:border-emerald-500/50 hover:text-emerald-600">{f}</button>)}
           </div>
         )}
-        {onStar && m.id !== 'tmp-u' && (
-          <button onClick={() => onStar(m)} title={m.starred ? 'Unstar' : 'Star this message'} className={'absolute -top-2 ' + (user ? '-left-2' : '-right-2') + ' p-1 rounded-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 ' + (m.starred ? 'text-amber-500' : 'text-zinc-300 dark:text-zinc-600 opacity-0 group-hover:opacity-100') + ' hover:text-amber-500'}>
-            <Star size={13} className={m.starred ? 'fill-amber-500' : ''} />
-          </button>
+        {onStar && !temp && (
+          <div className={'mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ' + (user ? 'justify-end' : '')}>
+            {!user && <button onClick={copy} title="Copy" className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
+            <button onClick={() => onStar(m)} title={m.starred ? 'Unstar' : 'Star this message'} className={'p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (m.starred ? 'text-amber-500' : 'text-zinc-400 hover:text-amber-500')}><Star size={13} className={m.starred ? 'fill-amber-500' : ''} /></button>
+          </div>
         )}
       </div>
     </div>
@@ -267,36 +273,40 @@ export function Chat() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0 px-3 py-4 space-y-4">
-        {active.messages.length === 0 && !streaming && (
-          <div className="text-center text-sm text-zinc-400 mt-8">
-            <Sparkles className="mx-auto mb-2 text-emerald-500" size={22} />
-            <p className="mb-3">Ask anything about your {sc?.label.toLowerCase()}.</p>
-            <div className="flex flex-col items-center gap-1.5">
-              {(STARTERS[active.scope] || STARTERS.everything).map((p) => (
-                <button key={p} onClick={() => send(p)} className="rounded-full border border-emerald-500/40 text-emerald-600 px-3 py-1 text-xs hover:bg-emerald-500/10">{p}</button>
-              ))}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-6">
+          {active.messages.length === 0 && !streaming && (
+            <div className="text-center text-sm text-zinc-400 mt-10">
+              <Sparkles className="mx-auto mb-2 text-emerald-500" size={24} />
+              <p className="mb-4 text-zinc-500">Ask anything about your {sc?.label.toLowerCase()}.</p>
+              <div className="flex flex-col items-center gap-2">
+                {(STARTERS[active.scope] || STARTERS.everything).map((p) => (
+                  <button key={p} onClick={() => send(p)} className="rounded-full border border-zinc-200 dark:border-zinc-700 px-4 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-600">{p}</button>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        {active.messages.map((m) => <Bubble key={m.id} m={m} onStar={toggleStar} onFollow={send} />)}
-        {streaming !== null && (
-          <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />
-        )}
-        <div ref={endRef} />
+          )}
+          {active.messages.map((m) => <Bubble key={m.id} m={m} onStar={toggleStar} onFollow={send} />)}
+          {streaming !== null && (
+            <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />
+          )}
+          <div ref={endRef} />
+        </div>
       </div>
 
-      <div className="px-3 py-2.5 border-t border-zinc-200 dark:border-zinc-800 shrink-0 [padding-bottom:env(safe-area-inset-bottom)]">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            rows={1}
-            placeholder={`Ask your ${sc?.label.toLowerCase()}…`}
-            className="flex-1 resize-none rounded-xl bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2.5 text-sm outline-none focus:border-emerald-500 max-h-32"
-          />
-          <button onClick={() => send()} disabled={!input.trim() || sending} className="rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white p-2.5 disabled:opacity-40"><Send size={18} /></button>
+      <div className="border-t border-zinc-200 dark:border-zinc-800 shrink-0 [padding-bottom:env(safe-area-inset-bottom)] bg-white dark:bg-zinc-900">
+        <div className="max-w-3xl mx-auto w-full px-4 py-3">
+          <div className="flex items-end gap-1.5 rounded-2xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 pl-3 pr-1.5 py-1 focus-within:border-emerald-500 transition-colors">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+              rows={1}
+              placeholder={`Ask your ${sc?.label.toLowerCase()}…`}
+              className="flex-1 resize-none bg-transparent py-2 text-sm outline-none max-h-40 placeholder:text-zinc-400"
+            />
+            <button onClick={() => send()} disabled={!input.trim() || sending} className="shrink-0 mb-0.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white p-2 disabled:opacity-40"><Send size={16} /></button>
+          </div>
         </div>
       </div>
     </div>
@@ -308,9 +318,9 @@ export function Chat() {
   );
 
   return (
-    <div className="h-full flex bg-zinc-50 dark:bg-zinc-950">
+    <div className="h-full flex bg-white dark:bg-zinc-900">
       {/* Desktop collapsible sidebar */}
-      <aside className={'hidden md:flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-200 bg-white dark:bg-zinc-900 ' + (sidebarOpen ? 'w-80 border-r border-zinc-200 dark:border-zinc-800 p-3' : 'w-0')}>
+      <aside className={'hidden md:flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-200 bg-zinc-50 dark:bg-zinc-950 ' + (sidebarOpen ? 'w-72 border-r border-zinc-200 dark:border-zinc-800 p-3' : 'w-0')}>
         {sidebarOpen && listContent}
       </aside>
 
@@ -318,7 +328,7 @@ export function Chat() {
       {!active && <div className="md:hidden flex-1 h-full min-h-0 p-3 pb-20">{listContent}</div>}
 
       {/* Conversation: fullscreen on mobile, in-flow on desktop */}
-      <section className={active ? 'fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-950 md:static md:z-auto md:flex-1 md:min-w-0' : 'hidden md:flex md:flex-1 md:min-w-0 md:flex-col bg-white dark:bg-zinc-900'}>
+      <section className={active ? 'fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900 md:static md:z-auto md:flex-1 md:min-w-0' : 'hidden md:flex md:flex-1 md:min-w-0 md:flex-col bg-white dark:bg-zinc-900'}>
         {convo}
       </section>
 

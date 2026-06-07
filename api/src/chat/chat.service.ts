@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService, MemHit } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 export const SCOPES = ['everything', 'bookmark', 'idea', 'activity', 'document', 'skill'] as const;
 export type Scope = (typeof SCOPES)[number];
@@ -32,6 +33,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
   ) {}
 
   onModuleInit() {
@@ -123,12 +125,8 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   private async route(session: any, recent: any[], text: string): Promise<{ search: boolean; query: string }> {
     if (recent.length === 0) return { search: true, query: text }; // first question → always search
     const convo = recent.map((m) => `${m.role}: ${m.content}`).join('\n').slice(-2000);
-    const prompt =
-      `You route a "chat with my memory" assistant. Decide if the NEW message needs a fresh search of the user's saved memory (a new topic or specific recall) ` +
-      `or can be answered from the conversation already shown (a follow-up, clarification, "explain", or counter-question).\n` +
-      (session.summary ? `Earlier summary: ${session.summary}\n` : '') +
-      `Conversation:\n${convo}\n\nNew message: ${text}\n\n` +
-      `Respond with ONLY JSON: {"search": true|false, "query": "<a standalone search query if search is true, else empty>"}`;
+    const tmpl = await this.prompts.get('chat.router');
+    const prompt = `${tmpl}\n\n` + (session.summary ? `Earlier summary: ${session.summary}\n` : '') + `Conversation:\n${convo}\n\nNew message: ${text}`;
     const out = await this.llm.complete(prompt, 150);
     try {
       const j = JSON.parse(out!.slice(out!.indexOf('{'), out!.lastIndexOf('}') + 1));
@@ -138,18 +136,10 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private buildAnswerPrompt(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): string {
+  private async buildAnswerPrompt(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<string> {
     const convo = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n').slice(-3000);
     const ctx = hits.map((h, i) => `[${i + 1}] ${h.title || 'Saved item'}\n${h.content}`).join('\n\n');
-    const sys =
-      `You are the user's personal "second brain" assistant. You answer using (a) this conversation and (b) the MEMORY EXCERPTS below — passages from the user's OWN saved bookmarks, notes, ideas, documents and activity that have ALREADY been retrieved for you.\n\n` +
-      `Hard rules:\n` +
-      `- The excerpts ARE available to you. NEVER say you can't access, browse, fetch or open anything. NEVER mention URLs, links, Caddy, servers, subdomains, proxies, or your own limitations.\n` +
-      `- Answer the user's question DIRECTLY and helpfully in clean Markdown (short paragraphs, **bold**, bullet lists). Synthesize across excerpts; don't just quote fragments.\n` +
-      (hits.length ? `- Cite the excerpts you actually use inline as [1], [2].\n` : '') +
-      `- If the user pasted a link, the matching excerpt IS that page's saved content — answer from it.\n` +
-      `- If the excerpts genuinely don't contain the answer, say briefly: "I don't have anything saved about that in your ${session.scope === 'everything' ? 'memory' : session.scope + 's'}." Then stop — no tangents, no infrastructure talk.\n` +
-      `- Never invent facts that aren't in the excerpts or conversation.`;
+    const sys = await this.prompts.get('chat.answer');
     return (
       `${sys}\n\n` +
       (session.summary ? `Earlier summary of this chat: ${session.summary}\n\n` : '') +
@@ -171,7 +161,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async answer(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<{ answer: string; followups: string[] }> {
-    const raw = (await this.llm.complete(this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800)) || '';
+    const raw = (await this.llm.complete(await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800)) || '';
     return this.splitAnswer(raw);
   }
 
@@ -191,7 +181,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
     const sources = await this.toSources(hits);
 
-    const prompt = this.buildAnswerPrompt(session, recent, clean, hits, route.search);
+    const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, route.search);
     const cfg = await this.llm.getConfig();
     const full = (await this.llm.completeStream(cfg, prompt, 800, onToken)) || '';
     const { answer, followups } = this.splitAnswer(full);
