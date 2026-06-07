@@ -17,12 +17,19 @@ type AuthState = 'loading' | 'anon' | 'authed';
 export default function App() {
   return (
     <ToastProvider>
-      <Root />
+      <BrowserRouter>
+        <Routes>
+          {/* Public, no login required — shared links must open for anyone. */}
+          <Route path="/view/:id" element={<Viewer />} />
+          {/* Everything else is behind auth. */}
+          <Route path="/*" element={<AuthedApp />} />
+        </Routes>
+      </BrowserRouter>
     </ToastProvider>
   );
 }
 
-function Root() {
+function AuthedApp() {
   const [auth, setAuth] = useState<AuthState>('loading');
   const [email, setEmail] = useState('');
 
@@ -49,27 +56,22 @@ function Root() {
   }, []);
 
   if (auth === 'loading') {
-    return (
-      <div className="min-h-screen bg-zinc-950 text-zinc-400 flex items-center justify-center">Loading…</div>
-    );
+    return <div className="min-h-screen bg-zinc-950 text-zinc-400 flex items-center justify-center">Loading…</div>;
   }
   if (auth === 'anon') return <Login onSignedIn={refresh} />;
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/view/:id" element={<Viewer />} />
-        <Route element={<AppShell email={email} onSignOut={logout} />}>
-          <Route index element={<Dashboard />} />
-          <Route path="capture" element={<Capture />} />
-          <Route path="bookmarks" element={<Bookmarks />} />
-          <Route path="doc/:id" element={<DocDetail />} />
-          <Route path="chat/:id" element={<ChatDoc />} />
-          <Route path="tasks" element={<Tasks />} />
-          <Route path="settings" element={<Settings email={email} />} />
-          <Route path="*" element={<Dashboard />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <Routes>
+      <Route element={<AppShell email={email} onSignOut={logout} />}>
+        <Route index element={<Dashboard />} />
+        <Route path="capture" element={<Capture />} />
+        <Route path="bookmarks" element={<Bookmarks />} />
+        <Route path="doc/:id" element={<DocDetail />} />
+        <Route path="chat/:id" element={<ChatDoc />} />
+        <Route path="tasks" element={<Tasks />} />
+        <Route path="settings" element={<Settings email={email} />} />
+        <Route path="*" element={<Dashboard />} />
+      </Route>
+    </Routes>
   );
 }

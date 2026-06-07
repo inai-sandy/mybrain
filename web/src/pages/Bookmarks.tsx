@@ -4,7 +4,7 @@ import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2,
 import { DataTable, Column, Filter } from '../ui/DataTable';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
-import { shareItem } from '../ui/share';
+import { ShareDialog } from '../ui/ShareDialog';
 
 type BM = {
   id: string;
@@ -125,13 +125,8 @@ export function Bookmarks() {
   const toast = useToast();
   const navigate = useNavigate();
   const onOpen = (id: string) => navigate(`/doc/${id}`);
-  async function onShare(b: BM) {
-    const r = await shareItem(b.id, b.title);
-    if (r === 'copied') toast('success', 'Public link copied — anyone with it can read this');
-    else if (r === 'shared') toast('success', 'Shared');
-    else if (r === 'error') toast('error', 'Could not share');
-    if (r !== 'cancelled' && r !== 'error') load();
-  }
+  const [sharing, setSharing] = useState<BM | null>(null);
+  const onShare = (b: BM) => setSharing(b);
 
   async function load() {
     setLoading(true);
@@ -306,6 +301,16 @@ export function Bookmarks() {
               ? 'No bookmarks match.'
               : 'No bookmarks yet — connect Raindrop in Settings, then tap “Sync last 3 months”.'
           }
+        />
+      )}
+
+      {sharing && (
+        <ShareDialog
+          id={sharing.id}
+          title={sharing.title}
+          initialShared={sharing.shared}
+          onClose={() => setSharing(null)}
+          onChanged={() => load()}
         />
       )}
     </div>
