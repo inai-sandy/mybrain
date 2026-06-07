@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -32,13 +32,15 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'appearance';
+type Tab = 'account' | 'integrations' | 'models' | 'sync' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'integrations', label: 'Integrations', icon: Plug },
+    { id: 'models', label: 'Models', icon: Cpu },
+    { id: 'sync', label: 'Sync', icon: RefreshCw },
     { id: 'appearance', label: 'Appearance', icon: Palette },
   ];
 
@@ -68,6 +70,8 @@ export function Settings({ email }: { email?: string }) {
 
       {tab === 'account' && <AccountSection email={email} />}
       {tab === 'integrations' && <IntegrationsSection />}
+      {tab === 'models' && <ModelsSection />}
+      {tab === 'sync' && <SyncSection />}
       {tab === 'appearance' && <AppearanceSection />}
     </div>
   );
@@ -245,6 +249,23 @@ function AiModelCard() {
   );
 }
 
+function ModelsSection() {
+  return (
+    <div className="space-y-4">
+      <AiModelCard />
+      <BookmarksModelCard />
+    </div>
+  );
+}
+
+function SyncSection() {
+  return (
+    <div className="space-y-4">
+      <SuperMemorySyncCard />
+    </div>
+  );
+}
+
 function BookmarksModelCard() {
   const OPTS = [
     { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash — fast, reads video (recommended)' },
@@ -415,9 +436,6 @@ function IntegrationsSection() {
 
   return (
     <div className="space-y-4">
-      <SuperMemorySyncCard />
-      <AiModelCard />
-      <BookmarksModelCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {
           const managed = !!it.managed;
