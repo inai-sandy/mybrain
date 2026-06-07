@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink } from 'lucide-react';
-import { extractHeadings, stripLeadingUrl, mdComponents, Toc, MediaEmbed } from '../ui/markdown';
+import { extractHeadings, stripLeadingUrl, mdComponents, OutlineLayout, MediaEmbed } from '../ui/markdown';
 
 type Doc = { title: string; summary?: string | null; source: string; sourceUrl?: string | null; thumbnail?: string | null; content: string };
 
@@ -24,7 +24,6 @@ export function Viewer() {
 
   const headings = useMemo(() => (doc?.content ? extractHeadings(doc.content) : []), [doc?.content]);
   const body = useMemo(() => (doc?.content ? stripLeadingUrl(doc.content) : ''), [doc?.content]);
-  const showToc = headings.length >= 2;
 
   return (
     <div className="min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -38,16 +37,8 @@ export function Viewer() {
         {error && <p className="text-amber-500">{error}</p>}
 
         {doc && (
-          <div className="lg:flex lg:gap-8">
-            {showToc && (
-              <aside className="hidden lg:block lg:w-56 shrink-0 order-first">
-                <div className="sticky top-20">
-                  <Toc headings={headings} />
-                </div>
-              </aside>
-            )}
-
-            <div className="min-w-0 flex-1 space-y-5">
+          <OutlineLayout headings={headings}>
+            <div className="space-y-5">
               <div>
                 <div className="text-xs uppercase tracking-wide text-zinc-400 mb-1">{doc.source === 'raindrop' ? 'bookmark' : doc.source}</div>
                 <h1 className="text-2xl font-extrabold">{doc.title}</h1>
@@ -68,22 +59,13 @@ export function Viewer() {
 
               <MediaEmbed sourceUrl={doc.sourceUrl} source={doc.source} thumbnail={doc.thumbnail} title={doc.title} />
 
-              {showToc && (
-                <details className="lg:hidden rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                  <summary className="text-sm font-medium cursor-pointer text-zinc-600 dark:text-zinc-300">On this page</summary>
-                  <div className="mt-2">
-                    <Toc headings={headings} />
-                  </div>
-                </details>
-              )}
-
               {body && (
                 <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{body}</ReactMarkdown>
                 </article>
               )}
             </div>
-          </div>
+          </OutlineLayout>
         )}
         {!doc && !error && <p className="text-zinc-400">Loading…</p>}
       </div>

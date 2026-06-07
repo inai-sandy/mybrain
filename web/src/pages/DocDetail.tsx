@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { ArrowLeft, ExternalLink, Share2 } from 'lucide-react';
 import { StoreBadges } from '../ui/StoreBadges';
 import { ShareDialog } from '../ui/ShareDialog';
-import { extractHeadings, stripLeadingUrl, mdComponents, Toc, MediaEmbed } from '../ui/markdown';
+import { extractHeadings, stripLeadingUrl, mdComponents, OutlineLayout, MediaEmbed } from '../ui/markdown';
 
 export function DocDetail() {
   const { id } = useParams();
@@ -25,7 +25,6 @@ export function DocDetail() {
 
   const headings = useMemo(() => (d?.content ? extractHeadings(d.content) : []), [d?.content]);
   const body = useMemo(() => (d?.content ? stripLeadingUrl(d.content) : ''), [d?.content]);
-  const showToc = headings.length >= 2;
 
   return (
     <div className="space-y-5">
@@ -36,16 +35,8 @@ export function DocDetail() {
       {err && <p className="text-amber-500">{err}</p>}
 
       {d && (
-        <div className="lg:flex lg:gap-8">
-          {showToc && (
-            <aside className="hidden lg:block lg:w-56 shrink-0 order-first">
-              <div className="sticky top-20">
-                <Toc headings={headings} />
-              </div>
-            </aside>
-          )}
-
-          <div className="min-w-0 flex-1 space-y-5">
+        <OutlineLayout headings={headings}>
+          <div className="space-y-5">
             <div>
               <h1 className="text-2xl font-extrabold">{d.title}</h1>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-zinc-500">
@@ -90,22 +81,13 @@ export function DocDetail() {
 
             <MediaEmbed sourceUrl={d.sourceUrl} source={d.source} thumbnail={d.thumbnail} title={d.title} />
 
-            {showToc && (
-              <details className="lg:hidden rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
-                <summary className="text-sm font-medium cursor-pointer text-zinc-600 dark:text-zinc-300">On this page</summary>
-                <div className="mt-2">
-                  <Toc headings={headings} />
-                </div>
-              </details>
-            )}
-
             {body && (
               <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{body}</ReactMarkdown>
               </article>
             )}
           </div>
-        </div>
+        </OutlineLayout>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
 
