@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
@@ -11,6 +11,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const [menu, setMenu] = useState(false);
   const [help, setHelp] = useState(false);
   const navigate = useNavigate();
+  const isChat = useLocation().pathname === '/chat';
 
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
@@ -139,7 +140,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           </div>
         </header>
 
-        <main className="p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto">
+        <main className={isChat ? 'h-[calc(100dvh-3.5rem)] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}>
           <Outlet />
         </main>
       </div>

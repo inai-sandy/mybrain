@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { ChatService } from './chat.service';
 
 @Controller('chat')
@@ -48,6 +49,27 @@ export class ChatController {
     const r = await this.chat.sendMessage(id, body.text);
     if (!r) throw new BadRequestException('Chat not found');
     return r;
+  }
+
+  @Post('sessions/:id/message/stream')
+  async stream(@Param('id') id: string, @Body() body: { text?: string }, @Res() res: Response) {
+    if (!body?.text?.trim()) {
+      res.status(400).json({ message: 'Type a message' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    (res as any).flushHeaders?.();
+    try {
+      const r = await this.chat.streamMessage(id, body.text, (tok) => res.write(`data: ${JSON.stringify({ token: tok })}\n\n`));
+      if (!r) res.write(`data: ${JSON.stringify({ error: 'Chat not found' })}\n\n`);
+      else res.write(`data: ${JSON.stringify({ done: true, userMessage: r.userMessage, message: r.message })}\n\n`);
+    } catch (e: any) {
+      res.write(`data: ${JSON.stringify({ error: e?.message || 'failed' })}\n\n`);
+    }
+    res.end();
   }
 
   @Post('sessions/:id/pin')

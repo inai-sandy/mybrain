@@ -83,4 +83,55 @@ export class LlmService {
     }
     return null;
   }
+
+  /** Streaming completion — calls onToken as text arrives, returns the full text. Falls back to non-streaming for Anthropic. */
+  async completeStream(cfg: LlmConfig | null, prompt: string, maxTokens: number, onToken: (t: string) => void): Promise<string | null> {
+    if (!cfg?.provider || !cfg?.model) return null;
+    if (cfg.provider === 'openrouter') {
+      try {
+        const c = await this.connectors.get<{ apiKey: string }>('openrouter');
+        if (!c?.apiKey) return null;
+        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, stream: true, messages: [{ role: 'user', content: prompt }] }),
+        });
+        if (!r.ok || !r.body) return null;
+        return await this.readSse(r.body as any, onToken);
+      } catch {
+        return null;
+      }
+    }
+    // Anthropic (or anything else): no streaming here — emit the whole thing once.
+    const full = await this.completeWith(cfg, prompt, maxTokens);
+    if (full) onToken(full);
+    return full;
+  }
+
+  private async readSse(body: any, onToken: (t: string) => void): Promise<string> {
+    const reader = body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let full = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t.startsWith('data:')) continue;
+        const data = t.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        try {
+          const tok = JSON.parse(data)?.choices?.[0]?.delta?.content;
+          if (tok) { full += tok; onToken(tok); }
+        } catch {
+          /* ignore keep-alive / partial */
+        }
+      }
+    }
+    return full;
+  }
 }

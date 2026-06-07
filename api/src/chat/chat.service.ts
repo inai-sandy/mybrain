@@ -138,30 +138,68 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async answer(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<{ answer: string; followups: string[] }> {
+  private buildAnswerPrompt(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): string {
     const convo = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n').slice(-3000);
     const ctx = hits.map((h, i) => `[${i + 1}] ${h.title ? h.title + ': ' : ''}${h.content}`).join('\n\n');
     const sys =
-      `You are the user's "second brain" — answer from their saved memory and this conversation only. Be concise and direct. ` +
+      `You are the user's "second brain" — answer from their saved memory and this conversation only. Be concise and direct; use clean Markdown (short paragraphs, bold, bullet lists) when it helps. ` +
       (hits.length ? `Cite the snippets you use inline as [1], [2]. ` : '') +
       (didSearch && !hits.length ? `Nothing relevant was found in their memory for this — tell them you don't have anything saved about that; do NOT invent facts. ` : '') +
       `Never fabricate.`;
-    const prompt =
+    return (
       `${sys}\n\n` +
       (session.summary ? `Earlier summary: ${session.summary}\n\n` : '') +
       `Conversation so far:\n${convo || '(none)'}\n\n` +
       (hits.length ? `Memory snippets:\n${ctx}\n\n` : '') +
       `User: ${text}\n\n` +
-      `After your answer, on a new line output exactly "FOLLOWUPS:" then 2-3 short follow-up questions the user might ask next, separated by " | ".`;
-    const raw = (await this.llm.complete(prompt, 800)) || "I couldn't generate a reply just now — try again.";
-    const idx = raw.indexOf('FOLLOWUPS:');
-    let answer = raw;
-    let followups: string[] = [];
-    if (idx >= 0) {
-      answer = raw.slice(0, idx).trim();
-      followups = raw.slice(idx + 'FOLLOWUPS:'.length).split('|').map((s) => s.replace(/^[-•\s]+/, '').trim()).filter(Boolean).slice(0, 3);
-    }
-    return { answer: answer.trim(), followups };
+      `After your answer, on a new line output exactly "FOLLOWUPS:" then 2-3 short follow-up questions the user might ask next, separated by " | ".`
+    );
+  }
+
+  private splitAnswer(raw: string): { answer: string; followups: string[] } {
+    const text = raw || "I couldn't generate a reply just now — try again.";
+    const idx = text.indexOf('FOLLOWUPS:');
+    if (idx < 0) return { answer: text.trim(), followups: [] };
+    return {
+      answer: text.slice(0, idx).trim(),
+      followups: text.slice(idx + 'FOLLOWUPS:'.length).split('|').map((s) => s.replace(/^[-•\s]+/, '').trim()).filter(Boolean).slice(0, 3),
+    };
+  }
+
+  private async answer(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<{ answer: string; followups: string[] }> {
+    const raw = (await this.llm.complete(this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800)) || '';
+    return this.splitAnswer(raw);
+  }
+
+  /** Like sendMessage but streams answer tokens via onToken; saves + returns the final messages. */
+  async streamMessage(sessionId: string, text: string, onToken: (t: string) => void) {
+    const session = await this.prisma.chatSession.findUnique({ where: { id: sessionId } });
+    if (!session) return null;
+    const clean = (text || '').trim();
+    if (!clean) return null;
+
+    const recentRows = await this.prisma.chatMessage.findMany({ where: { sessionId }, orderBy: { createdAt: 'desc' }, take: 8 });
+    const recent = recentRows.reverse();
+    const userMsg = await this.prisma.chatMessage.create({ data: { sessionId, role: 'user', content: clean } });
+
+    const route = await this.route(session, recent, clean);
+    let hits: MemHit[] = [];
+    if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
+    const sources = await this.toSources(hits);
+
+    const prompt = this.buildAnswerPrompt(session, recent, clean, hits, route.search);
+    const cfg = await this.llm.getConfig();
+    const full = (await this.llm.completeStream(cfg, prompt, 800, onToken)) || '';
+    const { answer, followups } = this.splitAnswer(full);
+
+    const aMsg = await this.prisma.chatMessage.create({
+      data: { sessionId, role: 'assistant', content: answer, sources: JSON.stringify(sources), followups: JSON.stringify(followups) },
+    });
+    const data: any = { lastMessageAt: new Date() };
+    if (!session.title) data.title = clean.slice(0, 60);
+    await this.prisma.chatSession.update({ where: { id: sessionId }, data });
+
+    return { userMessage: this.shapeMessage(userMsg), message: this.shapeMessage(aMsg) };
   }
 
   /** Map memory hits to clickable sources (link to our internal Item when we can match it). */
