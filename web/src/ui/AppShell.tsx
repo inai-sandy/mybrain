@@ -140,10 +140,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           </div>
         </header>
 
-        <main
-          className={isChat ? 'h-[calc(100vh-3.5rem)] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}
-          style={isChat ? { height: 'calc(100dvh - 3.5rem)' } : undefined}
-        >
+        <main className={isChat ? 'h-[calc(100vh-7rem)] md:h-[calc(100vh-3.5rem)] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}>
           <Outlet />
         </main>
       </div>

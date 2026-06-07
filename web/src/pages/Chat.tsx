@@ -318,19 +318,19 @@ export function Chat() {
   );
 
   return (
-    <div className="h-full flex bg-white dark:bg-zinc-900">
+    <div className="h-full flex bg-white dark:bg-zinc-900 overflow-hidden">
       {/* Desktop collapsible sidebar */}
       <aside className={'hidden md:flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-200 bg-zinc-50 dark:bg-zinc-950 ' + (sidebarOpen ? 'w-72 border-r border-zinc-200 dark:border-zinc-800 p-3' : 'w-0')}>
         {sidebarOpen && listContent}
       </aside>
 
-      {/* Mobile thread list (when no conversation open) */}
-      {!active && <div className="md:hidden flex-1 h-full min-h-0 p-3 pb-20">{listContent}</div>}
-
-      {/* Conversation: fullscreen on mobile, in-flow on desktop */}
-      <section className={active ? 'fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900 md:static md:z-auto md:flex-1 md:min-w-0' : 'hidden md:flex md:flex-1 md:min-w-0 md:flex-col bg-white dark:bg-zinc-900'}>
-        {convo}
-      </section>
+      {/* Main area — in-flow (no fixed overlay), fits between the top bar and bottom tabs */}
+      <div className="flex-1 min-w-0 h-full flex flex-col">
+        {/* Mobile thread list (only when no conversation is open) */}
+        {!active && <div className="md:hidden h-full min-h-0 p-3">{listContent}</div>}
+        {/* Conversation — desktop always shows this column; mobile shows it only when a chat is open */}
+        <div className={'h-full min-h-0 ' + (active ? 'flex flex-col' : 'hidden md:flex md:flex-col')}>{convo}</div>
+      </div>
 
       {newChat && <NewChatModal onClose={() => setNewChat(false)} onCreated={(s) => { setNewChat(false); setSessions((p) => [s, ...p]); setActive(s); }} />}
       {delFor && <ConfirmDialog title="Delete chat?" message={`“${delFor.title}” will be removed.`} confirmLabel="Delete" onConfirm={() => remove(delFor)} onCancel={() => setDelFor(null)} />}
