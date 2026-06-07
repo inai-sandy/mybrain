@@ -158,12 +158,16 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       if (s) return { summary: s, readFailed: false };
       return { summary: this.fallbackSummary(b), readFailed: true };
     }
+    // 1) Let Gemini read the URL directly (handles share links, redirects, JS pages…).
+    const direct = await this.summarizer.summarizeUrl(b.link, b.title);
+    if (direct) return { summary: direct, readFailed: false };
+    // 2) Fallback: our own server-side HTML fetch → Gemini text.
     const text = await this.fetchPageText(b.link);
     if (text) {
       const s = await this.summarizer.summarizeText(b.title, text);
-      // page WAS read; if the model hiccupped, fall back to metadata but don't flag as unreadable.
       return { summary: s || this.fallbackSummary(b), readFailed: false };
     }
+    // 3) Couldn't read it at all → metadata summary + flag.
     return { summary: this.fallbackSummary(b), readFailed: true };
   }
 
