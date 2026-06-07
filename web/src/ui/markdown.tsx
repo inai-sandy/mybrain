@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { List } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { List, ChevronLeft } from 'lucide-react';
 
 export function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -52,7 +52,7 @@ export const mdComponents = {
   ),
 };
 
-export function Toc({ headings }: { headings: Heading[] }) {
+function TocList({ headings }: { headings: Heading[] }) {
   const [active, setActive] = useState('');
   useEffect(() => {
     const els = headings.map((h) => document.getElementById(h.id)).filter(Boolean) as HTMLElement[];
@@ -69,29 +69,92 @@ export function Toc({ headings }: { headings: Heading[] }) {
   }, [headings]);
 
   return (
-    <nav>
-      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">
-        <List size={14} /> On this page
+    <ul className="border-l border-zinc-200 dark:border-zinc-800">
+      {headings.map((h, i) => (
+        <li key={h.id + i}>
+          <button
+            onClick={() => document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className={
+              'block w-full text-left -ml-px border-l-2 py-1 text-sm transition-colors ' +
+              (active === h.id
+                ? 'border-emerald-500 text-emerald-600 font-medium'
+                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200')
+            }
+            style={{ paddingLeft: (h.level - 1) * 12 + 12 }}
+          >
+            {h.text}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function usePersistedBool(key: string, def: boolean): [boolean, (v: boolean) => void] {
+  const [v, setV] = useState<boolean>(() => {
+    try {
+      const s = localStorage.getItem(key);
+      return s == null ? def : s === '1';
+    } catch {
+      return def;
+    }
+  });
+  const set = (nv: boolean) => {
+    setV(nv);
+    try {
+      localStorage.setItem(key, nv ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  };
+  return [v, set];
+}
+
+/**
+ * Wraps article content with an optional "On this page" outline that collapses SIDEWAYS:
+ * collapsed (default) → content is centered; expanded → outline rail on the left.
+ * On mobile the outline is always a small accordion above the content.
+ */
+export function OutlineLayout({ headings, children }: { headings: Heading[]; children: ReactNode }) {
+  const has = headings.length >= 2;
+  const [open, setOpen] = usePersistedBool('toc.open', false);
+  if (!has) return <div className="max-w-3xl mx-auto">{children}</div>;
+
+  return (
+    <div className={open ? 'lg:flex lg:gap-8' : ''}>
+      {open && (
+        <aside className="hidden lg:block lg:w-56 shrink-0 order-first">
+          <div className="sticky top-20">
+            <div className="flex items-center justify-between mb-2">
+              <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                <List size={14} /> On this page
+              </span>
+              <button onClick={() => setOpen(false)} title="Hide outline" className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+                <ChevronLeft size={16} />
+              </button>
+            </div>
+            <TocList headings={headings} />
+          </div>
+        </aside>
+      )}
+      <div className={'min-w-0 ' + (open ? 'flex-1' : 'max-w-3xl mx-auto')}>
+        {!open && (
+          <button
+            onClick={() => setOpen(true)}
+            className="hidden lg:inline-flex items-center gap-1.5 mb-4 text-sm text-zinc-500 hover:text-emerald-600 rounded-lg border border-zinc-200 dark:border-zinc-800 px-2.5 py-1.5"
+          >
+            <List size={15} /> On this page
+          </button>
+        )}
+        <details className="lg:hidden mb-4 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
+          <summary className="text-sm font-medium cursor-pointer text-zinc-600 dark:text-zinc-300">On this page</summary>
+          <div className="mt-2">
+            <TocList headings={headings} />
+          </div>
+        </details>
+        {children}
       </div>
-      <ul className="border-l border-zinc-200 dark:border-zinc-800">
-        {headings.map((h, i) => (
-          <li key={h.id + i}>
-            <button
-              onClick={() => document.getElementById(h.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className={
-                'block w-full text-left -ml-px border-l-2 py-1 text-sm transition-colors ' +
-                (active === h.id
-                  ? 'border-emerald-500 text-emerald-600 font-medium'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200')
-              }
-              style={{ paddingLeft: (h.level - 1) * 12 + 12 }}
-            >
-              {h.text}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    </div>
   );
 }
 
