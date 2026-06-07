@@ -20,12 +20,24 @@ export type Doc = {
   summary?: string | null;
 };
 
-const SOURCE: Record<string, { icon: LucideIcon; color: string }> = {
-  upload: { icon: Upload, color: 'text-blue-500 bg-blue-500/10' },
-  url: { icon: Link2, color: 'text-emerald-500 bg-emerald-500/10' },
-  notion: { icon: FileText, color: 'text-purple-500 bg-purple-500/10' },
-  supermemory: { icon: Brain, color: 'text-indigo-500 bg-indigo-500/10' }, // synced from SuperMemory
+const SOURCE: Record<string, { icon: LucideIcon; color: string; label: string }> = {
+  upload: { icon: Upload, color: 'text-blue-500 bg-blue-500/10', label: 'Upload' },
+  url: { icon: Link2, color: 'text-emerald-500 bg-emerald-500/10', label: 'Link' },
+  notion: { icon: FileText, color: 'text-purple-500 bg-purple-500/10', label: 'Notion' },
+  supermemory: { icon: Brain, color: 'text-indigo-500 bg-indigo-500/10', label: 'Synced' }, // synced from SuperMemory
 };
+
+// Short, friendly date for the card meta line.
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (d.toDateString() === new Date().toDateString()) return 'today';
+  if (days <= 1) return 'yesterday';
+  if (days < 7) return `${days}d ago`;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) });
+}
 
 function Chip({ t }: { t: string }) {
   return (
@@ -103,22 +115,31 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
   function card(r: Doc) {
     const meta = SOURCE[r.source] || SOURCE.upload;
     const Icon = meta.icon;
+    const date = shortDate(r.createdAt);
     return (
-      <div className="h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3.5 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
-        <div className="flex items-center gap-2.5">
+      <div className="group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
+        {/* Title row: source chip + title (wraps to 2 lines) + meta */}
+        <div className="flex items-start gap-3">
           <div className={'shrink-0 rounded-lg p-2 ' + meta.color}>
-            <Icon size={16} />
+            <Icon size={18} />
           </div>
           <button onClick={() => navigate(`/doc/${r.id}`)} className="min-w-0 flex-1 text-left">
-            <h3 className="font-semibold truncate hover:text-emerald-600">{r.title}</h3>
+            <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{r.title}</h3>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              {meta.label}
+              {date && <> · {date}</>}
+            </p>
           </button>
         </div>
+
         {r.tags?.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-1">
-            {r.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {r.tags.slice(0, 3).map((t) => <Chip key={t} t={t} />)}
+            {r.tags.length > 3 && <Chip t={`+${r.tags.length - 3}`} />}
           </div>
         )}
-        <div className="mt-auto pt-3 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
+
+        <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
           <StoreBadges supermemory={r.supermemory} rag={r.rag} chunked={r.chunked} />
           <div className="flex items-center gap-0.5 shrink-0">
             <button onClick={() => navigate(`/chat/${r.id}`)} title="Chat with this document" className={iconBtn + ' hover:text-emerald-600'}>
