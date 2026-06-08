@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw } from 'lucide-react';
+import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useDictation } from '../ui/useDictation';
 
@@ -17,6 +17,8 @@ export type Task = {
   reminders?: string[];
   day?: string | null;
   status: 'open' | 'done';
+  progress?: number; // 0 | 30 | 60 | 100
+  followUp?: boolean;
   rolloverCount: number;
   createdAt: string;
   completedAt?: string | null;
@@ -45,9 +47,10 @@ export function mins(n?: number | null): string {
 }
 
 // ---- the task card (presentational; actions via callbacks) ----
-export function TaskCard({ t, onToggle, onEdit, onDelete }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void }) {
+export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void; onProgress?: (t: Task, pct: number) => void }) {
   const p = PRIO[t.priority] || PRIO.medium;
   const done = t.status === 'done';
+  const prog = t.progress ?? 0;
   return (
     <div className={'group rounded-xl border bg-white dark:bg-zinc-900 p-3.5 flex items-start gap-3 transition-all ' + (done ? 'opacity-60 border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm') + (t.pinned && !done ? ' ring-1 ring-amber-400/40' : '')}>
       <button onClick={() => onToggle(t)} title={done ? 'Mark open' : 'Mark done'} className={'mt-0.5 shrink-0 ' + (done ? 'text-emerald-600' : 'text-zinc-300 dark:text-zinc-600 hover:text-emerald-600')}>
@@ -57,6 +60,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete }: { t: Task; onToggle:
         <div className="flex items-start gap-2">
           <h3 className={'font-medium leading-snug flex-1 ' + (done ? 'line-through text-zinc-400' : '')}>
             {t.pinned && <Star size={13} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
+            {t.followUp && <RotateCcw size={12} className="inline -mt-0.5 mr-1 text-indigo-500" />}
             {t.title}
           </h3>
           <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -83,6 +87,23 @@ export function TaskCard({ t, onToggle, onEdit, onDelete }: { t: Task; onToggle:
             <span className="ml-auto inline-flex items-center gap-1 text-zinc-400"><Clock size={11} /> {mins(t.estimateMin)}</span>
           ) : null}
         </div>
+        {!done && onProgress && (
+          <div className="flex items-center gap-2 mt-2.5">
+            <div className="flex-1 h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+              <div className="h-full bg-emerald-500 transition-all" style={{ width: `${prog}%` }} />
+            </div>
+            {[30, 60].map((pct) => (
+              <button
+                key={pct}
+                onClick={() => onProgress(t, prog === pct ? 0 : pct)}
+                title={prog === pct ? 'Clear progress' : `Mark ${pct}% done`}
+                className={'rounded-full px-2 py-0.5 text-[11px] font-medium border transition-colors ' + (prog === pct ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600')}
+              >
+                {pct}%
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -264,18 +285,34 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
   );
 }
 
-// ---- "how long did it take?" on completion ----
+// ---- "how long did it take?" + optional follow-up, on completion ----
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function addDays(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return ymd(d);
+}
+function prettyDate(s: string): string {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 export function DoneModal({ task, onClose, onSaved }: { task: Task; onClose: () => void; onSaved: () => void }) {
   const [val, setVal] = useState(task.estimateMin ? String(task.estimateMin) : '');
+  const [wantFollow, setWantFollow] = useState(false);
+  const [fuDate, setFuDate] = useState(addDays(2));
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
   async function finish(actualMin?: number) {
     setBusy(true);
+    const followUpDate = wantFollow ? fuDate : undefined;
     try {
-      const r = await fetch(`/api/tasks/${task.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: true, actualMin }) });
+      const r = await fetch(`/api/tasks/${task.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: true, actualMin, followUpDate }) });
       if (r.ok) {
-        toast('success', 'Nice — done ✓');
+        toast('success', followUpDate ? `Done ✓ · follow-up set for ${prettyDate(followUpDate)}` : 'Nice — done ✓');
         onSaved();
         onClose();
       } else toast('error', 'Could not save');
@@ -286,9 +323,15 @@ export function DoneModal({ task, onClose, onSaved }: { task: Task; onClose: () 
     }
   }
 
+  const quick = [
+    { label: 'Tomorrow', date: addDays(1) },
+    { label: 'In 2 days', date: addDays(2) },
+    { label: 'In a week', date: addDays(7) },
+  ];
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-bold flex items-center gap-2"><Clock size={16} className="text-emerald-500" /> How long did it take?</h3>
           <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
@@ -303,8 +346,34 @@ export function DoneModal({ task, onClose, onSaved }: { task: Task; onClose: () 
             ))}
           </div>
         </div>
+
+        {/* Follow-up */}
+        <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium flex items-center gap-1.5"><CalendarClock size={15} className="text-indigo-500" /> Need a follow-up?</span>
+            <div className="flex gap-1">
+              <button onClick={() => setWantFollow(false)} className={'rounded-lg px-3 py-1 text-sm border ' + (!wantFollow ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>No</button>
+              <button onClick={() => setWantFollow(true)} className={'rounded-lg px-3 py-1 text-sm border ' + (wantFollow ? 'bg-indigo-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>Yes</button>
+            </div>
+          </div>
+          {wantFollow && (
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {quick.map((q) => (
+                  <button key={q.date} onClick={() => setFuDate(q.date)} className={'rounded-full px-3 py-1 text-xs border ' + (fuDate === q.date ? 'bg-indigo-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-indigo-500')}>{q.label}</button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-400">or pick a date</span>
+                <input type="date" min={addDays(1)} value={fuDate} onChange={(e) => e.target.value && setFuDate(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-sm outline-none focus:border-indigo-500" />
+              </div>
+              <p className="text-[11px] text-zinc-400">I'll add “Follow up: {task.title}” to {prettyDate(fuDate)} and nudge you on Telegram that morning.</p>
+            </div>
+          )}
+        </div>
+
         <div className="mt-4 flex justify-end gap-2">
-          <button onClick={() => finish(undefined)} disabled={busy} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Skip</button>
+          <button onClick={() => finish(undefined)} disabled={busy} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Skip time</button>
           <button onClick={() => finish(val ? Number(val) : undefined)} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">Done ✓</button>
         </div>
       </div>

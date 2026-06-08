@@ -158,6 +158,8 @@ model Task {
   dumpId        String? // the BrainDump this task was extracted from
   dueDate       DateTime?
   status        String    @default("open") // open | done
+  progress      Int       @default(0) // 0 | 30 | 60 | 100 — how far along (100 = done)
+  followUp      Boolean   @default(false) // true if this task was spawned as a follow-up to another
   rolloverCount Int       @default(0)
   createdAt     DateTime  @default(now())
   completedAt   DateTime?

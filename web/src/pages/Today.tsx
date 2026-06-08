@@ -34,6 +34,10 @@ export function Today() {
     const r = await fetch(`/api/tasks/${t.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: false }) });
     if (r.ok) load();
   }
+  async function progress(t: Task, pct: number) {
+    const r = await fetch(`/api/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ progress: pct }) });
+    if (r.ok) load();
+  }
   async function remove(t: Task) {
     const r = await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' });
     if (r.ok) load();
@@ -79,7 +83,7 @@ export function Today() {
             <Link to="/tasks" className="inline-flex items-center gap-0.5 text-xs text-emerald-600 hover:underline">View all tasks <ChevronRight size={13} /></Link>
           </div>
           <div className="space-y-2.5">
-            {important.map((t) => <TaskCard key={t.id} t={t} onToggle={toggle} onEdit={setEditing} onDelete={setDelFor} />)}
+            {important.map((t) => <TaskCard key={t.id} t={t} onToggle={toggle} onEdit={setEditing} onDelete={setDelFor} onProgress={progress} />)}
           </div>
         </section>
       )}

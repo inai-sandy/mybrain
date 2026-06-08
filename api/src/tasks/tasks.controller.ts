@@ -55,8 +55,8 @@ export class TasksController {
   }
 
   @Post(':id/done')
-  async done(@Param('id') id: string, @Body() body: { done?: boolean; actualMin?: number }) {
-    const t = await this.tasks.setDone(id, body?.done ?? true, body?.actualMin);
+  async done(@Param('id') id: string, @Body() body: { done?: boolean; actualMin?: number; followUpDate?: string }) {
+    const t = await this.tasks.setDone(id, body?.done ?? true, body?.actualMin, body?.followUpDate);
     if (!t) throw new BadRequestException('Task not found');
     return t;
   }

@@ -106,6 +106,46 @@ describe('TasksService', () => {
     expect(done!.completedAt).toBeTruthy();
   });
 
+  it('saves partial progress (30/60) and snaps stray values to the nearest step', async () => {
+    const { svc } = makeService(JSON.stringify({ tasks: [{ title: 'Big job' }] }));
+    const { tasks } = await svc.dump('big job');
+    const id = tasks[0].id;
+    const at60 = await svc.update(id, { progress: 60 });
+    expect(at60!.progress).toBe(60);
+    expect(at60!.status).toBe('open');
+    // a stray value snaps to the closest allowed step
+    const snapped = await svc.update(id, { progress: 42 });
+    expect(snapped!.progress).toBe(30);
+  });
+
+  it('treats 100% progress as done', async () => {
+    const { svc } = makeService(JSON.stringify({ tasks: [{ title: 'Finish' }] }));
+    const { tasks } = await svc.dump('finish');
+    const done = await svc.update(tasks[0].id, { progress: 100 });
+    expect(done!.progress).toBe(100);
+    expect(done!.status).toBe('done');
+    expect(done!.completedAt).toBeTruthy();
+  });
+
+  it('spawns a "Follow up:" task on the chosen day when completing with a follow-up date', async () => {
+    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Email client', category: 'Beakn' }] }));
+    const { tasks: made } = await svc.dump('email client');
+    expect(tasks).toHaveLength(1);
+    await svc.setDone(made[0].id, true, undefined, '2026-06-10');
+    const follow = tasks.find((t) => t.followUp);
+    expect(follow).toBeTruthy();
+    expect(follow!.title).toBe('Follow up: Email client');
+    expect(follow!.day).toBe('2026-06-10');
+    expect(follow!.category).toBe('Beakn');
+  });
+
+  it('does not spawn a follow-up when no date is given or the date is malformed', async () => {
+    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Just finish' }] }));
+    const { tasks: made } = await svc.dump('just finish');
+    await svc.setDone(made[0].id, true, undefined, 'next week');
+    expect(tasks.filter((t) => t.followUp)).toHaveLength(0);
+  });
+
   it('falls back to a single task if the LLM is unavailable so nothing is lost', async () => {
     const { svc } = makeService(null);
     const res = await svc.dump('one big messy thought');

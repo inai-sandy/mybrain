@@ -504,6 +504,15 @@ export class TelegramService implements OnModuleInit {
 
     const today = await this.tasks.today();
 
+    // follow-up tasks coming due today — one morning heads-up (09:00)
+    if (hm === '09:00') {
+      const followUps = today.tasks.filter((t: any) => t.followUp && t.status === 'open');
+      if (followUps.length) {
+        const lines = followUps.map((t: any) => `• <b>${t.title.replace(/^Follow up:\s*/i, '')}</b>`).join('\n');
+        await fireOnce('followups', () => this.send(owner, `🔁 <b>Follow-up${followUps.length > 1 ? 's' : ''} due today</b>\n${lines}`));
+      }
+    }
+
     // per-task reminders at their smart times
     for (const t of today.tasks) {
       if (t.status !== 'open' || !t.reminders?.length) continue;

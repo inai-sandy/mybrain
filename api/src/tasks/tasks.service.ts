@@ -191,6 +191,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       reminders: t.reminders ? (() => { try { return JSON.parse(t.reminders); } catch { return []; } })() : [],
       day: t.day,
       status: t.status,
+      progress: t.progress ?? 0,
+      followUp: !!t.followUp,
       rolloverCount: t.rolloverCount,
       createdAt: t.createdAt,
       completedAt: t.completedAt,
@@ -254,7 +256,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(t);
   }
 
-  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
+  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
     const priority = data.priority !== undefined ? this.normPriority(data.priority) : t.priority;
@@ -262,6 +264,16 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const reminderCount = data.reminderCount !== undefined ? Math.max(0, Math.min(4, Math.round(Number(data.reminderCount) || 0))) : t.reminderCount;
     const remindersChanged = data.reminderCount !== undefined || (data.priority !== undefined && data.priority !== t.priority);
     const reminders = remindersChanged ? this.computeReminders(reminderCount, priority) : (t.reminders ? JSON.parse(t.reminders) : []);
+    // Progress: snap to the allowed steps. 100 also flips the task to done.
+    let progress = t.progress;
+    let statusFromProgress: { status?: string; completedAt?: Date | null } = {};
+    if (data.progress !== undefined) {
+      const allowed = [0, 30, 60, 100];
+      const n = Number(data.progress);
+      progress = allowed.reduce((a, b) => (Math.abs(b - n) < Math.abs(a - n) ? b : a), 0);
+      if (progress === 100) statusFromProgress = { status: 'done', completedAt: new Date() };
+      else if (t.status === 'done') statusFromProgress = { status: 'open', completedAt: null };
+    }
     const upd = await this.prisma.task.update({
       where: { id },
       data: {
@@ -274,24 +286,45 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         pinned: data.pinned !== undefined ? !!data.pinned : t.pinned,
         reminderCount,
         reminders: reminders.length ? JSON.stringify(reminders) : null,
+        progress,
+        ...statusFromProgress,
       },
     });
     return this.shape(upd);
   }
 
-  /** Mark done/undone. On done, capture the one-tap "how long did it really take?" actual. */
-  async setDone(id: string, done: boolean, actualMin?: number) {
+  /** Mark done/undone. On done, capture the one-tap "how long did it really take?" actual,
+   *  and optionally spawn a follow-up task for a chosen day (YYYY-MM-DD). */
+  async setDone(id: string, done: boolean, actualMin?: number, followUpDate?: string) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
     const upd = await this.prisma.task.update({
       where: { id },
       data: {
         status: done ? 'done' : 'open',
+        progress: done ? 100 : t.progress, // mark-open keeps prior progress
         completedAt: done ? new Date() : null,
         actualMin: done ? (Number.isFinite(actualMin as any) ? Math.max(1, Math.round(Number(actualMin))) : t.actualMin) : null,
       },
     });
+    if (done) await this.spawnFollowUp(t, followUpDate);
     return this.shape(upd);
+  }
+
+  /** Create a "Follow up: <task>" task dated to the chosen day. The morning Telegram nudge announces it. */
+  private async spawnFollowUp(orig: any, followUpDate?: string) {
+    const day = (followUpDate || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    return this.prisma.task.create({
+      data: {
+        title: `Follow up: ${orig.title}`.slice(0, 160),
+        category: orig.category || null,
+        priority: orig.priority || 'medium',
+        note: orig.note || null,
+        day,
+        followUp: true,
+      },
+    });
   }
 
   async remove(id: string) {

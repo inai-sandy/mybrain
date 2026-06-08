@@ -33,6 +33,10 @@ export function Tasks() {
     const r = await fetch(`/api/tasks/${t.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: false }) });
     if (r.ok) load();
   }
+  async function progress(t: Task, pct: number) {
+    const r = await fetch(`/api/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ progress: pct }) });
+    if (r.ok) load();
+  }
   async function remove(t: Task) {
     const r = await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' });
     if (r.ok) load();
@@ -125,7 +129,7 @@ export function Tasks() {
                 <span className="flex-1 h-px bg-zinc-100 dark:bg-zinc-800" />
               </div>
               <div className="space-y-2.5">
-                {g.items.map((t) => <TaskCard key={t.id} t={t} onToggle={toggle} onEdit={setEditing} onDelete={setDelFor} />)}
+                {g.items.map((t) => <TaskCard key={t.id} t={t} onToggle={toggle} onEdit={setEditing} onDelete={setDelFor} onProgress={progress} />)}
               </div>
             </div>
           ))}
