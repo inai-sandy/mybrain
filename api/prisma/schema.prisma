@@ -155,6 +155,28 @@ model PersonalityInsight {
   createdAt  DateTime @default(now())
 }
 
+/// A focus area / direction the Mentor tracks — derived from stories or set by the user, then confirmed.
+model FocusArea {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  source      String   @default("derived") // derived | user
+  status      String   @default("proposed") // proposed | active | archived
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// One day's Mentor read — how well the day followed the focus areas + the guidance written for it.
+model MentorDay {
+  id             String   @id @default(uuid())
+  day            String   @unique // local day key YYYY-MM-DD
+  adherenceScore Int // 0-100: how well the day aligned with the active focus areas
+  moodScore      Int? // 0-100 wellbeing carried from the Story of the Day
+  guidance       String // the Mentor's direct guidance for the day
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())

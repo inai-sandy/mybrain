@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -261,6 +261,8 @@ function ModelsSection() {
       <TasksModelCard />
       <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model"
         desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. A strong model like Claude Sonnet is best here. Uses your OpenRouter key." />
+      <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model"
+        desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. A strong model like Claude Sonnet is best. Uses your OpenRouter key." />
       <VoiceModelCard />
     </div>
   );

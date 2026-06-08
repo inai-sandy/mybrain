@@ -1,0 +1,189 @@
+import { useEffect, useState } from 'react';
+import { Compass, Sparkles, Plus, Check, X, Trash2, RefreshCw, TrendingUp, Target } from 'lucide-react';
+import { useToast } from '../ui/Toast';
+
+type Focus = { id: string; title: string; description?: string | null; source: string; status: string };
+type MentorDay = { day: string; adherenceScore: number; moodScore?: number | null; guidance: string };
+type Trend = { day: string; adherence: number; mood?: number | null };
+type Overview = {
+  focusAreas: { active: Focus[]; proposed: Focus[] };
+  latest: MentorDay | null;
+  trend: Trend[];
+  avgAdherence: number | null;
+  days: number;
+};
+
+function prettyDay(day: string): string {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+export function Mentor() {
+  const [o, setO] = useState<Overview | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/mentor/overview');
+    if (r.ok) setO(await r.json());
+  }
+  useEffect(() => { load(); }, []);
+
+  async function derive() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/mentor/focus/derive', { method: 'POST' });
+      if (r.ok) { const j = await r.json(); toast('success', j.proposed?.length ? `${j.proposed.length} focus area(s) suggested` : 'No new focus areas — your set looks complete'); load(); }
+      else toast('error', 'Could not analyze');
+    } finally { setBusy(false); }
+  }
+  async function run() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/mentor/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
+      const j = await r.json();
+      if (r.ok && j.guidance) { toast('success', 'Guidance refreshed'); load(); }
+      else toast('error', j.message || 'Tell your story or finish a task first');
+    } finally { setBusy(false); }
+  }
+  async function setStatus(f: Focus, status: string) {
+    const r = await fetch(`/api/mentor/focus/${f.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+    if (r.ok) load();
+  }
+  async function addFocus() {
+    if (!newTitle.trim()) return;
+    const r = await fetch('/api/mentor/focus', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle.trim() }) });
+    if (r.ok) { setNewTitle(''); setAdding(false); load(); }
+  }
+
+  if (!o) return <p className="text-sm text-zinc-400">Loading…</p>;
+  const active = o.focusAreas.active;
+  const proposed = o.focusAreas.proposed;
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-extrabold flex items-center gap-2"><Compass className="text-indigo-500" /> Mentor</h1>
+          <p className="text-zinc-500 text-sm">Reads your stories, sets your focus, and keeps you honest about following it.</p>
+        </div>
+        <button onClick={run} disabled={busy} className="shrink-0 text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><RefreshCw size={12} /> {busy ? '…' : 'Refresh'}</button>
+      </div>
+
+      {/* Guidance */}
+      <section className="rounded-xl border border-indigo-300/50 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-5">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-indigo-400" /> Your guidance
+            {o.latest && <span className="text-xs font-normal text-zinc-500">· {prettyDay(o.latest.day)}</span>}
+          </h2>
+          {o.latest && <span className="text-xs rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 px-2 py-0.5">on-track {o.latest.adherenceScore}/100</span>}
+        </div>
+        {o.latest ? (
+          <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{o.latest.guidance}</p>
+        ) : (
+          <div className="text-sm text-zinc-500">
+            <p className="mb-3">Your Mentor writes guidance each night after your Story of the Day. Want a read now?</p>
+            <button onClick={run} disabled={busy} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{busy ? 'Thinking…' : 'Get guidance now'}</button>
+          </div>
+        )}
+      </section>
+
+      {/* Focus areas */}
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="flex items-center gap-2 font-semibold"><Target size={16} className="text-emerald-500" /> Your focus areas</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={derive} disabled={busy} className="text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><Sparkles size={12} /> Suggest</button>
+            <button onClick={() => setAdding((a) => !a)} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-1"><Plus size={13} /> Add</button>
+          </div>
+        </div>
+
+        {adding && (
+          <div className="flex items-center gap-2 mb-3">
+            <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addFocus()} placeholder="e.g. Protect deep-work mornings" className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+            <button onClick={addFocus} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">Add</button>
+          </div>
+        )}
+
+        {active.length ? (
+          <ul className="space-y-2">
+            {active.map((f) => (
+              <li key={f.id} className="group flex items-start gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
+                <span className="mt-0.5 h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-sm">{f.title}</div>
+                  {f.description && <p className="text-xs text-zinc-500 mt-0.5">{f.description}</p>}
+                </div>
+                <button onClick={() => setStatus(f, 'archived')} title="Remove" className="shrink-0 p-1 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-rose-600"><Trash2 size={14} /></button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-zinc-500">No focus areas yet. Tap <b>Suggest</b> to let the Mentor read your stories and propose a few, or <b>Add</b> your own.</p>
+        )}
+
+        {/* Proposed (confirm) */}
+        {proposed.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="text-xs font-semibold text-indigo-600 dark:text-indigo-300 mb-2 flex items-center gap-1"><Sparkles size={12} /> Mentor suggests — keep these?</div>
+            <ul className="space-y-2">
+              {proposed.map((f) => (
+                <li key={f.id} className="flex items-start gap-3 rounded-lg border border-indigo-300/40 dark:border-indigo-500/30 bg-indigo-500/5 p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm">{f.title}</div>
+                    {f.description && <p className="text-xs text-zinc-500 mt-0.5">{f.description}</p>}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => setStatus(f, 'active')} title="Keep" className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white"><Check size={14} /></button>
+                    <button onClick={() => setStatus(f, 'archived')} title="Dismiss" className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-600"><X size={14} /></button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {/* Trend graph */}
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="flex items-center gap-2 font-semibold"><TrendingUp size={16} className="text-indigo-500" /> Are you following it?</h2>
+          {o.avgAdherence !== null && <span className="text-xs text-zinc-500">avg on-track {o.avgAdherence}/100 · {o.days}d</span>}
+        </div>
+        <TrendChart trend={o.trend} />
+        <div className="flex items-center justify-center gap-4 mt-3 text-[11px] text-zinc-500">
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded bg-indigo-500" /> Following focus</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded bg-amber-400" /> Mood / wellbeing</span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/** Two-line SVG sparkline (adherence + mood) over the trend window. */
+function TrendChart({ trend }: { trend: Trend[] }) {
+  if (!trend.length) return <p className="text-sm text-zinc-400 text-center py-8">Your trend appears once you have a few nightly reads.</p>;
+  const W = 600, H = 160, pad = 8;
+  const n = trend.length;
+  const x = (i: number) => (n === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (n - 1));
+  const y = (v: number) => H - pad - (v / 100) * (H - 2 * pad);
+  const line = (key: 'adherence' | 'mood') => {
+    const pts = trend.map((t, i) => ({ i, v: t[key] })).filter((p) => typeof p.v === 'number') as { i: number; v: number }[];
+    if (!pts.length) return '';
+    return pts.map((p, k) => `${k === 0 ? 'M' : 'L'}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+  };
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-40" preserveAspectRatio="none">
+      {[0, 50, 100].map((g) => (
+        <line key={g} x1={0} x2={W} y1={y(g)} y2={y(g)} className="stroke-zinc-200 dark:stroke-zinc-800" strokeWidth={1} />
+      ))}
+      <path d={line('mood')} fill="none" className="stroke-amber-400" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      <path d={line('adherence')} fill="none" className="stroke-indigo-500" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      {trend.map((t, i) => (
+        <circle key={i} cx={x(i)} cy={y(t.adherence)} r={2.5} className="fill-indigo-500" />
+      ))}
+    </svg>
+  );
+}
