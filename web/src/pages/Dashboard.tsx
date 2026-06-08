@@ -58,9 +58,9 @@ export function Dashboard() {
         <Action icon={Upload} label="Capture" onClick={() => navigate('/capture')} />
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Today */}
-        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+        <section className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="flex items-center gap-1.5 font-semibold text-sm"><Sun size={16} className="text-amber-500" /> Today</h2>
             <button onClick={() => navigate('/today')} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5">Open <ArrowRight size={12} /></button>
@@ -91,7 +91,7 @@ export function Dashboard() {
         </section>
 
         {/* Insights */}
-        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+        <section className="min-w-0 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="flex items-center gap-1.5 font-semibold text-sm"><ActivityIcon size={16} className="text-emerald-500" /> Your pulse</h2>
             <button onClick={() => navigate('/activity')} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5">Activity <ArrowRight size={12} /></button>
