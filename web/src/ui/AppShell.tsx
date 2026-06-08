@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
+import { InstallPrompt } from './InstallPrompt';
 import { useTheme } from './theme';
 
 export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () => void }) {
@@ -145,13 +146,16 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </main>
       </div>
 
+      {/* Install-this-app banner (Android button / iOS hint) */}
+      <InstallPrompt />
+
       {/* Floating "chat with your brain" button — every page except the chat itself */}
       {!isChat && (
         <button
           onClick={() => navigate('/chat')}
           title="Chat with your brain"
           aria-label="Chat with your brain"
-          className="fixed right-4 bottom-20 md:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
+          className="fixed right-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
         >
           <MessageCircle size={22} />
         </button>
@@ -160,7 +164,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       {/* Bottom tab bar — mobile (5 primary tabs; the rest are in the drawer) */}
       <nav
         className="md:hidden fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
-        style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {BOTTOM_NAV.map((n) => (
           <NavLink

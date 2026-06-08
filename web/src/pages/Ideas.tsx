@@ -192,7 +192,7 @@ export function Ideas() {
       <button
         onClick={() => setCapturing(true)}
         title="New idea"
-        className="fixed right-4 bottom-36 md:bottom-24 md:right-6 z-30 inline-flex items-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 px-4 py-3"
+        className="fixed right-4 bottom-[calc(10rem+env(safe-area-inset-bottom))] md:bottom-24 md:right-6 z-30 inline-flex items-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 px-4 py-3"
       >
         <Plus size={20} />
         <span className="hidden sm:inline font-medium pr-1">New idea</span>
