@@ -137,7 +137,7 @@ export function Tasks() {
       )}
 
       {/* Floating capture buttons */}
-      <div className="fixed right-4 bottom-20 md:bottom-6 md:right-6 z-30 flex flex-col items-end gap-3">
+      <div className="fixed right-4 bottom-36 md:bottom-24 md:right-6 z-30 flex flex-col items-end gap-3">
         <button onClick={() => setAdding(true)} title="Add a task" className="inline-flex items-center justify-center rounded-full bg-zinc-800 dark:bg-zinc-700 hover:bg-zinc-700 text-white shadow-lg h-12 w-12">
           <Plus size={20} />
         </button>

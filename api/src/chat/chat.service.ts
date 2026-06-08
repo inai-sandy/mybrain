@@ -138,6 +138,17 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Stateless one-shot Q&A over memory (for Telegram /ask). No thread is saved. */
+  async askOnce(question: string, scope = 'everything'): Promise<{ answer: string; sources: Source[] }> {
+    const clean = (question || '').trim();
+    if (!clean) return { answer: '', sources: [] };
+    const hits = await this.memory.searchScoped(clean, scopeTags(scope), 5);
+    const sources = await this.toSources(hits);
+    const prompt = await this.buildAnswerPrompt({ scope, summary: null }, [], clean, hits, true);
+    const raw = (await this.llm.completeWith(await this.getModel(), prompt, 800)) || '';
+    return { answer: this.splitAnswer(raw).answer, sources };
+  }
+
   private async buildAnswerPrompt(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<string> {
     const convo = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n').slice(-3000);
     const ctx = hits.map((h, i) => `[${i + 1}] ${h.title || 'Saved item'}\n${h.content}`).join('\n\n');

@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageCircle, Plus, Send, X, ArrowLeft, ExternalLink, Sparkles, Trash2, Globe, Bookmark, Lightbulb, Activity as ActivityIcon, FileText, Wand2, Star, Search, Pin, PanelLeft, Copy, Check } from 'lucide-react';
+import { Mic } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { useDictation } from '../ui/useDictation';
 import { mdComponents } from '../ui/markdown';
 
 type Source = { title: string; url?: string; itemId?: string };
@@ -122,6 +124,7 @@ export function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const toast = useToast();
   const endRef = useRef<HTMLDivElement>(null);
+  const { supported: micOk, listening, toggle: toggleMic } = useDictation((chunk) => setInput((i) => (i ? i + ' ' : '') + chunk));
 
   async function loadSessions(q = '') {
     const r = await fetch('/api/chat/sessions' + (q ? `?q=${encodeURIComponent(q)}` : ''));
@@ -305,6 +308,9 @@ export function Chat() {
               placeholder={`Ask your ${sc?.label.toLowerCase()}…`}
               className="flex-1 resize-none bg-transparent py-2 text-sm outline-none max-h-40 placeholder:text-zinc-400"
             />
+            {micOk && (
+              <button onClick={toggleMic} title={listening ? 'Stop' : 'Speak'} className={'shrink-0 mb-0.5 p-2 rounded-xl ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'text-zinc-400 hover:text-emerald-600')}><Mic size={16} /></button>
+            )}
             <button onClick={() => send()} disabled={!input.trim() || sending} className="shrink-0 mb-0.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white p-2 disabled:opacity-40"><Send size={16} /></button>
           </div>
         </div>

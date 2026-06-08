@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink } from 'lucide-react';
+import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { useTheme } from './theme';
@@ -144,6 +144,18 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           <Outlet />
         </main>
       </div>
+
+      {/* Floating "chat with your brain" button — every page except the chat itself */}
+      {!isChat && (
+        <button
+          onClick={() => navigate('/chat')}
+          title="Chat with your brain"
+          aria-label="Chat with your brain"
+          className="fixed right-4 bottom-20 md:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
+        >
+          <MessageCircle size={22} />
+        </button>
+      )}
 
       {/* Bottom tab bar — mobile (5 primary tabs; the rest are in the drawer) */}
       <nav

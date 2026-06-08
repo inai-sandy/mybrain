@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService } from '../connectors/connector.service';
 import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
+import { ChatService } from '../chat/chat.service';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -14,6 +15,7 @@ const COMMANDS = [
   { command: 'add', description: 'Add a single task' },
   { command: 'today', description: "See today's tasks" },
   { command: 'done', description: 'Mark a task done (e.g. /done 2)' },
+  { command: 'ask', description: 'Ask your brain / memory anything' },
   { command: 'insights', description: 'Streak, follow-through, time' },
   { command: 'me', description: 'Your personality snapshot' },
   { command: 'activity', description: "Today's summary" },
@@ -32,6 +34,7 @@ const HELP =
   '🔵 <b>Check &amp; complete</b>\n' +
   '/today — see today\'s tasks\n' +
   '/done 2 — mark task #2 done\n' +
+  '/ask — ask your brain anything\n' +
   '/activity — today\'s summary\n' +
   '/insights — streak, follow-through, time\n' +
   '/me — your personality snapshot\n\n' +
@@ -49,6 +52,7 @@ export class TelegramService implements OnModuleInit {
     private readonly connectors: ConnectorService,
     private readonly tasks: TasksService,
     private readonly daily: DailyService,
+    private readonly chat: ChatService,
   ) {}
 
   async onModuleInit() {
@@ -264,6 +268,10 @@ export class TelegramService implements OnModuleInit {
         return this.doToday(chatId);
       case 'done':
         return this.doDone(chatId, arg);
+      case 'ask':
+        if (arg) return this.doAsk(chatId, arg);
+        await this.setState({ mode: 'awaiting_ask' });
+        return this.send(chatId, '🧠 What do you want to ask your brain?');
       case 'activity':
         return this.doActivity(chatId);
       case 'insights':
@@ -297,6 +305,10 @@ export class TelegramService implements OnModuleInit {
     if (st.mode === 'awaiting_add') {
       await this.setState({});
       return this.doAdd(chatId, text);
+    }
+    if (st.mode === 'awaiting_ask') {
+      await this.setState({});
+      return this.doAsk(chatId, text);
     }
     // no active flow → ask what they meant (buttons), remembering the text
     await this.setState({ mode: 'classify', pendingText: text });
@@ -406,6 +418,31 @@ export class TelegramService implements OnModuleInit {
     const lines = [p.summary || 'Building your portrait…'];
     if (p.insights.length) lines.push('', ...p.insights.slice(0, 5).map((i: any) => `• <b>${i.dimension}:</b> ${i.claim}`));
     return this.send(chatId, lines.join('\n'));
+  }
+
+  private esc(s: string): string {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  private mdToHtml(s: string): string {
+    let t = this.esc(s);
+    t = t.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    t = t.replace(/^#{1,6}\s*(.+)$/gm, '<b>$1</b>').replace(/^\s*[-*]\s+/gm, '• ');
+    return t;
+  }
+
+  /** /ask — query the user's whole brain (stateless), reply with the answer + sources. */
+  private async doAsk(chatId: string, question: string) {
+    await this.send(chatId, '🧠 Searching your brain…');
+    const { answer, sources } = await this.chat.askOnce(question, 'everything');
+    let msg = this.mdToHtml((answer || "I don't have anything saved about that.").slice(0, 3500));
+    if (sources?.length) {
+      const links = sources.slice(0, 5).map((s) => {
+        const url = s.url || (s.itemId ? `${PUBLIC_URL}/doc/${s.itemId}` : '');
+        return '• ' + (url ? `<a href="${url}">${this.esc(s.title)}</a>` : this.esc(s.title));
+      });
+      msg += '\n\n<b>Sources</b>\n' + links.join('\n');
+    }
+    return this.send(chatId, msg);
   }
 
   private async doSkip(chatId: string) {

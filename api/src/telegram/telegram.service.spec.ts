@@ -31,7 +31,8 @@ function make() {
     sent.push(JSON.parse(opts.body));
     return { json: async () => ({ ok: true, result: {} }) };
   });
-  return { svc: new TelegramService(prisma, connectors, tasks, daily), settings, tasks, daily, sent };
+  const chat: any = { askOnce: jest.fn(async () => ({ answer: 'Here is what you saved.', sources: [] })) };
+  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat), settings, tasks, daily, chat, sent };
 }
 
 describe('TelegramService', () => {
@@ -105,6 +106,13 @@ describe('TelegramService', () => {
     expect(m.motivation({ counts: { done: 5, total: 6 }, tasks: [] })).toMatch(/crushing/i);
     expect(m.motivation({ counts: { done: 0, total: 3 }, tasks: [{ pinned: true, status: 'open', title: 'Proposal', rolloverCount: 0 }] })).toMatch(/must-do/i);
     expect(m.motivation({ counts: { done: 0, total: 2 }, tasks: [{ status: 'open', title: 'Taxes', rolloverCount: 3 }] })).toMatch(/followed you/i);
+  });
+
+  it('answers /ask by querying the brain', async () => {
+    const { svc, chat } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/ask what did I save about SEO' } });
+    expect(chat.askOnce).toHaveBeenCalledWith('what did I save about SEO', 'everything');
   });
 
   it('ignores a duplicate update_id', async () => {
