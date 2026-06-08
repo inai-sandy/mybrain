@@ -47,6 +47,14 @@ export class ChatController {
     return this.chat.createSession(body?.scope);
   }
 
+  /** Get (or create) the chat bound to one document. */
+  @Get('doc/:itemId')
+  async doc(@Param('itemId') itemId: string) {
+    const s = await this.chat.docSession(itemId);
+    if (!s) throw new BadRequestException('Document not found');
+    return s;
+  }
+
   @Get('sessions/:id')
   async get(@Param('id') id: string) {
     const s = await this.chat.getSession(id);

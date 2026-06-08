@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, ExternalLink, Share2, Lightbulb } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Share2, Lightbulb, MessageCircle } from 'lucide-react';
 import { StoreBadges } from '../ui/StoreBadges';
 import { ShareDialog } from '../ui/ShareDialog';
 import { extractHeadings, stripLeadingUrl, mdComponents, OutlineLayout, MediaEmbed } from '../ui/markdown';
@@ -88,6 +88,12 @@ export function DocDetail() {
                     Open original <ExternalLink size={14} className="shrink-0" />
                   </a>
                 )}
+                <Link
+                  to={`/chat/${d.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600"
+                >
+                  <MessageCircle size={14} /> Chat with this doc
+                </Link>
                 <button
                   onClick={() => setSharing(true)}
                   className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 ' + (d.shared ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700')}

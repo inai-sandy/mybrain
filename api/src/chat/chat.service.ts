@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { promises as fs } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService, MemHit } from '../memory/memory.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
@@ -54,8 +55,33 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listSessions() {
-    const rows = await this.prisma.chatSession.findMany({ orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }, { createdAt: 'desc' }], take: 500 });
+    const rows = await this.prisma.chatSession.findMany({ where: { docId: null }, orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }, { createdAt: 'desc' }], take: 500 });
     return rows.map((r) => this.shapeSession(r, []));
+  }
+
+  /** Get (or create) the chat thread bound to a single document. */
+  async docSession(itemId: string) {
+    const item = await this.prisma.item.findUnique({ where: { id: itemId } });
+    if (!item) return null;
+    let s = await this.prisma.chatSession.findFirst({ where: { docId: itemId } });
+    if (!s) s = await this.prisma.chatSession.create({ data: { scope: 'document', docId: itemId, title: item.title || 'Document' } });
+    const msgs = await this.prisma.chatMessage.findMany({ where: { sessionId: s.id }, orderBy: { createdAt: 'asc' } });
+    return { ...this.shapeSession(s, msgs), docTitle: item.title || 'Document' };
+  }
+
+  /** The bound document's content, as a single context "excerpt". */
+  private async docHits(docId: string): Promise<MemHit[]> {
+    const it = await this.prisma.item.findUnique({ where: { id: docId } });
+    if (!it) return [];
+    let content = it.summary || '';
+    if (it.filePath) {
+      try {
+        content = await fs.readFile(it.filePath, 'utf8');
+      } catch {
+        /* fall back to summary */
+      }
+    }
+    return content.trim() ? [{ title: it.title || 'Document', content: content.slice(0, 12000), source: 'rag' }] : [];
   }
 
   async getSession(id: string) {
@@ -99,18 +125,22 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
     const userMsg = await this.prisma.chatMessage.create({ data: { sessionId, role: 'user', content: clean } });
 
-    // 1) router/rewrite — decide whether to search and craft a standalone query
-    const route = await this.route(session, recent, clean);
-
-    // 2) scoped retrieval (only when needed)
+    // retrieval: a bound document, or scoped memory (router decides when to search)
     let hits: MemHit[] = [];
-    if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
+    let sources: Source[] = [];
+    let didSearch = true;
+    if (session.docId) {
+      hits = await this.docHits(session.docId);
+      sources = hits.length ? [{ title: session.title || 'Document', itemId: session.docId }] : [];
+    } else {
+      const route = await this.route(session, recent, clean);
+      didSearch = route.search;
+      if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
+      sources = await this.toSources(hits);
+    }
 
-    // 3) build clickable citations (reverse-lookup our Item by memory id)
-    const sources = await this.toSources(hits);
-
-    // 4) grounded answer + suggested follow-ups
-    const { answer, followups } = await this.answer(session, recent, clean, hits, route.search);
+    // grounded answer + suggested follow-ups
+    const { answer, followups } = await this.answer(session, recent, clean, hits, didSearch);
 
     const aMsg = await this.prisma.chatMessage.create({
       data: { sessionId, role: 'assistant', content: answer, sources: JSON.stringify(sources), followups: JSON.stringify(followups) },
@@ -151,6 +181,20 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
   private async buildAnswerPrompt(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<string> {
     const convo = recent.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n').slice(-3000);
+
+    // Per-document chat: the single excerpt IS the document the user is asking about.
+    if (session.docId) {
+      return (
+        `You are answering questions about ONE specific document for the user. The FULL document is provided below. ` +
+        `Answer only from this document, in clean Markdown (short paragraphs, **bold**, bullet lists). Be direct and helpful. ` +
+        `If the document doesn't cover the question, say so briefly. NEVER claim you don't have a document — it is right here.\n\n` +
+        (convo ? `Conversation so far:\n${convo}\n\n` : '') +
+        `DOCUMENT — "${hits[0]?.title || 'Document'}":\n${hits.map((h) => h.content).join('\n\n') || '(this document is empty)'}\n\n` +
+        `User's question: ${text}\n\n` +
+        `After your answer, on a new line output exactly "FOLLOWUPS:" then 2-3 short follow-up questions about this document, separated by " | ".`
+      );
+    }
+
     const ctx = hits.map((h, i) => `[${i + 1}] ${h.title || 'Saved item'}\n${h.content}`).join('\n\n');
     const sys = await this.prompts.get('chat.answer');
     return (
@@ -189,12 +233,20 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const recent = recentRows.reverse();
     const userMsg = await this.prisma.chatMessage.create({ data: { sessionId, role: 'user', content: clean } });
 
-    const route = await this.route(session, recent, clean);
     let hits: MemHit[] = [];
-    if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
-    const sources = await this.toSources(hits);
+    let sources: Source[] = [];
+    let didSearch = true;
+    if (session.docId) {
+      hits = await this.docHits(session.docId);
+      sources = hits.length ? [{ title: session.title || 'Document', itemId: session.docId }] : [];
+    } else {
+      const route = await this.route(session, recent, clean);
+      didSearch = route.search;
+      if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
+      sources = await this.toSources(hits);
+    }
 
-    const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, route.search);
+    const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, didSearch);
     const cfg = await this.getModel();
     const full = (await this.llm.completeStream(cfg, prompt, 800, onToken)) || '';
     const { answer, followups } = this.splitAnswer(full);
@@ -242,7 +294,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   async searchSessions(q: string) {
     const s = (q || '').trim();
     if (!s) return this.listSessions();
-    const rows = await this.prisma.chatSession.findMany({ orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }, { createdAt: 'desc' }], take: 500 });
+    const rows = await this.prisma.chatSession.findMany({ where: { docId: null }, orderBy: [{ pinned: 'desc' }, { lastMessageAt: 'desc' }, { createdAt: 'desc' }], take: 500 });
     const hitMsgs = await this.prisma.chatMessage.findMany({ where: { content: { contains: s } }, select: { sessionId: true } });
     const ids = new Set(hitMsgs.map((m) => m.sessionId));
     const low = s.toLowerCase();

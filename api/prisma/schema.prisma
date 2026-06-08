@@ -189,6 +189,7 @@ model ChatSession {
   id            String    @id @default(uuid())
   title         String?
   scope         String    @default("everything") // everything | bookmark | idea | activity | document | skill
+  docId         String? // set = a per-document chat bound to this Item (answers only from that doc)
   summary       String? // rolling summary of older turns (keeps long threads cheap)
   pinned        Boolean   @default(false) // protected from retention auto-clean
   lastMessageAt DateTime?

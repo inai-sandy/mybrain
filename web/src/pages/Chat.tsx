@@ -9,8 +9,8 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useDictation } from '../ui/useDictation';
 import { mdComponents } from '../ui/markdown';
 
-type Source = { title: string; url?: string; itemId?: string };
-type Msg = { id: string; role: 'user' | 'assistant'; content: string; sources: Source[]; followups: string[]; starred: boolean; createdAt: string };
+export type Source = { title: string; url?: string; itemId?: string };
+export type Msg = { id: string; role: 'user' | 'assistant'; content: string; sources: Source[]; followups: string[]; starred: boolean; createdAt: string };
 type Session = { id: string; title: string; scope: string; pinned: boolean; lastMessageAt: string | null; createdAt: string; messages: Msg[] };
 type Starred = { id: string; messageId: string; sessionId: string | null; sessionTitle: string | null; scope: string; role: string; content: string; sources: Source[]; createdAt: string };
 
@@ -75,7 +75,7 @@ function SourceChip({ s }: { s: Source }) {
   return inner;
 }
 
-function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => void; onFollow?: (q: string) => void }) {
+export function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => void; onFollow?: (q: string) => void }) {
   const user = m.role === 'user';
   const [copied, setCopied] = useState(false);
   async function copy() {
