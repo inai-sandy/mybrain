@@ -108,15 +108,35 @@ export class TelegramService implements OnModuleInit {
     return this.getSetting('telegram.chatId');
   }
 
-  private async state(): Promise<{ mode?: string; pendingText?: string }> {
+  private async state(): Promise<{ mode?: string; pendingText?: string; scope?: string }> {
     try {
       return JSON.parse((await this.getSetting('telegram.state')) || '{}');
     } catch {
       return {};
     }
   }
-  private async setState(s: { mode?: string; pendingText?: string }) {
+  private async setState(s: { mode?: string; pendingText?: string; scope?: string }) {
     await this.setSetting('telegram.state', JSON.stringify(s || {}));
+  }
+
+  // Chat scopes shown by /ask — matches the web app's "talk to your brain" scopes.
+  private readonly ASK_SCOPES: Record<string, string> = {
+    everything: '🌐 Everything',
+    bookmark: '🔖 Bookmarks',
+    idea: '💡 Ideas',
+    activity: '📊 Activity',
+    document: '📥 Capture',
+    skill: '🪄 Skills',
+  };
+  private askScopeKeyboard() {
+    return {
+      inline_keyboard: [
+        [{ text: '🌐 Everything', callback_data: 'askscope:everything' }],
+        [{ text: '🔖 Bookmarks', callback_data: 'askscope:bookmark' }, { text: '💡 Ideas', callback_data: 'askscope:idea' }],
+        [{ text: '📊 Activity', callback_data: 'askscope:activity' }, { text: '📥 Capture', callback_data: 'askscope:document' }],
+        [{ text: '🪄 Skills', callback_data: 'askscope:skill' }],
+      ],
+    };
   }
 
   // ---- reminder acknowledgement: message→task map, per-task snooze, nudge acks ----
@@ -406,10 +426,12 @@ export class TelegramService implements OnModuleInit {
         return this.doToday(chatId);
       case 'done':
         return this.doDone(chatId, arg);
-      case 'ask':
-        if (arg) return this.doAsk(chatId, arg);
-        await this.setState({ mode: 'awaiting_ask' });
-        return this.send(chatId, '🧠 What do you want to ask your brain?');
+      case 'ask': {
+        // Always let the user pick a subject first; the chat then stays in that scope.
+        const cur = (await this.state()).scope;
+        if (arg) return this.doAsk(chatId, arg, cur || 'everything');
+        return this.send(chatId, '🧠 <b>Ask your brain</b> — which part do you want to talk to?', { reply_markup: this.askScopeKeyboard() });
+      }
       case 'activity':
         return this.doActivity(chatId);
       case 'insights':
@@ -428,6 +450,10 @@ export class TelegramService implements OnModuleInit {
 
   private async handlePlain(chatId: string, text: string) {
     const st = await this.state();
+    // Persistent ask-mode: every plain message keeps answering in the chosen scope until /ask switches it.
+    if (st.mode === 'ask') {
+      return this.doAsk(chatId, text, st.scope || 'everything');
+    }
     if (st.mode === 'awaiting_dump') {
       await this.setState({});
       return this.doDump(chatId, text);
@@ -509,6 +535,15 @@ export class TelegramService implements OnModuleInit {
     if (data === 'aks') { await this.ackToday('story', day); await ack('Got it 👍'); if (msgId) await this.editMsg(chatId, msgId, '👍 No more story nudges today.'); return; }
     if (data === 'acd') { await ack(); await this.setState({ mode: 'awaiting_dump' }); return this.send(chatId, '🧠 Go ahead — send everything on your mind (type or voice) and I\'ll build today\'s tasks.'); }
     if (data === 'acs') { await ack(); await this.setState({ mode: 'awaiting_story' }); return this.send(chatId, '🌙 Tell me about your day — the problems, the wins, all of it (type or voice).'); }
+
+    // --- /ask scope picker: enter persistent ask-mode in the chosen scope ---
+    if (data.startsWith('askscope:')) {
+      const scope = data.slice('askscope:'.length);
+      const label = this.ASK_SCOPES[scope] || '🌐 Everything';
+      await this.setState({ mode: 'ask', scope });
+      await ack(`Now asking ${label}`);
+      return this.send(chatId, `${label} — ask away. Every message now answers from your <b>${label.replace(/^\S+\s/, '')}</b>.\n\n<i>Send /ask anytime to switch subject.</i>`);
+    }
 
     // --- "what should I do with that?" classifier ---
     await ack();
@@ -613,10 +648,11 @@ export class TelegramService implements OnModuleInit {
     return t;
   }
 
-  /** /ask — query the user's whole brain (stateless), reply with the answer + sources. */
-  private async doAsk(chatId: string, question: string) {
-    await this.send(chatId, '🧠 Searching your brain…');
-    const { answer, sources } = await this.chat.askOnce(question, 'everything');
+  /** /ask — query a chosen slice of the user's brain, reply with the answer + sources. Scope persists. */
+  private async doAsk(chatId: string, question: string, scope = 'everything') {
+    const label = this.ASK_SCOPES[scope] || '🌐 Everything';
+    await this.send(chatId, `🧠 Searching your ${label}…`);
+    const { answer, sources } = await this.chat.askOnce(question, scope);
     let msg = this.mdToHtml((answer || "I don't have anything saved about that.").slice(0, 3500));
     if (sources?.length) {
       const links = sources.slice(0, 5).map((s) => {

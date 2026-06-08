@@ -156,6 +156,25 @@ describe('TelegramService', () => {
     expect(settings['telegram.ack.dump']).toBeTruthy();
   });
 
+  it('/ask shows all six scope options, then stays in the chosen scope', async () => {
+    const { svc, chat, sent } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/ask' } });
+    const menu = sent.find((m) => m.reply_markup?.inline_keyboard);
+    const datas = menu.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data);
+    expect(datas).toEqual(expect.arrayContaining([
+      'askscope:everything', 'askscope:bookmark', 'askscope:idea', 'askscope:activity', 'askscope:document', 'askscope:skill',
+    ]));
+    // pick Bookmarks
+    await svc.handleUpdate({ update_id: 3, callback_query: { id: 'c', data: 'askscope:bookmark', message: { chat: { id: 5 }, message_id: 1 } } });
+    // now a plain message answers in that scope…
+    await svc.handleUpdate({ update_id: 4, message: { chat: { id: 5 }, text: 'what did I save about pricing' } });
+    expect(chat.askOnce).toHaveBeenCalledWith('what did I save about pricing', 'bookmark');
+    // …and the NEXT message stays in bookmark scope (persistent)
+    await svc.handleUpdate({ update_id: 5, message: { chat: { id: 5 }, text: 'and about onboarding' } });
+    expect(chat.askOnce).toHaveBeenLastCalledWith('and about onboarding', 'bookmark');
+  });
+
   it('ignores a duplicate update_id', async () => {
     const { svc, tasks } = make();
     await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
