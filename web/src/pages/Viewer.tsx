@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Logo } from '../ui/Logo';
 import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -29,7 +30,7 @@ export function Viewer() {
     <div className="min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <header className="sticky top-0 z-10 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur">
         <div className="max-w-5xl mx-auto px-5 h-12 flex items-center gap-2 font-bold">
-          <span className="text-lg">🧠</span> My Brain
+          <Logo size={22} /> My Brain
         </div>
       </header>
 

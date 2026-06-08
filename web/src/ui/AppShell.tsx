@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
@@ -23,7 +24,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       {/* Desktop sidebar */}
       <aside className="hidden md:flex md:flex-col md:fixed md:inset-y-0 md:w-60 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4">
         <div className="flex items-center gap-2 px-2 mb-6 font-bold text-lg">
-          <span className="text-2xl">🧠</span> My Brain
+          <Logo size={28} /> My Brain
         </div>
         <nav className="flex-1 space-y-1">
           {NAV.map((n) => (
@@ -41,7 +42,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           <aside className="absolute inset-y-0 left-0 w-64 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 px-3 py-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-2 mb-6">
               <div className="flex items-center gap-2 font-bold text-lg">
-                <span className="text-2xl">🧠</span> My Brain
+                <Logo size={28} /> My Brain
               </div>
               <button onClick={() => setDrawer(false)} aria-label="Close menu" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
                 <X size={20} />
@@ -77,7 +78,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
               <Menu size={20} />
             </button>
             <div className="md:hidden flex items-center gap-2 font-bold">
-              <span className="text-xl">🧠</span> My Brain
+              <Logo size={24} /> My Brain
             </div>
             <div className="hidden md:block flex-1 max-w-md">
               <input
