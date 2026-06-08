@@ -19,6 +19,13 @@ function makeService(llmText: string | null) {
       count: async ({ where }: any = {}) => focus.filter((f) => !where?.status?.not || f.status !== where.status.not).length,
       create: async ({ data }: any) => { const row = { id: `f${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...data }; focus.push(row); return row; },
       update: async ({ where, data }: any) => { const f = focus.find((x) => x.id === where.id); Object.assign(f, data); return f; },
+      deleteMany: async ({ where }: any = {}) => {
+        for (let i = focus.length - 1; i >= 0; i--) {
+          const f = focus[i];
+          if ((where?.status === undefined || f.status === where.status) && (where?.source === undefined || f.source === where.source)) focus.splice(i, 1);
+        }
+        return {};
+      },
     },
     mentorDay: {
       findMany: async ({ where }: any = {}) => mentorDays.filter((m) => !where?.day?.gte || m.day >= where.day.gte).sort((a, b) => a.day.localeCompare(b.day)),

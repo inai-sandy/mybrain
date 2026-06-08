@@ -532,8 +532,8 @@ function SuggestedView() {
       ) : (
         <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-6 text-center text-sm text-zinc-500">
           <ListChecks size={22} className="mx-auto mb-2 text-zinc-400" />
-          <p className="mb-3">Your Story of the Day proposes tomorrow's tasks at 11:58 PM.<br />Want a set now?</p>
-          <button onClick={generate} disabled={gen} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{gen ? 'Thinking…' : 'Suggest tasks for tomorrow'}</button>
+          <p className="mb-3">Each night your Story of the Day suggests fresh next-steps for the next day.<br />Want a set now (from your last story)?</p>
+          <button onClick={generate} disabled={gen} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{gen ? 'Thinking…' : 'Suggest tasks'}</button>
         </div>
       )}
     </div>

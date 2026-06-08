@@ -144,11 +144,14 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     }
     proposed = proposed.filter((p) => p?.title?.trim()).slice(0, 3);
 
-    const existing = (await this.prisma.focusArea.findMany({ where: { status: { not: 'archived' } } })).map((f) => f.title.toLowerCase().trim());
+    // A fresh "Suggest" replaces the previous un-confirmed proposals (they're just pending ideas),
+    // and we only avoid duplicating focus areas the user has actually CONFIRMED (active).
+    await this.prisma.focusArea.deleteMany({ where: { status: 'proposed', source: 'derived' } });
+    const active = (await this.prisma.focusArea.findMany({ where: { status: 'active' } })).map((f) => f.title.toLowerCase().trim());
     const created = [];
     for (const p of proposed) {
       const title = String(p.title).trim().slice(0, 120);
-      if (existing.includes(title.toLowerCase())) continue; // don't duplicate what's already there
+      if (active.includes(title.toLowerCase())) continue; // already a confirmed focus
       const row = await this.prisma.focusArea.create({ data: { title, description: p.description ? String(p.description).trim().slice(0, 400) : null, source: 'derived', status: 'proposed' } });
       created.push(this.shapeFocus(row));
     }

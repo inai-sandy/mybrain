@@ -217,15 +217,14 @@ describe('DailyService', () => {
     expect(out.moodScore).toBeNull();
   });
 
-  it('predicts tomorrow\'s tasks from today and lets the user approve one into a real task', async () => {
-    const { svc, tasks } = makeService({ llmText: '{"tasks":[{"title":"Send Srikar the pricing","category":"Beakn","reason":"Carried over from today"},{"title":"Book gym slot","category":"Health","reason":"You skipped it"}]}' });
-    const made = await svc.generateSuggestions('2026-06-07');
+  it('suggests tasks FOR a day by reading the PREVIOUS day\'s story, and approves one into a real task', async () => {
+    const { svc, tasks } = makeService({ llmText: '{"tasks":[{"title":"Send Srikar the pricing","category":"Beakn","reason":"Next step after today"},{"title":"Book gym slot","category":"Health","reason":"You said you would"}]}' });
+    // target = the 8th → reads the 7th's story/tasks
+    const made = await svc.generateSuggestions('2026-06-08');
     expect(made).toHaveLength(2);
-    expect(made[0].forDay).toBe('2026-06-08'); // the next day
-    // listing defaults to pending picks for that day
+    expect(made[0].forDay).toBe('2026-06-08');
     const list = await svc.listSuggestions('2026-06-08');
     expect(list.suggestions).toHaveLength(2);
-    // approve the first → a real task is created on 2026-06-08, suggestion marked added
     const r = await svc.addSuggestion(made[0].id);
     expect(r!.ok).toBe(true);
     expect(tasks.find((t) => t.title === 'Send Srikar the pricing' && t.day === '2026-06-08')).toBeTruthy();
@@ -233,21 +232,20 @@ describe('DailyService', () => {
     expect(after.suggestions).toHaveLength(1); // the added one is no longer pending
   });
 
-  it('drops suggestions that duplicate a task already open on the list', async () => {
+  it('drops suggestions that duplicate a task already open (read from the previous day)', async () => {
     const { svc, tasks } = makeService({ llmText: '{"tasks":[{"title":"Complete the product Excel file"},{"title":"Call the new supplier about samples"}]}' });
-    tasks.push({ id: 'o1', day: '2026-06-07', status: 'open', title: 'Complete product Excel file' });
-    const made = await svc.generateSuggestions('2026-06-07');
-    // the Excel one overlaps an open task → dropped; only the genuinely new one survives
+    tasks.push({ id: 'o1', day: '2026-06-07', status: 'open', title: 'Complete product Excel file' }); // open on the source day
+    const made = await svc.generateSuggestions('2026-06-08'); // target 8th → source 7th
     expect(made).toHaveLength(1);
     expect(made[0].title).toContain('supplier');
   });
 
   it('regenerating suggestions replaces only the still-pending picks', async () => {
     const { svc } = makeService({ llmText: '{"tasks":[{"title":"First idea"}]}' });
-    const first = await svc.generateSuggestions('2026-06-07');
+    const first = await svc.generateSuggestions('2026-06-08');
     await svc.addSuggestion(first[0].id); // user accepted this one
     // a second run shouldn't wipe the accepted one, only pending
-    await svc.generateSuggestions('2026-06-07');
+    await svc.generateSuggestions('2026-06-08');
     const list = await svc.listSuggestions('2026-06-08');
     expect(list.suggestions.every((s) => s.status === 'pending')).toBe(true);
   });

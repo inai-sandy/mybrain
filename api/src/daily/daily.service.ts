@@ -258,7 +258,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const day = this.dayKey(tz);
     if (await this.prisma.dayStory.findUnique({ where: { day } })) return;
     await this.generateDayStory(day).catch(() => undefined);
-    await this.generateSuggestions(day).catch(() => undefined);
+    // Tonight's story (day) drives tomorrow's suggestions (day + 1).
+    await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
   }
 
   /** Weave the told story + the day's tasks + the activity timeline into one emotional Story of the Day. */
@@ -326,10 +327,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { id: s.id, forDay: s.forDay, title: s.title, category: s.category, reason: s.reason, status: s.status, createdAt: s.createdAt };
   }
 
-  /** Predict tasks for the day AFTER `sourceDay` from that day's story + open/done tasks. Replaces prior pending picks. */
-  async generateSuggestions(sourceDay: string) {
-    const tz = await this.tz();
-    const forDay = this.dayAdd(sourceDay, 1);
+  /** Predict tasks FOR `targetDay`, reading the PREVIOUS day's story + tasks. Replaces prior pending picks.
+   *  (Suggestions for the 9th come from the 8th's Story of the Day.) */
+  async generateSuggestions(targetDay: string) {
+    const sourceDay = this.dayAdd(targetDay, -1);
+    const forDay = targetDay;
     const [dayStory, told, dayTasks] = await Promise.all([
       this.prisma.dayStory.findUnique({ where: { day: sourceDay } }),
       this.prisma.story.findFirst({ where: { day: sourceDay }, orderBy: { createdAt: 'desc' } }),
@@ -391,10 +393,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return created;
   }
 
-  /** Pending suggestions for a day (defaults to tomorrow). */
+  /** Pending suggestions for a day (defaults to today — made from last night's story). */
   async listSuggestions(forDay?: string) {
     const tz = await this.tz();
-    const day = forDay && /^\d{4}-\d{2}-\d{2}$/.test(forDay) ? forDay : this.dayAdd(this.dayKey(tz), 1);
+    const day = forDay && /^\d{4}-\d{2}-\d{2}$/.test(forDay) ? forDay : this.dayKey(tz);
     const rows = await this.prisma.suggestedTask.findMany({ where: { forDay: day, status: 'pending' }, orderBy: { createdAt: 'asc' } });
     return { forDay: day, suggestions: rows.map((r) => this.shapeSuggestion(r)) };
   }

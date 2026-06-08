@@ -35,7 +35,7 @@ export function Mentor() {
     setBusy(true);
     try {
       const r = await fetch('/api/mentor/focus/derive', { method: 'POST' });
-      if (r.ok) { const j = await r.json(); toast('success', j.proposed?.length ? `${j.proposed.length} focus area(s) suggested` : 'No new focus areas — your set looks complete'); load(); }
+      if (r.ok) { const j = await r.json(); toast('success', j.proposed?.length ? `${j.proposed.length} focus area(s) suggested — keep the ones that fit` : 'Not enough clear patterns yet to suggest confidently — add your own, or try again after a few more days of stories'); load(); }
       else toast('error', 'Could not analyze');
     } finally { setBusy(false); }
   }
