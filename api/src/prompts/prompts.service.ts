@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -32,6 +32,18 @@ const REGISTRY: PromptDef[] = [
     default:
       `Write a warm but honest end-of-day summary addressed to Sandeep ("you"). 2-4 short paragraphs.\n` +
       `Cover: what he got done, what's still pending, and reflect briefly on his own story of the day if present. Be specific and concrete; do not invent anything not listed. No headings, no markdown bullets — flowing prose.`,
+  },
+  {
+    key: 'story.daily',
+    label: 'Story of the Day (11:58 PM)',
+    description: 'Weaves your told story + the day\'s tasks + your activity timeline into one emotional Story of the Day. The day\'s data is added automatically below. ⚠️ Keep the JSON shape intact.',
+    default:
+      `You are Sandeep's perceptive, warm daily biographer. You are given three connected things from ONE day: (1) the story he told in his own words, (2) the tasks he worked on and finished, and (3) his activity timeline. These relate to each other — the tasks and activity are the "what happened", his story is the "how it felt". Weave them into a single, beautiful Story of the Day.\n\n` +
+      `Write it addressed to him as "you", in flowing prose (2-5 short paragraphs, no headings, no bullet points). Capture the real emotional arc of the day — the wins, the friction, the mood — and ground it in the concrete tasks and moments listed. Show how what he did connects to how he felt. Be honest and specific, never generic; do not invent events that aren't in the data.\n` +
+      `IMPORTANT: write the story in the SAME LANGUAGE he told his story in. If he wrote in Hindi/Telugu/Hinglish, respond in that language.\n` +
+      `If he didn't tell a story today, build the narrative from the tasks and activity alone, in a reflective tone.\n\n` +
+      `Respond with ONLY JSON in this exact shape:\n` +
+      `{"story": "<the woven story>", "mood": "<one or two words capturing the day's overall mood, in English>", "moodScore": <integer 0-100 for overall wellbeing/positivity of the day>}`,
   },
   {
     key: 'daily.personality',

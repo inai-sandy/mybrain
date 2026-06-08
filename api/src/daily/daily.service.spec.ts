@@ -5,6 +5,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const notes: any[] = [];
   const tasks: any[] = [];
   const summaries: any[] = [];
+  const dayStories: any[] = [];
   const dumps: any[] = [];
   const insights: any[] = [];
   const settings: Record<string, string> = {};
@@ -95,12 +96,25 @@ function makeService(opts: { llmText?: string | null } = {}) {
         return row;
       },
     },
+    dayStory: {
+      findUnique: async ({ where }: any) => dayStories.find((s) => s.day === where.day) || null,
+      upsert: async ({ where, create, update }: any) => {
+        const ex = dayStories.find((s) => s.day === where.day);
+        if (ex) {
+          Object.assign(ex, update, { updatedAt: new Date() });
+          return ex;
+        }
+        const row = { id: `ds${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...create };
+        dayStories.push(row);
+        return row;
+      },
+    },
   };
   const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
-  const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }) };
+  const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }), listModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dumps, insights, enqueued };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, dumps, insights, enqueued };
 }
 
 describe('DailyService', () => {
@@ -155,6 +169,25 @@ describe('DailyService', () => {
     const { svc } = makeService({ llmText: null });
     const out = await svc.generateSummary('2026-06-07');
     expect(out.text).toMatch(/finished/i);
+  });
+
+  it('weaves the Story of the Day (JSON with mood score) and stores it in both memory stores', async () => {
+    const { svc, dayStories, enqueued } = makeService({ llmText: '{"story":"You pushed through a hard morning and landed the proposal.","mood":"determined","moodScore":78}' });
+    const out = await svc.generateDayStory('2026-06-07');
+    expect(out.text).toContain('proposal');
+    expect(out.mood).toBe('determined');
+    expect(out.moodScore).toBe(78);
+    expect(dayStories).toHaveLength(1);
+    // stored to memory (RAG + SuperMemory) stamped "activity" so the sync never re-imports it
+    expect(enqueued[0].o.tags).toEqual(['activity']);
+    expect(enqueued[0].text).toContain('Story of the Day');
+  });
+
+  it('keeps the model prose as the story when it does not return JSON', async () => {
+    const { svc } = makeService({ llmText: 'A plain, heartfelt paragraph about the day.' });
+    const out = await svc.generateDayStory('2026-06-07');
+    expect(out.text).toContain('heartfelt');
+    expect(out.moodScore).toBeNull();
   });
 
   it('dashboard aggregates follow-through, time-by-category and dump streak', async () => {

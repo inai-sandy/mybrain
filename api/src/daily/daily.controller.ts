@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { DailyService } from './daily.service';
 
 @Controller('daily')
@@ -39,6 +39,29 @@ export class DailyController {
   async story(@Body() body: { text?: string; source?: string; mood?: string }) {
     if (!body?.text?.trim()) throw new BadRequestException('Tell your story first');
     return this.daily.submitStory(body.text, body.source || 'app', body.mood);
+  }
+
+  // ---- Story of the Day (nightly woven narrative) ----
+  @Post('day-story')
+  async dayStory(@Body() body: { day?: string; force?: boolean }) {
+    const day = body?.day || (await this.daily.activity()).day;
+    return this.daily.generateDayStory(day, !!body?.force);
+  }
+
+  @Get('story-model')
+  async getStoryModel() {
+    return this.daily.storyModel();
+  }
+
+  @Put('story-model')
+  async setStoryModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.daily.setStoryModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('story-models')
+  async storyModels() {
+    return { models: await this.daily.listModels() };
   }
 
   // ---- agentic personality engine + Validate ----

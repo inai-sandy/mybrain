@@ -121,6 +121,18 @@ model DaySummary {
   updatedAt     DateTime @updatedAt
 }
 
+/// The nightly "Story of the Day" — story + tasks + activity woven into one emotional narrative (11:58 PM).
+model DayStory {
+  id        String   @id @default(uuid())
+  day       String   @unique // local day key YYYY-MM-DD
+  text      String // the woven story
+  mood      String? // one-word mood read from the day
+  moodScore Int? // 0-100 wellbeing read from the day
+  model     String? // which LLM produced it
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// One evidence-grounded read of the user's personality — confirmable in the Validate panel.
 model PersonalityInsight {
   id         String   @id @default(uuid())

@@ -1,12 +1,14 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmService } from '../llm/llm.service';
+import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PromptsService } from '../prompts/prompts.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
+const STORY_AT = '23:58'; // local time the nightly Story of the Day fires
+const DEFAULT_STORY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 type TimelineEvent = { type: string; title: string; detail?: string; at: string };
 
@@ -25,6 +27,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.tick = setInterval(() => {
       this.summaryTick().catch(() => undefined);
+      this.storyTick().catch(() => undefined);
       this.personalityTick().catch(() => undefined);
     }, 60_000);
   }
@@ -214,6 +217,106 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       /* ignore */
     }
     return { day: s.day, text: s.text, stats, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+
+  // ---- Story of the Day (nightly, 11:58 PM) ----
+
+  /** The model that writes the Story of the Day (own picker; defaults to Sonnet). */
+  async storyModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'story.llm' } });
+    if (!row) return DEFAULT_STORY_MODEL;
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : DEFAULT_STORY_MODEL;
+    } catch {
+      return DEFAULT_STORY_MODEL;
+    }
+  }
+  async setStoryModel(provider: string, model: string) {
+    const value = JSON.stringify({ provider, model });
+    await this.prisma.setting.upsert({ where: { key: 'story.llm' }, create: { key: 'story.llm', value }, update: { value } });
+    return { provider, model };
+  }
+  /** OpenAI + Anthropic models for the Settings pickers (shared with Tasks). */
+  async listModels() {
+    return this.tasks.listModels();
+  }
+
+  shapeDayStory(s: any) {
+    return { day: s.day, text: s.text, mood: s.mood, moodScore: s.moodScore, model: s.model, createdAt: s.createdAt, updatedAt: s.updatedAt };
+  }
+
+  async getDayStory(day: string) {
+    const row = await this.prisma.dayStory.findUnique({ where: { day } });
+    return row ? this.shapeDayStory(row) : null;
+  }
+
+  /** At 11:58 PM local, write today's Story of the Day if it isn't done yet. */
+  async storyTick(): Promise<void> {
+    const tz = await this.tz();
+    if (this.localHM(tz) < STORY_AT) return;
+    const day = this.dayKey(tz);
+    if (await this.prisma.dayStory.findUnique({ where: { day } })) return;
+    await this.generateDayStory(day).catch(() => undefined);
+  }
+
+  /** Weave the told story + the day's tasks + the activity timeline into one emotional Story of the Day. */
+  async generateDayStory(day: string, force = false) {
+    const tz = await this.tz();
+    if (!force) {
+      const existing = await this.prisma.dayStory.findUnique({ where: { day } });
+      if (existing) return this.shapeDayStory(existing);
+    }
+    const [timeline, st, told, dayTasks] = await Promise.all([
+      this.feed(day, tz),
+      this.stats(day),
+      this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.task.findMany({ where: { day } }),
+    ]);
+
+    const doneList = dayTasks
+      .filter((t) => t.status === 'done')
+      .map((t) => `✓ ${t.title}${t.category ? ` [${t.category}]` : ''}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
+    const partialList = dayTasks
+      .filter((t) => t.status !== 'done' && (t.progress || 0) > 0)
+      .map((t) => `◐ ${t.title} — ${t.progress}% done`);
+    const openList = dayTasks.filter((t) => t.status !== 'done' && !(t.progress || 0)).map((t) => `○ ${t.title}`);
+    const activityLines = timeline.filter((e) => e.type !== 'task').map((e) => `- ${e.title}${e.detail ? ` (${e.detail})` : ''}`);
+
+    const tmpl = await this.prompts.get('story.daily');
+    const prompt =
+      `${tmpl}\n\n` +
+      `=== DATE: ${day} ===\n\n` +
+      `HIS STORY (own words${told?.mood ? `, mood: ${told.mood}` : ''}):\n${told?.rawText?.slice(0, 3000) || '(he did not tell a story today)'}\n\n` +
+      `TASKS DONE (${st.tasksDone}/${st.tasksTotal}, ~${st.minutesSpent}m):\n${doneList.join('\n') || '(none)'}\n\n` +
+      (partialList.length ? `TASKS IN PROGRESS:\n${partialList.join('\n')}\n\n` : '') +
+      `TASKS STILL OPEN:\n${openList.join('\n') || '(none)'}\n\n` +
+      `ACTIVITY TIMELINE:\n${activityLines.join('\n') || '(quiet day in the app)'}`;
+
+    const cfg = await this.storyModel();
+    const raw = (await this.llm.completeWith(cfg, prompt, 1400))?.trim() || '';
+    let text = raw;
+    let mood: string | null = told?.mood || null;
+    let moodScore: number | null = null;
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (json?.story) text = String(json.story).trim();
+      if (json?.mood) mood = String(json.mood).slice(0, 40);
+      if (Number.isFinite(json?.moodScore)) moodScore = Math.max(0, Math.min(100, Math.round(Number(json.moodScore))));
+    } catch {
+      /* model returned prose, not JSON — keep it as the story */
+    }
+    if (!text) text = this.fallbackSummary(st, doneList, openList);
+
+    const row = await this.prisma.dayStory.upsert({
+      where: { day },
+      create: { day, text, mood, moodScore, model: cfg.model },
+      update: { text, mood, moodScore, model: cfg.model },
+    });
+
+    // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
+    await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
+    return this.shapeDayStory(row);
   }
 
   // ---- agentic personality engine ----
@@ -433,11 +536,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async activity(dayInput?: string) {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
-    const [timeline, st, story, summary] = await Promise.all([
+    const [timeline, st, story, summary, dayStory] = await Promise.all([
       this.feed(day, tz),
       this.stats(day),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.daySummary.findUnique({ where: { day } }),
+      this.prisma.dayStory.findUnique({ where: { day } }),
     ]);
     return {
       day,
@@ -445,6 +549,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       stats: st,
       story: story ? this.shapeStory(story) : null,
       summary: summary ? this.shapeSummary(summary) : null,
+      dayStory: dayStory ? this.shapeDayStory(dayStory) : null,
       timeline,
     };
   }

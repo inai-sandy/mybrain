@@ -6,7 +6,8 @@ type Ev = { type: string; title: string; detail?: string; at: string };
 type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number };
 type Summary = { day: string; text: string; stats: Stats | null } | null;
 type Story = { text: string; mood?: string | null } | null;
-type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; timeline: Ev[] };
+type DayStoryT = { text: string; mood?: string | null; moodScore?: number | null } | null;
+type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; dayStory: DayStoryT; timeline: Ev[] };
 
 type Dash = {
   days: number;
@@ -85,6 +86,21 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
     }
   }
 
+  const [genStory, setGenStory] = useState(false);
+  async function buildStory(force = false) {
+    if (!day) return;
+    setGenStory(true);
+    try {
+      const r = await fetch('/api/daily/day-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, force }) });
+      if (r.ok) {
+        toast('success', force ? 'Story of the Day rebuilt' : 'Story of the Day created');
+        load(day);
+      } else toast('error', 'Could not create the story');
+    } finally {
+      setGenStory(false);
+    }
+  }
+
   const st = data?.stats;
   const pct = st && st.tasksTotal ? Math.round((st.tasksDone / st.tasksTotal) * 100) : 0;
 
@@ -107,9 +123,29 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
         </div>
       )}
 
+      {/* Story of the Day — the woven nightly narrative (story + tasks + activity) */}
+      <section className="rounded-xl border border-indigo-300/50 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-5">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="flex items-center gap-2 font-semibold"><Moon size={16} className="text-indigo-400" /> Story of the Day
+            {typeof data?.dayStory?.moodScore === 'number' && (
+              <span className="text-xs font-normal text-zinc-500 inline-flex items-center gap-1">· mood {data.dayStory.moodScore}/100{data.dayStory.mood ? ` · ${data.dayStory.mood}` : ''}</span>
+            )}
+          </h2>
+          {data?.dayStory && <button onClick={() => buildStory(true)} disabled={genStory} className="text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><RefreshCw size={12} /> rebuild</button>}
+        </div>
+        {data?.dayStory ? (
+          <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{data.dayStory.text}</p>
+        ) : (
+          <div className="text-sm text-zinc-500">
+            <p className="mb-3">{data?.isToday ? 'Your Story of the Day writes itself at 11:58 PM — weaving your story, tasks and activity into one. Or create it now.' : 'No Story of the Day was written for this day.'}</p>
+            <button onClick={() => buildStory(false)} disabled={genStory} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{genStory ? 'Writing…' : 'Create Story of the Day'}</button>
+          </div>
+        )}
+      </section>
+
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-emerald-500" /> Day summary</h2>
+          <h2 className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-emerald-500" /> Day summary <span className="text-xs font-normal text-zinc-400">· 9:30 PM</span></h2>
           {data?.summary && <button onClick={() => generate(true)} disabled={gen} className="text-xs text-zinc-400 hover:text-emerald-600 inline-flex items-center gap-1"><RefreshCw size={12} /> rebuild</button>}
         </div>
         {data?.summary ? (

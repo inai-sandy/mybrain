@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -259,8 +259,67 @@ function ModelsSection() {
       <ChatModelCard />
       <BookmarksModelCard />
       <TasksModelCard />
+      <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model"
+        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. A strong model like Claude Sonnet is best here. Uses your OpenRouter key." />
       <VoiceModelCard />
     </div>
+  );
+}
+
+/** Reusable model picker for an engine that exposes GET/PUT `${base}` + GET `${base}s`. */
+function EngineModelCard({ title, desc, icon: Icon, base }: { title: string; desc: string; icon: LucideIcon; base: string }) {
+  const FALLBACK = [
+    { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6 (best, recommended)' },
+    { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6 (deepest)' },
+    { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (fast)' },
+    { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+    { id: 'openai/gpt-4o', name: 'GPT-4o' },
+  ];
+  const [opts, setOpts] = useState<{ id: string; name: string }[]>([]);
+  const [model, setModel] = useState('');
+  const [custom, setCustom] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    Promise.all([
+      fetch(base).then((r) => r.json()).catch(() => ({})),
+      fetch(base + 's').then((r) => r.json()).catch(() => ({ models: [] })),
+    ])
+      .then(([cfg, list]) => {
+        const models = (list.models || []) as { id: string; name: string }[];
+        const finalOpts = models.length ? models : FALLBACK;
+        setOpts(finalOpts);
+        const m = cfg.model || '';
+        setModel(m);
+        setCustom(!!m && !finalOpts.some((o) => o.id === m));
+      })
+      .finally(() => setLoaded(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base]);
+  if (!loaded) return null;
+  async function save() {
+    const r = await fetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+    if (r.ok) toast('success', 'Model saved');
+    else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
+  }
+  const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1"><Icon size={18} className="text-emerald-600" /> {title}</h2>
+      <p className="text-sm text-zinc-500 mb-4">{desc}</p>
+      <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
+        Model
+        <select value={custom ? '__custom__' : model} onChange={(e) => { if (e.target.value === '__custom__') { setCustom(true); setModel(''); } else { setCustom(false); setModel(e.target.value); } }} className={sel}>
+          <option value="">Choose…</option>
+          {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          <option value="__custom__">Custom…</option>
+        </select>
+      </label>
+      {custom && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openrouter model id (e.g. anthropic/claude-sonnet-4.6)" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
+      <div className="mt-4 text-right">
+        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
+      </div>
+    </section>
   );
 }
 
