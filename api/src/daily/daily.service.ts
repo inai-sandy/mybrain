@@ -318,6 +318,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
     await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
+    // Flag it for the Telegram push (delivered by the Telegram nudge loop).
+    await this.setSetting('telegram.pushStory', day).catch(() => undefined);
     return this.shapeDayStory(row);
   }
 

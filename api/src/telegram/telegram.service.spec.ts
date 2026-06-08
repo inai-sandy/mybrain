@@ -10,10 +10,15 @@ function make() {
         return { key: where.key, value: settings[where.key] };
       },
     },
-    task: { findUnique: async ({ where }: any) => ({ id: where.id, title: 'Finish proposal', note: null, status: 'open' }) },
+    task: {
+      findUnique: async ({ where }: any) => ({ id: where.id, title: 'Finish proposal', note: null, status: 'open' }),
+      create: jest.fn(async ({ data }: any) => ({ id: 'tr', ...data })),
+    },
     brainDump: { findFirst: async () => null },
     story: { findFirst: async () => null },
     daySummary: { findUnique: async () => null },
+    dayStory: { findUnique: async () => null },
+    mentorDay: { findUnique: async () => null },
   };
   const connectors: any = { get: async () => ({ botToken: 'TEST' }) };
   const tasks: any = {
@@ -26,18 +31,19 @@ function make() {
   const daily: any = {
     submitStory: jest.fn(async () => ({})),
     addNote: jest.fn(async () => ({})),
-    dashboard: jest.fn(async () => ({ streak: 4, totals: { followThrough: 67, tasksDone: 8, tasksTotal: 12 }, minutesSpent: 240, categoryTime: [{ category: 'Beakn', minutes: 120 }] })),
+    dashboard: jest.fn(async () => ({ streak: 4, totals: { followThrough: 67, tasksDone: 8, tasksTotal: 12 }, minutesSpent: 240, categoryTime: [{ category: 'Beakn', minutes: 120 }], perDay: [{ day: '2026-06-07', done: 3 }] })),
     getPersonality: jest.fn(async () => ({ unlocked: false, daysCovered: 3, minDays: 10, summary: null, insights: [] })),
     activity: jest.fn(async () => ({ stats: { tasksDone: 1, tasksTotal: 2, minutesSpent: 25 }, summary: { text: 'You had a focused day.' }, timeline: [] })),
   };
+  const items: any = { store: jest.fn(async () => ({ item: { id: 'i1' }, deduped: false })) };
   const sent: any[] = [];
-  // stub the Telegram HTTP layer
+  // stub the Telegram HTTP layer (some calls pass no body, e.g. fetching a URL to save)
   (global as any).fetch = jest.fn(async (_url: string, opts: any) => {
-    sent.push(JSON.parse(opts.body));
-    return { json: async () => ({ ok: true, result: {} }) };
+    if (opts?.body) sent.push(JSON.parse(opts.body));
+    return { ok: true, json: async () => ({ ok: true, result: {} }), text: async () => 'page text' };
   });
   const chat: any = { askOnce: jest.fn(async () => ({ answer: 'Here is what you saved.', sources: [] })) };
-  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat), settings, tasks, daily, chat, sent };
+  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items), settings, prisma, tasks, daily, chat, items, sent };
 }
 
 describe('TelegramService', () => {
@@ -173,6 +179,32 @@ describe('TelegramService', () => {
     // …and the NEXT message stays in bookmark scope (persistent)
     await svc.handleUpdate({ update_id: 5, message: { chat: { id: 5 }, text: 'and about onboarding' } });
     expect(chat.askOnce).toHaveBeenLastCalledWith('and about onboarding', 'bookmark');
+  });
+
+  it('auto-saves a bare link to the brain', async () => {
+    const { svc, items } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: 'https://example.com/great-article' } });
+    expect(items.store).toHaveBeenCalled();
+    expect(items.store.mock.calls[0][3]).toBe('https://example.com/great-article'); // sourceUrl
+  });
+
+  it('"remind me … at 5pm" creates a task with that reminder time', async () => {
+    const { svc, prisma } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: 'remind me to call Sam at 5pm' } });
+    expect(prisma.task.create).toHaveBeenCalled();
+    const data = prisma.task.create.mock.calls[0][0].data;
+    expect(data.title).toBe('call Sam');
+    expect(data.reminders).toContain('17:00');
+  });
+
+  it('/week sends a weekly recap from the dashboard', async () => {
+    const { svc, daily, sent } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/week' } });
+    expect(daily.dashboard).toHaveBeenCalledWith(7);
+    expect(sent.some((m) => /week in review/i.test(m.text))).toBe(true);
   });
 
   it('ignores a duplicate update_id', async () => {

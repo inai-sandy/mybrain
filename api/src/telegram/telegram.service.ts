@@ -5,6 +5,7 @@ import { ConnectorService } from '../connectors/connector.service';
 import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
 import { ChatService } from '../chat/chat.service';
+import { ItemsService } from '../items/items.service';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -16,7 +17,9 @@ const COMMANDS = [
   { command: 'today', description: "See today's tasks" },
   { command: 'done', description: 'Mark a task done (e.g. /done 2)' },
   { command: 'ask', description: 'Ask your brain / memory anything' },
+  { command: 'save', description: 'Save a link, text or file to your brain' },
   { command: 'insights', description: 'Streak, follow-through, time' },
+  { command: 'week', description: 'Your week in review' },
   { command: 'me', description: 'Your personality snapshot' },
   { command: 'activity', description: "Today's summary" },
   { command: 'skip', description: 'Rest day — mute nudges today' },
@@ -34,10 +37,13 @@ const HELP =
   '🔵 <b>Check &amp; complete</b>\n' +
   '/today — see today\'s tasks\n' +
   '/done 2 — mark task #2 done\n' +
-  '/ask — ask your brain anything\n' +
+  '/ask — ask your brain (pick a subject, stays there)\n' +
+  '/save — save a link / text / file to your brain\n' +
   '/activity — today\'s summary\n' +
   '/insights — streak, follow-through, time\n' +
+  '/week — your week in review\n' +
   '/me — your personality snapshot\n\n' +
+  '✨ <b>Just send me a link</b> and I\'ll save it. Say <i>“remind me to call Sam at 5pm”</i> and I\'ll set the reminder.\n\n' +
   '⚙️ <b>Control</b>\n' +
   '/skip — rest day (no nudges today)\n' +
   '/snooze — quiet nudges for an hour\n\n' +
@@ -54,6 +60,7 @@ export class TelegramService implements OnModuleInit {
     private readonly tasks: TasksService,
     private readonly daily: DailyService,
     private readonly chat: ChatService,
+    private readonly items: ItemsService,
   ) {}
 
   async onModuleInit() {
@@ -385,6 +392,11 @@ export class TelegramService implements OnModuleInit {
         await this.send(chatId, `🎙️ <i>${transcript.slice(0, 200)}</i>`);
         return this.handlePlain(chatId, transcript);
       }
+
+      // A file or photo → save it to the brain.
+      if (msg.document || msg.photo) {
+        return this.handleIncomingFile(chatId, msg);
+      }
       if (!text) return;
 
       if (text.startsWith('/')) return this.handleCommand(chatId, text);
@@ -432,11 +444,17 @@ export class TelegramService implements OnModuleInit {
         if (arg) return this.doAsk(chatId, arg, cur || 'everything');
         return this.send(chatId, '🧠 <b>Ask your brain</b> — which part do you want to talk to?', { reply_markup: this.askScopeKeyboard() });
       }
+      case 'save':
+        if (arg) return this.doSave(chatId, arg);
+        await this.setState({ mode: 'awaiting_save' });
+        return this.send(chatId, '📥 Send me a link, some text, or a file and I\'ll save it to your brain.');
       case 'activity':
         return this.doActivity(chatId);
       case 'insights':
       case 'stats':
         return this.doInsights(chatId);
+      case 'week':
+        return this.doWeek(chatId);
       case 'me':
         return this.doMe(chatId);
       case 'skip':
@@ -453,6 +471,10 @@ export class TelegramService implements OnModuleInit {
     // Persistent ask-mode: every plain message keeps answering in the chosen scope until /ask switches it.
     if (st.mode === 'ask') {
       return this.doAsk(chatId, text, st.scope || 'everything');
+    }
+    if (st.mode === 'awaiting_save') {
+      await this.setState({});
+      return this.doSave(chatId, text);
     }
     if (st.mode === 'awaiting_dump') {
       await this.setState({});
@@ -474,6 +496,17 @@ export class TelegramService implements OnModuleInit {
       await this.setState({});
       return this.doAsk(chatId, text);
     }
+
+    // "remind me to X at 5pm" → create the task with that reminder
+    if (/^\s*remind me\b/i.test(text)) {
+      const r = await this.createReminder(text);
+      if (r) return this.send(chatId, `⏰ Reminder set: <b>${this.esc(r.title)}</b> at <b>${r.hm}</b>${r.tomorrow ? ' (tomorrow)' : ''}.`);
+    }
+
+    // a bare link → save it to the brain
+    const url = this.firstUrl(text);
+    if (url) return this.doSave(chatId, text);
+
     // no active flow → ask what they meant (buttons), remembering the text
     await this.setState({ mode: 'classify', pendingText: text });
     return this.send(chatId, '🤔 What should I do with that?', {
@@ -675,6 +708,184 @@ export class TelegramService implements OnModuleInit {
     return this.send(chatId, `🔕 Nudges quiet for ${mins} minutes.`);
   }
 
+  private dayAdd(day: string, n: number): string {
+    const d = new Date(day + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // ---- save anything to the brain ----
+  private firstUrl(text: string): string | null {
+    const m = (text || '').match(/https?:\/\/[^\s]+/i);
+    return m ? m[0] : null;
+  }
+  private titleFromUrl(url: string): string {
+    try {
+      const u = new URL(url);
+      return u.hostname.replace(/^www\./, '') + (u.pathname !== '/' ? ' — saved page' : '');
+    } catch {
+      return url.slice(0, 60);
+    }
+  }
+
+  private async doSave(chatId: string, text: string) {
+    const url = this.firstUrl(text);
+    if (url) {
+      await this.send(chatId, '🔗 Saving the link…');
+      let content = url;
+      try {
+        const r = await fetch(url);
+        if (r.ok) content = (await r.text()).slice(0, 200000);
+      } catch {
+        /* keep the url itself as content */
+      }
+      const title = text.replace(url, '').trim().slice(0, 80) || this.titleFromUrl(url);
+      const res = await this.items.store(content, 'telegram-url', title, url).catch(() => null);
+      if (!res) return this.send(chatId, 'Could not save that link.');
+      return this.send(chatId, res.deduped ? '✓ Already saved.' : `🔖 Saved: <a href="${url}">${this.esc(title)}</a>`);
+    }
+    const content = (text || '').trim();
+    if (content.length < 2) return this.send(chatId, 'Send a link, some text, or a file to save.');
+    await this.send(chatId, '📥 Saving…');
+    const title = content.split('\n')[0].slice(0, 80);
+    const res = await this.items.store(content, 'telegram', title).catch(() => null);
+    if (!res) return this.send(chatId, 'Could not save that.');
+    return this.send(chatId, res.deduped ? '✓ Already in your brain.' : `📥 Saved to your brain: <b>${this.esc(title)}</b>`);
+  }
+
+  private async handleIncomingFile(chatId: string, msg: any) {
+    const caption = (msg.caption || '').trim();
+    // Photo → read it with vision, save the text/description.
+    if (msg.photo?.length) {
+      await this.send(chatId, '🖼️ Reading the image…');
+      const fileId = msg.photo[msg.photo.length - 1].file_id; // largest size
+      const buf = await this.downloadFile(fileId);
+      const read = buf ? await this.visionRead(buf, 'image/jpeg').catch(() => null) : null;
+      if (!read && !caption) return this.send(chatId, '🖼️ I couldn\'t read text from that image. Add a caption and I\'ll save that.');
+      const body = [caption, read].filter(Boolean).join('\n\n');
+      const title = (caption || (read || '').split('\n')[0] || 'Image note').slice(0, 80);
+      const res = await this.items.store(body, 'telegram-image', title).catch(() => null);
+      return this.send(chatId, res ? `📥 Saved from image: <b>${this.esc(title)}</b>` : 'Could not save that.');
+    }
+    const doc = msg.document;
+    if (!doc) return;
+    const name = doc.file_name || 'file';
+    const mime = doc.mime_type || '';
+    if (/\.(md|markdown|txt|csv|json)$/i.test(name) || /^text\//.test(mime) || mime === 'application/json') {
+      await this.send(chatId, '📄 Saving the file…');
+      const buf = await this.downloadFile(doc.file_id);
+      const content = buf ? buf.toString('utf8').slice(0, 300000) : '';
+      if (!content) return this.send(chatId, 'Could not read that file.');
+      const res = await this.items.store(content, 'telegram-file', name.replace(/\.[^.]+$/, '').slice(0, 80)).catch(() => null);
+      return this.send(chatId, res ? `📥 Saved file: <b>${this.esc(name)}</b>` : 'Could not save that.');
+    }
+    // Other types (PDF, etc.) → keep the caption + filename so nothing's lost.
+    const body = [caption, `File: ${name} (${mime})`].filter(Boolean).join('\n');
+    const res = await this.items.store(body, 'telegram-file', (caption || name).slice(0, 80)).catch(() => null);
+    return this.send(chatId, res ? `📥 Saved <b>${this.esc(name)}</b>${caption ? ' with your caption' : ''}. <i>(Links, text, images & .txt/.md are read in full; deep PDF reading is coming.)</i>` : 'Could not save that.');
+  }
+
+  private async downloadFile(fileId: string): Promise<Buffer | null> {
+    const t = await this.token();
+    if (!t) return null;
+    const f = await this.api('getFile', { file_id: fileId });
+    const path = f?.result?.file_path;
+    if (!path) return null;
+    try {
+      const r = await fetch(`https://api.telegram.org/file/bot${t}/${path}`);
+      if (!r.ok) return null;
+      return Buffer.from(await r.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  private async visionRead(buf: Buffer, mime: string): Promise<string | null> {
+    const or = await this.connectors.get<{ apiKey: string }>('openrouter');
+    if (!or?.apiKey) return null;
+    const body = {
+      model: 'google/gemini-3-flash-preview',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Extract all text from this image verbatim. If there is little text, briefly describe what it shows. Output only the result.' },
+        { type: 'image_url', image_url: { url: `data:${mime};base64,${buf.toString('base64')}` } },
+      ] }],
+    };
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${or.apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) return null;
+    const d: any = await r.json();
+    const text = d?.choices?.[0]?.message?.content;
+    return typeof text === 'string' && text.trim() ? text.trim() : null;
+  }
+
+  // ---- natural-language reminder: "remind me to call Sam at 5pm" ----
+  async createReminder(text: string): Promise<{ title: string; hm: string; tomorrow: boolean } | null> {
+    const tz = await this.tz();
+    let body = text.replace(/^\s*remind me\s*/i, '').trim();
+    let tomorrow = /\btomorrow\b/i.test(body);
+    body = body.replace(/\btomorrow\b/i, '').trim();
+    let hm: string | null = null;
+
+    const rel = body.match(/\bin\s+(\d+)\s*(minutes?|mins?|hours?|hrs?)\b/i);
+    if (rel) {
+      const n = parseInt(rel[1], 10);
+      const isHour = /hour|hr/i.test(rel[2]);
+      let total = this.minsIntoDay(tz) + (isHour ? n * 60 : n);
+      if (total >= 1440) { total -= 1440; tomorrow = true; }
+      hm = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+      body = body.replace(rel[0], '').trim();
+    }
+    if (!hm) {
+      const at = body.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i) || body.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
+      if (at) {
+        let h = parseInt(at[1], 10);
+        const min = at[2] ? parseInt(at[2], 10) : 0;
+        const mer = (at[3] || '').toLowerCase();
+        if (mer === 'pm' && h < 12) h += 12;
+        if (mer === 'am' && h === 12) h = 0;
+        if (!mer && h >= 1 && h <= 7) h += 12; // bare "at 5" → assume evening
+        hm = `${String(Math.min(23, h)).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+        body = body.replace(at[0], '').trim();
+      }
+    }
+    if (!hm) return null;
+
+    let title = body.replace(/^to\s+/i, '').replace(/[\s,]+$/, '').trim().slice(0, 160) || 'Reminder';
+    const day = tomorrow ? this.dayAdd(this.dayKey(tz), 1) : this.dayKey(tz);
+    await this.prisma.task.create({ data: { title, day, reminderCount: 1, reminders: JSON.stringify([hm]), priority: 'medium' } });
+    return { title, hm, tomorrow };
+  }
+
+  private async doWeek(chatId: string) {
+    const d = await this.daily.dashboard(7);
+    const cats = d.categoryTime.slice(0, 3).map((c: any) => `${c.category} ${Math.round(c.minutes)}m`).join(', ') || 'n/a';
+    const best = d.perDay.reduce((a: any, b: any) => (b.done > (a?.done ?? -1) ? b : a), null);
+    return this.send(
+      chatId,
+      `<b>📅 Your week in review</b>\n🔥 Dump streak: <b>${d.streak}</b>\n✅ Follow-through: <b>${d.totals.followThrough}%</b> (${d.totals.tasksDone}/${d.totals.tasksTotal})\n⏱ Time logged: <b>${d.minutesSpent}m</b>\n📊 Top areas: ${cats}${best && best.done ? `\n🏆 Best day: ${best.day} (${best.done} done)` : ''}`,
+    );
+  }
+
+  /** Deliver the nightly Story of the Day + Mentor read to Telegram (flags set by those engines). */
+  private async pushPending(owner: string) {
+    const sDay = await this.getSetting('telegram.pushStory');
+    if (sDay) {
+      await this.setSetting('telegram.pushStory', '');
+      const ds = await this.prisma.dayStory.findUnique({ where: { day: sDay } });
+      if (ds?.text) await this.send(owner, `🌙 <b>Story of the Day</b>${ds.moodScore != null ? ` · mood ${ds.moodScore}/100` : ''}\n\n${this.esc(ds.text).slice(0, 3800)}`);
+    }
+    const mDay = await this.getSetting('telegram.pushMentor');
+    if (mDay) {
+      await this.setSetting('telegram.pushMentor', '');
+      const md = await this.prisma.mentorDay.findUnique({ where: { day: mDay } });
+      if (md?.guidance) {
+        await this.send(owner, `🧭 <b>Mentor</b> · on-track ${md.adherenceScore}/100\n\n${this.esc(md.guidance).slice(0, 3500)}`, {
+          reply_markup: { inline_keyboard: [[{ text: '🧭 Open Mentor', url: `${PUBLIC_URL}/mentor` }]] },
+        });
+      }
+    }
+  }
+
   // ---- outbound nudge scheduler ----
   private async firedSet(day: string): Promise<Set<string>> {
     try {
@@ -695,6 +906,9 @@ export class TelegramService implements OnModuleInit {
     const tz = await this.tz();
     const day = this.dayKey(tz);
     const hm = this.localHM(tz);
+
+    // Deliver the nightly Story of the Day + Mentor read regardless of rest-day/snooze (not a nag).
+    await this.pushPending(owner);
 
     if ((await this.getSetting('telegram.skipDay')) === day) return; // rest day
     const snooze = Number((await this.getSetting('telegram.snoozeUntil')) || 0);

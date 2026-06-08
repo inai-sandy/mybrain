@@ -216,6 +216,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       create: { day, adherenceScore, moodScore: dayStory?.moodScore ?? null, guidance },
       update: { adherenceScore, moodScore: dayStory?.moodScore ?? null, guidance },
     });
+    // Flag it for the nightly Telegram push.
+    await this.setSetting('telegram.pushMentor', day).catch(() => undefined);
     return this.shapeMentorDay(row);
   }
 
