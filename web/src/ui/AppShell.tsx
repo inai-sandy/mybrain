@@ -5,6 +5,7 @@ import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpC
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
+import { DictationIndicator } from './DictationIndicator';
 import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useTheme } from './theme';
 
@@ -159,6 +160,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Install-this-app banner (Android button / iOS hint) */}
       <InstallPrompt />
+
+      {/* Live voice-dictation banner — shows what's being heard + a Stop button, globally */}
+      <DictationIndicator />
 
       {/* Floating "chat with your brain" button — every page except the chat itself */}
       {!isChat && (
