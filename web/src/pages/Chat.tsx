@@ -7,6 +7,7 @@ import { Mic } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useDictation } from '../ui/useDictation';
+import { GrowTextarea } from '../ui/GrowTextarea';
 import { mdComponents } from '../ui/markdown';
 
 export type Source = { title: string; url?: string; itemId?: string };
@@ -327,13 +328,13 @@ export function Chat() {
       <div className="border-t border-zinc-200 dark:border-zinc-800 shrink-0 [padding-bottom:env(safe-area-inset-bottom)] bg-white dark:bg-zinc-900">
         <div className="max-w-3xl mx-auto w-full px-4 py-3">
           <div className="flex items-end gap-1.5 rounded-2xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 pl-3 pr-1.5 py-1 focus-within:border-emerald-500 transition-colors">
-            <textarea
+            <GrowTextarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               rows={1}
               placeholder={`Ask your ${sc?.label.toLowerCase()}…`}
-              className="flex-1 resize-none bg-transparent py-2 text-sm outline-none max-h-40 placeholder:text-zinc-400"
+              className="flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-zinc-400"
             />
             {micOk && (
               <button onClick={toggleMic} title={listening ? 'Stop' : 'Speak'} className={'shrink-0 mb-0.5 p-2 rounded-xl ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'text-zinc-400 hover:text-emerald-600')}><Mic size={16} /></button>

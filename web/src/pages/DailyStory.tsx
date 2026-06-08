@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Moon, X, Mic, BookOpen, Plus, Trash2, MessageSquare } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useDictation } from '../ui/useDictation';
+import { GrowTextarea } from '../ui/GrowTextarea';
 
 type Story = { id: string; text: string; mood?: string | null; createdAt: string; updatedAt?: string };
 type Note = { id: string; text: string; source: string; createdAt: string };
@@ -123,11 +124,12 @@ export function StorySection() {
       {/* Daytime quick notes */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
         <h2 className="flex items-center gap-2 font-semibold text-sm mb-2"><MessageSquare size={15} className="text-emerald-500" /> Quick notes <span className="text-xs font-normal text-zinc-400">— capture what you're doing</span></h2>
-        <div className="flex items-center gap-2">
-          <input
+        <div className="flex items-end gap-2">
+          <GrowTextarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addNote()}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addNote(); } }}
+            rows={1}
             placeholder="Speak or type a quick note…"
             className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
           />
