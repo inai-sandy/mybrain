@@ -6,6 +6,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const tasks: any[] = [];
   const summaries: any[] = [];
   const dayStories: any[] = [];
+  const suggestions: any[] = [];
   const dumps: any[] = [];
   const insights: any[] = [];
   const settings: Record<string, string> = {};
@@ -57,6 +58,32 @@ function makeService(opts: { llmText?: string | null } = {}) {
           }
           return true;
         }),
+      create: async ({ data }: any) => {
+        const row = { id: `t${++seq}`, createdAt: new Date(), status: 'open', ...data };
+        tasks.push(row);
+        return row;
+      },
+    },
+    suggestedTask: {
+      findMany: async ({ where }: any = {}) => suggestions.filter((s) => (where?.forDay === undefined || s.forDay === where.forDay) && (where?.status === undefined || s.status === where.status)),
+      findUnique: async ({ where }: any) => suggestions.find((s) => s.id === where.id) || null,
+      create: async ({ data }: any) => {
+        const row = { id: `sg${++seq}`, createdAt: new Date(), status: 'pending', ...data };
+        suggestions.push(row);
+        return row;
+      },
+      update: async ({ where, data }: any) => {
+        const s = suggestions.find((x) => x.id === where.id);
+        if (s) Object.assign(s, data);
+        return s;
+      },
+      deleteMany: async ({ where }: any) => {
+        for (let i = suggestions.length - 1; i >= 0; i--) {
+          const s = suggestions[i];
+          if ((where?.forDay === undefined || s.forDay === where.forDay) && (where?.status === undefined || s.status === where.status)) suggestions.splice(i, 1);
+        }
+        return {};
+      },
     },
     item: { findMany: async () => [] },
     idea: { findMany: async () => [] },
@@ -114,7 +141,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }), listModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, dumps, insights, enqueued };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, suggestions, dumps, insights, enqueued };
 }
 
 describe('DailyService', () => {
@@ -188,6 +215,32 @@ describe('DailyService', () => {
     const out = await svc.generateDayStory('2026-06-07');
     expect(out.text).toContain('heartfelt');
     expect(out.moodScore).toBeNull();
+  });
+
+  it('predicts tomorrow\'s tasks from today and lets the user approve one into a real task', async () => {
+    const { svc, tasks } = makeService({ llmText: '{"tasks":[{"title":"Send Srikar the pricing","category":"Beakn","reason":"Carried over from today"},{"title":"Book gym slot","category":"Health","reason":"You skipped it"}]}' });
+    const made = await svc.generateSuggestions('2026-06-07');
+    expect(made).toHaveLength(2);
+    expect(made[0].forDay).toBe('2026-06-08'); // the next day
+    // listing defaults to pending picks for that day
+    const list = await svc.listSuggestions('2026-06-08');
+    expect(list.suggestions).toHaveLength(2);
+    // approve the first → a real task is created on 2026-06-08, suggestion marked added
+    const r = await svc.addSuggestion(made[0].id);
+    expect(r!.ok).toBe(true);
+    expect(tasks.find((t) => t.title === 'Send Srikar the pricing' && t.day === '2026-06-08')).toBeTruthy();
+    const after = await svc.listSuggestions('2026-06-08');
+    expect(after.suggestions).toHaveLength(1); // the added one is no longer pending
+  });
+
+  it('regenerating suggestions replaces only the still-pending picks', async () => {
+    const { svc } = makeService({ llmText: '{"tasks":[{"title":"First idea"}]}' });
+    const first = await svc.generateSuggestions('2026-06-07');
+    await svc.addSuggestion(first[0].id); // user accepted this one
+    // a second run shouldn't wipe the accepted one, only pending
+    await svc.generateSuggestions('2026-06-07');
+    const list = await svc.listSuggestions('2026-06-08');
+    expect(list.suggestions.every((s) => s.status === 'pending')).toBe(true);
   });
 
   it('dashboard aggregates follow-through, time-by-category and dump streak', async () => {

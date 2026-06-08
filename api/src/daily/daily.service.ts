@@ -251,13 +251,14 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return row ? this.shapeDayStory(row) : null;
   }
 
-  /** At 11:58 PM local, write today's Story of the Day if it isn't done yet. */
+  /** At 11:58 PM local, write today's Story of the Day (and tomorrow's suggested tasks) if not done yet. */
   async storyTick(): Promise<void> {
     const tz = await this.tz();
     if (this.localHM(tz) < STORY_AT) return;
     const day = this.dayKey(tz);
     if (await this.prisma.dayStory.findUnique({ where: { day } })) return;
     await this.generateDayStory(day).catch(() => undefined);
+    await this.generateSuggestions(day).catch(() => undefined);
   }
 
   /** Weave the told story + the day's tasks + the activity timeline into one emotional Story of the Day. */
@@ -317,6 +318,89 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
     await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
     return this.shapeDayStory(row);
+  }
+
+  // ---- predictive (suggested) tasks for tomorrow ----
+
+  private shapeSuggestion(s: any) {
+    return { id: s.id, forDay: s.forDay, title: s.title, category: s.category, reason: s.reason, status: s.status, createdAt: s.createdAt };
+  }
+
+  /** Predict tasks for the day AFTER `sourceDay` from that day's story + open/done tasks. Replaces prior pending picks. */
+  async generateSuggestions(sourceDay: string) {
+    const tz = await this.tz();
+    const forDay = this.dayAdd(sourceDay, 1);
+    const [dayStory, told, dayTasks] = await Promise.all([
+      this.prisma.dayStory.findUnique({ where: { day: sourceDay } }),
+      this.prisma.story.findFirst({ where: { day: sourceDay }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.task.findMany({ where: { day: sourceDay } }),
+    ]);
+
+    const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}`);
+    const openList = dayTasks
+      .filter((t) => t.status !== 'done')
+      .map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}% done)` : ''}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
+    const narrative = dayStory?.text || told?.rawText || '';
+
+    const tmpl = await this.prompts.get('tasks.predict');
+    const prompt =
+      `${tmpl}\n\n` +
+      `=== TODAY (${sourceDay}) ===\n` +
+      `Story of the day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
+      `Finished today:\n${doneList.join('\n') || '(none)'}\n\n` +
+      `Still open / carried:\n${openList.join('\n') || '(none)'}\n\n` +
+      `Suggest tasks for TOMORROW (${forDay}).`;
+
+    const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900))?.trim() || '';
+    let suggestions: { title: string; category?: string; reason?: string }[] = [];
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (Array.isArray(json?.tasks)) suggestions = json.tasks;
+    } catch {
+      /* ignore — no suggestions this round */
+    }
+    suggestions = suggestions.filter((s) => s?.title?.trim()).slice(0, 6);
+    if (!suggestions.length) return [];
+
+    // Replace previous *pending* picks for that day (keep ones the user already added/dismissed).
+    await this.prisma.suggestedTask.deleteMany({ where: { forDay, status: 'pending' } });
+    const created = [];
+    for (const s of suggestions) {
+      const row = await this.prisma.suggestedTask.create({
+        data: {
+          forDay,
+          title: String(s.title).trim().slice(0, 160),
+          category: s.category ? String(s.category).trim().slice(0, 40) : null,
+          reason: s.reason ? String(s.reason).trim().slice(0, 240) : null,
+        },
+      });
+      created.push(this.shapeSuggestion(row));
+    }
+    return created;
+  }
+
+  /** Pending suggestions for a day (defaults to tomorrow). */
+  async listSuggestions(forDay?: string) {
+    const tz = await this.tz();
+    const day = forDay && /^\d{4}-\d{2}-\d{2}$/.test(forDay) ? forDay : this.dayAdd(this.dayKey(tz), 1);
+    const rows = await this.prisma.suggestedTask.findMany({ where: { forDay: day, status: 'pending' }, orderBy: { createdAt: 'asc' } });
+    return { forDay: day, suggestions: rows.map((r) => this.shapeSuggestion(r)) };
+  }
+
+  /** Approve a suggestion → create the real task on its day. */
+  async addSuggestion(id: string) {
+    const s = await this.prisma.suggestedTask.findUnique({ where: { id } });
+    if (!s || s.status !== 'pending') return null;
+    const task = await this.prisma.task.create({
+      data: { title: s.title, category: s.category, priority: 'medium', day: s.forDay },
+    });
+    await this.prisma.suggestedTask.update({ where: { id }, data: { status: 'added' } });
+    return { ok: true, taskId: task.id, forDay: s.forDay };
+  }
+
+  async dismissSuggestion(id: string) {
+    await this.prisma.suggestedTask.update({ where: { id }, data: { status: 'dismissed' } }).catch(() => null);
+    return { ok: true };
   }
 
   // ---- agentic personality engine ----
@@ -510,6 +594,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const tasks = await this.prisma.task.findMany({ where: { day: { gte: start } } });
     const dumps = new Set((await this.prisma.brainDump.findMany({ where: { day: { gte: start } }, select: { day: true } })).map((d) => d.day));
     const stories = new Set((await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true } })).map((d) => d.day));
+    // Pending suggested tasks land on FUTURE days (e.g. tomorrow) — count them per day so the calendar can flag them.
+    const suggRows = await this.prisma.suggestedTask.findMany({ where: { status: 'pending' }, select: { forDay: true } });
+    const suggested: Record<string, number> = {};
+    for (const s of suggRows) suggested[s.forDay] = (suggested[s.forDay] || 0) + 1;
     const byDay: Record<string, { done: number; total: number }> = {};
     for (const t of tasks) {
       const k = t.day || '';
@@ -518,16 +606,18 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       byDay[k].total++;
       if (t.status === 'done') byDay[k].done++;
     }
-    const all = new Set([...Object.keys(byDay), ...dumps, ...stories]);
+    const all = new Set([...Object.keys(byDay), ...dumps, ...stories, ...Object.keys(suggested)]);
+    const end = [today, ...Object.keys(suggested)].sort().slice(-1)[0]; // extend to the latest suggested day (e.g. tomorrow)
     return {
       start,
-      end: today,
+      end,
       days: [...all].sort().map((day) => ({
         day,
         done: byDay[day]?.done || 0,
         total: byDay[day]?.total || 0,
         dumped: dumps.has(day),
         story: stories.has(day),
+        suggested: suggested[day] || 0,
       })),
     };
   }

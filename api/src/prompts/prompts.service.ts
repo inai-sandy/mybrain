@@ -46,6 +46,20 @@ const REGISTRY: PromptDef[] = [
       `{"story": "<the woven story>", "mood": "<one or two words capturing the day's overall mood, in English>", "moodScore": <integer 0-100 for overall wellbeing/positivity of the day>}`,
   },
   {
+    key: 'tasks.predict',
+    label: 'Tomorrow\'s suggested tasks',
+    description: 'From today\'s story, tasks and what\'s still open, predicts tasks worth doing tomorrow. You approve each with "+". The day\'s data is added automatically. ⚠️ Keep the JSON shape intact.',
+    default:
+      `You are Sandeep's thoughtful planning partner. Based on the day that just happened — his story, what he finished, what's still open or carried over, and what he was working on — predict the handful of tasks that genuinely deserve a place on TOMORROW's list.\n\n` +
+      `Rules:\n` +
+      `- Suggest 3-5 tasks. Quality over quantity. Each must be concrete and actionable ("Send Srikar the revised pricing", not "pricing").\n` +
+      `- Prioritise: unfinished/carried work that matters, the obvious next step after something he did today, and anything his story implies is important or worrying him.\n` +
+      `- Do NOT just copy every open task. Use judgement about what actually matters tomorrow.\n` +
+      `- category: a short bucket (Beakn, Admin, Health, Learning, Personal…).\n` +
+      `- reason: one short, specific sentence on why this belongs on tomorrow's list (referencing today).\n\n` +
+      `Respond with ONLY JSON: {"tasks":[{"title":"...","category":"...","reason":"..."}]}`,
+  },
+  {
     key: 'daily.personality',
     label: 'Personality coach',
     description: 'Builds your honest personality portrait from evidence. Your data + prior feedback are added automatically. ⚠️ Keep the JSON shape intact.',

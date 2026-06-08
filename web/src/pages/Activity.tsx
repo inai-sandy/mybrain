@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
@@ -18,7 +18,7 @@ type Dash = {
   streak: number;
   perDay: { day: string; done: number; total: number }[];
 };
-type Cal = { start: string; end: string; days: { day: string; done: number; total: number; dumped: boolean; story: boolean }[] };
+type Cal = { start: string; end: string; days: { day: string; done: number; total: number; dumped: boolean; story: boolean; suggested?: number }[] };
 
 const ICON: Record<string, any> = { capture: FileText, bookmark: Bookmark, idea: Lightbulb, skill: Wand2, task: CheckCircle2, dump: Brain, story: Moon, note: MessageSquare };
 const TINT: Record<string, string> = {
@@ -308,6 +308,7 @@ function CalendarView({ onPick }: { onPick: (day: string) => void }) {
     if (e.done >= 3) return 'bg-emerald-500';
     if (e.done >= 1) return 'bg-emerald-400/70';
     if (e.total > 0 || e.dumped || e.story) return 'bg-emerald-300/40';
+    if (e.suggested) return 'bg-indigo-400/70'; // upcoming day with suggested tasks waiting
     return 'bg-zinc-100 dark:bg-zinc-800/50';
   }
 
@@ -332,7 +333,7 @@ function CalendarView({ onPick }: { onPick: (day: string) => void }) {
                     key={c.day}
                     disabled={future}
                     onClick={() => onPick(c.day)}
-                    title={future ? '' : `${c.day} — ${e ? `${e.done}/${e.total} done` : 'nothing'}${e?.dumped ? ' · dumped' : ''}${e?.story ? ' · story' : ''}`}
+                    title={future ? '' : `${c.day} — ${e ? `${e.done}/${e.total} done` : 'nothing'}${e?.dumped ? ' · dumped' : ''}${e?.story ? ' · story' : ''}${e?.suggested ? ` · ✨${e.suggested} suggested` : ''}`}
                     className={'h-3.5 w-3.5 rounded-sm transition-transform hover:scale-125 ' + (future ? 'opacity-0' : tint(c.day))}
                   />
                 );
@@ -348,9 +349,11 @@ function CalendarView({ onPick }: { onPick: (day: string) => void }) {
           <span className="h-3 w-3 rounded-sm bg-emerald-500" />
           <span className="h-3 w-3 rounded-sm bg-emerald-600" />
           <span>more</span>
+          <span className="ml-2 h-3 w-3 rounded-sm bg-indigo-400/70" />
+          <span>suggested</span>
         </div>
       </section>
-      <p className="text-xs text-zinc-400 text-center">Tap any day to open it.</p>
+      <p className="text-xs text-zinc-400 text-center">Tap any day to open it. Indigo = upcoming day with suggested tasks.</p>
     </div>
   );
 }
@@ -454,8 +457,91 @@ function MeView() {
   );
 }
 
+// ---------- Suggested tasks view ----------
+type Suggestion = { id: string; forDay: string; title: string; category?: string | null; reason?: string | null };
+function SuggestedView() {
+  const [forDay, setForDay] = useState('');
+  const [items, setItems] = useState<Suggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [gen, setGen] = useState(false);
+  const toast = useToast();
+
+  async function load() {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/daily/suggestions');
+      if (r.ok) {
+        const j = await r.json();
+        setForDay(j.forDay);
+        setItems(j.suggestions || []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function generate() {
+    setGen(true);
+    try {
+      const r = await fetch('/api/daily/suggestions/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      if (r.ok) { toast('success', 'Suggested tomorrow’s tasks'); load(); }
+      else toast('error', 'Could not generate');
+    } finally { setGen(false); }
+  }
+  async function add(s: Suggestion) {
+    const r = await fetch(`/api/daily/suggestions/${s.id}/add`, { method: 'POST' });
+    if (r.ok) { toast('success', `Added “${s.title}” to ${prettyDay(s.forDay)}`); setItems((xs) => xs.filter((x) => x.id !== s.id)); }
+    else toast('error', 'Could not add');
+  }
+  async function dismiss(s: Suggestion) {
+    const r = await fetch(`/api/daily/suggestions/${s.id}/dismiss`, { method: 'POST' });
+    if (r.ok) setItems((xs) => xs.filter((x) => x.id !== s.id));
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 font-semibold"><ListChecks size={16} className="text-emerald-500" /> Suggested for {forDay ? prettyDay(forDay) : 'tomorrow'}</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">Predicted from your Story of the Day. Tap + to add to your tasks.</p>
+        </div>
+        <button onClick={generate} disabled={gen} className="text-xs text-zinc-400 hover:text-emerald-600 inline-flex items-center gap-1 shrink-0"><RefreshCw size={12} /> {gen ? 'Thinking…' : 'Refresh'}</button>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-zinc-400">Loading…</p>
+      ) : items.length ? (
+        <ul className="space-y-2">
+          {items.map((s) => (
+            <li key={s.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3.5 flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium leading-snug">{s.title}</span>
+                  {s.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-500">{s.category}</span>}
+                </div>
+                {s.reason && <p className="text-xs text-zinc-500 mt-1">{s.reason}</p>}
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={() => add(s)} title="Add to tasks" className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white"><Plus size={15} /></button>
+                <button onClick={() => dismiss(s)} title="Dismiss" className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-600"><X size={15} /></button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-6 text-center text-sm text-zinc-500">
+          <ListChecks size={22} className="mx-auto mb-2 text-zinc-400" />
+          <p className="mb-3">Your Story of the Day proposes tomorrow's tasks at 11:58 PM.<br />Want a set now?</p>
+          <button onClick={generate} disabled={gen} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{gen ? 'Thinking…' : 'Suggest tasks for tomorrow'}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Shell with tabs ----------
-type TabId = 'day' | 'insights' | 'calendar' | 'me';
+type TabId = 'day' | 'suggested' | 'insights' | 'calendar' | 'me';
 
 export function Activity() {
   const [tab, setTab] = useState<TabId>('day');
@@ -463,6 +549,7 @@ export function Activity() {
 
   const tabs: { id: TabId; label: string; icon: any }[] = [
     { id: 'day', label: 'Day', icon: ListTree },
+    { id: 'suggested', label: 'Suggested tasks', icon: ListChecks },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
     { id: 'calendar', label: 'Calendar', icon: CalendarDays },
     { id: 'me', label: 'Me', icon: Fingerprint },
@@ -489,6 +576,7 @@ export function Activity() {
       </div>
 
       {tab === 'day' && <DayView day={day} onDay={setDay} />}
+      {tab === 'suggested' && <SuggestedView />}
       {tab === 'insights' && <InsightsView />}
       {tab === 'calendar' && <CalendarView onPick={openDay} />}
       {tab === 'me' && <MeView />}

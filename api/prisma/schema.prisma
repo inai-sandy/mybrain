@@ -133,6 +133,17 @@ model DayStory {
   updatedAt DateTime @updatedAt
 }
 
+/// A predicted task for an upcoming day, proposed by the Story of the Day — the user approves it with "+".
+model SuggestedTask {
+  id        String   @id @default(uuid())
+  forDay    String // local day key YYYY-MM-DD this is suggested FOR (usually tomorrow)
+  title     String
+  category  String?
+  reason    String? // why the Story of the Day suggests it
+  status    String   @default("pending") // pending | added | dismissed
+  createdAt DateTime @default(now())
+}
+
 /// One evidence-grounded read of the user's personality — confirmable in the Validate panel.
 model PersonalityInsight {
   id         String   @id @default(uuid())

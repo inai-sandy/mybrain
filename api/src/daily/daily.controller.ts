@@ -64,6 +64,30 @@ export class DailyController {
     return { models: await this.daily.listModels() };
   }
 
+  // ---- predictive (suggested) tasks for tomorrow ----
+  @Get('suggestions')
+  async suggestions(@Query('day') day?: string) {
+    return this.daily.listSuggestions(day);
+  }
+
+  @Post('suggestions/generate')
+  async genSuggestions(@Body() body: { day?: string }) {
+    const day = body?.day || (await this.daily.activity()).day;
+    return { suggestions: await this.daily.generateSuggestions(day) };
+  }
+
+  @Post('suggestions/:id/add')
+  async addSuggestion(@Param('id') id: string) {
+    const r = await this.daily.addSuggestion(id);
+    if (!r) throw new BadRequestException('Suggestion not found or already handled');
+    return r;
+  }
+
+  @Post('suggestions/:id/dismiss')
+  async dismissSuggestion(@Param('id') id: string) {
+    return this.daily.dismissSuggestion(id);
+  }
+
   // ---- agentic personality engine + Validate ----
   @Get('personality')
   async personality() {
