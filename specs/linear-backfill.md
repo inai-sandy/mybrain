@@ -33,3 +33,6 @@ When the **claude.ai Linear** connector is re-authorized, create these in team *
 25. Per-document chat — "Chat with this doc" — `4d2cda7`
 
 All shipped & live on mybrain.1site.ai. Earlier Skills work (BEA-61→66) WAS created in Linear before the token expired.
+
+---
+**BACKFILL COMPLETE (2026-06-08):** all of the above were created in Linear as issues **BEA-67 → BEA-87** (21 issues, some consolidated), all set to **Done**, in team Beakn / project "My Brain — Personal Second Brain".
