@@ -73,9 +73,9 @@ export function Dashboard() {
               </div>
               <ul className="space-y-1.5">
                 {d!.today.mustDos.map((t) => (
-                  <li key={t.id} className="flex items-center gap-2 text-sm">
+                  <li key={t.id} className="flex items-center gap-2 text-sm min-w-0">
                     {t.pinned ? <Star size={13} className="text-amber-500 fill-amber-500 shrink-0" /> : <span className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 shrink-0" />}
-                    <span className="truncate">{t.title}</span>
+                    <span className="flex-1 min-w-0 truncate">{t.title}</span>
                   </li>
                 ))}
                 {d!.today.mustDos.length === 0 && <li className="text-sm text-zinc-400">All done — nice. 🎉</li>}
@@ -137,9 +137,9 @@ export function Dashboard() {
           <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recently saved</h2>
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 divide-y divide-zinc-100 dark:divide-zinc-800">
             {d.recent.map((it) => (
-              <button key={it.id} onClick={() => navigate(`/doc/${it.id}`)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+              <button key={it.id} onClick={() => navigate(`/doc/${it.id}`)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50 min-w-0">
                 <BookOpen size={15} className="text-zinc-400 shrink-0" />
-                <span className="flex-1 truncate text-sm">{it.title}</span>
+                <span className="flex-1 min-w-0 truncate text-sm">{it.title}</span>
                 <span className="text-[11px] text-zinc-400 shrink-0">{new Date(it.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>
               </button>
             ))}

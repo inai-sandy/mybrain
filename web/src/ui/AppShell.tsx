@@ -25,7 +25,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       {/* Desktop sidebar */}
       <aside className="hidden md:flex md:flex-col md:fixed md:inset-y-0 md:w-60 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4">
         <div className="flex items-center gap-2 px-2 mb-6 font-bold text-lg">
-          <Logo size={28} /> My Brain
+          <Logo size={34} /> My Brain
         </div>
         <nav className="flex-1 space-y-1">
           {NAV.map((n) => (
@@ -43,7 +43,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           <aside className="absolute inset-y-0 left-0 w-64 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 px-3 py-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-2 mb-6">
               <div className="flex items-center gap-2 font-bold text-lg">
-                <Logo size={28} /> My Brain
+                <Logo size={34} /> My Brain
               </div>
               <button onClick={() => setDrawer(false)} aria-label="Close menu" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
                 <X size={20} />
@@ -73,13 +73,14 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Main column */}
       <div className="md:pl-60">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 px-4 sm:px-6 h-14 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur">
+        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
             <button onClick={() => setDrawer(true)} aria-label="Menu" className="md:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
               <Menu size={20} />
             </button>
             <div className="md:hidden flex items-center gap-2 font-bold">
-              <Logo size={24} /> My Brain
+              <Logo size={30} /> My Brain
             </div>
             <button
               onClick={openSearch}
@@ -145,9 +146,10 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
             )}
           </div>
           </div>
+          </div>
         </header>
 
-        <main className={isChat ? 'h-[calc(100vh-7rem)] md:h-[calc(100vh-3.5rem)] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}>
+        <main className={isChat ? 'h-[calc(100vh-7rem-env(safe-area-inset-top))] md:h-[calc(100vh-3.5rem-env(safe-area-inset-top))] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}>
           <Outlet />
         </main>
       </div>

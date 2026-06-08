@@ -33,7 +33,7 @@ export function Login({ onSignedIn }: { onSignedIn: () => void }) {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <Logo size={64} className="mx-auto mb-3" />
+          <Logo size={88} className="mx-auto mb-3" />
           <h1 className="text-2xl font-bold">My Brain</h1>
           <p className="text-sm text-zinc-500 mt-1">Sign in to your second brain</p>
         </div>

@@ -40,7 +40,7 @@ export function InstallPrompt() {
 
   if (!show) return null;
   return (
-    <div className="fixed top-[4.25rem] inset-x-3 md:inset-x-auto md:right-4 md:w-80 z-40 rounded-xl border border-emerald-500/40 bg-white dark:bg-zinc-900 shadow-lg p-3 flex items-center gap-3">
+    <div className="fixed top-[calc(4.25rem+env(safe-area-inset-top))] inset-x-3 md:inset-x-auto md:right-4 md:w-80 z-40 rounded-xl border border-emerald-500/40 bg-white dark:bg-zinc-900 shadow-lg p-3 flex items-center gap-3">
       <img src="/icons/icon-192.png" alt="" className="h-9 w-9 rounded-lg shrink-0" />
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold">Install My Brain</div>
