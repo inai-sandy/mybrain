@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle } from 'lucide-react';
+import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
+import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useTheme } from './theme';
 
 export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () => void }) {
@@ -80,16 +81,20 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
             <div className="md:hidden flex items-center gap-2 font-bold">
               <Logo size={24} /> My Brain
             </div>
-            <div className="hidden md:block flex-1 max-w-md">
-              <input
-                aria-label="Search"
-                placeholder="Search your brain…"
-                className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500"
-              />
-            </div>
+            <button
+              onClick={openSearch}
+              className="hidden md:flex items-center gap-2 flex-1 max-w-md rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:border-emerald-500/50"
+            >
+              <Search size={15} /> <span>Search your brain…</span>
+              <kbd className="ml-auto hidden lg:inline text-[10px] rounded border border-zinc-300 dark:border-zinc-600 px-1 py-0.5">⌘K</kbd>
+            </button>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+          {/* Mobile search */}
+          <button onClick={openSearch} aria-label="Search" className="md:hidden p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500">
+            <Search size={20} />
+          </button>
           {/* Help / support menu */}
           <div className="relative">
             <button onClick={() => setHelp((h) => !h)} aria-label="Help" className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -146,6 +151,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           <Outlet />
         </main>
       </div>
+
+      {/* Global search overlay (find + ask) */}
+      <SearchOverlay />
 
       {/* Install-this-app banner (Android button / iOS hint) */}
       <InstallPrompt />

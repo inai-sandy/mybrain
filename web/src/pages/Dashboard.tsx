@@ -1,17 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  FileText, Brain, Database, RefreshCw, Upload, Link2, Sparkles,
-  ArrowRight, type LucideIcon,
-} from 'lucide-react';
+import { Search, Brain, MessageCircle, Upload, Sun, Flame, Activity as ActivityIcon, FileText, Bookmark, Lightbulb, Wand2, ArrowRight, Fingerprint, Star, BookOpen, type LucideIcon } from 'lucide-react';
+import { openSearch } from '../ui/SearchOverlay';
 
-type Doc = {
-  id: string;
-  source: string;
-  createdAt: string;
-  supermemory: boolean;
-  rag: boolean;
-  tags: string[];
+type Home = {
+  today: { dumped: boolean; storyDone: boolean; counts: { total: number; done: number; open: number }; mustDos: { id: string; title: string; pinned: boolean; priority: string }[] };
+  insights: { streak: number; followThrough: number; minutesSpent: number; daySummary: string | null };
+  personality: { unlocked: boolean; summary: string | null; daysCovered: number; minDays: number };
+  counts: { documents: number; bookmarks: number; ideas: number; skills: number };
+  recent: { id: string; title: string; source: string; createdAt: string }[];
 };
 
 function greeting(h: number): string {
@@ -21,247 +18,167 @@ function greeting(h: number): string {
   if (h < 21) return 'Good evening';
   return 'Good night';
 }
-
-function relativeDate(iso: string | null): string {
-  if (!iso) return 'never';
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return 'never';
-  const diff = Date.now() - then;
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24 && new Date(iso).toDateString() === new Date().toDateString()) return 'today';
-  const days = Math.floor(hrs / 24);
-  if (days < 1) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 7) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+function mins(n: number): string {
+  if (!n) return '0m';
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
 }
-
-// Human label + accent for each capture source.
-const SOURCE_META: Record<string, { label: string; bar: string }> = {
-  supermemory: { label: 'Synced from SuperMemory', bar: 'bg-indigo-500' },
-  upload: { label: 'Uploads', bar: 'bg-blue-500' },
-  url: { label: 'Links', bar: 'bg-emerald-500' },
-  notion: { label: 'Notion', bar: 'bg-purple-500' },
-};
-const SOURCE_ORDER = ['supermemory', 'upload', 'url', 'notion'];
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const [items, setItems] = useState<Doc[] | null>(null);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [d, setD] = useState<Home | null>(null);
 
   useEffect(() => {
-    fetch('/api/items')
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((d) => setItems(d.items || []))
-      .catch(() => setItems([]));
-    fetch('/api/items/supermemory-sync-status')
-      .then((r) => (r.ok ? r.json() : { lastSync: null }))
-      .then((d) => setLastSync(d.lastSync || null))
-      .catch(() => undefined);
+    fetch('/api/home').then((r) => (r.ok ? r.json() : null)).then(setD).catch(() => undefined);
   }, []);
 
-  const stats = useMemo(() => {
-    const list = items || [];
-    const bySource: Record<string, number> = {};
-    const tagCount: Record<string, number> = {};
-    let inSM = 0;
-    let inRag = 0;
-    for (const it of list) {
-      bySource[it.source] = (bySource[it.source] || 0) + 1;
-      if (it.supermemory) inSM++;
-      if (it.rag) inRag++;
-      for (const t of it.tags || []) tagCount[t] = (tagCount[t] || 0) + 1;
-    }
-    const topTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 8);
-    return { total: list.length, bySource, inSM, inRag, topTags };
-  }, [items]);
-
-  const loading = items === null;
   const now = new Date();
-  const dateLabel = now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-
-  if (loading) {
-    return (
-      <div className="space-y-6 animate-pulse">
-        <div className="h-8 w-64 rounded bg-zinc-200 dark:bg-zinc-800" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[0, 1, 2, 3].map((i) => <div key={i} className="h-24 rounded-xl bg-zinc-200 dark:bg-zinc-800" />)}
-        </div>
-        <div className="h-40 rounded-xl bg-zinc-200 dark:bg-zinc-800" />
-      </div>
-    );
-  }
-
-  // Empty brain — friendly first-run state.
-  if (stats.total === 0) {
-    return (
-      <div className="space-y-6">
-        <Header dateLabel={dateLabel} hour={now.getHours()} total={0} />
-        <div className="rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 p-10 text-center">
-          <Brain size={40} className="mx-auto text-emerald-500" />
-          <h2 className="mt-3 text-lg font-bold">Your brain is empty</h2>
-          <p className="mt-1 text-zinc-500">Capture your first note and it’s remembered forever.</p>
-          <button
-            onClick={() => navigate('/capture')}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 text-sm font-medium"
-          >
-            <Upload size={16} /> Capture something
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const dateLabel = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const c = d?.today.counts;
+  const pct = c && c.total ? Math.round((c.done / c.total) * 100) : 0;
 
   return (
-    <div className="space-y-6">
-      <Header dateLabel={dateLabel} hour={now.getHours()} total={stats.total} />
-
-      {/* Real stats only — no fabricated zeros. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Stat icon={FileText} label="Documents" value={String(stats.total)} hint="in your brain" />
-        <Stat icon={Brain} label="In SuperMemory" value={String(stats.inSM)} hint="long-term memory" />
-        <Stat icon={Database} label="In RAG" value={String(stats.inRag)} hint="searchable chunks" />
-        <Stat icon={RefreshCw} label="Last synced" value={relativeDate(lastSync)} hint="from SuperMemory" />
+    <div className="space-y-5">
+      {/* Greeting */}
+      <div>
+        <h1 className="text-2xl font-extrabold">{greeting(now.getHours())}, Sandeep</h1>
+        <p className="text-zinc-500 text-sm">{dateLabel}</p>
       </div>
 
-      {/* Quick capture */}
+      {/* Search your brain */}
+      <button onClick={openSearch} className="w-full flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-400 hover:border-emerald-500/50">
+        <Search size={16} /> Search your brain — find anything, or ask a question…
+      </button>
+
+      {/* Quick actions */}
+      <div className="grid grid-cols-3 gap-3">
+        <Action icon={Brain} label="Dump my brain" onClick={() => navigate('/today')} />
+        <Action icon={MessageCircle} label="Talk to your brain" onClick={() => navigate('/chat')} />
+        <Action icon={Upload} label="Capture" onClick={() => navigate('/capture')} />
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* Today */}
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="flex items-center gap-1.5 font-semibold text-sm"><Sun size={16} className="text-amber-500" /> Today</h2>
+            <button onClick={() => navigate('/today')} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5">Open <ArrowRight size={12} /></button>
+          </div>
+          {c && c.total > 0 ? (
+            <>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex-1 h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} /></div>
+                <span className="text-xs text-zinc-500 tabular-nums">{c.done}/{c.total}</span>
+              </div>
+              <ul className="space-y-1.5">
+                {d!.today.mustDos.map((t) => (
+                  <li key={t.id} className="flex items-center gap-2 text-sm">
+                    {t.pinned ? <Star size={13} className="text-amber-500 fill-amber-500 shrink-0" /> : <span className="h-1.5 w-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 shrink-0" />}
+                    <span className="truncate">{t.title}</span>
+                  </li>
+                ))}
+                {d!.today.mustDos.length === 0 && <li className="text-sm text-zinc-400">All done — nice. 🎉</li>}
+              </ul>
+            </>
+          ) : (
+            <p className="text-sm text-zinc-500">{d ? 'No tasks yet — dump your brain to build today’s list.' : 'Loading…'}</p>
+          )}
+          <div className="flex gap-1.5 mt-3">
+            <Chip ok={d?.today.dumped} label="Brain dumped" />
+            <Chip ok={d?.today.storyDone} label="Story told" />
+          </div>
+        </section>
+
+        {/* Insights */}
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="flex items-center gap-1.5 font-semibold text-sm"><ActivityIcon size={16} className="text-emerald-500" /> Your pulse</h2>
+            <button onClick={() => navigate('/activity')} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5">Activity <ArrowRight size={12} /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <Mini icon={Flame} value={String(d?.insights.streak ?? '—')} label="streak" />
+            <Mini value={d ? `${d.insights.followThrough}%` : '—'} label="follow-through" />
+            <Mini value={d ? mins(d.insights.minutesSpent) : '—'} label="time spent" />
+          </div>
+          {d?.insights.daySummary ? (
+            <p className="text-xs text-zinc-500 line-clamp-3 border-l-2 border-emerald-500/40 pl-2">{d.insights.daySummary}</p>
+          ) : (
+            <p className="text-xs text-zinc-400">Your day-summary appears here after 9:30 PM.</p>
+          )}
+        </section>
+      </div>
+
+      {/* Personality (once unlocked) */}
+      {d?.personality.unlocked && d.personality.summary && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-gradient-to-br from-emerald-500/5 to-transparent p-4">
+          <div className="flex items-center justify-between mb-1">
+            <h2 className="flex items-center gap-1.5 font-semibold text-sm"><Fingerprint size={16} className="text-emerald-500" /> Your portrait</h2>
+            <button onClick={() => navigate('/activity')} className="text-xs text-emerald-600 hover:underline">Validate</button>
+          </div>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300 line-clamp-3">{d.personality.summary}</p>
+        </section>
+      )}
+
+      {/* Brain at a glance */}
       <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-2">Add to your brain</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Your brain at a glance</h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Action icon={Upload} label="Upload" onClick={() => navigate('/capture')} />
-          <Action icon={Link2} label="Paste link" onClick={() => navigate('/capture')} />
-          <Action icon={FileText} label="Notion" onClick={() => navigate('/capture')} />
-          <Action icon={Brain} label="Sync SuperMemory" onClick={() => navigate('/settings')} />
+          <Count icon={FileText} label="Documents" value={d?.counts.documents} onClick={() => navigate('/capture')} />
+          <Count icon={Bookmark} label="Bookmarks" value={d?.counts.bookmarks} onClick={() => navigate('/bookmarks')} />
+          <Count icon={Lightbulb} label="Ideas" value={d?.counts.ideas} onClick={() => navigate('/ideas')} />
+          <Count icon={Wand2} label="Skills" value={d?.counts.skills} onClick={() => navigate('/skills')} />
         </div>
       </section>
 
-      <div className="grid lg:grid-cols-2 gap-3">
-        {/* By source */}
-        <Panel title="By source">
-          <div className="space-y-3">
-            {SOURCE_ORDER.map((key) => {
-              const meta = SOURCE_META[key];
-              const count = stats.bySource[key] || 0;
-              const pct = stats.total ? Math.round((count / stats.total) * 100) : 0;
-              return (
-                <div key={key}>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-600 dark:text-zinc-300">{meta.label}</span>
-                    <span className="tabular-nums text-zinc-500">{count}</span>
-                  </div>
-                  <div className="mt-1 h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
-                    <div className={`h-full rounded-full ${meta.bar}`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <button
-            onClick={() => navigate('/capture')}
-            className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-500"
-          >
-            Browse all documents <ArrowRight size={14} />
-          </button>
-        </Panel>
-
-        {/* Memory health */}
-        <Panel title="Memory health">
-          <ul className="space-y-3 text-sm">
-            <HealthRow ok label={`${stats.inSM} of ${stats.total} safe in SuperMemory`} />
-            <HealthRow ok={stats.inRag > 0} label={`${stats.inRag} also indexed in RAG (searchable)`} />
-            <HealthRow ok={!!lastSync} label={`Last SuperMemory sync: ${relativeDate(lastSync)}`} />
-          </ul>
-          <button
-            onClick={() => navigate('/settings')}
-            className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-500"
-          >
-            Sync &amp; settings <ArrowRight size={14} />
-          </button>
-        </Panel>
-      </div>
-
-      {/* Topics */}
-      <Panel title="Topics">
-        {stats.topTags.length === 0 ? (
-          <p className="text-sm text-zinc-500">No tags yet. Add tags when you capture to organise your brain.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {stats.topTags.map(([tag, count]) => (
-              <button
-                key={tag}
-                onClick={() => navigate('/capture')}
-                className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 px-3 py-1 text-sm hover:border-emerald-500/50 hover:text-emerald-600"
-              >
-                <Sparkles size={12} className="text-amber-500" />
-                {tag}
-                <span className="tabular-nums text-xs text-zinc-400">{count}</span>
+      {/* Recent */}
+      {d && d.recent.length > 0 && (
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recently saved</h2>
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 divide-y divide-zinc-100 dark:divide-zinc-800">
+            {d.recent.map((it) => (
+              <button key={it.id} onClick={() => navigate(`/doc/${it.id}`)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                <BookOpen size={15} className="text-zinc-400 shrink-0" />
+                <span className="flex-1 truncate text-sm">{it.title}</span>
+                <span className="text-[11px] text-zinc-400 shrink-0">{new Date(it.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>
               </button>
             ))}
           </div>
-        )}
-      </Panel>
-    </div>
-  );
-}
-
-function Header({ dateLabel, hour, total }: { dateLabel: string; hour: number; total: number }) {
-  return (
-    <div>
-      <h1 className="text-2xl font-extrabold">
-        {greeting(hour)}, Sandeep <span className="font-normal text-zinc-400">· {dateLabel}</span>
-      </h1>
-      <p className="text-zinc-500">
-        Your second brain — {total === 0 ? 'nothing captured yet' : `${total} document${total === 1 ? '' : 's'} and counting`}.
-      </p>
-    </div>
-  );
-}
-
-function Stat({ icon: Icon, label, value, hint }: { icon: LucideIcon; label: string; value: string; hint?: string }) {
-  return (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-zinc-500">{label}</span>
-        <Icon size={18} className="text-emerald-600" />
-      </div>
-      <div className="mt-2 text-2xl font-bold truncate">{value}</div>
-      {hint && <div className="text-xs text-zinc-400 mt-1">{hint}</div>}
+        </section>
+      )}
     </div>
   );
 }
 
 function Action({ icon: Icon, label, onClick }: { icon: LucideIcon; label: string; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-3 text-sm font-medium hover:border-emerald-500/50 hover:shadow-sm transition-all"
-    >
-      <span className="rounded-lg bg-emerald-500/10 text-emerald-600 p-1.5">
-        <Icon size={16} />
-      </span>
-      <span className="truncate">{label}</span>
+    <button onClick={onClick} className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2 py-3.5 text-center hover:border-emerald-500/50 hover:shadow-sm transition-all">
+      <span className="rounded-lg bg-emerald-500/10 text-emerald-600 p-2"><Icon size={18} /></span>
+      <span className="text-xs font-medium leading-tight">{label}</span>
     </button>
   );
 }
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Mini({ icon: Icon, value, label }: { icon?: LucideIcon; value: string; label: string }) {
   return (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400 mb-3">{title}</h2>
-      {children}
+    <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 p-2 text-center">
+      <div className="text-lg font-extrabold tabular-nums flex items-center justify-center gap-1">{Icon && <Icon size={14} className="text-amber-500" />}{value}</div>
+      <div className="text-[10px] text-zinc-400">{label}</div>
     </div>
   );
 }
-
-function HealthRow({ ok, label }: { ok: boolean; label: string }) {
+function Count({ icon: Icon, label, value, onClick }: { icon: LucideIcon; label: string; value?: number; onClick: () => void }) {
   return (
-    <li className="flex items-center gap-2">
-      <span className={`h-2 w-2 rounded-full ${ok ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-      <span className="text-zinc-600 dark:text-zinc-300">{label}</span>
-    </li>
+    <button onClick={onClick} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 text-left hover:border-emerald-500/50">
+      <Icon size={18} className="text-emerald-600" />
+      <div className="mt-2 text-xl font-bold tabular-nums">{value ?? '—'}</div>
+      <div className="text-xs text-zinc-400">{label}</div>
+    </button>
+  );
+}
+function Chip({ ok, label }: { ok?: boolean; label: string }) {
+  return (
+    <span className={'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ' + (ok ? 'bg-emerald-500/10 text-emerald-600' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400')}>
+      <span className={'h-1.5 w-1.5 rounded-full ' + (ok ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600')} /> {label}
+    </span>
   );
 }

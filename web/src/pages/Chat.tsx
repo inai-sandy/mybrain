@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MessageCircle, Plus, Send, X, ArrowLeft, ExternalLink, Sparkles, Trash2, Globe, Bookmark, Lightbulb, Activity as ActivityIcon, FileText, Wand2, Star, Search, Pin, PanelLeft, Copy, Check } from 'lucide-react';
@@ -125,6 +125,33 @@ export function Chat() {
   const toast = useToast();
   const endRef = useRef<HTMLDivElement>(null);
   const { supported: micOk, listening, toggle: toggleMic } = useDictation((chunk) => setInput((i) => (i ? i + ' ' : '') + chunk));
+  const [params, setParams] = useSearchParams();
+  const pendingRef = useRef<string | null>(null);
+
+  // Arriving from search with ?q= → start a fresh "everything" chat and ask it.
+  useEffect(() => {
+    const qq = params.get('q');
+    if (!qq) return;
+    setParams({}, { replace: true });
+    (async () => {
+      const r = await fetch('/api/chat/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'everything' }) });
+      if (r.ok) {
+        const s = await r.json();
+        setSessions((p) => [s, ...p]);
+        pendingRef.current = qq;
+        setActive(s);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (active && pendingRef.current) {
+      const qq = pendingRef.current;
+      pendingRef.current = null;
+      send(qq);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   async function loadSessions(q = '') {
     const r = await fetch('/api/chat/sessions' + (q ? `?q=${encodeURIComponent(q)}` : ''));

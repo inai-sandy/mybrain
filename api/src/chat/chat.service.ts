@@ -168,6 +168,35 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Find matching items across the whole brain (for the search bar). Returns clickable results. */
+  async findItems(q: string): Promise<{ title: string; snippet: string; type: string; itemId?: string; url?: string }[]> {
+    const clean = (q || '').trim();
+    if (!clean) return [];
+    const hits = await this.memory.searchScoped(clean, [], 8);
+    const out: { title: string; snippet: string; type: string; itemId?: string; url?: string }[] = [];
+    const seen = new Set<string>();
+    for (const h of hits) {
+      let itemId: string | undefined;
+      let title = h.title;
+      let url = h.url;
+      let type = 'memory';
+      if (h.memId) {
+        const it = await this.prisma.item.findFirst({ where: { OR: [{ supermemoryId: h.memId }, { ragId: h.memId }] }, select: { id: true, title: true, sourceUrl: true, source: true } });
+        if (it) {
+          itemId = it.id;
+          title = title || it.title || undefined;
+          url = url || it.sourceUrl || undefined;
+          type = it.source === 'raindrop' ? 'bookmark' : 'document';
+        }
+      }
+      const key = itemId || url || title || '';
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ title: title || 'Saved item', snippet: (h.content || '').replace(/\s+/g, ' ').trim().slice(0, 160), type, itemId, url });
+    }
+    return out;
+  }
+
   /** Stateless one-shot Q&A over memory (for Telegram /ask). No thread is saved. */
   async askOnce(question: string, scope = 'everything'): Promise<{ answer: string; sources: Source[] }> {
     const clean = (question || '').trim();

@@ -16,6 +16,12 @@ export class ChatController {
     return { starred: await this.chat.listStarred() };
   }
 
+  /** Search the whole brain for matching items (the search bar). */
+  @Get('find')
+  async find(@Query('q') q?: string) {
+    return { results: await this.chat.findItems(q || '') };
+  }
+
   @Get('model')
   async getModel() {
     return this.chat.getModel();
