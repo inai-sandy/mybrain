@@ -233,6 +233,15 @@ describe('DailyService', () => {
     expect(after.suggestions).toHaveLength(1); // the added one is no longer pending
   });
 
+  it('drops suggestions that duplicate a task already open on the list', async () => {
+    const { svc, tasks } = makeService({ llmText: '{"tasks":[{"title":"Complete the product Excel file"},{"title":"Call the new supplier about samples"}]}' });
+    tasks.push({ id: 'o1', day: '2026-06-07', status: 'open', title: 'Complete product Excel file' });
+    const made = await svc.generateSuggestions('2026-06-07');
+    // the Excel one overlaps an open task → dropped; only the genuinely new one survives
+    expect(made).toHaveLength(1);
+    expect(made[0].title).toContain('supplier');
+  });
+
   it('regenerating suggestions replaces only the still-pending picks', async () => {
     const { svc } = makeService({ llmText: '{"tasks":[{"title":"First idea"}]}' });
     const first = await svc.generateSuggestions('2026-06-07');

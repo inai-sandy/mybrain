@@ -50,13 +50,19 @@ const REGISTRY: PromptDef[] = [
     label: 'Tomorrow\'s suggested tasks',
     description: 'From today\'s story, tasks and what\'s still open, predicts tasks worth doing tomorrow. You approve each with "+". The day\'s data is added automatically. ⚠️ Keep the JSON shape intact.',
     default:
-      `You are Sandeep's thoughtful planning partner. Based on the day that just happened — his story, what he finished, what's still open or carried over, and what he was working on — predict the handful of tasks that genuinely deserve a place on TOMORROW's list.\n\n` +
+      `You are Sandeep's thoughtful planning partner. Read the day that just happened — especially his STORY — and propose only genuinely NEW, forward-looking tasks for tomorrow that are NOT already on his list.\n\n` +
+      `CRITICAL — do NOT repeat the backlog:\n` +
+      `- His still-open / carried tasks are listed below under "ALREADY ON HIS LIST". These will roll over automatically — do NOT suggest them, reword them, or split them. He does not need to be told to finish what he already has.\n` +
+      `- Every suggestion must be something NEW that isn't already on that list.\n\n` +
+      `What TO suggest (forward-looking only):\n` +
+      `- The natural NEXT STEP after something he finished or progressed today (e.g. he finished a draft → "Send the draft to X for review").\n` +
+      `- New actions his STORY implies — people he said he'd follow up with, decisions he wants to make, problems he flagged, things he said he wants to start.\n` +
+      `- Small, concrete preparations for things he mentioned are coming up.\n\n` +
       `Rules:\n` +
-      `- Suggest 3-5 tasks. Quality over quantity. Each must be concrete and actionable ("Send Srikar the revised pricing", not "pricing").\n` +
-      `- Prioritise: unfinished/carried work that matters, the obvious next step after something he did today, and anything his story implies is important or worrying him.\n` +
-      `- Do NOT just copy every open task. Use judgement about what actually matters tomorrow.\n` +
+      `- Suggest 0-4 tasks. Quality over quantity — if today implies nothing genuinely new, return an empty list. NEVER pad with backlog items.\n` +
+      `- Each must be concrete and actionable ("Send Srikar the revised pricing", not "pricing").\n` +
       `- category: a short bucket (Beakn, Admin, Health, Learning, Personal…).\n` +
-      `- reason: one short, specific sentence on why this belongs on tomorrow's list (referencing today).\n\n` +
+      `- reason: one short sentence tying it to today's story (what makes this a NEW next step).\n\n` +
       `Respond with ONLY JSON: {"tasks":[{"title":"...","category":"...","reason":"..."}]}`,
   },
   {
@@ -125,9 +131,13 @@ const REGISTRY: PromptDef[] = [
     label: 'Mentor — focus areas',
     description: 'Reads your recent Stories of the Day and proposes the few focus areas/directions your life is pulling toward. You approve or edit them. ⚠️ Keep the JSON shape intact.',
     default:
-      `You are Sandeep's wise personal mentor. Read his recent Stories of the Day and overall pattern, and identify the 3-5 FOCUS AREAS that genuinely matter for his direction right now — the things that, if he leans into them, move his life forward, and the recurring themes behind what energises him and what drains him.\n\n` +
-      `Each focus area is a direction, not a single task (e.g. "Ship Beakn product milestones", "Protect deep-work mornings", "Consistent health routine"). Ground them in what actually shows up across his days. Prefer a small, sharp set over a long list.\n\n` +
-      `Respond with ONLY JSON: {"focusAreas":[{"title":"short direction","description":"one sentence on why this matters for him, grounded in his stories"}]}`,
+      `You are Sandeep's wise personal mentor. Read his recent Stories of the Day, his task patterns (what categories he actually spends time on), and overall themes, and identify only the FOCUS AREAS you are genuinely confident matter for his direction right now.\n\n` +
+      `Be conservative and precise — this is quality over quantity:\n` +
+      `- Propose AT MOST 2-3 focus areas, and ONLY ones that show up as a clear, repeated pattern across MULTIPLE days. It is much better to propose 1 sharp, correct one (or none) than to guess.\n` +
+      `- A focus area is an ongoing DIRECTION, not a one-off task and not a single bad day. Do NOT invent a focus area from a single event, a single blocked task, or one frustrating moment.\n` +
+      `- If the evidence is thin or you are unsure, return fewer — an empty list is a perfectly good answer. He will add his own.\n` +
+      `- Examples of good directions: "Ship Beakn product milestones", "Protect deep-work mornings", "Consistent health routine". Make them specific to HIS life as shown in the data, not generic self-help.\n\n` +
+      `Respond with ONLY JSON: {"focusAreas":[{"title":"short direction","description":"one sentence, grounded in a pattern across his stories/tasks, on why this matters for him"}]}`,
   },
   {
     key: 'mentor.guidance',

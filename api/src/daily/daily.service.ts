@@ -336,10 +336,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.prisma.task.findMany({ where: { day: sourceDay } }),
     ]);
 
+    const openTasks = dayTasks.filter((t) => t.status !== 'done');
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}`);
-    const openList = dayTasks
-      .filter((t) => t.status !== 'done')
-      .map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}% done)` : ''}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
+    const openList = openTasks.map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}% done)` : ''}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
     const narrative = dayStory?.text || told?.rawText || '';
 
     const tmpl = await this.prompts.get('tasks.predict');
@@ -348,8 +347,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `=== TODAY (${sourceDay}) ===\n` +
       `Story of the day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
       `Finished today:\n${doneList.join('\n') || '(none)'}\n\n` +
-      `Still open / carried:\n${openList.join('\n') || '(none)'}\n\n` +
-      `Suggest tasks for TOMORROW (${forDay}).`;
+      `ALREADY ON HIS LIST (do NOT suggest these — they roll over automatically):\n${openList.join('\n') || '(none)'}\n\n` +
+      `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}).`;
 
     const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900))?.trim() || '';
     let suggestions: { title: string; category?: string; reason?: string }[] = [];
@@ -359,7 +358,20 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     } catch {
       /* ignore — no suggestions this round */
     }
-    suggestions = suggestions.filter((s) => s?.title?.trim()).slice(0, 6);
+    // Safety net: drop anything that overlaps an existing open/carried task (the model sometimes still echoes
+    // the backlog, often slightly reworded). Compare by significant-word overlap, not exact text.
+    const sig = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 3));
+    const openSets = openTasks.map((t) => sig(t.title)).filter((set) => set.size > 0);
+    const isDuplicate = (title: string) => {
+      const n = sig(title);
+      if (!n.size) return false;
+      return openSets.some((o) => {
+        const inter = [...n].filter((w) => o.has(w)).length;
+        const minSize = Math.min(n.size, o.size);
+        return minSize >= 2 ? inter / minSize >= 0.6 : inter >= 1; // most key words shared ⇒ same task
+      });
+    };
+    suggestions = suggestions.filter((s) => s?.title?.trim() && !isDuplicate(s.title)).slice(0, 6);
     if (!suggestions.length) return [];
 
     // Replace previous *pending* picks for that day (keep ones the user already added/dismissed).

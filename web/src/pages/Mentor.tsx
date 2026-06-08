@@ -153,37 +153,63 @@ export function Mentor() {
           {o.avgAdherence !== null && <span className="text-xs text-zinc-500">avg on-track {o.avgAdherence}/100 · {o.days}d</span>}
         </div>
         <TrendChart trend={o.trend} />
-        <div className="flex items-center justify-center gap-4 mt-3 text-[11px] text-zinc-500">
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded bg-indigo-500" /> Following focus</span>
-          <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded bg-amber-400" /> Mood / wellbeing</span>
+        <div className="flex items-center justify-center gap-4 mt-2 text-[11px] text-zinc-500">
+          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-indigo-500/80" /> On-track (bars)</span>
+          <span className="inline-flex items-center gap-1"><span className="h-1 w-4 rounded bg-amber-400" /> Mood / wellbeing (line)</span>
+          <span className="hidden sm:inline text-zinc-400">· tap a bar for the day</span>
         </div>
       </section>
     </div>
   );
 }
 
-/** Two-line SVG sparkline (adherence + mood) over the trend window. */
+function shortDate(day: string): string {
+  const [, m, d] = day.split('-').map(Number);
+  return `${d}/${m}`;
+}
+
+/** Daily on-track bars (indigo) with the mood/wellbeing line drawn over the top (amber). */
 function TrendChart({ trend }: { trend: Trend[] }) {
   if (!trend.length) return <p className="text-sm text-zinc-400 text-center py-8">Your trend appears once you have a few nightly reads.</p>;
-  const W = 600, H = 160, pad = 8;
+  const W = 640, H = 180, padL = 26, padR = 8, padT = 10, padB = 22;
   const n = trend.length;
-  const x = (i: number) => (n === 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (n - 1));
-  const y = (v: number) => H - pad - (v / 100) * (H - 2 * pad);
-  const line = (key: 'adherence' | 'mood') => {
-    const pts = trend.map((t, i) => ({ i, v: t[key] })).filter((p) => typeof p.v === 'number') as { i: number; v: number }[];
-    if (!pts.length) return '';
-    return pts.map((p, k) => `${k === 0 ? 'M' : 'L'}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
-  };
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const slot = plotW / n;
+  const barW = Math.max(3, Math.min(26, slot * 0.6));
+  const cx = (i: number) => padL + slot * i + slot / 2;
+  const y = (v: number) => padT + plotH - (v / 100) * plotH;
+
+  const moodPts = trend.map((t, i) => ({ i, v: t.mood })).filter((p) => typeof p.v === 'number') as { i: number; v: number }[];
+  const moodPath = moodPts.map((p, k) => `${k === 0 ? 'M' : 'L'}${cx(p.i).toFixed(1)},${y(p.v as number).toFixed(1)}`).join(' ');
+  // show ~6 date ticks max, evenly spaced
+  const tickEvery = Math.max(1, Math.ceil(n / 6));
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-40" preserveAspectRatio="none">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 200 }}>
+      {/* gridlines + y labels */}
       {[0, 50, 100].map((g) => (
-        <line key={g} x1={0} x2={W} y1={y(g)} y2={y(g)} className="stroke-zinc-200 dark:stroke-zinc-800" strokeWidth={1} />
+        <g key={g}>
+          <line x1={padL} x2={W - padR} y1={y(g)} y2={y(g)} className="stroke-zinc-200 dark:stroke-zinc-800" strokeWidth={1} />
+          <text x={padL - 6} y={y(g) + 3} textAnchor="end" className="fill-zinc-400 text-[9px]">{g}</text>
+        </g>
       ))}
-      <path d={line('mood')} fill="none" className="stroke-amber-400" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-      <path d={line('adherence')} fill="none" className="stroke-indigo-500" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-      {trend.map((t, i) => (
-        <circle key={i} cx={x(i)} cy={y(t.adherence)} r={2.5} className="fill-indigo-500" />
-      ))}
+      {/* on-track bars */}
+      {trend.map((t, i) => {
+        const h = (t.adherence / 100) * plotH;
+        return (
+          <rect key={i} x={cx(i) - barW / 2} y={padT + plotH - h} width={barW} height={h} rx={2} className="fill-indigo-500/80">
+            <title>{`${t.day} — on-track ${t.adherence}/100${typeof t.mood === 'number' ? ` · mood ${t.mood}/100` : ''}`}</title>
+          </rect>
+        );
+      })}
+      {/* mood line over the bars */}
+      {moodPath && <path d={moodPath} fill="none" className="stroke-amber-400" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
+      {moodPts.map((p) => <circle key={p.i} cx={cx(p.i)} cy={y(p.v as number)} r={2.5} className="fill-amber-400" />)}
+      {/* x date labels */}
+      {trend.map((t, i) => (i % tickEvery === 0 || i === n - 1) ? (
+        <text key={t.day} x={cx(i)} y={H - 6} textAnchor="middle" className="fill-zinc-400 text-[9px]">{shortDate(t.day)}</text>
+      ) : null)}
     </svg>
   );
 }

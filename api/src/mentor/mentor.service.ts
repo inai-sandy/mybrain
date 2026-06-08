@@ -106,15 +106,32 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     return this.shapeFocus(row);
   }
 
-  /** Read recent Stories of the Day and propose focus areas (added as "proposed" for the user to confirm). */
+  /** Read recent Stories of the Day + task patterns and propose focus areas (added as "proposed" for the user to confirm). */
   async deriveFocusAreas() {
-    const [dayStories, stories] = await Promise.all([
-      this.prisma.dayStory.findMany({ orderBy: { day: 'desc' }, take: 14 }),
-      this.prisma.story.findMany({ orderBy: { createdAt: 'desc' }, take: 14 }),
+    const [dayStories, stories, recentTasks] = await Promise.all([
+      this.prisma.dayStory.findMany({ orderBy: { day: 'desc' }, take: 21 }),
+      this.prisma.story.findMany({ orderBy: { createdAt: 'desc' }, take: 21 }),
+      this.prisma.task.findMany({ orderBy: { createdAt: 'desc' }, take: 400 }),
     ]);
+
+    // Task pattern: where his time/effort actually goes, by category (a strong signal of real direction).
+    const catCount: Record<string, number> = {};
+    const catMin: Record<string, number> = {};
+    for (const t of recentTasks) {
+      const c = (t.category || 'Uncategorized').trim();
+      catCount[c] = (catCount[c] || 0) + 1;
+      catMin[c] = (catMin[c] || 0) + (t.actualMin || t.estimateMin || 0);
+    }
+    const catLines = Object.keys(catCount)
+      .sort((a, b) => catMin[b] - catMin[a])
+      .slice(0, 8)
+      .map((c) => `- ${c}: ${catCount[c]} tasks, ~${catMin[c]}m`);
+
     const corpus =
       `Recent Stories of the Day:\n${dayStories.map((s) => `• (${s.day}) ${s.text.slice(0, 400)}`).join('\n') || '(none yet)'}\n\n` +
-      `Recent told stories:\n${stories.map((s) => `• ${s.rawText.slice(0, 240)}`).join('\n') || '(none)'}`;
+      `Recent told stories:\n${stories.map((s) => `• ${s.rawText.slice(0, 240)}`).join('\n') || '(none)'}\n\n` +
+      `Where his task effort goes (by category):\n${catLines.join('\n') || '(no task data yet)'}\n\n` +
+      `Days of data available: ${dayStories.length} stories. If this is small (under ~5), be especially cautious and propose at most one focus area, or none.`;
 
     const tmpl = await this.prompts.get('mentor.focus');
     const raw = (await this.llm.completeWith(await this.mentorModel(), `${tmpl}\n\n${corpus}`, 900))?.trim() || '';
@@ -125,7 +142,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     } catch {
       /* ignore */
     }
-    proposed = proposed.filter((p) => p?.title?.trim()).slice(0, 5);
+    proposed = proposed.filter((p) => p?.title?.trim()).slice(0, 3);
 
     const existing = (await this.prisma.focusArea.findMany({ where: { status: { not: 'archived' } } })).map((f) => f.title.toLowerCase().trim());
     const created = [];
