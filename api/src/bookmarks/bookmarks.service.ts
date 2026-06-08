@@ -193,7 +193,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
   }
 
   async count(): Promise<number> {
-    return this.prisma.item.count({ where: { source: 'raindrop' } });
+    return this.prisma.item.count({ where: { source: { in: ['raindrop', 'bookmark'] } } });
   }
 
   getState() {
@@ -201,7 +201,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
   }
 
   async listItems() {
-    const rows = await this.prisma.item.findMany({ where: { source: 'raindrop' }, orderBy: { createdAt: 'desc' }, take: 1000 });
+    const rows = await this.prisma.item.findMany({ where: { source: { in: ['raindrop', 'bookmark'] } }, orderBy: { createdAt: 'desc' }, take: 1000 });
     return rows.map((i) => ({
       id: i.id,
       title: i.title,

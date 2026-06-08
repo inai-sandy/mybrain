@@ -35,7 +35,7 @@ function make() {
     getPersonality: jest.fn(async () => ({ unlocked: false, daysCovered: 3, minDays: 10, summary: null, insights: [] })),
     activity: jest.fn(async () => ({ stats: { tasksDone: 1, tasksTotal: 2, minutesSpent: 25 }, summary: { text: 'You had a focused day.' }, timeline: [] })),
   };
-  const items: any = { store: jest.fn(async () => ({ item: { id: 'i1' }, deduped: false })) };
+  const items: any = { store: jest.fn(async () => ({ item: { id: 'i1' }, deduped: false })), setBookmark: jest.fn(async () => ({ ok: true })) };
   const sent: any[] = [];
   // stub the Telegram HTTP layer (some calls pass no body, e.g. fetching a URL to save)
   (global as any).fetch = jest.fn(async (_url: string, opts: any) => {
@@ -197,6 +197,26 @@ describe('TelegramService', () => {
     const data = prisma.task.create.mock.calls[0][0].data;
     expect(data.title).toBe('call Sam');
     expect(data.reminders).toContain('17:00');
+  });
+
+  it('offers a destination after saving, and "Bookmarks" reclassifies the item', async () => {
+    const { svc, items, sent } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: 'https://example.com/x' } });
+    expect(sent.some((m) => m.reply_markup?.inline_keyboard?.flat().some((b: any) => b.callback_data === 'dest:bm:i1'))).toBe(true);
+    await svc.handleUpdate({ update_id: 3, callback_query: { id: 'c', data: 'dest:bm:i1', message: { chat: { id: 5 }, message_id: 1 } } });
+    expect(items.setBookmark).toHaveBeenCalledWith('i1');
+  });
+
+  it('/exit leaves ask-mode so plain messages stop being treated as questions', async () => {
+    const { svc, chat } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, callback_query: { id: 'c', data: 'askscope:bookmark', message: { chat: { id: 5 }, message_id: 1 } } });
+    await svc.handleUpdate({ update_id: 3, message: { chat: { id: 5 }, text: 'first question' } });
+    expect(chat.askOnce).toHaveBeenCalledTimes(1);
+    await svc.handleUpdate({ update_id: 4, message: { chat: { id: 5 }, text: '/exit' } });
+    await svc.handleUpdate({ update_id: 5, message: { chat: { id: 5 }, text: 'just a loose thought' } });
+    expect(chat.askOnce).toHaveBeenCalledTimes(1); // no new ask after exiting
   });
 
   it('/week sends a weekly recap from the dashboard', async () => {

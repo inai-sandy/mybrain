@@ -22,6 +22,7 @@ const COMMANDS = [
   { command: 'week', description: 'Your week in review' },
   { command: 'me', description: 'Your personality snapshot' },
   { command: 'activity', description: "Today's summary" },
+  { command: 'exit', description: 'Leave the current mode (e.g. /ask)' },
   { command: 'skip', description: 'Rest day — mute nudges today' },
   { command: 'snooze', description: 'Quiet nudges for a while' },
   { command: 'help', description: 'List all commands' },
@@ -45,6 +46,7 @@ const HELP =
   '/me — your personality snapshot\n\n' +
   '✨ <b>Just send me a link</b> and I\'ll save it. Say <i>“remind me to call Sam at 5pm”</i> and I\'ll set the reminder.\n\n' +
   '⚙️ <b>Control</b>\n' +
+  '/exit — leave the current mode (e.g. /ask)\n' +
   '/skip — rest day (no nudges today)\n' +
   '/snooze — quiet nudges for an hour\n\n' +
   '💡 <b>On a task reminder</b> you can tap the buttons (✅ Done · 30% · 60% · 🔕 Snooze), or just <b>reply</b> to it: 👍 = done, a number (30/60) = progress, or any text/voice note → saved to that task.\n\n' +
@@ -457,6 +459,13 @@ export class TelegramService implements OnModuleInit {
         return this.doWeek(chatId);
       case 'me':
         return this.doMe(chatId);
+      case 'exit':
+      case 'cancel':
+      case 'stop': {
+        const had = (await this.state()).mode;
+        await this.setState({});
+        return this.send(chatId, had ? '👌 Exited. Back to normal — send /help for commands.' : 'Nothing to exit — send /help for commands.');
+      }
       case 'skip':
         return this.doSkip(chatId);
       case 'snooze':
@@ -569,13 +578,27 @@ export class TelegramService implements OnModuleInit {
     if (data === 'acd') { await ack(); await this.setState({ mode: 'awaiting_dump' }); return this.send(chatId, '🧠 Go ahead — send everything on your mind (type or voice) and I\'ll build today\'s tasks.'); }
     if (data === 'acs') { await ack(); await this.setState({ mode: 'awaiting_story' }); return this.send(chatId, '🌙 Tell me about your day — the problems, the wins, all of it (type or voice).'); }
 
+    // --- save destination chooser: Bookmarks vs Capture ---
+    if (data.startsWith('dest:')) {
+      const [, dest, id] = data.split(':');
+      if (dest === 'bm') {
+        await this.items.setBookmark(id).catch(() => null);
+        await ack('Moved to Bookmarks 🔖');
+        if (msgId) await this.editMsg(chatId, msgId, '🔖 Filed under <b>Bookmarks</b>.');
+      } else {
+        await ack('Kept in Capture 📥');
+        if (msgId) await this.editMsg(chatId, msgId, '📥 Kept in <b>Capture</b>.');
+      }
+      return;
+    }
+
     // --- /ask scope picker: enter persistent ask-mode in the chosen scope ---
     if (data.startsWith('askscope:')) {
       const scope = data.slice('askscope:'.length);
       const label = this.ASK_SCOPES[scope] || '🌐 Everything';
       await this.setState({ mode: 'ask', scope });
       await ack(`Now asking ${label}`);
-      return this.send(chatId, `${label} — ask away. Every message now answers from your <b>${label.replace(/^\S+\s/, '')}</b>.\n\n<i>Send /ask anytime to switch subject.</i>`);
+      return this.send(chatId, `${label} — ask away. Every message now answers from your <b>${label.replace(/^\S+\s/, '')}</b>.\n\n<i>/ask to switch subject · /exit to leave.</i>`);
     }
 
     // --- "what should I do with that?" classifier ---
@@ -728,6 +751,16 @@ export class TelegramService implements OnModuleInit {
     }
   }
 
+  /** Confirm a save and offer to file it under Bookmarks vs Capture. */
+  private async confirmSaved(chatId: string, res: any, what: string) {
+    if (!res) return this.send(chatId, 'Could not save that.');
+    if (res.deduped) return this.send(chatId, '✓ Already in your brain.');
+    const id = res.item?.id;
+    return this.send(chatId, `📥 Saved to <b>Capture</b>: ${what}\n<i>Where should this live?</i>`, id ? {
+      reply_markup: { inline_keyboard: [[{ text: '🔖 Move to Bookmarks', callback_data: `dest:bm:${id}` }, { text: '✓ Keep in Capture', callback_data: `dest:cap:${id}` }]] },
+    } : {});
+  }
+
   private async doSave(chatId: string, text: string) {
     const url = this.firstUrl(text);
     if (url) {
@@ -741,16 +774,14 @@ export class TelegramService implements OnModuleInit {
       }
       const title = text.replace(url, '').trim().slice(0, 80) || this.titleFromUrl(url);
       const res = await this.items.store(content, 'telegram-url', title, url).catch(() => null);
-      if (!res) return this.send(chatId, 'Could not save that link.');
-      return this.send(chatId, res.deduped ? '✓ Already saved.' : `🔖 Saved: <a href="${url}">${this.esc(title)}</a>`);
+      return this.confirmSaved(chatId, res, `<a href="${url}">${this.esc(title)}</a>`);
     }
     const content = (text || '').trim();
     if (content.length < 2) return this.send(chatId, 'Send a link, some text, or a file to save.');
     await this.send(chatId, '📥 Saving…');
     const title = content.split('\n')[0].slice(0, 80);
     const res = await this.items.store(content, 'telegram', title).catch(() => null);
-    if (!res) return this.send(chatId, 'Could not save that.');
-    return this.send(chatId, res.deduped ? '✓ Already in your brain.' : `📥 Saved to your brain: <b>${this.esc(title)}</b>`);
+    return this.confirmSaved(chatId, res, `<b>${this.esc(title)}</b>`);
   }
 
   private async handleIncomingFile(chatId: string, msg: any) {
@@ -765,7 +796,7 @@ export class TelegramService implements OnModuleInit {
       const body = [caption, read].filter(Boolean).join('\n\n');
       const title = (caption || (read || '').split('\n')[0] || 'Image note').slice(0, 80);
       const res = await this.items.store(body, 'telegram-image', title).catch(() => null);
-      return this.send(chatId, res ? `📥 Saved from image: <b>${this.esc(title)}</b>` : 'Could not save that.');
+      return this.confirmSaved(chatId, res, `🖼️ <b>${this.esc(title)}</b>`);
     }
     const doc = msg.document;
     if (!doc) return;
@@ -777,12 +808,13 @@ export class TelegramService implements OnModuleInit {
       const content = buf ? buf.toString('utf8').slice(0, 300000) : '';
       if (!content) return this.send(chatId, 'Could not read that file.');
       const res = await this.items.store(content, 'telegram-file', name.replace(/\.[^.]+$/, '').slice(0, 80)).catch(() => null);
-      return this.send(chatId, res ? `📥 Saved file: <b>${this.esc(name)}</b>` : 'Could not save that.');
+      return this.confirmSaved(chatId, res, `📄 <b>${this.esc(name)}</b>`);
     }
     // Other types (PDF, etc.) → keep the caption + filename so nothing's lost.
     const body = [caption, `File: ${name} (${mime})`].filter(Boolean).join('\n');
     const res = await this.items.store(body, 'telegram-file', (caption || name).slice(0, 80)).catch(() => null);
-    return this.send(chatId, res ? `📥 Saved <b>${this.esc(name)}</b>${caption ? ' with your caption' : ''}. <i>(Links, text, images & .txt/.md are read in full; deep PDF reading is coming.)</i>` : 'Could not save that.');
+    if (res && !res.deduped) await this.send(chatId, '<i>(Links, text, images & .txt/.md are read in full; deep PDF reading is coming.)</i>');
+    return this.confirmSaved(chatId, res, `📎 <b>${this.esc(name)}</b>`);
   }
 
   private async downloadFile(fileId: string): Promise<Buffer | null> {

@@ -85,9 +85,27 @@ export class ItemsService {
     return { item: { ...item, filePath }, deduped: false };
   }
 
+  /** Reclassify a captured item as a bookmark so it shows on the Bookmarks page + bookmark chat-scope. */
+  async setBookmark(id: string) {
+    const item = await this.prisma.item.findUnique({ where: { id } });
+    if (!item) return null;
+    let tags: string[] = [];
+    try {
+      tags = item.tags ? JSON.parse(item.tags) : [];
+    } catch {
+      /* ignore */
+    }
+    if (!tags.includes('bookmark')) tags.push('bookmark');
+    await this.prisma.item.update({ where: { id }, data: { source: 'bookmark', tags: JSON.stringify(tags) } });
+    // Re-index with the bookmark tag so the "Bookmarks" chat scope can find it.
+    const content = item.filePath ? await fs.readFile(item.filePath, 'utf8').catch(() => item.summary || item.title || '') : item.summary || item.title || '';
+    await this.memory.enqueue(content, { itemId: id, title: item.title || undefined, tags }).catch(() => undefined);
+    return { ok: true };
+  }
+
   async list() {
-    // Bookmarks (source='raindrop') live on their own Bookmarks page — keep them out of the documents list.
-    const items = await this.prisma.item.findMany({ where: { source: { not: 'raindrop' } }, orderBy: { createdAt: 'desc' }, take: 200 });
+    // Bookmarks (raindrop or manually bookmarked) live on the Bookmarks page — keep them out of the documents list.
+    const items = await this.prisma.item.findMany({ where: { source: { notIn: ['raindrop', 'bookmark'] } }, orderBy: { createdAt: 'desc' }, take: 200 });
     return items.map((i) => {
       const supermemory = !!i.supermemoryId;
       const rag = !!i.ragId;
