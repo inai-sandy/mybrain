@@ -10,6 +10,10 @@ function make() {
         return { key: where.key, value: settings[where.key] };
       },
     },
+    task: { findUnique: async ({ where }: any) => ({ id: where.id, title: 'Finish proposal', note: null, status: 'open' }) },
+    brainDump: { findFirst: async () => null },
+    story: { findFirst: async () => null },
+    daySummary: { findUnique: async () => null },
   };
   const connectors: any = { get: async () => ({ botToken: 'TEST' }) };
   const tasks: any = {
@@ -17,6 +21,7 @@ function make() {
     create: jest.fn(async (d: any) => ({ id: 'x', title: d.title })),
     today: jest.fn(async () => ({ dumped: true, counts: { done: 0, total: 1 }, tasks: [{ id: 't1', title: 'Finish proposal', status: 'open', pinned: true }] })),
     setDone: jest.fn(async () => ({ id: 't1', status: 'done' })),
+    update: jest.fn(async (_id: string, d: any) => ({ id: _id, progress: d.progress, status: (d.progress ?? 0) >= 100 ? 'done' : 'open', note: d.note })),
   };
   const daily: any = {
     submitStory: jest.fn(async () => ({})),
@@ -113,6 +118,42 @@ describe('TelegramService', () => {
     await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
     await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/ask what did I save about SEO' } });
     expect(chat.askOnce).toHaveBeenCalledWith('what did I save about SEO', 'everything');
+  });
+
+  it('replying 👍 to a task reminder marks that task done', async () => {
+    const { svc, settings, tasks } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    settings['telegram.msgmap'] = JSON.stringify([{ id: 777, taskId: 't1' }]);
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '👍', reply_to_message: { message_id: 777 } } });
+    expect(tasks.setDone).toHaveBeenCalledWith('t1', true);
+  });
+
+  it('replying a number to a reminder sets progress; other text goes to the task note', async () => {
+    const { svc, settings, tasks } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    settings['telegram.msgmap'] = JSON.stringify([{ id: 777, taskId: 't1' }]);
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '30', reply_to_message: { message_id: 777 } } });
+    expect(tasks.update).toHaveBeenCalledWith('t1', { progress: 30 });
+    await svc.handleUpdate({ update_id: 3, message: { chat: { id: 5 }, text: 'spoke to the vendor, waiting on a quote', reply_to_message: { message_id: 777 } } });
+    expect(tasks.update).toHaveBeenCalledWith('t1', { note: 'spoke to the vendor, waiting on a quote' });
+  });
+
+  it('task reminder buttons mark done, set %, and snooze', async () => {
+    const { svc, settings, tasks } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, callback_query: { id: 'a', data: 'td:t1', message: { chat: { id: 5 }, message_id: 1 } } });
+    expect(tasks.setDone).toHaveBeenCalledWith('t1', true);
+    await svc.handleUpdate({ update_id: 3, callback_query: { id: 'b', data: 'tp60:t1', message: { chat: { id: 5 }, message_id: 2 } } });
+    expect(tasks.update).toHaveBeenCalledWith('t1', { progress: 60 });
+    await svc.handleUpdate({ update_id: 4, callback_query: { id: 'c', data: 'ts30:t1', message: { chat: { id: 5 }, message_id: 3 } } });
+    expect(settings['telegram.taskSnooze']).toContain('t1');
+  });
+
+  it('👍 on a dump nudge stops dump nudges for the day', async () => {
+    const { svc, settings } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    await svc.handleUpdate({ update_id: 2, callback_query: { id: 'a', data: 'akd', message: { chat: { id: 5 }, message_id: 1 } } });
+    expect(settings['telegram.ack.dump']).toBeTruthy();
   });
 
   it('ignores a duplicate update_id', async () => {

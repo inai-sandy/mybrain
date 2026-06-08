@@ -41,6 +41,7 @@ const HELP =
   '⚙️ <b>Control</b>\n' +
   '/skip — rest day (no nudges today)\n' +
   '/snooze — quiet nudges for an hour\n\n' +
+  '💡 <b>On a task reminder</b> you can tap the buttons (✅ Done · 30% · 60% · 🔕 Snooze), or just <b>reply</b> to it: 👍 = done, a number (30/60) = progress, or any text/voice note → saved to that task.\n\n' +
   'Tip: send a command alone (e.g. /dump) and I\'ll take your next message or voice note — or put it all on one line.';
 
 @Injectable()
@@ -116,6 +117,129 @@ export class TelegramService implements OnModuleInit {
   }
   private async setState(s: { mode?: string; pendingText?: string }) {
     await this.setSetting('telegram.state', JSON.stringify(s || {}));
+  }
+
+  // ---- reminder acknowledgement: message→task map, per-task snooze, nudge acks ----
+  /** Inline buttons attached to a task reminder. */
+  private taskKeyboard(taskId: string) {
+    return {
+      inline_keyboard: [
+        [
+          { text: '✅ Done', callback_data: `td:${taskId}` },
+          { text: '30%', callback_data: `tp30:${taskId}` },
+          { text: '60%', callback_data: `tp60:${taskId}` },
+        ],
+        [
+          { text: '🔕 30m', callback_data: `ts30:${taskId}` },
+          { text: '🔕 2h', callback_data: `ts120:${taskId}` },
+          { text: '🔕 tmrw', callback_data: `tstm:${taskId}` },
+        ],
+      ],
+    };
+  }
+
+  /** Remember which task a reminder message belongs to, so a reply to it updates that task. */
+  private async msgMap(): Promise<{ id: number; taskId: string }[]> {
+    try {
+      return JSON.parse((await this.getSetting('telegram.msgmap')) || '[]');
+    } catch {
+      return [];
+    }
+  }
+  private async recordTaskMsg(res: any, taskId: string) {
+    const id = res?.result?.message_id;
+    if (!id) return;
+    const map = await this.msgMap();
+    map.push({ id, taskId });
+    await this.setSetting('telegram.msgmap', JSON.stringify(map.slice(-120)));
+  }
+  private async lookupTaskMsg(messageId: number): Promise<string | null> {
+    return (await this.msgMap()).find((m) => m.id === messageId)?.taskId || null;
+  }
+
+  private async taskSnooze(): Promise<Record<string, number>> {
+    try {
+      return JSON.parse((await this.getSetting('telegram.taskSnooze')) || '{}');
+    } catch {
+      return {};
+    }
+  }
+  private async snoozeTask(taskId: string, untilTs: number) {
+    const m = await this.taskSnooze();
+    m[taskId] = untilTs;
+    await this.setSetting('telegram.taskSnooze', JSON.stringify(m));
+  }
+  private async isTaskSnoozed(taskId: string): Promise<boolean> {
+    const m = await this.taskSnooze();
+    return !!m[taskId] && Date.now() < m[taskId];
+  }
+
+  private async ackedToday(kind: string, day: string): Promise<boolean> {
+    return (await this.getSetting(`telegram.ack.${kind}`)) === day;
+  }
+  private async ackToday(kind: string, day: string) {
+    await this.setSetting(`telegram.ack.${kind}`, day);
+  }
+
+  /** Minutes from local midnight (used to compute "rest of today" snooze). */
+  private minsIntoDay(tz: string): number {
+    const [h, m] = this.localHM(tz).split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  private async editMsg(chatId: string, messageId: number, text: string) {
+    return this.api('editMessageText', { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: true });
+  }
+
+  /** Apply a reply/voice-note aimed at a specific task: 👍→done, a number→%, anything else→note. */
+  private async applyTaskReply(chatId: string, taskId: string, body: string) {
+    const t = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!t) return this.send(chatId, 'That task is no longer on your list.');
+    const b = (body || '').trim();
+    if (!b) return;
+    if (/^(👍|👍🏻|👍🏼|done|ok|okay|okey|yes|yep|✅|✔️|finished|complete|completed|did it)$/i.test(b)) {
+      await this.tasks.setDone(taskId, true);
+      return this.send(chatId, `✅ Marked done: <b>${this.esc(t.title)}</b>. Nice.`);
+    }
+    const num = b.match(/^(\d{1,3})\s*%?$/);
+    if (num) {
+      const pct = Math.max(0, Math.min(100, parseInt(num[1], 10)));
+      const upd = await this.tasks.update(taskId, { progress: pct });
+      if ((upd?.progress ?? pct) >= 100 || upd?.status === 'done') return this.send(chatId, `✅ Marked done: <b>${this.esc(t.title)}</b>.`);
+      return this.send(chatId, `◐ <b>${this.esc(t.title)}</b> — ${upd?.progress ?? pct}% done.`);
+    }
+    const note = (t.note ? t.note + '\n' : '') + b;
+    await this.tasks.update(taskId, { note });
+    return this.send(chatId, `📝 Added to <b>${this.esc(t.title)}</b>'s notes:\n<i>${this.esc(b.slice(0, 300))}</i>`);
+  }
+
+  /** 7 AM: one tidy briefing of today's must-dos, each with a tap-to-complete button. */
+  private async morningBriefing(owner: string) {
+    const data = await this.tasks.today();
+    const open = data.tasks.filter((t: any) => t.status === 'open');
+    if (!open.length) {
+      const text = data.dumped ? '☀️ <b>Good morning!</b> Nothing on today\'s list yet — clear runway. /dump to plan it.' : '☀️ <b>Good morning, Sandeep!</b> What\'s on your plate today?';
+      return this.send(owner, text, { reply_markup: { inline_keyboard: [[{ text: '🧠 Dump my brain', callback_data: 'acd' }]] } });
+    }
+    const pinned = open.filter((t: any) => t.pinned);
+    const focus = (pinned.length ? pinned : open).slice(0, 5);
+    const lines = focus.map((t: any, i: number) => `${t.pinned ? '⭐️' : `${i + 1}.`} ${this.esc(t.title)}${t.estimateMin ? ` <i>(~${t.estimateMin}m)</i>` : ''}`);
+    const rows = focus.map((t: any) => [{ text: `✅ ${t.title.slice(0, 28)}`, callback_data: `td:${t.id}` }]);
+    return this.send(owner, `☀️ <b>Good morning! Today's focus — ${data.counts.done}/${data.counts.total} done</b>\n${lines.join('\n')}\n\n<i>Tap to complete, or reply to any reminder later.</i>`, { reply_markup: { inline_keyboard: rows } });
+  }
+
+  /** 9 PM: what's still open with Done buttons + a one-tap prompt to tell tonight's story. */
+  private async eveningCheckin(owner: string) {
+    const data = await this.tasks.today();
+    const open = data.tasks.filter((t: any) => t.status === 'open');
+    const storyRow = [{ text: '🌙 Tell tonight\'s story', callback_data: 'acs' }];
+    if (!open.length) {
+      return this.send(owner, `🌆 <b>Evening check-in</b>\nEverything done — ${data.counts.done}/${data.counts.total}. 🎉\n\nHow did the day really feel?`, { reply_markup: { inline_keyboard: [storyRow] } });
+    }
+    const lines = open.slice(0, 6).map((t: any) => `• ${this.esc(t.title)}${(t.progress || 0) > 0 ? ` <i>(${t.progress}%)</i>` : ''}`);
+    const rows = open.slice(0, 6).map((t: any) => [{ text: `✅ ${t.title.slice(0, 28)}`, callback_data: `td:${t.id}` }]);
+    rows.push(storyRow);
+    return this.send(owner, `🌆 <b>Evening check-in — ${open.length} still open</b>\n${lines.join('\n')}\n\n<i>Close what you can, then tell tonight's story.</i>`, { reply_markup: { inline_keyboard: rows } });
   }
 
   async webhookSecret(): Promise<string> {
@@ -215,6 +339,20 @@ export class TelegramService implements OnModuleInit {
       if (chatId !== owner) {
         await this.send(chatId, '🔒 This bot is private.');
         return;
+      }
+
+      // Reply to a task reminder → update THAT task (👍=done · number=% · text/voice→note).
+      const replyId = msg.reply_to_message?.message_id;
+      if (replyId) {
+        const taskId = await this.lookupTaskMsg(Number(replyId));
+        if (taskId) {
+          let body = text;
+          if (msg.voice || msg.audio) {
+            body = (await this.transcribe(msg.voice?.file_id || msg.audio?.file_id)) || '';
+            if (body) await this.send(chatId, `🎙️ <i>${this.esc(body.slice(0, 200))}</i>`);
+          }
+          return this.applyTaskReply(chatId, taskId, body);
+        }
       }
 
       if (msg.voice || msg.audio) {
@@ -326,9 +464,54 @@ export class TelegramService implements OnModuleInit {
   private async handleCallback(cb: any) {
     const chatId = String(cb.message?.chat?.id || '');
     const owner = await this.ownerChatId();
-    await this.api('answerCallbackQuery', { callback_query_id: cb.id });
-    if (!chatId || chatId !== owner) return;
+    if (!chatId || chatId !== owner) {
+      await this.api('answerCallbackQuery', { callback_query_id: cb.id });
+      return;
+    }
     const data: string = cb.data || '';
+    const msgId = cb.message?.message_id;
+    const tz = await this.tz();
+    const day = this.dayKey(tz);
+
+    const ack = (text?: string) => this.api('answerCallbackQuery', { callback_query_id: cb.id, text });
+
+    // --- task reminder actions ---
+    const taskAction = data.match(/^(td|tp30|tp60|ts30|ts120|tstm):(.+)$/);
+    if (taskAction) {
+      const [, action, taskId] = taskAction;
+      const t = await this.prisma.task.findUnique({ where: { id: taskId } });
+      if (!t) { await ack('Task is gone'); return; }
+      const title = this.esc(t.title);
+      if (action === 'td') {
+        await this.tasks.setDone(taskId, true);
+        await ack('Done ✅');
+        if (msgId) await this.editMsg(chatId, msgId, `✅ <b>${title}</b> — done. Nice.`);
+        return;
+      }
+      if (action === 'tp30' || action === 'tp60') {
+        const pct = action === 'tp30' ? 30 : 60;
+        await this.tasks.update(taskId, { progress: pct });
+        await ack(`Marked ${pct}%`);
+        if (msgId) await this.editMsg(chatId, msgId, `◐ <b>${title}</b> — ${pct}% done. Keep going.`);
+        return;
+      }
+      // snooze
+      const mins = action === 'ts30' ? 30 : action === 'ts120' ? 120 : (1440 - this.minsIntoDay(tz)) + 360; // tmrw ≈ until ~6 AM
+      await this.snoozeTask(taskId, Date.now() + mins * 60_000);
+      const label = action === 'ts30' ? '30 min' : action === 'ts120' ? '2 hours' : 'tomorrow';
+      await ack(`Snoozed ${label}`);
+      if (msgId) await this.editMsg(chatId, msgId, `🔕 <b>${title}</b> — snoozed until ${label}.`);
+      return;
+    }
+
+    // --- nudge acknowledgements / quick actions ---
+    if (data === 'akd') { await this.ackToday('dump', day); await ack('Got it 👍'); if (msgId) await this.editMsg(chatId, msgId, '👍 No more dump nudges today.'); return; }
+    if (data === 'aks') { await this.ackToday('story', day); await ack('Got it 👍'); if (msgId) await this.editMsg(chatId, msgId, '👍 No more story nudges today.'); return; }
+    if (data === 'acd') { await ack(); await this.setState({ mode: 'awaiting_dump' }); return this.send(chatId, '🧠 Go ahead — send everything on your mind (type or voice) and I\'ll build today\'s tasks.'); }
+    if (data === 'acs') { await ack(); await this.setState({ mode: 'awaiting_story' }); return this.send(chatId, '🌙 Tell me about your day — the problems, the wins, all of it (type or voice).'); }
+
+    // --- "what should I do with that?" classifier ---
+    await ack();
     const st = await this.state();
     const pending = st.pendingText || '';
     await this.setState({});
@@ -489,16 +672,32 @@ export class TelegramService implements OnModuleInit {
       await fn();
     };
 
-    // morning dump nudges (until dumped or 9 AM)
-    if (['07:00', '07:30', '08:00', '08:30'].includes(hm)) {
-      if (!(await this.prisma.brainDump.findFirst({ where: { day } }))) {
-        await fireOnce(`dump:${hm}`, () => this.send(owner, "🌅 Morning! What's on your mind today? Send /dump and I'll build your task list."));
+    // morning briefing (7 AM): today's focus, each tap-to-complete
+    if (hm === '07:00') {
+      await fireOnce('briefing', () => this.morningBriefing(owner));
+    }
+    // morning dump nudges (until dumped, acknowledged, or 9 AM) — now ack-able
+    if (['07:30', '08:00', '08:30'].includes(hm)) {
+      if (!(await this.prisma.brainDump.findFirst({ where: { day } })) && !(await this.ackedToday('dump', day))) {
+        await fireOnce(`dump:${hm}`, () =>
+          this.send(owner, "🌅 What's on your mind today? Send /dump and I'll build your task list.", {
+            reply_markup: { inline_keyboard: [[{ text: '🧠 Dump now', callback_data: 'acd' }, { text: '👍 Got it', callback_data: 'akd' }]] },
+          }),
+        );
       }
     }
-    // evening story nudges (until told or 11 PM)
-    if (['21:00', '21:30', '22:00', '22:30'].includes(hm)) {
-      if (!(await this.prisma.story.findFirst({ where: { day } }))) {
-        await fireOnce(`story:${hm}`, () => this.send(owner, '🌙 How was your day? Tell me the story — send /story.'));
+    // evening check-in (9 PM): still-open tasks with Done buttons + a story prompt
+    if (hm === '21:00') {
+      await fireOnce('checkin', () => this.eveningCheckin(owner));
+    }
+    // evening story nudges (until told, acknowledged, or 11 PM) — now ack-able
+    if (['21:30', '22:00', '22:30'].includes(hm)) {
+      if (!(await this.prisma.story.findFirst({ where: { day } })) && !(await this.ackedToday('story', day))) {
+        await fireOnce(`story:${hm}`, () =>
+          this.send(owner, '🌙 How was your day? Tell me the story.', {
+            reply_markup: { inline_keyboard: [[{ text: '🌙 Tell story', callback_data: 'acs' }, { text: '👍 Got it', callback_data: 'aks' }]] },
+          }),
+        );
       }
     }
 
@@ -508,16 +707,23 @@ export class TelegramService implements OnModuleInit {
     if (hm === '09:00') {
       const followUps = today.tasks.filter((t: any) => t.followUp && t.status === 'open');
       if (followUps.length) {
-        const lines = followUps.map((t: any) => `• <b>${t.title.replace(/^Follow up:\s*/i, '')}</b>`).join('\n');
+        const lines = followUps.map((t: any) => `• <b>${this.esc(t.title.replace(/^Follow up:\s*/i, ''))}</b>`).join('\n');
         await fireOnce('followups', () => this.send(owner, `🔁 <b>Follow-up${followUps.length > 1 ? 's' : ''} due today</b>\n${lines}`));
       }
     }
 
-    // per-task reminders at their smart times
+    // per-task reminders at their smart times — now actionable (buttons + reply)
     for (const t of today.tasks) {
       if (t.status !== 'open' || !t.reminders?.length) continue;
-      if (t.reminders.includes(hm)) {
-        await fireOnce(`task:${t.id}:${hm}`, () => this.send(owner, `⏰ Reminder: <b>${t.title}</b>${t.estimateMin ? ` (~${t.estimateMin}m)` : ''}`));
+      if (t.reminders.includes(hm) && !(await this.isTaskSnoozed(t.id))) {
+        await fireOnce(`task:${t.id}:${hm}`, async () => {
+          const res = await this.send(
+            owner,
+            `⏰ <b>${this.esc(t.title)}</b>${t.estimateMin ? ` (~${t.estimateMin}m)` : ''}\n<i>reply 👍=done · 30/60=% · text/voice→note</i>`,
+            { reply_markup: this.taskKeyboard(t.id) },
+          );
+          await this.recordTaskMsg(res, t.id);
+        });
       }
     }
 
