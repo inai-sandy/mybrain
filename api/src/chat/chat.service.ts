@@ -10,20 +10,37 @@ const DEFAULT_CHAT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropi
 export const SCOPES = ['everything', 'bookmark', 'idea', 'activity', 'document', 'skill'] as const;
 export type Scope = (typeof SCOPES)[number];
 
-/** Map a chat scope to the SuperMemory tags to filter by ([] = whole brain). */
-function scopeTags(scope: string): string[] {
+const SPECIAL_TAGS = ['bookmark', 'idea', 'activity', 'skill'];
+
+/** A chat scope → which tags must be present (include) / absent (exclude). Empty/empty = whole brain. */
+function scopeFilter(scope: string): { include: string[]; exclude: string[] } {
   switch (scope) {
     case 'bookmark':
-      return ['bookmark'];
+      return { include: ['bookmark'], exclude: [] };
     case 'idea':
-      return ['idea'];
+      return { include: ['idea'], exclude: [] };
     case 'activity':
-      return ['activity'];
+      return { include: ['activity'], exclude: [] };
     case 'skill':
-      return ['skill'];
+      return { include: ['skill'], exclude: [] };
+    case 'document':
+      // Capture = your documents: everything that ISN'T one of the special buckets.
+      return { include: [], exclude: SPECIAL_TAGS };
     default:
-      return []; // everything + document → no tag filter (document refined later)
+      return { include: [], exclude: [] }; // everything
   }
+}
+
+const SCOPE_LABEL: Record<string, string> = {
+  bookmark: 'Bookmarks',
+  idea: 'Ideas',
+  activity: 'Activity',
+  skill: 'Skills',
+  document: 'Capture',
+  everything: 'brain',
+};
+function scopeLabel(scope: string): string {
+  return SCOPE_LABEL[scope] || 'brain';
 }
 
 type Source = { title: string; url?: string; itemId?: string };
@@ -135,7 +152,10 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     } else {
       const route = await this.route(session, recent, clean);
       didSearch = route.search;
-      if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
+      if (route.search) {
+        const f = scopeFilter(session.scope);
+        hits = await this.memory.searchScoped(route.query || clean, f.include, 5, f.exclude);
+      }
       sources = await this.toSources(hits);
     }
 
@@ -201,7 +221,12 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   async askOnce(question: string, scope = 'everything'): Promise<{ answer: string; sources: Source[] }> {
     const clean = (question || '').trim();
     if (!clean) return { answer: '', sources: [] };
-    const hits = await this.memory.searchScoped(clean, scopeTags(scope), 5);
+    const f = scopeFilter(scope);
+    const hits = await this.memory.searchScoped(clean, f.include, 5, f.exclude);
+    // Strict scope: when a specific subject is chosen and nothing matches, say so — never widen.
+    if (!hits.length && scope !== 'everything') {
+      return { answer: `I don't have anything in your **${scopeLabel(scope)}** about that.`, sources: [] };
+    }
     const sources = await this.toSources(hits);
     const prompt = await this.buildAnswerPrompt({ scope, summary: null }, [], clean, hits, true);
     const raw = (await this.llm.completeWith(await this.getModel(), prompt, 800)) || '';
@@ -226,8 +251,13 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
     const ctx = hits.map((h, i) => `[${i + 1}] ${h.title || 'Saved item'}\n${h.content}`).join('\n\n');
     const sys = await this.prompts.get('chat.answer');
+    const scoped = session.scope && session.scope !== 'everything';
+    const scopeNote = scoped
+      ? `The user is asking ONLY within their "${scopeLabel(session.scope)}". Use ONLY the excerpts below; if they don't answer it, reply exactly that you don't have anything in their ${scopeLabel(session.scope)} about that — do NOT pull from anywhere else.\n\n`
+      : '';
     return (
       `${sys}\n\n` +
+      scopeNote +
       (session.summary ? `Earlier summary of this chat: ${session.summary}\n\n` : '') +
       (convo ? `Conversation so far:\n${convo}\n\n` : '') +
       (hits.length ? `MEMORY EXCERPTS (the user's saved content):\n${ctx}\n\n` : didSearch ? `MEMORY EXCERPTS: (none found)\n\n` : '') +
@@ -271,7 +301,10 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     } else {
       const route = await this.route(session, recent, clean);
       didSearch = route.search;
-      if (route.search) hits = await this.memory.searchScoped(route.query || clean, scopeTags(session.scope), 5);
+      if (route.search) {
+        const f = scopeFilter(session.scope);
+        hits = await this.memory.searchScoped(route.query || clean, f.include, 5, f.exclude);
+      }
       sources = await this.toSources(hits);
     }
 

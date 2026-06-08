@@ -134,18 +134,50 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  /** Scoped semantic search for the chat: SuperMemory (tag-filtered) first, RAG as fallback. Returns normalized snippets. */
-  async searchScoped(q: string, tags: string[] = [], limit = 5): Promise<MemHit[]> {
+  /** Tags on a SuperMemory result (from saved metadata, or its containerTags). */
+  private smTags(r: any): string[] {
+    const meta = r?.metadata?.tags;
+    if (typeof meta === 'string' && meta.trim()) return meta.split(',').map((s: string) => s.trim()).filter(Boolean);
+    if (Array.isArray(r?.containerTags)) return r.containerTags;
+    if (Array.isArray(r?.tags)) return r.tags;
+    return [];
+  }
+
+  /**
+   * Scoped semantic search for the chat. `include` = tags that MUST be present; `exclude` = tags that must be ABSENT.
+   * The scope is enforced on BOTH stores — when a scope is set we NEVER widen to the whole brain (strict).
+   * SuperMemory (tag-filtered) first, RAG as a same-scope fallback.
+   */
+  async searchScoped(q: string, include: string[] = [], limit = 5, exclude: string[] = []): Promise<MemHit[]> {
+    const scoped = include.length > 0 || exclude.length > 0;
+    const inc = include.map((s) => s.toLowerCase());
+    const exc = exclude.map((s) => s.toLowerCase());
+    const ok = (tags: string[]): boolean => {
+      const t = (tags || []).map((x) => String(x).toLowerCase());
+      if (inc.length && !inc.some((x) => t.includes(x))) return false;
+      if (exc.length && exc.some((x) => t.includes(x))) return false;
+      return true;
+    };
+    // Over-fetch when scoped so post-filtering still leaves enough results.
+    const fetchN = scoped ? Math.max(limit * 4, 20) : limit;
     try {
-      const sm = await this.sm.search(q, limit, tags);
-      const norm = (sm || []).map((r) => this.normSm(r)).filter((x) => x.content);
+      const sm = await this.sm.search(q, fetchN, include);
+      const norm = (sm || [])
+        .filter((r) => !scoped || ok(this.smTags(r)))
+        .map((r) => this.normSm(r))
+        .filter((x) => x.content)
+        .slice(0, limit);
       if (norm.length) return norm;
     } catch {
-      /* fall through to RAG */
+      /* fall through to RAG (still same-scope) */
     }
     try {
-      const rag = await this.rag.search(q, limit);
-      return (rag || []).map((r) => this.normRag(r)).filter((x) => x.content);
+      const rag = await this.rag.search(q, fetchN);
+      return (rag || [])
+        .filter((r) => !scoped || ok(Array.isArray(r?.tags) ? r.tags : []))
+        .map((r) => this.normRag(r))
+        .filter((x) => x.content)
+        .slice(0, limit);
     } catch {
       return [];
     }

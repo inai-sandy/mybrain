@@ -71,10 +71,24 @@ describe('ChatService', () => {
     expect(d.scope).toBe('everything');
   });
 
-  it('scopes the memory search to the thread tag on the first message', async () => {
+  it('scopes the memory search to the thread tag on the first message (include + no exclude)', async () => {
     const { svc, memory } = make({ hits: [] });
     await svc.sendMessage('s1', 'what did I save about SEO?');
-    expect(memory.searchScoped).toHaveBeenCalledWith('what did I save about SEO?', ['bookmark'], 5);
+    expect(memory.searchScoped).toHaveBeenCalledWith('what did I save about SEO?', ['bookmark'], 5, []);
+  });
+
+  it('Capture scope excludes the special buckets (strict, never the whole brain)', async () => {
+    const { svc, memory } = make({ session: { id: 's2', scope: 'document', summary: null, title: null }, hits: [] });
+    await svc.sendMessage('s2', 'what was in that report');
+    expect(memory.searchScoped).toHaveBeenCalledWith('what was in that report', [], 5, ['bookmark', 'idea', 'activity', 'skill']);
+  });
+
+  it('/ask stays strict: an empty scoped result says so instead of widening', async () => {
+    const { svc, memory } = make({ hits: [] });
+    const r = await svc.askOnce('most important activity on 8th June', 'activity');
+    expect(memory.searchScoped).toHaveBeenCalledWith('most important activity on 8th June', ['activity'], 5, []);
+    expect(r.answer).toMatch(/don't have anything in your \*\*Activity\*\*/i);
+    expect(r.sources).toHaveLength(0);
   });
 
   it('parses the answer and the suggested follow-ups', async () => {

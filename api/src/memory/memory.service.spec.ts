@@ -74,3 +74,47 @@ describe('MemoryService outbox', () => {
     expect(prisma.itemUpdates.some((u: any) => u.data.ragId === 'rag-id-1')).toBe(true);
   });
 });
+
+describe('MemoryService.searchScoped (strict scoping)', () => {
+  function svcWith(smResults: any[], ragResults: any[]) {
+    const sm: any = { search: jest.fn(async () => smResults) };
+    const rag: any = { search: jest.fn(async () => ragResults) };
+    return { svc: new MemoryService(fakePrisma(), sm, rag), sm, rag };
+  }
+
+  it('keeps only include-tagged results and never widens the scope', async () => {
+    // SuperMemory returns a mix; only the activity-tagged one should survive an Activity scope.
+    const sm = [
+      { content: 'day summary', metadata: { tags: 'activity' } },
+      { content: 'a bookmark', metadata: { tags: 'bookmark' } },
+    ];
+    const { svc } = svcWith(sm, []);
+    const hits = await svc.searchScoped('what happened', ['activity'], 5);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].content).toContain('day summary');
+  });
+
+  it('falls back to RAG but STILL enforces the scope (no whole-brain leak)', async () => {
+    // SuperMemory empty → RAG fallback; RAG returns mixed tags, only activity kept.
+    const rag = [
+      { content: 'unrelated bookmark', tags: ['bookmark'] },
+      { content: 'the 8th day summary', tags: ['activity'] },
+    ];
+    const { svc } = svcWith([], rag);
+    const hits = await svc.searchScoped('most important activity', ['activity'], 5);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].content).toContain('day summary');
+  });
+
+  it('Capture scope excludes the special buckets', async () => {
+    const rag = [
+      { content: 'a saved document', tags: ['research'] },
+      { content: 'an activity summary', tags: ['activity'] },
+      { content: 'a bookmark', tags: ['bookmark'] },
+    ];
+    const { svc } = svcWith([], rag);
+    const hits = await svc.searchScoped('the report', [], 5, ['bookmark', 'idea', 'activity', 'skill']);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].content).toContain('saved document');
+  });
+});
