@@ -164,7 +164,9 @@ const REGISTRY: PromptDef[] = [
       `- Remove filler words and false starts (um, uh, er, "like", "you know", repeated words, stutters).\n` +
       `- Fix clear mis-recognitions using context (e.g. a wrong homophone), but ONLY when you're confident.\n` +
       `- Break it into natural sentences/paragraphs.\n` +
-      `CRITICAL: do NOT add new information, do NOT summarize, do NOT translate, do NOT change the meaning or the user's wording/intent. If the transcript is already clean, return it as-is. Output ONLY the cleaned text — no preamble, no quotes, no commentary.`,
+      `CRITICAL: do NOT add new information, do NOT summarize, do NOT translate, do NOT change the meaning or the user's wording/intent. If the transcript is already clean, return it as-is.\n` +
+      `If the transcript is empty, blank, or clearly not real speech, return it EXACTLY as given (or nothing) — NEVER write a question, apology, note, or any message back. You are a text filter, not a chat partner.\n` +
+      `Output ONLY the cleaned text — no preamble, no quotes, no commentary.`,
   },
 ];
 

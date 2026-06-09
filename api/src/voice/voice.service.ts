@@ -160,9 +160,13 @@ export class VoiceService {
 
   /** Light AI cleanup: punctuation, capitals, filler removal — faithful to the user's words. */
   private async clean(text: string): Promise<string> {
-    if (!text || text.length < 2) return text;
+    const raw = (text || '').trim();
+    if (raw.length < 3) return raw; // nothing meaningful to clean
     const tmpl = await this.prompts.get('voice.cleanup');
-    const out = await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}\n\nTRANSCRIPT:\n${text}`, Math.min(2000, Math.round(text.length / 2) + 300));
-    return (out || text).trim();
+    const out = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300)))?.trim();
+    if (!out) return raw;
+    // Guard against the model "replying" instead of cleaning (e.g. on garbled/non-speech input).
+    const looksLikeMeta = /\b(i don'?t see|please provide|no (transcript|text)|i can'?t|as an ai|it (looks|seems) like)\b/i.test(out) && out.length > raw.length + 40;
+    return looksLikeMeta ? raw : out;
   }
 }

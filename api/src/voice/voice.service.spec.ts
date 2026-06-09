@@ -48,6 +48,12 @@ describe('VoiceService', () => {
     expect(text).toBe('um hello world'); // OpenAI fallback result
   });
 
+  it('ignores a chatty "reply" from cleanup and keeps the raw transcript', async () => {
+    const { svc } = make({ clean: "I don't see any transcript text to clean up. Please provide the speech you'd like cleaned." });
+    const text = await svc.transcribe(Buffer.from('audio'), 'a.webm');
+    expect(text).toBe('um hello world'); // raw STT kept, not the meta-message
+  });
+
   it('reports engines with their configured flags', async () => {
     const { svc } = make({ keys: { openai: { apiKey: 'oa' }, elevenlabs: { apiKey: 'el' } } });
     const cfg = await svc.config();
