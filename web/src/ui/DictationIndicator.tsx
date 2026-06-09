@@ -1,11 +1,20 @@
 import { useDictationStatus } from './useDictation';
-import { Square, Mic } from 'lucide-react';
+import { Square, Mic, Loader2 } from 'lucide-react';
 
-/** A single global banner shown whenever ANY mic is dictating. Gives the two things
- *  the user said were missing: live feedback ("is it hearing me?") + a clear Stop. */
+/** A single global banner showing whichever mic is active: recording (with Stop) or transcribing. */
 export function DictationIndicator() {
-  const { listening, interim, stop } = useDictationStatus();
-  if (!listening) return null;
+  const { phase, stop } = useDictationStatus();
+  if (phase === 'idle') return null;
+
+  if (phase === 'transcribing') {
+    return (
+      <div className="fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 rounded-full bg-zinc-900 text-white px-4 py-2.5 shadow-xl bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6">
+        <Loader2 size={15} className="animate-spin text-emerald-300" />
+        <span className="text-sm">Transcribing your voice…</span>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-full bg-zinc-900 text-white px-4 py-2.5 shadow-xl max-w-[92vw] bottom-[calc(6rem+env(safe-area-inset-bottom))] md:bottom-6">
       <span className="relative flex h-3 w-3 shrink-0">
@@ -13,7 +22,7 @@ export function DictationIndicator() {
         <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
       </span>
       <Mic size={15} className="shrink-0 text-rose-300" />
-      <span className="text-sm truncate min-w-0">{interim ? interim : 'Listening… speak now'}</span>
+      <span className="text-sm">Listening… speak naturally, then tap Stop</span>
       <button
         onClick={stop}
         className="ml-1 shrink-0 inline-flex items-center gap-1 rounded-full bg-rose-500 hover:bg-rose-400 px-3 py-1 text-xs font-semibold"

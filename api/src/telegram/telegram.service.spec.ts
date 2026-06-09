@@ -36,6 +36,7 @@ function make() {
     activity: jest.fn(async () => ({ stats: { tasksDone: 1, tasksTotal: 2, minutesSpent: 25 }, summary: { text: 'You had a focused day.' }, timeline: [] })),
   };
   const items: any = { store: jest.fn(async () => ({ item: { id: 'i1' }, deduped: false })), setBookmark: jest.fn(async () => ({ ok: true })) };
+  const voice: any = { transcribe: jest.fn(async () => 'transcribed text') };
   const sent: any[] = [];
   // stub the Telegram HTTP layer (some calls pass no body, e.g. fetching a URL to save)
   (global as any).fetch = jest.fn(async (_url: string, opts: any) => {
@@ -43,7 +44,7 @@ function make() {
     return { ok: true, json: async () => ({ ok: true, result: {} }), text: async () => 'page text' };
   });
   const chat: any = { askOnce: jest.fn(async () => ({ answer: 'Here is what you saved.', sources: [] })) };
-  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items), settings, prisma, tasks, daily, chat, items, sent };
+  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items, voice), settings, prisma, tasks, daily, chat, items, voice, sent };
 }
 
 describe('TelegramService', () => {

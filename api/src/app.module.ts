@@ -11,6 +11,7 @@ import { SkillsModule } from './skills/skills.module';
 import { TasksModule } from './tasks/tasks.module';
 import { DailyModule } from './daily/daily.module';
 import { MentorModule } from './mentor/mentor.module';
+import { VoiceModule } from './voice/voice.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { ChatModule } from './chat/chat.module';
 import { HomeModule } from './home/home.module';
@@ -18,7 +19,7 @@ import { PromptsModule } from './prompts/prompts.module';
 import { LlmModule } from './llm/llm.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, TelegramModule, ChatModule, HomeModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, TelegramModule, ChatModule, HomeModule],
   controllers: [HealthController],
 })
 export class AppModule {}

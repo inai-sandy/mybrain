@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -153,6 +153,18 @@ const REGISTRY: PromptDef[] = [
       `Be specific to today's actual content. 2-4 short paragraphs, plain prose, warm but firm. Write in the same language he tends to use.\n\n` +
       `Also score how well TODAY aligned with his focus areas, 0-100 (0 = completely off-track, 100 = fully lived his focus).\n\n` +
       `Respond with ONLY JSON: {"adherenceScore": <0-100 integer>, "guidance": "<your guidance text>"}`,
+  },
+  {
+    key: 'voice.cleanup',
+    label: 'Voice cleanup',
+    description: 'Tidies a raw voice transcription (punctuation, capitals, filler removal) before it\'s inserted. The raw transcript is added automatically. Keep it faithful — it must NOT change your meaning.',
+    default:
+      `You clean up a raw speech-to-text transcription so it reads well. Do ALL of the following, and nothing more:\n` +
+      `- Fix punctuation, capitalization, and obvious spacing.\n` +
+      `- Remove filler words and false starts (um, uh, er, "like", "you know", repeated words, stutters).\n` +
+      `- Fix clear mis-recognitions using context (e.g. a wrong homophone), but ONLY when you're confident.\n` +
+      `- Break it into natural sentences/paragraphs.\n` +
+      `CRITICAL: do NOT add new information, do NOT summarize, do NOT translate, do NOT change the meaning or the user's wording/intent. If the transcript is already clean, return it as-is. Output ONLY the cleaned text — no preamble, no quotes, no commentary.`,
   },
 ];
 

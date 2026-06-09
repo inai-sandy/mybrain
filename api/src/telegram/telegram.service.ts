@@ -6,6 +6,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
 import { ChatService } from '../chat/chat.service';
 import { ItemsService } from '../items/items.service';
+import { VoiceService } from '../voice/voice.service';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -63,6 +64,7 @@ export class TelegramService implements OnModuleInit {
     private readonly daily: DailyService,
     private readonly chat: ChatService,
     private readonly items: ItemsService,
+    private readonly voice: VoiceService,
   ) {}
 
   async onModuleInit() {
@@ -1058,41 +1060,8 @@ export class TelegramService implements OnModuleInit {
       return null;
     }
     const name = path.split('/').pop() || 'voice.oga';
-    const provider = await this.getVoiceProvider();
-    const tryWhisper = async () => {
-      const oa = await this.connectors.get<{ apiKey: string }>('openai');
-      return oa?.apiKey ? this.whisper(buf, name, oa.apiKey).catch(() => null) : null;
-    };
-    const tryGemini = () => this.geminiTranscribe(buf, name).catch(() => null);
-    // chosen provider first, the other as fallback
-    if (provider === 'gemini') return (await tryGemini()) || (await tryWhisper());
-    return (await tryWhisper()) || (await tryGemini());
+    // Use the app-wide voice engine (GPT-4o Transcribe + cleanup) so Telegram matches the in-app mic.
+    return (await this.voice.transcribe(buf, name, 'audio/ogg')) || null;
   }
 
-  private async whisper(buf: Buffer, name: string, apiKey: string): Promise<string | null> {
-    const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(buf)]), name);
-    form.append('model', 'whisper-1');
-    const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form as any });
-    if (!r.ok) return null;
-    const d: any = await r.json();
-    return d?.text?.trim() || null;
-  }
-
-  private async geminiTranscribe(buf: Buffer, name: string): Promise<string | null> {
-    const or = await this.connectors.get<{ apiKey: string }>('openrouter');
-    if (!or?.apiKey) return null;
-    const ext = (name.split('.').pop() || 'ogg').toLowerCase();
-    const format = ext === 'oga' ? 'ogg' : ext;
-    const body = {
-      model: 'google/gemini-3-flash-preview',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: [{ type: 'text', text: 'Transcribe this audio verbatim. Output only the transcription, nothing else.' }, { type: 'input_audio', input_audio: { data: buf.toString('base64'), format } }] }],
-    };
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${or.apiKey}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r.ok) return null;
-    const d: any = await r.json();
-    const text = d?.choices?.[0]?.message?.content;
-    return typeof text === 'string' && text.trim() ? text.trim() : null;
-  }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -16,7 +16,9 @@ const INTEGRATIONS: Integration[] = [
   { name: 'tavily', label: 'Tavily', desc: 'Reads web pages so bookmarks can be summarized', icon: Globe, testable: true, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude models direct', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openrouter', label: 'OpenRouter', desc: 'One gateway to many models (Claude, GPT, Gemini…)', icon: Boxes, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
-  { name: 'openai', label: 'OpenAI', desc: 'Transcribes your Telegram voice notes (Whisper)', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'openai', label: 'OpenAI', desc: 'Powers voice-to-text (GPT-4o Transcribe) + Whisper', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'elevenlabs', label: 'ElevenLabs', desc: 'Optional voice engine — Scribe (most accurate on English)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'deepgram', label: 'Deepgram', desc: 'Optional voice engine — Nova-3 (fast)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
 ];
 
 const MODELS: Record<string, { value: string; label: string }[]> = {
@@ -382,40 +384,66 @@ function ChatModelCard() {
   );
 }
 
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; language: string };
 function VoiceModelCard() {
-  const [provider, setProvider] = useState('openai');
-  const [loaded, setLoaded] = useState(false);
+  const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
-  useEffect(() => {
-    fetch('/api/telegram/voice').then((r) => r.json()).then((d) => setProvider(d.provider || 'openai')).catch(() => undefined).finally(() => setLoaded(true));
-  }, []);
-  if (!loaded) return null;
-  async function save(p: string) {
-    setProvider(p);
-    const r = await fetch('/api/telegram/voice', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: p }) });
-    if (r.ok) toast('success', 'Voice model saved');
+  function load() {
+    fetch('/api/voice/config').then((r) => r.json()).then(setCfg).catch(() => undefined);
   }
-  const OPTS = [
-    { id: 'openai', label: 'OpenAI Whisper', desc: 'Most accurate. Needs your OpenAI key.' },
-    { id: 'gemini', label: 'Gemini (via OpenRouter)', desc: 'No separate key — uses your OpenRouter key.' },
-  ];
+  useEffect(() => { load(); }, []);
+  if (!cfg) return null;
+
+  async function setEngine(engine: string) {
+    setCfg((c) => (c ? { ...c, engine } : c));
+    const r = await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
+    if (r.ok) toast('success', 'Voice engine saved');
+  }
+  async function setCleanup(cleanup: boolean) {
+    setCfg((c) => (c ? { ...c, cleanup } : c));
+    await fetch('/api/voice/cleanup', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cleanup }) });
+  }
+  async function saveLang(language: string) {
+    setCfg((c) => (c ? { ...c, language } : c));
+    await fetch('/api/voice/language', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }) });
+  }
+
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
       <h2 className="flex items-center gap-2 font-semibold mb-1">
-        <Send size={18} className="text-sky-500" /> Voice transcription
+        <Mic size={18} className="text-emerald-600" /> Voice input
       </h2>
-      <p className="text-sm text-zinc-500 mb-4">Which model transcribes your Telegram voice notes. The other is used automatically as a fallback if the first can't.</p>
+      <p className="text-sm text-zinc-500 mb-4">
+        Powers the mic everywhere (chat, brain-dump, story, notes) and your Telegram voice notes. Records your audio and transcribes it with a high-accuracy engine — far better than the old browser mic.
+      </p>
       <div className="space-y-2">
-        {OPTS.map((o) => (
-          <label key={o.id} className={'flex items-start gap-3 rounded-lg border p-3 cursor-pointer ' + (provider === o.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
-            <input type="radio" name="voice" checked={provider === o.id} onChange={() => save(o.id)} className="mt-1 accent-emerald-600" />
-            <div>
-              <div className="text-sm font-medium">{o.label}</div>
-              <div className="text-xs text-zinc-500">{o.desc}</div>
+        {cfg.engines.map((e) => (
+          <label key={e.id} className={'flex items-start gap-3 rounded-lg border p-3 ' + (e.configured ? 'cursor-pointer ' : 'opacity-60 ') + (cfg.engine === e.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
+            <input type="radio" name="voiceEngine" disabled={!e.configured} checked={cfg.engine === e.id} onChange={() => setEngine(e.id)} className="mt-1 accent-emerald-600" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">{e.name}</div>
+              <div className="text-xs text-zinc-500">{e.configured ? 'Ready' : 'Add this provider’s API key in Integrations to use it'}</div>
             </div>
           </label>
         ))}
       </div>
+      <label className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 mt-3 cursor-pointer">
+        <div>
+          <div className="text-sm font-medium">Clean up my dictation</div>
+          <div className="text-xs text-zinc-500">Auto punctuation &amp; capitals, removes “um/uh”, tidies sentences — keeps your words.</div>
+        </div>
+        <input type="checkbox" checked={cfg.cleanup} onChange={(e) => setCleanup(e.target.checked)} className="h-4 w-4 accent-emerald-600 shrink-0" />
+      </label>
+      <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
+        Spoken language <span className="text-zinc-400">(optional — helps accuracy)</span>
+        <input
+          value={cfg.language}
+          onChange={(e) => setCfg((c) => (c ? { ...c, language: e.target.value } : c))}
+          onBlur={(e) => saveLang(e.target.value.trim())}
+          placeholder="e.g. en for English (blank = auto-detect)"
+          className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+        />
+      </label>
     </section>
   );
 }
