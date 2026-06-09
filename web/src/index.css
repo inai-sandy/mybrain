@@ -28,3 +28,20 @@
     min-height: 44px;
   }
 }
+
+/* Tap feedback on touch devices — buttons gently press in when touched (native app feel). */
+@media (hover: none) and (pointer: coarse) {
+  button:not(:disabled) {
+    transition: transform 90ms ease;
+  }
+  button:not(:disabled):active {
+    transform: scale(0.96);
+  }
+}
+
+/* Shimmer for skeleton loaders. */
+@keyframes mb-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

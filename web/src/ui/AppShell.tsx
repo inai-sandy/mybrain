@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search } from 'lucide-react';
@@ -15,7 +16,8 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const [menu, setMenu] = useState(false);
   const [help, setHelp] = useState(false);
   const navigate = useNavigate();
-  const isChat = useLocation().pathname === '/chat';
+  const location = useLocation();
+  const isChat = location.pathname === '/chat';
 
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
@@ -151,7 +153,13 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </header>
 
         <main className={isChat ? 'h-[calc(100vh-7rem-env(safe-area-inset-top))] md:h-[calc(100vh-3.5rem-env(safe-area-inset-top))] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}>
-          <Outlet />
+          {isChat ? (
+            <Outlet />
+          ) : (
+            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }}>
+              <Outlet />
+            </motion.div>
+          )}
         </main>
       </div>
 
@@ -182,15 +190,18 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {BOTTOM_NAV.map((n) => (
-          <NavLink
-            key={n.to}
-            to={n.to}
-            end={n.end}
-            className={({ isActive }) =>
-              'flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] ' + (isActive ? 'text-emerald-600' : 'text-zinc-500 dark:text-zinc-400')
-            }
-          >
-            <n.icon size={20} /> {n.label}
+          <NavLink key={n.to} to={n.to} end={n.end} className="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px]">
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <motion.span layoutId="navpill" className="absolute inset-x-2.5 top-1 bottom-1 rounded-xl bg-emerald-500/10" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
+                )}
+                <span className={'relative z-10 ' + (isActive ? 'text-emerald-600' : 'text-zinc-500 dark:text-zinc-400')}>
+                  <n.icon size={20} />
+                </span>
+                <span className={'relative z-10 ' + (isActive ? 'text-emerald-600 font-medium' : 'text-zinc-500 dark:text-zinc-400')}>{n.label}</span>
+              </>
+            )}
           </NavLink>
         ))}
       </nav>

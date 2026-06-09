@@ -3,6 +3,7 @@ import { Moon, X, Mic, BookOpen, Plus, Trash2, MessageSquare } from 'lucide-reac
 import { useToast } from '../ui/Toast';
 import { useDictation, isDictating } from '../ui/useDictation';
 import { GrowTextarea } from '../ui/GrowTextarea';
+import { Sheet } from '../ui/Sheet';
 
 type Story = { id: string; text: string; mood?: string | null; createdAt: string; updatedAt?: string };
 type Note = { id: string; text: string; source: string; createdAt: string };
@@ -40,46 +41,48 @@ function StoryModal({ initial, onClose, onSaved }: { initial: Story | null; onCl
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={() => { if (!isDictating()) onClose(); }}>
-      <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> Tonight's story</h3>
-          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
-        </div>
-        <p className="text-xs text-zinc-500 mb-3">Tell the story of your day — the problems, the wins, what happened. Type or speak it. This is how the app comes to understand you.</p>
-        <div className="relative">
-          <textarea
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={8}
-            placeholder="Today started slow… the proposal took longer than I thought but I finally cracked the pricing section. Felt good. Skipped the gym again though…"
-            className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-12 text-sm outline-none focus:border-indigo-500"
-          />
-          {supported && (
-            <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-indigo-500')}>
-              <Mic size={16} />
-            </button>
-          )}
-        </div>
-        <div className="mt-3">
-          <p className="text-xs text-zinc-500 mb-1.5">How did the day feel?</p>
-          <div className="flex flex-wrap gap-2">
-            {MOODS.map((m) => (
-              <button key={m} onClick={() => setMood(mood === m ? '' : m)} className={'rounded-full border px-3 py-1 text-sm ' + (mood === m ? 'border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>
-                {m}
-              </button>
-            ))}
+    <Sheet onClose={onClose} canClose={() => !isDictating()}>
+      {(close) => (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> Tonight's story</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
           </div>
-        </div>
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
-          <button onClick={save} disabled={busy || !text.trim()} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
-            {busy ? 'Saving…' : 'Save story'}
-          </button>
-        </div>
-      </div>
-    </div>
+          <p className="text-xs text-zinc-500 mb-3">Tell the story of your day — the problems, the wins, what happened. Type or speak it. This is how the app comes to understand you.</p>
+          <div className="relative">
+            <textarea
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={8}
+              placeholder="Today started slow… the proposal took longer than I thought but I finally cracked the pricing section. Felt good. Skipped the gym again though…"
+              className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-12 text-sm outline-none focus:border-indigo-500"
+            />
+            {supported && (
+              <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-indigo-500')}>
+                <Mic size={16} />
+              </button>
+            )}
+          </div>
+          <div className="mt-3">
+            <p className="text-xs text-zinc-500 mb-1.5">How did the day feel?</p>
+            <div className="flex flex-wrap gap-2">
+              {MOODS.map((m) => (
+                <button key={m} onClick={() => setMood(mood === m ? '' : m)} className={'rounded-full border px-3 py-1 text-sm ' + (mood === m ? 'border-indigo-500 bg-indigo-500/10 text-indigo-600 dark:text-indigo-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+            <button onClick={save} disabled={busy || !text.trim()} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+              {busy ? 'Saving…' : 'Save story'}
+            </button>
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }
 

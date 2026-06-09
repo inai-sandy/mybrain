@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useDictation, isDictating } from '../ui/useDictation';
+import { Sheet } from '../ui/Sheet';
+import { motion } from 'framer-motion';
 
 export type Task = {
   id: string;
@@ -54,7 +56,13 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
   return (
     <div className={'group rounded-xl border bg-white dark:bg-zinc-900 p-3.5 flex items-start gap-3 transition-all ' + (done ? 'opacity-60 border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm') + (t.pinned && !done ? ' ring-1 ring-amber-400/40' : '')}>
       <button onClick={() => onToggle(t)} title={done ? 'Mark open' : 'Mark done'} className={'mt-0.5 shrink-0 ' + (done ? 'text-emerald-600' : 'text-zinc-300 dark:text-zinc-600 hover:text-emerald-600')}>
-        {done ? <Check size={20} /> : <Circle size={20} />}
+        {done ? (
+          <motion.span initial={{ scale: 0, rotate: -25 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 500, damping: 16 }} className="inline-flex">
+            <Check size={20} />
+          </motion.span>
+        ) : (
+          <Circle size={20} />
+        )}
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
@@ -143,45 +151,47 @@ export function DumpModal({ onClose, onDone, initialQuestion }: { onClose: () =>
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={() => { if (!isDictating()) onClose(); }}>
-      <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold flex items-center gap-2"><Brain className="text-emerald-500" size={18} /> Dump your brain</h3>
-          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
-        </div>
-        <p className="text-xs text-zinc-500 mb-3">Type or speak everything on your mind — the AI turns it into clean, prioritized tasks for today.</p>
-        {question && (
-          <div className="mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-            <span className="font-medium">One question: </span>{question}
+    <Sheet onClose={onClose} canClose={() => !isDictating()}>
+      {(close) => (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold flex items-center gap-2"><Brain className="text-emerald-500" size={18} /> Dump your brain</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
           </div>
-        )}
-        <div className="relative">
-          <textarea
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={7}
-            placeholder="e.g. need to finish the beakn proposal, call the accountant before noon, gym in the evening, read up on rag eval…"
-            className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-12 text-sm outline-none focus:border-emerald-500"
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit();
-            }}
-          />
-          {supported && (
-            <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-emerald-600')}>
-              <Mic size={16} />
-            </button>
+          <p className="text-xs text-zinc-500 mb-3">Type or speak everything on your mind — the AI turns it into clean, prioritized tasks for today.</p>
+          {question && (
+            <div className="mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+              <span className="font-medium">One question: </span>{question}
+            </div>
           )}
-        </div>
-        {supported && <p className="mt-1 text-[11px] text-zinc-400">{listening ? 'Listening… tap the mic to stop.' : 'Tap the mic to dictate.'}</p>}
-        <div className="mt-3 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
-          <button onClick={submit} disabled={busy || !text.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
-            {busy ? 'Organizing…' : 'Make my tasks'}
-          </button>
-        </div>
-      </div>
-    </div>
+          <div className="relative">
+            <textarea
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={7}
+              placeholder="e.g. need to finish the beakn proposal, call the accountant before noon, gym in the evening, read up on rag eval…"
+              className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-12 text-sm outline-none focus:border-emerald-500"
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit();
+              }}
+            />
+            {supported && (
+              <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-emerald-600')}>
+                <Mic size={16} />
+              </button>
+            )}
+          </div>
+          {supported && <p className="mt-1 text-[11px] text-zinc-400">{listening ? 'Listening… just speak; it finishes when you pause.' : 'Tap the mic and speak — no need to stop.'}</p>}
+          <div className="mt-3 flex justify-end gap-2">
+            <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+            <button onClick={submit} disabled={busy || !text.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+              {busy ? 'Organizing…' : 'Make my tasks'}
+            </button>
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }
 
@@ -230,58 +240,60 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
 
   const inp = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500';
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold">{editing ? 'Edit task' : 'Add task'}</h3>
-          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
-        </div>
-        <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Title
-          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className={inp} placeholder="What needs doing?" />
-        </label>
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Category
-            <input value={category} onChange={(e) => setCategory(e.target.value)} className={inp} placeholder="Beakn, Admin…" />
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold">{editing ? 'Edit task' : 'Add task'}</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+          </div>
+          <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Title
+            <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className={inp} placeholder="What needs doing?" />
           </label>
-          <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Priority
-            <select value={priority} onChange={(e) => setPriority(e.target.value as any)} className={inp}>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Category
+              <input value={category} onChange={(e) => setCategory(e.target.value)} className={inp} placeholder="Beakn, Admin…" />
+            </label>
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Priority
+              <select value={priority} onChange={(e) => setPriority(e.target.value as any)} className={inp}>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Estimate (min)
+              <input type="number" min={1} value={estimate} onChange={(e) => setEstimate(e.target.value)} className={inp} placeholder="30" />
+            </label>
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Reminders
+              <select value={reminders} onChange={(e) => setReminders(Number(e.target.value))} className={inp}>
+                <option value={0}>None</option>
+                <option value={1}>1 reminder</option>
+                <option value={2}>2 reminders</option>
+                <option value={3}>3 reminders</option>
+                <option value={4}>4 reminders</option>
+              </select>
+            </label>
+          </div>
+          <p className="text-[11px] text-zinc-400 mt-1">The AI picks smart times based on priority. Reminders are delivered via Telegram.</p>
+          <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Tags
+            <input value={tags} onChange={(e) => setTags(e.target.value)} className={inp} placeholder="comma, separated" />
           </label>
-          <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Estimate (min)
-            <input type="number" min={1} value={estimate} onChange={(e) => setEstimate(e.target.value)} className={inp} placeholder="30" />
+          <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Notes
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className={inp} placeholder="Any extra context…" />
           </label>
-          <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Reminders
-            <select value={reminders} onChange={(e) => setReminders(Number(e.target.value))} className={inp}>
-              <option value={0}>None</option>
-              <option value={1}>1 reminder</option>
-              <option value={2}>2 reminders</option>
-              <option value={3}>3 reminders</option>
-              <option value={4}>4 reminders</option>
-            </select>
+          <label className="flex items-center gap-2 mt-3 text-sm cursor-pointer">
+            <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+            <Star size={14} className="text-amber-500" /> Pin as a must-do today
           </label>
-        </div>
-        <p className="text-[11px] text-zinc-400 mt-1">The AI picks smart times based on priority. Reminders are delivered via Telegram.</p>
-        <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Tags
-          <input value={tags} onChange={(e) => setTags(e.target.value)} className={inp} placeholder="comma, separated" />
-        </label>
-        <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Notes
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className={inp} placeholder="Any extra context…" />
-        </label>
-        <label className="flex items-center gap-2 mt-3 text-sm cursor-pointer">
-          <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
-          <Star size={14} className="text-amber-500" /> Pin as a must-do today
-        </label>
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
-          <button onClick={save} disabled={busy || !title.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+            <button onClick={save} disabled={busy || !title.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }
 
@@ -330,54 +342,56 @@ export function DoneModal({ task, onClose, onSaved }: { task: Task; onClose: () 
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-bold flex items-center gap-2"><Clock size={16} className="text-emerald-500" /> How long did it take?</h3>
-          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
-        </div>
-        <p className="text-xs text-zinc-500 mb-3 line-clamp-1">“{task.title}”{task.estimateMin ? ` · est. ${mins(task.estimateMin)}` : ''}</p>
-        <div className="flex items-center gap-2">
-          <input type="number" min={1} autoFocus value={val} onChange={(e) => setVal(e.target.value)} className="w-24 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-          <span className="text-sm text-zinc-500">minutes</span>
-          <div className="flex gap-1 ml-auto">
-            {[15, 30, 60].map((q) => (
-              <button key={q} onClick={() => setVal(String(q))} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:border-emerald-500">{q}m</button>
-            ))}
+    <Sheet onClose={onClose} size="sm">
+      {(close) => (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-bold flex items-center gap-2"><Clock size={16} className="text-emerald-500" /> How long did it take?</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
           </div>
-        </div>
-
-        {/* Follow-up */}
-        <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium flex items-center gap-1.5"><CalendarClock size={15} className="text-indigo-500" /> Need a follow-up?</span>
-            <div className="flex gap-1">
-              <button onClick={() => setWantFollow(false)} className={'rounded-lg px-3 py-1 text-sm border ' + (!wantFollow ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>No</button>
-              <button onClick={() => setWantFollow(true)} className={'rounded-lg px-3 py-1 text-sm border ' + (wantFollow ? 'bg-indigo-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>Yes</button>
+          <p className="text-xs text-zinc-500 mb-3 line-clamp-1">“{task.title}”{task.estimateMin ? ` · est. ${mins(task.estimateMin)}` : ''}</p>
+          <div className="flex items-center gap-2">
+            <input type="number" min={1} autoFocus value={val} onChange={(e) => setVal(e.target.value)} className="w-24 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+            <span className="text-sm text-zinc-500">minutes</span>
+            <div className="flex gap-1 ml-auto">
+              {[15, 30, 60].map((q) => (
+                <button key={q} onClick={() => setVal(String(q))} className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:border-emerald-500">{q}m</button>
+              ))}
             </div>
           </div>
-          {wantFollow && (
-            <div className="mt-3 space-y-2">
-              <div className="flex flex-wrap gap-1.5">
-                {quick.map((q) => (
-                  <button key={q.date} onClick={() => setFuDate(q.date)} className={'rounded-full px-3 py-1 text-xs border ' + (fuDate === q.date ? 'bg-indigo-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-indigo-500')}>{q.label}</button>
-                ))}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400">or pick a date</span>
-                <input type="date" min={addDays(1)} value={fuDate} onChange={(e) => e.target.value && setFuDate(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-sm outline-none focus:border-indigo-500" />
-              </div>
-              <p className="text-[11px] text-zinc-400">I'll add “Follow up: {task.title}” to {prettyDate(fuDate)} and nudge you on Telegram that morning.</p>
-            </div>
-          )}
-        </div>
 
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={() => finish(undefined)} disabled={busy} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Skip time</button>
-          <button onClick={() => finish(val ? Number(val) : undefined)} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">Done ✓</button>
-        </div>
-      </div>
-    </div>
+          {/* Follow-up */}
+          <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-1.5"><CalendarClock size={15} className="text-indigo-500" /> Need a follow-up?</span>
+              <div className="flex gap-1">
+                <button onClick={() => setWantFollow(false)} className={'rounded-lg px-3 py-1 text-sm border ' + (!wantFollow ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>No</button>
+                <button onClick={() => setWantFollow(true)} className={'rounded-lg px-3 py-1 text-sm border ' + (wantFollow ? 'bg-indigo-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>Yes</button>
+              </div>
+            </div>
+            {wantFollow && (
+              <div className="mt-3 space-y-2">
+                <div className="flex flex-wrap gap-1.5">
+                  {quick.map((q) => (
+                    <button key={q.date} onClick={() => setFuDate(q.date)} className={'rounded-full px-3 py-1 text-xs border ' + (fuDate === q.date ? 'bg-indigo-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-indigo-500')}>{q.label}</button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-zinc-400">or pick a date</span>
+                  <input type="date" min={addDays(1)} value={fuDate} onChange={(e) => e.target.value && setFuDate(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-sm outline-none focus:border-indigo-500" />
+                </div>
+                <p className="text-[11px] text-zinc-400">I'll add “Follow up: {task.title}” to {prettyDate(fuDate)} and nudge you on Telegram that morning.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={() => finish(undefined)} disabled={busy} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Skip time</button>
+            <button onClick={() => finish(val ? Number(val) : undefined)} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">Done ✓</button>
+          </div>
+        </>
+      )}
+    </Sheet>
   );
 }
 

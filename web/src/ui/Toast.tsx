@@ -1,4 +1,5 @@
 import { createContext, ReactNode, useCallback, useContext, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 type Kind = 'success' | 'error';
 type Toast = { id: number; kind: Kind; msg: string };
@@ -15,16 +16,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 space-y-2 z-50">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className={'px-4 py-2 rounded-lg text-sm text-white shadow-lg ' + (t.kind === 'success' ? 'bg-emerald-600' : 'bg-red-600')}
-          >
-            {t.msg}
-          </div>
-        ))}
+      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-4 right-4 left-4 md:left-auto flex flex-col items-end gap-2 z-[70] pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              role="status"
+              layout
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              transition={{ type: 'spring', stiffness: 420, damping: 30 }}
+              className={'pointer-events-auto px-4 py-2.5 rounded-xl text-sm text-white shadow-lg max-w-[90vw] ' + (t.kind === 'success' ? 'bg-emerald-600' : 'bg-red-600')}
+            >
+              {t.msg}
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </Ctx.Provider>
   );

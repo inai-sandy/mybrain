@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, Brain, MessageCircle, Upload, Sun, Flame, Activity as ActivityIcon, FileText, Bookmark, Lightbulb, Wand2, ArrowRight, Fingerprint, Star, BookOpen, type LucideIcon } from 'lucide-react';
 import { openSearch } from '../ui/SearchOverlay';
+import { Skeleton } from '../ui/Skeleton';
 
 type Home = {
   today: { dumped: boolean; storyDone: boolean; counts: { total: number; done: number; open: number }; mustDos: { id: string; title: string; pinned: boolean; priority: string }[] };
@@ -81,8 +82,14 @@ export function Dashboard() {
                 {d!.today.mustDos.length === 0 && <li className="text-sm text-zinc-400">All done — nice. 🎉</li>}
               </ul>
             </>
+          ) : !d ? (
+            <div className="space-y-2">
+              <Skeleton className="h-3.5 w-3/4" />
+              <Skeleton className="h-3.5 w-1/2" />
+              <Skeleton className="h-3.5 w-2/3" />
+            </div>
           ) : (
-            <p className="text-sm text-zinc-500">{d ? 'No tasks yet — dump your brain to build today’s list.' : 'Loading…'}</p>
+            <p className="text-sm text-zinc-500">No tasks yet — dump your brain to build today’s list.</p>
           )}
           <div className="flex gap-1.5 mt-3">
             <Chip ok={d?.today.dumped} label="Brain dumped" />
