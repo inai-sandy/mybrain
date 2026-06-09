@@ -251,15 +251,27 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return row ? this.shapeDayStory(row) : null;
   }
 
-  /** At 11:58 PM local, write today's Story of the Day (and tomorrow's suggested tasks) if not done yet. */
+  /** At 11:58 PM local, write today's Story of the Day (and tomorrow's suggested tasks). If the
+   *  late-night window was missed (deploy/restart), catch up on YESTERDAY's story the next day. */
   async storyTick(): Promise<void> {
     const tz = await this.tz();
-    if (this.localHM(tz) < STORY_AT) return;
     const day = this.dayKey(tz);
-    if (await this.prisma.dayStory.findUnique({ where: { day } })) return;
-    await this.generateDayStory(day).catch(() => undefined);
-    // Tonight's story (day) drives tomorrow's suggestions (day + 1).
-    await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
+    if (this.localHM(tz) >= STORY_AT) {
+      if (await this.prisma.dayStory.findUnique({ where: { day } })) return;
+      await this.generateDayStory(day).catch(() => undefined);
+      // Tonight's story (day) drives tomorrow's suggestions (day + 1).
+      await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
+    } else {
+      const y = this.dayAdd(day, -1);
+      if (await this.prisma.dayStory.findUnique({ where: { day: y } })) return;
+      const [told, taskCount] = await Promise.all([
+        this.prisma.story.findFirst({ where: { day: y } }),
+        this.prisma.task.count({ where: { day: y } }),
+      ]);
+      if (!told && !taskCount) return; // nothing happened that day — nothing to backfill
+      await this.generateDayStory(y).catch(() => undefined);
+      await this.generateSuggestions(day).catch(() => undefined); // yesterday's story drives TODAY's picks
+    }
   }
 
   /** Weave the told story + the day's tasks + the activity timeline into one emotional Story of the Day. */

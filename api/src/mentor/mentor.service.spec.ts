@@ -42,7 +42,7 @@ function makeService(llmText: string | null) {
       findUnique: async ({ where }: any) => mentorDays.find((m) => m.day === where.day) || null,
       upsert: async ({ where, create, update }: any) => {
         const ex = mentorDays.find((m) => m.day === where.day);
-        if (ex) { Object.assign(ex, update); return ex; }
+        if (ex) { Object.assign(ex, update, { updatedAt: new Date() }); return ex; }
         const row = { id: `m${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...create };
         mentorDays.push(row);
         return row;
@@ -104,6 +104,19 @@ describe('MentorService', () => {
     const { svc } = makeService(null);
     const m = await svc.runMentorDay('2026-06-08');
     expect(m).toBeNull();
+  });
+
+  it('ensureFreshRead re-runs a read that predates its Story of the Day, and skips a fresh one', async () => {
+    const { svc, llm, mentorDays, dayStories } = makeService('{"adherenceScore":70,"guidance":"Fresh end-of-day read."}');
+    // stale: read written at 1 AM, story written at 11:58 PM the same day
+    mentorDays.push({ day: '2026-06-09', adherenceScore: 72, moodScore: null, guidance: 'Stale 1 AM read.', updatedAt: new Date('2026-06-08T19:30:00Z') });
+    dayStories.push({ day: '2026-06-09', text: 'The real day.', moodScore: 60, createdAt: new Date('2026-06-09T18:28:00Z') });
+    await svc.ensureFreshRead('2026-06-09');
+    expect(llm.completeWith).toHaveBeenCalledTimes(1); // re-ran
+    expect(mentorDays.find((m) => m.day === '2026-06-09')!.guidance).toContain('Fresh end-of-day');
+    // now it's fresh (updatedAt > story.createdAt) → a second ensure does nothing
+    await svc.ensureFreshRead('2026-06-09');
+    expect(llm.completeWith).toHaveBeenCalledTimes(1);
   });
 
   it('getDay returns a past day with the previous read\'s score for the delta', async () => {

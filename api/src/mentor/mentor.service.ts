@@ -249,18 +249,34 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ---- nightly ----
+
+  /** (Re)write a day's read unless one already exists that reflects the FINAL day (written after its
+   *  Story of the Day). A daytime "Get guidance now" must never block the end-of-day read, and a
+   *  missed 23:59 window (deploy/restart) gets caught up the next day. */
+  async ensureFreshRead(day: string): Promise<void> {
+    const [read, story] = await Promise.all([
+      this.prisma.mentorDay.findUnique({ where: { day } }),
+      this.prisma.dayStory.findUnique({ where: { day } }),
+    ]);
+    if (read && (!story || new Date(read.updatedAt) >= new Date(story.createdAt))) return; // already fresh
+    await this.runMentorDay(day, true).catch(() => undefined);
+  }
+
   async nightlyTick(): Promise<void> {
     const tz = await this.tz();
-    if (this.localHM(tz) < MENTOR_AT) return;
     const day = this.dayKey(tz);
 
-    // Make sure there are focus areas to mentor against — derive on first run, then every few days.
-    const haveAny = await this.prisma.focusArea.count({ where: { status: { not: 'archived' } } });
-    const lastDerive = (await this.prisma.setting.findUnique({ where: { key: 'mentor.lastDerive' } }))?.value;
-    const dueToDerive = !lastDerive || Date.now() - new Date(lastDerive).getTime() > DERIVE_EVERY_MS;
-    if (!haveAny || dueToDerive) await this.deriveFocusAreas().catch(() => undefined);
-
-    if (await this.prisma.mentorDay.findUnique({ where: { day } })) return;
-    await this.runMentorDay(day).catch(() => undefined);
+    if (this.localHM(tz) >= MENTOR_AT) {
+      // End of day: make sure there are focus areas to mentor against, then write tonight's read.
+      const haveAny = await this.prisma.focusArea.count({ where: { status: { not: 'archived' } } });
+      const lastDerive = (await this.prisma.setting.findUnique({ where: { key: 'mentor.lastDerive' } }))?.value;
+      const dueToDerive = !lastDerive || Date.now() - new Date(lastDerive).getTime() > DERIVE_EVERY_MS;
+      if (!haveAny || dueToDerive) await this.deriveFocusAreas().catch(() => undefined);
+      await this.ensureFreshRead(day);
+    } else {
+      // Catch-up: yesterday's read was missed (restart at 23:59) or is stale (a daytime manual
+      // run wrote it before the Story of the Day existed) — fix it now.
+      await this.ensureFreshRead(this.dayAdd(day, -1));
+    }
   }
 }
