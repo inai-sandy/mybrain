@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Pin, Archive, ArchiveRestore, Trash2, X, Mic, ListChecks, Tag as TagIcon, StickyNote } from 'lucide-react';
+import { Plus, Search, Pin, Archive, ArchiveRestore, Trash2, X, Mic, ListChecks, Tag as TagIcon, StickyNote, LayoutGrid, List as ListIcon } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useDictation } from '../ui/useDictation';
 import { Sheet } from '../ui/Sheet';
@@ -41,6 +41,13 @@ export function Notes() {
   const [color, setColor] = useState('');
   const [tag, setTag] = useState('');
   const [editing, setEditing] = useState<Note | 'new' | null>(null);
+  const [view, setView] = useState<'grid' | 'list'>(() => {
+    try { return (localStorage.getItem('notes-view') as 'grid' | 'list') || 'grid'; } catch { return 'grid'; }
+  });
+  function chooseView(v: 'grid' | 'list') {
+    setView(v);
+    try { localStorage.setItem('notes-view', v); } catch { /* ignore */ }
+  }
   const toast = useToast();
 
   async function load() {
@@ -91,9 +98,15 @@ export function Notes() {
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><StickyNote className="text-amber-500" /> Notes</h1>
           <p className="text-zinc-500 text-sm">Quick capture — colors &amp; tags, kept on your device only.</p>
         </div>
-        <button onClick={() => setArchived((a) => !a)} className={'shrink-0 text-xs inline-flex items-center gap-1 rounded-lg px-3 py-2 border ' + (archived ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
-          <Archive size={14} /> {archived ? 'Archived' : 'Archive'}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="inline-flex rounded-lg border border-zinc-200 dark:border-zinc-800 p-0.5">
+            <button onClick={() => chooseView('grid')} title="Grid" className={'p-1.5 rounded-md ' + (view === 'grid' ? 'bg-amber-500/15 text-amber-600' : 'text-zinc-400')}><LayoutGrid size={16} /></button>
+            <button onClick={() => chooseView('list')} title="List" className={'p-1.5 rounded-md ' + (view === 'list' ? 'bg-amber-500/15 text-amber-600' : 'text-zinc-400')}><ListIcon size={16} /></button>
+          </div>
+          <button onClick={() => setArchived((a) => !a)} title={archived ? 'Archived notes' : 'Show archived'} className={'text-xs inline-flex items-center gap-1 rounded-lg px-2.5 py-2 border ' + (archived ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
+            <Archive size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Take a note */}
@@ -134,9 +147,9 @@ export function Notes() {
           {archived ? 'No archived notes.' : q || color || tag ? 'No notes match.' : 'No notes yet — tap “Take a note…” to add one.'}
         </div>
       ) : (
-        <div className="columns-1 sm:columns-2 lg:columns-3 gap-3">
+        <div className={view === 'grid' ? 'columns-2 md:columns-3 xl:columns-4 gap-2.5' : 'columns-1 gap-2.5 max-w-2xl'}>
           {filtered.map((n) => (
-            <NoteCard key={n.id} n={n} onOpen={() => setEditing(n)} onPin={() => patch(n.id, { pinned: !n.pinned } as any)} onArchive={() => patch(n.id, { archived: !n.archived } as any)} onDelete={() => remove(n.id)} onToggleCheck={(i) => toggleCheck(n, i)} />
+            <NoteCard key={n.id} n={n} compact={view === 'grid'} onOpen={() => setEditing(n)} onPin={() => patch(n.id, { pinned: !n.pinned } as any)} onArchive={() => patch(n.id, { archived: !n.archived } as any)} onDelete={() => remove(n.id)} onToggleCheck={(i) => toggleCheck(n, i)} />
           ))}
         </div>
       )}
@@ -148,19 +161,19 @@ export function Notes() {
   );
 }
 
-function NoteCard({ n, onOpen, onPin, onArchive, onDelete, onToggleCheck }: { n: Note; onOpen: () => void; onPin: () => void; onArchive: () => void; onDelete: () => void; onToggleCheck: (i: number) => void }) {
+function NoteCard({ n, compact, onOpen, onPin, onArchive, onDelete, onToggleCheck }: { n: Note; compact: boolean; onOpen: () => void; onPin: () => void; onArchive: () => void; onDelete: () => void; onToggleCheck: (i: number) => void }) {
   const strip = COLORS[n.color] || 'transparent';
   return (
-    <div className="break-inside-avoid mb-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden group">
+    <div className="break-inside-avoid mb-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden group">
       {n.color !== 'default' && <div style={{ height: 5, background: strip }} />}
-      <div className="p-3.5 cursor-pointer" onClick={onOpen}>
-        <div className="flex items-start gap-2">
-          {n.title && <h3 className="font-semibold text-sm flex-1 min-w-0 break-words">{n.title}</h3>}
-          <button onClick={(e) => { e.stopPropagation(); onPin(); }} title={n.pinned ? 'Unpin' : 'Pin'} className={'shrink-0 -mt-0.5 ' + (n.pinned ? 'text-amber-500' : 'text-zinc-300 dark:text-zinc-600 opacity-0 group-hover:opacity-100')}>
+      <div className={'cursor-pointer ' + (compact ? 'p-2.5' : 'p-3.5')} onClick={onOpen}>
+        <div className="flex items-start gap-1.5">
+          {n.title && <h3 className={'font-semibold flex-1 min-w-0 break-words ' + (compact ? 'text-[13px]' : 'text-sm')}>{n.title}</h3>}
+          <button onClick={(e) => { e.stopPropagation(); onPin(); }} title={n.pinned ? 'Unpin' : 'Pin'} className={'shrink-0 -mt-0.5 ' + (n.pinned ? 'text-amber-500' : 'text-zinc-300 dark:text-zinc-600 opacity-60 sm:opacity-0 sm:group-hover:opacity-100')}>
             <Pin size={15} className={n.pinned ? 'fill-amber-500' : ''} />
           </button>
         </div>
-        {n.content && <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words mt-1 line-clamp-[12]">{n.content}</p>}
+        {n.content && <p className={'text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words mt-1 ' + (compact ? 'text-[13px] line-clamp-[10]' : 'text-sm line-clamp-[14]')}>{n.content}</p>}
         {n.checklist.length > 0 && (
           <ul className="mt-2 space-y-1">
             {n.checklist.slice(0, 8).map((c, i) => (
@@ -180,7 +193,7 @@ function NoteCard({ n, onOpen, onPin, onArchive, onDelete, onToggleCheck }: { n:
           </div>
         )}
       </div>
-      <div className="flex items-center justify-end gap-0.5 px-2 pb-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center justify-end gap-0.5 px-1.5 pb-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
         <button onClick={onArchive} title={n.archived ? 'Unarchive' : 'Archive'} className="p-1.5 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">{n.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
         <button onClick={onDelete} title="Delete" className="p-1.5 rounded text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Trash2 size={14} /></button>
       </div>
