@@ -11,6 +11,14 @@ export class MentorController {
     return this.mentor.overview(days ? Number(days) : 30);
   }
 
+  /** One past day's guidance + score (with the previous day's score for the delta). */
+  @Get('day')
+  async day(@Query('day') day?: string) {
+    if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new BadRequestException('Pick a day');
+    const r = await this.mentor.getDay(day);
+    return r || { day, missing: true };
+  }
+
   // ---- focus areas ----
   @Get('focus')
   async focus() {

@@ -28,7 +28,17 @@ function makeService(llmText: string | null) {
       },
     },
     mentorDay: {
-      findMany: async ({ where }: any = {}) => mentorDays.filter((m) => !where?.day?.gte || m.day >= where.day.gte).sort((a, b) => a.day.localeCompare(b.day)),
+      findMany: async ({ where, orderBy, take }: any = {}) => {
+        let rows = mentorDays.filter((m) => (!where?.day?.gte || m.day >= where.day.gte) && (!where?.day?.lt || m.day < where.day.lt));
+        rows = rows.sort((a, b) => (orderBy?.day === 'desc' ? b.day.localeCompare(a.day) : a.day.localeCompare(b.day)));
+        return take ? rows.slice(0, take) : rows;
+      },
+      findFirst: async ({ where, orderBy }: any = {}) => {
+        const rows = mentorDays
+          .filter((m) => !where?.day?.lt || m.day < where.day.lt)
+          .sort((a, b) => (orderBy?.day === 'desc' ? b.day.localeCompare(a.day) : a.day.localeCompare(b.day)));
+        return rows[0] || null;
+      },
       findUnique: async ({ where }: any) => mentorDays.find((m) => m.day === where.day) || null,
       upsert: async ({ where, create, update }: any) => {
         const ex = mentorDays.find((m) => m.day === where.day);
@@ -42,10 +52,10 @@ function makeService(llmText: string | null) {
     story: { findFirst: async ({ where }: any) => stories.filter((s) => s.day === where.day).slice(-1)[0] || null, findMany: async () => stories.slice() },
     task: { findMany: async ({ where }: any = {}) => tasks.filter((t) => !where?.day || t.day === where.day) },
   };
-  const llm: any = { completeWith: async () => llmText };
+  const llm: any = { completeWith: jest.fn(async () => llmText) };
   const prompts: any = { get: async (k: string) => `[${k}]` };
   const tasksSvc: any = { listModels: async () => [] };
-  return { svc: new MentorService(prisma, llm, prompts, tasksSvc), focus, mentorDays, dayStories, stories, tasks };
+  return { svc: new MentorService(prisma, llm, prompts, tasksSvc), llm, focus, mentorDays, dayStories, stories, tasks };
 }
 
 describe('MentorService', () => {
@@ -94,5 +104,26 @@ describe('MentorService', () => {
     const { svc } = makeService(null);
     const m = await svc.runMentorDay('2026-06-08');
     expect(m).toBeNull();
+  });
+
+  it('getDay returns a past day with the previous read\'s score for the delta', async () => {
+    const { svc, mentorDays } = makeService(null);
+    mentorDays.push({ day: '2026-06-07', adherenceScore: 40, moodScore: 50, guidance: 'Day one.' });
+    mentorDays.push({ day: '2026-06-08', adherenceScore: 72, moodScore: 80, guidance: 'Day two.' });
+    const d = await svc.getDay('2026-06-08');
+    expect(d!.guidance).toBe('Day two.');
+    expect(d!.prev).toEqual({ day: '2026-06-07', adherenceScore: 40 });
+    expect(await svc.getDay('2026-06-01')).toBeNull(); // no read that day
+  });
+
+  it('the nightly read is told yesterday\'s score and never reads its own same-day draft as yesterday', async () => {
+    const { svc, llm, mentorDays, dayStories } = makeService('{"adherenceScore":72,"guidance":"Yesterday 40, today 72 — the Beakn push did it."}');
+    mentorDays.push({ day: '2026-06-07', adherenceScore: 40, moodScore: null, guidance: 'Push the Excel file.' });
+    mentorDays.push({ day: '2026-06-08', adherenceScore: 55, moodScore: null, guidance: 'Old same-day draft.' });
+    dayStories.push({ day: '2026-06-08', text: 'Big Beakn day.', moodScore: 80 });
+    await svc.runMentorDay('2026-06-08', true); // force re-run of a day that already has a draft
+    const prompt: string = llm.completeWith.mock.calls[0][1];
+    expect(prompt).toContain('Score: 40/100 (2026-06-07)'); // yesterday = the prior day...
+    expect(prompt).not.toContain('Old same-day draft'); // ...never its own earlier draft
   });
 });

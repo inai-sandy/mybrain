@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Compass, Sparkles, Plus, Check, X, Trash2, RefreshCw, TrendingUp, Target } from 'lucide-react';
+import { Compass, Sparkles, Plus, Check, X, Trash2, RefreshCw, TrendingUp, Target, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Focus = { id: string; title: string; description?: string | null; source: string; status: string };
-type MentorDay = { day: string; adherenceScore: number; moodScore?: number | null; guidance: string };
+type MentorDay = { day: string; adherenceScore: number; moodScore?: number | null; guidance: string; prev?: { day: string; adherenceScore: number } | null; missing?: boolean };
 type Trend = { day: string; adherence: number; mood?: number | null };
 type Overview = {
   focusAreas: { active: Focus[]; proposed: Focus[] };
@@ -23,13 +23,30 @@ export function Mentor() {
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [selDay, setSelDay] = useState<string | null>(null); // null = latest
+  const [dayData, setDayData] = useState<MentorDay | null>(null);
   const toast = useToast();
 
-  async function load() {
+  async function load(target?: string | null) {
     const r = await fetch('/api/mentor/overview');
-    if (r.ok) setO(await r.json());
+    if (r.ok) {
+      const j = await r.json();
+      setO(j);
+      // (re)load the shown day — explicit target, else the user's selection, else the latest read
+      const want = target !== undefined ? target : selDay;
+      const d = want || j.latest?.day;
+      if (d) loadDay(d);
+    }
   }
-  useEffect(() => { load(); }, []);
+  async function loadDay(d: string) {
+    const r = await fetch(`/api/mentor/day?day=${d}`);
+    if (r.ok) setDayData(await r.json());
+  }
+  function pickDay(d: string) {
+    setSelDay(d);
+    loadDay(d);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   async function derive() {
     setBusy(true);
@@ -44,7 +61,7 @@ export function Mentor() {
     try {
       const r = await fetch('/api/mentor/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
       const j = await r.json();
-      if (r.ok && j.guidance) { toast('success', 'Guidance refreshed'); load(); }
+      if (r.ok && j.guidance) { toast('success', 'Guidance refreshed'); setSelDay(null); load(null); }
       else toast('error', j.message || 'Tell your story or finish a task first');
     } finally { setBusy(false); }
   }
@@ -62,6 +79,16 @@ export function Mentor() {
   const active = o.focusAreas.active;
   const proposed = o.focusAreas.proposed;
 
+  // Day navigation across the days that actually have a read (from the trend series).
+  const days = o.trend.map((t) => t.day);
+  const shown: MentorDay | null = dayData || o.latest;
+  const curDay = shown?.day || null;
+  const idx = curDay ? days.indexOf(curDay) : -1;
+  const prevDay = idx > 0 ? days[idx - 1] : null;
+  const nextDay = idx >= 0 && idx < days.length - 1 ? days[idx + 1] : null;
+  const delta = shown && !shown.missing && shown.prev ? shown.adherenceScore - shown.prev.adherenceScore : null;
+  const isLatest = !!curDay && curDay === o.latest?.day;
+
   return (
     <div className="space-y-5 max-w-3xl">
       <div className="flex items-start justify-between gap-3">
@@ -72,16 +99,37 @@ export function Mentor() {
         <button onClick={run} disabled={busy} className="shrink-0 text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><RefreshCw size={12} /> {busy ? '…' : 'Refresh'}</button>
       </div>
 
-      {/* Guidance */}
+      {/* Guidance — browse any past day with ◀ ▶, the date picker, or by tapping a bar in the graph */}
       <section className="rounded-xl border border-indigo-300/50 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-5">
+        {shown && (
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <button onClick={() => prevDay && pickDay(prevDay)} disabled={!prevDay} aria-label="Previous day" className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-indigo-400 disabled:opacity-30"><ChevronLeft size={15} /></button>
+              <div className="text-center min-w-0">
+                <div className="font-semibold text-sm truncate">{curDay ? prettyDay(curDay) : '—'}{isLatest && <span className="ml-1.5 text-[11px] font-normal text-indigo-500">latest</span>}</div>
+              </div>
+              <button onClick={() => nextDay && pickDay(nextDay)} disabled={!nextDay} aria-label="Next day" className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-indigo-400 disabled:opacity-30"><ChevronRight size={15} /></button>
+            </div>
+            <input type="date" value={curDay || ''} max={o.latest?.day} onChange={(e) => e.target.value && pickDay(e.target.value)} className="shrink-0 rounded-lg bg-white/60 dark:bg-zinc-950/60 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs" />
+          </div>
+        )}
         <div className="flex items-center justify-between mb-2">
-          <h2 className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-indigo-400" /> Your guidance
-            {o.latest && <span className="text-xs font-normal text-zinc-500">· {prettyDay(o.latest.day)}</span>}
-          </h2>
-          {o.latest && <span className="text-xs rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 px-2 py-0.5">on-track {o.latest.adherenceScore}/100</span>}
+          <h2 className="flex items-center gap-2 font-semibold"><Sparkles size={16} className="text-indigo-400" /> Your guidance</h2>
+          {shown && !shown.missing && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-xs rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 px-2 py-0.5">on-track {shown.adherenceScore}/100</span>
+              {delta !== null && delta !== 0 && (
+                <span className={'text-xs rounded-full px-2 py-0.5 font-medium ' + (delta > 0 ? 'bg-emerald-500/15 text-emerald-600' : 'bg-rose-500/15 text-rose-600')}>
+                  {delta > 0 ? '▲' : '▼'} {delta > 0 ? '+' : ''}{delta} vs prev
+                </span>
+              )}
+            </span>
+          )}
         </div>
-        {o.latest ? (
-          <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{o.latest.guidance}</p>
+        {shown && shown.missing ? (
+          <p className="text-sm text-zinc-500">No mentor read for this day. Pick another day, or tap a bar in the graph below.</p>
+        ) : shown ? (
+          <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{shown.guidance}</p>
         ) : (
           <div className="text-sm text-zinc-500">
             <p className="mb-3">Your Mentor writes guidance each night after your Story of the Day. Want a read now?</p>
@@ -152,11 +200,11 @@ export function Mentor() {
           <h2 className="flex items-center gap-2 font-semibold"><TrendingUp size={16} className="text-indigo-500" /> Are you following it?</h2>
           {o.avgAdherence !== null && <span className="text-xs text-zinc-500">avg on-track {o.avgAdherence}/100 · {o.days}d</span>}
         </div>
-        <TrendChart trend={o.trend} />
+        <TrendChart trend={o.trend} selected={curDay} onPick={pickDay} />
         <div className="flex items-center justify-center gap-4 mt-2 text-[11px] text-zinc-500">
           <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-indigo-500/80" /> On-track (bars)</span>
           <span className="inline-flex items-center gap-1"><span className="h-1 w-4 rounded bg-amber-400" /> Mood / wellbeing (line)</span>
-          <span className="hidden sm:inline text-zinc-400">· tap a bar for the day</span>
+          <span className="text-zinc-400">· tap a bar to open that day</span>
         </div>
       </section>
     </div>
@@ -168,8 +216,8 @@ function shortDate(day: string): string {
   return `${d}/${m}`;
 }
 
-/** Daily on-track bars (indigo) with the mood/wellbeing line drawn over the top (amber). */
-function TrendChart({ trend }: { trend: Trend[] }) {
+/** Daily on-track bars (indigo) with the mood/wellbeing line drawn over the top (amber). Bars are tappable. */
+function TrendChart({ trend, selected, onPick }: { trend: Trend[]; selected: string | null; onPick: (day: string) => void }) {
   if (!trend.length) return <p className="text-sm text-zinc-400 text-center py-8">Your trend appears once you have a few nightly reads.</p>;
   const W = 640, H = 180, padL = 26, padR = 8, padT = 10, padB = 22;
   const n = trend.length;
@@ -194,13 +242,18 @@ function TrendChart({ trend }: { trend: Trend[] }) {
           <text x={padL - 6} y={y(g) + 3} textAnchor="end" className="fill-zinc-400 text-[9px]">{g}</text>
         </g>
       ))}
-      {/* on-track bars */}
+      {/* on-track bars — tap to open that day's guidance (full-height hit area so thin bars are easy to tap) */}
       {trend.map((t, i) => {
         const h = (t.adherence / 100) * plotH;
+        const sel = t.day === selected;
         return (
-          <rect key={i} x={cx(i) - barW / 2} y={padT + plotH - h} width={barW} height={h} rx={2} className="fill-indigo-500/80">
-            <title>{`${t.day} — on-track ${t.adherence}/100${typeof t.mood === 'number' ? ` · mood ${t.mood}/100` : ''}`}</title>
-          </rect>
+          <g key={i} onClick={() => onPick(t.day)} className="cursor-pointer">
+            <rect x={cx(i) - slot / 2} y={padT} width={slot} height={plotH} fill="transparent" />
+            <rect x={cx(i) - barW / 2} y={padT + plotH - h} width={barW} height={h} rx={2} className={sel ? 'fill-indigo-600' : 'fill-indigo-500/60 hover:fill-indigo-500'}>
+              <title>{`${t.day} — on-track ${t.adherence}/100${typeof t.mood === 'number' ? ` · mood ${t.mood}/100` : ''} · tap to open`}</title>
+            </rect>
+            {sel && <rect x={cx(i) - barW / 2 - 2} y={padT + plotH - h - 2} width={barW + 4} height={h + 4} rx={3} fill="none" className="stroke-indigo-400" strokeWidth={1.5} />}
+          </g>
         );
       })}
       {/* mood line over the bars */}

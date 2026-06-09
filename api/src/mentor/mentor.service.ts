@@ -168,6 +168,14 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     return { day: m.day, adherenceScore: m.adherenceScore, moodScore: m.moodScore, guidance: m.guidance, createdAt: m.createdAt };
   }
 
+  /** One day's read + the previous existing read's score (for the "vs yesterday" delta). */
+  async getDay(day: string) {
+    const row = await this.prisma.mentorDay.findUnique({ where: { day } });
+    if (!row) return null;
+    const prev = await this.prisma.mentorDay.findFirst({ where: { day: { lt: day } }, orderBy: { day: 'desc' } });
+    return { ...this.shapeMentorDay(row), prev: prev ? { day: prev.day, adherenceScore: prev.adherenceScore } : null };
+  }
+
   /** Compare the day to the active focus areas, write guidance + an adherence score. */
   async runMentorDay(day: string, force = false) {
     if (!force) {
@@ -179,7 +187,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.task.findMany({ where: { day } }),
       this.prisma.focusArea.findMany({ where: { status: 'active' }, orderBy: { createdAt: 'asc' } }),
-      this.prisma.mentorDay.findMany({ orderBy: { day: 'desc' }, take: 4 }),
+      // strictly PRIOR days, so a re-run never reads its own earlier draft as "yesterday"
+      this.prisma.mentorDay.findMany({ where: { day: { lt: day } }, orderBy: { day: 'desc' }, take: 4 }),
     ]);
 
     const narrative = dayStory?.text || told?.rawText || '';
@@ -188,7 +197,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}`);
     const openList = dayTasks.filter((t) => t.status !== 'done').map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}%)` : ''}`);
     const focusLines = focus.map((f) => `- ${f.title}${f.description ? `: ${f.description}` : ''}`);
-    const recentGuide = recent.reverse().map((m) => `(${m.day}, score ${m.adherenceScore}) ${m.guidance.slice(0, 200)}`);
+    const yesterday = recent[0] || null; // most recent prior read
+    const recentGuide = [...recent].reverse().map((m) => `(${m.day}, score ${m.adherenceScore}) ${m.guidance.slice(0, 300)}`);
 
     const tmpl = await this.prompts.get('mentor.guidance');
     const prompt =
@@ -197,7 +207,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `=== TODAY (${day}) ===\n` +
       `Story of the Day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
       `Finished:\n${doneList.join('\n') || '(none)'}\n\nStill open:\n${openList.join('\n') || '(none)'}\n\n` +
-      `=== YOUR RECENT GUIDANCE ===\n${recentGuide.join('\n') || '(this is your first note to him)'}`;
+      `=== YESTERDAY ===\n${yesterday ? `Score: ${yesterday.adherenceScore}/100 (${yesterday.day}). Your note to him was:\n${yesterday.guidance.slice(0, 600)}` : '(no prior read — this is your first note to him)'}\n\n` +
+      `=== YOUR EARLIER NOTES ===\n${recentGuide.join('\n') || '(none)'}`;
 
     const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200))?.trim() || '';
     let guidance = raw;
