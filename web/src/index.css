@@ -11,3 +11,20 @@
     max-width: 100%;
   }
 }
+
+/* MOBILE TYPING FIX —
+   iOS Safari auto-zooms into any input whose text is smaller than 16px (the app uses 14px
+   everywhere), and never zooms back out. Forcing 16px on form controls on phones stops the
+   page from zooming when you focus a field, and gives comfortable touch targets. */
+@media (max-width: 768px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px !important;
+    line-height: 1.4;
+  }
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select {
+    min-height: 44px;
+  }
+}
