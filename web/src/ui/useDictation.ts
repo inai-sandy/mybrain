@@ -9,6 +9,10 @@ function setStatus(s: Partial<Status>) {
   status = { ...status, ...s };
   subs.forEach((f) => f());
 }
+/** True while ANY mic is recording/transcribing — used to protect modals from closing mid-dictation. */
+export function isDictating(): boolean {
+  return status.phase !== 'idle';
+}
 
 export function useDictationStatus(): Status {
   const [, force] = useState(0);
@@ -22,15 +26,20 @@ export function useDictationStatus(): Status {
   return status;
 }
 
+const SILENCE_MS = 2200; // auto-finish after this much quiet (once you've started speaking)
+const MAX_MS = 90_000; // hard cap on a single dictation
+
 /**
- * Record-then-transcribe dictation. Records mic audio in the browser, then sends it to the
- * server's high-accuracy speech-to-text engine (GPT-4o Transcribe + cleanup) — far better than
- * the old browser SpeechRecognition. onText receives the finished, cleaned transcript.
+ * Record-then-transcribe dictation with hands-free auto-stop: tap the mic, speak, and it finalizes
+ * itself when you pause (no need to reach for a Stop button). Audio is sent to the server's
+ * high-accuracy engine (GPT-4o Transcribe + cleanup). onText receives the finished transcript.
  */
 export function useDictation(onText: (chunk: string) => void) {
   const recRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<any>(null);
+  const rafRef = useRef<any>(null);
   const [listening, setListening] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -40,16 +49,71 @@ export function useDictation(onText: (chunk: string) => void) {
     typeof window !== 'undefined' &&
     typeof (window as any).MediaRecorder !== 'undefined';
 
+  function teardownMeter() {
+    if (rafRef.current) {
+      clearTimeout(rafRef.current);
+      rafRef.current = null;
+    }
+    try {
+      audioCtxRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    audioCtxRef.current = null;
+  }
+
   function releaseStream() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
   }
 
   function stop() {
+    teardownMeter();
     try {
       if (recRef.current && recRef.current.state !== 'inactive') recRef.current.stop();
     } catch {
       /* ignore */
+    }
+  }
+
+  /** Listen to the mic level and auto-stop after a pause (once the user has actually spoken). */
+  function startSilenceWatch(stream: MediaStream) {
+    try {
+      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      audioCtxRef.current = ctx;
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      const startedAt = Date.now();
+      let lastSound = Date.now();
+      let spoke = false;
+      const tick = () => {
+        if (!audioCtxRef.current) return;
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) {
+          const d = data[i] - 128;
+          sum += d * d;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        const now = Date.now();
+        if (rms > 4) {
+          lastSound = now;
+          spoke = true;
+        }
+        if ((spoke && now - lastSound > SILENCE_MS) || now - startedAt > MAX_MS) {
+          stop();
+          return;
+        }
+        rafRef.current = setTimeout(tick, 120);
+      };
+      rafRef.current = setTimeout(tick, 250);
+    } catch {
+      /* no silence detection — manual stop still works */
     }
   }
 
@@ -71,6 +135,7 @@ export function useDictation(onText: (chunk: string) => void) {
       if (e.data && e.data.size) chunksRef.current.push(e.data);
     };
     rec.onstop = async () => {
+      teardownMeter();
       releaseStream();
       setListening(false);
       const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' });
@@ -98,6 +163,7 @@ export function useDictation(onText: (chunk: string) => void) {
     };
     recRef.current = rec;
     rec.start();
+    startSilenceWatch(stream);
     setListening(true);
     setStatus({ listening: true, phase: 'listening', interim: '', stop });
   }

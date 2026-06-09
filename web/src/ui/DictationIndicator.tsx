@@ -22,7 +22,7 @@ export function DictationIndicator() {
         <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
       </span>
       <Mic size={15} className="shrink-0 text-rose-300" />
-      <span className="text-sm">Listening… speak naturally, then tap Stop</span>
+      <span className="text-sm">Listening… just speak — it finishes when you pause</span>
       <button
         onClick={stop}
         className="ml-1 shrink-0 inline-flex items-center gap-1 rounded-full bg-rose-500 hover:bg-rose-400 px-3 py-1 text-xs font-semibold"

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { useDictation } from '../ui/useDictation';
+import { useDictation, isDictating } from '../ui/useDictation';
 
 export type Task = {
   id: string;
@@ -143,7 +143,7 @@ export function DumpModal({ onClose, onDone, initialQuestion }: { onClose: () =>
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={() => { if (!isDictating()) onClose(); }}>
       <div className="w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-bold flex items-center gap-2"><Brain className="text-emerald-500" size={18} /> Dump your brain</h3>
