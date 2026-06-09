@@ -14,6 +14,7 @@ import { Tasks } from './pages/Tasks';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
 import { Mentor } from './pages/Mentor';
+import { Notes } from './pages/Notes';
 import { Chat } from './pages/Chat';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
@@ -87,6 +88,7 @@ function AuthedApp() {
         <Route path="chat" element={<Chat />} />
         <Route path="activity" element={<Activity />} />
         <Route path="mentor" element={<Mentor />} />
+        <Route path="notes" element={<Notes />} />
         <Route path="settings" element={<Settings email={email} />} />
         <Route path="*" element={<Dashboard />} />
       </Route>

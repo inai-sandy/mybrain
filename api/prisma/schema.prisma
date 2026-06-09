@@ -155,6 +155,20 @@ model PersonalityInsight {
   createdAt  DateTime @default(now())
 }
 
+/// A quick-capture note (Google Keep style) — LOCAL ONLY, never synced to RAG/SuperMemory.
+model Note {
+  id        String   @id @default(uuid())
+  title     String?
+  content   String? // plain-text body
+  checklist String? // JSON array of { text, done } for checklist notes
+  color     String   @default("default") // color key, shown as a top strip
+  tags      String? // JSON array of strings
+  pinned    Boolean  @default(false)
+  archived  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// A focus area / direction the Mentor tracks — derived from stories or set by the user, then confirmed.
 model FocusArea {
   id          String   @id @default(uuid())
