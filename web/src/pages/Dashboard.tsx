@@ -112,11 +112,15 @@ export function Dashboard() {
             <h2 className="flex items-center gap-1.5 font-semibold text-sm"><ActivityIcon size={16} className="text-emerald-500" /> Your pulse</h2>
             <button onClick={() => navigate('/activity')} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5">Activity <ArrowRight size={12} /></button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-            <Mini icon={Flame} value={String(d?.insights.streak ?? '—')} label="streak" />
-            <Mini value={d ? `${d.insights.followThrough}%` : '—'} label="follow-through" />
-            <Mini value={d ? mins(d.insights.minutesSpent) : '—'} label="time spent" />
-            <Mini value={aiWeek === null ? '—' : '$' + (aiWeek > 0 && aiWeek < 0.01 ? aiWeek.toFixed(4) : aiWeek.toFixed(2))} label="AI this week" />
+          {/* Slim one-line strip — four stats always fit on one row, even on a phone */}
+          <div className="flex items-center mb-3 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 px-1 py-2">
+            <Pulse icon={Flame} value={String(d?.insights.streak ?? '—')} label="streak" />
+            <Dot />
+            <Pulse value={d ? `${d.insights.followThrough}%` : '—'} label="follow-through" />
+            <Dot />
+            <Pulse value={d ? mins(d.insights.minutesSpent) : '—'} label="time spent" />
+            <Dot />
+            <Pulse value={aiWeek === null ? '—' : '$' + (aiWeek > 0 && aiWeek < 0.01 ? aiWeek.toFixed(4) : aiWeek.toFixed(2))} label="AI this week" />
           </div>
           {d?.insights.daySummary ? (
             <p className="text-xs text-zinc-500 line-clamp-3 border-l-2 border-emerald-500/40 pl-2">{d.insights.daySummary}</p>
@@ -175,13 +179,16 @@ function Action({ icon: Icon, label, onClick }: { icon: LucideIcon; label: strin
     </button>
   );
 }
-function Mini({ icon: Icon, value, label }: { icon?: LucideIcon; value: string; label: string }) {
+function Pulse({ icon: Icon, value, label }: { icon?: LucideIcon; value: string; label: string }) {
   return (
-    <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 p-2 text-center">
-      <div className="text-lg font-extrabold tabular-nums flex items-center justify-center gap-1">{Icon && <Icon size={14} className="text-amber-500" />}{value}</div>
-      <div className="text-[10px] text-zinc-400">{label}</div>
+    <div className="flex-1 min-w-0 text-center">
+      <div className="text-base font-extrabold tabular-nums whitespace-nowrap flex items-center justify-center gap-1">{Icon && <Icon size={13} className="text-amber-500 shrink-0" />}{value}</div>
+      <div className="text-[9px] text-zinc-400 truncate px-0.5">{label}</div>
     </div>
   );
+}
+function Dot() {
+  return <span className="shrink-0 text-zinc-300 dark:text-zinc-600 select-none">·</span>;
 }
 function Count({ icon: Icon, label, value, onClick }: { icon: LucideIcon; label: string; value?: number; onClick: () => void }) {
   return (
