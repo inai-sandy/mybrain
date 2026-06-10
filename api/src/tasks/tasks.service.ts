@@ -231,6 +231,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return rows.map((t) => this.shape(t));
   }
 
+  /** All tasks planned/finished on one day (for the history calendar). */
+  async forDay(day: string) {
+    const rows = await this.prisma.task.findMany({ where: { day } });
+    return this.sortTasks(rows).map((t) => this.shape(t));
+  }
+
   /** Manually add a single task (no dump). */
   async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
     const title = String(data.title || '').trim().slice(0, 160);

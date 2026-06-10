@@ -146,6 +146,16 @@ describe('TasksService', () => {
     expect(tasks.filter((t) => t.followUp)).toHaveLength(0);
   });
 
+  it('forDay returns only that day\'s tasks, done and open', async () => {
+    const { svc, tasks } = makeService(null);
+    tasks.push({ id: 'a', day: '2026-06-01', status: 'done', title: 'Old win', priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() });
+    tasks.push({ id: 'b', day: '2026-06-01', status: 'open', title: 'Old open', priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() });
+    tasks.push({ id: 'c', day: '2026-06-02', status: 'done', title: 'Other day', priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() });
+    const list = await svc.forDay('2026-06-01');
+    expect(list).toHaveLength(2);
+    expect(list.map((t) => t.id).sort()).toEqual(['a', 'b']);
+  });
+
   it('falls back to a single task if the LLM is unavailable so nothing is lost', async () => {
     const { svc } = makeService(null);
     const res = await svc.dump('one big messy thought');
