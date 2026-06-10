@@ -16,7 +16,8 @@ function timeOf(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
-function StoryModal({ initial, onClose, onSaved }: { initial: Story | null; onClose: () => void; onSaved: () => void }) {
+/** The story-telling window. Pass `day` + `title` to narrate a past day (from Activity); without them it saves for today. */
+export function StoryModal({ initial, day, title, onClose, onSaved }: { initial: { text?: string; mood?: string | null } | null; day?: string; title?: string; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(initial?.text || '');
   const [mood, setMood] = useState(initial?.mood || '');
   const [busy, setBusy] = useState(false);
@@ -27,9 +28,10 @@ function StoryModal({ initial, onClose, onSaved }: { initial: Story | null; onCl
     if (!text.trim()) return;
     setBusy(true);
     try {
-      const r = await fetch('/api/daily/story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mood: mood || undefined }) });
+      const r = await fetch('/api/daily/story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mood: mood || undefined, day }) });
       if (r.ok) {
-        toast('success', 'Story saved — sleep well 🌙');
+        const j = await r.json().catch(() => ({} as any));
+        toast('success', j?.rewriting ? 'Story saved — rewriting that day’s Story of the Day ✨' : 'Story saved — sleep well 🌙');
         onSaved();
         onClose();
       } else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
@@ -45,7 +47,7 @@ function StoryModal({ initial, onClose, onSaved }: { initial: Story | null; onCl
       {(close) => (
         <>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> Tonight's story</h3>
+            <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> {title || "Tonight's story"}</h3>
             <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
           </div>
           <p className="text-xs text-zinc-500 mb-3">Tell the story of your day — the problems, the wins, what happened. Type or speak it. This is how the app comes to understand you.</p>

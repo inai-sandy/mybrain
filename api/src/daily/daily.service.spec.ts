@@ -154,6 +154,24 @@ describe('DailyService', () => {
     expect(second!.mood).toBe('🤩 Great');
   });
 
+  it('saves a story for a past day (the morning-after catch-up) but never for the future', async () => {
+    const { svc, stories } = makeService();
+    const past = await svc.submitStory('told the next morning on the commute', 'app', undefined, '2026-06-01');
+    expect(past!.day).toBe('2026-06-01');
+    const future = await svc.submitStory('time travel', 'app', undefined, '2099-01-01');
+    expect(future!.day).not.toBe('2099-01-01'); // clamped to today
+    expect(stories.find((s) => s.day === '2026-06-01')).toBeTruthy();
+  });
+
+  it('rewrites an already-written Story of the Day when the user narrates that day later', async () => {
+    const { svc, dayStories } = makeService({ llmText: '{"story":"Rewritten around his own words.","mood":"reflective","moodScore":70}' });
+    dayStories.push({ id: 'ds-old', day: '2026-06-01', text: 'Written without his story.', createdAt: new Date(0), updatedAt: new Date(0) });
+    const out = await svc.submitStory('what really happened that day', 'app', undefined, '2026-06-01');
+    expect(out!.rewriting).toBe(true);
+    await new Promise((r) => setTimeout(r, 0)); // let the background rewrite finish
+    expect(dayStories[0].text).toContain('Rewritten');
+  });
+
   it('captures daytime notes and reports them in today()', async () => {
     const { svc } = makeService();
     await svc.addNote('shipped the tasks feature');

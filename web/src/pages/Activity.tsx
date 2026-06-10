@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { StoryModal } from './DailyStory';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
 type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number };
@@ -87,6 +88,7 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
   }
 
   const [genStory, setGenStory] = useState(false);
+  const [telling, setTelling] = useState(false);
   async function buildStory(force = false) {
     if (!day) return;
     setGenStory(true);
@@ -158,11 +160,33 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
         )}
       </section>
 
-      {data?.story && (
-        <section className="rounded-xl border border-indigo-300/40 dark:border-indigo-500/30 bg-indigo-500/5 p-4">
-          <h2 className="flex items-center gap-2 font-semibold text-sm mb-1.5"><Moon size={15} className="text-indigo-400" /> Your story {data.story.mood && <span className="text-xs font-normal">· {data.story.mood}</span>}</h2>
+      {/* Your story — always available, for today or any past day; saving rewrites that day's Story of the Day */}
+      <section className="rounded-xl border border-indigo-300/40 dark:border-indigo-500/30 bg-indigo-500/5 p-4">
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="flex items-center gap-2 font-semibold text-sm"><Moon size={15} className="text-indigo-400" /> Your story {data?.story?.mood && <span className="text-xs font-normal">· {data.story.mood}</span>}</h2>
+          {data?.story && <button onClick={() => setTelling(true)} className="text-xs text-indigo-500 hover:underline">Edit</button>}
+        </div>
+        {data?.story ? (
           <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">{data.story.text}</p>
-        </section>
+        ) : (
+          <div className="text-sm text-zinc-500">
+            <p className="mb-3">{data?.isToday ? 'Tell the story of your day — type or speak it. This is how the app comes to understand you.' : 'You didn’t tell this day’s story — you still can. The Story of the Day will rewrite itself around your words.'}</p>
+            <button onClick={() => setTelling(true)} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 text-sm inline-flex items-center gap-1.5"><Mic size={14} /> Tell this day’s story</button>
+          </div>
+        )}
+      </section>
+      {telling && day && (
+        <StoryModal
+          initial={data?.story || null}
+          day={day}
+          title={data?.isToday ? "Tonight's story" : `Story for ${prettyDay(day)}`}
+          onClose={() => setTelling(false)}
+          onSaved={() => {
+            load(day);
+            // the Story of the Day rewrite runs in the background — refresh again once it has had time to finish
+            setTimeout(() => load(day), 12000);
+          }}
+        />
       )}
 
       <section>

@@ -77,15 +77,20 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
   // ---- nightly story (one per day) ----
 
-  async submitStory(rawText: string, source = 'app', mood?: string) {
+  async submitStory(rawText: string, source = 'app', mood?: string, forDay?: string) {
     const text = (rawText || '').trim();
     if (!text) return null;
-    const day = this.dayKey(await this.tz());
+    const today = this.dayKey(await this.tz());
+    // Telling a past day's story (e.g. the morning after) is allowed; the future is not.
+    const day = forDay && /^\d{4}-\d{2}-\d{2}$/.test(forDay) && forDay <= today ? forDay : today;
     const existing = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const row = existing
       ? await this.prisma.story.update({ where: { id: existing.id }, data: { rawText: text, source, mood: mood ?? existing.mood } })
       : await this.prisma.story.create({ data: { day, rawText: text, source, mood: mood || null } });
-    return this.shapeStory(row);
+    // If that day's Story of the Day was already written, rewrite it around the user's own words.
+    const woven = await this.prisma.dayStory.findUnique({ where: { day } });
+    if (woven) this.generateDayStory(day, true).catch(() => undefined);
+    return { ...this.shapeStory(row), rewriting: !!woven };
   }
 
   private shapeStory(s: any) {

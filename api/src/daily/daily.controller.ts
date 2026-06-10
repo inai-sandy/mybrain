@@ -36,9 +36,9 @@ export class DailyController {
   }
 
   @Post('story')
-  async story(@Body() body: { text?: string; source?: string; mood?: string }) {
+  async story(@Body() body: { text?: string; source?: string; mood?: string; day?: string }) {
     if (!body?.text?.trim()) throw new BadRequestException('Tell your story first');
-    return this.daily.submitStory(body.text, body.source || 'app', body.mood);
+    return this.daily.submitStory(body.text, body.source || 'app', body.mood, body.day);
   }
 
   // ---- Story of the Day (nightly woven narrative) ----
