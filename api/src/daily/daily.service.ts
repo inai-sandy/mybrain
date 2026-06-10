@@ -192,7 +192,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Other activity in the app:\n${activityLines.join('\n') || '(none)'}\n\n` +
       `His story of the day${story?.mood ? ` (mood: ${story.mood})` : ''}:\n${story?.rawText?.slice(0, 2000) || '(not told)'}`;
 
-    const text = (await this.llm.completeWith(await this.tasks.getModel(), prompt, 900))?.trim() || this.fallbackSummary(st, doneList, openList);
+    const text = (await this.llm.completeWith(await this.tasks.getModel(), prompt, 900, 'day-summary'))?.trim() || this.fallbackSummary(st, doneList, openList);
     const stats = JSON.stringify(st);
     const row = await this.prisma.daySummary.upsert({
       where: { day },
@@ -308,7 +308,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `ACTIVITY TIMELINE:\n${activityLines.join('\n') || '(quiet day in the app)'}`;
 
     const cfg = await this.storyModel();
-    const raw = (await this.llm.completeWith(cfg, prompt, 1400))?.trim() || '';
+    const raw = (await this.llm.completeWith(cfg, prompt, 1400, 'story-of-day'))?.trim() || '';
     let text = raw;
     let mood: string | null = told?.mood || null;
     let moodScore: number | null = null;
@@ -366,7 +366,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `ALREADY ON HIS LIST (do NOT suggest these — they roll over automatically):\n${openList.join('\n') || '(none)'}\n\n` +
       `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}).`;
 
-    const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900, 'suggested-tasks'))?.trim() || '';
     let suggestions: { title: string; category?: string; reason?: string }[] = [];
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -505,7 +505,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       (rejected.length ? `Rejected (do not repeat):\n${rejected.join('\n')}\n` : '') +
       `\nEVIDENCE:\n${evidence}`;
 
-    const text = await this.llm.completeWith(await this.tasks.getModel(), prompt, 1500);
+    const text = await this.llm.completeWith(await this.tasks.getModel(), prompt, 1500, 'personality');
     let parsed: { summary?: string; insights?: { dimension: string; claim: string; evidence?: string }[] } | null = null;
     try {
       parsed = text ? JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) : null;

@@ -42,7 +42,7 @@ export class SkillsService {
     if (!content?.trim()) return fb;
     const tmpl = await this.prompts.get('skills.describe');
     const prompt = `${tmpl}\n\nSKILL.md:\n${content.slice(0, 5000)}`;
-    const text = await this.llm.complete(prompt, 200);
+    const text = await this.llm.complete(prompt, 200, 'skill-describe');
     return (text?.trim() || fb).slice(0, 600);
   }
 

@@ -327,9 +327,96 @@ function UsageCard() {
               <p className="text-sm text-zinc-400">OpenAI only shares spend with an <b>Admin key</b>. Create one at platform.openai.com (Settings → API keys → Admin keys, usage-read scope) and paste it in Integrations → “OpenAI Admin (usage)”.</p>
             )}
           </div>
+          <RequestLog />
         </div>
       )}
     </section>
+  );
+}
+
+const FEATURE_NAMES: Record<string, string> = {
+  chat: 'Chat', 'chat-router': 'Chat routing', 'task-dump': 'Brain dump → tasks', 'story-of-day': 'Story of the Day',
+  'day-summary': 'Day summary', 'suggested-tasks': 'Suggested tasks', 'mentor-guidance': 'Mentor guidance',
+  'mentor-focus': 'Mentor focus areas', personality: 'Personality', 'voice-cleanup': 'Voice cleanup',
+  'voice-transcribe': 'Voice transcription', 'capture-enrich': 'Capture enrichment', 'idea-organize': 'Ideas organizer',
+  'skill-describe': 'Skill description', other: 'Other',
+};
+const fName = (f: string) => FEATURE_NAMES[f] || f;
+
+type FeatRow = { feature: string; cost: number; requests: number };
+type ReqRow = { id: string; at: string; feature: string; model: string; cost: number | null };
+
+function RequestLog() {
+  const [feats, setFeats] = useState<{ features: FeatRow[]; totalCost: number; totalRequests: number } | null>(null);
+  const [reqs, setReqs] = useState<ReqRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    fetch('/api/usage/features?days=7').then((r) => r.json()).then(setFeats).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    fetch(`/api/usage/requests?limit=25${filter ? `&feature=${filter}` : ''}`)
+      .then((r) => r.json())
+      .then((d) => { setReqs(d.requests || []); setTotal(d.total || 0); })
+      .catch(() => undefined);
+  }, [filter]);
+
+  async function loadMore() {
+    const r = await fetch(`/api/usage/requests?limit=25&offset=${reqs.length}${filter ? `&feature=${filter}` : ''}`);
+    if (r.ok) { const d = await r.json(); setReqs((xs) => [...xs, ...(d.requests || [])]); }
+  }
+  const maxCost = Math.max(0.000001, ...(feats?.features.map((f) => f.cost) || [0]));
+
+  return (
+    <>
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">By feature — last 7 days{feats ? ` · ${fmtUsd(feats.totalCost)} · ${feats.totalRequests} requests` : ''}</div>
+        {feats && feats.features.length ? (
+          <div className="space-y-1.5">
+            {feats.features.map((f) => (
+              <div key={f.feature} className="flex items-center gap-2 text-sm">
+                <span className="w-40 shrink-0 truncate text-zinc-600 dark:text-zinc-300">{fName(f.feature)}</span>
+                <div className="flex-1 h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-full bg-emerald-500" style={{ width: `${Math.max(2, Math.round((f.cost / maxCost) * 100))}%` }} />
+                </div>
+                <span className="w-20 text-right tabular-nums text-zinc-500 text-xs shrink-0">{fmtUsd(f.cost)}</span>
+                <span className="w-12 text-right tabular-nums text-zinc-400 text-[11px] shrink-0">{f.requests}×</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-400">No requests logged yet — every AI call is recorded from now on, so this fills up as you use the app.</p>
+        )}
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Recent requests{total ? ` · ${total}` : ''}</div>
+          <select aria-label="Filter by feature" value={filter} onChange={(e) => setFilter(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
+            <option value="">All features</option>
+            {(feats?.features || []).map((f) => <option key={f.feature} value={f.feature}>{fName(f.feature)}</option>)}
+          </select>
+        </div>
+        {reqs.length ? (
+          <div className="rounded-lg border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
+            {reqs.map((r) => (
+              <div key={r.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                <span className="w-28 shrink-0 text-zinc-400 tabular-nums">{new Date(r.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="flex-1 min-w-0 truncate text-zinc-600 dark:text-zinc-300">{fName(r.feature)}</span>
+                <span className="hidden sm:block w-40 shrink-0 truncate text-zinc-400">{r.model.replace(/^.*\//, '')}</span>
+                <span className="w-16 text-right tabular-nums shrink-0">{r.cost === null ? '—' : fmtUsd(r.cost)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-zinc-400">Nothing yet{filter ? ' for this feature' : ''}.</p>
+        )}
+        {reqs.length < total && (
+          <button onClick={loadMore} className="mt-2 text-xs text-emerald-600 hover:underline">Load more ({total - reqs.length} older)</button>
+        )}
+      </div>
+    </>
   );
 }
 

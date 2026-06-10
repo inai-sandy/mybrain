@@ -134,7 +134,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `Days of data available: ${dayStories.length} stories. If this is small (under ~5), be especially cautious and propose at most one focus area, or none.`;
 
     const tmpl = await this.prompts.get('mentor.focus');
-    const raw = (await this.llm.completeWith(await this.mentorModel(), `${tmpl}\n\n${corpus}`, 900))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.mentorModel(), `${tmpl}\n\n${corpus}`, 900, 'mentor-focus'))?.trim() || '';
     let proposed: { title: string; description?: string }[] = [];
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -210,7 +210,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `=== YESTERDAY ===\n${yesterday ? `Score: ${yesterday.adherenceScore}/100 (${yesterday.day}). Your note to him was:\n${yesterday.guidance.slice(0, 600)}` : '(no prior read — this is your first note to him)'}\n\n` +
       `=== YOUR EARLIER NOTES ===\n${recentGuide.join('\n') || '(none)'}`;
 
-    const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200, 'mentor-guidance'))?.trim() || '';
     let guidance = raw;
     let adherenceScore = dayStory?.moodScore ?? 50;
     try {

@@ -10,6 +10,7 @@ function make(opts: { keys?: Record<string, any>; settings?: Record<string, stri
         return { key: where.key, value: settings[where.key] };
       },
     },
+    usageLog: { create: async () => ({}) },
   };
   const keys = opts.keys ?? { openai: { apiKey: 'oa' } };
   const connectors: any = { get: async (n: string) => keys[n] ?? null };

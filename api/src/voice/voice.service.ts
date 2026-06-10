@@ -77,9 +77,16 @@ export class VoiceService {
   async transcribe(buf: Buffer, filename = 'audio.webm', mime = 'audio/webm'): Promise<string> {
     if (!buf?.length) return '';
     const engine = await this.getEngine();
+    let used: Engine = engine;
     let text = await this.run(engine, buf, filename, mime).catch(() => null);
-    if (!text && engine !== 'openai') text = await this.run('openai', buf, filename, mime).catch(() => null);
+    if (!text && engine !== 'openai') {
+      used = 'openai';
+      text = await this.run('openai', buf, filename, mime).catch(() => null);
+    }
     if (!text) return '';
+    // Log the request (STT providers don't return a $ figure — cost stays in the provider totals).
+    const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
+    await this.prisma.usageLog.create({ data: { feature: 'voice-transcribe', model: sttModel[used], cost: null } }).catch(() => undefined);
     if (await this.cleanupOn()) text = await this.clean(text).catch(() => text);
     return (text || '').trim();
   }
@@ -163,7 +170,7 @@ export class VoiceService {
     const raw = (text || '').trim();
     if (raw.length < 3) return raw; // nothing meaningful to clean
     const tmpl = await this.prompts.get('voice.cleanup');
-    const out = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300)))?.trim();
+    const out = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300), 'voice-cleanup'))?.trim();
     if (!out) return raw;
     // Guard against the model "replying" instead of cleaning (e.g. on garbled/non-speech input).
     const looksLikeMeta = /\b(i don'?t see|please provide|no (transcript|text)|i can'?t|as an ai|it (looks|seems) like)\b/i.test(out) && out.length > raw.length + 40;

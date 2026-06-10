@@ -179,7 +179,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const convo = recent.map((m) => `${m.role}: ${m.content}`).join('\n').slice(-2000);
     const tmpl = await this.prompts.get('chat.router');
     const prompt = `${tmpl}\n\n` + (session.summary ? `Earlier summary: ${session.summary}\n` : '') + `Conversation:\n${convo}\n\nNew message: ${text}`;
-    const out = await this.llm.completeWith(await this.getModel(), prompt, 150);
+    const out = await this.llm.completeWith(await this.getModel(), prompt, 150, 'chat-router');
     try {
       const j = JSON.parse(out!.slice(out!.indexOf('{'), out!.lastIndexOf('}') + 1));
       return { search: !!j.search, query: String(j.query || text) };
@@ -229,7 +229,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     }
     const sources = await this.toSources(hits);
     const prompt = await this.buildAnswerPrompt({ scope, summary: null }, [], clean, hits, true);
-    const raw = (await this.llm.completeWith(await this.getModel(), prompt, 800)) || '';
+    const raw = (await this.llm.completeWith(await this.getModel(), prompt, 800, 'chat')) || '';
     return { answer: this.splitAnswer(raw).answer, sources };
   }
 
@@ -277,7 +277,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async answer(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<{ answer: string; followups: string[] }> {
-    const raw = (await this.llm.completeWith(await this.getModel(), await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800)) || '';
+    const raw = (await this.llm.completeWith(await this.getModel(), await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800, 'chat')) || '';
     return this.splitAnswer(raw);
   }
 
@@ -310,7 +310,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
     const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, didSearch);
     const cfg = await this.getModel();
-    const full = (await this.llm.completeStream(cfg, prompt, 800, onToken)) || '';
+    const full = (await this.llm.completeStream(cfg, prompt, 800, onToken, 'chat')) || '';
     const { answer, followups } = this.splitAnswer(full);
 
     const aMsg = await this.prisma.chatMessage.create({

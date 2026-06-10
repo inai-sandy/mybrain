@@ -13,7 +13,7 @@ export class EnrichmentService {
     const prompt =
       `Summarise the document in ONE short sentence and give 3-4 short lowercase topical tags (1-2 words each).\n` +
       `Respond with ONLY JSON: {"summary":"...","tags":["..",".."]}\n\nTitle: ${title}\n\nDocument:\n${doc}`;
-    const text = await this.llm.complete(prompt, 300);
+    const text = await this.llm.complete(prompt, 300, 'capture-enrich');
     if (!text) return null;
     try {
       const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));

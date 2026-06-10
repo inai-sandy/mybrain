@@ -110,7 +110,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   private async craft(dump: string): Promise<{ question?: string; tasks: CraftedTask[] } | null> {
     const tmpl = await this.prompts.get('tasks.dump');
     const prompt = `${tmpl}\n\nBrain-dump:\n${dump.slice(0, 8000)}`;
-    const text = await this.llm.completeWith(await this.getModel(), prompt, 2000);
+    const text = await this.llm.completeWith(await this.getModel(), prompt, 2000, 'task-dump');
     if (!text) return null;
     try {
       const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));

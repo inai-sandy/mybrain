@@ -28,7 +28,7 @@ export class IdeasService {
   private async craft(dump: string): Promise<{ title: string; content: string; research: string } | null> {
     const tmpl = await this.prompts.get('ideas.organize');
     const prompt = `${tmpl}\n\nBrain-dump:\n${dump.slice(0, 6000)}`;
-    const text = await this.llm.complete(prompt, 1200);
+    const text = await this.llm.complete(prompt, 1200, 'idea-organize');
     if (!text) return null;
     try {
       const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));

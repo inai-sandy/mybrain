@@ -45,13 +45,30 @@ export class LlmService {
     }
   }
 
+  /** Record one AI request's cost (never blocks or fails the actual request). */
+  private async logUsage(feature: string, model: string, usage: any): Promise<void> {
+    try {
+      await this.prisma.usageLog.create({
+        data: {
+          feature,
+          model,
+          promptTokens: usage?.prompt_tokens ?? usage?.input_tokens ?? null,
+          completionTokens: usage?.completion_tokens ?? usage?.output_tokens ?? null,
+          cost: typeof usage?.cost === 'number' ? usage.cost : null,
+        },
+      });
+    } catch {
+      /* usage logging must never break the request */
+    }
+  }
+
   /** Single-shot completion via the app's default provider+model. Returns text, or null if unavailable. */
-  async complete(prompt: string, maxTokens = 400): Promise<string | null> {
-    return this.completeWith(await this.getConfig(), prompt, maxTokens);
+  async complete(prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
+    return this.completeWith(await this.getConfig(), prompt, maxTokens, label);
   }
 
   /** Single-shot completion forcing a specific provider+model (e.g. the Tasks engine's Sonnet). */
-  async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400): Promise<string | null> {
+  async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     try {
       if (cfg.provider === 'anthropic') {
@@ -64,6 +81,7 @@ export class LlmService {
         });
         if (!r.ok) return null;
         const d: any = await r.json();
+        await this.logUsage(label, cfg.model, d?.usage); // tokens only — Anthropic doesn't return $ cost
         return d?.content?.[0]?.text ?? null;
       }
       if (cfg.provider === 'openrouter') {
@@ -72,10 +90,12 @@ export class LlmService {
         const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+          // usage.include → OpenRouter returns the exact cost of THIS request in the response
+          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, usage: { include: true }, messages: [{ role: 'user', content: prompt }] }),
         });
         if (!r.ok) return null;
         const d: any = await r.json();
+        await this.logUsage(label, cfg.model, d?.usage);
         return d?.choices?.[0]?.message?.content ?? null;
       }
     } catch {
@@ -85,7 +105,7 @@ export class LlmService {
   }
 
   /** Streaming completion — calls onToken as text arrives, returns the full text. Falls back to non-streaming for Anthropic. */
-  async completeStream(cfg: LlmConfig | null, prompt: string, maxTokens: number, onToken: (t: string) => void): Promise<string | null> {
+  async completeStream(cfg: LlmConfig | null, prompt: string, maxTokens: number, onToken: (t: string) => void, label = 'chat'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     if (cfg.provider === 'openrouter') {
       try {
@@ -94,25 +114,28 @@ export class LlmService {
         const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, stream: true, messages: [{ role: 'user', content: prompt }] }),
+          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, stream: true, usage: { include: true }, messages: [{ role: 'user', content: prompt }] }),
         });
         if (!r.ok || !r.body) return null;
-        return await this.readSse(r.body as any, onToken);
+        const { full, usage } = await this.readSse(r.body as any, onToken);
+        await this.logUsage(label, cfg.model, usage);
+        return full;
       } catch {
         return null;
       }
     }
     // Anthropic (or anything else): no streaming here — emit the whole thing once.
-    const full = await this.completeWith(cfg, prompt, maxTokens);
+    const full = await this.completeWith(cfg, prompt, maxTokens, label);
     if (full) onToken(full);
     return full;
   }
 
-  private async readSse(body: any, onToken: (t: string) => void): Promise<string> {
+  private async readSse(body: any, onToken: (t: string) => void): Promise<{ full: string; usage: any }> {
     const reader = body.getReader();
     const dec = new TextDecoder();
     let buf = '';
     let full = '';
+    let usage: any = null;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -125,13 +148,15 @@ export class LlmService {
         const data = t.slice(5).trim();
         if (!data || data === '[DONE]') continue;
         try {
-          const tok = JSON.parse(data)?.choices?.[0]?.delta?.content;
+          const j = JSON.parse(data);
+          const tok = j?.choices?.[0]?.delta?.content;
           if (tok) { full += tok; onToken(tok); }
+          if (j?.usage) usage = j.usage; // final chunk carries the cost when usage.include is on
         } catch {
           /* ignore keep-alive / partial */
         }
       }
     }
-    return full;
+    return { full, usage };
   }
 }

@@ -155,6 +155,17 @@ model PersonalityInsight {
   createdAt  DateTime @default(now())
 }
 
+/// One AI request's cost record (feature label + model + tokens + exact OpenRouter cost).
+model UsageLog {
+  id               String   @id @default(uuid())
+  at               DateTime @default(now())
+  feature          String // chat | chat-router | task-dump | story-of-day | mentor-guidance | voice-cleanup | …
+  model            String
+  promptTokens     Int?
+  completionTokens Int?
+  cost             Float? // USD — exact from OpenRouter; null where the provider doesn't report it
+}
+
 /// A quick-capture note (Google Keep style) — LOCAL ONLY, never synced to RAG/SuperMemory.
 model Note {
   id        String   @id @default(uuid())
