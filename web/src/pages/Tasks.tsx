@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Star } from 'lucide-react';
+import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Star, StickyNote, ChevronDown } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Task, TaskCard, DumpModal, TaskFormModal, DoneModal, useToday, mins } from './taskShared';
 
@@ -190,6 +190,7 @@ function TaskHistory() {
   const [months, setMonths] = useState(3);
   const [sel, setSel] = useState<string | null>(null);
   const [dayTasks, setDayTasks] = useState<Task[] | null>(null);
+  const [openNotes, setOpenNotes] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     fetch(`/api/daily/calendar?months=${months}`)
@@ -287,22 +288,38 @@ function TaskHistory() {
           <p className="text-sm text-zinc-400">Loading…</p>
         ) : finished.length ? (
           <ul className="space-y-2">
-            {finished.map((t) => (
-              <li key={t.id} className="flex items-start gap-2.5 rounded-lg border border-zinc-100 dark:border-zinc-800 p-2.5">
-                <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium break-words">
-                    {t.pinned && <Star size={12} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
-                    {t.title}
+            {finished.map((t) => {
+              const open = !!openNotes[t.id];
+              return (
+                <li key={t.id} className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-2.5">
+                  <div
+                    className={'flex items-start gap-2.5 ' + (t.note ? 'cursor-pointer' : '')}
+                    onClick={() => t.note && setOpenNotes((m) => ({ ...m, [t.id]: !m[t.id] }))}
+                  >
+                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium break-words">
+                        {t.pinned && <Star size={12} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
+                        {t.title}
+                      </div>
+                      <div className="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-zinc-400">
+                        {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+                        {t.actualMin ? <span>took {mins(t.actualMin)}</span> : null}
+                        {t.completedAt && <span>at {new Date(t.completedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}
+                        {t.note && (
+                          <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + (open ? 'bg-amber-500/15 text-amber-600' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}>
+                            <StickyNote size={10} /> notes <ChevronDown size={10} className={'transition-transform ' + (open ? 'rotate-180' : '')} />
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-zinc-400">
-                    {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
-                    {t.actualMin ? <span>took {mins(t.actualMin)}</span> : null}
-                    {t.completedAt && <span>at {new Date(t.completedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>}
-                  </div>
-                </div>
-              </li>
-            ))}
+                  {t.note && open && (
+                    <p className="mt-2 ml-[26px] rounded-lg bg-zinc-50 dark:bg-zinc-800/60 border-l-2 border-amber-400 px-3 py-2 text-xs text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words">{t.note}</p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <p className="text-sm text-zinc-400">Nothing finished on this day.</p>
