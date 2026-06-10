@@ -55,7 +55,7 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
   const toast = useToast();
 
   async function load(d?: string) {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const r = await fetch('/api/daily/activity' + (d ? `?day=${d}` : ''));
       if (r.ok) {
@@ -467,7 +467,7 @@ function SuggestedView() {
   const toast = useToast();
 
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const r = await fetch('/api/daily/suggestions');
       if (r.ok) {

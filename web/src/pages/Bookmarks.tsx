@@ -182,7 +182,7 @@ export function Bookmarks() {
   const gridCls = view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2';
 
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const [r1, r2] = await Promise.all([fetch('/api/bookmarks'), fetch('/api/bookmarks/status')]);
       if (r1.ok) setItems((await r1.json()).items || []);

@@ -58,7 +58,7 @@ export function DocumentsList({ onCount }: { onCount?: (n: number) => void }) {
   const navigate = useNavigate();
 
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     const r = await fetch('/api/items');
     if (r.ok) {
       const d = await r.json();

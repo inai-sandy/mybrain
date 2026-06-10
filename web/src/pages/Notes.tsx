@@ -51,7 +51,7 @@ export function Notes() {
   const toast = useToast();
 
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const r = await fetch(`/api/notes?archived=${archived ? 1 : 0}`);
       if (r.ok) setNotes((await r.json()).notes || []);

@@ -88,7 +88,7 @@ export function Ideas() {
   const navigate = useNavigate();
 
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const r = await fetch('/api/ideas');
       if (r.ok) setIdeas((await r.json()).ideas || []);

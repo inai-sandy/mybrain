@@ -400,7 +400,7 @@ export function useToday() {
   const [data, setData] = useState<TodayData | null>(null);
   const [loading, setLoading] = useState(true);
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const r = await fetch('/api/tasks/today');
       if (r.ok) setData(await r.json());

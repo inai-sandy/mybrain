@@ -138,7 +138,7 @@ export function Skills() {
   const navigate = useNavigate();
 
   async function load() {
-    setLoading(true);
+    // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
       const r = await fetch('/api/skills');
       if (r.ok) setSkills((await r.json()).skills || []);
