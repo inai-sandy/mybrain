@@ -29,9 +29,18 @@ function mins(n: number): string {
 export function Dashboard() {
   const navigate = useNavigate();
   const [d, setD] = useState<Home | null>(null);
+  const [aiWeek, setAiWeek] = useState<number | null>(null);
 
   useEffect(() => {
     fetch('/api/home').then((r) => (r.ok ? r.json() : null)).then(setD).catch(() => undefined);
+    fetch('/api/usage')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((u) => {
+        if (!u) return;
+        const wk = (u.openrouter?.week ?? 0) + (u.openai?.available ? u.openai.week ?? 0 : 0);
+        setAiWeek(wk);
+      })
+      .catch(() => undefined);
   }, []);
 
   const now = new Date();
@@ -103,10 +112,11 @@ export function Dashboard() {
             <h2 className="flex items-center gap-1.5 font-semibold text-sm"><ActivityIcon size={16} className="text-emerald-500" /> Your pulse</h2>
             <button onClick={() => navigate('/activity')} className="text-xs text-emerald-600 hover:underline inline-flex items-center gap-0.5">Activity <ArrowRight size={12} /></button>
           </div>
-          <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
             <Mini icon={Flame} value={String(d?.insights.streak ?? '—')} label="streak" />
             <Mini value={d ? `${d.insights.followThrough}%` : '—'} label="follow-through" />
             <Mini value={d ? mins(d.insights.minutesSpent) : '—'} label="time spent" />
+            <Mini value={aiWeek === null ? '—' : '$' + (aiWeek > 0 && aiWeek < 0.01 ? aiWeek.toFixed(4) : aiWeek.toFixed(2))} label="AI this week" />
           </div>
           {d?.insights.daySummary ? (
             <p className="text-xs text-zinc-500 line-clamp-3 border-l-2 border-emerald-500/40 pl-2">{d.insights.daySummary}</p>

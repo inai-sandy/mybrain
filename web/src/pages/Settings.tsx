@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -17,6 +17,7 @@ const INTEGRATIONS: Integration[] = [
   { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude models direct', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openrouter', label: 'OpenRouter', desc: 'One gateway to many models (Claude, GPT, Gemini…)', icon: Boxes, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openai', label: 'OpenAI', desc: 'Powers voice-to-text (GPT-4o Transcribe) + Whisper', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'openai_admin', label: 'OpenAI Admin (usage)', desc: 'Optional — unlocks your OpenAI spend in the API-usage card. Create an Admin key with the usage-read scope at platform.openai.com → Settings → API keys.', icon: Sparkles, fields: [{ key: 'apiKey', label: 'Admin key', type: 'password' }] },
   { name: 'elevenlabs', label: 'ElevenLabs', desc: 'Optional voice engine — Scribe (most accurate on English)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'deepgram', label: 'Deepgram', desc: 'Optional voice engine — Nova-3 (fast)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
 ];
@@ -254,9 +255,88 @@ function AiModelCard() {
   );
 }
 
+type UsageData = {
+  openrouter: { today: number; week: number; month: number; total: number; credits: { total: number; used: number; remaining: number } | null } | null;
+  openai: { available: boolean; today?: number; week?: number; month?: number; reason?: string };
+};
+function fmtUsd(n?: number): string {
+  if (n === undefined || n === null) return '—';
+  if (n > 0 && n < 0.01) return '$' + n.toFixed(4);
+  return '$' + n.toFixed(2);
+}
+
+function UsageCard() {
+  const [u, setU] = useState<UsageData | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    fetch('/api/usage').then((r) => r.json()).then(setU).catch(() => setFailed(true));
+  }, []);
+  const or = u?.openrouter;
+  const oa = u?.openai;
+  const pct = or?.credits && or.credits.total > 0 ? Math.min(100, Math.round((or.credits.used / or.credits.total) * 100)) : null;
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1"><Wallet size={18} className="text-emerald-600" /> API usage</h2>
+      <p className="text-sm text-zinc-500 mb-4">What your AI actually costs — fetched live from the providers (refreshed every few minutes).</p>
+      {failed ? (
+        <p className="text-sm text-zinc-400">Couldn’t load usage right now.</p>
+      ) : !u ? (
+        <p className="text-sm text-zinc-400">Loading…</p>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">OpenRouter — this app</div>
+            {or ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[['Today', or.today], ['This week', or.week], ['This month', or.month], ['All-time', or.total]].map(([label, val]) => (
+                    <div key={label as string} className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 p-2.5 text-center">
+                      <div className="text-lg font-extrabold tabular-nums">{fmtUsd(val as number)}</div>
+                      <div className="text-[10px] text-zinc-400">{label}</div>
+                    </div>
+                  ))}
+                </div>
+                {or.credits && (
+                  <div className="mt-3">
+                    <div className="flex justify-between text-xs text-zinc-500 mb-1">
+                      <span>Account credits (all your OpenRouter apps)</span>
+                      <span className="tabular-nums">{fmtUsd(or.credits.remaining)} left of {fmtUsd(or.credits.total)}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                      <div className={'h-full ' + ((pct ?? 0) > 90 ? 'bg-rose-500' : (pct ?? 0) > 75 ? 'bg-amber-500' : 'bg-emerald-500')} style={{ width: `${pct ?? 0}%` }} />
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-zinc-400">Connect your OpenRouter key in Integrations to see usage.</p>
+            )}
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">OpenAI — voice transcription</div>
+            {oa?.available ? (
+              <div className="grid grid-cols-3 gap-2">
+                {[['Today', oa.today], ['This week', oa.week], ['30 days', oa.month]].map(([label, val]) => (
+                  <div key={label as string} className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 p-2.5 text-center">
+                    <div className="text-lg font-extrabold tabular-nums">{fmtUsd(val as number)}</div>
+                    <div className="text-[10px] text-zinc-400">{label}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-400">OpenAI only shares spend with an <b>Admin key</b>. Create one at platform.openai.com (Settings → API keys → Admin keys, usage-read scope) and paste it in Integrations → “OpenAI Admin (usage)”.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ModelsSection() {
   return (
     <div className="space-y-4">
+      <UsageCard />
       <AiModelCard />
       <ChatModelCard />
       <BookmarksModelCard />
