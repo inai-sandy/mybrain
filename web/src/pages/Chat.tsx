@@ -100,7 +100,7 @@ export function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => v
           </div>
         )}
         {onStar && !temp && (
-          <div className={'mt-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ' + (user ? 'justify-end' : '')}>
+          <div className={'mt-1.5 flex items-center gap-0.5 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity ' + (user ? 'justify-end' : '')}>
             {!user && <button onClick={copy} title="Copy" className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">{copied ? <Check size={13} /> : <Copy size={13} />}</button>}
             <button onClick={() => onStar(m)} title={m.starred ? 'Unstar' : 'Star this message'} className={'p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (m.starred ? 'text-amber-500' : 'text-zinc-400 hover:text-amber-500')}><Star size={13} className={m.starred ? 'fill-amber-500' : ''} /></button>
           </div>
@@ -268,8 +268,8 @@ export function Chat() {
                 <button key={s.id} onClick={() => openSession(s.id)} className={'group w-full text-left rounded-lg px-3 py-2 flex items-center gap-2 ' + (active?.id === s.id ? 'bg-emerald-500/10' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800')}>
                   <ss.icon size={15} className="text-zinc-400 shrink-0" />
                   <span className="flex-1 min-w-0 truncate text-sm">{s.pinned && <Pin size={11} className="inline -mt-0.5 mr-1 text-emerald-500 fill-emerald-500" />}{s.title}</span>
-                  <Pin size={13} onClick={(e) => togglePin(s, e)} className={'shrink-0 opacity-0 group-hover:opacity-100 hover:text-emerald-600 ' + (s.pinned ? 'text-emerald-500' : 'text-zinc-400')} />
-                  <Trash2 size={13} onClick={(e) => { e.stopPropagation(); setDelFor(s); }} className="shrink-0 opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-rose-600" />
+                  <Pin size={13} onClick={(e) => togglePin(s, e)} className={'shrink-0 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 hover:text-emerald-600 ' + (s.pinned ? 'text-emerald-500' : 'text-zinc-400')} />
+                  <Trash2 size={13} onClick={(e) => { e.stopPropagation(); setDelFor(s); }} className="shrink-0 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 text-zinc-400 hover:text-rose-600" />
                 </button>
               );
             })}

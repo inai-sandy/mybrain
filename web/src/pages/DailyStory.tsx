@@ -149,7 +149,7 @@ export function StorySection() {
               <li key={n.id} className="group flex items-start gap-2 text-sm">
                 <span className="text-[11px] text-zinc-400 tabular-nums pt-0.5 w-12 shrink-0">{timeOf(n.createdAt)}</span>
                 <span className="flex-1 text-zinc-700 dark:text-zinc-300">{n.text}</span>
-                <button onClick={() => delNote(n.id)} className="opacity-0 group-hover:opacity-100 p-0.5 text-zinc-400 hover:text-rose-600"><Trash2 size={13} /></button>
+                <button onClick={() => delNote(n.id)} className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 p-0.5 text-zinc-400 hover:text-rose-600"><Trash2 size={13} /></button>
               </li>
             ))}
           </ul>

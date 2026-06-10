@@ -71,7 +71,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
             {t.followUp && <RotateCcw size={12} className="inline -mt-0.5 mr-1 text-indigo-500" />}
             {t.title}
           </h3>
-          <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 shrink-0 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
             <button onClick={() => onEdit(t)} title="Edit" className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={14} /></button>
             <button onClick={() => onDelete(t)} title="Delete" className="p-1 rounded text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Trash2 size={14} /></button>
           </div>

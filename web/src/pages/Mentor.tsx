@@ -164,7 +164,7 @@ export function Mentor() {
                   <div className="font-medium text-sm">{f.title}</div>
                   {f.description && <p className="text-xs text-zinc-500 mt-0.5">{f.description}</p>}
                 </div>
-                <button onClick={() => setStatus(f, 'archived')} title="Remove" className="shrink-0 p-1 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-rose-600"><Trash2 size={14} /></button>
+                <button onClick={() => setStatus(f, 'archived')} title="Remove" className="shrink-0 p-1 rounded text-zinc-400 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 hover:text-rose-600"><Trash2 size={14} /></button>
               </li>
             ))}
           </ul>

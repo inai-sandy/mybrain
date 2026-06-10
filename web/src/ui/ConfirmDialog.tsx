@@ -1,12 +1,12 @@
 export function ConfirmDialog({
-  open,
+  open = true, // optional — when rendered conditionally ({cond && <ConfirmDialog/>}) it is simply open
   title,
   message,
   confirmLabel = 'Delete',
   onConfirm,
   onCancel,
 }: {
-  open: boolean;
+  open?: boolean;
   title: string;
   message?: string;
   confirmLabel?: string;
