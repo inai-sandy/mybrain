@@ -37,6 +37,19 @@ export class HomeService {
 
     const mustDos = (today.tasks || []).filter((t: any) => t.status === 'open').slice(0, 3);
 
+    // Day summary: today's once it exists (after 9:30 PM), otherwise yesterday's — mornings shouldn't show an empty card.
+    let summaryText: string | null = activity.summary?.text || null;
+    let summaryFor: 'today' | 'yesterday' | null = summaryText ? 'today' : null;
+    if (!summaryText && activity.day) {
+      const y = new Date(activity.day + 'T12:00:00Z');
+      y.setUTCDate(y.getUTCDate() - 1);
+      const row = await this.prisma.daySummary.findUnique({ where: { day: y.toISOString().slice(0, 10) } });
+      if (row?.text) {
+        summaryText = row.text;
+        summaryFor = 'yesterday';
+      }
+    }
+
     return {
       today: {
         dumped: today.dumped,
@@ -47,8 +60,11 @@ export class HomeService {
       insights: {
         streak: dash.streak,
         followThrough: dash.totals.followThrough,
+        followTrend: dash.followTrend,
         minutesSpent: dash.minutesSpent,
-        daySummary: activity.summary?.text ? activity.summary.text.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
+        minutesToday: activity.stats?.minutesSpent ?? 0,
+        daySummary: summaryText ? summaryText.replace(/\s+/g, ' ').trim().slice(0, 280) : null,
+        daySummaryFor: summaryFor,
       },
       personality: {
         unlocked: personality.unlocked,

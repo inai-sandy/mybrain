@@ -189,6 +189,22 @@ describe('DailyService', () => {
     expect(t.story!.text).toBe('a full day');
   });
 
+  it('reports a follow-through trend: this week vs the week before', async () => {
+    const { svc, tasks } = makeService();
+    const today = new Date().toISOString().slice(0, 10);
+    const ago = (n: number) => {
+      const d = new Date(today + 'T12:00:00Z');
+      d.setUTCDate(d.getUTCDate() - n);
+      return d.toISOString().slice(0, 10);
+    };
+    // this week: 2 of 2 done (100%) · last week: 1 of 2 done (50%)
+    tasks.push({ id: 'w1', day: ago(1), status: 'done' }, { id: 'w2', day: ago(2), status: 'done' });
+    tasks.push({ id: 'p1', day: ago(8), status: 'done' }, { id: 'p2', day: ago(9), status: 'open' });
+    const dash = await svc.dashboard(30);
+    expect(dash.followTrend.week).toBe(100);
+    expect(dash.followTrend.prevWeek).toBe(50);
+  });
+
   it('computes day stats from tasks (done count + minutes spent)', async () => {
     const { svc, tasks } = makeService();
     tasks.push({ id: 'a', day: '2026-06-07', status: 'done', actualMin: 30, estimateMin: 20 });

@@ -607,9 +607,17 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       cur = this.dayAdd(cur, -1);
     }
 
+    // follow-through trend: last 7 days vs the 7 before (drives the home KPI arrow)
+    const ftBetween = (from: string, to: string) => {
+      const win = tasks.filter((t) => t.day && t.day >= from && t.day <= to);
+      const d = win.filter((t) => t.status === 'done').length;
+      return win.length ? Math.round((d / win.length) * 100) : null;
+    };
+
     return {
       days: span,
       totals: { tasksTotal: tasks.length, tasksDone: done.length, followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : 0 },
+      followTrend: { week: ftBetween(this.dayAdd(today, -6), today), prevWeek: ftBetween(this.dayAdd(today, -13), this.dayAdd(today, -7)) },
       minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
       categoryTime,
       estimateVsActual: { estimated, actual, count: withBoth.length },
