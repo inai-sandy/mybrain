@@ -301,7 +301,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     ]);
     if (!summaries.length && !dayStories.length && !stats.tasksTotal) return null; // empty week — nothing to review
 
+    const today = this.dayKey(await this.tz());
     const dayLines = days.map((d) => {
+      if (d > today) return `• ${d}: (in the future — has not happened yet; do NOT treat as missed)`;
       const sum = summaries.find((s) => s.day === d);
       const ds = dayStories.find((s) => s.day === d);
       const bits = [sum?.text?.replace(/\s+/g, ' ').slice(0, 280), ds?.moodScore != null ? `mood ${ds.moodScore}` : null].filter(Boolean);
@@ -311,7 +313,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     const tmpl = await this.prompts.get('mentor.weekly');
     const prompt =
       `${tmpl}\n\n` +
-      `=== THE WEEK (${weekStart} .. ${days[6]}) ===\n${dayLines.join('\n')}\n\n` +
+      `=== THE WEEK (${weekStart} .. ${days[6]}) ===\nToday is ${today}.\n${dayLines.join('\n')}\n\n` +
       `=== NUMBERS ===\nThis week: ${JSON.stringify(stats)}\nLast week: ${JSON.stringify(prevStats)}\n\n` +
       `=== HIS FOCUS AREAS ===\n${focus.map((f) => `- ${f.title}`).join('\n') || '(none set)'}\n\n` +
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
