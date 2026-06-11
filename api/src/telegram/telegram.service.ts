@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService } from '../connectors/connector.service';
+import { LlmService } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
 import { ChatService } from '../chat/chat.service';
@@ -66,6 +67,7 @@ export class TelegramService implements OnModuleInit {
     private readonly chat: ChatService,
     private readonly items: ItemsService,
     private readonly voice: VoiceService,
+    private readonly llm: LlmService,
   ) {}
 
   async onModuleInit() {
@@ -956,6 +958,47 @@ export class TelegramService implements OnModuleInit {
     await this.setSetting('telegram.fired', JSON.stringify({ day, keys: [...set] }));
   }
 
+  /** Monday of the week containing `day` — the rate-limit window for daytime mentor nudges. */
+  private weekKeyOf(day: string): string {
+    const d = new Date(day + 'T12:00:00Z');
+    const dow = d.getUTCDay();
+    d.setUTCDate(d.getUTCDate() + (dow === 0 ? -6 : 1 - dow));
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** 4 PM mentor: if a pinned must-do has zero progress, ONE short data-grounded push. Max 3/week — a mentor, not a nag. */
+  async daytimeMentor(owner: string, day: string): Promise<void> {
+    let rl: { week?: string; count?: number } = {};
+    try {
+      rl = JSON.parse((await this.getSetting('telegram.mentorNudgeRate')) || '{}');
+    } catch {
+      /* ignore */
+    }
+    const week = this.weekKeyOf(day);
+    if (rl.week === week && (rl.count || 0) >= 3) return;
+
+    const today = await this.tasks.today();
+    const stuck = (today.tasks || []).filter((t: any) => t.status === 'open' && t.pinned && !(t.progress || 0));
+    if (!stuck.length) return;
+
+    const recent = await this.prisma.mentorDay.findMany({ orderBy: { day: 'desc' }, take: 7 });
+    const avg = recent.length ? Math.round(recent.reduce((s: number, m: any) => s + m.adherenceScore, 0) / recent.length) : null;
+
+    const prompt =
+      `You are Sandeep's mentor sending ONE short afternoon Telegram message (2-3 sentences, plain text, no markdown, at most one emoji). It is 4 PM. ` +
+      `His pinned must-do${stuck.length > 1 ? 's' : ''} for today ${stuck.length > 1 ? 'have' : 'has'} zero progress: ${stuck.map((t: any) => `"${t.title}"`).join(', ')}.` +
+      (avg !== null ? ` His average on-track score over the last week is ${avg}/100.` : '') +
+      ` Be warm but direct — name the task, make starting NOW feel small and doable. No guilt-tripping, no lecture.`;
+    const text = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 220, 'mentor-nudge'))?.trim();
+    if (!text) return;
+
+    await this.setSetting('telegram.mentorNudgeRate', JSON.stringify({ week, count: rl.week === week ? (rl.count || 0) + 1 : 1 }));
+    const first = stuck[0];
+    await this.send(owner, `🧭 ${this.esc(text)}`, {
+      reply_markup: { inline_keyboard: [[{ text: '✅ Done', callback_data: `td:${first.id}` }, { text: '30%', callback_data: `tp30:${first.id}` }, { text: '🔕 Today', callback_data: 'akd' }]] },
+    });
+  }
+
   /** Nightly backup result from the home server → owner message. Success is silent (3 AM); failure buzzes. */
   async reportBackup(ok: boolean, detail?: string): Promise<{ sent: boolean }> {
     const owner = await this.ownerChatId();
@@ -1027,6 +1070,10 @@ export class TelegramService implements OnModuleInit {
           }),
         );
       }
+    }
+    // daytime mentor (4 PM): one rare, data-driven push when a pinned must-do hasn't moved
+    if (hm === '16:00') {
+      await fireOnce('mentor-day', () => this.daytimeMentor(owner, day));
     }
     // evening check-in (9 PM): still-open tasks with Done buttons + a story prompt
     if (hm === '21:00') {

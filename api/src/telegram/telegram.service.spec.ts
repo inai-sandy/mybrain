@@ -18,7 +18,7 @@ function make() {
     story: { findFirst: async () => null },
     daySummary: { findUnique: async () => null },
     dayStory: { findUnique: async () => null },
-    mentorDay: { findUnique: async () => null },
+    mentorDay: { findUnique: async () => null, findMany: async () => [{ day: '2026-06-10', adherenceScore: 60 }] },
   };
   const connectors: any = { get: async () => ({ botToken: 'TEST' }) };
   const tasks: any = {
@@ -44,7 +44,8 @@ function make() {
     return { ok: true, json: async () => ({ ok: true, result: {} }), text: async () => 'page text' };
   });
   const chat: any = { askOnce: jest.fn(async () => ({ answer: 'Here is what you saved.', sources: [] })) };
-  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items, voice), settings, prisma, tasks, daily, chat, items, voice, sent };
+  const llm: any = { completeWith: jest.fn(async () => 'The proposal is still untouched — open it and write one paragraph now.') };
+  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items, voice, llm), settings, prisma, tasks, daily, chat, items, voice, sent, llm };
 }
 
 describe('TelegramService', () => {
@@ -234,6 +235,31 @@ describe('TelegramService', () => {
     await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/dump x' } });
     await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/dump x' } });
     expect(tasks.dump).toHaveBeenCalledTimes(1);
+  });
+
+  describe('daytime mentor (4 PM nudge)', () => {
+    it('sends one short push with tap buttons when a pinned must-do has zero progress', async () => {
+      const { svc, sent, llm } = make();
+      await svc.daytimeMentor('5', '2026-06-11');
+      expect(llm.completeWith).toHaveBeenCalled();
+      const msg = sent.find((m) => /proposal is still untouched/i.test(m.text || ''));
+      expect(msg).toBeTruthy();
+      expect(JSON.stringify(msg.reply_markup)).toContain('td:t1');
+    });
+
+    it('hard-caps at 3 nudges per week', async () => {
+      const { svc, settings, llm } = make();
+      settings['telegram.mentorNudgeRate'] = JSON.stringify({ week: '2026-06-08', count: 3 });
+      await svc.daytimeMentor('5', '2026-06-11');
+      expect(llm.completeWith).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when the must-dos already have progress', async () => {
+      const { svc, tasks, llm } = make();
+      tasks.today = jest.fn(async () => ({ dumped: true, counts: { done: 0, total: 1 }, tasks: [{ id: 't1', title: 'Finish proposal', status: 'open', pinned: true, progress: 30 }] }));
+      await svc.daytimeMentor('5', '2026-06-11');
+      expect(llm.completeWith).not.toHaveBeenCalled();
+    });
   });
 
   describe('backup sync report', () => {
