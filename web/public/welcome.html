@@ -57,12 +57,23 @@
 
 <!-- ===== TOP BAR ===== -->
 <nav class="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-black/40 border-b border-zinc-800/80">
-  <div class="max-w-6xl mx-auto px-4 py-2.5 flex items-center gap-3">
+  <div class="max-w-6xl mx-auto px-4 py-2.5 grid grid-cols-[auto_1fr_auto] items-center gap-3">
     <button onclick="go(0)" class="font-extrabold shrink-0">🧠 My <span class="gtext">Brain</span></button>
-    <div class="flex-1 flex gap-4 overflow-x-auto text-sm text-zinc-500 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" id="chtabs"></div>
+    <div class="hidden md:flex justify-center gap-6 text-sm text-zinc-500" id="chtabs"></div>
+    <button id="chBtn" onclick="toggleMenu(true)" class="md:hidden justify-self-center rounded-full border border-zinc-700 bg-zinc-900/70 px-3.5 py-1.5 text-xs text-zinc-300 max-w-[58vw] truncate"></button>
     <a href="/?login=1" class="shrink-0 rounded-full border border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-1.5 text-sm font-medium text-emerald-300 transition-colors">Login</a>
   </div>
 </nav>
+
+<!-- chapter menu (mobile) -->
+<div id="chMenu" class="fixed inset-0 z-[60] hidden">
+  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleMenu(false)"></div>
+  <div class="absolute bottom-0 inset-x-0 rounded-t-3xl border-t border-zinc-700 bg-zinc-950 p-5 pb-8 max-h-[80vh] overflow-y-auto" style="animation:chIn .3s ease">
+    <div class="mx-auto mb-4 h-1.5 w-10 rounded-full bg-zinc-700"></div>
+    <p class="text-xs uppercase tracking-[0.3em] text-zinc-500 mb-3 text-center">Chapters</p>
+    <div id="chList" class="space-y-1.5"></div>
+  </div>
+</div>
 
 <div class="pt-14"></div>
 
@@ -90,7 +101,7 @@
   </header>
 
   <div class="max-w-5xl mx-auto px-6 pb-10 space-y-24">
-    <div class="reveal">
+    <div class="reveal text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">The problem</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold leading-tight">Every app organizes your <span class="text-zinc-500 line-through">tasks</span>.<br/>None of them understand your <span class="gtext">life</span>.</h2>
       <div class="mt-8 grid sm:grid-cols-2 gap-5">
@@ -105,7 +116,7 @@
       </div>
     </div>
 
-    <div class="reveal">
+    <div class="reveal text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">How a day works</p>
       <h2 class="text-3xl sm:text-4xl font-extrabold">One day in the loop <span class="text-zinc-500 text-xl font-normal">— tap each step</span></h2>
       <div class="mt-8 grid sm:grid-cols-5 gap-3 relative">
@@ -119,7 +130,7 @@
       <div class="mt-5 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[110px]"><p class="text-sm text-zinc-300" id="loopText">👆 Tap a step to see what happens there.</p></div>
     </div>
 
-    <div class="reveal">
+    <div class="reveal text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">One story · two lives</p>
       <h2 class="text-3xl sm:text-4xl font-extrabold">It separates <span class="text-emerald-400">work</span> from <span class="text-violet-400">family</span> — and watches the balance</h2>
       <div class="mt-7 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 max-w-2xl mx-auto">
@@ -136,7 +147,7 @@
       </div>
     </div>
 
-    <div class="reveal">
+    <div class="reveal text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Feel it</p>
       <h2 class="text-3xl sm:text-4xl font-extrabold mb-7">60 seconds of speaking → a day that runs itself</h2>
       <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 font-mono text-sm max-w-2xl mx-auto shadow-2xl shadow-emerald-500/5">
@@ -157,10 +168,10 @@
 <!-- ================= CHAPTER 2 — EVERYTHING IT DOES ================= -->
 <section class="chapter" data-title="Everything it does">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 2</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">One brain, <span class="gtext">ten rooms</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">Tasks are just the heartbeat. Tap any room to see what lives inside.</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Tasks are just the heartbeat. Tap any room to see what lives inside.</p>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-5 gap-3" id="rooms"></div>
     <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 min-h-[150px]" id="roomDetail">
@@ -173,10 +184,10 @@
 <!-- ================= CHAPTER 3 — ARCHITECTURE ================= -->
 <section class="chapter" data-title="Architecture">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 3</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">The architecture, <span class="gtext">as a living picture</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">Four layers. Everything you see talks to the layer below it — and your data never leaves your control. Tap any block.</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Four layers. Everything you see talks to the layer below it — and your data never leaves your control. Tap any block.</p>
     </div>
 
     <div class="space-y-3" id="arch">
@@ -214,14 +225,14 @@
 <!-- ================= CHAPTER 4 — MEMORY & RETRIEVAL ================= -->
 <section class="chapter" data-title="Memory">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 4</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">How remembering <span class="gtext">actually works</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">This is the heart of the whole system — and the part most apps don’t have at all.</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">This is the heart of the whole system — and the part most apps don’t have at all.</p>
     </div>
 
     <div class="reveal">
-      <h3 class="text-xl font-bold mb-4">Writing a memory <span class="text-zinc-500 font-normal text-sm">— what happens when you save anything</span></h3>
+      <h3 class="text-xl font-bold mb-4 text-center">Writing a memory <span class="text-zinc-500 font-normal text-sm">— what happens when you save anything</span></h3>
       <div class="grid sm:grid-cols-4 gap-3 relative">
         <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
         <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">📄</div><div class="font-bold text-sm mt-1">Anything arrives</div><div class="text-[11px] text-zinc-500">a document · a link · a video · tonight’s story</div></div>
@@ -236,9 +247,9 @@
     </div>
 
     <div class="reveal">
-      <h3 class="text-xl font-bold mb-1">Finding a memory <span class="text-zinc-500 font-normal text-sm">— ask, and watch what happens</span></h3>
-      <p class="text-sm text-zinc-500 mb-4">This is a live simulation — tap a question.</p>
-      <div class="flex flex-wrap gap-2 mb-5">
+      <h3 class="text-xl font-bold mb-1 text-center">Finding a memory <span class="text-zinc-500 font-normal text-sm">— ask, and watch what happens</span></h3>
+      <p class="text-sm text-zinc-500 mb-4 text-center">This is a live simulation — tap a question.</p>
+      <div class="flex flex-wrap justify-center gap-2 mb-5">
         <button class="memq tap rounded-full border border-zinc-700 px-4 py-1.5 text-sm text-zinc-300" data-q="0">“What did I save about SEO?”</button>
         <button class="memq tap rounded-full border border-zinc-700 px-4 py-1.5 text-sm text-zinc-300" data-q="1">“When did I last feel really great?”</button>
       </div>
@@ -275,10 +286,10 @@
 <!-- ================= CHAPTER 5 — THE CHAT ================= -->
 <section class="chapter" data-title="The Chat">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 5</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Talk to your brain — <span class="gtext">with receipts</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">Every conversation is scoped to a part of your life, and every claim comes with its source. Watch a real exchange replay:</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Every conversation is scoped to a part of your life, and every claim comes with its source. Watch a real exchange replay:</p>
     </div>
 
     <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-2xl mx-auto">
@@ -304,7 +315,7 @@
       <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">🧾 Receipts attached</h3><p class="mt-1 text-xs text-zinc-400">Answers cite the actual saved items they came from — tap a source and read the original. No hallucinated confidence.</p></div>
       <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">⚡ A router thinks first</h3><p class="mt-1 text-xs text-zinc-400">A fast small model decides per message: does this need a fresh memory search, or is it a follow-up? Searches happen only when they should.</p></div>
     </div>
-    <details class="curious max-w-2xl">
+    <details class="curious max-w-2xl mx-auto">
       <summary>For the curious — chat internals</summary>
       <div class="body">Sessions carry a scope; a lightweight router model classifies each message (new retrieval vs follow-up) and writes a standalone search query when needed. Retrieval merges both memory stores with tag filters, then the answer streams token-by-token to the screen. A per-document chat mode binds a session to one document. Conversations are kept on a retention schedule you control.</div>
     </details>
@@ -314,10 +325,10 @@
 <!-- ================= CHAPTER 6 — THE BRAINS ================= -->
 <section class="chapter" data-title="The Brains">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 6</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">The right brain <span class="gtext">for the right job</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">One AI model would be either wasteful or weak. My Brain runs a crew — each picked for its task, each swappable from Settings without touching code.</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">One AI model would be either wasteful or weak. My Brain runs a crew — each picked for its task, each swappable from Settings without touching code.</p>
     </div>
     <div class="grid sm:grid-cols-2 gap-5">
       <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-indigo-500/50 hover:-translate-y-1 transition-all">
@@ -340,7 +351,7 @@
     <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 text-center">
       <p class="text-sm text-zinc-300">🎛️ Every role has its own picker in Settings — and every instruction the AI follows is an <b>editable prompt</b>. The owner can re-tune any brain, any time, without a developer.</p>
     </div>
-    <details class="curious max-w-2xl">
+    <details class="curious max-w-2xl mx-auto">
       <summary>For the curious — the actual crew</summary>
       <div class="body">Claude Sonnet for the long-form writing and mentoring; Claude Haiku for routing, cleanup, extraction and nudges; Gemini (multimodal) for watching bookmarked videos and reading pages; GPT-4o-transcribe / Whisper, ElevenLabs Scribe and Deepgram Nova as selectable speech engines. All routed through one gateway with per-request usage logging, and every role’s model + prompt is user-configurable.</div>
     </details>
@@ -350,14 +361,14 @@
 <!-- ================= CHAPTER 7 — CONNECTIONS ================= -->
 <section class="chapter" data-title="Connections">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 7</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Connected to your world, <span class="gtext">guarded like a vault</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">Tap a connection to see its role. Every key is encrypted at rest — even someone holding the database file couldn’t read them.</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Tap a connection to see its role. Every key is encrypted at rest — even someone holding the database file couldn’t read them.</p>
     </div>
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="conns"></div>
     <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 min-h-[110px]"><p class="text-sm text-zinc-300" id="connText">👆 Tap a connection.</p></div>
-    <details class="curious max-w-2xl">
+    <details class="curious max-w-2xl mx-auto">
       <summary>For the curious — the key vault</summary>
       <div class="body">All third-party credentials live in an encrypted connector registry (AES-256-GCM, key derived from a server-side secret) — never in code, never in the repository. Each connector has a live “Test” button in Settings that makes one real, cheap call to prove the key works.</div>
     </details>
@@ -367,10 +378,10 @@
 <!-- ================= CHAPTER 8 — BUILT & GROWING ================= -->
 <section class="chapter" data-title="Built & Growing">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
-    <div>
+    <div class="text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 8</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Built by AI — <span class="gtext">held to engineering discipline</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl">The entire application was built by an AI working under an enforced pipeline — nothing ships on trust.</p>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The entire application was built by an AI working under an enforced pipeline — nothing ships on trust.</p>
     </div>
 
     <div class="grid sm:grid-cols-5 gap-3 relative">
@@ -384,7 +395,7 @@
     <p class="text-center text-sm text-zinc-500">Everything versioned on a private repository · data backed up to a second machine nightly, with every backup integrity-tested.</p>
 
     <div class="reveal">
-      <h3 class="text-xl font-bold mb-6">From zero to a life companion — in days, not years</h3>
+      <h3 class="text-xl font-bold mb-6 text-center">From zero to a life companion — in days, not years</h3>
       <div class="space-y-0" id="timeline">
         <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm">Born</b><p class="text-xs text-zinc-500">Skeleton, login, the twin-memory engine, the design system.</p></div></div>
         <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm">It started remembering</b><p class="text-xs text-zinc-500">Capture for documents; bookmarks imported and literally watched; ideas and skills organized by AI.</p></div></div>
@@ -419,33 +430,48 @@
 <script>
   // ---------- chapter paging ----------
   const chapters = [...document.querySelectorAll('.chapter')];
+  const SHORT = ['Story', 'Rooms', 'Architecture', 'Memory', 'Chat', 'Brains', 'Connections', 'Growth'];
   const tabs = document.getElementById('chtabs');
   const dots = document.getElementById('dots');
+  const chBtn = document.getElementById('chBtn');
+  const chMenu = document.getElementById('chMenu');
+  const chList = document.getElementById('chList');
   chapters.forEach((c, i) => {
     const t = document.createElement('button');
     t.className = 'chtab py-1' + (i === 0 ? ' on' : '');
-    t.textContent = (i + 1) + '. ' + c.dataset.title;
+    t.textContent = SHORT[i] || c.dataset.title;
     t.onclick = () => go(i);
     tabs.appendChild(t);
     const d = document.createElement('span');
     d.className = 'h-1.5 rounded-full transition-all ' + (i === 0 ? 'w-5 bg-emerald-500' : 'w-1.5 bg-zinc-700');
     dots.appendChild(d);
+    const li = document.createElement('button');
+    li.className = 'chitem w-full flex items-center gap-3 rounded-xl border border-zinc-800 px-4 py-3 text-left';
+    li.innerHTML = '<span class="text-xs font-bold text-zinc-500 w-5">' + (i + 1) + '</span><span class="text-sm font-medium">' + c.dataset.title + '</span>';
+    li.onclick = () => { toggleMenu(false); go(i); };
+    chList.appendChild(li);
   });
+  function toggleMenu(open) { chMenu.classList.toggle('hidden', !open); }
   let cur = 0;
+  function paint() {
+    [...tabs.children].forEach((t, j) => t.classList.toggle('on', j === cur));
+    [...dots.children].forEach((d, j) => { d.className = 'h-1.5 rounded-full transition-all ' + (j === cur ? 'w-5 bg-emerald-500' : 'w-1.5 bg-zinc-700'); });
+    [...chList.children].forEach((l, j) => { l.className = 'chitem w-full flex items-center gap-3 rounded-xl border px-4 py-3 text-left ' + (j === cur ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-zinc-800'); });
+    chBtn.innerHTML = '<span class="text-zinc-500">' + (cur + 1) + '/' + chapters.length + '</span> · ' + chapters[cur].dataset.title + ' <span class="text-zinc-500">▾</span>';
+    document.getElementById('prevBtn').disabled = cur === 0;
+    document.getElementById('nextBtn').textContent = cur === chapters.length - 1 ? 'Start over ↺' : 'Next →';
+  }
   function go(i) {
     if (i < 0 || i >= chapters.length) return;
     chapters[cur].classList.remove('on');
     cur = i;
     chapters[cur].classList.add('on');
-    [...tabs.children].forEach((t, j) => t.classList.toggle('on', j === i));
-    [...dots.children].forEach((d, j) => { d.className = 'h-1.5 rounded-full transition-all ' + (j === i ? 'w-5 bg-emerald-500' : 'w-1.5 bg-zinc-700'); });
-    document.getElementById('prevBtn').disabled = i === 0;
-    document.getElementById('nextBtn').textContent = i === chapters.length - 1 ? 'Start over ↺' : 'Next →';
+    paint();
     window.scrollTo({ top: 0 });
     history.replaceState(null, '', '#' + (i + 1));
-    tabs.children[i].scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
     chapters[cur].querySelectorAll('.reveal').forEach((el) => io.observe(el));
   }
+  paint();
   document.getElementById('prevBtn').onclick = () => go(cur - 1);
   document.getElementById('nextBtn').onclick = () => go(cur === chapters.length - 1 ? 0 : cur + 1);
   // swipe
