@@ -431,6 +431,36 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
   // ---- people memory: who appears in his stories ----
 
+  /** Learned spelling aliases (from merges): { "Allison": "Alisan" } — applied to every future extraction. */
+  private async peopleAliases(): Promise<Record<string, string>> {
+    try {
+      return JSON.parse((await this.prisma.setting.findUnique({ where: { key: 'people.aliases' } }))?.value || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  /** Merge one person into another: rewrite all mentions (deduped per day) and remember the alias forever. */
+  async mergePeople(from: string, into: string) {
+    const f = String(from || '').trim();
+    const t = String(into || '').trim();
+    if (!f || !t || f.toLowerCase() === t.toLowerCase()) return null;
+    const mentions = await this.prisma.personMention.findMany({ where: { name: f } });
+    if (!mentions.length) return null;
+    for (const m of mentions) {
+      await this.prisma.personMention
+        .upsert({ where: { name_day: { name: t, day: m.day } }, create: { name: t, day: m.day }, update: {} })
+        .catch(() => undefined);
+    }
+    await this.prisma.personMention.deleteMany({ where: { name: f } });
+    const aliases = await this.peopleAliases();
+    aliases[f] = t;
+    // re-point any aliases that targeted the old name
+    for (const k of Object.keys(aliases)) if (aliases[k] === f) aliases[k] = t;
+    await this.setSetting('people.aliases', JSON.stringify(aliases));
+    return { merged: mentions.length, from: f, into: t };
+  }
+
   /** Extract people's names from the user's own story (tiny Haiku call, idempotent per name+day). */
   async extractPeople(day: string, storyText?: string | null): Promise<void> {
     const text = (storyText || '').trim();
@@ -449,9 +479,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return;
     }
+    const aliases = await this.peopleAliases();
     for (const n of names.slice(0, 10)) {
-      const name = String(n || '').trim().slice(0, 60);
+      let name = String(n || '').trim().slice(0, 60);
       if (!name || name.length < 2) continue;
+      name = aliases[name] || name; // learned spellings from merges
       await this.prisma.personMention
         .upsert({ where: { name_day: { name, day } }, create: { name, day }, update: {} })
         .catch(() => undefined);

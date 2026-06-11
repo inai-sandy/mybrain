@@ -67,6 +67,14 @@ export class DailyController {
     return this.daily.peopleOverview();
   }
 
+  /** Merge a duplicate person into the canonical one (drag-and-drop on the People card). */
+  @Post('people/merge')
+  async mergePeople(@Body() body: { from?: string; into?: string }) {
+    const r = await this.daily.mergePeople(body?.from || '', body?.into || '');
+    if (!r) throw new BadRequestException('Pick two different people to merge');
+    return r;
+  }
+
   // ---- Story of the Year ----
   @Get('year-story')
   async yearStory(@Query('year') year?: string) {

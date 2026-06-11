@@ -153,7 +153,11 @@ function makeService(opts: { llmText?: string | null } = {}) {
     },
     weeklyReview: { findMany: async () => [] },
     personMention: {
-      findMany: async () => peopleMentions.slice(),
+      findMany: async ({ where }: any = {}) => peopleMentions.filter((m) => !where?.name || m.name === where.name),
+      deleteMany: async ({ where }: any = {}) => {
+        for (let i = peopleMentions.length - 1; i >= 0; i--) if (!where?.name || peopleMentions[i].name === where.name) peopleMentions.splice(i, 1);
+        return {};
+      },
       upsert: async ({ where, create }: any) => {
         const k = where.name_day;
         const ex = peopleMentions.find((m) => m.name === k.name && m.day === k.day);
@@ -244,6 +248,20 @@ describe('DailyService', () => {
       expect(o.people.find((p: any) => p.name === 'Amma')!.fading).toBe(true);
     });
   });
+
+
+    it('merges a duplicate person and remembers the alias for future extractions', async () => {
+      const { svc, peopleMentions } = makeService({ llmText: '{"people":["Allison"]}' });
+      peopleMentions.push({ name: 'Alisan', day: '2026-06-10' }, { name: 'Allison', day: '2026-06-11' }, { name: 'Allison', day: '2026-06-10' });
+      const r = await svc.mergePeople('Allison', 'Alisan');
+      expect(r!.merged).toBe(2);
+      const names = peopleMentions.map((m: any) => m.name);
+      expect(names.every((n: string) => n === 'Alisan')).toBe(true);
+      expect(peopleMentions).toHaveLength(2); // June 10 deduped
+      // future extraction of "Allison" lands as Alisan
+      await svc.extractPeople('2026-06-12', 'Long call with Allison about the mounting plan.');
+      expect(peopleMentions.find((m: any) => m.day === '2026-06-12')!.name).toBe('Alisan');
+    });
 
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();

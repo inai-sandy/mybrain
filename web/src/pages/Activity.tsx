@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { StoryModal } from './DailyStory';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
@@ -492,26 +494,83 @@ type PersonT = { name: string; mentions: number; firstSeen: string; lastSeen: st
 
 function PeopleCard() {
   const [data, setData] = useState<{ people: PersonT[]; count: number } | null>(null);
-  useEffect(() => {
-    fetch('/api/daily/people').then((r) => (r.ok ? r.json() : null)).then(setData).catch(() => undefined);
-  }, []);
+  const [overName, setOverName] = useState<string | null>(null); // chip currently hovered by a drag
+  const [merge, setMerge] = useState<{ from: string; into: string } | null>(null);
+  const chipRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/daily/people');
+    if (r.ok) setData(await r.json());
+  }
+  useEffect(() => { load(); }, []);
+
+  function chipUnder(x: number, y: number, except: string): string | null {
+    for (const [name, el] of Object.entries(chipRefs.current)) {
+      if (!el || name === except) continue;
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return name;
+    }
+    return null;
+  }
+
+  async function doMerge(from: string, into: string) {
+    setMerge(null);
+    const r = await fetch('/api/daily/people/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, into }) });
+    if (r.ok) {
+      toast('success', `${from} merged into ${into} — and remembered for future stories`);
+      load();
+    } else toast('error', 'Could not merge');
+  }
+
   if (!data || !data.count) return null; // appears once stories start mentioning people
   const fading = data.people.filter((p) => p.fading);
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
       <h2 className="flex items-center gap-2 font-semibold mb-1">👥 People in your stories <span className="text-xs font-normal text-zinc-400">{data.count}</span></h2>
-      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words.</p>
+      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words. Same person twice? Drag one name onto the other to merge them.</p>
       <div className="flex flex-wrap gap-2">
-        {data.people.slice(0, 20).map((p) => (
-          <span key={p.name} title={`${p.mentions} mention${p.mentions === 1 ? '' : 's'} · first ${p.firstSeen} · last ${p.lastSeen}`} className={'rounded-full px-3 py-1 text-sm border ' + (p.fading ? 'border-amber-300/60 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/5' : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300')}>
+        {data.people.slice(0, 30).map((p) => (
+          <motion.span
+            key={p.name}
+            ref={(el: HTMLSpanElement | null) => { chipRefs.current[p.name] = el; }}
+            drag
+            dragSnapToOrigin
+            dragMomentum={false}
+            whileDrag={{ scale: 1.08, zIndex: 40 }}
+            onDrag={(_e, info) => setOverName(chipUnder(info.point.x - window.scrollX, info.point.y - window.scrollY, p.name))}
+            onDragEnd={(_e, info) => {
+              const target = chipUnder(info.point.x - window.scrollX, info.point.y - window.scrollY, p.name);
+              setOverName(null);
+              if (target) setMerge({ from: p.name, into: target });
+            }}
+            title={`${p.mentions} mention${p.mentions === 1 ? '' : 's'} · first ${p.firstSeen} · last ${p.lastSeen}`}
+            className={
+              'inline-block cursor-grab active:cursor-grabbing touch-none select-none rounded-full px-3 py-1 text-sm border ' +
+              (overName === p.name
+                ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/40 '
+                : p.fading
+                  ? 'border-amber-300/60 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/5 '
+                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 bg-white dark:bg-zinc-900 ')
+            }
+          >
             {p.name} <span className="text-[11px] text-zinc-400">×{p.mentions}</span>
-          </span>
+          </motion.span>
         ))}
       </div>
       {fading.length > 0 && (
         <p className="mt-3 text-xs rounded-lg bg-amber-500/5 border border-amber-300/30 dark:border-amber-500/20 px-2.5 py-1.5">
           <span className="font-semibold text-amber-600">Fading:</span> {fading.map((p) => p.name).join(', ')} — not mentioned in over two weeks.
         </p>
+      )}
+      {merge && (
+        <ConfirmDialog
+          title={`Merge ${merge.from} into ${merge.into}?`}
+          message={`All of ${merge.from}'s mentions move to ${merge.into}, and future stories saying "${merge.from}" will count as ${merge.into} automatically.`}
+          confirmLabel="Merge"
+          onConfirm={() => doMerge(merge.from, merge.into)}
+          onCancel={() => setMerge(null)}
+        />
       )}
     </section>
   );
