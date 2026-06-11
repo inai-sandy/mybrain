@@ -48,6 +48,19 @@ export class DailyController {
     return this.daily.generateDayStory(day, !!body?.force);
   }
 
+  // ---- Story of the Month (chapters) ----
+  @Get('months')
+  async months() {
+    return this.daily.listMonths();
+  }
+
+  @Post('month-story')
+  async monthStory(@Body() body: { month?: string; force?: boolean }) {
+    if (!body?.month || !/^\d{4}-\d{2}$/.test(body.month)) throw new BadRequestException('Pick a month');
+    const r = await this.daily.generateMonthStory(body.month, !!body?.force);
+    return r || { ok: false, message: 'That month needs at least 3 recorded days before it can become a chapter.' };
+  }
+
   @Get('story-model')
   async getStoryModel() {
     return this.daily.storyModel();

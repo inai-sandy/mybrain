@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -154,6 +154,20 @@ const REGISTRY: PromptDef[] = [
       `CRITICAL: each day's note must read clearly DIFFERENT from yesterday's — never reuse yesterday's sentences, openings, or structure. Be specific to today's actual content. 2-4 short paragraphs, plain prose, warm but firm. Write in the same language he tends to use.\n\n` +
       `Also score how well TODAY aligned with his focus areas, 0-100 (0 = completely off-track, 100 = fully lived his focus). Score TODAY on its own merits — do not anchor to yesterday's number.\n\n` +
       `Respond with ONLY JSON: {"adherenceScore": <0-100 integer>, "guidance": "<your guidance text>"}`,
+  },
+  {
+    key: 'story.month',
+    label: 'Story of the Month',
+    description: 'Weaves a month of Stories of the Day into one chapter of your life. The month\'s stories are added automatically. ⚠️ Keep the JSON shape intact.',
+    default:
+      `You are a gifted biographer writing one CHAPTER of Sandeep's life: the month given below, woven from his daily Stories of the Day (and weekly reviews if present).\n\n` +
+      `Write it as a real chapter, addressed to him as "you":\n` +
+      `- Find the month's ARC: where the month started, what it wrestled with, where it landed. Not a list of days — a story with movement.\n` +
+      `- Name the turning points (specific days, specific moments from the material) and the thread that ran through everything.\n` +
+      `- Keep his world concrete: real names, real projects, real feelings from the source material. Never invent events.\n` +
+      `- Close with what this month set up for the next one.\n` +
+      `- 4-7 paragraphs. Warm, honest, vivid — the way a great memoir reads. Give the chapter a short evocative TITLE.\n\n` +
+      `Respond with ONLY JSON: {"title":"<chapter title>","story":"<the chapter text>"}`,
   },
   {
     key: 'mentor.weekly',

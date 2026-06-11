@@ -6,6 +6,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const tasks: any[] = [];
   const summaries: any[] = [];
   const dayStories: any[] = [];
+  const monthStories: any[] = [];
   const suggestions: any[] = [];
   const dumps: any[] = [];
   const insights: any[] = [];
@@ -125,6 +126,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
     },
     dayStory: {
       findUnique: async ({ where }: any) => dayStories.find((s) => s.day === where.day) || null,
+      findMany: async ({ where }: any = {}) => dayStories.filter((s) => (!where?.day?.gte || s.day >= where.day.gte) && (!where?.day?.lte || s.day <= where.day.lte)),
       upsert: async ({ where, create, update }: any) => {
         const ex = dayStories.find((s) => s.day === where.day);
         if (ex) {
@@ -136,15 +138,55 @@ function makeService(opts: { llmText?: string | null } = {}) {
         return row;
       },
     },
+    monthStory: {
+      findUnique: async ({ where }: any) => monthStories.find((m) => m.month === where.month) || null,
+      findMany: async () => monthStories.slice(),
+      upsert: async ({ where, create, update }: any) => {
+        const ex = monthStories.find((m) => m.month === where.month);
+        if (ex) { Object.assign(ex, update, { updatedAt: new Date() }); return ex; }
+        const row = { id: `ms${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...create };
+        monthStories.push(row);
+        return row;
+      },
+    },
+    weeklyReview: { findMany: async () => [] },
   };
   const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }), listModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, suggestions, dumps, insights, enqueued };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued };
 }
 
 describe('DailyService', () => {
+  describe('Story of the Month', () => {
+    it('weaves a chapter from the month\'s day stories and indexes it to memory', async () => {
+      const { svc, dayStories, monthStories, enqueued } = makeService({ llmText: '{"title":"The Month of Building","story":"May opened with doubt and closed with a shipped product."}' });
+      dayStories.push({ day: '2026-05-03', text: 'Started the build.', moodScore: 60 }, { day: '2026-05-15', text: 'Hard week.', moodScore: 45 }, { day: '2026-05-28', text: 'Shipped it.', moodScore: 85 });
+      const m = await svc.generateMonthStory('2026-05');
+      expect(m!.title).toBe('The Month of Building');
+      expect(m!.text).toContain('shipped product');
+      expect(monthStories).toHaveLength(1);
+      expect(enqueued.some((e) => e.o.title === 'Story of the Month 2026-05')).toBe(true);
+    });
+
+    it('refuses a chapter for a month with fewer than 3 recorded days', async () => {
+      const { svc, dayStories, monthStories } = makeService({ llmText: '{"story":"x"}' });
+      dayStories.push({ day: '2026-04-10', text: 'one day' });
+      expect(await svc.generateMonthStory('2026-04')).toBeNull();
+      expect(monthStories).toHaveLength(0);
+    });
+
+    it('lists written chapters and months still waiting', async () => {
+      const { svc, dayStories, monthStories } = makeService();
+      monthStories.push({ month: '2026-05', title: 'T', text: 'x', createdAt: new Date(), updatedAt: new Date() });
+      dayStories.push({ day: '2026-06-09', text: 'a' });
+      const l = await svc.listMonths();
+      expect(l.count).toBe(1);
+      expect(l.pending).toEqual(['2026-06']);
+    });
+  });
+
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();
     await svc.submitStory('rough start to the day', 'app', '😐 Okay');

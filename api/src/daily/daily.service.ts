@@ -28,6 +28,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     this.tick = setInterval(() => {
       this.summaryTick().catch(() => undefined);
       this.storyTick().catch(() => undefined);
+      this.monthTick().catch(() => undefined);
       this.personalityTick().catch(() => undefined);
     }, 60_000);
   }
@@ -340,6 +341,80 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // Flag it for the Telegram push (delivered by the Telegram nudge loop).
     await this.setSetting('telegram.pushStory', day).catch(() => undefined);
     return this.shapeDayStory(row);
+  }
+
+  // ---- Story of the Month (the chapters of the year book) ----
+
+  private shapeMonthStory(m: any) {
+    return { month: m.month, title: m.title, text: m.text, createdAt: m.createdAt, updatedAt: m.updatedAt };
+  }
+
+  /** Written chapters + months that have day-stories but no chapter yet (offered for on-demand writing). */
+  async listMonths() {
+    const [chapters, dayStories] = await Promise.all([
+      this.prisma.monthStory.findMany({ orderBy: { month: 'desc' } }),
+      this.prisma.dayStory.findMany({ select: { day: true } }),
+    ]);
+    const have = new Set(chapters.map((c: any) => c.month));
+    const pending = [...new Set(dayStories.map((s: any) => s.day.slice(0, 7)))].filter((m) => !have.has(m)).sort().reverse();
+    return { chapters: chapters.map((c: any) => this.shapeMonthStory(c)), pending, count: chapters.length };
+  }
+
+  /** Weave a month's Stories of the Day (+ weekly reviews) into one chapter. */
+  async generateMonthStory(month: string, force = false) {
+    if (!/^\d{4}-\d{2}$/.test(month)) return null;
+    if (!force) {
+      const existing = await this.prisma.monthStory.findUnique({ where: { month } });
+      if (existing) return this.shapeMonthStory(existing);
+    }
+    const [stories, weeklies] = await Promise.all([
+      this.prisma.dayStory.findMany({ where: { day: { gte: `${month}-01`, lte: `${month}-31` } }, orderBy: { day: 'asc' } }),
+      this.prisma.weeklyReview.findMany({ where: { weekStart: { gte: `${month}-01`, lte: `${month}-31` } }, orderBy: { weekStart: 'asc' } }),
+    ]);
+    if (stories.length < 3) return null; // not enough recorded days to call it a chapter
+
+    const dayLines = stories.map((s: any) => `• ${s.day}${s.moodScore != null ? ` (mood ${s.moodScore})` : ''}: ${s.text.replace(/\s+/g, ' ').slice(0, 600)}`);
+    const weekLines = weeklies.map((w: any) => `• Week of ${w.weekStart}: pattern — ${w.pattern || '-'}; experiment — ${w.experiment || '-'}`);
+
+    const tmpl = await this.prompts.get('story.month');
+    const prompt =
+      `${tmpl}\n\n` +
+      `=== THE MONTH: ${month} (${stories.length} recorded days) ===\n${dayLines.join('\n')}\n\n` +
+      `=== WEEKLY REVIEWS ===\n${weekLines.join('\n') || '(none that month)'}`;
+
+    const cfg = await this.storyModel();
+    const raw = (await this.llm.completeWith(cfg, prompt, 2200, 'story-of-month'))?.trim() || '';
+    let text = raw;
+    let title: string | null = null;
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (json?.story) text = String(json.story).trim();
+      if (json?.title) title = String(json.title).trim().slice(0, 120);
+    } catch {
+      /* keep prose */
+    }
+    if (!text) return null;
+
+    const row = await this.prisma.monthStory.upsert({
+      where: { month },
+      create: { month, title, text },
+      update: { title, text },
+    });
+    await this.memory.enqueue(`Story of the Month — ${month}${title ? ` — ${title}` : ''}\n\n${text}`, { title: `Story of the Month ${month}`, tags: ['activity'] }).catch(() => undefined);
+    return this.shapeMonthStory(row);
+  }
+
+  /** On the 1st of each month (after 00:20 local), write last month's chapter. Once-a-day try guard. */
+  async monthTick(): Promise<void> {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    if (!today.endsWith('-01') || this.localHM(tz) < '00:20') return;
+    const prevMonth = this.dayAdd(today, -1).slice(0, 7);
+    if (await this.prisma.monthStory.findUnique({ where: { month: prevMonth } })) return;
+    const tried = (await this.prisma.setting.findUnique({ where: { key: 'story.monthTry' } }))?.value;
+    if (tried === today) return;
+    await this.setSetting('story.monthTry', today);
+    await this.generateMonthStory(prevMonth).catch(() => undefined);
   }
 
   // ---- predictive (suggested) tasks for tomorrow ----

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { StoryModal } from './DailyStory';
 
@@ -564,8 +564,95 @@ function SuggestedView() {
   );
 }
 
+// ---------- Your book: monthly chapters woven from the day stories ----------
+type Chapter = { month: string; title?: string | null; text: string; createdAt: string };
+
+function monthLabel(m: string): string {
+  const [y, mo] = m.split('-').map(Number);
+  return new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+}
+
+function BookView() {
+  const [data, setData] = useState<{ chapters: Chapter[]; pending: string[]; count: number } | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [writing, setWriting] = useState<string | null>(null);
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/daily/months');
+    if (r.ok) {
+      const j = await r.json();
+      setData(j);
+      setOpen((cur) => cur ?? j.chapters?.[0]?.month ?? null);
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function write(month: string, force = false) {
+    setWriting(month);
+    try {
+      const r = await fetch('/api/daily/month-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month, force }) });
+      const j = await r.json();
+      if (r.ok && j.text) { toast('success', `Chapter written — ${monthLabel(month)}`); setOpen(month); load(); }
+      else toast('error', j.message || 'Could not write the chapter');
+    } finally { setWriting(null); }
+  }
+
+  if (!data) return <p className="text-sm text-zinc-400">Loading…</p>;
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-indigo-300/50 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-5">
+        <h2 className="flex items-center gap-2 font-semibold mb-1"><BookOpen size={16} className="text-indigo-400" /> The book of your life</h2>
+        <p className="text-sm text-zinc-500">Every month, your daily stories are woven into one chapter — written automatically on the 1st. Chapter by chapter, this becomes the story of your year.</p>
+      </section>
+
+      {data.pending.length > 0 && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <h3 className="text-sm font-semibold mb-2">Months waiting to be written</h3>
+          <div className="flex flex-wrap gap-2">
+            {data.pending.map((m) => (
+              <button key={m} onClick={() => write(m)} disabled={writing === m} className="rounded-full border border-indigo-300/50 dark:border-indigo-500/30 px-3 py-1.5 text-sm text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50">
+                {writing === m ? 'Writing…' : `✍️ ${monthLabel(m)}`}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {data.chapters.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 p-8 text-center text-sm text-zinc-400">No chapters yet — they begin once a month has at least 3 recorded days.</p>
+      ) : (
+        <div className="space-y-2">
+          {data.chapters.map((c) => {
+            const isOpen = open === c.month;
+            return (
+              <section key={c.month} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
+                <button onClick={() => setOpen(isOpen ? null : c.month)} className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left">
+                  <span>
+                    <span className="block text-xs text-zinc-400">{monthLabel(c.month)}</span>
+                    <span className="font-semibold">{c.title || `Chapter — ${monthLabel(c.month)}`}</span>
+                  </span>
+                  <ChevronRight size={16} className={'shrink-0 text-zinc-400 transition-transform ' + (isOpen ? 'rotate-90' : '')} />
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-4">
+                    <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{c.text}</p>
+                    <button onClick={() => write(c.month, true)} disabled={writing === c.month} className="mt-3 text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1">
+                      <RefreshCw size={12} /> {writing === c.month ? 'Rewriting…' : 'rewrite chapter'}
+                    </button>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Shell with tabs ----------
-type TabId = 'day' | 'suggested' | 'insights' | 'calendar' | 'me';
+type TabId = 'day' | 'suggested' | 'insights' | 'calendar' | 'book' | 'me';
 
 export function Activity() {
   const [tab, setTab] = useState<TabId>('day');
@@ -576,6 +663,7 @@ export function Activity() {
     { id: 'suggested', label: 'Suggested tasks', icon: ListChecks },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
     { id: 'calendar', label: 'Calendar', icon: CalendarDays },
+    { id: 'book', label: 'Your book', icon: BookOpen },
     { id: 'me', label: 'Me', icon: Fingerprint },
   ];
 
@@ -603,6 +691,7 @@ export function Activity() {
       {tab === 'suggested' && <SuggestedView />}
       {tab === 'insights' && <InsightsView />}
       {tab === 'calendar' && <CalendarView onPick={openDay} />}
+      {tab === 'book' && <BookView />}
       {tab === 'me' && <MeView />}
     </div>
   );

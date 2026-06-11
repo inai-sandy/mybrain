@@ -214,6 +214,16 @@ model WeeklyReview {
   updatedAt  DateTime @updatedAt
 }
 
+/// A month of life woven into one chapter (from the Stories of the Day) — and the building block of the year book.
+model MonthStory {
+  id        String   @id @default(uuid())
+  month     String   @unique // YYYY-MM
+  title     String? // chapter title
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())
