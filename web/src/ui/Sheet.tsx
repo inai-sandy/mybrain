@@ -27,10 +27,26 @@ export function Sheet({
   };
 
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // iOS-safe scroll lock: plain overflow:hidden makes iOS Safari/PWA reset the page scroll to
+    // the top, so closing a sheet dumped the user at the top of long lists. Pinning the body with
+    // position:fixed at -scrollY keeps the page visually in place; restore the position on close.
+    const y = window.scrollY;
+    const b = document.body.style;
+    const prev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width, overflow: b.overflow };
+    b.position = 'fixed';
+    b.top = `-${y}px`;
+    b.left = '0';
+    b.right = '0';
+    b.width = '100%';
+    b.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = prev;
+      b.position = prev.position;
+      b.top = prev.top;
+      b.left = prev.left;
+      b.right = prev.right;
+      b.width = prev.width;
+      b.overflow = prev.overflow;
+      window.scrollTo(0, y);
     };
   }, []);
 
