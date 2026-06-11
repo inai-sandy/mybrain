@@ -48,6 +48,21 @@ export function mins(n?: number | null): string {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+/** Quiet creation stamp: time for today's tasks, short date for older ones. */
+export function taskWhen(createdAt: string, now = new Date()): string {
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+/** Date ordering for the task list ('newest' | 'oldest'). */
+export function sortTasksBy(list: Task[], mode: string): Task[] {
+  const dir = mode === 'oldest' ? 1 : -1;
+  return [...list].sort((a, b) => dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()));
+}
+
 // ---- the task card (presentational; actions via callbacks) ----
 export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void; onProgress?: (t: Task, pct: number) => void }) {
   const p = PRIO[t.priority] || PRIO.medium;
@@ -94,6 +109,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
           ) : t.estimateMin ? (
             <span className="ml-auto inline-flex items-center gap-1 text-zinc-400"><Clock size={11} /> {mins(t.estimateMin)}</span>
           ) : null}
+          <span title={new Date(t.createdAt).toLocaleString()} className={'text-zinc-400/80 ' + ((done && t.actualMin) || t.estimateMin ? '' : 'ml-auto')}>{taskWhen(t.createdAt)}</span>
         </div>
         {!done && onProgress && (
           <div className="flex items-center gap-2 mt-2.5">

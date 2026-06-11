@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Star, StickyNote, ChevronDown } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { Task, TaskCard, DumpModal, TaskFormModal, DoneModal, useToday, mins } from './taskShared';
+import { Task, TaskCard, DumpModal, TaskFormModal, DoneModal, useToday, mins, sortTasksBy } from './taskShared';
 
 export function Tasks() {
   const { data, loading, load } = useToday();
@@ -17,6 +17,11 @@ export function Tasks() {
   const [q, setQ] = useState('');
   const [fPriority, setFPriority] = useState('');
   const [fCategory, setFCategory] = useState('');
+  const [sort, setSortRaw] = useState<string>(() => localStorage.getItem('tasks-sort') || 'newest');
+  function setSort(v: string) {
+    setSortRaw(v);
+    localStorage.setItem('tasks-sort', v);
+  }
 
   useEffect(() => {
     load();
@@ -57,18 +62,24 @@ export function Tasks() {
     return list;
   }, [tasks, showDone, q, fPriority, fCategory]);
 
-  // group: must-dos → High → Medium → Low → Done
+  // group: priority view = must-dos → High → Medium → Low; date views = one flat list. Done at the bottom either way.
   const groups = useMemo(() => {
     const open = filtered.filter((t) => t.status === 'open');
-    const g: { key: string; label: string; items: Task[] }[] = [
-      { key: 'pin', label: '⭐️ Must-dos', items: open.filter((t) => t.pinned) },
-      { key: 'high', label: 'High', items: open.filter((t) => !t.pinned && t.priority === 'high') },
-      { key: 'medium', label: 'Medium', items: open.filter((t) => !t.pinned && t.priority === 'medium') },
-      { key: 'low', label: 'Low', items: open.filter((t) => !t.pinned && t.priority === 'low') },
-    ];
-    if (showDone) g.push({ key: 'done', label: 'Done', items: filtered.filter((t) => t.status === 'done') });
+    const g: { key: string; label: string; items: Task[] }[] =
+      sort === 'priority'
+        ? [
+            { key: 'pin', label: '⭐️ Must-dos', items: open.filter((t) => t.pinned) },
+            { key: 'high', label: 'High', items: open.filter((t) => !t.pinned && t.priority === 'high') },
+            { key: 'medium', label: 'Medium', items: open.filter((t) => !t.pinned && t.priority === 'medium') },
+            { key: 'low', label: 'Low', items: open.filter((t) => !t.pinned && t.priority === 'low') },
+          ]
+        : [{ key: 'open', label: sort === 'oldest' ? 'Oldest first' : 'Newest first', items: sortTasksBy(open, sort) }];
+    if (showDone) {
+      const done = filtered.filter((t) => t.status === 'done');
+      g.push({ key: 'done', label: 'Done', items: sort === 'priority' ? done : sortTasksBy(done, sort) });
+    }
     return g.filter((x) => x.items.length);
-  }, [filtered, showDone]);
+  }, [filtered, showDone, sort]);
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
   const hasFilters = !!(q || fPriority || fCategory);
@@ -121,6 +132,11 @@ export function Tasks() {
         <select aria-label="Filter by category" value={fCategory} onChange={(e) => setFCategory(e.target.value)} className={sel}>
           <option value="">All categories</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select aria-label="Sort tasks" value={sort} onChange={(e) => setSort(e.target.value)} className={sel}>
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="priority">By priority</option>
         </select>
         {hasFilters && (
           <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
