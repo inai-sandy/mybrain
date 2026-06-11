@@ -61,6 +61,20 @@ export class DailyController {
     return r || { ok: false, message: 'That month needs at least 3 recorded days before it can become a chapter.' };
   }
 
+  // ---- Story of the Year ----
+  @Get('year-story')
+  async yearStory(@Query('year') year?: string) {
+    const y = year && /^\d{4}$/.test(year) ? year : String(new Date().getFullYear());
+    return (await this.daily.getYearStory(y)) || { year: y, missing: true };
+  }
+
+  @Post('year-story')
+  async writeYearStory(@Body() body: { year?: string; force?: boolean }) {
+    const y = body?.year && /^\d{4}$/.test(body.year) ? body.year : String(new Date().getFullYear());
+    const r = await this.daily.generateYearStory(y, !!body?.force);
+    return r || { ok: false, message: 'No monthly chapters exist for that year yet — write a chapter first.' };
+  }
+
   @Get('story-model')
   async getStoryModel() {
     return this.daily.storyModel();

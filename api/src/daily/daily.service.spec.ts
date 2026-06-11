@@ -7,6 +7,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const summaries: any[] = [];
   const dayStories: any[] = [];
   const monthStories: any[] = [];
+  const yearStories: any[] = [];
   const suggestions: any[] = [];
   const dumps: any[] = [];
   const insights: any[] = [];
@@ -140,7 +141,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
     },
     monthStory: {
       findUnique: async ({ where }: any) => monthStories.find((m) => m.month === where.month) || null,
-      findMany: async () => monthStories.slice(),
+      findMany: async ({ where }: any = {}) => monthStories.filter((m) => (!where?.month?.gte || m.month >= where.month.gte) && (!where?.month?.lte || m.month <= where.month.lte)),
       upsert: async ({ where, create, update }: any) => {
         const ex = monthStories.find((m) => m.month === where.month);
         if (ex) { Object.assign(ex, update, { updatedAt: new Date() }); return ex; }
@@ -150,12 +151,22 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
     weeklyReview: { findMany: async () => [] },
+    yearStory: {
+      findUnique: async ({ where }: any) => yearStories.find((y) => y.year === where.year) || null,
+      upsert: async ({ where, create, update }: any) => {
+        const ex = yearStories.find((y) => y.year === where.year);
+        if (ex) { Object.assign(ex, update, { updatedAt: new Date() }); return ex; }
+        const row = { id: `ys${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...create };
+        yearStories.push(row);
+        return row;
+      },
+    },
   };
   const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }), listModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories };
 }
 
 describe('DailyService', () => {
@@ -186,6 +197,22 @@ describe('DailyService', () => {
       expect(l.pending).toEqual(['2026-06']);
     });
   });
+
+
+    it('weaves the Story of the Year from the monthly chapters (partial while the year runs)', async () => {
+      const { svc, monthStories, yearStories } = makeService({ llmText: '{"title":"The Year It Compounded","story":"The year opened slowly and ended with a system that knows you."}' });
+      const yr = new Date().getFullYear();
+      monthStories.push({ month: `${yr}-01`, title: 'Start', text: 'January.' }, { month: `${yr}-05`, title: 'Mid', text: 'May.' });
+      const y = await svc.generateYearStory(String(yr));
+      expect(y!.title).toBe('The Year It Compounded');
+      expect(y!.partial).toBe(true); // generated during the running year
+      expect(yearStories).toHaveLength(1);
+    });
+
+    it('returns null for a year with no chapters', async () => {
+      const { svc } = makeService({ llmText: '{"story":"x"}' });
+      expect(await svc.generateYearStory('2020')).toBeNull();
+    });
 
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();

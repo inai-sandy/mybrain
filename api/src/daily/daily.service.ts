@@ -29,6 +29,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.summaryTick().catch(() => undefined);
       this.storyTick().catch(() => undefined);
       this.monthTick().catch(() => undefined);
+      this.yearTick().catch(() => undefined);
       this.personalityTick().catch(() => undefined);
     }, 60_000);
   }
@@ -415,6 +416,73 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (tried === today) return;
     await this.setSetting('story.monthTry', today);
     await this.generateMonthStory(prevMonth).catch(() => undefined);
+  }
+
+  // ---- Story of the Year (the book itself) ----
+
+  private shapeYearStory(y: any) {
+    return { year: y.year, title: y.title, text: y.text, partial: y.partial, createdAt: y.createdAt, updatedAt: y.updatedAt };
+  }
+
+  async getYearStory(year: string) {
+    const row = await this.prisma.yearStory.findUnique({ where: { year } });
+    return row ? this.shapeYearStory(row) : null;
+  }
+
+  /** Weave the year's monthly chapters into the Story of the Year. Partial = "year so far". */
+  async generateYearStory(year: string, force = false) {
+    if (!/^\d{4}$/.test(year)) return null;
+    if (!force) {
+      const existing = await this.prisma.yearStory.findUnique({ where: { year } });
+      if (existing && !existing.partial) return this.shapeYearStory(existing); // the final book is never silently rewritten
+    }
+    const chapters = await this.prisma.monthStory.findMany({ where: { month: { gte: `${year}-01`, lte: `${year}-12` } }, orderBy: { month: 'asc' } });
+    if (!chapters.length) return null;
+    const today = this.dayKey(await this.tz());
+    const partial = today.slice(0, 4) === year; // generated during the year = a "so far" draft
+
+    const chapterBlocks = chapters.map((c: any) => `=== ${c.month}${c.title ? ` — ${c.title}` : ''} ===\n${c.text.slice(0, 2600)}`);
+    const tmpl = await this.prompts.get('story.year');
+    const prompt =
+      `${tmpl}\n\n` +
+      `THE YEAR: ${year}${partial ? ` (year SO FAR — chapters through ${chapters[chapters.length - 1].month}; the year is still running)` : ''}\n\n` +
+      chapterBlocks.join('\n\n');
+
+    const cfg = await this.storyModel();
+    const raw = (await this.llm.completeWith(cfg, prompt, 3500, 'story-of-year'))?.trim() || '';
+    let text = raw;
+    let title: string | null = null;
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (json?.story) text = String(json.story).trim();
+      if (json?.title) title = String(json.title).trim().slice(0, 120);
+    } catch {
+      /* keep prose */
+    }
+    if (!text) return null;
+
+    const row = await this.prisma.yearStory.upsert({
+      where: { year },
+      create: { year, title, text, partial },
+      update: { title, text, partial },
+    });
+    if (!partial) await this.memory.enqueue(`Story of the Year — ${year}${title ? ` — ${title}` : ''}\n\n${text}`, { title: `Story of the Year ${year}`, tags: ['activity'] }).catch(() => undefined);
+    return this.shapeYearStory(row);
+  }
+
+  /** On Jan 1 (after 01:00 local, once last December's chapter exists), write the previous year's final book. */
+  async yearTick(): Promise<void> {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    if (!today.endsWith('-01-01') || this.localHM(tz) < '01:00') return;
+    const prevYear = String(Number(today.slice(0, 4)) - 1);
+    const existing = await this.prisma.yearStory.findUnique({ where: { year: prevYear } });
+    if (existing && !existing.partial) return;
+    if (!(await this.prisma.monthStory.findUnique({ where: { month: `${prevYear}-12` } }))) return; // wait for December's chapter first
+    const tried = (await this.prisma.setting.findUnique({ where: { key: 'story.yearTry' } }))?.value;
+    if (tried === today) return;
+    await this.setSetting('story.yearTry', today);
+    await this.generateYearStory(prevYear, true).catch(() => undefined);
   }
 
   // ---- predictive (suggested) tasks for tomorrow ----

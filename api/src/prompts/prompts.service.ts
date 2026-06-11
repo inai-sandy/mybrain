@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -168,6 +168,21 @@ const REGISTRY: PromptDef[] = [
       `- Close with what this month set up for the next one.\n` +
       `- 4-7 paragraphs. Warm, honest, vivid — the way a great memoir reads. Give the chapter a short evocative TITLE.\n\n` +
       `Respond with ONLY JSON: {"title":"<chapter title>","story":"<the chapter text>"}`,
+  },
+  {
+    key: 'story.year',
+    label: 'Story of the Year',
+    description: 'Weaves the year\'s monthly chapters into the book of your year. The chapters are added automatically. ⚠️ Keep the JSON shape intact.',
+    default:
+      `You are a master biographer writing THE STORY OF SANDEEP'S YEAR — the closing piece of his book, woven from the monthly chapters given below. This is the best writing his app will ever produce; take it seriously.\n\n` +
+      `Write it addressed to him as "you":\n` +
+      `- Find the year's ARC: the person he was in the earliest chapter, what the year threw at him, the turning points, and the person the final chapter shows. Movement, not summary.\n` +
+      `- Name the 2-4 true TURNING POINTS of the year — specific months, specific events from the chapters.\n` +
+      `- Trace the THREADS that ran through the whole year (a project, a struggle, a relationship, a habit) and say honestly which were resolved and which still run.\n` +
+      `- Keep his world concrete: real names, real projects, real feelings from the chapters. Never invent.\n` +
+      `- If the chapters cover only part of the year (a "year so far"), write it as the story up to now and end facing forward, not with a conclusion.\n` +
+      `- 7-12 paragraphs. The tone of a great memoir: warm, honest, unhurried. Give it an evocative TITLE worthy of a book.\n\n` +
+      `Respond with ONLY JSON: {"title":"<the year's title>","story":"<the story text>"}`,
   },
   {
     key: 'mentor.weekly',

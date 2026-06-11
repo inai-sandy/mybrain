@@ -224,6 +224,17 @@ model MonthStory {
   updatedAt DateTime @updatedAt
 }
 
+/// The Story of the Year — the book itself, woven from the monthly chapters (Dec 31 + on-demand "year so far").
+model YearStory {
+  id        String   @id @default(uuid())
+  year      String   @unique // YYYY
+  title     String?
+  text      String
+  partial   Boolean  @default(false) // true = a "year so far" draft, rewritten as months land
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())

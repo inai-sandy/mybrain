@@ -603,8 +603,11 @@ function BookView() {
     <div className="space-y-4">
       <section className="rounded-xl border border-indigo-300/50 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-5">
         <h2 className="flex items-center gap-2 font-semibold mb-1"><BookOpen size={16} className="text-indigo-400" /> The book of your life</h2>
-        <p className="text-sm text-zinc-500">Every month, your daily stories are woven into one chapter — written automatically on the 1st. Chapter by chapter, this becomes the story of your year.</p>
+        <p className="text-sm text-zinc-500">Every month, your daily stories are woven into one chapter — written automatically on the 1st. On December 31st, the chapters become the Story of your Year.</p>
       </section>
+
+      <YearCard />
+
 
       {data.pending.length > 0 && (
         <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
@@ -648,6 +651,57 @@ function BookView() {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------- Story of the Year card ----------
+type YearStoryT = { year: string; title?: string | null; text: string; partial: boolean; missing?: boolean };
+
+function YearCard() {
+  const year = String(new Date().getFullYear());
+  const [ys, setYs] = useState<YearStoryT | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch(`/api/daily/year-story?year=${year}`);
+    if (r.ok) setYs(await r.json());
+  }
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function write() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/daily/year-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year, force: true }) });
+      const j = await r.json();
+      if (r.ok && j.text) { toast('success', 'Your year, written ✨'); setYs(j); setOpen(true); }
+      else toast('error', j.message || 'Write a monthly chapter first');
+    } finally { setBusy(false); }
+  }
+
+  const have = ys && !ys.missing;
+  return (
+    <section className="rounded-xl border border-amber-300/50 dark:border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-transparent p-5">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 font-semibold">
+          📖 Story of the Year {year}
+          {have && ys!.partial && <span className="text-[10px] uppercase tracking-wide rounded-full bg-amber-500/15 text-amber-600 px-2 py-0.5">so far</span>}
+        </h2>
+        <button onClick={write} disabled={busy} className="shrink-0 text-xs text-zinc-400 hover:text-amber-600 inline-flex items-center gap-1">
+          <RefreshCw size={12} /> {busy ? 'Writing…' : have ? 'Update' : 'Write my year so far'}
+        </button>
+      </div>
+      {have ? (
+        <div className="mt-2">
+          {ys!.title && <p className="font-bold text-lg">“{ys!.title}”</p>}
+          <p className={'mt-1 text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed ' + (open ? '' : 'line-clamp-4')}>{ys!.text}</p>
+          <button onClick={() => setOpen((v) => !v)} className="mt-2 text-xs text-amber-600 hover:underline">{open ? 'Show less' : 'Read the whole story'}</button>
+        </div>
+      ) : (
+        <p className="mt-1 text-sm text-zinc-500">Written automatically on December 31st from your monthly chapters — or get a “year so far” edition any time with the button above.</p>
+      )}
+    </section>
   );
 }
 
