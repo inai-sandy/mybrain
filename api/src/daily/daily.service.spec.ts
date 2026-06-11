@@ -154,6 +154,14 @@ describe('DailyService', () => {
     expect(second!.mood).toBe('🤩 Great');
   });
 
+  it('indexes the told story into memory stamped "activity" (Ask-your-life recall)', async () => {
+    const { svc, enqueued } = makeService();
+    await svc.submitStory('cracked the pricing section today', 'app', '🙂 Good');
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0].text).toContain('cracked the pricing');
+    expect(enqueued[0].o.tags).toEqual(['activity']);
+  });
+
   it('saves a story for a past day (the morning-after catch-up) but never for the future', async () => {
     const { svc, stories } = makeService();
     const past = await svc.submitStory('told the next morning on the commute', 'app', undefined, '2026-06-01');

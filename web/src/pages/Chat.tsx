@@ -19,7 +19,7 @@ const SCOPES: { id: string; label: string; icon: any; hint: string }[] = [
   { id: 'everything', label: 'Everything', icon: Globe, hint: 'Your whole brain' },
   { id: 'bookmark', label: 'Bookmarks', icon: Bookmark, hint: 'Your saved links' },
   { id: 'idea', label: 'Ideas', icon: Lightbulb, hint: 'Your captured ideas' },
-  { id: 'activity', label: 'Activity', icon: ActivityIcon, hint: 'Your days & story' },
+  { id: 'activity', label: 'My life', icon: ActivityIcon, hint: 'Your days, stories & moods' },
   { id: 'document', label: 'Documents', icon: FileText, hint: 'Your research docs' },
   { id: 'skill', label: 'Skills', icon: Wand2, hint: 'Your Claude skills' },
 ];
@@ -29,7 +29,7 @@ const STARTERS: Record<string, string[]> = {
   everything: ['What did I save this week?', "Summarize what I've been working on", 'What ideas have I captured?'],
   bookmark: ['What did I save about SEO?', 'Show my AI / coding bookmarks', 'Any videos I saved on marketing?'],
   idea: ['What ideas have I had recently?', 'Which ideas still need research?', 'Summarize my best idea'],
-  activity: ['What did I do yesterday?', 'How productive was my week?', 'What patterns do you see in my days?'],
+  activity: ['What did I do yesterday?', 'When did I last feel really great?', 'What was I worried about last week?'],
   document: ['Summarize my latest research doc', 'What do my notes say about pricing?', 'Key takeaways from my documents'],
   skill: ['Which skills have I built?', 'What does my deep-research skill do?', 'Which skills am I not using?'],
 };

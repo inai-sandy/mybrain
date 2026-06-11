@@ -34,7 +34,7 @@ function scopeFilter(scope: string): { include: string[]; exclude: string[] } {
 const SCOPE_LABEL: Record<string, string> = {
   bookmark: 'Bookmarks',
   idea: 'Ideas',
-  activity: 'Activity',
+  activity: 'life log (days, stories, moods)',
   skill: 'Skills',
   document: 'Capture',
   everything: 'brain',

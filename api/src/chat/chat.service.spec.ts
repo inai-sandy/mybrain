@@ -87,7 +87,7 @@ describe('ChatService', () => {
     const { svc, memory } = make({ hits: [] });
     const r = await svc.askOnce('most important activity on 8th June', 'activity');
     expect(memory.searchScoped).toHaveBeenCalledWith('most important activity on 8th June', ['activity'], 5, []);
-    expect(r.answer).toMatch(/don't have anything in your \*\*Activity\*\*/i);
+    expect(r.answer).toMatch(/don't have anything in your \*\*life log/i);
     expect(r.sources).toHaveLength(0);
   });
 

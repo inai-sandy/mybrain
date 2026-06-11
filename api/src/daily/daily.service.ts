@@ -87,6 +87,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const row = existing
       ? await this.prisma.story.update({ where: { id: existing.id }, data: { rawText: text, source, mood: mood ?? existing.mood } })
       : await this.prisma.story.create({ data: { day, rawText: text, source, mood: mood || null } });
+    // Index his own words into memory so "My life" chat can answer from them ("what was I worried about in May?").
+    await this.memory.enqueue(`His own story — ${day}${mood ? ` (mood: ${mood})` : ''}\n\n${text}`, { title: `Your story ${day}`, tags: ['activity'] }).catch(() => undefined);
     // If that day's Story of the Day was already written, rewrite it around the user's own words.
     const woven = await this.prisma.dayStory.findUnique({ where: { day } });
     if (woven) this.generateDayStory(day, true).catch(() => undefined);
