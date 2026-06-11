@@ -69,7 +69,15 @@ function AuthedApp() {
   if (auth === 'loading') {
     return <div className="min-h-screen bg-zinc-950 text-zinc-400 flex items-center justify-center">Loading…</div>;
   }
-  if (auth === 'anon') return <Login onSignedIn={refresh} />;
+  if (auth === 'anon') {
+    // Logged-out visitors landing on the root see the public showcase ("the homepage").
+    // The Login button there links back with ?login=1; deep links (PWA shortcuts) go straight to login.
+    if (window.location.pathname === '/' && !window.location.search.includes('login')) {
+      window.location.replace('/welcome.html');
+      return null;
+    }
+    return <Login onSignedIn={refresh} />;
+  }
 
   return (
     <Routes>
