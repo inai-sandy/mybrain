@@ -134,7 +134,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
 }
 
 // ---- brain-dump modal (type or speak) ----
-export function DumpModal({ onClose, onDone, initialQuestion }: { onClose: () => void; onDone: () => void; initialQuestion: string | null }) {
+export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onClose: () => void; onDone: () => void; onCreated?: (tasks: Task[]) => void; initialQuestion: string | null }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState<string | null>(initialQuestion);
@@ -159,6 +159,7 @@ export function DumpModal({ onClose, onDone, initialQuestion }: { onClose: () =>
       toast('success', `${d.tasks?.length || 0} task${d.tasks?.length === 1 ? '' : 's'} created`);
       onDone();
       onClose();
+      if (d.tasks?.length) onCreated?.(d.tasks);
     } catch {
       toast('error', 'Could not process');
     } finally {
@@ -204,6 +205,78 @@ export function DumpModal({ onClose, onDone, initialQuestion }: { onClose: () =>
             <button onClick={submit} disabled={busy || !text.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
               {busy ? 'Organizing…' : 'Make my tasks'}
             </button>
+          </div>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+// ---- post-dump review: verify what just landed, delete strays ----
+export function DumpReviewSheet({ tasks, onClose, onChanged }: { tasks: Task[]; onClose: () => void; onChanged: () => void }) {
+  const [list, setList] = useState<Task[]>(tasks);
+  const [armed, setArmed] = useState<string | null>(null);
+  const toast = useToast();
+
+  // Only tasks created by THIS dump are ever in `list`, so deletes here can't touch anything else.
+  async function remove(t: Task) {
+    if (armed !== t.id) {
+      setArmed(t.id);
+      setTimeout(() => setArmed((a) => (a === t.id ? null : a)), 3000);
+      return;
+    }
+    setArmed(null);
+    const r = await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' });
+    if (r.ok) {
+      setList((l) => l.filter((x) => x.id !== t.id));
+      toast('success', 'Removed');
+      onChanged();
+    } else toast('error', 'Could not remove');
+  }
+
+  return (
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold flex items-center gap-2"><Brain className="text-emerald-500" size={18} /> Added {list.length} task{list.length === 1 ? '' : 's'}</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-3">Quick check — everything land where it should? Tap 🗑 twice to remove a stray.</p>
+          {list.length ? (
+            <ul className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+              {list.map((t) => {
+                const p = PRIO[t.priority] || PRIO.medium;
+                return (
+                  <li key={t.id} className="flex items-start gap-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5">
+                    <span className={'mt-1.5 h-2 w-2 rounded-full shrink-0 ' + p.dot} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium break-words">
+                        {t.pinned && <Star size={12} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
+                        {t.title}
+                      </div>
+                      <div className="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-zinc-400">
+                        <span className={'rounded-full px-1.5 py-0.5 ' + p.cls}>{p.label}</span>
+                        {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+                        {t.estimateMin ? <span className="inline-flex items-center gap-1"><Clock size={10} /> {mins(t.estimateMin)}</span> : null}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => remove(t)}
+                      title={armed === t.id ? 'Tap again to remove' : 'Remove this task'}
+                      className={'shrink-0 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ' + (armed === t.id ? 'bg-rose-600 text-white' : 'text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800')}
+                    >
+                      {armed === t.id ? 'Sure?' : <Trash2 size={14} />}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 p-6 text-center text-sm text-zinc-400">All removed — dump again whenever you're ready.</p>
+          )}
+          <div className="mt-4 flex justify-end">
+            <button onClick={close} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm">Looks good ✓</button>
           </div>
         </>
       )}

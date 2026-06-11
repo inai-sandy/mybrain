@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Brain, ChevronRight, Star } from 'lucide-react';
-import { Task, TaskCard, DumpModal, TaskFormModal, DoneModal, useToday } from './taskShared';
+import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday } from './taskShared';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { StorySection } from './DailyStory';
 
@@ -11,6 +11,7 @@ export function Today() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [doneFor, setDoneFor] = useState<Task | null>(null);
   const [delFor, setDelFor] = useState<Task | null>(null);
+  const [review, setReview] = useState<Task[] | null>(null);
 
   useEffect(() => {
     load();
@@ -97,7 +98,8 @@ export function Today() {
       {/* Daytime notes + nightly story */}
       <StorySection />
 
-      {dumping && <DumpModal onClose={() => setDumping(false)} onDone={load} initialQuestion={data?.question || null} />}
+      {dumping && <DumpModal onClose={() => setDumping(false)} onDone={load} onCreated={setReview} initialQuestion={data?.question || null} />}
+      {review && <DumpReviewSheet tasks={review} onClose={() => setReview(null)} onChanged={load} />}
       {editing && <TaskFormModal task={editing} onClose={() => setEditing(null)} onSaved={load} />}
       {doneFor && <DoneModal task={doneFor} onClose={() => setDoneFor(null)} onSaved={load} />}
       {delFor && <ConfirmDialog title="Delete task?" message={`“${delFor.title}” will be removed.`} confirmLabel="Delete" onConfirm={() => remove(delFor)} onCancel={() => setDelFor(null)} />}
