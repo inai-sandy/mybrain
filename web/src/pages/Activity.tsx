@@ -423,15 +423,19 @@ function MeView() {
 
   if (!p.unlocked) {
     const pct = Math.round((p.daysCovered / p.minDays) * 100);
+    // People memory is independent of the personality unlock — it must show here too.
     return (
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 text-center">
-        <Fingerprint className="mx-auto text-emerald-500 mb-2" size={28} />
-        <h2 className="font-semibold">Getting to know you</h2>
-        <p className="text-sm text-zinc-500 mt-1">Your honest personality read unlocks after <b>{p.minDays} days</b> of real use — so it's built on evidence, not guesswork.</p>
-        <div className="mt-4 h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden max-w-xs mx-auto">
-          <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+      <div className="space-y-5">
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 text-center">
+          <Fingerprint className="mx-auto text-emerald-500 mb-2" size={28} />
+          <h2 className="font-semibold">Getting to know you</h2>
+          <p className="text-sm text-zinc-500 mt-1">Your honest personality read unlocks after <b>{p.minDays} days</b> of real use — so it's built on evidence, not guesswork.</p>
+          <div className="mt-4 h-2 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden max-w-xs mx-auto">
+            <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-xs text-zinc-400 mt-2">{p.daysCovered} / {p.minDays} active days</p>
         </div>
-        <p className="text-xs text-zinc-400 mt-2">{p.daysCovered} / {p.minDays} active days</p>
+        <PeopleCard />
       </div>
     );
   }
