@@ -461,6 +461,46 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { merged: mentions.length, from: f, into: t };
   }
 
+  /** Everything ever recorded involving one person: per mention-day, the task lines, story
+   *  sentences and notes containing their name (any known spelling). Pure data, no AI. */
+  async personDetail(name: string) {
+    const canonical = String(name || '').trim();
+    if (!canonical) return null;
+    const mentions = await this.prisma.personMention.findMany({ where: { name: canonical }, orderBy: { day: 'desc' } });
+    if (!mentions.length) return null;
+    const aliases = await this.peopleAliases();
+    const spellings = [canonical, ...Object.keys(aliases).filter((k) => aliases[k] === canonical)].map((s) => s.toLowerCase());
+    const has = (text?: string | null) => !!text && spellings.some((sp) => text.toLowerCase().includes(sp));
+    const sentencesWith = (text: string) =>
+      text
+        .split(/(?<=[.!?。])\s+|\n+/)
+        .map((s) => s.trim())
+        .filter((s) => s && has(s))
+        .map((s) => s.slice(0, 280));
+
+    const days = [] as { day: string; items: { type: 'story' | 'task' | 'note'; text: string }[] }[];
+    for (const m of mentions) {
+      const [told, tasks, notes] = await Promise.all([
+        this.prisma.story.findFirst({ where: { day: m.day }, orderBy: { createdAt: 'desc' } }),
+        this.prisma.task.findMany({ where: { day: m.day } }),
+        this.prisma.dayNote.findMany({ where: { day: m.day } }),
+      ]);
+      const items: { type: 'story' | 'task' | 'note'; text: string }[] = [];
+      if (told?.rawText) for (const s of sentencesWith(told.rawText)) items.push({ type: 'story', text: s });
+      for (const t of tasks) if (has(t.title) || has(t.note)) items.push({ type: 'task', text: `${t.title}${t.status === 'done' ? ' ✓' : ''}` });
+      for (const n of notes) if (has(n.text)) items.push({ type: 'note', text: n.text.slice(0, 280) });
+      days.push({ day: m.day, items });
+    }
+    return {
+      name: canonical,
+      mentions: mentions.length,
+      firstSeen: mentions[mentions.length - 1].day,
+      lastSeen: mentions[0].day,
+      otherSpellings: Object.keys(aliases).filter((k) => aliases[k] === canonical),
+      days,
+    };
+  }
+
   /** Extract people's names from the user's own story (tiny Haiku call, idempotent per name+day). */
   async extractPeople(day: string, storyText?: string | null): Promise<void> {
     const text = (storyText || '').trim();

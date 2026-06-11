@@ -272,6 +272,21 @@ describe('DailyService', () => {
       expect(peopleMentions.every((m: any) => m.name === 'Alison K')).toBe(true);
     });
 
+
+    it('personDetail collects the task lines, story sentences and notes mentioning the person', async () => {
+      const { svc, peopleMentions, stories, tasks, notes } = makeService();
+      peopleMentions.push({ name: 'Srikar', day: '2026-06-11' });
+      stories.push({ id: 's1', day: '2026-06-11', rawText: 'Long call with Srikar about payments. Then gym.', createdAt: new Date() });
+      tasks.push({ id: 't1', day: '2026-06-11', title: 'Discuss installation charges with Srikar', status: 'done' });
+      notes.push({ id: 'n1', day: '2026-06-11', text: 'Srikar asked for the revised quote' });
+      const d = await svc.personDetail('Srikar');
+      expect(d!.mentions).toBe(1);
+      const types = d!.days[0].items.map((i: any) => i.type).sort();
+      expect(types).toEqual(['note', 'story', 'task']);
+      expect(d!.days[0].items.find((i: any) => i.type === 'story')!.text).toContain('payments');
+      expect(d!.days[0].items.find((i: any) => i.type === 'story')!.text).not.toContain('gym');
+    });
+
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();
     await svc.submitStory('rough start to the day', 'app', '😐 Okay');

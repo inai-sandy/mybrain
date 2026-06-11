@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { Sheet } from '../ui/Sheet';
 import { StoryModal } from './DailyStory';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
@@ -497,10 +498,21 @@ function PeopleCard() {
   const [overName, setOverName] = useState<string | null>(null); // chip currently hovered by a drag
   const [merge, setMerge] = useState<{ from: string; into: string } | null>(null);
   const [editFor, setEditFor] = useState<string | null>(null); // long-press → rename
+  const [detailFor, setDetailFor] = useState<string | null>(null); // double-tap → full history
   const chipRefs = useRef<Record<string, HTMLSpanElement | null>>({});
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTap = useRef<{ name: string; at: number }>({ name: '', at: 0 });
   const dragging = useRef(false);
   const toast = useToast();
+
+  function tap(name: string) {
+    const now = Date.now();
+    if (lastTap.current.name === name && now - lastTap.current.at < 350) {
+      endPress(); // a double-tap is not a long-press
+      setDetailFor(name);
+      lastTap.current = { name: '', at: 0 };
+    } else lastTap.current = { name, at: now };
+  }
 
   async function load() {
     const r = await fetch('/api/daily/people');
@@ -543,7 +555,7 @@ function PeopleCard() {
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
       <h2 className="flex items-center gap-2 font-semibold mb-1">👥 People in your stories <span className="text-xs font-normal text-zinc-400">{data.count}</span></h2>
-      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words. Drag one name onto another to merge · hold a name to rename it.</p>
+      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words. Double-tap a name for your full history together · drag one onto another to merge · hold to rename.</p>
       <div className="flex flex-wrap gap-2">
         {data.people.slice(0, 30).map((p) => (
           <motion.span
@@ -555,6 +567,7 @@ function PeopleCard() {
             whileDrag={{ scale: 1.08, zIndex: 40 }}
             onPointerDown={() => startPress(p.name)}
             onPointerUp={endPress}
+            onClick={() => tap(p.name)}
             onDragStart={() => { dragging.current = true; endPress(); }}
             onDrag={(_e, info) => setOverName(chipUnder(info.point.x - window.scrollX, info.point.y - window.scrollY, p.name))}
             onDragEnd={(_e, info) => {
@@ -591,7 +604,72 @@ function PeopleCard() {
         />
       )}
       {editFor && <RenamePersonDialog name={editFor} onCancel={() => setEditFor(null)} onSave={(to) => doMerge(editFor, to, true)} />}
+      {detailFor && <PersonDetailSheet name={detailFor} onClose={() => setDetailFor(null)} />}
     </section>
+  );
+}
+
+/** Double-tap → the person's full history: every task, story sentence and note involving them. */
+function PersonDetailSheet({ name, onClose }: { name: string; onClose: () => void }) {
+  const [d, setD] = useState<{ name: string; mentions: number; firstSeen: string; lastSeen: string; otherSpellings: string[]; days: { day: string; items: { type: string; text: string }[] }[] } | null>(null);
+  useEffect(() => {
+    fetch(`/api/daily/people/detail?name=${encodeURIComponent(name)}`).then((r) => (r.ok ? r.json() : null)).then(setD).catch(() => undefined);
+  }, [name]);
+
+  const ICONS: Record<string, { icon: any; cls: string; label: string }> = {
+    task: { icon: CheckCircle2, cls: 'text-emerald-500 bg-emerald-500/10', label: 'Task' },
+    story: { icon: Moon, cls: 'text-indigo-400 bg-indigo-500/10', label: 'Your story' },
+    note: { icon: MessageSquare, cls: 'text-zinc-500 bg-zinc-500/10', label: 'Note' },
+  };
+  return (
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold flex items-center gap-2">👤 {name}</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+          </div>
+          {!d ? (
+            <p className="text-sm text-zinc-400 py-6 text-center">Loading…</p>
+          ) : (
+            <>
+              <p className="text-xs text-zinc-500 mb-3">
+                {d.mentions} day{d.mentions === 1 ? '' : 's'} · first {prettyDay(d.firstSeen).replace(/^[A-Za-z]+, /, '')} · last {prettyDay(d.lastSeen).replace(/^[A-Za-z]+, /, '')}
+                {d.otherSpellings.length > 0 && <> · also written as {d.otherSpellings.join(', ')}</>}
+              </p>
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {d.days.map((dayEntry) => (
+                  <div key={dayEntry.day}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs font-semibold text-zinc-500">{prettyDay(dayEntry.day)}</span>
+                      <span className="flex-1 h-px bg-zinc-100 dark:bg-zinc-800" />
+                    </div>
+                    {dayEntry.items.length ? (
+                      <ul className="space-y-1.5">
+                        {dayEntry.items.map((it, i) => {
+                          const m = ICONS[it.type] || ICONS.note;
+                          return (
+                            <li key={i} className="flex items-start gap-2.5 rounded-lg border border-zinc-100 dark:border-zinc-800 p-2.5">
+                              <span className={'shrink-0 rounded-lg p-1.5 ' + m.cls}><m.icon size={14} /></span>
+                              <div className="min-w-0 flex-1">
+                                <span className="block text-[10px] uppercase tracking-wide text-zinc-400">{m.label}</span>
+                                <span className="text-sm text-zinc-700 dark:text-zinc-200 break-words">{it.text}</span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-zinc-400">Mentioned this day — no exact lines matched.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </Sheet>
   );
 }
 

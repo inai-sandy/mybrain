@@ -67,6 +67,14 @@ export class DailyController {
     return this.daily.peopleOverview();
   }
 
+  /** One person's full history — every recorded point involving them. */
+  @Get('people/detail')
+  async personDetail(@Query('name') name?: string) {
+    const r = await this.daily.personDetail(name || '');
+    if (!r) throw new BadRequestException('Person not found');
+    return r;
+  }
+
   /** Merge a duplicate person into the canonical one (drag-and-drop on the People card). */
   @Post('people/merge')
   async mergePeople(@Body() body: { from?: string; into?: string }) {
