@@ -339,8 +339,13 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
     await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
-    // People memory: remember who appeared in his own words (idempotent per name+day).
-    if (told?.rawText) await this.extractPeople(day, told.rawText).catch(() => undefined);
+    // People memory: remember who appeared in his own words — story, tasks AND quick notes
+    // (tasks come from his brain dumps, so "Discuss payments with Srikar" counts as a mention).
+    const dayNotes = await this.prisma.dayNote.findMany({ where: { day } }).catch(() => [] as any[]);
+    const peopleCorpus = [told?.rawText, dayTasks.map((t) => t.title).join('\n'), dayNotes.map((n: any) => n.text).join('\n')]
+      .filter(Boolean)
+      .join('\n');
+    if (peopleCorpus.trim()) await this.extractPeople(day, peopleCorpus).catch(() => undefined);
     // Flag it for the Telegram push (delivered by the Telegram nudge loop).
     await this.setSetting('telegram.pushStory', day).catch(() => undefined);
     return this.shapeDayStory(row);
@@ -431,11 +436,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const text = (storyText || '').trim();
     if (text.length < 20) return;
     const prompt =
-      `Extract the names of real PEOPLE mentioned in this diary entry. Rules:\n` +
+      `Extract the names of real PEOPLE mentioned in this diary entry / task list. Rules:\n` +
       `- People only — NOT companies, products, apps, places, AI assistants/tools (Claude, ChatGPT…), or the diary's author himself (Sandeep/"I").\n` +
       `- Use the name as written (e.g. "Srikar", "Kishore"). Max 10.\n` +
       `- If none, return an empty list.\n` +
-      `Respond with ONLY JSON: {"people":["Name", ...]}\n\nDIARY ENTRY:\n${text.slice(0, 3000)}`;
+      `Respond with ONLY JSON: {"people":["Name", ...]}\n\nDIARY ENTRY / TASKS:\n${text.slice(0, 3000)}`;
     const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 200, 'people-extract'))?.trim() || '';
     let names: string[] = [];
     try {
