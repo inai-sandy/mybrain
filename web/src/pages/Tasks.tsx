@@ -18,6 +18,7 @@ export function Tasks() {
   const [q, setQ] = useState('');
   const [fPriority, setFPriority] = useState('');
   const [fCategory, setFCategory] = useState('');
+  const [fSphere, setFSphere] = useState('');
   const [sort, setSortRaw] = useState<string>(() => localStorage.getItem('tasks-sort') || 'newest');
   function setSort(v: string) {
     setSortRaw(v);
@@ -60,8 +61,9 @@ export function Tasks() {
     }
     if (fPriority) list = list.filter((t) => t.priority === fPriority);
     if (fCategory) list = list.filter((t) => t.category === fCategory);
+    if (fSphere) list = list.filter((t) => (t.sphere || 'work') === fSphere);
     return list;
-  }, [tasks, showDone, q, fPriority, fCategory]);
+  }, [tasks, showDone, q, fPriority, fCategory, fSphere]);
 
   // group: priority view = must-dos → High → Medium → Low; date views = one flat list. Done at the bottom either way.
   const groups = useMemo(() => {
@@ -83,7 +85,7 @@ export function Tasks() {
   }, [filtered, showDone, sort]);
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
-  const hasFilters = !!(q || fPriority || fCategory);
+  const hasFilters = !!(q || fPriority || fCategory || fSphere);
   const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500';
 
   return (
@@ -134,13 +136,18 @@ export function Tasks() {
           <option value="">All categories</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select aria-label="Filter by life" value={fSphere} onChange={(e) => setFSphere(e.target.value)} className={sel}>
+          <option value="">Work + Personal</option>
+          <option value="work">💼 Work</option>
+          <option value="personal">🏠 Personal</option>
+        </select>
         <select aria-label="Sort tasks" value={sort} onChange={(e) => setSort(e.target.value)} className={sel}>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="priority">By priority</option>
         </select>
         {hasFilters && (
-          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
+          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
         )}
       </div>
       )}

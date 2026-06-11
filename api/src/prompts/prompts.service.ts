@@ -14,7 +14,7 @@ const REGISTRY: PromptDef[] = [
     default:
       `You are a sharp daily planner. Turn this raw morning brain-dump into clean, actionable tasks for today.\n` +
       `Respond with ONLY JSON, no prose, in this exact shape:\n` +
-      `{"question": null, "tasks": [{"title":"...","category":"...","tags":["..."],"priority":"high|medium|low","estimateMin": 30,"note":"...","pinned": false}]}\n\n` +
+      `{"question": null, "tasks": [{"title":"...","category":"...","tags":["..."],"priority":"high|medium|low","sphere":"work|personal","estimateMin": 30,"note":"...","pinned": false}]}\n\n` +
       `Rules:\n` +
       `- Extract concrete, imperative tasks ("Call the accountant", not "accountant"). Merge duplicates and overlapping items.\n` +
       `- category: a short bucket inferred from the task (e.g. Beakn, Learning, Admin, Health, Personal). 1-2 words.\n` +
@@ -23,6 +23,7 @@ const REGISTRY: PromptDef[] = [
       `- estimateMin: a realistic time estimate in whole minutes.\n` +
       `- note: optional one-line context pulled from the dump (omit if none).\n` +
       `- pinned: mark ONLY the 1-3 most important "must-do today" tasks as true.\n` +
+      `- sphere: "personal" for family/home/health/errands/relationships; "work" for job/business/professional tasks. Every task gets one.\n` +
       `- If the dump is too vague or empty to extract any real task, return {"question":"<one short clarifying question>","tasks":[]}.`,
   },
   {

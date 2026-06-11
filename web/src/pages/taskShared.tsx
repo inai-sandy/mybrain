@@ -12,6 +12,7 @@ export type Task = {
   category?: string | null;
   tags: string[];
   priority: 'high' | 'medium' | 'low';
+  sphere?: 'work' | 'personal';
   pinned: boolean;
   estimateMin?: number | null;
   actualMin?: number | null;
@@ -100,6 +101,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
             </span>
           )}
           {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+          {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
           {!!t.reminderCount && t.reminderCount > 0 && (
             <span title={(t.reminders || []).join(', ')} className="inline-flex items-center gap-0.5 text-zinc-400"><Bell size={10} /> {t.reminderCount}</span>
           )}
@@ -258,6 +260,7 @@ export function DumpReviewSheet({ tasks, onClose, onChanged }: { tasks: Task[]; 
                       <div className="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-zinc-400">
                         <span className={'rounded-full px-1.5 py-0.5 ' + p.cls}>{p.label}</span>
                         {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+          {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
                         {t.estimateMin ? <span className="inline-flex items-center gap-1"><Clock size={10} /> {mins(t.estimateMin)}</span> : null}
                       </div>
                     </div>
@@ -294,6 +297,7 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
   const [tags, setTags] = useState((task?.tags || []).join(', '));
   const [note, setNote] = useState(task?.note || '');
   const [pinned, setPinned] = useState(!!task?.pinned);
+  const [sphere, setSphere] = useState<'work' | 'personal'>(task?.sphere === 'personal' ? 'personal' : 'work');
   const [reminders, setReminders] = useState(task?.reminderCount ?? 0);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -309,6 +313,7 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       note: note.trim() || undefined,
       pinned,
+      sphere,
       reminderCount: reminders,
     };
     try {
@@ -364,6 +369,13 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
             </label>
           </div>
           <p className="text-[11px] text-zinc-400 mt-1">The AI picks smart times based on priority. Reminders are delivered via Telegram.</p>
+          <div className="mt-3">
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">Which life is this for?</p>
+            <div className="flex gap-1.5">
+              <button type="button" onClick={() => setSphere('work')} className={'rounded-lg px-3 py-1.5 text-sm border ' + (sphere === 'work' ? 'bg-emerald-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>💼 Work</button>
+              <button type="button" onClick={() => setSphere('personal')} className={'rounded-lg px-3 py-1.5 text-sm border ' + (sphere === 'personal' ? 'bg-violet-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>🏠 Personal</button>
+            </div>
+          </div>
           <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Tags
             <input value={tags} onChange={(e) => setTags(e.target.value)} className={inp} placeholder="comma, separated" />
           </label>

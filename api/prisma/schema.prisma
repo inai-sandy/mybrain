@@ -262,6 +262,7 @@ model Task {
   category      String? // AI-learned bucket (Beakn, Learning, Admin, Health…)
   tags          String? // JSON array of strings
   priority      String    @default("medium") // high | medium | low
+  sphere        String    @default("work") // work | personal — which life this task belongs to
   pinned        Boolean   @default(false) // a top 1–3 must-do for the day
   estimateMin   Int? // AI time estimate in minutes
   actualMin     Int? // user-reported actual time on completion

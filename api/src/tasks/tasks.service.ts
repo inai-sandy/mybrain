@@ -122,6 +122,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private normSphere(x?: string): string {
+    return String(x || '').toLowerCase().trim() === 'personal' ? 'personal' : 'work';
+  }
+
   private normPriority(p?: string): string {
     const v = String(p || '').toLowerCase();
     return v === 'high' || v === 'low' ? v : 'medium';
@@ -162,6 +166,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
           category: c.category ? String(c.category).trim().slice(0, 40) : null,
           tags: Array.isArray(c.tags) && c.tags.length ? JSON.stringify(c.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null,
           priority: this.normPriority(c.priority),
+          sphere: this.normSphere((c as any).sphere),
           estimateMin: Number.isFinite(c.estimateMin) ? Math.max(1, Math.round(Number(c.estimateMin))) : null,
           note: c.note ? String(c.note).trim().slice(0, 500) : null,
           pinned,
@@ -184,6 +189,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       category: t.category,
       tags: t.tags ? (() => { try { return JSON.parse(t.tags); } catch { return []; } })() : [],
       priority: t.priority,
+      sphere: t.sphere || 'work',
       pinned: t.pinned,
       estimateMin: t.estimateMin,
       actualMin: t.actualMin,
@@ -238,11 +244,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
     const priority = this.normPriority(data.priority);
+    const sphere = this.normSphere(data.sphere);
     const reminderCount = Number.isFinite(data.reminderCount as any) ? Math.max(0, Math.min(4, Math.round(Number(data.reminderCount)))) : 0;
     const reminders = this.computeReminders(reminderCount, priority);
     const t = await this.prisma.task.create({
@@ -251,6 +258,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         category: data.category ? String(data.category).trim().slice(0, 40) : null,
         tags: Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null,
         priority,
+        sphere,
         estimateMin: Number.isFinite(data.estimateMin as any) ? Math.max(1, Math.round(Number(data.estimateMin))) : null,
         note: data.note ? String(data.note).trim().slice(0, 500) : null,
         pinned: !!data.pinned,
@@ -262,10 +270,11 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(t);
   }
 
-  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number }) {
+  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
     const priority = data.priority !== undefined ? this.normPriority(data.priority) : t.priority;
+    const sphere = data.sphere !== undefined ? this.normSphere(data.sphere) : (t as any).sphere || 'work';
     // Recompute reminder times when the count or priority changes.
     const reminderCount = data.reminderCount !== undefined ? Math.max(0, Math.min(4, Math.round(Number(data.reminderCount) || 0))) : t.reminderCount;
     const remindersChanged = data.reminderCount !== undefined || (data.priority !== undefined && data.priority !== t.priority);
@@ -287,6 +296,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         category: data.category !== undefined ? (data.category ? String(data.category).trim().slice(0, 40) : null) : t.category,
         tags: data.tags !== undefined ? (Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null) : t.tags,
         priority,
+        sphere,
         estimateMin: data.estimateMin !== undefined ? (Number.isFinite(data.estimateMin as any) ? Math.max(1, Math.round(Number(data.estimateMin))) : null) : t.estimateMin,
         note: data.note !== undefined ? (data.note ? String(data.note).trim().slice(0, 500) : null) : t.note,
         pinned: data.pinned !== undefined ? !!data.pinned : t.pinned,
