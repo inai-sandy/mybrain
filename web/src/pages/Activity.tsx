@@ -496,7 +496,10 @@ function PeopleCard() {
   const [data, setData] = useState<{ people: PersonT[]; count: number } | null>(null);
   const [overName, setOverName] = useState<string | null>(null); // chip currently hovered by a drag
   const [merge, setMerge] = useState<{ from: string; into: string } | null>(null);
+  const [editFor, setEditFor] = useState<string | null>(null); // long-press → rename
   const chipRefs = useRef<Record<string, HTMLSpanElement | null>>({});
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragging = useRef(false);
   const toast = useToast();
 
   async function load() {
@@ -514,13 +517,25 @@ function PeopleCard() {
     return null;
   }
 
-  async function doMerge(from: string, into: string) {
+  async function doMerge(from: string, into: string, rename = false) {
     setMerge(null);
+    setEditFor(null);
     const r = await fetch('/api/daily/people/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, into }) });
     if (r.ok) {
-      toast('success', `${from} merged into ${into} — and remembered for future stories`);
+      toast('success', rename ? `Renamed to ${into} — future stories will use it too` : `${from} merged into ${into} — and remembered for future stories`);
       load();
-    } else toast('error', 'Could not merge');
+    } else toast('error', rename ? 'Could not rename' : 'Could not merge');
+  }
+
+  function startPress(name: string) {
+    dragging.current = false;
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+    pressTimer.current = setTimeout(() => {
+      if (!dragging.current) setEditFor(name); // held still → rename
+    }, 550);
+  }
+  function endPress() {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
   }
 
   if (!data || !data.count) return null; // appears once stories start mentioning people
@@ -528,7 +543,7 @@ function PeopleCard() {
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
       <h2 className="flex items-center gap-2 font-semibold mb-1">👥 People in your stories <span className="text-xs font-normal text-zinc-400">{data.count}</span></h2>
-      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words. Same person twice? Drag one name onto the other to merge them.</p>
+      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words. Drag one name onto another to merge · hold a name to rename it.</p>
       <div className="flex flex-wrap gap-2">
         {data.people.slice(0, 30).map((p) => (
           <motion.span
@@ -538,6 +553,9 @@ function PeopleCard() {
             dragSnapToOrigin
             dragMomentum={false}
             whileDrag={{ scale: 1.08, zIndex: 40 }}
+            onPointerDown={() => startPress(p.name)}
+            onPointerUp={endPress}
+            onDragStart={() => { dragging.current = true; endPress(); }}
             onDrag={(_e, info) => setOverName(chipUnder(info.point.x - window.scrollX, info.point.y - window.scrollY, p.name))}
             onDragEnd={(_e, info) => {
               const target = chipUnder(info.point.x - window.scrollX, info.point.y - window.scrollY, p.name);
@@ -572,7 +590,33 @@ function PeopleCard() {
           onCancel={() => setMerge(null)}
         />
       )}
+      {editFor && <RenamePersonDialog name={editFor} onCancel={() => setEditFor(null)} onSave={(to) => doMerge(editFor, to, true)} />}
     </section>
+  );
+}
+
+/** Long-press rename: small dialog with the name prefilled. */
+function RenamePersonDialog({ name, onCancel, onSave }: { name: string; onCancel: () => void; onSave: (to: string) => void }) {
+  const [val, setVal] = useState(name);
+  const ok = val.trim().length >= 2 && val.trim() !== name;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-sm rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl">
+        <h3 className="font-bold mb-1">Rename {name}</h3>
+        <p className="text-sm text-zinc-500 mb-3">Future stories using the old spelling will be filed under the new name automatically.</p>
+        <input
+          autoFocus
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && ok) onSave(val.trim()); }}
+          className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+        />
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onCancel} className="px-3 py-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 text-sm">Cancel</button>
+          <button onClick={() => onSave(val.trim())} disabled={!ok} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm disabled:opacity-50">Rename</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

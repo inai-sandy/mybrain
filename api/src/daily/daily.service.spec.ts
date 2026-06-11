@@ -263,6 +263,15 @@ describe('DailyService', () => {
       expect(peopleMentions.find((m: any) => m.day === '2026-06-12')!.name).toBe('Alisan');
     });
 
+
+    it('renames a person to a brand-new name (merge into a name with no rows)', async () => {
+      const { svc, peopleMentions } = makeService();
+      peopleMentions.push({ name: 'Alisan', day: '2026-06-10' }, { name: 'Alisan', day: '2026-06-11' });
+      const r = await svc.mergePeople('Alisan', 'Alison K');
+      expect(r!.merged).toBe(2);
+      expect(peopleMentions.every((m: any) => m.name === 'Alison K')).toBe(true);
+    });
+
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();
     await svc.submitStory('rough start to the day', 'app', '😐 Okay');
