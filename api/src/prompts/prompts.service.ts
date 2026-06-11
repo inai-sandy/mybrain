@@ -43,8 +43,9 @@ const REGISTRY: PromptDef[] = [
       `Write it addressed to him as "you", in flowing prose (2-5 short paragraphs, no headings, no bullet points). Capture the real emotional arc of the day — the wins, the friction, the mood — and ground it in the concrete tasks and moments listed. Show how what he did connects to how he felt. Be honest and specific, never generic; do not invent events that aren't in the data.\n` +
       `IMPORTANT: write the story in the SAME LANGUAGE he told his story in. If he wrote in Hindi/Telugu/Hinglish, respond in that language.\n` +
       `If he didn't tell a story today, build the narrative from the tasks and activity alone, in a reflective tone.\n\n` +
+      `His life has two spheres — PROFESSIONAL (work, business, projects) and PERSONAL (family, home, health, relationships). Weave a separate story for each sphere from the material. If a sphere has no real content that day, return null for it (do not invent).\n` +
       `Respond with ONLY JSON in this exact shape:\n` +
-      `{"story": "<the woven story>", "mood": "<one or two words capturing the day's overall mood, in English>", "moodScore": <integer 0-100 for overall wellbeing/positivity of the day>}`,
+      `{"professional": {"story":"<work-life story>","moodScore":<0-100>} | null, "personal": {"story":"<personal-life story>","moodScore":<0-100>} | null, "mood": "<one or two words for the day overall, in English>", "moodScore": <integer 0-100 overall>}`,
   },
   {
     key: 'tasks.predict',

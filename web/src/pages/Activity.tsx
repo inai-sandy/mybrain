@@ -10,7 +10,7 @@ type Ev = { type: string; title: string; detail?: string; at: string };
 type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number };
 type Summary = { day: string; text: string; stats: Stats | null } | null;
 type Story = { text: string; mood?: string | null } | null;
-type DayStoryT = { text: string; mood?: string | null; moodScore?: number | null } | null;
+type DayStoryT = { text: string; personalText?: string | null; mood?: string | null; moodScore?: number | null; proMoodScore?: number | null; personalMoodScore?: number | null } | null;
 type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; dayStory: DayStoryT; timeline: Ev[] };
 
 type Dash = {
@@ -139,7 +139,11 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
           {data?.dayStory && <button onClick={() => buildStory(true)} disabled={genStory} className="text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><RefreshCw size={12} /> rebuild</button>}
         </div>
         {data?.dayStory ? (
-          <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{data.dayStory.text}</p>
+          data.dayStory.personalText ? (
+            <StoryTabs ds={data.dayStory} />
+          ) : (
+            <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{data.dayStory.text}</p>
+          )
         ) : (
           <div className="text-sm text-zinc-500">
             <p className="mb-3">{data?.isToday ? 'Your Story of the Day writes itself at 11:58 PM — weaving your story, tasks and activity into one. Or create it now.' : 'No Story of the Day was written for this day.'}</p>
@@ -777,6 +781,23 @@ function SuggestedView() {
           <button onClick={generate} disabled={gen} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">{gen ? 'Thinking…' : 'Suggest tasks'}</button>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/** Professional / Personal tabs on the Story of the Day (when both spheres were woven). */
+function StoryTabs({ ds }: { ds: NonNullable<DayStoryT> }) {
+  const [tab, setTab] = useState<'pro' | 'personal'>('pro');
+  const score = tab === 'pro' ? ds.proMoodScore : ds.personalMoodScore;
+  return (
+    <div>
+      <div className="flex gap-1.5 mb-2">
+        <button onClick={() => setTab('pro')} className={'rounded-full px-3 py-1 text-xs border ' + (tab === 'pro' ? 'bg-emerald-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>💼 Professional{ds.proMoodScore != null ? ` · ${ds.proMoodScore}` : ''}</button>
+        <button onClick={() => setTab('personal')} className={'rounded-full px-3 py-1 text-xs border ' + (tab === 'personal' ? 'bg-violet-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>🏠 Personal{ds.personalMoodScore != null ? ` · ${ds.personalMoodScore}` : ''}</button>
+      </div>
+      <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{tab === 'pro' ? ds.text : ds.personalText}</p>
+      {score != null && <p className="mt-1.5 text-[11px] text-zinc-400">{tab === 'pro' ? 'Work' : 'Personal'} mood: {score}/100</p>}
     </div>
   );
 }

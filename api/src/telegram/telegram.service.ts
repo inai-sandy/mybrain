@@ -921,7 +921,13 @@ export class TelegramService implements OnModuleInit {
     if (sDay) {
       await this.setSetting('telegram.pushStory', '');
       const ds = await this.prisma.dayStory.findUnique({ where: { day: sDay } });
-      if (ds?.text) await this.send(owner, `🌙 <b>Story of the Day</b>${ds.moodScore != null ? ` · mood ${ds.moodScore}/100` : ''}\n\n${this.esc(ds.text).slice(0, 3800)}`);
+      if (ds?.text) {
+        const pers = (ds as any).personalText;
+        const body = pers
+          ? `💼 <b>Professional</b>${(ds as any).proMoodScore != null ? ` · ${(ds as any).proMoodScore}/100` : ''}\n${this.esc(ds.text).slice(0, 1800)}\n\n🏠 <b>Personal</b>${(ds as any).personalMoodScore != null ? ` · ${(ds as any).personalMoodScore}/100` : ''}\n${this.esc(pers).slice(0, 1800)}`
+          : this.esc(ds.text).slice(0, 3800);
+        await this.send(owner, `🌙 <b>Story of the Day</b>${ds.moodScore != null ? ` · mood ${ds.moodScore}/100` : ''}\n\n${body}`);
+      }
     }
     const mDay = await this.getSetting('telegram.pushMentor');
     if (mDay) {

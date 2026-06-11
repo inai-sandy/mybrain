@@ -252,7 +252,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
 
   shapeDayStory(s: any) {
-    return { day: s.day, text: s.text, mood: s.mood, moodScore: s.moodScore, model: s.model, createdAt: s.createdAt, updatedAt: s.updatedAt };
+    return { day: s.day, text: s.text, personalText: s.personalText ?? null, mood: s.mood, moodScore: s.moodScore, proMoodScore: s.proMoodScore ?? null, personalMoodScore: s.personalMoodScore ?? null, model: s.model, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
 
   async getDayStory(day: string) {
@@ -317,15 +317,25 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `ACTIVITY TIMELINE:\n${activityLines.join('\n') || '(quiet day in the app)'}`;
 
     const cfg = await this.storyModel();
-    const raw = (await this.llm.completeWith(cfg, prompt, 1400, 'story-of-day'))?.trim() || '';
+    const raw = (await this.llm.completeWith(cfg, prompt, 2000, 'story-of-day'))?.trim() || '';
     let text = raw;
+    let personalText: string | null = null;
     let mood: string | null = told?.mood || null;
     let moodScore: number | null = null;
+    let proMoodScore: number | null = null;
+    let personalMoodScore: number | null = null;
+    const score = (v: any): number | null => (Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(Number(v)))) : null);
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.story) text = String(json.story).trim();
+      if (json?.professional?.story || json?.personal?.story) {
+        // two-sphere shape: text = professional (or personal alone if work was silent)
+        text = String(json.professional?.story || json.personal?.story || '').trim();
+        personalText = json.professional?.story && json.personal?.story ? String(json.personal.story).trim() : null;
+        proMoodScore = score(json.professional?.moodScore);
+        personalMoodScore = score(json.personal?.moodScore);
+      } else if (json?.story) text = String(json.story).trim();
       if (json?.mood) mood = String(json.mood).slice(0, 40);
-      if (Number.isFinite(json?.moodScore)) moodScore = Math.max(0, Math.min(100, Math.round(Number(json.moodScore))));
+      moodScore = score(json?.moodScore);
     } catch {
       /* model returned prose, not JSON — keep it as the story */
     }
@@ -333,12 +343,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     const row = await this.prisma.dayStory.upsert({
       where: { day },
-      create: { day, text, mood, moodScore, model: cfg.model },
-      update: { text, mood, moodScore, model: cfg.model },
+      create: { day, text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: cfg.model },
+      update: { text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: cfg.model },
     });
 
     // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
-    await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
+    await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}${personalText ? `\n\nPERSONAL LIFE:\n${personalText}` : ''}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
     // People memory: remember who appeared in his own words — story, tasks AND quick notes
     // (tasks come from his brain dumps, so "Discuss payments with Srikar" counts as a mention).
     const dayNotes = await this.prisma.dayNote.findMany({ where: { day } }).catch(() => [] as any[]);

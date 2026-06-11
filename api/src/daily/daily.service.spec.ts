@@ -287,6 +287,25 @@ describe('DailyService', () => {
       expect(d!.days[0].items.find((i: any) => i.type === 'story')!.text).not.toContain('gym');
     });
 
+
+  it('weaves the two-sphere Story of the Day (professional + personal, separate moods)', async () => {
+    const { svc, dayStories } = makeService({ llmText: '{"professional":{"story":"You closed the Srikar payment thread.","moodScore":72},"personal":{"story":"Dinner with the family felt unhurried.","moodScore":85},"mood":"settled","moodScore":78}' });
+    const out = await svc.generateDayStory('2026-06-12');
+    expect(out.text).toContain('Srikar');
+    expect(out.personalText).toContain('family');
+    expect(out.proMoodScore).toBe(72);
+    expect(out.personalMoodScore).toBe(85);
+    expect(out.moodScore).toBe(78);
+    expect(dayStories).toHaveLength(1);
+  });
+
+  it('keeps the single-story shape working (no personal content -> no personal tab)', async () => {
+    const { svc } = makeService({ llmText: '{"professional":{"story":"All work today.","moodScore":60},"personal":null,"mood":"steady","moodScore":60}' });
+    const out = await svc.generateDayStory('2026-06-13');
+    expect(out.text).toContain('All work');
+    expect(out.personalText).toBeNull();
+  });
+
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();
     await svc.submitStory('rough start to the day', 'app', '😐 Okay');
