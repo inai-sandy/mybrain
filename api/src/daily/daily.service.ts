@@ -407,17 +407,21 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return this.shapeMonthStory(row);
   }
 
-  /** On the 1st of each month (after 00:20 local), write last month's chapter. Once-a-day try guard. */
+  /** On the 1st of each month (after 00:20 local), write last month's chapter. A chapter written
+   *  DURING its month (on demand) is only a draft — once the month closes, rewrite it with the full
+   *  month so the book never keeps a half-month chapter. Once-a-day try guard. */
   async monthTick(): Promise<void> {
     const tz = await this.tz();
     const today = this.dayKey(tz);
     if (!today.endsWith('-01') || this.localHM(tz) < '00:20') return;
     const prevMonth = this.dayAdd(today, -1).slice(0, 7);
-    if (await this.prisma.monthStory.findUnique({ where: { month: prevMonth } })) return;
+    const existing = await this.prisma.monthStory.findUnique({ where: { month: prevMonth } });
+    // skip only if the chapter was (re)written AFTER its month closed — i.e. on/after the 1st
+    if (existing && this.dayKey(tz, new Date(existing.updatedAt)) > `${prevMonth}-31`) return;
     const tried = (await this.prisma.setting.findUnique({ where: { key: 'story.monthTry' } }))?.value;
     if (tried === today) return;
     await this.setSetting('story.monthTry', today);
-    await this.generateMonthStory(prevMonth).catch(() => undefined);
+    await this.generateMonthStory(prevMonth, !!existing).catch(() => undefined);
   }
 
   // ---- people memory: who appears in his stories ----
