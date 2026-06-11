@@ -61,6 +61,12 @@ export class DailyController {
     return r || { ok: false, message: 'That month needs at least 3 recorded days before it can become a chapter.' };
   }
 
+  /** People memory: who appears in your stories. */
+  @Get('people')
+  async people() {
+    return this.daily.peopleOverview();
+  }
+
   // ---- Story of the Year ----
   @Get('year-story')
   async yearStory(@Query('year') year?: string) {

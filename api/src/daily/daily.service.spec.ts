@@ -8,6 +8,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const dayStories: any[] = [];
   const monthStories: any[] = [];
   const yearStories: any[] = [];
+  const peopleMentions: any[] = [];
   const suggestions: any[] = [];
   const dumps: any[] = [];
   const insights: any[] = [];
@@ -151,6 +152,17 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
     weeklyReview: { findMany: async () => [] },
+    personMention: {
+      findMany: async () => peopleMentions.slice(),
+      upsert: async ({ where, create }: any) => {
+        const k = where.name_day;
+        const ex = peopleMentions.find((m) => m.name === k.name && m.day === k.day);
+        if (ex) return ex;
+        const row = { id: `pm${++seq}`, createdAt: new Date(), ...create };
+        peopleMentions.push(row);
+        return row;
+      },
+    },
     yearStory: {
       findUnique: async ({ where }: any) => yearStories.find((y) => y.year === where.year) || null,
       upsert: async ({ where, create, update }: any) => {
@@ -162,11 +174,11 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
   };
-  const llm: any = { completeWith: async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText) };
+  const llm: any = { completeWith: jest.fn(async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText)) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
   const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }), listModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions };
 }
 
 describe('DailyService', () => {
@@ -213,6 +225,25 @@ describe('DailyService', () => {
       const { svc } = makeService({ llmText: '{"story":"x"}' });
       expect(await svc.generateYearStory('2020')).toBeNull();
     });
+
+
+  describe('people memory', () => {
+    it('extracts people from his story, idempotent per name+day', async () => {
+      const { svc, peopleMentions } = makeService({ llmText: '{"people":["Srikar","Kishore"]}' });
+      await svc.extractPeople('2026-06-10', 'Met Srikar about pricing, then a long call with Kishore.');
+      await svc.extractPeople('2026-06-10', 'Met Srikar about pricing, then a long call with Kishore.');
+      expect(peopleMentions).toHaveLength(2); // re-running the same day adds nothing
+    });
+
+    it('aggregates the people overview with fading detection', async () => {
+      const { svc, peopleMentions } = makeService();
+      peopleMentions.push({ name: 'Srikar', day: '2026-06-10' }, { name: 'Srikar', day: '2026-06-11' }, { name: 'Amma', day: '2026-04-01' }, { name: 'Amma', day: '2026-04-05' });
+      const o = await svc.peopleOverview();
+      expect(o.count).toBe(2);
+      expect(o.people[0].name).toBe('Srikar');
+      expect(o.people.find((p: any) => p.name === 'Amma')!.fading).toBe(true);
+    });
+  });
 
   it('keeps one story per day — re-submitting updates in place', async () => {
     const { svc, stories } = makeService();

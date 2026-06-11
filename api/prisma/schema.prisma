@@ -235,6 +235,16 @@ model YearStory {
   updatedAt DateTime @updatedAt
 }
 
+/// One person mentioned in the user's own story on one day (people memory; aggregated per person in code).
+model PersonMention {
+  id        String   @id @default(uuid())
+  name      String // canonical display name
+  day       String // local day key
+  createdAt DateTime @default(now())
+
+  @@unique([name, day])
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())

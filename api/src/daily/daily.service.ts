@@ -339,6 +339,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
     await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
+    // People memory: remember who appeared in his own words (idempotent per name+day).
+    if (told?.rawText) await this.extractPeople(day, told.rawText).catch(() => undefined);
     // Flag it for the Telegram push (delivered by the Telegram nudge loop).
     await this.setSetting('telegram.pushStory', day).catch(() => undefined);
     return this.shapeDayStory(row);
@@ -416,6 +418,55 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (tried === today) return;
     await this.setSetting('story.monthTry', today);
     await this.generateMonthStory(prevMonth).catch(() => undefined);
+  }
+
+  // ---- people memory: who appears in his stories ----
+
+  /** Extract people's names from the user's own story (tiny Haiku call, idempotent per name+day). */
+  async extractPeople(day: string, storyText?: string | null): Promise<void> {
+    const text = (storyText || '').trim();
+    if (text.length < 20) return;
+    const prompt =
+      `Extract the names of real PEOPLE mentioned in this diary entry. Rules:\n` +
+      `- People only — NOT companies, products, apps, places, or the diary's author himself (Sandeep/"I").\n` +
+      `- Use the name as written (e.g. "Srikar", "Kishore"). Max 10.\n` +
+      `- If none, return an empty list.\n` +
+      `Respond with ONLY JSON: {"people":["Name", ...]}\n\nDIARY ENTRY:\n${text.slice(0, 3000)}`;
+    const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 200, 'people-extract'))?.trim() || '';
+    let names: string[] = [];
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (Array.isArray(json?.people)) names = json.people;
+    } catch {
+      return;
+    }
+    for (const n of names.slice(0, 10)) {
+      const name = String(n || '').trim().slice(0, 60);
+      if (!name || name.length < 2) continue;
+      await this.prisma.personMention
+        .upsert({ where: { name_day: { name, day } }, create: { name, day }, update: {} })
+        .catch(() => undefined);
+    }
+  }
+
+  /** Aggregated people view: mention counts, first/last seen, and who's fading from his stories. */
+  async peopleOverview() {
+    const rows = await this.prisma.personMention.findMany({ orderBy: { day: 'asc' } });
+    const today = this.dayKey(await this.tz());
+    const cutoff = this.dayAdd(today, -14);
+    const map = new Map<string, { name: string; mentions: number; firstSeen: string; lastSeen: string }>();
+    for (const r of rows) {
+      const e = map.get(r.name);
+      if (e) {
+        e.mentions++;
+        e.lastSeen = r.day > e.lastSeen ? r.day : e.lastSeen;
+        e.firstSeen = r.day < e.firstSeen ? r.day : e.firstSeen;
+      } else map.set(r.name, { name: r.name, mentions: 1, firstSeen: r.day, lastSeen: r.day });
+    }
+    const people = [...map.values()]
+      .map((p) => ({ ...p, fading: p.mentions >= 2 && p.lastSeen < cutoff }))
+      .sort((a, b) => b.mentions - a.mentions || b.lastSeen.localeCompare(a.lastSeen));
+    return { people, count: people.length };
   }
 
   // ---- Story of the Year (the book itself) ----

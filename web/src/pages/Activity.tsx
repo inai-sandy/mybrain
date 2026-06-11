@@ -477,7 +477,39 @@ function MeView() {
           </ul>
         </section>
       )}
+
+      <PeopleCard />
     </div>
+  );
+}
+
+// ---------- People in your stories ----------
+type PersonT = { name: string; mentions: number; firstSeen: string; lastSeen: string; fading: boolean };
+
+function PeopleCard() {
+  const [data, setData] = useState<{ people: PersonT[]; count: number } | null>(null);
+  useEffect(() => {
+    fetch('/api/daily/people').then((r) => (r.ok ? r.json() : null)).then(setData).catch(() => undefined);
+  }, []);
+  if (!data || !data.count) return null; // appears once stories start mentioning people
+  const fading = data.people.filter((p) => p.fading);
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1">👥 People in your stories <span className="text-xs font-normal text-zinc-400">{data.count}</span></h2>
+      <p className="text-xs text-zinc-500 mb-3">Who shows up when you tell your days — straight from your own words.</p>
+      <div className="flex flex-wrap gap-2">
+        {data.people.slice(0, 20).map((p) => (
+          <span key={p.name} title={`${p.mentions} mention${p.mentions === 1 ? '' : 's'} · first ${p.firstSeen} · last ${p.lastSeen}`} className={'rounded-full px-3 py-1 text-sm border ' + (p.fading ? 'border-amber-300/60 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 bg-amber-500/5' : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300')}>
+            {p.name} <span className="text-[11px] text-zinc-400">×{p.mentions}</span>
+          </span>
+        ))}
+      </div>
+      {fading.length > 0 && (
+        <p className="mt-3 text-xs rounded-lg bg-amber-500/5 border border-amber-300/30 dark:border-amber-500/20 px-2.5 py-1.5">
+          <span className="font-semibold text-amber-600">Fading:</span> {fading.map((p) => p.name).join(', ')} — not mentioned in over two weeks.
+        </p>
+      )}
+    </section>
   );
 }
 

@@ -310,10 +310,28 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       return `• ${d}: ${bits.join(' · ') || '(no record)'}`;
     });
 
+    // People: who appeared this week, who is fading (pure data — the mentor decides if it matters)
+    const mentions = await this.prisma.personMention.findMany().catch(() => [] as any[]);
+    const inWeek = new Map<string, number>();
+    const lastSeen = new Map<string, string>();
+    const total = new Map<string, number>();
+    for (const m of mentions) {
+      total.set(m.name, (total.get(m.name) || 0) + 1);
+      if (!lastSeen.has(m.name) || m.day > lastSeen.get(m.name)!) lastSeen.set(m.name, m.day);
+      if (m.day >= days[0] && m.day <= days[6]) inWeek.set(m.name, (inWeek.get(m.name) || 0) + 1);
+    }
+    const fading = [...total.entries()]
+      .filter(([n, c]) => c >= 2 && lastSeen.get(n)! < this.dayAdd(weekStart, -14))
+      .map(([n]) => `${n} (last mentioned ${lastSeen.get(n)})`);
+    const peopleBlock =
+      inWeek.size || fading.length
+        ? `\n=== PEOPLE IN HIS STORIES ===\nThis week: ${[...inWeek.keys()].join(', ') || '(no one mentioned)'}\nFading (2+ weeks unmentioned): ${fading.join('; ') || '(none)'}\n`
+        : '';
+
     const tmpl = await this.prompts.get('mentor.weekly');
     const prompt =
       `${tmpl}\n\n` +
-      `=== THE WEEK (${weekStart} .. ${days[6]}) ===\nToday is ${today}.\n${dayLines.join('\n')}\n\n` +
+      `=== THE WEEK (${weekStart} .. ${days[6]}) ===\nToday is ${today}.\n${dayLines.join('\n')}\n${peopleBlock}\n` +
       `=== NUMBERS ===\nThis week: ${JSON.stringify(stats)}\nLast week: ${JSON.stringify(prevStats)}\n\n` +
       `=== HIS FOCUS AREAS ===\n${focus.map((f) => `- ${f.title}`).join('\n') || '(none set)'}\n\n` +
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
