@@ -181,7 +181,8 @@ const REGISTRY: PromptDef[] = [
       `- Trace the THREADS that ran through the whole year (a project, a struggle, a relationship, a habit) and say honestly which were resolved and which still run.\n` +
       `- Keep his world concrete: real names, real projects, real feelings from the chapters. Never invent.\n` +
       `- If the chapters cover only part of the year (a "year so far"), write it as the story up to now and end facing forward, not with a conclusion.\n` +
-      `- 7-12 paragraphs. The tone of a great memoir: warm, honest, unhurried. Give it an evocative TITLE worthy of a book.\n\n` +
+      `- Write from WHATEVER chapters are given — even a single one. Fewer chapters = a shorter story (2-4 paragraphs), never a request for more material. You are a writer, not a chat partner: NEVER ask questions, NEVER explain what you need, NEVER mention chapters or data.\n` +
+      `- Length scales with material: one chapter → 2-4 paragraphs; a full year → 7-12. The tone of a great memoir: warm, honest, unhurried. Give it an evocative TITLE worthy of a book.\n\n` +
       `Respond with ONLY JSON: {"title":"<the year's title>","story":"<the story text>"}`,
   },
   {

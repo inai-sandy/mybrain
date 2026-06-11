@@ -452,13 +452,19 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const raw = (await this.llm.completeWith(cfg, prompt, 3500, 'story-of-year'))?.trim() || '';
     let text = raw;
     let title: string | null = null;
+    let parsed = false;
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.story) text = String(json.story).trim();
+      if (json?.story) {
+        text = String(json.story).trim();
+        parsed = true;
+      }
       if (json?.title) title = String(json.title).trim().slice(0, 120);
     } catch {
       /* keep prose */
     }
+    // Guard: a model "reply" asking for more material must never be saved as the story.
+    if (!parsed && /\b(i need|could you (share|provide)|please (share|provide)|remaining .*chapters)\b/i.test(text)) return null;
     if (!text) return null;
 
     const row = await this.prisma.yearStory.upsert({
