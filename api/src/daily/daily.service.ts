@@ -428,7 +428,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (text.length < 20) return;
     const prompt =
       `Extract the names of real PEOPLE mentioned in this diary entry. Rules:\n` +
-      `- People only — NOT companies, products, apps, places, or the diary's author himself (Sandeep/"I").\n` +
+      `- People only — NOT companies, products, apps, places, AI assistants/tools (Claude, ChatGPT…), or the diary's author himself (Sandeep/"I").\n` +
       `- Use the name as written (e.g. "Srikar", "Kishore"). Max 10.\n` +
       `- If none, return an empty list.\n` +
       `Respond with ONLY JSON: {"people":["Name", ...]}\n\nDIARY ENTRY:\n${text.slice(0, 3000)}`;
