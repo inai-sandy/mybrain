@@ -1,0 +1,44 @@
+# RAG MCP Stack — paste this into Portainer → Stacks → Add stack
+#
+# Two replacements required before deploy:
+#   1. PASTE_POSTGRES_PASSWORD_HERE  (in TWO places)  — generate via: openssl rand -base64 24
+#   2. sk-PASTE_OPENAI_KEY_HERE                       — your OpenAI API key
+
+version: '3.8'
+
+services:
+  rag-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: PASTE_POSTGRES_PASSWORD_HERE
+      POSTGRES_DB: rag
+    volumes:
+      - rag-pgdata:/var/lib/postgresql/data
+    networks:
+      - mcp-network
+
+  rag-mcp:
+    image: rag-mcp:local
+    container_name: rag-mcp
+    restart: unless-stopped
+    depends_on:
+      - rag-postgres
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8050
+      DATABASE_URL: postgresql://rag:PASTE_POSTGRES_PASSWORD_HERE@rag-postgres:5432/rag
+      OPENAI_API_KEY: sk-PASTE_OPENAI_KEY_HERE
+      EMBEDDING_MODEL: text-embedding-3-small
+      EMBEDDING_DIMENSIONS: "1536"
+    networks:
+      - mcp-network
+
+volumes:
+  rag-pgdata:
+
+networks:
+  mcp-network:
+    external: true
