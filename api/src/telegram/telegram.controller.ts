@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, Post, Put, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Put, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { Public } from '../auth/public.decorator';
 import { TelegramService } from './telegram.service';
@@ -38,6 +38,23 @@ export class TelegramController {
   @Get('status')
   async status() {
     return this.telegram.status();
+  }
+
+  /** Model that phrases the 4 PM mentor nudge. */
+  @Get('nudge-model')
+  async getNudgeModel() {
+    return this.telegram.nudgeModel();
+  }
+
+  @Put('nudge-model')
+  async setNudgeModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.telegram.setNudgeModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('nudge-models')
+  async nudgeModels() {
+    return { models: await this.telegram.listModels() };
   }
 
   /** Voice-transcription provider: openai (Whisper) or gemini (OpenRouter). */

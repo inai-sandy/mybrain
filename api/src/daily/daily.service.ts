@@ -390,7 +390,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `=== THE MONTH: ${month} (${stories.length} recorded days) ===\n${dayLines.join('\n')}\n\n` +
       `=== WEEKLY REVIEWS ===\n${weekLines.join('\n') || '(none that month)'}`;
 
-    const cfg = await this.storyModel();
+    const cfg = await this.bookModel();
     const raw = (await this.llm.completeWith(cfg, prompt, 2200, 'story-of-month'))?.trim() || '';
     let text = raw;
     let title: string | null = null;
@@ -427,6 +427,39 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (tried === today) return;
     await this.setSetting('story.monthTry', today);
     await this.generateMonthStory(prevMonth, !!existing).catch(() => undefined);
+  }
+
+  // ---- per-feature model pickers (book + people) ----
+
+  private async pickerModel(key: string, fallback: LlmConfig): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key } });
+    if (!row) return fallback;
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  private async setPickerModel(key: string, provider: string, model: string) {
+    await this.setSetting(key, JSON.stringify({ provider, model }));
+    return { provider, model };
+  }
+
+  /** Model that writes the monthly chapters + Story of the Year (own picker; falls back to the Story model). */
+  async bookModel(): Promise<LlmConfig> {
+    return this.pickerModel('book.llm', await this.storyModel());
+  }
+  async setBookModel(provider: string, model: string) {
+    return this.setPickerModel('book.llm', provider, model);
+  }
+
+  /** Model that extracts people from the day (own picker; defaults to Haiku — it's a tiny job). */
+  async peopleModel(): Promise<LlmConfig> {
+    return this.pickerModel('people.llm', { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' });
+  }
+  async setPeopleModel(provider: string, model: string) {
+    return this.setPickerModel('people.llm', provider, model);
   }
 
   // ---- people memory: who appears in his stories ----
@@ -505,13 +538,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async extractPeople(day: string, storyText?: string | null): Promise<void> {
     const text = (storyText || '').trim();
     if (text.length < 20) return;
-    const prompt =
-      `Extract the names of real PEOPLE mentioned in this diary entry / task list. Rules:\n` +
-      `- People only — NOT companies, products, apps, places, AI assistants/tools (Claude, ChatGPT…), or the diary's author himself (Sandeep/"I").\n` +
-      `- Use the name as written (e.g. "Srikar", "Kishore"). Max 10.\n` +
-      `- If none, return an empty list.\n` +
-      `Respond with ONLY JSON: {"people":["Name", ...]}\n\nDIARY ENTRY / TASKS:\n${text.slice(0, 3000)}`;
-    const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 200, 'people-extract'))?.trim() || '';
+    const tmplP = await this.prompts.get('people.extract');
+    const prompt = `${tmplP}\n\nDIARY ENTRY / TASKS:\n${text.slice(0, 3000)}`;
+    const raw = (await this.llm.completeWith(await this.peopleModel(), prompt, 200, 'people-extract'))?.trim() || '';
     let names: string[] = [];
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -580,7 +609,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `THE YEAR: ${year}${partial ? ` (year SO FAR — chapters through ${chapters[chapters.length - 1].month}; the year is still running)` : ''}\n\n` +
       chapterBlocks.join('\n\n');
 
-    const cfg = await this.storyModel();
+    const cfg = await this.bookModel();
     const raw = (await this.llm.completeWith(cfg, prompt, 3500, 'story-of-year'))?.trim() || '';
     let text = raw;
     let title: string | null = null;

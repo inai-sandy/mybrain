@@ -72,6 +72,22 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     return this.tasks.listModels();
   }
 
+  /** Model that writes the Sunday weekly review (own picker; falls back to the Mentor model). */
+  async weeklyModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'weekly.llm' } });
+    if (!row) return this.mentorModel();
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : this.mentorModel();
+    } catch {
+      return this.mentorModel();
+    }
+  }
+  async setWeeklyModel(provider: string, model: string) {
+    await this.setSetting('weekly.llm', JSON.stringify({ provider, model }));
+    return { provider, model };
+  }
+
   // ---- focus areas ----
   private shapeFocus(f: any) {
     return { id: f.id, title: f.title, description: f.description, source: f.source, status: f.status, createdAt: f.createdAt };
@@ -336,7 +352,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `=== HIS FOCUS AREAS ===\n${focus.map((f) => `- ${f.title}`).join('\n') || '(none set)'}\n\n` +
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
 
-    const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1400, 'weekly-review'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 1400, 'weekly-review'))?.trim() || '';
     let text = raw;
     let pattern: string | null = null;
     let experiment: string | null = null;

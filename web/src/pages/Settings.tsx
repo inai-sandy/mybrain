@@ -432,6 +432,14 @@ function ModelsSection() {
         desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. A strong model like Claude Sonnet is best here. Uses your OpenRouter key." />
       <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model"
         desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. A strong model like Claude Sonnet is best. Uses your OpenRouter key." />
+      <EngineModelCard title="Weekly review model" icon={Compass} base="/api/mentor/weekly-model"
+        desc="Writes the Sunday-night weekly review (wins, drift, the pattern, the experiment). Until you pick one it follows the Mentor model." />
+      <EngineModelCard title="Book model (chapters & year)" icon={Moon} base="/api/daily/book-model"
+        desc="Writes the monthly chapters and the Story of the Year — the best writing in the app. Until you pick one it follows the Story of the Day model." />
+      <EngineModelCard title="4 PM nudge model" icon={Compass} base="/api/telegram/nudge-model"
+        desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal and costs ~1¢." />
+      <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model"
+        desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal." />
       <VoiceModelCard />
     </div>
   );

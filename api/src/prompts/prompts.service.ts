@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -199,6 +199,25 @@ const REGISTRY: PromptDef[] = [
       `5. THE EXPERIMENT — exactly ONE small, concrete experiment for next week, testable by the data ("dump before 8 AM all 7 days"). If he had an experiment last week, FIRST report its result honestly.\n` +
       `Plain prose, short paragraphs, warm but unflinching. No headers in the text itself.\n\n` +
       `Respond with ONLY JSON: {"review":"<the full review prose>","pattern":"<the one pattern, one sentence>","experiment":"<the one experiment, one sentence>"}`,
+  },
+  {
+    key: 'mentor.nudge',
+    label: 'Mentor — 4 PM nudge',
+    description: 'The short afternoon Telegram push when a pinned must-do has zero progress. The stuck tasks + your on-track score are added automatically.',
+    default:
+      `You are Sandeep's mentor sending ONE short afternoon Telegram message (2-3 sentences, plain text, no markdown, at most one emoji). It is 4 PM and his pinned must-do(s) listed below have zero progress.\n` +
+      `Be warm but direct — name the task, make starting NOW feel small and doable. No guilt-tripping, no lecture.`,
+  },
+  {
+    key: 'people.extract',
+    label: 'People extraction',
+    description: 'Pulls the real people\'s names out of your nightly story, tasks and notes for the People memory. The day\'s text is added automatically. ⚠️ Keep the JSON shape intact.',
+    default:
+      `Extract the names of real PEOPLE mentioned in this diary entry / task list. Rules:\n` +
+      `- People only — NOT companies, products, apps, places, AI assistants/tools (Claude, ChatGPT…), or the diary's author himself (Sandeep/"I").\n` +
+      `- Use the name as written (e.g. "Srikar", "Kishore"). Max 10.\n` +
+      `- If none, return an empty list.\n` +
+      `Respond with ONLY JSON: {"people":["Name", ...]}`,
   },
   {
     key: 'voice.cleanup',

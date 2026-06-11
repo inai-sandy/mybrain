@@ -57,6 +57,22 @@ export class MentorController {
     return r || { ok: false, message: 'Not enough recorded days in that week to review yet.' };
   }
 
+  @Get('weekly-model')
+  async getWeeklyModel() {
+    return this.mentor.weeklyModel();
+  }
+
+  @Put('weekly-model')
+  async setWeeklyModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.mentor.setWeeklyModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('weekly-models')
+  async weeklyModels() {
+    return { models: await this.mentor.listModels() };
+  }
+
   // ---- daily read ----
   @Post('run')
   async run(@Body() body: { day?: string; force?: boolean }) {

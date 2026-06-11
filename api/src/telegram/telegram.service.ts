@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService } from '../connectors/connector.service';
-import { LlmService } from '../llm/llm.service';
+import { LlmService, LlmConfig } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
 import { ChatService } from '../chat/chat.service';
@@ -68,6 +69,7 @@ export class TelegramService implements OnModuleInit {
     private readonly items: ItemsService,
     private readonly voice: VoiceService,
     private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
   ) {}
 
   async onModuleInit() {
@@ -958,6 +960,28 @@ export class TelegramService implements OnModuleInit {
     await this.setSetting('telegram.fired', JSON.stringify({ day, keys: [...set] }));
   }
 
+  async listModels() {
+    return this.tasks.listModels();
+  }
+
+  /** Model that phrases the 4 PM nudge (own picker; defaults to Haiku — it's a tiny job). */
+  async nudgeModel(): Promise<LlmConfig> {
+    const raw = await this.getSetting('nudge.llm');
+    if (raw) {
+      try {
+        const v = JSON.parse(raw);
+        if (v?.provider && v?.model) return v;
+      } catch {
+        /* ignore */
+      }
+    }
+    return { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
+  }
+  async setNudgeModel(provider: string, model: string) {
+    await this.setSetting('nudge.llm', JSON.stringify({ provider, model }));
+    return { provider, model };
+  }
+
   /** Monday of the week containing `day` — the rate-limit window for daytime mentor nudges. */
   private weekKeyOf(day: string): string {
     const d = new Date(day + 'T12:00:00Z');
@@ -984,12 +1008,12 @@ export class TelegramService implements OnModuleInit {
     const recent = await this.prisma.mentorDay.findMany({ orderBy: { day: 'desc' }, take: 7 });
     const avg = recent.length ? Math.round(recent.reduce((s: number, m: any) => s + m.adherenceScore, 0) / recent.length) : null;
 
+    const tmpl = await this.prompts.get('mentor.nudge');
     const prompt =
-      `You are Sandeep's mentor sending ONE short afternoon Telegram message (2-3 sentences, plain text, no markdown, at most one emoji). It is 4 PM. ` +
-      `His pinned must-do${stuck.length > 1 ? 's' : ''} for today ${stuck.length > 1 ? 'have' : 'has'} zero progress: ${stuck.map((t: any) => `"${t.title}"`).join(', ')}.` +
-      (avg !== null ? ` His average on-track score over the last week is ${avg}/100.` : '') +
-      ` Be warm but direct — name the task, make starting NOW feel small and doable. No guilt-tripping, no lecture.`;
-    const text = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 220, 'mentor-nudge'))?.trim();
+      `${tmpl}\n\n` +
+      `STUCK MUST-DO${stuck.length > 1 ? 'S' : ''}: ${stuck.map((t: any) => `"${t.title}"`).join(', ')}` +
+      (avg !== null ? `\nHis average on-track score over the last week is ${avg}/100.` : '');
+    const text = (await this.llm.completeWith(await this.nudgeModel(), prompt, 220, 'mentor-nudge'))?.trim();
     if (!text) return;
 
     await this.setSetting('telegram.mentorNudgeRate', JSON.stringify({ week, count: rl.week === week ? (rl.count || 0) + 1 : 1 }));

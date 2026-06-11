@@ -97,6 +97,39 @@ export class DailyController {
     return r || { ok: false, message: 'No monthly chapters exist for that year yet — write a chapter first.' };
   }
 
+  // ---- per-feature model pickers ----
+  @Get('book-model')
+  async getBookModel() {
+    return this.daily.bookModel();
+  }
+
+  @Put('book-model')
+  async setBookModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.daily.setBookModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('book-models')
+  async bookModels() {
+    return { models: await this.daily.listModels() };
+  }
+
+  @Get('people-model')
+  async getPeopleModel() {
+    return this.daily.peopleModel();
+  }
+
+  @Put('people-model')
+  async setPeopleModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.daily.setPeopleModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('people-models')
+  async peopleModels() {
+    return { models: await this.daily.listModels() };
+  }
+
   @Get('story-model')
   async getStoryModel() {
     return this.daily.storyModel();
