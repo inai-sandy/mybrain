@@ -236,6 +236,35 @@ describe('TelegramService', () => {
     expect(tasks.dump).toHaveBeenCalledTimes(1);
   });
 
+  describe('backup sync report', () => {
+    it('sends a SILENT success message (3 AM — no buzz)', async () => {
+      const { svc, settings, sent } = make();
+      settings['telegram.chatId'] = '5';
+      const r = await svc.reportBackup(true, 'My Brain + RAG, 5.6 MB');
+      expect(r.sent).toBe(true);
+      const msg = sent.find((m) => /Backup synced/.test(m.text));
+      expect(msg).toBeTruthy();
+      expect(msg.disable_notification).toBe(true);
+    });
+
+    it('sends a LOUD failure message', async () => {
+      const { svc, settings, sent } = make();
+      settings['telegram.chatId'] = '5';
+      await svc.reportBackup(false, 'rsync: connection timed out');
+      const msg = sent.find((m) => /Backup FAILED/.test(m.text));
+      expect(msg).toBeTruthy();
+      expect(msg.disable_notification).toBeUndefined();
+      expect(msg.text).toContain('connection timed out');
+    });
+
+    it('generates the report secret once and returns the same one after', async () => {
+      const { svc } = make();
+      const a = await svc.backupReportSecret();
+      expect(a).toHaveLength(32);
+      expect(await svc.backupReportSecret()).toBe(a);
+    });
+  });
+
   describe('backup watchdog', () => {
     const fsp = require('fs/promises');
     const os = require('os');

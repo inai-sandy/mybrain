@@ -120,6 +120,16 @@ export class TelegramService implements OnModuleInit {
     return this.getSetting('telegram.chatId');
   }
 
+  /** Shared secret gating POST /telegram/backup-report (generated once, also stored on the home server). */
+  async backupReportSecret(): Promise<string> {
+    let s = await this.getSetting('backup.reportSecret');
+    if (!s) {
+      s = randomUUID().replace(/-/g, '');
+      await this.setSetting('backup.reportSecret', s);
+    }
+    return s;
+  }
+
   private async state(): Promise<{ mode?: string; pendingText?: string; scope?: string }> {
     try {
       return JSON.parse((await this.getSetting('telegram.state')) || '{}');
@@ -933,6 +943,18 @@ export class TelegramService implements OnModuleInit {
   }
   private async saveFired(day: string, set: Set<string>) {
     await this.setSetting('telegram.fired', JSON.stringify({ day, keys: [...set] }));
+  }
+
+  /** Nightly backup result from the home server → owner message. Success is silent (3 AM); failure buzzes. */
+  async reportBackup(ok: boolean, detail?: string): Promise<{ sent: boolean }> {
+    const owner = await this.ownerChatId();
+    if (!owner || !(await this.token())) return { sent: false };
+    const d = (detail || '').slice(0, 500);
+    const text = ok
+      ? `✅ <b>Backup synced &amp; verified</b>${d ? ` — ${this.esc(d)}` : ''}`
+      : `❌ <b>Backup FAILED</b>${d ? `\n<i>${this.esc(d)}</i>` : ''}\nYour off-server backup did not complete tonight.`;
+    await this.send(owner, text, ok ? { disable_notification: true } : {});
+    return { sent: true };
   }
 
   /** Null when off-server backups are healthy; an alert message when the home-server pull is missing/stale (>36h). */

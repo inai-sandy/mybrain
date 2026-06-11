@@ -19,6 +19,16 @@ export class TelegramController {
     return { ok: true };
   }
 
+  /** The home server reports each nightly backup sync here. Public, but gated by a shared secret. */
+  @Public()
+  @Post('backup-report')
+  @HttpCode(200)
+  async backupReport(@Body() body: { secret?: string; ok?: boolean; detail?: string }) {
+    const expected = await this.telegram.backupReportSecret();
+    if (!expected || !body?.secret || body.secret !== expected) return { ok: false };
+    return { ok: true, ...(await this.telegram.reportBackup(!!body.ok, body.detail)) };
+  }
+
   /** Register (or re-register) the webhook + command menu with Telegram. */
   @Post('connect')
   async connect() {
