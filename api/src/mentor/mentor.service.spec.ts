@@ -93,6 +93,17 @@ function makeService(llmText: string | null) {
 
 describe('MentorService', () => {
   describe('weekly review', () => {
+    it('weekStats reports separate work and personal mood averages', async () => {
+      const { svc, dayStories } = makeService(null);
+      dayStories.push(
+        { day: '2026-06-08', moodScore: 70, proMoodScore: 80, personalMoodScore: 40 },
+        { day: '2026-06-09', moodScore: 60, proMoodScore: 76, personalMoodScore: 44 },
+      );
+      const stats = await (svc as any).weekStats('2026-06-08');
+      expect(stats.avgWorkMood).toBe(78);
+      expect(stats.avgPersonalMood).toBe(42);
+    });
+
     it('weekStartOf maps any day to its Monday (Mon..Sun weeks)', () => {
       const { svc } = makeService(null);
       expect(svc.weekStartOf('2026-06-08')).toBe('2026-06-08'); // a Monday

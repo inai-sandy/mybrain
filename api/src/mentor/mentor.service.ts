@@ -208,10 +208,11 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     const narrative = dayStory?.text || told?.rawText || '';
+    const personalNarrative = (dayStory as any)?.personalText || '';
     if (!narrative && !dayTasks.length) return null; // nothing to mentor on
 
-    const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}`);
-    const openList = dayTasks.filter((t) => t.status !== 'done').map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}%)` : ''}`);
+    const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}${(t as any).sphere === 'personal' ? ' [personal]' : ''}`);
+    const openList = dayTasks.filter((t) => t.status !== 'done').map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}%)` : ''}${(t as any).sphere === 'personal' ? ' [personal]' : ''}`);
     const focusLines = focus.map((f) => `- ${f.title}${f.description ? `: ${f.description}` : ''}`);
     const yesterday = recent[0] || null; // most recent prior read
     const recentGuide = [...recent].reverse().map((m) => `(${m.day}, score ${m.adherenceScore}) ${m.guidance.slice(0, 300)}`);
@@ -222,7 +223,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `${tmpl}\n\n` +
       `=== HIS FOCUS AREAS ===\n${focusLines.join('\n') || '(none set yet — give general direction and infer what matters)'}\n\n` +
       `=== TODAY (${day}) ===\n` +
-      `Story of the Day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
+      `Story of the Day (professional):\n${narrative.slice(0, 2200) || '(none)'}\n\n` +
+      (personalNarrative ? `Story of the Day (personal/family):\n${personalNarrative.slice(0, 1800)}\n\n` : '') +
+      ((dayStory as any)?.proMoodScore != null || (dayStory as any)?.personalMoodScore != null ? `Moods — work: ${(dayStory as any)?.proMoodScore ?? '–'}/100, personal: ${(dayStory as any)?.personalMoodScore ?? '–'}/100.\n\n` : '') +
       `Finished:\n${doneList.join('\n') || '(none)'}\n\nStill open:\n${openList.join('\n') || '(none)'}\n\n` +
       `=== YESTERDAY ===\n${yesterday ? `Score: ${yesterday.adherenceScore}/100 (${yesterday.day}). Your note to him was:\n${yesterday.guidance.slice(0, 600)}` : '(no prior read — this is your first note to him)'}\n\n` +
       `=== YOUR EARLIER NOTES ===\n${recentGuide.join('\n') || '(none)'}` +
@@ -287,6 +290,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     const perDay = days.map((d) => ({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length }));
     const withTasks = perDay.filter((p) => p.total > 0);
     const best = withTasks.length ? withTasks.reduce((a, b) => (b.done / b.total > a.done / a.total ? b : a)) : null;
+    const nums = (xs: any[]) => xs.filter((x): x is number => Number.isFinite(x as number));
     return {
       weekStart,
       tasksTotal: tasks.length,
@@ -294,7 +298,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : null,
       minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
       avgAdherence: avg(mentorDays.map((m) => m.adherenceScore)),
-      avgMood: avg(dayStories.map((s) => s.moodScore).filter((x): x is number => Number.isFinite(x as number))),
+      avgMood: avg(nums(dayStories.map((s) => s.moodScore))),
+      avgWorkMood: avg(nums(dayStories.map((s: any) => s.proMoodScore ?? s.moodScore))),
+      avgPersonalMood: avg(nums(dayStories.map((s: any) => s.personalMoodScore))),
       daysWithStory: dayStories.length,
       bestDay: best?.day || null,
     };
@@ -322,7 +328,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       if (d > today) return `• ${d}: (in the future — has not happened yet; do NOT treat as missed)`;
       const sum = summaries.find((s) => s.day === d);
       const ds = dayStories.find((s) => s.day === d);
-      const bits = [sum?.text?.replace(/\s+/g, ' ').slice(0, 280), ds?.moodScore != null ? `mood ${ds.moodScore}` : null].filter(Boolean);
+      const bits = [sum?.text?.replace(/\s+/g, ' ').slice(0, 280), ds?.moodScore != null ? `mood ${ds.moodScore}` : null, (ds as any)?.proMoodScore != null ? `work ${(ds as any).proMoodScore}` : null, (ds as any)?.personalMoodScore != null ? `personal ${(ds as any).personalMoodScore}` : null].filter(Boolean);
       return `• ${d}: ${bits.join(' · ') || '(no record)'}`;
     });
 
@@ -383,7 +389,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       const ws = this.dayAdd(thisMonday, -7 * w);
       const s = await this.weekStats(ws);
       if (!s.tasksTotal && s.avgAdherence === null) continue;
-      lines.push(`Week of ${ws}: follow-through ${s.followThrough ?? '–'}%, avg adherence ${s.avgAdherence ?? '–'}, avg mood ${s.avgMood ?? '–'}, ${s.daysWithStory}/7 stories told`);
+      lines.push(`Week of ${ws}: follow-through ${s.followThrough ?? '–'}%, avg adherence ${s.avgAdherence ?? '–'}, avg mood ${s.avgMood ?? '–'} (work ${s.avgWorkMood ?? '–'} / personal ${s.avgPersonalMood ?? '–'}), ${s.daysWithStory}/7 stories told`);
     }
     const latest = await this.prisma.weeklyReview.findFirst({ orderBy: { weekStart: 'desc' } });
     let block = lines.length ? `=== THE BIGGER PICTURE (4-week numbers) ===\n${lines.join('\n')}` : '';

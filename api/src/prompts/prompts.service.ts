@@ -153,6 +153,7 @@ const REGISTRY: PromptDef[] = [
       `3. Name what's IMPORTANT but slipping/getting delayed — and tell him plainly to pull it up and focus now. If you already pushed him on it yesterday, say whether he acted on it or not.\n` +
       `4. If he's drifting from a focus area, push him on it — or, if his story explains why, acknowledge that and adjust.\n` +
       `5. Give one clear direction for where his focus should go next.\n` +
+      `6. His life has TWO spheres — professional and personal/family (tasks marked [personal], separate work/personal moods when present). Treat both as first-class: if one sphere is consistently starving or its mood is sliding while the other thrives, NAME the imbalance plainly.\n` +
       `CRITICAL: each day's note must read clearly DIFFERENT from yesterday's — never reuse yesterday's sentences, openings, or structure. Be specific to today's actual content. 2-4 short paragraphs, plain prose, warm but firm. Write in the same language he tends to use.\n\n` +
       `Also score how well TODAY aligned with his focus areas, 0-100 (0 = completely off-track, 100 = fully lived his focus). Score TODAY on its own merits — do not anchor to yesterday's number.\n\n` +
       `Respond with ONLY JSON: {"adherenceScore": <0-100 integer>, "guidance": "<your guidance text>"}`,
@@ -198,6 +199,7 @@ const REGISTRY: PromptDef[] = [
       `2. WINS — 2-3 things that genuinely moved his life/focus forward. Be specific, quote his own days.\n` +
       `3. DRIFT — the most important thing that slipped, and what it cost him.\n` +
       `4. THE PATTERN — exactly ONE pattern you can see across multiple days of data (not a platitude; a real, checkable observation like "every day that started without a dump ended below 50"). If last week's review named a pattern, say whether it held.\n` +
+      `5a. BALANCE — if the work/personal mood numbers diverge or one sphere got all the attention, say it in one honest sentence.\n` +
       `5. THE EXPERIMENT — exactly ONE small, concrete experiment for next week, testable by the data ("dump before 8 AM all 7 days"). If he had an experiment last week, FIRST report its result honestly.\n` +
       `Plain prose, short paragraphs, warm but unflinching. No headers in the text itself.\n\n` +
       `Respond with ONLY JSON: {"review":"<the full review prose>","pattern":"<the one pattern, one sentence>","experiment":"<the one experiment, one sentence>"}`,
