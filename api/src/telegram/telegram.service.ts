@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService } from '../connectors/connector.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -934,6 +935,21 @@ export class TelegramService implements OnModuleInit {
     await this.setSetting('telegram.fired', JSON.stringify({ day, keys: [...set] }));
   }
 
+  /** Null when off-server backups are healthy; an alert message when the home-server pull is missing/stale (>36h). */
+  async backupAlertText(now = Date.now(), statusPath = '/app/data/backup-status.json'): Promise<string | null> {
+    let j: any;
+    try {
+      j = JSON.parse(await fs.readFile(statusPath, 'utf8'));
+    } catch {
+      return '⚠️ <b>Backup watchdog</b>: I could not read the backup status — the nightly backups may not be running at all.';
+    }
+    const pull = Date.parse(j?.lastPullAt || '');
+    const ageH = Number.isFinite(pull) ? (now - pull) / 3600_000 : Infinity;
+    if (ageH <= 36) return null;
+    const last = Number.isFinite(pull) ? `${Math.round(ageH)}h ago` : 'never';
+    return `⚠️ <b>Backup watchdog</b>: the home server has not pulled a backup recently (last successful pull: ${last}). Check that it is on and connected — your off-server backup is not up to date.`;
+  }
+
   async nudgeTick(): Promise<void> {
     const owner = await this.ownerChatId();
     if (!owner || !(await this.token())) return;
@@ -943,6 +959,15 @@ export class TelegramService implements OnModuleInit {
 
     // Deliver the nightly Story of the Day + Mentor read regardless of rest-day/snooze (not a nag).
     await this.pushPending(owner);
+
+    // Backup watchdog (10 AM, before rest-day/snooze — infrastructure alerts are never a nag)
+    if (hm === '10:00' && (await this.getSetting('telegram.backupAlertDay')) !== day) {
+      const alert = await this.backupAlertText();
+      if (alert) {
+        await this.setSetting('telegram.backupAlertDay', day);
+        await this.send(owner, alert);
+      }
+    }
 
     if ((await this.getSetting('telegram.skipDay')) === day) return; // rest day
     const snooze = Number((await this.getSetting('telegram.snoozeUntil')) || 0);

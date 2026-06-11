@@ -235,4 +235,32 @@ describe('TelegramService', () => {
     await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: '/dump x' } });
     expect(tasks.dump).toHaveBeenCalledTimes(1);
   });
+
+  describe('backup watchdog', () => {
+    const fsp = require('fs/promises');
+    const os = require('os');
+    const path = require('path');
+    async function statusFile(content: string): Promise<string> {
+      const p = path.join(await fsp.mkdtemp(path.join(os.tmpdir(), 'bk-')), 'backup-status.json');
+      await fsp.writeFile(p, content);
+      return p;
+    }
+
+    it('stays quiet when the home server pulled within 36 hours', async () => {
+      const { svc } = make();
+      const p = await statusFile(JSON.stringify({ lastPullAt: new Date(Date.now() - 5 * 3600_000).toISOString() }));
+      expect(await svc.backupAlertText(Date.now(), p)).toBeNull();
+    });
+
+    it('alerts when the last pull is older than 36 hours', async () => {
+      const { svc } = make();
+      const p = await statusFile(JSON.stringify({ lastPullAt: new Date(Date.now() - 48 * 3600_000).toISOString() }));
+      expect(await svc.backupAlertText(Date.now(), p)).toMatch(/Backup watchdog/);
+    });
+
+    it('alerts when the status file is missing entirely', async () => {
+      const { svc } = make();
+      expect(await svc.backupAlertText(Date.now(), '/nonexistent/backup-status.json')).toMatch(/may not be running/);
+    });
+  });
 });
