@@ -929,6 +929,17 @@ export class TelegramService implements OnModuleInit {
         });
       }
     }
+    const wWeek = await this.getSetting('telegram.pushWeekly');
+    if (wWeek) {
+      await this.setSetting('telegram.pushWeekly', '');
+      const wr = await this.prisma.weeklyReview.findUnique({ where: { weekStart: wWeek } });
+      if (wr?.text) {
+        const extras = [wr.pattern ? `\n\n🔍 <b>The pattern:</b> ${this.esc(wr.pattern)}` : '', wr.experiment ? `\n🧪 <b>Next week's experiment:</b> ${this.esc(wr.experiment)}` : ''].join('');
+        await this.send(owner, `📜 <b>Your weekly review</b> · week of ${wWeek}\n\n${this.esc(wr.text).slice(0, 3200)}${extras}`, {
+          reply_markup: { inline_keyboard: [[{ text: '🧭 Open Mentor', url: `${PUBLIC_URL}/mentor` }]] },
+        });
+      }
+    }
   }
 
   // ---- outbound nudge scheduler ----

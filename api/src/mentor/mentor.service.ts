@@ -201,6 +201,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     const recentGuide = [...recent].reverse().map((m) => `(${m.day}, score ${m.adherenceScore}) ${m.guidance.slice(0, 300)}`);
 
     const tmpl = await this.prompts.get('mentor.guidance');
+    const bigger = await this.trendBlock(day).catch(() => '');
     const prompt =
       `${tmpl}\n\n` +
       `=== HIS FOCUS AREAS ===\n${focusLines.join('\n') || '(none set yet — give general direction and infer what matters)'}\n\n` +
@@ -208,7 +209,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `Story of the Day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
       `Finished:\n${doneList.join('\n') || '(none)'}\n\nStill open:\n${openList.join('\n') || '(none)'}\n\n` +
       `=== YESTERDAY ===\n${yesterday ? `Score: ${yesterday.adherenceScore}/100 (${yesterday.day}). Your note to him was:\n${yesterday.guidance.slice(0, 600)}` : '(no prior read — this is your first note to him)'}\n\n` +
-      `=== YOUR EARLIER NOTES ===\n${recentGuide.join('\n') || '(none)'}`;
+      `=== YOUR EARLIER NOTES ===\n${recentGuide.join('\n') || '(none)'}` +
+      (bigger ? `\n\n${bigger}` : '');
 
     const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200, 'mentor-guidance'))?.trim() || '';
     let guidance = raw;
@@ -230,6 +232,129 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     // Flag it for the nightly Telegram push.
     await this.setSetting('telegram.pushMentor', day).catch(() => undefined);
     return this.shapeMentorDay(row);
+  }
+
+  // ---- weekly review (Sunday night) ----
+
+  /** Monday of the week containing `day` (weeks run Mon..Sun). */
+  weekStartOf(day: string): string {
+    const d = new Date(day + 'T12:00:00Z');
+    const dow = d.getUTCDay(); // 0=Sun..6=Sat
+    return this.dayAdd(day, dow === 0 ? -6 : 1 - dow);
+  }
+
+  private shapeWeekly(w: any) {
+    let stats: any = null;
+    try {
+      stats = w.stats ? JSON.parse(w.stats) : null;
+    } catch {
+      /* ignore */
+    }
+    return { weekStart: w.weekStart, weekEnd: this.dayAdd(w.weekStart, 6), text: w.text, pattern: w.pattern, experiment: w.experiment, stats, createdAt: w.createdAt };
+  }
+
+  async listWeekly(limit = 12) {
+    const rows = await this.prisma.weeklyReview.findMany({ orderBy: { weekStart: 'desc' }, take: Math.max(1, Math.min(52, limit)) });
+    return { reviews: rows.map((w) => this.shapeWeekly(w)), count: await this.prisma.weeklyReview.count() };
+  }
+
+  /** Plain-code week numbers — the grounding data for the review and the nightly trend block. */
+  private async weekStats(weekStart: string) {
+    const days: string[] = Array.from({ length: 7 }, (_, i) => this.dayAdd(weekStart, i));
+    const [tasks, mentorDays, dayStories] = await Promise.all([
+      this.prisma.task.findMany({ where: { day: { gte: days[0], lte: days[6] } } }),
+      this.prisma.mentorDay.findMany({ where: { day: { gte: days[0], lte: days[6] } } }),
+      this.prisma.dayStory.findMany({ where: { day: { gte: days[0], lte: days[6] } } }),
+    ]);
+    const done = tasks.filter((t) => t.status === 'done');
+    const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((s, x) => s + x, 0) / xs.length) : null);
+    const perDay = days.map((d) => ({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length }));
+    const withTasks = perDay.filter((p) => p.total > 0);
+    const best = withTasks.length ? withTasks.reduce((a, b) => (b.done / b.total > a.done / a.total ? b : a)) : null;
+    return {
+      weekStart,
+      tasksTotal: tasks.length,
+      tasksDone: done.length,
+      followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : null,
+      minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
+      avgAdherence: avg(mentorDays.map((m) => m.adherenceScore)),
+      avgMood: avg(dayStories.map((s) => s.moodScore).filter((x): x is number => Number.isFinite(x as number))),
+      daysWithStory: dayStories.length,
+      bestDay: best?.day || null,
+    };
+  }
+
+  /** Write the Sunday weekly review for the week starting `weekStart` (Mon..Sun). */
+  async generateWeeklyReview(weekStart: string, force = false) {
+    if (!force) {
+      const existing = await this.prisma.weeklyReview.findUnique({ where: { weekStart } });
+      if (existing) return this.shapeWeekly(existing);
+    }
+    const days: string[] = Array.from({ length: 7 }, (_, i) => this.dayAdd(weekStart, i));
+    const [stats, prevStats, summaries, dayStories, focus, prevReview] = await Promise.all([
+      this.weekStats(weekStart),
+      this.weekStats(this.dayAdd(weekStart, -7)),
+      this.prisma.daySummary.findMany({ where: { day: { gte: days[0], lte: days[6] } }, orderBy: { day: 'asc' } }),
+      this.prisma.dayStory.findMany({ where: { day: { gte: days[0], lte: days[6] } }, orderBy: { day: 'asc' } }),
+      this.prisma.focusArea.findMany({ where: { status: 'active' } }),
+      this.prisma.weeklyReview.findFirst({ where: { weekStart: { lt: weekStart } }, orderBy: { weekStart: 'desc' } }),
+    ]);
+    if (!summaries.length && !dayStories.length && !stats.tasksTotal) return null; // empty week — nothing to review
+
+    const dayLines = days.map((d) => {
+      const sum = summaries.find((s) => s.day === d);
+      const ds = dayStories.find((s) => s.day === d);
+      const bits = [sum?.text?.replace(/\s+/g, ' ').slice(0, 280), ds?.moodScore != null ? `mood ${ds.moodScore}` : null].filter(Boolean);
+      return `• ${d}: ${bits.join(' · ') || '(no record)'}`;
+    });
+
+    const tmpl = await this.prompts.get('mentor.weekly');
+    const prompt =
+      `${tmpl}\n\n` +
+      `=== THE WEEK (${weekStart} .. ${days[6]}) ===\n${dayLines.join('\n')}\n\n` +
+      `=== NUMBERS ===\nThis week: ${JSON.stringify(stats)}\nLast week: ${JSON.stringify(prevStats)}\n\n` +
+      `=== HIS FOCUS AREAS ===\n${focus.map((f) => `- ${f.title}`).join('\n') || '(none set)'}\n\n` +
+      `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
+
+    const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1400, 'weekly-review'))?.trim() || '';
+    let text = raw;
+    let pattern: string | null = null;
+    let experiment: string | null = null;
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (json?.review) text = String(json.review).trim();
+      if (json?.pattern) pattern = String(json.pattern).trim().slice(0, 300);
+      if (json?.experiment) experiment = String(json.experiment).trim().slice(0, 300);
+    } catch {
+      /* keep prose */
+    }
+    if (!text) return null;
+
+    const row = await this.prisma.weeklyReview.upsert({
+      where: { weekStart },
+      create: { weekStart, text, pattern, experiment, stats: JSON.stringify(stats) },
+      update: { text, pattern, experiment, stats: JSON.stringify(stats) },
+    });
+    await this.setSetting('telegram.pushWeekly', weekStart).catch(() => undefined);
+    return this.shapeWeekly(row);
+  }
+
+  /** Trend context for the nightly read: 4 weekly adherence/mood averages + the latest review. Pure numbers, no AI cost. */
+  private async trendBlock(day: string): Promise<string> {
+    const lines: string[] = [];
+    const thisMonday = this.weekStartOf(day);
+    for (let w = 3; w >= 0; w--) {
+      const ws = this.dayAdd(thisMonday, -7 * w);
+      const s = await this.weekStats(ws);
+      if (!s.tasksTotal && s.avgAdherence === null) continue;
+      lines.push(`Week of ${ws}: follow-through ${s.followThrough ?? '–'}%, avg adherence ${s.avgAdherence ?? '–'}, avg mood ${s.avgMood ?? '–'}, ${s.daysWithStory}/7 stories told`);
+    }
+    const latest = await this.prisma.weeklyReview.findFirst({ orderBy: { weekStart: 'desc' } });
+    let block = lines.length ? `=== THE BIGGER PICTURE (4-week numbers) ===\n${lines.join('\n')}` : '';
+    if (latest) {
+      block += `\n\n=== YOUR LATEST WEEKLY REVIEW (${latest.weekStart}) ===\nPattern you named: ${latest.pattern || '-'}\nThe running experiment: ${latest.experiment || '-'} — if today's data speaks to it, say so.`;
+    }
+    return block;
   }
 
   /** Everything the Mentor screen needs: focus areas, latest guidance, and the trend series. */
@@ -277,6 +402,23 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       // Catch-up: yesterday's read was missed (restart at 23:59) or is stale (a daytime manual
       // run wrote it before the Story of the Day existed) — fix it now.
       await this.ensureFreshRead(this.dayAdd(day, -1));
+    }
+
+    // Sunday 21:45: the weekly review (covers Mon..today). Any other time: catch up LAST week's
+    // review if the window was missed (restart, server down) and that week has data.
+    // The once-a-day guard stops a failed/empty generation from re-calling the LLM every minute.
+    const tried = (await this.prisma.setting.findUnique({ where: { key: 'mentor.weeklyTry' } }))?.value;
+    if (tried === day) return;
+    const dow = new Date(day + 'T12:00:00Z').getUTCDay();
+    if (dow === 0 && this.localHM(tz) >= '21:45') {
+      await this.setSetting('mentor.weeklyTry', day);
+      await this.generateWeeklyReview(this.weekStartOf(day)).catch(() => undefined);
+    } else {
+      const lastWeek = this.dayAdd(this.weekStartOf(day), -7);
+      if (!(await this.prisma.weeklyReview.findUnique({ where: { weekStart: lastWeek } }))) {
+        await this.setSetting('mentor.weeklyTry', day);
+        await this.generateWeeklyReview(lastWeek).catch(() => undefined);
+      }
     }
   }
 }

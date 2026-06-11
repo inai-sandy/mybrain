@@ -89,13 +89,13 @@ model Skill {
 
 /// A morning brain-dump: the raw multi-sentence text the LLM turns into tasks.
 model BrainDump {
-  id          String   @id @default(uuid())
-  day         String // local day key YYYY-MM-DD this dump belongs to
-  rawText     String
-  source      String   @default("app") // app | telegram | voice
-  question    String? // a single clarifying question the LLM asked, if any
-  taskCount   Int      @default(0)
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  day       String // local day key YYYY-MM-DD this dump belongs to
+  rawText   String
+  source    String   @default("app") // app | telegram | voice
+  question  String? // a single clarifying question the LLM asked, if any
+  taskCount Int      @default(0)
+  createdAt DateTime @default(now())
 }
 
 /// The mandatory nightly story — the user's free narrative of the day (problems, joy, events).
@@ -200,6 +200,18 @@ model MentorDay {
   guidance       String // the Mentor's direct guidance for the day
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+/// The Mentor's Sunday weekly review: the week's wins, drift, one pattern, one experiment.
+model WeeklyReview {
+  id         String   @id @default(uuid())
+  weekStart  String   @unique // Monday of the reviewed week, local YYYY-MM-DD
+  text       String // the review prose
+  pattern    String? // the ONE pattern the mentor noticed this week
+  experiment String? // the ONE experiment proposed for next week
+  stats      String? // JSON numbers the review was grounded in
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 /// A quick note the user speaks/types during the day (daytime oral capture).

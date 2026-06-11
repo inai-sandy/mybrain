@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Compass, Sparkles, Plus, Check, X, Trash2, RefreshCw, TrendingUp, Target, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Compass, Sparkles, Plus, Check, X, Trash2, RefreshCw, TrendingUp, Target, ChevronLeft, ChevronRight, CalendarRange } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Focus = { id: string; title: string; description?: string | null; source: string; status: string };
@@ -207,7 +207,77 @@ export function Mentor() {
           <span className="text-zinc-400">· tap a bar to open that day</span>
         </div>
       </section>
+
+      <WeeklyReviews />
     </div>
+  );
+}
+
+type Weekly = { weekStart: string; weekEnd: string; text: string; pattern?: string | null; experiment?: string | null; stats?: any; createdAt: string };
+
+/** The Sunday weekly reviews — latest open, history collapsible. */
+function WeeklyReviews() {
+  const [data, setData] = useState<{ reviews: Weekly[]; count: number } | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  async function load() {
+    const r = await fetch('/api/mentor/weekly');
+    if (r.ok) {
+      const j = await r.json();
+      setData(j);
+      setOpen((cur) => cur ?? j.reviews?.[0]?.weekStart ?? null);
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  async function generate() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/mentor/weekly/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
+      const j = await r.json();
+      if (r.ok && j.text) { toast('success', 'Weekly review written'); load(); }
+      else toast('error', j.message || 'Not enough recorded days this week yet');
+    } finally { setBusy(false); }
+  }
+
+  const reviews = data?.reviews || [];
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="flex items-center gap-2 font-semibold"><CalendarRange size={16} className="text-indigo-500" /> Weekly reviews {data ? <span className="text-xs font-normal text-zinc-400">{data.count}</span> : null}</h2>
+        <button onClick={generate} disabled={busy} className="text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><RefreshCw size={12} /> {busy ? 'Writing…' : 'Review this week now'}</button>
+      </div>
+      <p className="text-xs text-zinc-500 mb-3">Every Sunday night: the week's wins, the drift, one pattern, one experiment — pushed to Telegram too.</p>
+      {reviews.length === 0 ? (
+        <p className="text-sm text-zinc-400">Your first review arrives Sunday night — or write one now with the button above.</p>
+      ) : (
+        <ul className="space-y-2">
+          {reviews.map((w) => {
+            const isOpen = open === w.weekStart;
+            return (
+              <li key={w.weekStart} className="rounded-lg border border-zinc-100 dark:border-zinc-800">
+                <button onClick={() => setOpen(isOpen ? null : w.weekStart)} className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left">
+                  <span className="text-sm font-medium">Week of {prettyDay(w.weekStart).replace(/^[A-Za-z]+, /, '')}</span>
+                  <span className="flex items-center gap-2 text-[11px] text-zinc-400">
+                    {w.stats?.followThrough != null && <span>{w.stats.followThrough}% follow-through</span>}
+                    <ChevronRight size={14} className={'transition-transform ' + (isOpen ? 'rotate-90' : '')} />
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="px-3 pb-3">
+                    <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">{w.text}</p>
+                    {w.pattern && <p className="mt-2 text-xs rounded-lg bg-indigo-500/5 border border-indigo-300/30 dark:border-indigo-500/20 px-2.5 py-1.5"><span className="font-semibold text-indigo-500">🔍 The pattern:</span> {w.pattern}</p>}
+                    {w.experiment && <p className="mt-1.5 text-xs rounded-lg bg-amber-500/5 border border-amber-300/30 dark:border-amber-500/20 px-2.5 py-1.5"><span className="font-semibold text-amber-600">🧪 The experiment:</span> {w.experiment}</p>}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

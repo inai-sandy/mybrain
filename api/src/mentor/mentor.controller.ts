@@ -44,6 +44,19 @@ export class MentorController {
     return { proposed: await this.mentor.deriveFocusAreas() };
   }
 
+  // ---- weekly review ----
+  @Get('weekly')
+  async weekly(@Query('limit') limit?: string) {
+    return this.mentor.listWeekly(limit ? Number(limit) : 12);
+  }
+
+  @Post('weekly/generate')
+  async generateWeekly(@Body() body: { weekStart?: string; force?: boolean }) {
+    const ws = body?.weekStart && /^\d{4}-\d{2}-\d{2}$/.test(body.weekStart) ? this.mentor.weekStartOf(body.weekStart) : this.mentor.weekStartOf(todayKey());
+    const r = await this.mentor.generateWeeklyReview(ws, !!body?.force);
+    return r || { ok: false, message: 'Not enough recorded days in that week to review yet.' };
+  }
+
   // ---- daily read ----
   @Post('run')
   async run(@Body() body: { day?: string; force?: boolean }) {

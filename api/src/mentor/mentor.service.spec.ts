@@ -6,6 +6,8 @@ function makeService(llmText: string | null) {
   const dayStories: any[] = [];
   const stories: any[] = [];
   const tasks: any[] = [];
+  const summaries: any[] = [];
+  const weeklies: any[] = [];
   const settings: Record<string, string> = {};
   let seq = 0;
   const prisma: any = {
@@ -48,17 +50,75 @@ function makeService(llmText: string | null) {
         return row;
       },
     },
-    dayStory: { findUnique: async ({ where }: any) => dayStories.find((s) => s.day === where.day) || null, findMany: async () => dayStories.slice() },
+    dayStory: {
+      findUnique: async ({ where }: any) => dayStories.find((s) => s.day === where.day) || null,
+      findMany: async ({ where }: any = {}) => dayStories.filter((s) => (!where?.day?.gte || s.day >= where.day.gte) && (!where?.day?.lte || s.day <= where.day.lte)),
+    },
     story: { findFirst: async ({ where }: any) => stories.filter((s) => s.day === where.day).slice(-1)[0] || null, findMany: async () => stories.slice() },
-    task: { findMany: async ({ where }: any = {}) => tasks.filter((t) => !where?.day || t.day === where.day) },
+    task: {
+      findMany: async ({ where }: any = {}) =>
+        tasks.filter((t) => {
+          const d = where?.day;
+          if (d === undefined) return true;
+          if (typeof d === 'string') return t.day === d;
+          return (!d.gte || t.day >= d.gte) && (!d.lte || t.day <= d.lte);
+        }),
+    },
+    daySummary: { findMany: async ({ where }: any = {}) => summaries.filter((s) => (!where?.day?.gte || s.day >= where.day.gte) && (!where?.day?.lte || s.day <= where.day.lte)) },
+    weeklyReview: {
+      findUnique: async ({ where }: any) => weeklies.find((w) => w.weekStart === where.weekStart) || null,
+      findFirst: async ({ where, orderBy }: any = {}) => {
+        const rows = weeklies
+          .filter((w) => !where?.weekStart?.lt || w.weekStart < where.weekStart.lt)
+          .sort((a, b) => (orderBy?.weekStart === 'desc' ? b.weekStart.localeCompare(a.weekStart) : a.weekStart.localeCompare(b.weekStart)));
+        return rows[0] || null;
+      },
+      findMany: async ({ take }: any = {}) => weeklies.slice(0, take || undefined),
+      count: async () => weeklies.length,
+      upsert: async ({ where, create, update }: any) => {
+        const ex = weeklies.find((w) => w.weekStart === where.weekStart);
+        if (ex) { Object.assign(ex, update, { updatedAt: new Date() }); return ex; }
+        const row = { id: `w${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...create };
+        weeklies.push(row);
+        return row;
+      },
+    },
   };
   const llm: any = { completeWith: jest.fn(async () => llmText) };
   const prompts: any = { get: async (k: string) => `[${k}]` };
   const tasksSvc: any = { listModels: async () => [] };
-  return { svc: new MentorService(prisma, llm, prompts, tasksSvc), llm, focus, mentorDays, dayStories, stories, tasks };
+  return { svc: new MentorService(prisma, llm, prompts, tasksSvc), llm, focus, mentorDays, dayStories, stories, tasks, summaries, weeklies, settings };
 }
 
 describe('MentorService', () => {
+  describe('weekly review', () => {
+    it('weekStartOf maps any day to its Monday (Mon..Sun weeks)', () => {
+      const { svc } = makeService(null);
+      expect(svc.weekStartOf('2026-06-08')).toBe('2026-06-08'); // a Monday
+      expect(svc.weekStartOf('2026-06-11')).toBe('2026-06-08'); // Thursday
+      expect(svc.weekStartOf('2026-06-14')).toBe('2026-06-08'); // Sunday belongs to the week it ends
+    });
+
+    it('writes the weekly review with pattern + experiment and flags the Telegram push', async () => {
+      const { svc, summaries, dayStories, settings, weeklies } = makeService('{"review":"A strong week — Beakn moved.","pattern":"Days that started with a dump ended above 70.","experiment":"Dump before 8 AM all 7 days."}');
+      summaries.push({ day: '2026-06-08', text: 'Shipped the proposal.' });
+      dayStories.push({ day: '2026-06-09', text: 'Good day', moodScore: 75 });
+      const w = await svc.generateWeeklyReview('2026-06-08');
+      expect(w!.text).toContain('strong week');
+      expect(w!.pattern).toContain('dump');
+      expect(w!.experiment).toContain('8 AM');
+      expect(weeklies).toHaveLength(1);
+      expect(settings['telegram.pushWeekly']).toBe('2026-06-08');
+    });
+
+    it('returns null for a week with no recorded data (and writes nothing)', async () => {
+      const { svc, weeklies, llm } = makeService('{"review":"should never be called"}');
+      expect(await svc.generateWeeklyReview('2026-01-05')).toBeNull();
+      expect(weeklies).toHaveLength(0);
+      expect(llm.completeWith).not.toHaveBeenCalled();
+    });
+  });
+
   it('derives focus areas as "proposed" and skips duplicates of existing ones', async () => {
     const { svc, focus } = makeService('{"focusAreas":[{"title":"Ship Beakn milestones","description":"core work"},{"title":"Protect mornings"}]}');
     focus.push({ id: 'x', title: 'Protect mornings', status: 'active' });

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -154,6 +154,21 @@ const REGISTRY: PromptDef[] = [
       `CRITICAL: each day's note must read clearly DIFFERENT from yesterday's — never reuse yesterday's sentences, openings, or structure. Be specific to today's actual content. 2-4 short paragraphs, plain prose, warm but firm. Write in the same language he tends to use.\n\n` +
       `Also score how well TODAY aligned with his focus areas, 0-100 (0 = completely off-track, 100 = fully lived his focus). Score TODAY on its own merits — do not anchor to yesterday's number.\n\n` +
       `Respond with ONLY JSON: {"adherenceScore": <0-100 integer>, "guidance": "<your guidance text>"}`,
+  },
+  {
+    key: 'mentor.weekly',
+    label: 'Mentor — weekly review',
+    description: 'The Sunday-night weekly review: the week\'s wins, drift, ONE pattern, ONE experiment for next week. The week\'s data is added automatically. ⚠️ Keep the JSON shape intact.',
+    default:
+      `You are Sandeep's honest, caring mentor writing his SUNDAY WEEKLY REVIEW. You are given the week's numbers (follow-through, mood, adherence, time), each day's summary and story, his focus areas, and last week's review + experiment.\n\n` +
+      `Write, addressed to him as "you":\n` +
+      `1. THE WEEK IN ONE LINE — its honest headline.\n` +
+      `2. WINS — 2-3 things that genuinely moved his life/focus forward. Be specific, quote his own days.\n` +
+      `3. DRIFT — the most important thing that slipped, and what it cost him.\n` +
+      `4. THE PATTERN — exactly ONE pattern you can see across multiple days of data (not a platitude; a real, checkable observation like "every day that started without a dump ended below 50"). If last week's review named a pattern, say whether it held.\n` +
+      `5. THE EXPERIMENT — exactly ONE small, concrete experiment for next week, testable by the data ("dump before 8 AM all 7 days"). If he had an experiment last week, FIRST report its result honestly.\n` +
+      `Plain prose, short paragraphs, warm but unflinching. No headers in the text itself.\n\n` +
+      `Respond with ONLY JSON: {"review":"<the full review prose>","pattern":"<the one pattern, one sentence>","experiment":"<the one experiment, one sentence>"}`,
   },
   {
     key: 'voice.cleanup',
