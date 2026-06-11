@@ -3,5 +3,6 @@
 export type HelpDoc = { title: string; href: string };
 
 export const HELP_DOCS: HelpDoc[] = [
+  { title: '✨ What is My Brain?', href: '/help/about-my-brain.html' },
   { title: 'Tasks & Activity — Guide', href: '/help/tasks-and-activity.html' },
 ];

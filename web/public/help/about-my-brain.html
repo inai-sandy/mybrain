@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My Brain — a second brain that knows you</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #07090f; color: #e4e4e7; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
+
+  /* ---- floating orbs ---- */
+  .orb { position: absolute; border-radius: 9999px; filter: blur(70px); opacity: .5; animation: drift 16s ease-in-out infinite alternate; pointer-events: none; }
+  @keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(60px,-40px) scale(1.15); } }
+
+  /* ---- scroll reveal ---- */
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.shown { opacity: 1; transform: none; }
+
+  /* ---- hero brain pulse ---- */
+  @keyframes pulse-ring { 0% { transform: scale(.85); opacity: .8; } 100% { transform: scale(1.6); opacity: 0; } }
+  .pulse-ring { animation: pulse-ring 2.6s cubic-bezier(.2,.6,.4,1) infinite; }
+  .pulse-ring.d2 { animation-delay: 1.3s; }
+
+  /* ---- flow diagram ---- */
+  .flow-path { stroke-dasharray: 8 8; animation: dash 1.2s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -16; } }
+  .loop-step { cursor: pointer; transition: transform .25s ease, box-shadow .25s ease, border-color .25s; }
+  .loop-step:hover { transform: translateY(-4px); }
+  .loop-step.active { border-color: #34d399 !important; box-shadow: 0 0 32px rgba(52,211,153,.25); transform: translateY(-4px); }
+
+  /* ---- hierarchy pyramid ---- */
+  .layer { transition: transform .3s ease, box-shadow .3s ease; cursor: pointer; }
+  .layer:hover { transform: scale(1.03); }
+  .layer.lit { box-shadow: 0 0 40px rgba(129,140,248,.35); transform: scale(1.03); }
+
+  /* ---- typing demo ---- */
+  .caret::after { content: "▋"; animation: blink 1s steps(1) infinite; color: #34d399; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ---- mood bars ---- */
+  .bar { transition: width 1.1s cubic-bezier(.2,.7,.3,1); }
+
+  /* ---- gradient text ---- */
+  .gtext { background: linear-gradient(100deg,#34d399,#818cf8 55%,#f472b6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  /* ---- counters ---- */
+  .tick { font-variant-numeric: tabular-nums; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .orb, .pulse-ring, .flow-path, .caret::after { animation: none !important; }
+    .reveal { transition: none; opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ HERO ============ -->
+<header class="relative min-h-[92vh] flex flex-col items-center justify-center text-center px-6 overflow-hidden">
+  <div class="orb w-96 h-96 bg-emerald-500/50 -top-20 -left-24"></div>
+  <div class="orb w-[28rem] h-[28rem] bg-indigo-600/40 bottom-0 -right-32" style="animation-delay:4s"></div>
+  <div class="orb w-72 h-72 bg-pink-500/30 top-1/3 left-1/2" style="animation-delay:8s"></div>
+
+  <div class="relative mb-8">
+    <div class="pulse-ring absolute inset-0 rounded-full border-2 border-emerald-400/60"></div>
+    <div class="pulse-ring d2 absolute inset-0 rounded-full border-2 border-indigo-400/50"></div>
+    <div class="relative h-28 w-28 rounded-full bg-gradient-to-br from-emerald-500/30 to-indigo-600/30 border border-emerald-400/40 flex items-center justify-center text-6xl backdrop-blur">🧠</div>
+  </div>
+
+  <h1 class="text-5xl sm:text-7xl font-black tracking-tight">My <span class="gtext">Brain</span></h1>
+  <p class="mt-5 max-w-2xl text-lg sm:text-2xl text-zinc-300 font-light">Not another to-do app.<br/>A second brain that <span class="text-emerald-400 font-medium">listens to your day</span>, <span class="text-indigo-400 font-medium">remembers your life</span>, and <span class="text-pink-400 font-medium">mentors you back</span>.</p>
+
+  <div class="mt-10 flex flex-wrap items-center justify-center gap-6 text-sm text-zinc-400">
+    <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="2">0</span><br/>minutes of effort a day</div>
+    <div class="h-10 w-px bg-zinc-700"></div>
+    <div><span class="tick text-3xl font-extrabold text-indigo-400" data-count="365">0</span><br/>days woven into one book a year</div>
+    <div class="h-10 w-px bg-zinc-700"></div>
+    <div><span class="tick text-3xl font-extrabold text-pink-400" data-count="100">0</span><span class="text-3xl font-extrabold text-pink-400">%</span><br/>yours — private &amp; self-hosted</div>
+  </div>
+
+  <a href="#problem" class="mt-12 animate-bounce text-zinc-500 text-3xl" aria-label="Scroll down">↓</a>
+</header>
+
+<main class="relative max-w-5xl mx-auto px-6 pb-28 space-y-32">
+
+  <!-- ============ THE PROBLEM ============ -->
+  <section id="problem" class="reveal pt-8">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">The problem</p>
+    <h2 class="text-3xl sm:text-5xl font-extrabold leading-tight">Every app organizes your <span class="text-zinc-500 line-through">tasks</span>.<br/>None of them understand your <span class="gtext">life</span>.</h2>
+    <div class="mt-10 grid sm:grid-cols-2 gap-5">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <p class="text-sm text-zinc-500 uppercase tracking-wide mb-3">A normal to-do app</p>
+        <ul class="space-y-2 text-zinc-400">
+          <li>☑️ Stores what you type</li>
+          <li>😶 Forgets how the day felt</li>
+          <li>📦 A filing cabinet — tasks go in, silence comes out</li>
+          <li>🔁 Day 1000 works exactly like day 1</li>
+        </ul>
+      </div>
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+        <p class="text-sm text-emerald-400 uppercase tracking-wide mb-3">My Brain</p>
+        <ul class="space-y-2 text-zinc-200">
+          <li>🎙️ You <b>speak</b>, it builds the day</li>
+          <li>📖 Every evening becomes a written story</li>
+          <li>🧭 A mentor reads it all and answers back</li>
+          <li>📈 Day 1000 knows 999 days more about you</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE DAILY LOOP (interactive flow) ============ -->
+  <section class="reveal">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">How it works</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">One day in the loop <span class="text-zinc-500 text-xl font-normal">— tap each step</span></h2>
+
+    <div class="mt-10 grid sm:grid-cols-5 gap-3 relative" id="loop">
+      <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
+      <div class="loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="0"><div class="text-3xl">🌅</div><div class="mt-1 font-bold text-sm">Morning dump</div><div class="text-[11px] text-zinc-500">7 AM · 60 seconds</div></div>
+      <div class="loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="1"><div class="text-3xl">✅</div><div class="mt-1 font-bold text-sm">Your day, built</div><div class="text-[11px] text-zinc-500">AI-crafted tasks</div></div>
+      <div class="loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="2"><div class="text-3xl">🌙</div><div class="mt-1 font-bold text-sm">Evening story</div><div class="text-[11px] text-zinc-500">tell it in your words</div></div>
+      <div class="loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="3"><div class="text-3xl">📖</div><div class="mt-1 font-bold text-sm">Story of the Day</div><div class="text-[11px] text-zinc-500">11:58 PM · auto-written</div></div>
+      <div class="loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="4"><div class="text-3xl">🧭</div><div class="mt-1 font-bold text-sm">Mentor speaks</div><div class="text-[11px] text-zinc-500">honest, every night</div></div>
+    </div>
+
+    <div id="loopDetail" class="mt-6 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[120px] transition-all">
+      <p class="text-sm text-zinc-300" id="loopText">👆 Tap a step to see what happens there.</p>
+    </div>
+  </section>
+
+  <!-- ============ TWO LIVES ============ -->
+  <section class="reveal">
+    <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">One story · two lives</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">It separates your <span class="text-emerald-400">work</span> from your <span class="text-violet-400">family</span> — and watches the balance</h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl">You tell one story at night, mixing everything naturally. The AI weaves two narratives and scores each life's mood — so the mentor can finally see what every busy person misses.</p>
+
+    <div class="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 max-w-2xl mx-auto">
+      <div class="flex gap-2 mb-4">
+        <button id="tabPro" class="rounded-full px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white">💼 Professional</button>
+        <button id="tabPer" class="rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400">🏠 Personal</button>
+      </div>
+      <p id="tabText" class="text-sm leading-relaxed text-zinc-300 min-h-[88px]">The client call you dreaded turned into the win of the week — they signed. You closed three threads you'd been circling for days, and it shows: you ended work lighter than you started it.</p>
+      <div class="mt-5 space-y-2">
+        <div class="flex items-center gap-3 text-xs"><span class="w-20 text-zinc-500">Work mood</span><div class="flex-1 h-2.5 rounded-full bg-zinc-800 overflow-hidden"><div id="barPro" class="bar h-full bg-emerald-500" style="width:0%"></div></div><span id="numPro" class="tick w-8 text-emerald-400 font-bold">—</span></div>
+        <div class="flex items-center gap-3 text-xs"><span class="w-20 text-zinc-500">Home mood</span><div class="flex-1 h-2.5 rounded-full bg-zinc-800 overflow-hidden"><div id="barPer" class="bar h-full bg-violet-500" style="width:0%"></div></div><span id="numPer" class="tick w-8 text-violet-400 font-bold">—</span></div>
+      </div>
+      <p class="mt-4 text-xs rounded-lg bg-pink-500/10 border border-pink-500/20 px-3 py-2 text-pink-200">🧭 <b>Mentor:</b> "Work is winning at 78 while home sits at 52 for the third week. The proposal can wait one evening — Thursday's dinner cannot."</p>
+    </div>
+  </section>
+
+  <!-- ============ THE HIERARCHY ============ -->
+  <section class="reveal">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">The memory hierarchy</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">Days become weeks. Weeks become chapters.<br/>Chapters become <span class="gtext">the book of your life</span>.</h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl">Every layer is distilled once and reused forever — so the app gets deeper every month while staying fast and costing pocket change. Tap a layer.</p>
+
+    <div class="mt-10 flex flex-col items-center gap-3" id="pyramid">
+      <div class="layer w-full sm:w-[30%] rounded-2xl border border-pink-500/40 bg-gradient-to-br from-pink-500/15 to-transparent p-4 text-center" data-layer="3">
+        <div class="text-2xl">📕</div><div class="font-extrabold">Story of the Year</div><div class="text-[11px] text-zinc-500">written Dec 31 · 1 per year</div>
+      </div>
+      <div class="text-zinc-600">▲</div>
+      <div class="layer w-full sm:w-[48%] rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-indigo-500/15 to-transparent p-4 text-center" data-layer="2">
+        <div class="text-2xl">📖</div><div class="font-extrabold">Monthly chapters</div><div class="text-[11px] text-zinc-500">auto-written on the 1st · 12 per year</div>
+      </div>
+      <div class="text-zinc-600">▲</div>
+      <div class="layer w-full sm:w-[66%] rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-500/15 to-transparent p-4 text-center" data-layer="1">
+        <div class="text-2xl">📜</div><div class="font-extrabold">Sunday weekly reviews</div><div class="text-[11px] text-zinc-500">wins · drift · ONE pattern · ONE experiment</div>
+      </div>
+      <div class="text-zinc-600">▲</div>
+      <div class="layer w-full sm:w-[84%] rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-layer="0">
+        <div class="text-2xl">🌙</div><div class="font-extrabold">365 daily stories</div><div class="text-[11px] text-zinc-500">your words + your tasks + your moods, woven nightly</div>
+      </div>
+    </div>
+    <div id="layerDetail" class="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 max-w-3xl mx-auto">
+      <p class="text-sm text-zinc-300" id="layerText">👆 Tap any layer of the pyramid.</p>
+    </div>
+  </section>
+
+  <!-- ============ INTELLIGENCE FEATURES ============ -->
+  <section class="reveal">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">What it gives you</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">A companion that compounds</h2>
+    <div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🧭</div><h3 class="font-bold">A mentor with a long memory</h3><p class="mt-1 text-sm text-zinc-400">Reads weeks of your real data and tells you the truth: <i>"every day that started without a plan ended below 50."</i></p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-indigo-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">💬</div><h3 class="font-bold">Ask your life anything</h3><p class="mt-1 text-sm text-zinc-400">"What was I worried about in May?" "When did I last feel great?" — answered from your own words, with receipts.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">👥</div><h3 class="font-bold">People memory</h3><p class="mt-1 text-sm text-zinc-400">It quietly notices who appears in your days — and tells you when someone you care about is fading from your story.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">📲</div><h3 class="font-bold">Lives in your pocket</h3><p class="mt-1 text-sm text-zinc-400">Full app on your phone + a Telegram companion: dump by voice note, get reminders, tap ✅ done from the chat.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-indigo-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">⏰</div><h3 class="font-bold">A nudge, never a nag</h3><p class="mt-1 text-sm text-zinc-400">If your most important task hasn't moved by 4 PM, one short message — hard-capped at 3 a week.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">💎</div><h3 class="font-bold">Radically transparent</h3><p class="mt-1 text-sm text-zinc-400">Every AI request and its exact cost is visible. The whole intelligent layer runs on roughly the price of one coffee a month.</p></div>
+    </div>
+  </section>
+
+  <!-- ============ ARCHITECTURE / PRIVACY ============ -->
+  <section class="reveal">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Under the hood · in one picture</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">Your data never stops being <span class="gtext">yours</span></h2>
+
+    <div class="mt-10 grid sm:grid-cols-3 gap-4 items-stretch text-center">
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-5">
+        <div class="text-3xl">🗣️</div><h3 class="font-bold mt-1">You</h3>
+        <p class="text-xs text-zinc-500 mt-1">Voice or text · phone app · Telegram</p>
+      </div>
+      <div class="relative rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5">
+        <svg class="hidden sm:block absolute top-1/2 -left-5 w-5" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#34d399" stroke-width="2" class="flow-path"/></svg>
+        <svg class="hidden sm:block absolute top-1/2 -right-5 w-5" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#34d399" stroke-width="2" class="flow-path"/></svg>
+        <div class="text-3xl">🧠</div><h3 class="font-bold mt-1">Your private server</h3>
+        <p class="text-xs text-zinc-500 mt-1">The app + your memories live on hardware you control — no big-tech account, no ads, no data sharing</p>
+      </div>
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-5">
+        <div class="text-3xl">🏠</div><h3 class="font-bold mt-1">Home backup</h3>
+        <p class="text-xs text-zinc-500 mt-1">Every night, verified copies land on a second machine at home — and Telegram confirms it</p>
+      </div>
+    </div>
+    <p class="mt-6 text-center text-sm text-zinc-500">AI models are called only for the moments of intelligence — they process, respond, and keep nothing.</p>
+  </section>
+
+  <!-- ============ A DAY, TYPED OUT ============ -->
+  <section class="reveal">
+    <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Feel it</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold mb-8">60 seconds of speaking → a day that runs itself</h2>
+    <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 font-mono text-sm max-w-2xl mx-auto shadow-2xl shadow-emerald-500/5">
+      <p class="text-zinc-500 mb-2">🎙️ 7:02 AM — you, speaking:</p>
+      <p class="text-emerald-300 caret" id="typeLine"></p>
+      <div id="typedTasks" class="mt-5 space-y-2 opacity-0 transition-opacity duration-700">
+        <p class="text-zinc-500">✨ your day, one second later:</p>
+        <p class="text-zinc-200">📌 <b>Send the revised quote to the architect</b> <span class="text-emerald-400 text-xs">[💼 work · high · 30m]</span></p>
+        <p class="text-zinc-200">○ Book the dentist for Amma <span class="text-violet-400 text-xs">[🏠 personal]</span></p>
+        <p class="text-zinc-200">○ Pick up the school project supplies <span class="text-violet-400 text-xs">[🏠 personal]</span></p>
+        <p class="text-zinc-200">○ Review the vendor contract <span class="text-emerald-400 text-xs">[💼 work · 45m]</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CLOSING ============ -->
+  <section class="reveal text-center pt-8">
+    <h2 class="text-4xl sm:text-5xl font-black leading-tight">Most apps manage what you <span class="text-zinc-500">do</span>.<br/><span class="gtext">This one understands who you are.</span></h2>
+    <p class="mt-6 text-zinc-400 max-w-xl mx-auto">And because it learns from every single day, the version of it you meet next year will know you better than any product ever has.</p>
+    <div class="mt-10 inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-emerald-300 font-medium">🧠 My Brain — one life, fully remembered</div>
+  </section>
+</main>
+
+<footer class="border-t border-zinc-800 py-8 text-center text-xs text-zinc-600">
+  Built by <span class="text-zinc-400 font-medium">Sandeep Karnati</span> · designed &amp; engineered with AI · private by design
+</footer>
+
+<script>
+  // scroll reveal
+  const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('shown')), { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+  // hero counters
+  const cio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    const el = e.target, target = +el.dataset.count, t0 = performance.now();
+    const step = (t) => { const p = Math.min(1, (t - t0) / 1400); el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step); cio.unobserve(el);
+  }));
+  document.querySelectorAll('[data-count]').forEach((el) => cio.observe(el));
+
+  // daily loop
+  const LOOP = [
+    ['🌅 Morning dump', 'You talk for a minute — everything on your mind, work and family mixed. The AI turns it into a clean, prioritized task list with time estimates, categories, and your must-dos pinned. A review pop-up shows exactly what landed.'],
+    ['✅ Your day, built', 'Tasks carry a Work or Personal tag automatically. Tap 30% / 60% as you progress; unfinished tasks roll to tomorrow on their own and the app tracks how long things really take versus your guesses.'],
+    ['🌙 Evening story', 'You tell the story of your day in your own words — typed or spoken, even from Telegram, even the next morning if life got busy. This is how the app comes to know the real you.'],
+    ['📖 Story of the Day', 'At 11:58 PM the AI weaves your story, your tasks and your activity into two written narratives — professional and personal — each with its own mood score. Day by day, your book is being written.'],
+    ['🧭 Mentor speaks', 'A mentor that has read everything gives you an honest nightly note: what moved, what slipped, what changed since yesterday — and on Sundays, the week\'s one pattern and one experiment for the next.'],
+  ];
+  const steps = document.querySelectorAll('.loop-step'); const loopText = document.getElementById('loopText');
+  steps.forEach((s) => s.addEventListener('click', () => {
+    steps.forEach((x) => x.classList.remove('active')); s.classList.add('active');
+    const [t, d] = LOOP[+s.dataset.step]; loopText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
+  }));
+
+  // two lives tabs
+  const PRO = 'The client call you dreaded turned into the win of the week — they signed. You closed three threads you\'d been circling for days, and it shows: you ended work lighter than you started it.';
+  const PER = 'The evening belonged to the kids — homework, then the school project that turned the living room into a workshop. Dinner ran long and nobody minded. The dentist is finally booked.';
+  const tabPro = document.getElementById('tabPro'), tabPer = document.getElementById('tabPer'), tabText = document.getElementById('tabText');
+  const barPro = document.getElementById('barPro'), barPer = document.getElementById('barPer');
+  function setTab(pro) {
+    tabText.textContent = pro ? PRO : PER;
+    tabPro.className = pro ? 'rounded-full px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white' : 'rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400';
+    tabPer.className = !pro ? 'rounded-full px-4 py-1.5 text-sm font-medium bg-violet-600 text-white' : 'rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400';
+  }
+  tabPro.onclick = () => setTab(true); tabPer.onclick = () => setTab(false);
+  const mio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    barPro.style.width = '78%'; barPer.style.width = '52%';
+    animateNum('numPro', 78); animateNum('numPer', 52); mio.disconnect();
+  }), { threshold: 0.4 });
+  mio.observe(document.getElementById('barPro'));
+  function animateNum(id, target) { const el = document.getElementById(id); const t0 = performance.now(); const step = (t) => { const p = Math.min(1, (t - t0) / 1100); el.textContent = Math.round(target * p); if (p < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+
+  // pyramid
+  const LAYERS = [
+    ['🌙 365 daily stories', 'The foundation. Each night, your told story + finished tasks + activity become a written Story of the Day with mood scores for work and home. Your own words are searchable forever — ask "what was I worried about in May?" and get an answer with receipts.'],
+    ['📜 Sunday weekly reviews', 'Every Sunday night the mentor reads the whole week and writes: the wins, the drift, exactly ONE pattern it can prove from your data, and ONE small experiment for next week — then reports the result honestly the following Sunday.'],
+    ['📖 Monthly chapters', 'On the 1st of every month, the daily stories become one titled chapter — a real piece of memoir with the month\'s arc and turning points. Written automatically, kept forever.'],
+    ['📕 Story of the Year', 'On December 31st, the twelve chapters become the book of your year — the person you were in January, what the year threw at you, and who the final chapter shows. Ten years of use = ten volumes of your life.'],
+  ];
+  const layers = document.querySelectorAll('.layer'); const layerText = document.getElementById('layerText');
+  layers.forEach((l) => l.addEventListener('click', () => {
+    layers.forEach((x) => x.classList.remove('lit')); l.classList.add('lit');
+    const [t, d] = LAYERS[+l.dataset.layer]; layerText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
+  }));
+
+  // typing demo
+  const SCRIPT = '"okay so… need to send the architect the revised quote, it\'s urgent… book the dentist for amma, pick up the kids\' project supplies, and that vendor contract needs a proper read…"';
+  const typeLine = document.getElementById('typeLine'); const typedTasks = document.getElementById('typedTasks');
+  const tio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return; tio.disconnect();
+    let i = 0; const tick = () => { typeLine.textContent = SCRIPT.slice(0, ++i); if (i < SCRIPT.length) setTimeout(tick, 26); else { typeLine.classList.remove('caret'); setTimeout(() => (typedTasks.style.opacity = 1), 350); } };
+    tick();
+  }), { threshold: 0.5 });
+  tio.observe(typeLine);
+</script>
+</body>
+</html>
