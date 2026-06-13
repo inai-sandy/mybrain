@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Reorder, useDragControls } from 'framer-motion';
-import { Wand2, Pencil, Plus, X, GripVertical, Play, Lightbulb, Target, Save, Sparkles, Copy, Check, Terminal } from 'lucide-react';
+import { Wand2, Pencil, Plus, X, GripVertical, Play, Lightbulb, Target, Save, Sparkles, Copy, Check, Terminal, RotateCcw } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 
@@ -51,9 +51,11 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
   const [saving, setSaving] = useState(false);
   const [palette, setPalette] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editedPrompt, setEditedPrompt] = useState<string | null>(null); // null = use the auto-generated prompt
   const toast = useToast();
 
-  const prompt = useMemo(() => buildPrompt(ideaTitle, ideaContent || '', nodes), [ideaTitle, ideaContent, nodes]);
+  const autoPrompt = useMemo(() => buildPrompt(ideaTitle, ideaContent || '', nodes), [ideaTitle, ideaContent, nodes]);
+  const prompt = editedPrompt ?? autoPrompt; // what's shown / copied / saved
   async function copyPrompt() {
     try {
       await navigator.clipboard.writeText(prompt);
@@ -65,7 +67,7 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
   }
 
   useEffect(() => {
-    fetch(`/api/ideas/${ideaId}/workflow`).then((r) => (r.ok ? r.json() : null)).then((w) => w && setNodes(w.nodes || [])).catch(() => undefined);
+    fetch(`/api/ideas/${ideaId}/workflow`).then((r) => (r.ok ? r.json() : null)).then((w) => { if (w) { setNodes(w.nodes || []); setEditedPrompt(w.customPrompt ?? null); } }).catch(() => undefined);
     fetch('/api/skills').then((r) => (r.ok ? r.json() : [])).then((d) => setSkills((Array.isArray(d) ? d : d.skills || []).map((s: any) => ({ id: s.id, title: s.title, slug: s.slug })))).catch(() => undefined);
   }, [ideaId]);
 
@@ -91,7 +93,7 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
   async function save() {
     setSaving(true);
     try {
-      const r = await fetch(`/api/ideas/${ideaId}/workflow`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes }) });
+      const r = await fetch(`/api/ideas/${ideaId}/workflow`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes, customPrompt: editedPrompt }) });
       if (r.ok) {
         toast('success', 'Workflow saved');
         setDirty(false);
@@ -147,16 +149,27 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
         </div>
       </div>
 
-      {/* Claude Code prompt — run it manually now (live-updates as you build) */}
+      {/* Claude Code prompt — editable; run it manually now */}
       <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="flex items-center gap-2 text-sm font-semibold"><Terminal size={14} className="text-emerald-500" /> Claude Code prompt</h3>
-          <button onClick={copyPrompt} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 text-xs">
-            {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
-          </button>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h3 className="flex items-center gap-2 text-sm font-semibold"><Terminal size={14} className="text-emerald-500" /> Claude Code prompt {editedPrompt !== null && <span className="text-[10px] uppercase tracking-wide rounded-full bg-amber-500/15 text-amber-600 px-2 py-0.5">edited</span>}</h3>
+          <div className="flex items-center gap-1.5">
+            {editedPrompt !== null && (
+              <button onClick={() => { setEditedPrompt(null); setDirty(true); }} title="Discard edits, rebuild from the steps" className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-indigo-500"><RotateCcw size={13} /> Regenerate</button>
+            )}
+            <button onClick={copyPrompt} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 text-xs">
+              {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+            </button>
+          </div>
         </div>
-        <p className="text-[11px] text-zinc-400 mb-2">Paste this into your Claude Code to run the flow by hand — it updates as you add or reorder steps.</p>
-        <pre className="whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300 font-mono max-h-64 overflow-auto bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5">{prompt}</pre>
+        <p className="text-[11px] text-zinc-400 mb-2">Edit it freely, then paste into your Claude Code. Untouched, it rebuilds itself as you change the steps; once you edit, your version is kept (tap Regenerate to rebuild). Remember to Save.</p>
+        <textarea
+          value={prompt}
+          onChange={(e) => { setEditedPrompt(e.target.value); setDirty(true); }}
+          rows={10}
+          spellCheck={false}
+          className="w-full resize-y text-xs text-zinc-700 dark:text-zinc-200 font-mono max-h-80 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5 outline-none focus:border-emerald-500"
+        />
       </div>
 
       {/* Run (stub until the agent engine ships) */}

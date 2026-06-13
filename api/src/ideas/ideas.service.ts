@@ -121,7 +121,7 @@ export class IdeasService {
     } catch {
       nodes = [];
     }
-    return { id: w.id, ideaId: w.ideaId, name: w.name, nodes, updatedAt: w.updatedAt };
+    return { id: w.id, ideaId: w.ideaId, name: w.name, nodes, customPrompt: w.customPrompt ?? null, updatedAt: w.updatedAt };
   }
 
   async getWorkflow(ideaId: string) {
@@ -130,7 +130,7 @@ export class IdeasService {
   }
 
   /** Validate + persist the node list. Only 'skill' and 'text' node types are accepted (v1). */
-  async saveWorkflow(ideaId: string, data: { name?: string; nodes?: any[] }) {
+  async saveWorkflow(ideaId: string, data: { name?: string; nodes?: any[]; customPrompt?: string | null }) {
     const idea = await this.prisma.idea.findUnique({ where: { id: ideaId } });
     if (!idea) return null;
     const clean = (Array.isArray(data.nodes) ? data.nodes : [])
@@ -144,10 +144,11 @@ export class IdeasService {
       .filter(Boolean)
       .slice(0, 50);
     const name = (data.name || 'Workflow').toString().trim().slice(0, 80) || 'Workflow';
+    const customPrompt = data.customPrompt === undefined ? undefined : data.customPrompt ? String(data.customPrompt).slice(0, 8000) : null;
     const w = await this.prisma.ideaWorkflow.upsert({
       where: { ideaId },
-      create: { ideaId, name, nodes: JSON.stringify(clean) },
-      update: { name, nodes: JSON.stringify(clean) },
+      create: { ideaId, name, nodes: JSON.stringify(clean), customPrompt: customPrompt ?? null },
+      update: { name, nodes: JSON.stringify(clean), ...(customPrompt === undefined ? {} : { customPrompt }) },
     });
     return this.shapeWorkflow(w);
   }

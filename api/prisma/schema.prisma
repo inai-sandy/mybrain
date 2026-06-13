@@ -67,13 +67,14 @@ model Idea {
 
 /// A saved agentic workflow for an idea (n8n-style): an ordered list of nodes (skills + text steps).
 model IdeaWorkflow {
-  id         String   @id @default(uuid())
-  ideaId     String?  @unique // the idea this flow belongs to (null = a reusable template)
-  name       String   @default("Workflow")
-  isTemplate Boolean  @default(false)
-  nodes      String   @default("[]") // JSON: [{id,type:'skill'|'text',skill?,text?,config?}]
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id           String   @id @default(uuid())
+  ideaId       String?  @unique // the idea this flow belongs to (null = a reusable template)
+  name         String   @default("Workflow")
+  isTemplate   Boolean  @default(false)
+  nodes        String   @default("[]") // JSON: [{id,type:'skill'|'text',skill?,text?,config?}]
+  customPrompt String? // user-edited Claude Code prompt; null = use the auto-generated one
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 /// A Claude skill the user tracks (created on Claude Code/Chat, or downloaded).

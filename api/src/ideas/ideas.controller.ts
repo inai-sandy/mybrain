@@ -47,7 +47,7 @@ export class IdeasController {
   }
 
   @Put(':id/workflow')
-  async saveWorkflow(@Param('id') id: string, @Body() body: { name?: string; nodes?: any[] }) {
+  async saveWorkflow(@Param('id') id: string, @Body() body: { name?: string; nodes?: any[]; customPrompt?: string | null }) {
     const r = await this.ideas.saveWorkflow(id, body || {});
     if (!r) throw new BadRequestException('Idea not found');
     return r;
