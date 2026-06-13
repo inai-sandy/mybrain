@@ -360,12 +360,14 @@ describe('DailyService', () => {
       expect(await svc.isClosed(past)).toBe(true);
     });
 
-    it('does not roll tasks when closing TODAY (nothing to carry yet)', async () => {
-      const { svc, rolledCalls } = makeService({ llmText: '{"story":"Today, closed early.","moodScore":60}' });
+    it('closing TODAY with leftover open tasks rolls them to TOMORROW (not stranded on a sealed day)', async () => {
+      const { svc, tasks } = makeService({ llmText: '{"story":"Today, closed early.","moodScore":60}' });
       const today = new Date().toISOString().slice(0, 10);
+      const tomorrow = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+      tasks.push({ id: 'tt', day: today, status: 'open', title: 'spillover' });
       const r = await svc.closeDay(today, false);
-      expect(r!.rolled).toBe(0);
-      expect(rolledCalls.length).toBe(0);
+      expect(r!.rolled).toBe(1);
+      expect(tasks.find((t) => t.id === 'tt').day).toBe(tomorrow);
     });
 
     it('activity() reports provisional for an un-sealed written day and final once closed', async () => {
