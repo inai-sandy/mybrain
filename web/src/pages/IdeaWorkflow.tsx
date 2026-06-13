@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Reorder, useDragControls } from 'framer-motion';
-import { Wand2, Pencil, Plus, X, GripVertical, Play, Lightbulb, Target, Save, Sparkles, Copy, Check, Terminal, RotateCcw } from 'lucide-react';
+import { Wand2, Pencil, Plus, X, ChevronUp, ChevronDown, Play, Lightbulb, Target, Save, Sparkles, Copy, Check, Terminal, RotateCcw } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 
@@ -89,6 +88,13 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
   function remove(id: string) {
     setN(nodes.filter((n) => n.id !== id));
   }
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= nodes.length) return;
+    const next = nodes.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    setN(next);
+  }
 
   async function save() {
     setSaving(true);
@@ -111,7 +117,7 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
           {dirty && <button onClick={save} disabled={saving} className="inline-flex items-center gap-1 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 disabled:opacity-50"><Save size={13} /> {saving ? 'Saving…' : 'Save'}</button>}
         </div>
       </div>
-      <p className="text-xs text-zinc-500 mb-3">Build an agent flow: drag steps in order, drop in your skills and text instructions. Run comes online soon.</p>
+      <p className="text-xs text-zinc-500 mb-3">Build an agent flow: add your skills and text instructions, reorder with the arrows. Run comes online soon.</p>
 
       {/* Start */}
       <div className="rounded-xl border border-emerald-400/40 bg-emerald-500/5 p-3 flex items-start gap-2.5">
@@ -126,11 +132,11 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
 
       {/* The editable node stack */}
       {nodes.length > 0 && (
-        <Reorder.Group axis="y" values={nodes} onReorder={setN} className="space-y-0">
-          {nodes.map((n) => (
-            <WorkflowCard key={n.id} node={n} onEditText={editText} onRemove={remove} />
+        <div>
+          {nodes.map((n, i) => (
+            <WorkflowCard key={n.id} node={n} index={i} total={nodes.length} onEditText={editText} onRemove={remove} onMove={move} />
           ))}
-        </Reorder.Group>
+        </div>
       )}
 
       {/* Add step */}
@@ -214,38 +220,38 @@ function Connector() {
   return <div className="flex justify-center"><div className="w-px h-4 bg-indigo-400/40" /></div>;
 }
 
-/** One draggable node card (skill or text). */
-function WorkflowCard({ node, onEditText, onRemove }: { node: Node; onEditText: (id: string, t: string) => void; onRemove: (id: string) => void }) {
-  const controls = useDragControls();
+/** One node card (skill or text). Reorder via the up/down buttons — no drag library (avoids a layout loop). */
+function WorkflowCard({ node, index, total, onEditText, onRemove, onMove }: { node: Node; index: number; total: number; onEditText: (id: string, t: string) => void; onRemove: (id: string) => void; onMove: (i: number, dir: -1 | 1) => void }) {
   return (
-    <Reorder.Item value={node} dragListener={false} dragControls={controls} className="my-1.5">
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 flex items-start gap-2">
-        <span onPointerDown={(e) => controls.start(e)} className="mt-0.5 shrink-0 cursor-grab active:cursor-grabbing touch-none text-zinc-300 dark:text-zinc-600"><GripVertical size={16} /></span>
-        {node.type === 'skill' ? (
-          <>
-            <span className="rounded-lg bg-indigo-500/15 text-indigo-500 p-1.5 shrink-0"><Wand2 size={14} /></span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] uppercase tracking-wide text-zinc-400">Skill</div>
-              <div className="text-sm font-medium break-words">{node.skill}</div>
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="rounded-lg bg-amber-500/15 text-amber-500 p-1.5 shrink-0"><Pencil size={14} /></span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[10px] uppercase tracking-wide text-zinc-400">Text / instruction</div>
-              <textarea
-                value={node.text || ''}
-                onChange={(e) => onEditText(node.id, e.target.value)}
-                rows={2}
-                placeholder="e.g. turn this into a one-pager, keep it under 500 words…"
-                className="w-full mt-1 resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500"
-              />
-            </div>
-          </>
-        )}
-        <button onClick={() => onRemove(node.id)} className="shrink-0 p-1 text-zinc-400 hover:text-rose-600"><X size={15} /></button>
+    <div className="my-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 flex items-start gap-2">
+      <div className="flex flex-col -my-0.5 shrink-0 text-zinc-400">
+        <button onClick={() => onMove(index, -1)} disabled={index === 0} aria-label="Move up" className="p-0.5 disabled:opacity-25 hover:text-indigo-500"><ChevronUp size={15} /></button>
+        <button onClick={() => onMove(index, 1)} disabled={index === total - 1} aria-label="Move down" className="p-0.5 disabled:opacity-25 hover:text-indigo-500"><ChevronDown size={15} /></button>
       </div>
-    </Reorder.Item>
+      {node.type === 'skill' ? (
+        <>
+          <span className="rounded-lg bg-indigo-500/15 text-indigo-500 p-1.5 shrink-0"><Wand2 size={14} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400">Skill · step {index + 1}</div>
+            <div className="text-sm font-medium break-words">{node.skill}</div>
+          </div>
+        </>
+      ) : (
+        <>
+          <span className="rounded-lg bg-amber-500/15 text-amber-500 p-1.5 shrink-0"><Pencil size={14} /></span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-400">Text · step {index + 1}</div>
+            <textarea
+              value={node.text || ''}
+              onChange={(e) => onEditText(node.id, e.target.value)}
+              rows={2}
+              placeholder="e.g. turn this into a one-pager, keep it under 500 words…"
+              className="w-full mt-1 resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm outline-none focus:border-indigo-500"
+            />
+          </div>
+        </>
+      )}
+      <button onClick={() => onRemove(node.id)} aria-label="Remove step" className="shrink-0 p-1 text-zinc-400 hover:text-rose-600"><X size={15} /></button>
+    </div>
   );
 }
