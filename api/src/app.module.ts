@@ -19,9 +19,10 @@ import { ChatModule } from './chat/chat.module';
 import { HomeModule } from './home/home.module';
 import { PromptsModule } from './prompts/prompts.module';
 import { LlmModule } from './llm/llm.module';
+import { CodexModule } from './codex/codex.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule],
   controllers: [HealthController],
 })
 export class AppModule {}
