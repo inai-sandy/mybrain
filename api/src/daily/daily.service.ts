@@ -308,8 +308,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     await this.generateDayStory(day, true).catch(() => undefined);
     await this.mentor.runMentorDay(day, true).catch(() => undefined);
     await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
-    // 2. roll the day's genuine leftovers forward to today (only when closing a PAST day)
-    const rolled = day < today ? (await this.tasks.rollDayForward(day, today)).rolled : 0;
+    // 2. roll the day's genuine leftovers forward: a past day → today; closing today → tomorrow.
+    const target = day < today ? today : this.dayAdd(day, 1);
+    const rolled = (await this.tasks.rollDayForward(day, target)).rolled;
     // 3. seal it — its artifacts are now "final" (provisional is derived from this row's absence)
     await this.prisma.dayClose.upsert({ where: { day }, create: { day, auto }, update: { auto } });
     return { day, closed: true, auto, rolled };

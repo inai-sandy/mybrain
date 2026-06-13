@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Sheet } from '../ui/Sheet';
 import { StoryModal } from './DailyStory';
+import { CloseDaySheet } from './CloseDay';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
 type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number };
 type Summary = { day: string; text: string; stats: Stats | null } | null;
 type Story = { text: string; mood?: string | null } | null;
 type DayStoryT = { text: string; personalText?: string | null; mood?: string | null; moodScore?: number | null; proMoodScore?: number | null; personalMoodScore?: number | null } | null;
-type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; dayStory: DayStoryT; timeline: Ev[] };
+type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; dayStory: DayStoryT; timeline: Ev[]; closed?: boolean; provisional?: boolean; needsClosing?: boolean; openTaskCount?: number };
 
 type Dash = {
   days: number;
@@ -56,6 +57,7 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
   const [data, setData] = useState<DayData | null>(null);
   const [loading, setLoading] = useState(true);
   const [gen, setGen] = useState(false);
+  const [closing, setClosing] = useState<string | null>(null);
   const toast = useToast();
 
   async function load(d?: string) {
@@ -120,6 +122,14 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
         <button disabled={!!data?.isToday} onClick={() => day && onDay(addDays(day, 1))} className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500 disabled:opacity-30"><ChevronRight size={16} /></button>
       </div>
 
+      {/* A past day that isn't sealed yet — finish & close it right here */}
+      {data?.needsClosing && day && (
+        <button onClick={() => setClosing(day)} className="w-full flex items-center justify-center gap-2 rounded-xl border border-amber-300/50 dark:border-amber-500/40 bg-amber-500/5 hover:bg-amber-500/10 p-3 text-sm font-medium text-amber-700 dark:text-amber-300">
+          <Lock size={15} /> This day is still open — finish &amp; close it
+        </button>
+      )}
+      {closing && <CloseDaySheet day={closing} onClose={() => setClosing(null)} onClosed={() => load(day || undefined)} />}
+
       {st && (
         <div className="grid grid-cols-3 gap-3">
           <Stat big={`${st.tasksDone}/${st.tasksTotal}`} label="tasks done" />
@@ -138,6 +148,14 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
           </h2>
           {data?.dayStory && <button onClick={() => buildStory(true)} disabled={genStory} className="text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1"><RefreshCw size={12} /> rebuild</button>}
         </div>
+        {/* provisional vs final — the score only settles when the day is closed */}
+        {data?.dayStory && (
+          data.closed ? (
+            <p className="mb-2 inline-flex items-center gap-1 text-[11px] rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2 py-0.5">🔒 Final — this day is sealed</p>
+          ) : (
+            <p className="mb-2 text-[11px] rounded-lg bg-amber-500/10 border border-amber-300/30 dark:border-amber-500/20 text-amber-700 dark:text-amber-300 px-2.5 py-1.5">⏳ Provisional — the score finalizes when you close this day{data.openTaskCount ? ` (${data.openTaskCount} task${data.openTaskCount === 1 ? '' : 's'} still open)` : ''}.</p>
+          )
+        )}
         {data?.dayStory ? (
           data.dayStory.personalText ? (
             <StoryTabs ds={data.dayStory} />

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Brain, ChevronRight, Star } from 'lucide-react';
+import { Brain, ChevronRight, Star, Lock } from 'lucide-react';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday } from './taskShared';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { StorySection } from './DailyStory';
+import { CloseDaySheet, OpenDaysBanner } from './CloseDay';
 
 export function Today() {
   const { data, loading, load } = useToday();
@@ -12,6 +13,8 @@ export function Today() {
   const [doneFor, setDoneFor] = useState<Task | null>(null);
   const [delFor, setDelFor] = useState<Task | null>(null);
   const [review, setReview] = useState<Task[] | null>(null);
+  const [closeDay, setCloseDay] = useState<string | null>(null);
+  const [bannerKey, setBannerKey] = useState(0); // re-fetch open-days after a close
 
   useEffect(() => {
     load();
@@ -61,6 +64,9 @@ export function Today() {
         )}
       </div>
 
+      {/* Finish an earlier un-closed day (the morning-after catch-up) */}
+      <OpenDaysBanner key={bannerKey} onPick={setCloseDay} />
+
       {/* Brain-dump hero (until you've dumped) */}
       {!loading && !data?.dumped && (
         <button onClick={() => setDumping(true)} className="w-full rounded-2xl border border-dashed border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10 p-6 text-center transition-colors">
@@ -97,6 +103,15 @@ export function Today() {
 
       {/* Daytime notes + nightly story */}
       <StorySection />
+
+      {/* Seal today when you're done — the one act that settles everything */}
+      {data?.dumped && (
+        <button onClick={() => data?.day && setCloseDay(data.day)} className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10 p-3 text-sm font-medium text-emerald-300 transition-colors">
+          <Lock size={15} /> Close the day — finish tasks, story &amp; settle the mentor
+        </button>
+      )}
+
+      {closeDay && <CloseDaySheet day={closeDay} onClose={() => setCloseDay(null)} onClosed={() => { load(); setBannerKey((k) => k + 1); }} />}
 
       {dumping && <DumpModal onClose={() => setDumping(false)} onDone={load} onCreated={setReview} initialQuestion={data?.question || null} />}
       {review && <DumpReviewSheet tasks={review} onClose={() => setReview(null)} onChanged={load} />}
