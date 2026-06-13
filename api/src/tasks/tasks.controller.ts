@@ -17,6 +17,12 @@ export class TasksController {
     return this.tasks.today();
   }
 
+  /** Every task involving a given person (across all days/statuses). */
+  @Get('by-person')
+  async byPerson(@Query('name') name?: string) {
+    return { tasks: await this.tasks.byPerson(name || '') };
+  }
+
   @Get()
   async list(@Query('day') day?: string) {
     if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) return { tasks: await this.tasks.forDay(day) };

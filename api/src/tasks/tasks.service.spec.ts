@@ -171,6 +171,25 @@ describe('TasksService', () => {
     expect(t!.reminders[0]).toMatch(/^\d{2}:\d{2}$/);
   });
 
+  it('byPerson finds tasks naming the person (and merge/rename aliases), with word-boundary matching', async () => {
+    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'seed' }] }));
+    await svc.dump('seed');
+    tasks.length = 0; // start clean
+    tasks.push(
+      { id: '1', title: 'Discuss payments with Srikar', note: null, status: 'open', day: '2026-06-10', tags: null },
+      { id: '2', title: 'Call Allison about the plan', note: null, status: 'done', day: '2026-06-11', tags: null },
+      { id: '3', title: 'Buy bananas', note: null, status: 'open', day: '2026-06-12', tags: null }, // must NOT match "Ana"
+      { id: '4', title: 'Send report', note: 'follow up with Srikar after', status: 'open', day: '2026-06-12', tags: null },
+    );
+    await (svc as any).prisma.setting.upsert({ where: { key: 'people.aliases' }, create: { key: 'people.aliases', value: JSON.stringify({ Allison: 'Alisan' }) }, update: { value: JSON.stringify({ Allison: 'Alisan' }) } });
+
+    const srikar = await svc.byPerson('Srikar');
+    expect(srikar.map((t: any) => t.id).sort()).toEqual(['1', '4']); // title + note, not the banana
+
+    const alisan = await svc.byPerson('Alisan'); // alias Allison -> Alisan
+    expect(alisan.map((t: any) => t.id)).toEqual(['2']);
+  });
+
   it('rollDayForward carries a closed day\'s open tasks forward; finished tasks stay on their day', async () => {
     const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Carry me' }, { title: 'Already done' }] }));
     const { tasks: made } = await svc.dump('two');

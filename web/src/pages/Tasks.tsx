@@ -19,6 +19,9 @@ export function Tasks() {
   const [fPriority, setFPriority] = useState('');
   const [fCategory, setFCategory] = useState('');
   const [fSphere, setFSphere] = useState('');
+  const [fPerson, setFPerson] = useState('');
+  const [people, setPeople] = useState<string[]>([]);
+  const [personTasks, setPersonTasks] = useState<Task[] | null>(null); // all tasks involving the picked person
   const [sort, setSortRaw] = useState<string>(() => localStorage.getItem('tasks-sort') || 'newest');
   function setSort(v: string) {
     setSortRaw(v);
@@ -27,10 +30,28 @@ export function Tasks() {
 
   useEffect(() => {
     load();
+    fetch('/api/daily/people').then((r) => (r.ok ? r.json() : null)).then((j) => j && setPeople((j.people || []).map((p: any) => p.name))).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const tasks = data?.tasks || [];
+  async function loadPerson(name: string) {
+    const r = await fetch(`/api/tasks/by-person?name=${encodeURIComponent(name)}`);
+    if (r.ok) setPersonTasks((await r.json()).tasks || []);
+  }
+  // Picking a person loads EVERY task involving them (across all days); clearing returns to today's list.
+  useEffect(() => {
+    if (!fPerson) { setPersonTasks(null); return; }
+    loadPerson(fPerson);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fPerson]);
+  // After any task action, refresh whichever list is showing.
+  function refresh() {
+    load();
+    if (fPerson) loadPerson(fPerson);
+  }
+
+  // When a person is selected, that's the base list; otherwise today's tasks. Other filters narrow on top.
+  const tasks = fPerson ? personTasks || [] : data?.tasks || [];
   const categories = useMemo(() => Array.from(new Set(tasks.map((t) => t.category).filter(Boolean))) as string[], [tasks]);
 
   async function toggle(t: Task) {
@@ -39,15 +60,15 @@ export function Tasks() {
       return;
     }
     const r = await fetch(`/api/tasks/${t.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: false }) });
-    if (r.ok) load();
+    if (r.ok) refresh();
   }
   async function progress(t: Task, pct: number) {
     const r = await fetch(`/api/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ progress: pct }) });
-    if (r.ok) load();
+    if (r.ok) refresh();
   }
   async function remove(t: Task) {
     const r = await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' });
-    if (r.ok) load();
+    if (r.ok) refresh();
     setDelFor(null);
   }
 
@@ -85,7 +106,7 @@ export function Tasks() {
   }, [filtered, showDone, sort]);
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
-  const hasFilters = !!(q || fPriority || fCategory || fSphere);
+  const hasFilters = !!(q || fPriority || fCategory || fSphere || fPerson);
   const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500';
 
   return (
@@ -141,15 +162,29 @@ export function Tasks() {
           <option value="work">💼 Work</option>
           <option value="personal">🏠 Personal</option>
         </select>
+        {people.length > 0 && (
+          <select aria-label="Filter by person" value={fPerson} onChange={(e) => setFPerson(e.target.value)} className={sel}>
+            <option value="">👥 Anyone</option>
+            {people.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
         <select aria-label="Sort tasks" value={sort} onChange={(e) => setSort(e.target.value)} className={sel}>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="priority">By priority</option>
         </select>
         {hasFilters && (
-          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
+          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setFPerson(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
         )}
       </div>
+      )}
+
+      {/* Person scope banner */}
+      {!history && fPerson && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-violet-300/40 dark:border-violet-500/30 bg-violet-500/5 px-3 py-2 text-sm">
+          <span className="text-violet-700 dark:text-violet-300">👥 All tasks involving <b>{fPerson}</b>{personTasks ? ` · ${personTasks.length}` : '…'}</span>
+          <button onClick={() => setFPerson('')} className="text-xs text-zinc-400 hover:text-rose-600 inline-flex items-center gap-1"><X size={12} /> back to today</button>
+        </div>
       )}
 
       {/* The list — clean, grouped, must-dos on top */}

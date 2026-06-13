@@ -234,6 +234,25 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.sortTasks(rows).map((t) => this.shape(t));
   }
 
+  /** Every task (any day/status) that names a person — matched against the canonical name and any
+   *  learned merge/rename spellings (people.aliases). Word-boundary match so "Ana" ≠ "Banana". */
+  async byPerson(name: string) {
+    const canonical = String(name || '').trim();
+    if (!canonical) return [];
+    let aliases: Record<string, string> = {};
+    try {
+      aliases = JSON.parse((await this.prisma.setting.findUnique({ where: { key: 'people.aliases' } }))?.value || '{}');
+    } catch {
+      /* ignore */
+    }
+    const spellings = [canonical, ...Object.keys(aliases).filter((k) => aliases[k] === canonical)];
+    const res = spellings.map((s) => new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
+    const hit = (txt?: string | null) => !!txt && res.some((re) => re.test(txt));
+    const rows = await this.prisma.task.findMany({ take: 5000 });
+    const matched = rows.filter((t) => hit(t.title) || hit(t.note));
+    return this.sortTasks(matched).map((t) => this.shape(t));
+  }
+
   /** Manually add a single task (no dump). */
   async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
     const title = String(data.title || '').trim().slice(0, 160);
