@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Copy, Check, Circle, Pencil, Upload, FileText, Link2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { IdeaWorkflow } from './IdeaWorkflow';
 
 export function IdeaDetail() {
   const { id } = useParams();
@@ -207,6 +208,8 @@ export function IdeaDetail() {
             <p className="text-xs text-zinc-400 mb-2">Paste this into Claude Code or Claude chat to run your /deep-research skill.</p>
             <pre className="whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300 font-mono max-h-72 overflow-auto bg-white dark:bg-zinc-950 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">{d.researchPrompt}</pre>
           </div>
+
+          <IdeaWorkflow ideaId={id!} ideaTitle={d.title} />
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}

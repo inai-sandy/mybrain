@@ -40,6 +40,19 @@ export class IdeasController {
     return r;
   }
 
+  /** The saved agentic workflow (node stack) for this idea. */
+  @Get(':id/workflow')
+  async getWorkflow(@Param('id') id: string) {
+    return this.ideas.getWorkflow(id);
+  }
+
+  @Put(':id/workflow')
+  async saveWorkflow(@Param('id') id: string, @Body() body: { name?: string; nodes?: any[] }) {
+    const r = await this.ideas.saveWorkflow(id, body || {});
+    if (!r) throw new BadRequestException('Idea not found');
+    return r;
+  }
+
   /** Upload a research .md → becomes a Capture doc linked to this idea. */
   @Post(':id/upload')
   @UseInterceptors(FileInterceptor('file'))

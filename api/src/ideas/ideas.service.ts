@@ -111,4 +111,44 @@ export class IdeasService {
     });
     return this.get(id);
   }
+
+  // ---- agentic workflow (node stack) ----
+
+  private shapeWorkflow(w: any) {
+    let nodes: any[] = [];
+    try {
+      nodes = JSON.parse(w.nodes || '[]');
+    } catch {
+      nodes = [];
+    }
+    return { id: w.id, ideaId: w.ideaId, name: w.name, nodes, updatedAt: w.updatedAt };
+  }
+
+  async getWorkflow(ideaId: string) {
+    const w = await this.prisma.ideaWorkflow.findUnique({ where: { ideaId } });
+    return w ? this.shapeWorkflow(w) : { ideaId, name: 'Workflow', nodes: [] as any[] };
+  }
+
+  /** Validate + persist the node list. Only 'skill' and 'text' node types are accepted (v1). */
+  async saveWorkflow(ideaId: string, data: { name?: string; nodes?: any[] }) {
+    const idea = await this.prisma.idea.findUnique({ where: { id: ideaId } });
+    if (!idea) return null;
+    const clean = (Array.isArray(data.nodes) ? data.nodes : [])
+      .map((n: any) => {
+        const type = n?.type === 'text' ? 'text' : n?.type === 'skill' ? 'skill' : null;
+        if (!type) return null;
+        const id = String(n.id || '').slice(0, 60) || Math.random().toString(36).slice(2);
+        if (type === 'skill') return { id, type, skill: String(n.skill || '').slice(0, 120) };
+        return { id, type, text: String(n.text || '').slice(0, 4000) };
+      })
+      .filter(Boolean)
+      .slice(0, 50);
+    const name = (data.name || 'Workflow').toString().trim().slice(0, 80) || 'Workflow';
+    const w = await this.prisma.ideaWorkflow.upsert({
+      where: { ideaId },
+      create: { ideaId, name, nodes: JSON.stringify(clean) },
+      update: { name, nodes: JSON.stringify(clean) },
+    });
+    return this.shapeWorkflow(w);
+  }
 }
