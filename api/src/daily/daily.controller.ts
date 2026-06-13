@@ -28,6 +28,21 @@ export class DailyController {
     return this.daily.calendar(months ? Number(months) : 3);
   }
 
+  /** Close (seal) a day — one act: finalize summary + story + mentor + suggestions, roll leftovers forward. */
+  @Post('close')
+  async close(@Body() body: { day?: string }) {
+    const day = body?.day && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : (await this.daily.activity()).day;
+    const r = await this.daily.closeDay(day, false);
+    if (!r) throw new BadRequestException('Could not close that day');
+    return r;
+  }
+
+  /** Past days still open (for the "finish yesterday" prompt). */
+  @Get('open-days')
+  async openDays() {
+    return this.daily.openDays();
+  }
+
   /** Generate (or rebuild) the AI day-summary on demand. */
   @Post('summary')
   async summary(@Body() body: { day?: string; force?: boolean }) {

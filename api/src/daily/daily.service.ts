@@ -4,6 +4,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { MentorService } from '../mentor/mentor.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
@@ -22,12 +23,14 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     private readonly memory: MemoryService,
     private readonly tasks: TasksService,
     private readonly prompts: PromptsService,
+    private readonly mentor: MentorService,
   ) {}
 
   onModuleInit() {
     this.tick = setInterval(() => {
       this.summaryTick().catch(() => undefined);
       this.storyTick().catch(() => undefined);
+      this.lifecycleTick().catch(() => undefined);
       this.monthTick().catch(() => undefined);
       this.yearTick().catch(() => undefined);
       this.personalityTick().catch(() => undefined);
@@ -261,17 +264,20 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** At 11:58 PM local, write today's Story of the Day (and tomorrow's suggested tasks). If the
-   *  late-night window was missed (deploy/restart), catch up on YESTERDAY's story the next day. */
+   *  late-night window was missed (deploy/restart), catch up on YESTERDAY's story the next day.
+   *  A SEALED day is final — never (re)drafted here. Drafts on an open day are provisional (derived). */
   async storyTick(): Promise<void> {
     const tz = await this.tz();
     const day = this.dayKey(tz);
     if (this.localHM(tz) >= STORY_AT) {
+      if (await this.isClosed(day)) return;
       if (await this.prisma.dayStory.findUnique({ where: { day } })) return;
       await this.generateDayStory(day).catch(() => undefined);
       // Tonight's story (day) drives tomorrow's suggestions (day + 1).
       await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
     } else {
       const y = this.dayAdd(day, -1);
+      if (await this.isClosed(y)) return;
       if (await this.prisma.dayStory.findUnique({ where: { day: y } })) return;
       const [told, taskCount] = await Promise.all([
         this.prisma.story.findFirst({ where: { day: y } }),
@@ -281,6 +287,75 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       await this.generateDayStory(y).catch(() => undefined);
       await this.generateSuggestions(day).catch(() => undefined); // yesterday's story drives TODAY's picks
     }
+  }
+
+  // ---- day lifecycle: open → sealed (the "Close the day" engine) ----
+
+  private readonly SEAL_AFTER_DAYS = 2; // a day stays open through today + the next day, then auto-seals (~48h)
+
+  async isClosed(day: string): Promise<boolean> {
+    return !!(await this.prisma.dayClose.findUnique({ where: { day } }));
+  }
+
+  /** Close (finalize/seal) a day: regenerate its summary → story → mentor read → next-day suggestions
+   *  IN ORDER, then roll its still-open tasks forward to today, then mark it sealed. One unified act. */
+  async closeDay(day: string, auto = false) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    // 1. finalize the day's narrative + verdict, in dependency order
+    await this.generateSummary(day, true).catch(() => undefined);
+    await this.generateDayStory(day, true).catch(() => undefined);
+    await this.mentor.runMentorDay(day, true).catch(() => undefined);
+    await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
+    // 2. roll the day's genuine leftovers forward to today (only when closing a PAST day)
+    const rolled = day < today ? (await this.tasks.rollDayForward(day, today)).rolled : 0;
+    // 3. seal it — its artifacts are now "final" (provisional is derived from this row's absence)
+    await this.prisma.dayClose.upsert({ where: { day }, create: { day, auto }, update: { auto } });
+    return { day, closed: true, auto, rolled };
+  }
+
+  /** Auto-seal abandoned days once per local day: any day older than the grace window that still has
+   *  content and was never closed gets finalized so the weekly/book pipeline never stalls. */
+  async lifecycleTick(): Promise<void> {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const scan = await this.prisma.setting.findUnique({ where: { key: 'daily.lastSealScan' } });
+    if (scan?.value === today) return; // once per day is enough — sealability only changes at day boundaries
+    await this.setSetting('daily.lastSealScan', today);
+    const cutoff = this.dayAdd(today, -this.SEAL_AFTER_DAYS); // seal days <= cutoff
+    const closed = new Set((await this.prisma.dayClose.findMany({ select: { day: true } })).map((c) => c.day));
+    // candidate days with content: any told story or any task, on a day at/over the cutoff and not closed
+    const [storyDays, taskDays] = await Promise.all([
+      this.prisma.story.findMany({ where: { day: { lte: cutoff } }, select: { day: true } }),
+      this.prisma.task.findMany({ where: { day: { lte: cutoff } }, select: { day: true } }),
+    ]);
+    const days = [...new Set([...storyDays, ...taskDays].map((r) => r.day).filter((d): d is string => !!d))]
+      .filter((d) => !closed.has(d))
+      .sort();
+    for (const d of days) await this.closeDay(d, true).catch(() => undefined);
+  }
+
+  /** Past days that are still open and have something to finalize — drives the "finish yesterday" prompt. */
+  async openDays() {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const closed = new Set((await this.prisma.dayClose.findMany({ select: { day: true } })).map((c) => c.day));
+    const tasks = await this.prisma.task.findMany({ where: { day: { lt: today } }, select: { day: true, status: true } });
+    const stories = await this.prisma.story.findMany({ where: { day: { lt: today } }, select: { day: true } });
+    const byDay: Record<string, { day: string; openTasks: number; totalTasks: number; hasStory: boolean }> = {};
+    for (const t of tasks) {
+      if (!t.day || closed.has(t.day)) continue;
+      const e = (byDay[t.day] = byDay[t.day] || { day: t.day, openTasks: 0, totalTasks: 0, hasStory: false });
+      e.totalTasks++;
+      if (t.status !== 'done') e.openTasks++;
+    }
+    for (const s of stories) {
+      if (!s.day || closed.has(s.day)) continue;
+      (byDay[s.day] = byDay[s.day] || { day: s.day, openTasks: 0, totalTasks: 0, hasStory: false }).hasStory = true;
+    }
+    const list = Object.values(byDay).sort((a, b) => b.day.localeCompare(a.day));
+    return { days: list, count: list.length };
   }
 
   /** Weave the told story + the day's tasks + the activity timeline into one emotional Story of the Day. */
@@ -989,21 +1064,32 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async activity(dayInput?: string) {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
-    const [timeline, st, story, summary, dayStory] = await Promise.all([
+    const [timeline, st, story, summary, dayStory, closeRow, openCount] = await Promise.all([
       this.feed(day, tz),
       this.stats(day),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.daySummary.findUnique({ where: { day } }),
       this.prisma.dayStory.findUnique({ where: { day } }),
+      this.prisma.dayClose.findUnique({ where: { day } }),
+      this.prisma.task.count({ where: { day, status: 'open' } }),
     ]);
+    const closed = !!closeRow;
+    const isToday = day === this.dayKey(tz);
     return {
       day,
-      isToday: day === this.dayKey(tz),
+      isToday,
       stats: st,
       story: story ? this.shapeStory(story) : null,
       summary: summary ? this.shapeSummary(summary) : null,
       dayStory: dayStory ? this.shapeDayStory(dayStory) : null,
       timeline,
+      closed,
+      sealedAuto: closeRow?.auto ?? false,
+      // a written verdict on a day that isn't sealed yet is provisional — it finalizes when you close the day
+      provisional: !!dayStory && !closed,
+      openTaskCount: openCount,
+      // a PAST day that isn't closed is still finishable
+      needsClosing: !isToday && day < this.dayKey(tz) && !closed && (!!dayStory || !!story || st.tasksTotal > 0),
     };
   }
 }

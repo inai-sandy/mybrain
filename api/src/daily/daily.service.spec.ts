@@ -9,6 +9,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const monthStories: any[] = [];
   const yearStories: any[] = [];
   const peopleMentions: any[] = [];
+  const dayCloses: any[] = [];
   const suggestions: any[] = [];
   const dumps: any[] = [];
   const insights: any[] = [];
@@ -25,7 +26,13 @@ function makeService(opts: { llmText?: string | null } = {}) {
     },
     story: {
       findFirst: async ({ where }: any) => stories.filter((s) => s.day === where.day).slice(-1)[0] || null,
-      findMany: async ({ where }: any = {}) => stories.filter((s) => !where?.day?.gte || s.day >= where.day.gte),
+      findMany: async ({ where }: any = {}) =>
+        stories.filter(
+          (s) =>
+            (!where?.day?.gte || s.day >= where.day.gte) &&
+            (!where?.day?.lte || s.day <= where.day.lte) &&
+            (!where?.day?.lt || s.day < where.day.lt),
+        ),
       create: async ({ data }: any) => {
         const row = { id: `s${++seq}`, createdAt: new Date(), updatedAt: new Date(), ...data };
         stories.push(row);
@@ -58,12 +65,30 @@ function makeService(opts: { llmText?: string | null } = {}) {
           if (d !== undefined) {
             if (typeof d === 'string') return t.day === d;
             if (d.gte && !(t.day && t.day >= d.gte)) return false;
+            if (d.lt && !(t.day && t.day < d.lt)) return false;
+            if (d.lte && !(t.day && t.day <= d.lte)) return false;
           }
           return true;
         }),
+      count: async ({ where }: any = {}) =>
+        tasks.filter((t) => (!where?.status || t.status === where.status) && (where?.day === undefined || t.day === where.day)).length,
       create: async ({ data }: any) => {
         const row = { id: `t${++seq}`, createdAt: new Date(), status: 'open', ...data };
         tasks.push(row);
+        return row;
+      },
+    },
+    dayClose: {
+      findUnique: async ({ where }: any) => dayCloses.find((c) => c.day === where.day) || null,
+      findMany: async () => dayCloses.slice(),
+      upsert: async ({ where, create, update }: any) => {
+        const ex = dayCloses.find((c) => c.day === where.day);
+        if (ex) {
+          Object.assign(ex, update);
+          return ex;
+        }
+        const row = { id: `dc${++seq}`, closedAt: new Date(), ...create };
+        dayCloses.push(row);
         return row;
       },
     },
@@ -180,9 +205,21 @@ function makeService(opts: { llmText?: string | null } = {}) {
   };
   const llm: any = { completeWith: jest.fn(async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText)) };
   const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
-  const tasksSvc: any = { getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }), listModels: async () => [] };
+  const rolledCalls: any[] = [];
+  const tasksSvc: any = {
+    getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }),
+    listModels: async () => [],
+    rollDayForward: async (fromDay: string, toDay: string) => {
+      rolledCalls.push({ fromDay, toDay });
+      const open = tasks.filter((t) => t.status === 'open' && t.day === fromDay);
+      open.forEach((t) => { t.day = toDay; t.rolloverCount = (t.rolloverCount || 0) + 1; });
+      return { rolled: open.length };
+    },
+  };
+  const mentorCalls: any[] = [];
+  const mentorSvc: any = { runMentorDay: async (day: string, force: boolean) => { mentorCalls.push({ day, force }); return { day }; } };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls };
 }
 
 describe('DailyService', () => {
@@ -304,6 +341,61 @@ describe('DailyService', () => {
     const out = await svc.generateDayStory('2026-06-13');
     expect(out.text).toContain('All work');
     expect(out.personalText).toBeNull();
+  });
+
+  describe('day lifecycle — Close the day', () => {
+    it('closeDay finalizes story + mentor + suggestions and rolls a past day\'s open tasks forward', async () => {
+      const { svc, tasks, dayCloses, mentorCalls, rolledCalls } = makeService({ llmText: '{"story":"A real day, sealed.","mood":"settled","moodScore":70}' });
+      const today = new Date().toISOString().slice(0, 10);
+      const past = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
+      tasks.push({ id: 'a', day: past, status: 'open', title: 'leftover' }, { id: 'b', day: past, status: 'done', title: 'did it' });
+
+      const r = await svc.closeDay(past, false);
+      expect(r!.closed).toBe(true);
+      expect(dayCloses.find((c) => c.day === past)).toBeTruthy();
+      expect(mentorCalls.some((m) => m.day === past && m.force)).toBe(true); // mentor re-ran for that day
+      expect(rolledCalls.some((c) => c.fromDay === past && c.toDay === today)).toBe(true);
+      expect(tasks.find((t) => t.id === 'a').day).toBe(today); // leftover rolled forward
+      expect(tasks.find((t) => t.id === 'b').day).toBe(past); // finished task stays on its real day
+      expect(await svc.isClosed(past)).toBe(true);
+    });
+
+    it('does not roll tasks when closing TODAY (nothing to carry yet)', async () => {
+      const { svc, rolledCalls } = makeService({ llmText: '{"story":"Today, closed early.","moodScore":60}' });
+      const today = new Date().toISOString().slice(0, 10);
+      const r = await svc.closeDay(today, false);
+      expect(r!.rolled).toBe(0);
+      expect(rolledCalls.length).toBe(0);
+    });
+
+    it('activity() reports provisional for an un-sealed written day and final once closed', async () => {
+      const { svc, dayStories } = makeService({ llmText: '{"story":"x","moodScore":50}' });
+      const today = new Date().toISOString().slice(0, 10);
+      dayStories.push({ day: today, text: 'auto draft', moodScore: 42, createdAt: new Date(), updatedAt: new Date() });
+      const a1 = await svc.activity(today);
+      expect(a1.provisional).toBe(true);
+      expect(a1.closed).toBe(false);
+      await svc.closeDay(today, false);
+      const a2 = await svc.activity(today);
+      expect(a2.closed).toBe(true);
+      expect(a2.provisional).toBe(false);
+    });
+
+    it('openDays lists un-closed past days with content; lifecycleTick auto-seals only days past the grace window', async () => {
+      const { svc, tasks, dayCloses } = makeService({ llmText: '{"story":"sealed.","moodScore":55}' });
+      const today = new Date().toISOString().slice(0, 10);
+      const add = (n: number) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+      tasks.push({ id: 'y', day: add(-1), status: 'open', title: 'yesterday' }); // within grace
+      tasks.push({ id: 'o', day: add(-3), status: 'open', title: 'old' }); // past grace (>=2 days old)
+
+      const open = await svc.openDays();
+      expect(open.days.map((d: any) => d.day).sort()).toEqual([add(-3), add(-1)].sort());
+
+      await svc.lifecycleTick();
+      // only the old day auto-seals; yesterday is still within the 48h window
+      expect(dayCloses.map((c: any) => c.day)).toEqual([add(-3)]);
+      expect(dayCloses[0].auto).toBe(true);
+    });
   });
 
   it('keeps one story per day — re-submitting updates in place', async () => {

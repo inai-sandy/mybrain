@@ -421,6 +421,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
    *  Story of the Day). A daytime "Get guidance now" must never block the end-of-day read, and a
    *  missed 23:59 window (deploy/restart) gets caught up the next day. */
   async ensureFreshRead(day: string): Promise<void> {
+    // A sealed day's read is FINAL — closeDay wrote it; never silently re-run it here.
+    if (await this.prisma.dayClose.findUnique({ where: { day } })) return;
     const [read, story] = await Promise.all([
       this.prisma.mentorDay.findUnique({ where: { day } }),
       this.prisma.dayStory.findUnique({ where: { day } }),

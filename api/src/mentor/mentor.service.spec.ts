@@ -66,6 +66,7 @@ function makeService(llmText: string | null) {
     },
     daySummary: { findMany: async ({ where }: any = {}) => summaries.filter((s) => (!where?.day?.gte || s.day >= where.day.gte) && (!where?.day?.lte || s.day <= where.day.lte)) },
     personMention: { findMany: async () => [] },
+    dayClose: { findUnique: async () => null },
     weeklyReview: {
       findUnique: async ({ where }: any) => weeklies.find((w) => w.weekStart === where.weekStart) || null,
       findFirst: async ({ where, orderBy }: any = {}) => {

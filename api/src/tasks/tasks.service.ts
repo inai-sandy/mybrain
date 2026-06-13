@@ -28,31 +28,22 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    // Once a minute, check whether the local day has rolled over and carry unfinished tasks forward.
-    this.tick = setInterval(() => this.rolloverTick().catch(() => undefined), 60_000);
+    // No automatic midnight rollover anymore: a day's open tasks stay on that day until the day is
+    // CLOSED (DailyService.closeDay), which then rolls the leftovers forward via rollDayForward().
+    // This keeps task credit truthful to the day the work actually belonged to.
   }
   onModuleDestroy() {
     if (this.tick) clearInterval(this.tick);
   }
 
-  /** Carry yesterday's open tasks into today (flagged via rolloverCount) when the day changes. */
-  async rolloverTick(): Promise<{ rolled: number } | null> {
-    const tz = await this.tz();
-    const today = this.dayKey(tz);
-    const row = await this.prisma.setting.findUnique({ where: { key: 'tasks.lastRollDay' } });
-    const last = row?.value || null;
-    if (last === today) return null;
-    let rolled = 0;
-    if (last) {
-      // Only roll on a genuine day change (skip on first boot so we don't touch a fresh DB).
-      const stale = await this.prisma.task.findMany({ where: { status: 'open', day: { not: null, lt: today } } });
-      for (const t of stale) {
-        await this.prisma.task.update({ where: { id: t.id }, data: { day: today, rolloverCount: (t.rolloverCount || 0) + 1 } });
-        rolled++;
-      }
+  /** Carry a closed day's still-open tasks forward to `toDay` (flagged via rolloverCount). Called by closeDay. */
+  async rollDayForward(fromDay: string, toDay: string): Promise<{ rolled: number }> {
+    if (!fromDay || !toDay || fromDay >= toDay) return { rolled: 0 };
+    const open = await this.prisma.task.findMany({ where: { status: 'open', day: fromDay } });
+    for (const t of open) {
+      await this.prisma.task.update({ where: { id: t.id }, data: { day: toDay, rolloverCount: (t.rolloverCount || 0) + 1 } });
     }
-    await this.prisma.setting.upsert({ where: { key: 'tasks.lastRollDay' }, create: { key: 'tasks.lastRollDay', value: today }, update: { value: today } });
-    return { rolled };
+    return { rolled: open.length };
   }
 
   /** Smart-spaced reminder times (local HH:MM) for a task, weighted by priority. Delivery wired in the Telegram phase. */

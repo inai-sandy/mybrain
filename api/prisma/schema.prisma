@@ -248,6 +248,14 @@ model PersonMention {
   @@unique([name, day])
 }
 
+/// A sealed day — once a DayClose row exists for a day, that day is finalized (story/mood/mentor are final, leftovers have rolled forward). Absence = the day is still open.
+model DayClose {
+  id       String   @id @default(uuid())
+  day      String   @unique // local day key YYYY-MM-DD
+  auto     Boolean  @default(false) // true = auto-sealed after the grace window, false = user closed it
+  closedAt DateTime @default(now())
+}
+
 /// A quick note the user speaks/types during the day (daytime oral capture).
 model DayNote {
   id        String   @id @default(uuid())

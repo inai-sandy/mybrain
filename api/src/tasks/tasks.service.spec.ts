@@ -171,24 +171,23 @@ describe('TasksService', () => {
     expect(t!.reminders[0]).toMatch(/^\d{2}:\d{2}$/);
   });
 
-  it('does not roll tasks on first boot, but carries open tasks forward on a day change', async () => {
-    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Yesterday job' }] }));
-    const { tasks: made } = await svc.dump('job');
-    const id = made[0].id;
+  it('rollDayForward carries a closed day\'s open tasks forward; finished tasks stay on their day', async () => {
+    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Carry me' }, { title: 'Already done' }] }));
+    const { tasks: made } = await svc.dump('two');
+    const open = tasks.find((x) => x.id === made[0].id);
+    const done = tasks.find((x) => x.id === made[1].id);
+    open.day = '2026-06-12';
+    open.status = 'open';
+    done.day = '2026-06-12';
+    done.status = 'done';
 
-    // First boot: no lastRollDay yet -> it just records today, rolls nothing.
-    const first = await svc.rolloverTick();
-    expect(first!.rolled).toBe(0);
+    const r = await svc.rollDayForward('2026-06-12', '2026-06-13');
+    expect(r.rolled).toBe(1); // only the open task moves
+    expect(open.day).toBe('2026-06-13');
+    expect(open.rolloverCount).toBe(1);
+    expect(done.day).toBe('2026-06-12'); // a finished task stays credited to its real day
 
-    // Simulate the task being left open from a previous day, and a stale roll marker.
-    const row = tasks.find((x) => x.id === id);
-    row.day = '2000-01-01';
-    row.status = 'open';
-    await (svc as any).prisma.setting.upsert({ where: { key: 'tasks.lastRollDay' }, create: { key: 'tasks.lastRollDay', value: '2000-01-01' }, update: { value: '2000-01-01' } });
-
-    const second = await svc.rolloverTick();
-    expect(second!.rolled).toBe(1);
-    expect(row.day).not.toBe('2000-01-01');
-    expect(row.rolloverCount).toBe(1);
+    // never rolls same-day or backwards
+    expect((await svc.rollDayForward('2026-06-13', '2026-06-13')).rolled).toBe(0);
   });
 });
