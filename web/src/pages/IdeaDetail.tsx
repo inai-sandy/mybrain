@@ -10,6 +10,7 @@ export function IdeaDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [d, setD] = useState<any>(null);
+  const [tab, setTab] = useState<'idea' | 'workflow'>('idea');
   const [err, setErr] = useState('');
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -135,6 +136,21 @@ export function IdeaDetail() {
             </div>
           </header>
 
+          {/* Tabs — keep the idea page clean; workflow gets its own space up top */}
+          <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+            {(['idea', 'workflow'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={'px-4 py-2 text-sm border-b-2 -mb-px ' + (tab === t ? 'border-emerald-500 text-emerald-600 font-medium' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
+              >
+                {t === 'workflow' ? '⚡ Workflow' : 'Idea'}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'idea' && (
+            <>
           {/* Research docs — prominent, near the top */}
           <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             <div className="flex items-center justify-between mb-3">
@@ -208,8 +224,10 @@ export function IdeaDetail() {
             <p className="text-xs text-zinc-400 mb-2">Paste this into Claude Code or Claude chat to run your /deep-research skill.</p>
             <pre className="whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300 font-mono max-h-72 overflow-auto bg-white dark:bg-zinc-950 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">{d.researchPrompt}</pre>
           </div>
+            </>
+          )}
 
-          <IdeaWorkflow ideaId={id!} ideaTitle={d.title} ideaContent={d.content} />
+          {tab === 'workflow' && <IdeaWorkflow ideaId={id!} ideaTitle={d.title} ideaContent={d.content} />}
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
