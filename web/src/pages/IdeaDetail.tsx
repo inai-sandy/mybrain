@@ -209,7 +209,7 @@ export function IdeaDetail() {
             <pre className="whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300 font-mono max-h-72 overflow-auto bg-white dark:bg-zinc-950 rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">{d.researchPrompt}</pre>
           </div>
 
-          <IdeaWorkflow ideaId={id!} ideaTitle={d.title} />
+          <IdeaWorkflow ideaId={id!} ideaTitle={d.title} ideaContent={d.content} />
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}

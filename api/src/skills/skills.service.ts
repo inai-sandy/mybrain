@@ -50,6 +50,7 @@ export class SkillsService {
     return {
       id: s.id,
       title: s.title,
+      slug: s.slug || null,
       description: s.description,
       origin: s.origin,
       platform: s.platform,

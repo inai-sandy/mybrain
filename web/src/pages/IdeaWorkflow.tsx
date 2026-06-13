@@ -1,11 +1,42 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Reorder, useDragControls } from 'framer-motion';
-import { Wand2, Pencil, Plus, X, GripVertical, Play, Lightbulb, Target, Save, Sparkles } from 'lucide-react';
+import { Wand2, Pencil, Plus, X, GripVertical, Play, Lightbulb, Target, Save, Sparkles, Copy, Check, Terminal } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 
-type Node = { id: string; type: 'skill' | 'text'; skill?: string; text?: string };
-type SkillT = { id: string; title: string };
+type Node = { id: string; type: 'skill' | 'text'; skill?: string; text?: string; slug?: string | null };
+type SkillT = { id: string; title: string; slug?: string | null };
+
+function kebab(s: string) {
+  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Compile the built workflow into a Claude Code prompt the user can paste & run by hand. */
+function buildPrompt(ideaTitle: string, ideaContent: string, nodes: Node[]): string {
+  const out: string[] = [];
+  out.push("I'm working on the idea below. Run the workflow step by step, carrying each step's output into the next.");
+  out.push('');
+  out.push(`## Idea: ${ideaTitle}`);
+  if (ideaContent?.trim()) out.push(ideaContent.trim());
+  out.push('');
+  if (!nodes.length) {
+    out.push('## Workflow\n(Add steps above to build the workflow.)');
+    return out.join('\n');
+  }
+  out.push('## Workflow');
+  nodes.forEach((n, i) => {
+    const where = i === 0 ? 'the idea above' : "the previous step's result";
+    if (n.type === 'skill') {
+      const cmd = n.slug || kebab(n.skill || '');
+      out.push(`${i + 1}. Use the \`/${cmd}\` skill (${n.skill}) on ${where}.`);
+    } else {
+      out.push(`${i + 1}. ${(n.text || '').trim() || '(instruction)'}`);
+    }
+  });
+  out.push('');
+  out.push('When finished, share the final result.');
+  return out.join('\n');
+}
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -13,25 +44,37 @@ function uid() {
 
 /** The agentic workflow builder for an idea — a phone-friendly draggable card stack
  *  (Idea → skills + text steps → finish). Execution is wired in a later phase. */
-export function IdeaWorkflow({ ideaId, ideaTitle }: { ideaId: string; ideaTitle: string }) {
+export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: string; ideaTitle: string; ideaContent?: string }) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [skills, setSkills] = useState<SkillT[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [palette, setPalette] = useState(false);
+  const [copied, setCopied] = useState(false);
   const toast = useToast();
+
+  const prompt = useMemo(() => buildPrompt(ideaTitle, ideaContent || '', nodes), [ideaTitle, ideaContent, nodes]);
+  async function copyPrompt() {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      toast('error', 'Could not copy');
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/ideas/${ideaId}/workflow`).then((r) => (r.ok ? r.json() : null)).then((w) => w && setNodes(w.nodes || [])).catch(() => undefined);
-    fetch('/api/skills').then((r) => (r.ok ? r.json() : [])).then((d) => setSkills((Array.isArray(d) ? d : d.skills || []).map((s: any) => ({ id: s.id, title: s.title })))).catch(() => undefined);
+    fetch('/api/skills').then((r) => (r.ok ? r.json() : [])).then((d) => setSkills((Array.isArray(d) ? d : d.skills || []).map((s: any) => ({ id: s.id, title: s.title, slug: s.slug })))).catch(() => undefined);
   }, [ideaId]);
 
   function setN(next: Node[]) {
     setNodes(next);
     setDirty(true);
   }
-  function addSkill(title: string) {
-    setN([...nodes, { id: uid(), type: 'skill', skill: title }]);
+  function addSkill(title: string, slug?: string | null) {
+    setN([...nodes, { id: uid(), type: 'skill', skill: title, slug: slug || null }]);
     setPalette(false);
   }
   function addText() {
@@ -104,9 +147,21 @@ export function IdeaWorkflow({ ideaId, ideaTitle }: { ideaId: string; ideaTitle:
         </div>
       </div>
 
+      {/* Claude Code prompt — run it manually now (live-updates as you build) */}
+      <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="flex items-center gap-2 text-sm font-semibold"><Terminal size={14} className="text-emerald-500" /> Claude Code prompt</h3>
+          <button onClick={copyPrompt} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 text-xs">
+            {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+          </button>
+        </div>
+        <p className="text-[11px] text-zinc-400 mb-2">Paste this into your Claude Code to run the flow by hand — it updates as you add or reorder steps.</p>
+        <pre className="whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300 font-mono max-h-64 overflow-auto bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5">{prompt}</pre>
+      </div>
+
       {/* Run (stub until the agent engine ships) */}
-      <button disabled title="Execution is coming soon" className="w-full mt-3 flex items-center justify-center gap-2 rounded-xl bg-zinc-200 dark:bg-zinc-800 text-zinc-400 py-3 text-sm font-medium cursor-not-allowed">
-        <Play size={15} /> Run workflow — coming soon
+      <button disabled title="Auto-run is coming soon — use the prompt above for now" className="w-full mt-3 flex items-center justify-center gap-2 rounded-xl bg-zinc-200 dark:bg-zinc-800 text-zinc-400 py-3 text-sm font-medium cursor-not-allowed">
+        <Play size={15} /> Auto-run — coming soon (use the prompt above)
       </button>
 
       {palette && (
@@ -125,7 +180,7 @@ export function IdeaWorkflow({ ideaId, ideaTitle }: { ideaId: string; ideaTitle:
               {skills.length ? (
                 <div className="space-y-1.5 max-h-[45vh] overflow-y-auto pr-1">
                   {skills.map((s) => (
-                    <button key={s.id} onClick={() => addSkill(s.title)} className="w-full flex items-center gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-2.5 text-left hover:border-indigo-500/40">
+                    <button key={s.id} onClick={() => addSkill(s.title, s.slug)} className="w-full flex items-center gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-2.5 text-left hover:border-indigo-500/40">
                       <span className="rounded-lg bg-indigo-500/15 text-indigo-500 p-2 shrink-0"><Wand2 size={15} /></span>
                       <span className="text-sm truncate">{s.title}</span>
                     </button>

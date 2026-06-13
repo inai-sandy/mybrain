@@ -138,7 +138,7 @@ export class IdeasService {
         const type = n?.type === 'text' ? 'text' : n?.type === 'skill' ? 'skill' : null;
         if (!type) return null;
         const id = String(n.id || '').slice(0, 60) || Math.random().toString(36).slice(2);
-        if (type === 'skill') return { id, type, skill: String(n.skill || '').slice(0, 120) };
+        if (type === 'skill') return { id, type, skill: String(n.skill || '').slice(0, 120), slug: n.slug ? String(n.slug).slice(0, 120) : null };
         return { id, type, text: String(n.text || '').slice(0, 4000) };
       })
       .filter(Boolean)
