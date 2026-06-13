@@ -7,6 +7,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // We register + poll for updates manually in main.tsx (self-healing), so
+      // disable the plugin's own auto-injected registration to avoid double-register.
+      injectRegister: null,
       includeAssets: ['favicon-32.png', 'icons/icon-180.png'],
       manifest: {
         name: 'My Brain',
