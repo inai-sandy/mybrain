@@ -9,6 +9,10 @@
   body {
     overflow-x: hidden;
     max-width: 100%;
+    /* Stop the rubber-band overscroll bounce at the top/bottom edges. On phones that bounce
+       visibly drags the fixed bottom tab bar (and the sticky header) up and down while scrolling,
+       which looks unpolished. `none` keeps normal scrolling but removes the bounce. */
+    overscroll-behavior: none;
   }
 }
 
