@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
@@ -7,6 +9,8 @@ import { PromptsService } from '../prompts/prompts.service';
 
 @Injectable()
 export class IdeasService {
+  private readonly logger = new Logger(IdeasService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
@@ -15,12 +19,54 @@ export class IdeasService {
     private readonly prompts: PromptsService,
   ) {}
 
+  // ---- persist idea markdown files to a server folder (default /var/www/ideas) ----
+
+  private ideasDir(): string {
+    return process.env.IDEAS_MD_DIR || '/var/www/ideas';
+  }
+
+  private slugify(s: string): string {
+    return (s || 'idea')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'idea';
+  }
+
+  /** Write the AI-organized idea (title + content + research prompt) as a .md. Creates the folder
+   *  if missing; never throws — a failed write must not break idea create/edit. */
+  private async writeIdeaFile(idea: { id: string; title: string; content: string; researchPrompt?: string | null }): Promise<void> {
+    try {
+      const dir = this.ideasDir();
+      await fs.mkdir(dir, { recursive: true });
+      const name = `${this.slugify(idea.title)}-${idea.id.slice(0, 8)}.md`;
+      const md = `# ${idea.title || 'Untitled idea'}\n\n${(idea.content || '').trim()}\n\n---\n\n## Deep-research prompt\n\n${(idea.researchPrompt || '').trim()}\n`;
+      await fs.writeFile(join(dir, name), md, 'utf8');
+    } catch (e) {
+      this.logger.warn(`Could not write idea md (${idea.id}): ${String((e as Error)?.message || e)}`);
+    }
+  }
+
+  /** Write an uploaded research doc into the same folder, named after its idea. Never throws. */
+  private async writeDocFile(ideaTitle: string, docTitle: string, content: string): Promise<void> {
+    try {
+      const dir = this.ideasDir();
+      await fs.mkdir(dir, { recursive: true });
+      const name = `${this.slugify(ideaTitle)}--${this.slugify(docTitle)}.md`;
+      await fs.writeFile(join(dir, name), content, 'utf8');
+    } catch (e) {
+      this.logger.warn(`Could not write research doc md: ${String((e as Error)?.message || e)}`);
+    }
+  }
+
   /** Attach an uploaded research doc to an idea: store it as a Capture item, then link it. */
   async addDoc(ideaId: string, content: string, title: string) {
     const idea = await this.prisma.idea.findUnique({ where: { id: ideaId } });
     if (!idea) return null;
     const { item } = await this.items.store(content, 'upload', title || 'Research notes', undefined, ['research']);
     await this.prisma.item.update({ where: { id: item.id }, data: { ideaId } });
+    await this.writeDocFile(idea.title, title || 'Research notes', content);
     return { id: item.id, title: item.title };
   }
 
@@ -54,6 +100,7 @@ export class IdeasService {
     const research = crafted?.research || `Research this idea thoroughly and produce a structured Markdown report.\n\n${clean}`;
     const researchPrompt = `/deep-research\n\n${research}`;
     const idea = await this.prisma.idea.create({ data: { rawDump: clean, title, content, researchPrompt, status: 'open' } });
+    await this.writeIdeaFile({ id: idea.id, title, content, researchPrompt });
     // Index the idea text so even un-researched ideas are searchable by meaning (stamped "idea").
     await this.memory.enqueue(`${title}\n\n${content}`, { title, tags: ['idea'] });
     return { id: idea.id, title, snippet: this.snippet(content), researchPrompt, status: 'open', createdAt: idea.createdAt, linkedCount: 0 };
@@ -109,6 +156,8 @@ export class IdeasService {
         content: typeof data.content === 'string' ? data.content : idea.content,
       },
     });
+    const fresh = await this.prisma.idea.findUnique({ where: { id } });
+    if (fresh) await this.writeIdeaFile(fresh);
     return this.get(id);
   }
 
