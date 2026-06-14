@@ -51,7 +51,7 @@ function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onS
   return (
     <div className="group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
       {b.thumbnail && (
-        <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="relative mb-3 block rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 aspect-video">
+        <button onClick={() => onOpen(b.id)} title="Open in app" className="relative mb-3 block w-full rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 aspect-video">
           <img
             src={b.thumbnail}
             alt=""
@@ -69,21 +69,21 @@ function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onS
               </span>
             </span>
           )}
-        </a>
+        </button>
       )}
-      {/* Title row — source chip + title (links to original) + meta line (matches the document card) */}
+      {/* Title row — source chip + title (opens the in-app page) + meta line (matches the document card) */}
       <div className="flex items-start gap-3">
         <div className={'shrink-0 rounded-lg p-2 ' + chip}>
           <Icon size={18} />
         </div>
-        <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+        <button onClick={() => onOpen(b.id)} title="Open in app" className="min-w-0 flex-1 text-left">
           <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{b.title}</h3>
           <p className="mt-0.5 text-xs text-zinc-400">
             {yt ? 'YouTube' : 'Link'}
             {date && <> · {date}</>}
             {b.readFailed && <> · <span className="text-amber-600">couldn't read</span></>}
           </p>
-        </a>
+        </button>
       </div>
 
       {b.summary && <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400 line-clamp-3">{b.summary}</p>}
@@ -119,7 +119,7 @@ function Row({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onSh
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
   return (
     <div className="group flex gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:border-emerald-500/40 transition-all">
-      <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="relative shrink-0 w-24 sm:w-28 aspect-video rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+      <button onClick={() => onOpen(b.id)} title="Open in app" className="relative shrink-0 w-24 sm:w-28 aspect-video rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
         {b.thumbnail ? (
           <img src={b.thumbnail} alt="" loading="lazy" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
         ) : (
@@ -130,12 +130,12 @@ function Row({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onSh
             <span className="rounded-full bg-black/60 p-1.5"><Play size={13} className="text-white fill-white" /></span>
           </span>
         )}
-      </a>
+      </button>
       <div className="min-w-0 flex-1 flex flex-col">
         <div className="flex items-start gap-2">
-          <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+          <button onClick={() => onOpen(b.id)} title="Open in app" className="min-w-0 flex-1 text-left">
             <h3 className="font-semibold text-sm leading-snug line-clamp-1 group-hover:text-emerald-600">{b.title}</h3>
-          </a>
+          </button>
           <div className="flex items-center gap-0.5 shrink-0">
             <button onClick={() => onShare(b)} title="Share" className={iconBtn + (b.shared ? ' text-emerald-600' : '')}><Share2 size={15} /></button>
             <button onClick={() => onOpen(b.id)} title="Open in app" className={iconBtn}><Eye size={15} /></button>
