@@ -357,4 +357,70 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.task.delete({ where: { id } }).catch(() => null);
     return { ok: true };
   }
+
+  // ---- AI duplicate cleanup ----
+
+  /** Among same-intent open tasks, the one to KEEP: pinned > furthest along > has a note > the original (oldest). */
+  private pickKeeper(members: any[]) {
+    return members.slice().sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      if ((b.progress ?? 0) !== (a.progress ?? 0)) return (b.progress ?? 0) - (a.progress ?? 0);
+      const an = a.note ? 1 : 0;
+      const bn = b.note ? 1 : 0;
+      if (an !== bn) return bn - an;
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    })[0];
+  }
+
+  /** Ask the Tasks model to cluster OPEN tasks that mean the same thing. Returns {keep, remove[]} groups
+   *  for the user to review — nothing is deleted here. Conservative by design (this leads to deletion). */
+  async findDuplicates() {
+    const model = await this.getModel();
+    const rows = await this.prisma.task.findMany({ where: { status: 'open' }, orderBy: { createdAt: 'asc' }, take: 2000 });
+    if (rows.length < 2) return { groups: [], openCount: rows.length, model };
+
+    const list = rows.map((t) => ({
+      id: t.id,
+      title: t.title,
+      note: t.note ? String(t.note).slice(0, 200) : undefined,
+      category: t.category || undefined,
+      day: t.day || undefined,
+    }));
+    const tmpl = await this.prompts.get('tasks.dedupe');
+    const prompt = `${tmpl}\n\nOPEN TASKS (JSON):\n${JSON.stringify(list)}`;
+    const text = await this.llm.completeWith(model, prompt, 2000, 'task-dedupe');
+    if (!text) return { groups: [], openCount: rows.length, model, error: 'ai-unavailable' };
+
+    let raw: any[] = [];
+    try {
+      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+      raw = Array.isArray(json.groups) ? json.groups : [];
+    } catch {
+      raw = [];
+    }
+
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const used = new Set<string>();
+    const groups: { keep: any; remove: any[] }[] = [];
+    for (const g of raw) {
+      // De-dup ids within a group, drop unknowns, and never let an id land in two groups.
+      const members = Array.from(new Set((Array.isArray(g) ? g : []).map((x) => String(x))))
+        .filter((id) => byId.has(id) && !used.has(id))
+        .map((id) => byId.get(id));
+      if (members.length < 2) continue;
+      members.forEach((m) => used.add(m.id));
+      const keep = this.pickKeeper(members);
+      const remove = members.filter((m) => m.id !== keep.id);
+      groups.push({ keep: this.shape(keep), remove: remove.map((m) => this.shape(m)) });
+    }
+    return { groups, openCount: rows.length, model };
+  }
+
+  /** Delete chosen duplicate ids — but ONLY ones still open, so completed history is never touched. */
+  async removeDuplicates(ids: string[]) {
+    const clean = (Array.isArray(ids) ? ids : []).map((x) => String(x)).filter(Boolean).slice(0, 2000);
+    if (!clean.length) return { removed: 0 };
+    const res = await this.prisma.task.deleteMany({ where: { id: { in: clean }, status: 'open' } });
+    return { removed: res.count };
+  }
 }

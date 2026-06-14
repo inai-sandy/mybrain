@@ -46,6 +46,19 @@ export class TasksController {
     return { models: await this.tasks.listModels() };
   }
 
+  // ---- AI duplicate cleanup ----
+  /** Analyze open tasks and return duplicate groups for review (nothing is deleted here). */
+  @Post('find-duplicates')
+  async findDuplicates() {
+    return this.tasks.findDuplicates();
+  }
+
+  /** Delete the user-confirmed duplicate ids (open tasks only). */
+  @Post('remove-duplicates')
+  async removeDuplicates(@Body() body: { ids?: string[] }) {
+    return this.tasks.removeDuplicates(body?.ids || []);
+  }
+
   @Post()
   async create(@Body() body: any) {
     if (!body?.title?.trim()) throw new BadRequestException('Add a title');

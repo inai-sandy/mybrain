@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Star, StickyNote, ChevronDown } from 'lucide-react';
+import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Star, StickyNote, ChevronDown, Copy, Loader2, Check } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { Sheet } from '../ui/Sheet';
+import { useToast } from '../ui/Toast';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday, mins, sortTasksBy } from './taskShared';
 
 export function Tasks() {
@@ -15,6 +17,7 @@ export function Tasks() {
   const [showDone, setShowDone] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [history, setHistory] = useState(false);
+  const [dedup, setDedup] = useState(false);
   const [q, setQ] = useState('');
   const [fPriority, setFPriority] = useState('');
   const [fCategory, setFCategory] = useState('');
@@ -129,6 +132,9 @@ export function Tasks() {
               <button onClick={() => setShowDone((v) => !v)} className={'rounded-lg px-2.5 py-1.5 text-xs border ' + (showDone ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
                 {showDone ? 'Hide done' : 'Show done'}
               </button>
+              <button onClick={() => setDedup(true)} title="Find & remove duplicate tasks with AI" className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600">
+                <Copy size={13} /> <span className="hidden sm:inline">Remove duplicates</span>
+              </button>
             </>
           )}
         </div>
@@ -228,7 +234,124 @@ export function Tasks() {
       {editing && <TaskFormModal task={editing} onClose={() => setEditing(null)} onSaved={load} />}
       {doneFor && <DoneModal task={doneFor} onClose={() => setDoneFor(null)} onSaved={load} />}
       {delFor && <ConfirmDialog title="Delete task?" message={`“${delFor.title}” will be removed.`} confirmLabel="Delete" onConfirm={() => remove(delFor)} onCancel={() => setDelFor(null)} />}
+      {dedup && <DedupeSheet onClose={() => setDedup(false)} onDone={refresh} />}
     </div>
+  );
+}
+
+// ---- AI "Remove duplicates": scans open tasks, shows clusters to review, deletes only what you confirm ----
+function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [groups, setGroups] = useState<{ keep: Task; remove: Task[] }[]>([]);
+  const [model, setModel] = useState('');
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [removing, setRemoving] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    fetch('/api/tasks/find-duplicates', { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => {
+        const gs = (d.groups || []) as { keep: Task; remove: Task[] }[];
+        setGroups(gs);
+        setModel(d.model?.model || '');
+        if (d.error === 'ai-unavailable') setErr('The AI model is unavailable right now. Check the Tasks model in Settings and try again.');
+        const init: Record<string, boolean> = {};
+        gs.forEach((g) => g.remove.forEach((t) => (init[t.id] = true)));
+        setChecked(init);
+      })
+      .catch(() => setErr('Could not analyze your tasks. Please try again.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const selectedIds = Object.keys(checked).filter((id) => checked[id]);
+
+  async function confirm(close: () => void) {
+    if (!selectedIds.length) {
+      close();
+      return;
+    }
+    setRemoving(true);
+    try {
+      const r = await fetch('/api/tasks/remove-duplicates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: selectedIds }) });
+      if (!r.ok) throw new Error();
+      const { removed } = await r.json();
+      toast('success', `Removed ${removed} duplicate${removed === 1 ? '' : 's'}`);
+      onDone();
+      close();
+    } catch {
+      toast('error', 'Could not remove those tasks');
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold flex items-center gap-2"><Copy size={18} className="text-emerald-600" /> Remove duplicates</h3>
+            <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+          </div>
+          <p className="text-xs text-zinc-500 mb-4">AI looks across your open tasks and groups ones that mean the same thing. It keeps the most complete one in each group — review below and untick anything you want to keep.</p>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-zinc-500 py-10 justify-center"><Loader2 size={16} className="animate-spin" /> Analyzing your tasks with AI…</div>
+          ) : err ? (
+            <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-sm p-3">{err}</div>
+          ) : groups.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 p-8 text-center text-sm text-zinc-400">No duplicates found — your task list is clean. 🎉</div>
+          ) : (
+            <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+              {groups.map((g, i) => (
+                <div key={i} className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+                  {/* Kept */}
+                  <div className="flex items-start gap-2 bg-emerald-500/5 px-3 py-2">
+                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] uppercase tracking-wide text-emerald-600 font-medium">Keeping</div>
+                      <div className="text-sm font-medium break-words">{g.keep.title}</div>
+                      {g.keep.note && <div className="text-xs text-zinc-400 break-words">{g.keep.note}</div>}
+                    </div>
+                  </div>
+                  {/* Removable */}
+                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {g.remove.map((t) => {
+                      const on = !!checked[t.id];
+                      return (
+                        <button key={t.id} onClick={() => setChecked((c) => ({ ...c, [t.id]: !c[t.id] }))} className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-950/50">
+                          <span className={'mt-0.5 h-4 w-4 rounded border flex items-center justify-center shrink-0 ' + (on ? 'bg-rose-500 border-rose-500 text-white' : 'border-zinc-300 dark:border-zinc-600')}>{on && <Check size={11} />}</span>
+                          <div className="min-w-0">
+                            <div className={'text-sm break-words ' + (on ? 'text-zinc-500 line-through' : '')}>{t.title}</div>
+                            {t.note && <div className="text-xs text-zinc-400 break-words">{t.note}</div>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!loading && !err && groups.length > 0 && (
+            <div className="flex items-center justify-between gap-2 mt-4">
+              <span className="text-xs text-zinc-400">{selectedIds.length} to remove{model ? ` · via ${model}` : ''}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+                <button onClick={() => confirm(close)} disabled={removing || !selectedIds.length} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+                  {removing ? <><Loader2 size={14} className="animate-spin" /> Removing…</> : <>Remove {selectedIds.length} duplicate{selectedIds.length === 1 ? '' : 's'}</>}
+                </button>
+              </div>
+            </div>
+          )}
+          {!loading && (err || groups.length === 0) && (
+            <div className="flex justify-end mt-4"><button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Close</button></div>
+          )}
+        </div>
+      )}
+    </Sheet>
   );
 }
 

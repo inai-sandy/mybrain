@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -25,6 +25,19 @@ const REGISTRY: PromptDef[] = [
       `- pinned: mark ONLY the 1-3 most important "must-do today" tasks as true.\n` +
       `- sphere: "personal" for family/home/health/errands/relationships; "work" for job/business/professional tasks. Every task gets one.\n` +
       `- If the dump is too vague or empty to extract any real task, return {"question":"<one short clarifying question>","tasks":[]}.`,
+  },
+  {
+    key: 'tasks.dedupe',
+    label: 'Remove duplicate tasks',
+    description: 'Finds tasks that mean the SAME thing (even if worded differently) so they can be removed. Your open tasks are added automatically below as JSON. ⚠️ Keep the JSON shape intact — it must return groups of task ids.',
+    default:
+      `You are carefully cleaning up Sandeep's to-do list. Below is the JSON list of his OPEN tasks (each with an id, title, and sometimes a note, category or day). Find groups of tasks that are DUPLICATES — they describe essentially the SAME thing to do, even if worded differently (e.g. "Call accountant" and "Phone the CA about taxes" are the same task).\n\n` +
+      `Be CONSERVATIVE — these tasks will be deleted, so only group when you are confident:\n` +
+      `- Group two or more tasks ONLY when they are clearly the same underlying action or goal. Different wording is fine; the same intent is required.\n` +
+      `- Do NOT group tasks that are merely related, or different steps of one project ("Draft the proposal" and "Send the proposal" are NOT duplicates), or the same routine on different days if it's clearly meant to repeat.\n` +
+      `- Each task id may appear in at most ONE group. Leave every non-duplicate out entirely.\n` +
+      `- If nothing is clearly duplicated, return an empty list.\n\n` +
+      `Respond with ONLY JSON in this exact shape: {"groups": [["id1","id2"], ["id3","id4","id5"]]} — each inner array is a set of 2+ duplicate task ids. No prose.`,
   },
   {
     key: 'daily.summary',
