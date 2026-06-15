@@ -1,5 +1,9 @@
 import { DailyService } from './daily.service';
 
+// The service computes "today" in the user's timezone (Asia/Kolkata), so tests must too —
+// using UTC (new Date().toISOString()) flakes near IST midnight (passes by day, fails by night).
+const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
 function makeService(opts: { llmText?: string | null } = {}) {
   const stories: any[] = [];
   const notes: any[] = [];
@@ -346,7 +350,7 @@ describe('DailyService', () => {
   describe('day lifecycle — Close the day', () => {
     it('closeDay finalizes story + mentor + suggestions and rolls a past day\'s open tasks forward', async () => {
       const { svc, tasks, dayCloses, mentorCalls, rolledCalls } = makeService({ llmText: '{"story":"A real day, sealed.","mood":"settled","moodScore":70}' });
-      const today = new Date().toISOString().slice(0, 10);
+      const today = istToday();
       const past = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
       tasks.push({ id: 'a', day: past, status: 'open', title: 'leftover' }, { id: 'b', day: past, status: 'done', title: 'did it' });
 
@@ -362,7 +366,7 @@ describe('DailyService', () => {
 
     it('closing TODAY with leftover open tasks rolls them to TOMORROW (not stranded on a sealed day)', async () => {
       const { svc, tasks } = makeService({ llmText: '{"story":"Today, closed early.","moodScore":60}' });
-      const today = new Date().toISOString().slice(0, 10);
+      const today = istToday();
       const tomorrow = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
       tasks.push({ id: 'tt', day: today, status: 'open', title: 'spillover' });
       const r = await svc.closeDay(today, false);
@@ -372,7 +376,7 @@ describe('DailyService', () => {
 
     it('activity() reports provisional for an un-sealed written day and final once closed', async () => {
       const { svc, dayStories } = makeService({ llmText: '{"story":"x","moodScore":50}' });
-      const today = new Date().toISOString().slice(0, 10);
+      const today = istToday();
       dayStories.push({ day: today, text: 'auto draft', moodScore: 42, createdAt: new Date(), updatedAt: new Date() });
       const a1 = await svc.activity(today);
       expect(a1.provisional).toBe(true);
@@ -385,7 +389,7 @@ describe('DailyService', () => {
 
     it('openDays lists un-closed past days with content; lifecycleTick auto-seals only days past the grace window', async () => {
       const { svc, tasks, dayCloses } = makeService({ llmText: '{"story":"sealed.","moodScore":55}' });
-      const today = new Date().toISOString().slice(0, 10);
+      const today = istToday();
       const add = (n: number) => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
       tasks.push({ id: 'y', day: add(-1), status: 'open', title: 'yesterday' }); // within grace
       tasks.push({ id: 'o', day: add(-3), status: 'open', title: 'old' }); // past grace (>=2 days old)
@@ -454,7 +458,7 @@ describe('DailyService', () => {
 
   it('reports a follow-through trend: this week vs the week before', async () => {
     const { svc, tasks } = makeService();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = istToday();
     const ago = (n: number) => {
       const d = new Date(today + 'T12:00:00Z');
       d.setUTCDate(d.getUTCDate() - n);
