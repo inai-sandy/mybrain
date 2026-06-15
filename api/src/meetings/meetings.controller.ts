@@ -1,7 +1,8 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
 import { MeetingsService } from './meetings.service';
 
 @Controller('meetings')
@@ -75,13 +76,35 @@ export class MeetingsController {
     return r;
   }
 
-  /** Stream the stored recording for playback. */
+  /** Stream the stored recording for playback. Honors HTTP Range so the <audio> element
+   *  (Safari requires 206 Partial Content) can play and seek. */
   @Get(':id/audio')
-  async audio(@Param('id') id: string, @Res() res: Response) {
+  async audio(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const f = await this.meetings.audioFile(id);
     if (!f) throw new BadRequestException('No audio for this meeting');
+    let size = 0;
+    try {
+      size = (await stat(f.path)).size;
+    } catch {
+      throw new BadRequestException('Recording file missing');
+    }
     res.setHeader('Content-Type', f.mime);
     res.setHeader('Accept-Ranges', 'bytes');
-    createReadStream(f.path).pipe(res);
+    const range = req.headers.range;
+    const m = range && /bytes=(\d+)-(\d*)/.exec(range);
+    if (m) {
+      const start = parseInt(m[1], 10);
+      const end = m[2] ? Math.min(parseInt(m[2], 10), size - 1) : size - 1;
+      if (Number.isNaN(start) || start > end || start >= size) {
+        res.status(416).setHeader('Content-Range', `bytes */${size}`);
+        return res.end();
+      }
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+      res.setHeader('Content-Length', end - start + 1);
+      return createReadStream(f.path, { start, end }).pipe(res);
+    }
+    res.setHeader('Content-Length', size);
+    return createReadStream(f.path).pipe(res);
   }
 }
