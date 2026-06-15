@@ -371,3 +371,27 @@ model AgentActionLog {
   result    String?
   createdAt DateTime @default(now())
 }
+
+/// A recorded meeting. Audio is captured first; transcription + AI summary are opt-in (ticket B).
+model Meeting {
+  id            String    @id @default(uuid())
+  title         String    @default("Untitled meeting")
+  agenda        String? // optional pre-meeting notes the AI considers
+  audioPath     String? // stored recording on the data volume
+  audioMime     String? // e.g. audio/webm
+  durationSec   Int       @default(0)
+  status        String    @default("recorded") // recorded | transcribing | transcribed
+  engine        String? // which transcription engine was used
+  transcript    String?
+  summary       String?
+  takeaways     String? // JSON array of strings
+  decisions     String? // JSON array of strings
+  actionItems   String? // JSON array of {title, ...}
+  language      String?
+  savedToMemory Boolean   @default(false)
+  supermemoryId String?
+  ragId         String?
+  shared        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

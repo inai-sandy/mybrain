@@ -21,6 +21,8 @@ import { Viewer } from './pages/Viewer';
 import { SkillViewer } from './pages/SkillViewer';
 import { DocDetail } from './pages/DocDetail';
 import { ChatDoc } from './pages/ChatDoc';
+import { Meetings } from './pages/Meetings';
+import { MeetingDetail } from './pages/MeetingDetail';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
@@ -93,6 +95,8 @@ function AuthedApp() {
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="today" element={<Today />} />
         <Route path="tasks" element={<Tasks />} />
+        <Route path="meetings" element={<Meetings />} />
+        <Route path="meeting/:id" element={<MeetingDetail />} />
         <Route path="chat" element={<Chat />} />
         <Route path="activity" element={<Activity />} />
         <Route path="mentor" element={<Mentor />} />
