@@ -62,7 +62,7 @@ describe('UsageService', () => {
     ]);
     const f = await svc.features(7);
     expect(f.totalRequests).toBe(4);
-    expect(f.features[0].feature).toBe('mentor-guidance'); // sorted by cost
+    expect(f.features[0].feature).toBe('chat'); // sorted by request count (most active first) so STT/Deepgram shows
     const chat = f.features.find((x: any) => x.feature === 'chat');
     expect(chat.requests).toBe(2);
     expect(chat.cost).toBeCloseTo(0.005, 5);
