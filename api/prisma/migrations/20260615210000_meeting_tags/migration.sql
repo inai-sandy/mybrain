@@ -1,0 +1,1 @@
+ALTER TABLE "Meeting" ADD COLUMN "tags" TEXT;

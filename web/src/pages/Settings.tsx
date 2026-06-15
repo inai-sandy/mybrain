@@ -428,6 +428,9 @@ function ModelsSection() {
       <ChatModelCard />
       <BookmarksModelCard />
       <TasksModelCard />
+      <MeetingsEngineCard />
+      <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
+        desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
       <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model"
         desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. A strong model like Claude Sonnet is best here. Uses your OpenRouter key." />
       <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model"
@@ -497,6 +500,42 @@ function EngineModelCard({ title, desc, icon: Icon, base }: { title: string; des
       {custom && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openrouter model id (e.g. anthropic/claude-sonnet-4.6)" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
       <div className="mt-4 text-right">
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
+      </div>
+    </section>
+  );
+}
+
+function MeetingsEngineCard() {
+  const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
+  const [engine, setEngine] = useState('deepgram');
+  const [loaded, setLoaded] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/meetings/engines')
+      .then((r) => r.json())
+      .then((d) => { setEngines(d.engines || []); setEngine(d.default || 'deepgram'); })
+      .catch(() => undefined)
+      .finally(() => setLoaded(true));
+  }, []);
+  if (!loaded) return null;
+  async function save() {
+    const r = await fetch('/api/meetings/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
+    if (r.ok) toast('success', 'Transcription engine saved');
+    else toast('error', 'Could not save');
+  }
+  const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1"><Mic size={18} className="text-emerald-600" /> Meeting transcription engine</h2>
+      <p className="text-sm text-zinc-500 mb-4">Which engine turns meeting recordings into text. Deepgram is the cheapest for long meetings; others need their API key in Integrations. (You can also pick per-meeting when you hit Transcribe.)</p>
+      <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
+        Engine
+        <select value={engine} onChange={(e) => setEngine(e.target.value)} className={sel}>
+          {engines.map((e) => <option key={e.id} value={e.id} disabled={!e.configured}>{e.name}{e.configured ? '' : ' — needs API key'}</option>)}
+        </select>
+      </label>
+      <div className="mt-4 text-right">
+        <button onClick={save} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">Save</button>
       </div>
     </section>
   );

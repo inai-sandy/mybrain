@@ -388,6 +388,7 @@ model Meeting {
   decisions     String? // JSON array of strings
   actionItems   String? // JSON array of {title, ...}
   language      String?
+  tags          String? // JSON array of AI keywords
   savedToMemory Boolean   @default(false)
   supermemoryId String?
   ragId         String?

@@ -46,8 +46,10 @@ const REGISTRY: PromptDef[] = [
     default:
       `You are a sharp meeting assistant. From the meeting transcript below (and the agenda, if given), produce a clean, useful write-up.\n` +
       `Respond with ONLY JSON in this exact shape:\n` +
-      `{"summary":"2-4 short paragraphs of flowing prose covering what the meeting was about and what happened","takeaways":["..."],"decisions":["..."],"actionItems":[{"title":"a concrete, imperative to-do","owner":"name if clearly assigned, else null"}]}\n\n` +
+      `{"title":"a short, specific title for THIS meeting (max 80 chars)","tags":["2-5 lowercase keywords"],"summary":"2-4 short paragraphs of flowing prose covering what the meeting was about and what happened","takeaways":["..."],"decisions":["..."],"actionItems":[{"title":"a concrete, imperative to-do","owner":"name if clearly assigned, else null"}]}\n\n` +
       `Rules:\n` +
+      `- title: name it by what the meeting was actually about (e.g. "Pricing review with Srikar"), not a generic "Meeting".\n` +
+      `- tags: 2-5 short lowercase topic keywords for filtering (e.g. "pricing", "beakn", "hiring").\n` +
       `- summary: concise but complete; do not invent anything not in the transcript.\n` +
       `- takeaways: 3-7 key points worth remembering.\n` +
       `- decisions: only firm decisions actually made (empty list if none).\n` +

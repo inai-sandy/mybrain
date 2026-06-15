@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { VoiceService } from '../voice/voice.service';
-import { LlmService } from '../llm/llm.service';
+import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { MemoryService } from '../memory/memory.service';
 
@@ -13,6 +13,8 @@ function meetingsDir() {
 
 const VALID_ENGINES = ['deepgram', 'openai', 'elevenlabs', 'gemini'];
 const DEFAULT_ENGINE = 'deepgram';
+// Title the recorder auto-assigns until the AI names the meeting from its content.
+const isAutoTitle = (t: string) => /^Meeting · /.test(t) || t === 'Untitled meeting' || !t.trim();
 
 function parseArr(s: string | null): any[] {
   if (!s) return [];
@@ -54,6 +56,29 @@ export class MeetingsService {
     return { engines: await this.voice.engines(), default: await this.getEngine() };
   }
 
+  // ---- summary model (the LLM that writes the summary/title/tags) ----
+
+  async getModel(): Promise<LlmConfig | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'meetings.llm' } });
+    if (!row) return null; // null = use the app default model
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async setModel(provider: string, model: string): Promise<LlmConfig> {
+    const cfg = { provider: provider === 'anthropic' ? 'anthropic' : 'openrouter', model } as LlmConfig;
+    await this.prisma.setting.upsert({ where: { key: 'meetings.llm' }, create: { key: 'meetings.llm', value: JSON.stringify(cfg) }, update: { value: JSON.stringify(cfg) } });
+    return cfg;
+  }
+
+  async listModels() {
+    return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
+  }
+
   /** Transcribe a recorded meeting with the chosen engine, then AI-summarize. Opt-in (never automatic). */
   async transcribe(id: string, engineReq?: string): Promise<any> {
     const m = await this.prisma.meeting.findUnique({ where: { id } });
@@ -74,6 +99,9 @@ export class MeetingsService {
         data: {
           status: 'transcribed',
           transcript,
+          // Rename to the AI title only if the user hasn't given it their own name.
+          title: ai.title && isAutoTitle(m.title) ? ai.title : m.title,
+          tags: JSON.stringify(ai.tags || []),
           summary: ai.summary || null,
           takeaways: JSON.stringify(ai.takeaways || []),
           decisions: JSON.stringify(ai.decisions || []),
@@ -88,16 +116,20 @@ export class MeetingsService {
     }
   }
 
-  /** AI write-up from the transcript: summary + takeaways + decisions + action items (English). */
-  private async summarize(transcript: string, agenda?: string | null): Promise<{ summary?: string; takeaways?: string[]; decisions?: string[]; actionItems?: any[] }> {
+  /** AI write-up from the transcript: title + tags + summary + takeaways + decisions + action items (English).
+   *  Uses the meeting summary model if set, else the app default. */
+  private async summarize(transcript: string, agenda?: string | null): Promise<{ title?: string; tags?: string[]; summary?: string; takeaways?: string[]; decisions?: string[]; actionItems?: any[] }> {
     const tmpl = await this.prompts.get('meeting.summary');
     const prompt = `${tmpl}\n\n${agenda?.trim() ? `AGENDA / CONTEXT:\n${agenda.trim()}\n\n` : ''}TRANSCRIPT:\n${transcript.slice(0, 100000)}`;
-    const text = await this.llm.complete(prompt, 2000, 'meeting-summary');
+    const model = await this.getModel();
+    const text = model ? await this.llm.completeWith(model, prompt, 2000, 'meeting-summary') : await this.llm.complete(prompt, 2000, 'meeting-summary');
     if (!text) return { summary: '', takeaways: [], decisions: [], actionItems: [] };
     try {
       const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
       const arr = (v: any) => (Array.isArray(v) ? v : []);
       return {
+        title: String(json.title || '').trim().slice(0, 80) || undefined,
+        tags: arr(json.tags).map((x: any) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5),
         summary: String(json.summary || '').trim(),
         takeaways: arr(json.takeaways).map((x: any) => String(x).trim()).filter(Boolean).slice(0, 20),
         decisions: arr(json.decisions).map((x: any) => String(x).trim()).filter(Boolean).slice(0, 20),
@@ -123,6 +155,7 @@ export class MeetingsService {
       takeaways: parseArr(m.takeaways),
       decisions: parseArr(m.decisions),
       actionItems: parseArr(m.actionItems),
+      tags: parseArr(m.tags),
       language: m.language,
       savedToMemory: m.savedToMemory,
       shared: m.shared,
@@ -156,7 +189,7 @@ export class MeetingsService {
     let list = rows.map((m) => this.shape(m));
     if (q?.trim()) {
       const s = q.toLowerCase();
-      list = list.filter((m) => [m.title, m.summary, m.transcript, ...(m.takeaways || [])].filter(Boolean).join(' ').toLowerCase().includes(s));
+      list = list.filter((m) => [m.title, m.summary, m.transcript, ...(m.takeaways || []), ...(m.tags || [])].filter(Boolean).join(' ').toLowerCase().includes(s));
     }
     return list;
   }

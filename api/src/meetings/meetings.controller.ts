@@ -33,6 +33,23 @@ export class MeetingsController {
     return this.meetings.setEngine(body?.engine || '');
   }
 
+  // --- meeting summary model (the LLM that writes the summary/title/tags) ---
+  @Get('model')
+  async getModel() {
+    return (await this.meetings.getModel()) || { provider: null, model: '' };
+  }
+
+  @Put('model')
+  async setModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.meetings.setModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('models')
+  async models() {
+    return { models: await this.meetings.listModels() };
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const m = await this.meetings.get(id);
