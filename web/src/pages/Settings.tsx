@@ -1248,6 +1248,61 @@ function SuperMemorySyncCard() {
   );
 }
 
+type GoogleStatus = { connected: boolean; email: string | null; gws: boolean; bridge: boolean };
+
+/** Google Workspace setup — connects Gmail/Drive/Docs/Sheets via the gws CLI on your server. */
+function GoogleCard() {
+  const [s, setS] = useState<GoogleStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/google/status');
+      if (r.ok) setS(await r.json());
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+  const Step = ({ ok, children }: { ok: boolean; children: React.ReactNode }) => (
+    <li className="flex items-center gap-2 text-sm">
+      <span className={ok ? 'text-emerald-500' : 'text-zinc-400'}>{ok ? '✓' : '○'}</span>
+      <span className={ok ? 'text-zinc-700 dark:text-zinc-200' : 'text-zinc-500'}>{children}</span>
+    </li>
+  );
+  const code = 'rounded bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.5 text-emerald-600 dark:text-emerald-400';
+  return (
+    <div className="rounded-xl border border-blue-300/40 dark:border-blue-500/30 bg-gradient-to-br from-blue-500/5 to-transparent p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-bold flex items-center gap-2">🟦 Google Workspace <span className="text-[10px] uppercase tracking-wide rounded-full bg-blue-500/15 text-blue-500 px-2 py-0.5">setup</span></h3>
+          <p className="text-xs text-zinc-500 mt-1">Pull your <b>Gmail, Drive, Docs &amp; Sheets</b> into your brain via the Google Workspace CLI (<code className="text-zinc-500">gws</code>) on your server — read &amp; safe-write. Google sign-in is handled by the CLI.</p>
+        </div>
+        <button onClick={load} disabled={busy} className="text-xs text-zinc-400 hover:text-blue-500 shrink-0">{busy ? '…' : 'refresh'}</button>
+      </div>
+      {!s ? (
+        <p className="mt-3 text-sm text-zinc-400">Checking your server…</p>
+      ) : (
+        <>
+          <ul className="mt-3 space-y-1.5">
+            <Step ok={s.bridge}>Server bridge reachable</Step>
+            <Step ok={s.gws}>Google Workspace CLI installed on your server</Step>
+            <Step ok={s.connected}>Connected to your Google account{s.email ? ` (${s.email})` : ''}</Step>
+          </ul>
+          {!s.connected && (
+            <div className="mt-3 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2.5 space-y-1.5">
+              <p className="text-zinc-600 dark:text-zinc-300 font-medium">One step only you can do — connect your Google account on the server:</p>
+              <p className="text-zinc-500">Easiest (uses gcloud to auto-create the Google app + sign in): run <code className={code}>gws auth setup</code></p>
+              <p className="text-zinc-500">Or, if you’ve placed a client_secret.json in <code className={code}>~/.config/gws/</code>: run <code className={code}>gws auth login</code></p>
+              <p className="text-zinc-500">It’ll ask for Gmail, Drive, Docs &amp; Sheets access. On a headless server use the printed URL/device-code flow. Then tap “refresh”.</p>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 type CodexStatus = { connected: boolean; installed: boolean; version: string | null; loggedIn: boolean; ready: boolean; workdir: string | null; reason?: string };
 
 /** Codex agent setup — connects your server's Codex (on your ChatGPT subscription) for running tasks. */
@@ -1357,6 +1412,7 @@ function IntegrationsSection() {
 
   return (
     <div className="space-y-4">
+      <GoogleCard />
       <CodexCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {

@@ -21,9 +21,10 @@ import { PromptsModule } from './prompts/prompts.module';
 import { LlmModule } from './llm/llm.module';
 import { CodexModule } from './codex/codex.module';
 import { MeetingsModule } from './meetings/meetings.module';
+import { GoogleModule } from './google/google.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule],
   controllers: [HealthController],
 })
 export class AppModule {}
