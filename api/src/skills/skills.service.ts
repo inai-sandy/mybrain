@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { promises as fs, createWriteStream } from 'fs';
 import { join } from 'path';
 // archiver's runtime is callable as archiver('zip', …); @types/archiver v8 omits that signature, so type it loosely.
@@ -68,6 +68,11 @@ export class SkillsService {
   async create(input: CreateInput) {
     const parsed = input.content ? parseSkillMd(input.content) : {};
     const title = (input.title?.trim() || parsed.name || 'Untitled skill').slice(0, 120);
+    // Block duplicate names in the list (case-insensitive). Keeps the tracker clean and avoids the
+    // confusion of two same-named cards. The filesystem scan has its own upsert and is unaffected.
+    const norm = title.trim().toLowerCase();
+    const dup = (await this.prisma.skill.findMany({ select: { id: true, title: true } })).find((x) => x.title.trim().toLowerCase() === norm);
+    if (dup) throw new BadRequestException(`A skill named “${title}” already exists — open it to update it instead.`);
     // AI-generated description (from the SKILL.md content); fall back to provided/frontmatter text.
     const description = await this.aiDescribe(input.content || '', input.description?.trim() || parsed.description);
     const origin = input.origin === 'downloaded' ? 'downloaded' : 'created';
@@ -182,8 +187,25 @@ export class SkillsService {
     if (!s) return { ok: false, message: 'Skill not found' };
     const baseDir = this.deployTargets()[target];
     if (!baseDir) return { ok: false, message: 'Unknown deploy target' };
-    const slug = (s.slug || s.title || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 80);
-    if (!slug || slug.includes('..')) return { ok: false, message: 'Invalid skill name' };
+    const baseSlug = (s.slug || s.title || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 80);
+    if (!baseSlug || baseSlug.includes('..')) return { ok: false, message: 'Invalid skill name' };
+
+    // Never overwrite a DIFFERENT skill. If we're re-deploying THIS skill to the same target, update
+    // its own folder in place. Otherwise pick the next free name (name-2, name-3…) so the existing
+    // skill on disk is always preserved.
+    const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
+    let slug = baseSlug;
+    let renamed = false;
+    if (s.slug && s.source === baseDir) {
+      slug = s.slug; // this skill already lives here — update its own folder
+    } else {
+      let n = 1;
+      while (await exists(join(baseDir, slug))) {
+        n += 1;
+        slug = `${baseSlug.slice(0, 76)}-${n}`;
+        renamed = true;
+      }
+    }
     const destDir = join(baseDir, slug);
     try {
       await fs.mkdir(destDir, { recursive: true });
@@ -197,7 +219,8 @@ export class SkillsService {
         return { ok: false, message: 'Nothing to deploy — add the skill file or paste its content first.' };
       }
       await this.prisma.skill.update({ where: { id }, data: { installed: true, slug, source: baseDir } });
-      return { ok: true, message: `Deployed to ${target} → ~/.claude/skills/${slug}` };
+      const note = renamed ? ` (a skill named “${baseSlug}” already existed, so this was saved as “${slug}” — the old one is untouched)` : '';
+      return { ok: true, message: `Deployed to ${target} → ~/.claude/skills/${slug}${note}` };
     } catch (e: any) {
       return { ok: false, message: 'Deploy failed: ' + (e?.message || 'error') };
     }
