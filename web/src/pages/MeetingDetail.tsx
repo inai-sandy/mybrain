@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2 } from 'lucide-react';
+import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2, Share2, Brain, Plus } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { ShareDialog } from '../ui/ShareDialog';
 
 type Meeting = {
   id: string;
@@ -39,6 +40,9 @@ export function MeetingDetail() {
   const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [engine, setEngine] = useState('deepgram');
   const [transcribing, setTranscribing] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [savingMem, setSavingMem] = useState(false);
+  const [addedTasks, setAddedTasks] = useState<Record<number, boolean>>({});
   const toast = useToast();
 
   function load() {
@@ -91,6 +95,28 @@ export function MeetingDetail() {
     } else toast('error', 'Could not save');
   }
 
+  async function saveMemory() {
+    setSavingMem(true);
+    try {
+      const r = await fetch(`/api/meetings/${id}/save-memory`, { method: 'POST' });
+      if (!r.ok) throw new Error();
+      setD((p) => (p ? { ...p, savedToMemory: true } : p));
+      toast('success', 'Saved to your memory');
+    } catch {
+      toast('error', 'Could not save to memory');
+    } finally {
+      setSavingMem(false);
+    }
+  }
+
+  async function addTask(title: string, i: number) {
+    const r = await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) });
+    if (r.ok) {
+      setAddedTasks((p) => ({ ...p, [i]: true }));
+      toast('success', 'Added to Tasks');
+    } else toast('error', 'Could not add to Tasks');
+  }
+
   const transcribed = d?.status === 'transcribed';
 
   return (
@@ -141,6 +167,19 @@ export function MeetingDetail() {
             </div>
           )}
 
+          {/* Actions: share + save to memory (the write-up is what's shared/saved) */}
+          {transcribed && (
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setSharing(true)} className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (d.shared ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 hover:border-emerald-500 hover:text-emerald-600')}>
+                <Share2 size={15} /> {d.shared ? 'Shared' : 'Share'}
+              </button>
+              <button onClick={saveMemory} disabled={savingMem || d.savedToMemory} className={'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm disabled:opacity-60 ' + (d.savedToMemory ? 'border-indigo-500 text-indigo-600' : 'border-zinc-300 dark:border-zinc-700 hover:border-indigo-500 hover:text-indigo-600')}>
+                {savingMem ? <Loader2 size={15} className="animate-spin" /> : d.savedToMemory ? <Check size={15} /> : <Brain size={15} />}
+                {d.savedToMemory ? 'In your memory' : savingMem ? 'Saving…' : 'Save to my memory'}
+              </button>
+            </div>
+          )}
+
           {/* Agenda */}
           {d.agenda && !editing && (
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4">
@@ -179,7 +218,25 @@ export function MeetingDetail() {
               {d.summary && <Section icon={<FileText size={15} className="text-emerald-600" />} title="Summary"><p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap">{d.summary}</p></Section>}
               {d.takeaways?.length > 0 && <Section icon={<Lightbulb size={15} className="text-amber-500" />} title="Key takeaways"><ul className="list-disc pl-5 text-sm text-zinc-700 dark:text-zinc-200 space-y-1">{d.takeaways.map((t, i) => <li key={i}>{t}</li>)}</ul></Section>}
               {d.decisions?.length > 0 && <Section icon={<Check size={15} className="text-emerald-600" />} title="Decisions"><ul className="list-disc pl-5 text-sm text-zinc-700 dark:text-zinc-200 space-y-1">{d.decisions.map((t, i) => <li key={i}>{t}</li>)}</ul></Section>}
-              {d.actionItems?.length > 0 && <Section icon={<ListChecks size={15} className="text-violet-500" />} title="Action items"><ul className="space-y-1 text-sm text-zinc-700 dark:text-zinc-200">{d.actionItems.map((t, i) => <li key={i} className="flex items-start gap-2"><span className="text-violet-400 mt-1">•</span> {typeof t === 'string' ? t : t.title}</li>)}</ul></Section>}
+              {d.actionItems?.length > 0 && (
+                <Section icon={<ListChecks size={15} className="text-violet-500" />} title="Action items">
+                  <ul className="space-y-1.5 text-sm text-zinc-700 dark:text-zinc-200">
+                    {d.actionItems.map((t, i) => {
+                      const title = typeof t === 'string' ? t : t.title;
+                      const owner = typeof t === 'string' ? null : t.owner;
+                      const added = addedTasks[i];
+                      return (
+                        <li key={i} className="flex items-start justify-between gap-2">
+                          <span className="flex items-start gap-2 min-w-0"><span className="text-violet-400 mt-1">•</span> <span className="break-words">{title}{owner ? <span className="text-zinc-400"> — {owner}</span> : ''}</span></span>
+                          <button onClick={() => addTask(title, i)} disabled={added} className={'shrink-0 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] disabled:opacity-60 ' + (added ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600')}>
+                            {added ? <><Check size={11} /> Added</> : <><Plus size={11} /> Tasks</>}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </Section>
+              )}
               {d.transcript && (
                 <details className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 p-4">
                   <summary className="text-sm font-semibold cursor-pointer">Full transcript</summary>
@@ -191,6 +248,18 @@ export function MeetingDetail() {
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
+
+      {sharing && d && (
+        <ShareDialog
+          id={d.id}
+          title={d.title}
+          initialShared={d.shared}
+          shareEndpoint={`/api/meetings/${d.id}/share`}
+          publicLink={`${location.origin}/meeting-view/${d.id}`}
+          onClose={() => setSharing(false)}
+          onChanged={load}
+        />
+      )}
     </div>
   );
 }

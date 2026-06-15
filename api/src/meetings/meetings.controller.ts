@@ -61,6 +61,20 @@ export class MeetingsController {
     return r;
   }
 
+  @Post(':id/share')
+  async share(@Param('id') id: string, @Body() body: { shared?: boolean }) {
+    const r = await this.meetings.setShared(id, !!body?.shared);
+    if (!r) throw new BadRequestException('Meeting not found');
+    return r;
+  }
+
+  @Post(':id/save-memory')
+  async saveMemory(@Param('id') id: string) {
+    const r = await this.meetings.saveToMemory(id);
+    if (!r) throw new BadRequestException('Meeting not found');
+    return r;
+  }
+
   /** Stream the stored recording for playback. */
   @Get(':id/audio')
   async audio(@Param('id') id: string, @Res() res: Response) {

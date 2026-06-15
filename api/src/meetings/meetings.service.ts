@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { VoiceService } from '../voice/voice.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { MemoryService } from '../memory/memory.service';
 
 function meetingsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'meetings');
@@ -32,6 +33,7 @@ export class MeetingsService {
     private readonly voice: VoiceService,
     private readonly llm: LlmService,
     private readonly prompts: PromptsService,
+    private readonly memory: MemoryService,
   ) {}
 
   // ---- transcription engine (per-meeting choice; default Deepgram for cost) ----
@@ -189,5 +191,51 @@ export class MeetingsService {
     const m = await this.prisma.meeting.findUnique({ where: { id } });
     if (!m?.audioPath) return null;
     return { path: m.audioPath, mime: m.audioMime || 'audio/webm' };
+  }
+
+  // ---- share + memory ----
+
+  async setShared(id: string, shared: boolean) {
+    const m = await this.prisma.meeting.findUnique({ where: { id } });
+    if (!m) return null;
+    await this.prisma.meeting.update({ where: { id }, data: { shared: !!shared } });
+    return { shared: !!shared };
+  }
+
+  /** Public payload for a shared meeting — summary/takeaways/decisions/action items only.
+   *  The full transcript and audio are intentionally NOT exposed. */
+  async getShared(id: string) {
+    const m = await this.prisma.meeting.findUnique({ where: { id } });
+    if (!m || !m.shared) return null;
+    return {
+      title: m.title,
+      createdAt: m.createdAt,
+      durationSec: m.durationSec,
+      summary: m.summary,
+      takeaways: parseArr(m.takeaways),
+      decisions: parseArr(m.decisions),
+      actionItems: parseArr(m.actionItems),
+    };
+  }
+
+  /** Opt-in: store this meeting's write-up into the searchable memory (RAG + SuperMemory). */
+  async saveToMemory(id: string) {
+    const m = await this.prisma.meeting.findUnique({ where: { id } });
+    if (!m) return null;
+    const takeaways = parseArr(m.takeaways);
+    const decisions = parseArr(m.decisions);
+    const actions = parseArr(m.actionItems).map((a: any) => (typeof a === 'string' ? a : a?.title)).filter(Boolean);
+    const parts = [
+      m.title,
+      m.summary || '',
+      takeaways.length ? 'Key takeaways:\n' + takeaways.map((t: string) => `- ${t}`).join('\n') : '',
+      decisions.length ? 'Decisions:\n' + decisions.map((t: string) => `- ${t}`).join('\n') : '',
+      actions.length ? 'Action items:\n' + actions.map((t: string) => `- ${t}`).join('\n') : '',
+    ].filter(Boolean);
+    const text = parts.join('\n\n').trim();
+    if (!text) return { saved: false };
+    await this.memory.enqueue(text, { title: m.title, tags: ['meeting'] });
+    await this.prisma.meeting.update({ where: { id }, data: { savedToMemory: true } });
+    return { saved: true };
   }
 }
