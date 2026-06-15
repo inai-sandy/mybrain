@@ -84,6 +84,7 @@ export class MeetingsService {
     const m = await this.prisma.meeting.findUnique({ where: { id } });
     if (!m) return null;
     if (!m.audioPath) return { error: 'no-audio' };
+    if (m.status === 'transcribing') return { error: 'already-transcribing' };
     const engine = engineReq && VALID_ENGINES.includes(engineReq) ? engineReq : await this.getEngine();
     await this.prisma.meeting.update({ where: { id }, data: { status: 'transcribing', engine } });
     try {
@@ -176,14 +177,20 @@ export class MeetingsService {
       },
     });
     if (audio?.buffer?.length) {
-      const dir = meetingsDir();
-      await fs.mkdir(dir, { recursive: true });
-      const ext = audio.mime.includes('webm') ? 'webm' : audio.mime.includes('ogg') ? 'ogg' : audio.mime.includes('mp4') || audio.mime.includes('m4a') ? 'm4a' : audio.mime.includes('wav') ? 'wav' : 'webm';
-      const path = join(dir, `${m.id}.${ext}`);
-      await fs.writeFile(path, audio.buffer);
-      await this.prisma.meeting.update({ where: { id: m.id }, data: { audioPath: path, audioMime: audio.mime } });
+      try {
+        const dir = meetingsDir();
+        await fs.mkdir(dir, { recursive: true });
+        const ext = audio.mime.includes('webm') ? 'webm' : audio.mime.includes('ogg') ? 'ogg' : audio.mime.includes('mp4') || audio.mime.includes('m4a') ? 'm4a' : audio.mime.includes('wav') ? 'wav' : 'webm';
+        const path = join(dir, `${m.id}.${ext}`);
+        await fs.writeFile(path, audio.buffer);
+        await this.prisma.meeting.update({ where: { id: m.id }, data: { audioPath: path, audioMime: audio.mime } });
+      } catch (e) {
+        // Don't leave a ghost meeting with no recording — roll back the row, then surface the error.
+        await this.prisma.meeting.delete({ where: { id: m.id } }).catch(() => undefined);
+        throw e;
+      }
     }
-    return this.shape(await this.prisma.meeting.findUnique({ where: { id: m.id } }));
+    return this.shape((await this.prisma.meeting.findUnique({ where: { id: m.id } })) ?? m);
   }
 
   async list(q?: string) {

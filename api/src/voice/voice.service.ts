@@ -96,11 +96,15 @@ export class VoiceService {
   async transcribeWith(engine: string, buf: Buffer, filename = 'audio.webm', mime = 'audio/webm'): Promise<string> {
     if (!buf?.length) return '';
     const e = (ENGINES.find((x) => x.id === engine)?.id || 'deepgram') as Engine;
+    let used: Engine = e;
     let text = await this.run(e, buf, filename, mime).catch(() => null);
-    if (!text && e !== 'openai') text = await this.run('openai', buf, filename, mime).catch(() => null);
+    if (!text && e !== 'openai') {
+      used = 'openai';
+      text = await this.run('openai', buf, filename, mime).catch(() => null);
+    }
     if (text) {
       const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
-      const model = e === 'deepgram' ? await this.getDeepgramModel() : sttModel[e];
+      const model = used === 'deepgram' ? await this.getDeepgramModel() : sttModel[used];
       await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model, cost: null } }).catch(() => undefined);
     }
     return (text || '').trim();

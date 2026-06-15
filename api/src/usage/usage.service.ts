@@ -16,8 +16,8 @@ export class UsageService {
   /** Build an `at` filter from a YYYY-MM-DD date range (inclusive). */
   private dateFilter(from?: string, to?: string): any {
     const at: any = {};
-    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) at.gte = new Date(from + 'T00:00:00.000');
-    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) at.lte = new Date(to + 'T23:59:59.999');
+    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) at.gte = new Date(from + 'T00:00:00.000Z');
+    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) at.lte = new Date(to + 'T23:59:59.999Z');
     return Object.keys(at).length ? at : null;
   }
 

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { createReadStream } from 'fs';
@@ -64,14 +64,14 @@ export class MeetingsController {
   @Get(':id')
   async get(@Param('id') id: string) {
     const m = await this.meetings.get(id);
-    if (!m) throw new BadRequestException('Meeting not found');
+    if (!m) throw new NotFoundException('Meeting not found');
     return m;
   }
 
   @Put(':id')
   async update(@Param('id') id: string, @Body() body: { title?: string; agenda?: string }) {
     const m = await this.meetings.update(id, body || {});
-    if (!m) throw new BadRequestException('Meeting not found');
+    if (!m) throw new NotFoundException('Meeting not found');
     return m;
   }
 
@@ -84,8 +84,9 @@ export class MeetingsController {
   @Post(':id/transcribe')
   async transcribe(@Param('id') id: string, @Body() body: { engine?: string }) {
     const r = await this.meetings.transcribe(id, body?.engine);
-    if (!r) throw new BadRequestException('Meeting not found');
+    if (!r) throw new NotFoundException('Meeting not found');
     if (r.error === 'no-audio') throw new BadRequestException('This meeting has no recording to transcribe.');
+    if (r.error === 'already-transcribing') throw new BadRequestException('This meeting is already being transcribed.');
     if (r.error === 'transcribe-failed') throw new BadRequestException('Transcription failed — check the engine’s API key in Settings → Integrations, or try another engine.');
     return r;
   }
@@ -93,14 +94,14 @@ export class MeetingsController {
   @Post(':id/share')
   async share(@Param('id') id: string, @Body() body: { shared?: boolean }) {
     const r = await this.meetings.setShared(id, !!body?.shared);
-    if (!r) throw new BadRequestException('Meeting not found');
+    if (!r) throw new NotFoundException('Meeting not found');
     return r;
   }
 
   @Post(':id/save-memory')
   async saveMemory(@Param('id') id: string) {
     const r = await this.meetings.saveToMemory(id);
-    if (!r) throw new BadRequestException('Meeting not found');
+    if (!r) throw new NotFoundException('Meeting not found');
     return r;
   }
 
@@ -108,7 +109,7 @@ export class MeetingsController {
   @Delete(':id/audio')
   async deleteAudio(@Param('id') id: string) {
     const r = await this.meetings.deleteAudio(id);
-    if (!r) throw new BadRequestException('Meeting not found');
+    if (!r) throw new NotFoundException('Meeting not found');
     return r;
   }
 

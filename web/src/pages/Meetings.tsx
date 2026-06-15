@@ -97,6 +97,7 @@ export function Meetings() {
         <select aria-label="Filter by status" value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={sel}>
           <option value="">All status</option>
           <option value="recorded">Recorded</option>
+          <option value="transcribing">Transcribing…</option>
           <option value="transcribed">Transcribed</option>
         </select>
         {allTags.length > 0 && (
