@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -38,6 +38,21 @@ const REGISTRY: PromptDef[] = [
       `- Each task id may appear in at most ONE group. Leave every non-duplicate out entirely.\n` +
       `- If nothing is clearly duplicated, return an empty list.\n\n` +
       `Respond with ONLY JSON in this exact shape: {"groups": [["id1","id2"], ["id3","id4","id5"]]} — each inner array is a set of 2+ duplicate task ids. No prose.`,
+  },
+  {
+    key: 'meeting.summary',
+    label: 'Meeting summary',
+    description: 'Turns a meeting transcript into a summary, key takeaways, decisions and action items. The agenda (if any) + transcript are added automatically. ⚠️ Keep the JSON shape intact.',
+    default:
+      `You are a sharp meeting assistant. From the meeting transcript below (and the agenda, if given), produce a clean, useful write-up.\n` +
+      `Respond with ONLY JSON in this exact shape:\n` +
+      `{"summary":"2-4 short paragraphs of flowing prose covering what the meeting was about and what happened","takeaways":["..."],"decisions":["..."],"actionItems":[{"title":"a concrete, imperative to-do","owner":"name if clearly assigned, else null"}]}\n\n` +
+      `Rules:\n` +
+      `- summary: concise but complete; do not invent anything not in the transcript.\n` +
+      `- takeaways: 3-7 key points worth remembering.\n` +
+      `- decisions: only firm decisions actually made (empty list if none).\n` +
+      `- actionItems: concrete next steps someone agreed to do ("Send Srikar the revised quote", not "pricing"). Empty list if none.\n` +
+      `- ALWAYS write the summary, takeaways, decisions and action items in clear, natural English even if the transcript is in Hindi/Telugu/another language. Keep the transcript itself untouched.`,
   },
   {
     key: 'daily.summary',

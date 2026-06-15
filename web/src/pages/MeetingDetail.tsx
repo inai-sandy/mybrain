@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb } from 'lucide-react';
+import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Meeting = {
@@ -36,6 +36,9 @@ export function MeetingDetail() {
   const [editing, setEditing] = useState(false);
   const [eTitle, setETitle] = useState('');
   const [eAgenda, setEAgenda] = useState('');
+  const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
+  const [engine, setEngine] = useState('deepgram');
+  const [transcribing, setTranscribing] = useState(false);
   const toast = useToast();
 
   function load() {
@@ -46,8 +49,32 @@ export function MeetingDetail() {
   }
   useEffect(() => {
     load();
+    fetch('/api/meetings/engines')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) {
+          setEngines(d.engines || []);
+          setEngine(d.default || 'deepgram');
+        }
+      })
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function transcribe() {
+    setTranscribing(true);
+    try {
+      const r = await fetch(`/api/meetings/${id}/transcribe`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.message || 'Transcription failed');
+      setD(body);
+      toast('success', 'Transcribed ✓');
+    } catch (e: any) {
+      toast('error', e?.message || 'Transcription failed');
+    } finally {
+      setTranscribing(false);
+    }
+  }
 
   function startEdit() {
     if (!d) return;
@@ -122,15 +149,27 @@ export function MeetingDetail() {
             </div>
           )}
 
-          {/* Transcription state — the Transcribe action arrives in the next update (ticket B) */}
+          {/* Opt-in transcription — only the meetings you choose get transcribed */}
           {!transcribed && (
             <div className="rounded-xl border border-dashed border-indigo-300/50 dark:border-indigo-500/30 bg-indigo-500/5 p-5 text-center">
               <Sparkles size={20} className="mx-auto text-indigo-400 mb-2" />
-              <p className="text-sm font-medium">Not transcribed yet</p>
-              <p className="text-xs text-zinc-500 mt-1">Your recording is saved. Transcription + AI summary (with your choice of engine) lands in the next update — only the meetings you choose get transcribed.</p>
-              <button disabled title="Coming in the next update" className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-zinc-200 dark:bg-zinc-800 text-zinc-400 px-4 py-2 text-sm cursor-not-allowed">
-                <FileText size={15} /> Transcribe — coming next
-              </button>
+              <p className="text-sm font-medium">{transcribing ? 'Transcribing…' : 'Not transcribed yet'}</p>
+              <p className="text-xs text-zinc-500 mt-1">{transcribing ? 'Transcribing the recording and writing the summary — this can take a bit for long meetings.' : 'Your recording is saved. Transcribe it when you want — pick a cheaper engine for long meetings.'}</p>
+              {d.hasAudio ? (
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                  <select value={engine} onChange={(e) => setEngine(e.target.value)} disabled={transcribing} className="rounded-lg bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-2 text-sm">
+                    {engines.map((e) => (
+                      <option key={e.id} value={e.id} disabled={!e.configured}>{e.name}{e.configured ? '' : ' — needs API key'}</option>
+                    ))}
+                  </select>
+                  <button onClick={transcribe} disabled={transcribing} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-sm font-medium disabled:opacity-50">
+                    {transcribing ? <><Loader2 size={15} className="animate-spin" /> Transcribing…</> : <><FileText size={15} /> Transcribe</>}
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-amber-600">No recording attached to this meeting.</p>
+              )}
+              <p className="mt-2 text-[11px] text-zinc-400">Engine &amp; prompt are configurable in Settings. Deepgram is the cheap default; for Telugu/Hindi a self-hosted model is coming next.</p>
             </div>
           )}
 

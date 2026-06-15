@@ -21,6 +21,17 @@ export class MeetingsController {
     return { meetings: await this.meetings.list(q) };
   }
 
+  // --- transcription engine (static routes MUST precede :id) ---
+  @Get('engines')
+  async engines() {
+    return this.meetings.engineOptions();
+  }
+
+  @Put('engine')
+  async setEngine(@Body() body: { engine?: string }) {
+    return this.meetings.setEngine(body?.engine || '');
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const m = await this.meetings.get(id);
@@ -38,6 +49,16 @@ export class MeetingsController {
   @Delete(':id')
   async remove(@Param('id') id: string) {
     return this.meetings.remove(id);
+  }
+
+  /** Opt-in transcription + AI summary for one meeting, with a chosen engine. */
+  @Post(':id/transcribe')
+  async transcribe(@Param('id') id: string, @Body() body: { engine?: string }) {
+    const r = await this.meetings.transcribe(id, body?.engine);
+    if (!r) throw new BadRequestException('Meeting not found');
+    if (r.error === 'no-audio') throw new BadRequestException('This meeting has no recording to transcribe.');
+    if (r.error === 'transcribe-failed') throw new BadRequestException('Transcription failed — check the engine’s API key in Settings → Integrations, or try another engine.');
+    return r;
   }
 
   /** Stream the stored recording for playback. */

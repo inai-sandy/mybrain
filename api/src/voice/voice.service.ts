@@ -91,6 +91,19 @@ export class VoiceService {
     return (text || '').trim();
   }
 
+  /** Transcribe with a SPECIFIC engine (Meetings module — per-meeting choice). No dictation cleanup; OpenAI fallback. */
+  async transcribeWith(engine: string, buf: Buffer, filename = 'audio.webm', mime = 'audio/webm'): Promise<string> {
+    if (!buf?.length) return '';
+    const e = (ENGINES.find((x) => x.id === engine)?.id || 'deepgram') as Engine;
+    let text = await this.run(e, buf, filename, mime).catch(() => null);
+    if (!text && e !== 'openai') text = await this.run('openai', buf, filename, mime).catch(() => null);
+    if (text) {
+      const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
+      await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: sttModel[e], cost: null } }).catch(() => undefined);
+    }
+    return (text || '').trim();
+  }
+
   private async run(engine: Engine, buf: Buffer, filename: string, mime: string): Promise<string | null> {
     switch (engine) {
       case 'elevenlabs':

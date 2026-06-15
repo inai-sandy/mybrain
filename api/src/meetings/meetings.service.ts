@@ -1,11 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { VoiceService } from '../voice/voice.service';
+import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 function meetingsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'meetings');
 }
+
+const VALID_ENGINES = ['deepgram', 'openai', 'elevenlabs', 'gemini'];
+const DEFAULT_ENGINE = 'deepgram';
 
 function parseArr(s: string | null): any[] {
   if (!s) return [];
@@ -19,7 +25,87 @@ function parseArr(s: string | null): any[] {
 
 @Injectable()
 export class MeetingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(MeetingsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly voice: VoiceService,
+    private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
+  ) {}
+
+  // ---- transcription engine (per-meeting choice; default Deepgram for cost) ----
+
+  async getEngine(): Promise<string> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'meetings.engine' } });
+    return row?.value && VALID_ENGINES.includes(row.value) ? row.value : DEFAULT_ENGINE;
+  }
+
+  async setEngine(engine: string): Promise<{ engine: string }> {
+    const e = VALID_ENGINES.includes(engine) ? engine : DEFAULT_ENGINE;
+    await this.prisma.setting.upsert({ where: { key: 'meetings.engine' }, create: { key: 'meetings.engine', value: e }, update: { value: e } });
+    return { engine: e };
+  }
+
+  /** Engines for the picker (which have a key configured), plus the current default. */
+  async engineOptions() {
+    return { engines: await this.voice.engines(), default: await this.getEngine() };
+  }
+
+  /** Transcribe a recorded meeting with the chosen engine, then AI-summarize. Opt-in (never automatic). */
+  async transcribe(id: string, engineReq?: string): Promise<any> {
+    const m = await this.prisma.meeting.findUnique({ where: { id } });
+    if (!m) return null;
+    if (!m.audioPath) return { error: 'no-audio' };
+    const engine = engineReq && VALID_ENGINES.includes(engineReq) ? engineReq : await this.getEngine();
+    await this.prisma.meeting.update({ where: { id }, data: { status: 'transcribing', engine } });
+    try {
+      const buf = await fs.readFile(m.audioPath);
+      const transcript = await this.voice.transcribeWith(engine, buf, `${id}.${(m.audioMime || 'webm').includes('webm') ? 'webm' : 'audio'}`, m.audioMime || 'audio/webm');
+      if (!transcript) {
+        await this.prisma.meeting.update({ where: { id }, data: { status: 'recorded' } });
+        return { error: 'transcribe-failed' };
+      }
+      const ai = await this.summarize(transcript, m.agenda);
+      await this.prisma.meeting.update({
+        where: { id },
+        data: {
+          status: 'transcribed',
+          transcript,
+          summary: ai.summary || null,
+          takeaways: JSON.stringify(ai.takeaways || []),
+          decisions: JSON.stringify(ai.decisions || []),
+          actionItems: JSON.stringify(ai.actionItems || []),
+        },
+      });
+      return this.get(id);
+    } catch (e) {
+      this.logger.warn(`Meeting transcribe failed (${id}): ${String((e as Error)?.message || e)}`);
+      await this.prisma.meeting.update({ where: { id }, data: { status: 'recorded' } }).catch(() => undefined);
+      return { error: 'transcribe-failed' };
+    }
+  }
+
+  /** AI write-up from the transcript: summary + takeaways + decisions + action items (English). */
+  private async summarize(transcript: string, agenda?: string | null): Promise<{ summary?: string; takeaways?: string[]; decisions?: string[]; actionItems?: any[] }> {
+    const tmpl = await this.prompts.get('meeting.summary');
+    const prompt = `${tmpl}\n\n${agenda?.trim() ? `AGENDA / CONTEXT:\n${agenda.trim()}\n\n` : ''}TRANSCRIPT:\n${transcript.slice(0, 100000)}`;
+    const text = await this.llm.complete(prompt, 2000, 'meeting-summary');
+    if (!text) return { summary: '', takeaways: [], decisions: [], actionItems: [] };
+    try {
+      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+      const arr = (v: any) => (Array.isArray(v) ? v : []);
+      return {
+        summary: String(json.summary || '').trim(),
+        takeaways: arr(json.takeaways).map((x: any) => String(x).trim()).filter(Boolean).slice(0, 20),
+        decisions: arr(json.decisions).map((x: any) => String(x).trim()).filter(Boolean).slice(0, 20),
+        actionItems: arr(json.actionItems).map((x: any) => (typeof x === 'string' ? { title: x } : { title: String(x?.title || '').trim(), owner: x?.owner || null })).filter((a: any) => a.title).slice(0, 30),
+      };
+    } catch {
+      // Fall back to using the raw text as the summary so nothing is lost.
+      return { summary: text.trim().slice(0, 4000), takeaways: [], decisions: [], actionItems: [] };
+    }
+  }
 
   private shape(m: any) {
     return {
