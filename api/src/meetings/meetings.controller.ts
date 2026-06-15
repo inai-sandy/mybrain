@@ -50,6 +50,17 @@ export class MeetingsController {
     return { models: await this.meetings.listModels() };
   }
 
+  // --- auto-delete-audio setting ---
+  @Get('auto-delete-audio')
+  async getAutoDelete() {
+    return { enabled: await this.meetings.getAutoDeleteAudio() };
+  }
+
+  @Put('auto-delete-audio')
+  async setAutoDelete(@Body() body: { enabled?: boolean }) {
+    return this.meetings.setAutoDeleteAudio(!!body?.enabled);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const m = await this.meetings.get(id);
@@ -89,6 +100,14 @@ export class MeetingsController {
   @Post(':id/save-memory')
   async saveMemory(@Param('id') id: string) {
     const r = await this.meetings.saveToMemory(id);
+    if (!r) throw new BadRequestException('Meeting not found');
+    return r;
+  }
+
+  /** Delete just the recording, keeping the meeting + transcript. */
+  @Delete(':id/audio')
+  async deleteAudio(@Param('id') id: string) {
+    const r = await this.meetings.deleteAudio(id);
     if (!r) throw new BadRequestException('Meeting not found');
     return r;
   }

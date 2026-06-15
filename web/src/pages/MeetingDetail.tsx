@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2, Share2, Brain, Plus } from 'lucide-react';
+import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2, Share2, Brain, Plus, Trash2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ShareDialog } from '../ui/ShareDialog';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 type Meeting = {
   id: string;
@@ -44,7 +45,17 @@ export function MeetingDetail() {
   const [sharing, setSharing] = useState(false);
   const [savingMem, setSavingMem] = useState(false);
   const [addedTasks, setAddedTasks] = useState<Record<number, boolean>>({});
+  const [delAudio, setDelAudio] = useState(false);
   const toast = useToast();
+
+  async function deleteAudio() {
+    setDelAudio(false);
+    const r = await fetch(`/api/meetings/${id}/audio`, { method: 'DELETE' });
+    if (r.ok) {
+      setD((p) => (p ? { ...p, hasAudio: false } : p));
+      toast('success', 'Recording deleted');
+    } else toast('error', 'Could not delete the recording');
+  }
 
   function load() {
     fetch(`/api/meetings/${id}`)
@@ -170,6 +181,9 @@ export function MeetingDetail() {
           {d.hasAudio && (
             <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
               <audio controls preload="none" className="w-full" src={`/api/meetings/${d.id}/audio`} />
+              <div className="mt-2 text-right">
+                <button onClick={() => setDelAudio(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><Trash2 size={12} /> Delete recording{transcribed ? '' : ' (transcribe first to keep the text)'}</button>
+              </div>
             </div>
           )}
 
@@ -254,6 +268,8 @@ export function MeetingDetail() {
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
+
+      {delAudio && <ConfirmDialog title="Delete recording?" message={transcribed ? 'The audio file will be removed. The transcript and summary stay.' : 'The audio will be removed and you won’t be able to transcribe it afterward.'} confirmLabel="Delete recording" onConfirm={deleteAudio} onCancel={() => setDelAudio(false)} />}
 
       {sharing && d && (
         <ShareDialog

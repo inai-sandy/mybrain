@@ -508,13 +508,15 @@ function EngineModelCard({ title, desc, icon: Icon, base }: { title: string; des
 function MeetingsEngineCard() {
   const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [engine, setEngine] = useState('deepgram');
+  const [autoDelete, setAutoDelete] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const toast = useToast();
   useEffect(() => {
-    fetch('/api/meetings/engines')
-      .then((r) => r.json())
-      .then((d) => { setEngines(d.engines || []); setEngine(d.default || 'deepgram'); })
-      .catch(() => undefined)
+    Promise.all([
+      fetch('/api/meetings/engines').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/meetings/auto-delete-audio').then((r) => r.json()).catch(() => ({})),
+    ])
+      .then(([eng, ad]) => { setEngines(eng.engines || []); setEngine(eng.default || 'deepgram'); setAutoDelete(!!ad.enabled); })
       .finally(() => setLoaded(true));
   }, []);
   if (!loaded) return null;
@@ -522,6 +524,10 @@ function MeetingsEngineCard() {
     const r = await fetch('/api/meetings/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
     if (r.ok) toast('success', 'Transcription engine saved');
     else toast('error', 'Could not save');
+  }
+  async function toggleAutoDelete(on: boolean) {
+    setAutoDelete(on);
+    await fetch('/api/meetings/auto-delete-audio', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).catch(() => undefined);
   }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
@@ -533,6 +539,10 @@ function MeetingsEngineCard() {
         <select value={engine} onChange={(e) => setEngine(e.target.value)} className={sel}>
           {engines.map((e) => <option key={e.id} value={e.id} disabled={!e.configured}>{e.name}{e.configured ? '' : ' — needs API key'}</option>)}
         </select>
+      </label>
+      <label className="mt-4 flex items-start gap-2.5 text-sm cursor-pointer">
+        <input type="checkbox" checked={autoDelete} onChange={(e) => toggleAutoDelete(e.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" />
+        <span><span className="font-medium">Delete the recording after transcribing</span><br /><span className="text-xs text-zinc-500">Frees disk on long meetings — the transcript and summary are kept. You can also delete a recording manually on its page.</span></span>
       </label>
       <div className="mt-4 text-right">
         <button onClick={save} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">Save</button>

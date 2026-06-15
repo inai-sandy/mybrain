@@ -108,6 +108,8 @@ export class MeetingsService {
           actionItems: JSON.stringify(ai.actionItems || []),
         },
       });
+      // Optionally free the recording right after a successful transcription.
+      if (await this.getAutoDeleteAudio()) await this.deleteAudio(id);
       return this.get(id);
     } catch (e) {
       this.logger.warn(`Meeting transcribe failed (${id}): ${String((e as Error)?.message || e)}`);
@@ -224,6 +226,25 @@ export class MeetingsService {
     const m = await this.prisma.meeting.findUnique({ where: { id } });
     if (!m?.audioPath) return null;
     return { path: m.audioPath, mime: m.audioMime || 'audio/webm' };
+  }
+
+  /** Delete just the recording (keep the meeting + transcript). Frees disk on long meetings. */
+  async deleteAudio(id: string) {
+    const m = await this.prisma.meeting.findUnique({ where: { id } });
+    if (!m) return null;
+    if (m.audioPath) await fs.unlink(m.audioPath).catch(() => undefined);
+    await this.prisma.meeting.update({ where: { id }, data: { audioPath: null, audioMime: null } });
+    return { ok: true };
+  }
+
+  async getAutoDeleteAudio(): Promise<boolean> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'meetings.autoDeleteAudio' } });
+    return row?.value === 'true';
+  }
+
+  async setAutoDeleteAudio(on: boolean): Promise<{ enabled: boolean }> {
+    await this.prisma.setting.upsert({ where: { key: 'meetings.autoDeleteAudio' }, create: { key: 'meetings.autoDeleteAudio', value: on ? 'true' : 'false' }, update: { value: on ? 'true' : 'false' } });
+    return { enabled: on };
   }
 
   // ---- share + memory ----
