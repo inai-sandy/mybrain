@@ -36,7 +36,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'models' | 'prompts' | 'sync' | 'appearance';
+type Tab = 'account' | 'integrations' | 'models' | 'usage' | 'prompts' | 'sync' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
@@ -44,6 +44,7 @@ export function Settings({ email }: { email?: string }) {
     { id: 'account', label: 'Account', icon: User },
     { id: 'integrations', label: 'Integrations', icon: Plug },
     { id: 'models', label: 'Models', icon: Cpu },
+    { id: 'usage', label: 'Usage', icon: Wallet },
     { id: 'prompts', label: 'Prompts', icon: MessageSquare },
     { id: 'sync', label: 'Sync', icon: RefreshCw },
     { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -76,6 +77,7 @@ export function Settings({ email }: { email?: string }) {
       {tab === 'account' && <AccountSection email={email} />}
       {tab === 'integrations' && <IntegrationsSection />}
       {tab === 'models' && <ModelsSection />}
+      {tab === 'usage' && <UsageCard />}
       {tab === 'prompts' && <PromptsSection />}
       {tab === 'sync' && <SyncSection />}
       {tab === 'appearance' && <AppearanceSection />}
@@ -339,81 +341,117 @@ const FEATURE_NAMES: Record<string, string> = {
   'day-summary': 'Day summary', 'suggested-tasks': 'Suggested tasks', 'mentor-guidance': 'Mentor guidance',
   'mentor-focus': 'Mentor focus areas', personality: 'Personality', 'voice-cleanup': 'Voice cleanup',
   'voice-transcribe': 'Voice transcription', 'capture-enrich': 'Capture enrichment', 'idea-organize': 'Ideas organizer',
-  'skill-describe': 'Skill description', other: 'Other',
+  'skill-describe': 'Skill description', 'meeting-transcribe': 'Meeting transcription', 'meeting-summary': 'Meeting summary',
+  'tasks-dedupe': 'Remove duplicate tasks', 'weekly-review': 'Weekly review', 'people-extract': 'People extraction', other: 'Other',
 };
 const fName = (f: string) => FEATURE_NAMES[f] || f;
 
 type FeatRow = { feature: string; cost: number; requests: number };
 type ReqRow = { id: string; at: string; feature: string; model: string; cost: number | null };
 
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function daysAgoStr(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); }
+
 function RequestLog() {
+  const [from, setFrom] = useState(daysAgoStr(30));
+  const [to, setTo] = useState(todayStr());
   const [feats, setFeats] = useState<{ features: FeatRow[]; totalCost: number; totalRequests: number } | null>(null);
   const [reqs, setReqs] = useState<ReqRow[]>([]);
   const [total, setTotal] = useState(0);
   const [filter, setFilter] = useState('');
+  const [page, setPage] = useState(0);
+  const PAGE = 25;
+  const range = `from=${from}&to=${to}`;
 
   useEffect(() => {
-    fetch('/api/usage/features?days=7').then((r) => r.json()).then(setFeats).catch(() => undefined);
-  }, []);
+    fetch(`/api/usage/features?${range}`).then((r) => r.json()).then(setFeats).catch(() => undefined);
+    setPage(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
   useEffect(() => {
-    fetch(`/api/usage/requests?limit=25${filter ? `&feature=${filter}` : ''}`)
+    fetch(`/api/usage/requests?limit=${PAGE}&offset=${page * PAGE}&${range}${filter ? `&feature=${filter}` : ''}`)
       .then((r) => r.json())
       .then((d) => { setReqs(d.requests || []); setTotal(d.total || 0); })
       .catch(() => undefined);
-  }, [filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, filter, page]);
 
-  async function loadMore() {
-    const r = await fetch(`/api/usage/requests?limit=25&offset=${reqs.length}${filter ? `&feature=${filter}` : ''}`);
-    if (r.ok) { const d = await r.json(); setReqs((xs) => [...xs, ...(d.requests || [])]); }
-  }
-  const maxCost = Math.max(0.000001, ...(feats?.features.map((f) => f.cost) || [0]));
+  const maxReq = Math.max(1, ...(feats?.features.map((f) => f.requests) || [0]));
+  const pages = Math.max(1, Math.ceil(total / PAGE));
+  const dateInput = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1.5 text-sm';
 
   return (
     <>
+      {/* Date range (calendar) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-zinc-400">From</span>
+        <input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className={dateInput} />
+        <span className="text-xs text-zinc-400">to</span>
+        <input type="date" value={to} min={from} max={todayStr()} onChange={(e) => setTo(e.target.value)} className={dateInput} />
+      </div>
+
+      {/* By feature (ranked by requests so transcription/Deepgram shows even with no $ figure) */}
       <div>
-        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">By feature — last 7 days{feats ? ` · ${fmtUsd(feats.totalCost)} · ${feats.totalRequests} requests` : ''}</div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">By feature{feats ? ` · ${fmtUsd(feats.totalCost)} · ${feats.totalRequests} requests` : ''}</div>
         {feats && feats.features.length ? (
           <div className="space-y-1.5">
             {feats.features.map((f) => (
-              <div key={f.feature} className="flex items-center gap-2 text-sm">
-                <span className="w-40 shrink-0 truncate text-zinc-600 dark:text-zinc-300">{fName(f.feature)}</span>
-                <div className="flex-1 h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
-                  <div className="h-full bg-emerald-500" style={{ width: `${Math.max(2, Math.round((f.cost / maxCost) * 100))}%` }} />
+              <div key={f.feature} className="flex items-center gap-2 text-sm whitespace-nowrap">
+                <span className="w-44 shrink-0 truncate text-zinc-600 dark:text-zinc-300">{fName(f.feature)}</span>
+                <div className="flex-1 min-w-[36px] h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-full bg-emerald-500" style={{ width: `${Math.max(3, Math.round((f.requests / maxReq) * 100))}%` }} />
                 </div>
-                <span className="w-20 text-right tabular-nums text-zinc-500 text-xs shrink-0">{fmtUsd(f.cost)}</span>
+                <span className="w-16 text-right tabular-nums text-zinc-500 text-xs shrink-0">{fmtUsd(f.cost)}</span>
                 <span className="w-12 text-right tabular-nums text-zinc-400 text-[11px] shrink-0">{f.requests}×</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-sm text-zinc-400">No requests logged yet — every AI call is recorded from now on, so this fills up as you use the app.</p>
+          <p className="text-sm text-zinc-400">No requests in this range.</p>
         )}
       </div>
 
+      {/* Request log — a real table; nothing wraps, scrolls sideways on small screens */}
       <div>
         <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Recent requests{total ? ` · ${total}` : ''}</div>
-          <select aria-label="Filter by feature" value={filter} onChange={(e) => setFilter(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
+          <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Requests{total ? ` · ${total}` : ''}</div>
+          <select aria-label="Filter by feature" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0); }} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
             <option value="">All features</option>
             {(feats?.features || []).map((f) => <option key={f.feature} value={f.feature}>{fName(f.feature)}</option>)}
           </select>
         </div>
         {reqs.length ? (
-          <div className="rounded-lg border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800 text-xs">
-            {reqs.map((r) => (
-              <div key={r.id} className="flex items-center gap-2 px-2.5 py-1.5">
-                <span className="w-28 shrink-0 text-zinc-400 tabular-nums">{new Date(r.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="flex-1 min-w-0 truncate text-zinc-600 dark:text-zinc-300">{fName(r.feature)}</span>
-                <span className="hidden sm:block w-40 shrink-0 truncate text-zinc-400">{r.model.replace(/^.*\//, '')}</span>
-                <span className="w-16 text-right tabular-nums shrink-0">{r.cost === null ? '—' : fmtUsd(r.cost)}</span>
-              </div>
-            ))}
+          <div className="overflow-x-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
+            <table className="w-full text-xs">
+              <thead className="text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                <tr className="text-left">
+                  <th className="px-2.5 py-1.5 font-medium whitespace-nowrap">When</th>
+                  <th className="px-2.5 py-1.5 font-medium whitespace-nowrap">Feature</th>
+                  <th className="px-2.5 py-1.5 font-medium whitespace-nowrap">Model</th>
+                  <th className="px-2.5 py-1.5 font-medium text-right whitespace-nowrap">Cost</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {reqs.map((r) => (
+                  <tr key={r.id} className="whitespace-nowrap">
+                    <td className="px-2.5 py-1.5 text-zinc-400 tabular-nums">{new Date(r.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+                    <td className="px-2.5 py-1.5 text-zinc-600 dark:text-zinc-300">{fName(r.feature)}</td>
+                    <td className="px-2.5 py-1.5 text-zinc-400 max-w-[200px] truncate">{r.model.replace(/^.*\//, '')}</td>
+                    <td className="px-2.5 py-1.5 text-right tabular-nums">{r.cost === null ? '—' : fmtUsd(r.cost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <p className="text-sm text-zinc-400">Nothing yet{filter ? ' for this feature' : ''}.</p>
+          <p className="text-sm text-zinc-400">No requests in this range{filter ? ' for this feature' : ''}.</p>
         )}
-        {reqs.length < total && (
-          <button onClick={loadMore} className="mt-2 text-xs text-emerald-600 hover:underline">Load more ({total - reqs.length} older)</button>
+        {total > PAGE && (
+          <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+            <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 disabled:opacity-40">← Prev</button>
+            <span>Page {page + 1} of {pages}</span>
+            <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={page >= pages - 1} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 disabled:opacity-40">Next →</button>
+          </div>
         )}
       </div>
     </>
@@ -423,7 +461,6 @@ function RequestLog() {
 function ModelsSection() {
   return (
     <div className="space-y-4">
-      <UsageCard />
       <AiModelCard />
       <ChatModelCard />
       <BookmarksModelCard />

@@ -13,10 +13,19 @@ export class UsageService {
   ) {}
   private cache: { at: number; data: any } | null = null;
 
-  /** Per-feature cost totals over the last `days`, from the app's own request log. */
-  async features(days = 7) {
-    const since = new Date(Date.now() - Math.max(1, Math.min(90, days)) * 86400_000);
-    const rows = await this.prisma.usageLog.findMany({ where: { at: { gte: since } }, select: { feature: true, cost: true } });
+  /** Build an `at` filter from a YYYY-MM-DD date range (inclusive). */
+  private dateFilter(from?: string, to?: string): any {
+    const at: any = {};
+    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) at.gte = new Date(from + 'T00:00:00.000');
+    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) at.lte = new Date(to + 'T23:59:59.999');
+    return Object.keys(at).length ? at : null;
+  }
+
+  /** Per-feature cost totals from the app's own request log — over a date range, else the last `days`. */
+  async features(days = 7, from?: string, to?: string) {
+    const dr = this.dateFilter(from, to);
+    const at = dr || { gte: new Date(Date.now() - Math.max(1, Math.min(366, days)) * 86400_000) };
+    const rows = await this.prisma.usageLog.findMany({ where: { at }, select: { feature: true, cost: true } });
     const map: Record<string, { cost: number; requests: number }> = {};
     for (const r of rows) {
       map[r.feature] = map[r.feature] || { cost: 0, requests: 0 };
@@ -25,13 +34,14 @@ export class UsageService {
     }
     const features = Object.entries(map)
       .map(([feature, v]) => ({ feature, cost: v.cost, requests: v.requests }))
-      .sort((a, b) => b.cost - a.cost);
-    return { days, features, totalCost: features.reduce((s, f) => s + f.cost, 0), totalRequests: rows.length };
+      .sort((a, b) => b.requests - a.requests);
+    return { days, from, to, features, totalCost: features.reduce((s, f) => s + f.cost, 0), totalRequests: rows.length };
   }
 
-  /** Recent individual requests (newest first), optionally filtered by feature. */
-  async requests(limit = 25, offset = 0, feature?: string) {
-    const where = feature ? { feature } : {};
+  /** Individual requests (newest first), optionally filtered by feature and date range. */
+  async requests(limit = 25, offset = 0, feature?: string, from?: string, to?: string) {
+    const dr = this.dateFilter(from, to);
+    const where: any = { ...(feature ? { feature } : {}), ...(dr ? { at: dr } : {}) };
     const [rows, total] = await Promise.all([
       this.prisma.usageLog.findMany({ where, orderBy: { at: 'desc' }, take: Math.max(1, Math.min(100, limit)), skip: Math.max(0, offset) }),
       this.prisma.usageLog.count({ where }),
