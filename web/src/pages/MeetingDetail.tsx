@@ -17,6 +17,7 @@ type Meeting = {
   takeaways: string[];
   decisions: string[];
   actionItems: any[];
+  tags: string[];
   language: string | null;
   savedToMemory: boolean;
   shared: boolean;
@@ -141,6 +142,11 @@ export function MeetingDetail() {
                   <input value={eTitle} onChange={(e) => setETitle(e.target.value)} className="w-full text-2xl font-extrabold rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5" />
                 ) : (
                   <h1 className="text-2xl font-extrabold tracking-tight">{d.title}</h1>
+                )}
+                {!editing && d.tags?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {d.tags.map((t) => <span key={t} className="text-[11px] rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-2 py-0.5">#{t}</span>)}
+                  </div>
                 )}
               </div>
               {!editing && (

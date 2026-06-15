@@ -11,6 +11,7 @@ type Meeting = {
   status: string;
   hasAudio: boolean;
   summary: string | null;
+  tags: string[];
   createdAt: string;
 };
 
@@ -26,6 +27,9 @@ export function Meetings() {
   const [list, setList] = useState<Meeting[] | null>(null);
   const [q, setQ] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [sort, setSort] = useState('newest');
+  const [fStatus, setFStatus] = useState('');
+  const [fTag, setFTag] = useState('');
   const [delFor, setDelFor] = useState<Meeting | null>(null);
   const navigate = useNavigate();
   const toast = useToast();
@@ -40,7 +44,18 @@ export function Meetings() {
     load();
   }, []);
 
-  const filtered = (list || []).filter((m) => !q.trim() || [m.title, m.summary].filter(Boolean).join(' ').toLowerCase().includes(q.toLowerCase()));
+  const allTags = Array.from(new Set((list || []).flatMap((m) => m.tags || []))).sort();
+  const filtered = (list || [])
+    .filter((m) => !q.trim() || [m.title, m.summary, ...(m.tags || [])].filter(Boolean).join(' ').toLowerCase().includes(q.toLowerCase()))
+    .filter((m) => !fStatus || m.status === fStatus)
+    .filter((m) => !fTag || (m.tags || []).includes(fTag))
+    .sort((a, b) => {
+      if (sort === 'oldest') return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      if (sort === 'longest') return (b.durationSec || 0) - (a.durationSec || 0);
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(); // newest
+    });
+  const hasFilters = !!(q || fStatus || fTag);
+  const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500';
 
   async function remove(m: Meeting) {
     const r = await fetch(`/api/meetings/${m.id}`, { method: 'DELETE' });
@@ -72,6 +87,30 @@ export function Meetings() {
         </div>
       )}
 
+      {/* Sort + filters */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)} className={sel}>
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="longest">Longest first</option>
+        </select>
+        <select aria-label="Filter by status" value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={sel}>
+          <option value="">All status</option>
+          <option value="recorded">Recorded</option>
+          <option value="transcribed">Transcribed</option>
+        </select>
+        {allTags.length > 0 && (
+          <select aria-label="Filter by tag" value={fTag} onChange={(e) => setFTag(e.target.value)} className={sel}>
+            <option value="">All tags</option>
+            {allTags.map((t) => <option key={t} value={t}>#{t}</option>)}
+          </select>
+        )}
+        {hasFilters && (
+          <button onClick={() => { setQ(''); setFStatus(''); setFTag(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
+        )}
+        <span className="ml-auto text-xs text-zinc-400">{filtered.length} shown</span>
+      </div>
+
       {list === null ? (
         <p className="text-sm text-zinc-400">Loading…</p>
       ) : filtered.length ? (
@@ -88,6 +127,13 @@ export function Meetings() {
                   </span>
                 </div>
                 {m.summary && <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400 line-clamp-2">{m.summary}</p>}
+                {m.tags?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {m.tags.slice(0, 5).map((t) => (
+                      <span key={t} onClick={(e) => { e.stopPropagation(); setFTag(t); }} className="text-[10px] rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-2 py-0.5 hover:text-emerald-600 cursor-pointer">#{t}</span>
+                    ))}
+                  </div>
+                )}
               </button>
               <button onClick={() => setDelFor(m)} title="Delete" className="shrink-0 p-1.5 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">
                 <Trash2 size={15} />
