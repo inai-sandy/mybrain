@@ -546,14 +546,18 @@ function MeetingsEngineCard() {
   const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [engine, setEngine] = useState('deepgram');
   const [autoDelete, setAutoDelete] = useState(false);
+  const [dgModels, setDgModels] = useState<{ id: string; name: string }[]>([]);
+  const [dgModel, setDgModel] = useState('nova-3');
   const [loaded, setLoaded] = useState(false);
   const toast = useToast();
   useEffect(() => {
     Promise.all([
       fetch('/api/meetings/engines').then((r) => r.json()).catch(() => ({})),
       fetch('/api/meetings/auto-delete-audio').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/voice/deepgram-models').then((r) => r.json()).catch(() => ({})),
+      fetch('/api/voice/deepgram-model').then((r) => r.json()).catch(() => ({})),
     ])
-      .then(([eng, ad]) => { setEngines(eng.engines || []); setEngine(eng.default || 'deepgram'); setAutoDelete(!!ad.enabled); })
+      .then(([eng, ad, dgm, dgc]) => { setEngines(eng.engines || []); setEngine(eng.default || 'deepgram'); setAutoDelete(!!ad.enabled); setDgModels(dgm.models || []); setDgModel(dgc.model || 'nova-3'); })
       .finally(() => setLoaded(true));
   }, []);
   if (!loaded) return null;
@@ -566,6 +570,11 @@ function MeetingsEngineCard() {
     setAutoDelete(on);
     await fetch('/api/meetings/auto-delete-audio', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).catch(() => undefined);
   }
+  async function pickDgModel(m: string) {
+    setDgModel(m);
+    await fetch('/api/voice/deepgram-model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) }).catch(() => undefined);
+    toast('success', 'Deepgram model saved');
+  }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
@@ -576,6 +585,17 @@ function MeetingsEngineCard() {
         <select value={engine} onChange={(e) => setEngine(e.target.value)} className={sel}>
           {engines.map((e) => <option key={e.id} value={e.id} disabled={!e.configured}>{e.name}{e.configured ? '' : ' — needs API key'}</option>)}
         </select>
+      </label>
+      <label className="mt-3 text-sm text-zinc-600 dark:text-zinc-400 block">
+        Deepgram model
+        {dgModels.length ? (
+          <select value={dgModel} onChange={(e) => pickDgModel(e.target.value)} className={sel}>
+            {!dgModels.some((m) => m.id === dgModel) && <option value={dgModel}>{dgModel}</option>}
+            {dgModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        ) : (
+          <p className="text-xs text-zinc-400 mt-1">Connect your Deepgram key in Integrations to choose from all models (currently <b>{dgModel}</b>).</p>
+        )}
       </label>
       <label className="mt-4 flex items-start gap-2.5 text-sm cursor-pointer">
         <input type="checkbox" checked={autoDelete} onChange={(e) => toggleAutoDelete(e.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" />

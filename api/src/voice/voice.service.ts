@@ -86,7 +86,8 @@ export class VoiceService {
     if (!text) return '';
     // Log the request (STT providers don't return a $ figure — cost stays in the provider totals).
     const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
-    await this.prisma.usageLog.create({ data: { feature: 'voice-transcribe', model: sttModel[used], cost: null } }).catch(() => undefined);
+    const loggedModel = used === 'deepgram' ? await this.getDeepgramModel() : sttModel[used];
+    await this.prisma.usageLog.create({ data: { feature: 'voice-transcribe', model: loggedModel, cost: null } }).catch(() => undefined);
     if (await this.cleanupOn()) text = await this.clean(text).catch(() => text);
     return (text || '').trim();
   }
@@ -99,7 +100,8 @@ export class VoiceService {
     if (!text && e !== 'openai') text = await this.run('openai', buf, filename, mime).catch(() => null);
     if (text) {
       const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
-      await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: sttModel[e], cost: null } }).catch(() => undefined);
+      const model = e === 'deepgram' ? await this.getDeepgramModel() : sttModel[e];
+      await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model, cost: null } }).catch(() => undefined);
     }
     return (text || '').trim();
   }
@@ -148,10 +150,46 @@ export class VoiceService {
     return d?.text?.trim() || null;
   }
 
+  /** The chosen Deepgram STT model (default nova-3). Used by both meeting + voice transcription. */
+  async getDeepgramModel(): Promise<string> {
+    return (await this.getSetting('voice.deepgramModel')) || 'nova-3';
+  }
+
+  async setDeepgramModel(model: string): Promise<{ model: string }> {
+    const m = (model || 'nova-3').trim().replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 60) || 'nova-3';
+    await this.setSetting('voice.deepgramModel', m);
+    return { model: m };
+  }
+
+  /** Live list of Deepgram's speech-to-text models (needs the Deepgram key). */
+  async deepgramModels(): Promise<{ id: string; name: string }[]> {
+    const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
+    if (!c?.apiKey) return [];
+    try {
+      const r = await fetch('https://api.deepgram.com/v1/models', { headers: { Authorization: `Token ${c.apiKey}` } });
+      if (!r.ok) return [];
+      const d: any = await r.json();
+      const stt = Array.isArray(d?.stt) ? d.stt : [];
+      const seen = new Set<string>();
+      return stt
+        .map((m: any) => {
+          const id = m.canonical_name || m.name;
+          const langs = Array.isArray(m.languages) ? m.languages : [];
+          const langTxt = langs.length ? ` · ${langs.slice(0, 3).join(', ')}${langs.length > 3 ? '…' : ''}` : '';
+          return { id, name: `${m.name}${langTxt}` };
+        })
+        .filter((x: any) => x.id && !seen.has(x.id) && seen.add(x.id))
+        .sort((a: any, b: any) => a.name.localeCompare(b.name));
+    } catch {
+      return [];
+    }
+  }
+
   private async deepgram(buf: Buffer, mime: string): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('deepgram');
     if (!c?.apiKey) return null;
-    const r = await fetch('https://api.deepgram.com/v1/listen?model=nova-3&smart_format=true&punctuate=true', {
+    const model = await this.getDeepgramModel();
+    const r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true`, {
       method: 'POST',
       headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime || 'audio/webm' },
       body: new Uint8Array(buf),

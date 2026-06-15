@@ -35,4 +35,20 @@ export class VoiceController {
   async setLanguage(@Body() body: { language?: string }) {
     return this.voice.setLanguage(body?.language || '');
   }
+
+  // --- Deepgram model (live list + current choice) ---
+  @Get('deepgram-models')
+  async deepgramModels() {
+    return { models: await this.voice.deepgramModels() };
+  }
+
+  @Get('deepgram-model')
+  async getDeepgramModel() {
+    return { model: await this.voice.getDeepgramModel() };
+  }
+
+  @Put('deepgram-model')
+  async setDeepgramModel(@Body() body: { model?: string }) {
+    return this.voice.setDeepgramModel(body?.model || '');
+  }
 }
