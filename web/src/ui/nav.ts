@@ -1,4 +1,4 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, Compass, StickyNote, Mic, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, Compass, StickyNote, Mic, Mail, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -12,6 +12,7 @@ export const NAV: NavItem[] = [
   { to: '/today', label: 'Today', icon: Sun },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/meetings', label: 'Meetings', icon: Mic },
+  { to: '/google', label: 'Google', icon: Mail },
   { to: '/notes', label: 'Notes', icon: StickyNote },
   { to: '/chat', label: 'Chat', icon: MessageCircle },
   { to: '/activity', label: 'Activity', icon: Activity },
