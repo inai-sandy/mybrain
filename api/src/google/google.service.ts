@@ -111,4 +111,48 @@ export class GoogleService {
     const { item } = await this.items.store(text, 'gmail', subject, undefined, ['email']);
     return { id: item.id, title: item.title };
   }
+
+  // ---- Drive / Docs / Sheets ----
+
+  async driveList(q?: string): Promise<{ id: string; name: string; mimeType: string; modified: string; link: string }[]> {
+    const query = q?.trim() ? `name contains '${q.trim().replace(/'/g, "\\'")}' and trashed=false` : 'trashed=false';
+    const params = JSON.stringify({ q: query, pageSize: 20, orderBy: 'modifiedTime desc', fields: 'files(id,name,mimeType,modifiedTime,webViewLink)' });
+    const r = await this.run(['drive', 'files', 'list', '--params', params, '--format', 'json']);
+    return ((r?.files as any[]) || []).map((f) => ({ id: f.id, name: f.name, mimeType: f.mimeType, modified: f.modifiedTime, link: f.webViewLink }));
+  }
+
+  /** Import a Drive file's text into Capture. Google Docs/Sheets/Slides are exported; text files downloaded. */
+  async driveImport(id: string): Promise<{ id: string; title: string }> {
+    const meta = await this.run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, fields: 'id,name,mimeType,webViewLink' }), '--format', 'json']);
+    const name = meta?.name || 'Drive file';
+    const mt = String(meta?.mimeType || '');
+    const exportMap: Record<string, string> = {
+      'application/vnd.google-apps.document': 'text/plain',
+      'application/vnd.google-apps.spreadsheet': 'text/csv',
+      'application/vnd.google-apps.presentation': 'text/plain',
+    };
+    let content = '';
+    if (exportMap[mt]) {
+      content = String((await this.run(['drive', 'files', 'export', '--params', JSON.stringify({ fileId: id, mimeType: exportMap[mt] })])) || '');
+    } else if (mt.startsWith('text/')) {
+      content = String((await this.run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, alt: 'media' })])) || '');
+    } else {
+      throw new Error(`Can’t import a “${mt || 'file of this type'}” yet — only Google Docs/Sheets/Slides and text files.`);
+    }
+    if (!content.trim()) throw new Error('That file appears to be empty.');
+    const { item } = await this.items.store(content, 'gdrive', name, meta?.webViewLink || undefined, ['drive']);
+    return { id: item.id, title: item.title };
+  }
+
+  /** Create a NEW Google Doc with the given text (safe write — never edits existing files). */
+  async docCreate(title: string, content: string): Promise<{ id: string; link: string }> {
+    const doc = await this.run(['docs', 'documents', 'create', '--json', JSON.stringify({ title: (title || 'Untitled').slice(0, 200) }), '--format', 'json']);
+    const docId = doc?.documentId;
+    if (!docId) throw new Error('Could not create the document.');
+    if (content?.trim()) {
+      const body = JSON.stringify({ requests: [{ insertText: { location: { index: 1 }, text: content.slice(0, 100000) } }] });
+      await this.run(['docs', 'documents', 'batchUpdate', '--params', JSON.stringify({ documentId: docId }), '--json', body, '--format', 'json']);
+    }
+    return { id: docId, link: `https://docs.google.com/document/d/${docId}/edit` };
+  }
 }

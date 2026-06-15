@@ -36,4 +36,32 @@ export class GoogleController {
       mapErr(e);
     }
   }
+
+  // ---- Drive / Docs / Sheets ----
+  @Get('drive')
+  async drive(@Query('q') q?: string) {
+    try {
+      return { files: await this.google.driveList(q) };
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('drive/:id/import')
+  async driveImport(@Param('id') id: string) {
+    try {
+      return await this.google.driveImport(id);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('docs/create')
+  async docCreate(@Body() body: { title?: string; content?: string }) {
+    try {
+      return await this.google.docCreate(body?.title || 'Untitled', body?.content || '');
+    } catch (e) {
+      mapErr(e);
+    }
+  }
 }
