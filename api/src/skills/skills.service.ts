@@ -129,7 +129,19 @@ export class SkillsService {
   async getShared(id: string) {
     const s = await this.prisma.skill.findUnique({ where: { id } });
     if (!s || !s.shared) return null;
-    return { title: s.title, description: s.description, platform: s.platform, origin: s.origin, downloadUrl: s.downloadUrl, hasFile: !!s.filePath || !!s.content };
+    const slug = (s.slug || s.title || 'skill').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 80) || 'skill';
+    const isZip = !!(s.filePath && s.filePath.toLowerCase().endsWith('.zip'));
+    return {
+      title: s.title,
+      description: s.description,
+      platform: s.platform,
+      origin: s.origin,
+      downloadUrl: s.downloadUrl,
+      hasFile: !!s.filePath || !!s.content,
+      content: s.content || null,
+      slug,
+      isZip,
+    };
   }
 
   /** Store an uploaded skill file (.zip/.md). For text files, also keep the content + AI-describe if empty. */
