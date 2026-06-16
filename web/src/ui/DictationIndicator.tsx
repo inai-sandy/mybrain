@@ -1,9 +1,9 @@
 import { useDictationStatus } from './useDictation';
-import { Mic, Loader2 } from 'lucide-react';
+import { Mic, Loader2, Square } from 'lucide-react';
 
 /** A single global banner showing whichever mic is active: the live transcript while listening, or a tidy-up spinner. */
 export function DictationIndicator() {
-  const { phase, interim } = useDictationStatus();
+  const { phase, interim, stop } = useDictationStatus();
   if (phase === 'idle') return null;
 
   if (phase === 'transcribing') {
@@ -24,7 +24,10 @@ export function DictationIndicator() {
             <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
           </span>
           <Mic size={14} className="shrink-0 text-rose-300" />
-          <span className="text-xs font-medium text-rose-200">Listening — hold &amp; speak, release when done</span>
+          <span className="flex-1 text-xs font-medium text-rose-200">Listening…</span>
+          <button onPointerDown={(e) => { e.preventDefault(); stop(); }} onClick={() => stop()} className="shrink-0 inline-flex items-center gap-1 rounded-full bg-rose-500 hover:bg-rose-400 px-3 py-1 text-xs font-semibold text-white">
+            <Square size={10} className="fill-white" /> Stop
+          </button>
         </div>
         <div className="text-sm leading-relaxed max-h-24 overflow-y-auto">
           {interim ? interim : <span className="text-zinc-400">Start speaking…</span>}

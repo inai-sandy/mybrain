@@ -57,6 +57,7 @@ export function useDictation(onText: (text: string) => void) {
   const chunksRef = useRef<Blob[]>([]);
   const modeRef = useRef<'stream' | 'batch' | null>(null);
   const capRef = useRef<any>(null);
+  const runningRef = useRef(false); // synchronous guard (React state can be stale in event closures)
   const [active, setActive] = useState(false);
 
   const supported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof window !== 'undefined' && typeof (window as any).MediaRecorder !== 'undefined';
@@ -211,7 +212,8 @@ export function useDictation(onText: (text: string) => void) {
   }
 
   async function start() {
-    if (active) return;
+    if (runningRef.current) return;
+    runningRef.current = true;
     finalRef.current = '';
     interimRef.current = '';
     preBufRef.current = [];
@@ -244,6 +246,7 @@ export function useDictation(onText: (text: string) => void) {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } as any });
     } catch {
       stopCapture();
+      runningRef.current = false;
       setActive(false);
       setStatus({ listening: false, phase: 'idle', interim: '' });
       return;
@@ -283,22 +286,23 @@ export function useDictation(onText: (text: string) => void) {
   }
 
   async function stop() {
-    if (!active) return;
+    if (!runningRef.current) return;
+    runningRef.current = false;
     setActive(false);
 
     const blobP = stopRecorder(); // begin finishing the safety recording
     const wasStream = modeRef.current === 'stream';
     stopCapture(); // halt PCM/ctx immediately
+    releaseStream(); // turn the mic OFF immediately on release (don't wait for the socket to close)
 
     if (!wasStream) {
       const blob = await blobP;
-      releaseStream();
       chunksRef.current = [];
       await batchTranscribe(blob);
       return;
     }
 
-    // streaming: tell Deepgram we're done, gather trailing finals.
+    // streaming: tell Deepgram we're done, gather any trailing finals (brief).
     const ws = wsRef.current;
     wsRef.current = null;
     await new Promise<void>((resolve) => {
@@ -320,7 +324,7 @@ export function useDictation(onText: (text: string) => void) {
       } catch {
         /* ignore */
       }
-      setTimeout(fin, 1500);
+      setTimeout(fin, 1000);
     });
 
     const streamed = liveText();
