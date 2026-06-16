@@ -24,7 +24,7 @@ export function DictationIndicator() {
             <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500" />
           </span>
           <Mic size={14} className="shrink-0 text-rose-300" />
-          <span className="flex-1 text-xs font-medium text-rose-200">Listening…</span>
+          <span className="flex-1 text-xs font-medium text-rose-200">Listening… <span className="text-[9px] text-zinc-500">build {__APP_BUILD__}</span></span>
           <button onPointerDown={(e) => { e.preventDefault(); stop(); }} onClick={() => stop()} className="shrink-0 inline-flex items-center gap-1 rounded-full bg-rose-500 hover:bg-rose-400 px-3 py-1 text-xs font-semibold text-white">
             <Square size={10} className="fill-white" /> Stop
           </button>

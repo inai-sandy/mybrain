@@ -253,9 +253,6 @@ export function useDictation(onText: (text: string) => void) {
     }
     streamRef.current = stream;
 
-    // 3) Always record in parallel (accuracy safety-net).
-    startRecorder(stream);
-
     const tok: any = await tokenP;
     const canStream = !!tok?.available && !!tok?.token && !!ctx;
     if (canStream && ctx) {
@@ -273,6 +270,7 @@ export function useDictation(onText: (text: string) => void) {
       }
     }
     if (modeRef.current !== 'stream') {
+      // No live streaming available → record the clip and transcribe on release (only here do we use the mic recorder).
       modeRef.current = 'batch';
       try {
         ctx?.close();
@@ -280,6 +278,7 @@ export function useDictation(onText: (text: string) => void) {
         /* ignore */
       }
       ctxRef.current = null;
+      startRecorder(stream);
     }
 
     capRef.current = setTimeout(() => stop(), MAX_MS);
@@ -289,56 +288,44 @@ export function useDictation(onText: (text: string) => void) {
     if (!runningRef.current) return;
     runningRef.current = false;
     setActive(false);
-
-    const blobP = stopRecorder(); // begin finishing the safety recording
     const wasStream = modeRef.current === 'stream';
-    stopCapture(); // halt PCM/ctx immediately
-    releaseStream(); // turn the mic OFF immediately on release (don't wait for the socket to close)
+    // Drop the "Listening" UI the instant we stop (don't keep it up while finishing).
+    setStatus({ listening: false, phase: 'transcribing', interim: wasStream ? liveText() || 'Finishing…' : 'Transcribing…' });
+    stopCapture();
 
-    if (!wasStream) {
-      const blob = await blobP;
-      chunksRef.current = [];
-      await batchTranscribe(blob);
-      return;
-    }
-
-    // streaming: tell Deepgram we're done, gather any trailing finals (brief).
-    const ws = wsRef.current;
-    wsRef.current = null;
-    await new Promise<void>((resolve) => {
-      if (!ws || (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING)) return resolve();
-      let done = false;
-      const fin = () => {
-        if (done) return;
-        done = true;
+    if (wasStream) {
+      releaseStream(); // mic OFF immediately — single consumer, nothing else holding it
+      const ws = wsRef.current;
+      wsRef.current = null;
+      await new Promise<void>((resolve) => {
+        if (!ws || (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING)) return resolve();
+        let done = false;
+        const fin = () => {
+          if (done) return;
+          done = true;
+          try {
+            ws.close();
+          } catch {
+            /* ignore */
+          }
+          resolve();
+        };
+        ws.addEventListener('close', fin);
         try {
-          ws.close();
+          ws.send(JSON.stringify({ type: 'CloseStream' }));
         } catch {
           /* ignore */
         }
-        resolve();
-      };
-      ws.addEventListener('close', fin);
-      try {
-        ws.send(JSON.stringify({ type: 'CloseStream' }));
-      } catch {
-        /* ignore */
-      }
-      setTimeout(fin, 1000);
-    });
-
-    const streamed = liveText();
-    if (streamed.replace(/\s/g, '').length >= 2) {
-      // Streaming worked → insert instantly (Deepgram already formatted it; tidy fillers locally).
-      onText(tidy(streamed) + ' ');
+        setTimeout(fin, 800);
+      });
+      const streamed = liveText();
+      if (streamed.replace(/\s/g, '').length >= 1) onText(tidy(streamed) + ' ');
       setStatus({ listening: false, phase: 'idle', interim: '' });
-      blobP.then(() => undefined).catch(() => undefined); // let the safety recording wind down in the background
-      releaseStream();
-      chunksRef.current = [];
       return;
     }
-    // Streaming caught nothing → fall back to transcribing the recording.
-    const blob = await blobP;
+
+    // batch (no live streaming): flush the recording first, then release the mic + transcribe.
+    const blob = await stopRecorder();
     releaseStream();
     chunksRef.current = [];
     await batchTranscribe(blob);

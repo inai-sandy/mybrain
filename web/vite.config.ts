@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // Build fingerprint (UTC MM-DD HH:MM) — shown in the dictation bar so we can confirm the live version.
+  define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(5, 16).replace('T', ' ')) },
   plugins: [
     react(),
     VitePWA({
