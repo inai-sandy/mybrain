@@ -189,6 +189,35 @@ export class VoiceService {
     }
   }
 
+  /** Mint a short-lived Deepgram token so the browser can stream audio directly (key stays server-side).
+   *  Returns null when Deepgram isn't configured → the client falls back to record-then-transcribe. */
+  async streamToken(): Promise<{ token: string; model: string; expiresIn: number } | null> {
+    const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
+    if (!c?.apiKey) return null;
+    try {
+      const r = await fetch('https://api.deepgram.com/v1/auth/grant', {
+        method: 'POST',
+        headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ttl_seconds: 60 }),
+      });
+      if (!r.ok) return null;
+      const d: any = await r.json();
+      if (!d?.access_token) return null;
+      await this.prisma.usageLog.create({ data: { feature: 'voice-stream', model: await this.getDeepgramModel(), cost: null } }).catch(() => undefined);
+      return { token: d.access_token, model: await this.getDeepgramModel(), expiresIn: Number(d.expires_in) || 60 };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Clean a streamed transcript with the AI tidy-up (respects the user's cleanup setting). */
+  async cleanText(text: string): Promise<string> {
+    const raw = (text || '').trim();
+    if (!raw) return '';
+    if (!(await this.cleanupOn())) return raw;
+    return (await this.clean(raw).catch(() => raw)).trim();
+  }
+
   private async deepgram(buf: Buffer, mime: string): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('deepgram');
     if (!c?.apiKey) return null;

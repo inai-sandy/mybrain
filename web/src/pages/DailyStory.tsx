@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Moon, X, Mic, BookOpen, Plus, Trash2, MessageSquare } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { useDictation, isDictating } from '../ui/useDictation';
+import { isDictating } from '../ui/useDictation';
+import { DictateButton } from '../ui/DictateButton';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { Sheet } from '../ui/Sheet';
 
@@ -22,7 +23,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
   const [mood, setMood] = useState(initial?.mood || '');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  const { supported, listening, toggle } = useDictation((chunk) => setText((t) => (t ? t + ' ' : '') + chunk));
+  const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
   async function save() {
     if (!text.trim()) return;
@@ -60,11 +61,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
               placeholder="Today started slow… the proposal took longer than I thought but I finally cracked the pricing section. Felt good. Skipped the gym again though…"
               className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-12 text-sm outline-none focus:border-indigo-500"
             />
-            {supported && (
-              <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-indigo-500')}>
-                <Mic size={16} />
-              </button>
-            )}
+            <DictateButton onText={appendText} className="absolute right-2 top-2" />
           </div>
           <div className="mt-3">
             <p className="text-xs text-zinc-500 mb-1.5">How did the day feel?</p>
@@ -94,7 +91,7 @@ export function StorySection() {
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState('');
   const toast = useToast();
-  const { supported, listening, toggle } = useDictation((chunk) => setNote((t) => (t ? t + ' ' : '') + chunk));
+  const appendNote = (chunk: string) => setNote((t) => (t ? t + ' ' : '') + chunk);
 
   async function load() {
     try {
@@ -138,11 +135,7 @@ export function StorySection() {
             placeholder="Speak or type a quick note…"
             className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
           />
-          {supported && (
-            <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'p-2 rounded-lg ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-emerald-600')}>
-              <Mic size={16} />
-            </button>
-          )}
+          <DictateButton onText={appendNote} />
           <button onClick={addNote} disabled={!note.trim()} className="p-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"><Plus size={16} /></button>
         </div>
         {notes.length > 0 && (

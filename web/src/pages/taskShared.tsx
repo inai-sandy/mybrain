@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { useDictation, isDictating } from '../ui/useDictation';
+import { isDictating } from '../ui/useDictation';
+import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
 import { motion } from 'framer-motion';
 
@@ -141,7 +142,7 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onC
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState<string | null>(initialQuestion);
   const toast = useToast();
-  const { supported, listening, toggle } = useDictation((chunk) => setText((t) => (t ? t + ' ' : '') + chunk));
+  const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
   async function submit() {
     if (!text.trim()) return;
@@ -195,13 +196,9 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onC
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit();
               }}
             />
-            {supported && (
-              <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-emerald-600')}>
-                <Mic size={16} />
-              </button>
-            )}
+            <DictateButton onText={appendText} className="absolute right-2 top-2" />
           </div>
-          {supported && <p className="mt-1 text-[11px] text-zinc-400">{listening ? 'Listening… just speak; it finishes when you pause.' : 'Tap the mic and speak — no need to stop.'}</p>}
+          <p className="mt-1 text-[11px] text-zinc-400">Hold the mic and speak — release when you're done.</p>
           <div className="mt-3 flex justify-end gap-2">
             <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
             <button onClick={submit} disabled={busy || !text.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">

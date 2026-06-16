@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, Pin, Archive, ArchiveRestore, Trash2, X, Mic, ListChecks, Tag as TagIcon, StickyNote, LayoutGrid, List as ListIcon } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { useDictation } from '../ui/useDictation';
+import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
 import { GrowTextarea } from '../ui/GrowTextarea';
 
@@ -210,7 +210,7 @@ function NoteEditor({ note, allTags, onClose, onSaved }: { note: Note | null; al
   const [tagInput, setTagInput] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  const { supported, listening, toggle } = useDictation((chunk) => setContent((c) => (c ? c + ' ' : '') + chunk));
+  const appendContent = (chunk: string) => setContent((c) => (c ? c + ' ' : '') + chunk);
 
   function addTag(raw: string) {
     const t = raw.toLowerCase().trim().replace(/^#/, '');
@@ -251,9 +251,7 @@ function NoteEditor({ note, allTags, onClose, onSaved }: { note: Note | null; al
 
           <div className="relative mt-2">
             <GrowTextarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Take a note…" rows={3} className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 pr-11 text-sm outline-none focus:border-amber-500" />
-            {supported && (
-              <button onClick={toggle} title={listening ? 'Stop' : 'Speak'} className={'absolute right-2 top-2 p-2 rounded-full ' + (listening ? 'bg-rose-500 text-white animate-pulse' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-500 hover:text-amber-600')}><Mic size={15} /></button>
-            )}
+            <DictateButton onText={appendContent} size={15} className="absolute right-2 top-2" />
           </div>
 
           {/* Checklist */}

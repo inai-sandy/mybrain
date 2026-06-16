@@ -15,6 +15,19 @@ export class VoiceController {
     return { text };
   }
 
+  /** Mint a short-lived Deepgram streaming token for the in-app live mic (key stays server-side). */
+  @Post('stream-token')
+  async streamToken() {
+    const t = await this.voice.streamToken();
+    return t ? { available: true, ...t } : { available: false };
+  }
+
+  /** AI tidy-up for a streamed transcript (punctuation, filler removal). */
+  @Post('clean')
+  async clean(@Body() body: { text?: string }) {
+    return { text: await this.voice.cleanText((body?.text || '').slice(0, 20000)) };
+  }
+
   @Get('config')
   async config() {
     return this.voice.config();
