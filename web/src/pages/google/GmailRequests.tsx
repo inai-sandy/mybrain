@@ -88,6 +88,7 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [threads, setThreads] = useState<Thread[] | null>(null);
+  const [gmailQuery, setGmailQuery] = useState('');
   const [building, setBuilding] = useState<string | null>(null);
   const toast = useToast();
 
@@ -100,6 +101,7 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || 'Search failed');
       setThreads(d.threads || []);
+      setGmailQuery(d.gmailQuery || '');
     } catch (e: any) {
       toast('error', e.message || 'Search failed');
     } finally {
@@ -146,7 +148,10 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
               <p className="text-sm text-zinc-400">Type what you’re looking for, then tap <b>Search</b>.</p>
             ) : threads.length ? (
               <>
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">Pick the right thread</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Pick the right thread</div>
+                  {gmailQuery && <span className="text-[11px] text-zinc-400">searched: <code className="rounded bg-zinc-100 dark:bg-zinc-800 px-1">{gmailQuery}</code></span>}
+                </div>
                 <ul className="space-y-2">
                   {threads.map((t) => (
                     <li key={t.threadId}>

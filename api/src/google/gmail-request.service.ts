@@ -8,6 +8,18 @@ import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
 
 const MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+const QUERY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }; // tiny job: NL → Gmail query
+
+/** Strip filler words as a safe fallback when the AI query step is unavailable. */
+const STOPWORDS = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'there', 'here', 'this', 'that', 'these', 'those', 'i', 'me', 'my', 'we', 'our', 'find', 'show', 'search', 'email', 'emails', 'mail', 'about', 'regarding', 'related', 'to', 'of', 'for', 'on', 'in', 'and', 'or', 'with', 'please', 'any', 'some', 'me', 'where', 'which', 'discussion', 'thread', 'get', 'give']);
+function keywordize(nl: string): string {
+  const words = nl
+    .toLowerCase()
+    .replace(/[^a-z0-9@.\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !STOPWORDS.has(w));
+  return (words.length ? words : nl.split(/\s+/)).join(' ').trim();
+}
 
 type Thread = { subject: string; copy: string; messages: { from: string; date: string; body: string }[] };
 
@@ -23,11 +35,27 @@ export class GmailRequestService {
     private readonly tasks: TasksService,
   ) {}
 
+  /** Turn a natural-language ask into a tight Gmail query (keywords + safe operators). */
+  private async buildGmailQuery(nl: string): Promise<string> {
+    const raw = (nl || '').trim();
+    if (!raw) return '';
+    const prompt =
+      `Convert this natural-language request into a concise Gmail search query.\n` +
+      `Rules: keep ONLY the meaningful keywords; drop filler words (there is, an email, regarding, about, please, find, show, etc.). ` +
+      `You MAY use Gmail operators (from:, to:, subject:, has:attachment, after:YYYY/MM/DD) only when clearly implied by the request. ` +
+      `Do NOT add quotes unless a multi-word phrase must stay exact. Return ONLY the query on a single line, nothing else.\n\n` +
+      `Request: ${raw}\nGmail query:`;
+    const out = (await this.llm.completeWith(QUERY_MODEL, prompt, 60, 'gmail-query'))?.trim() || '';
+    const cleaned = out.split('\n')[0].replace(/^["'`]+|["'`]+$/g, '').replace(/^Gmail query:\s*/i, '').trim();
+    return cleaned || keywordize(raw);
+  }
+
   /** Step 1 — find the top matching threads for the user to pick from. */
   async search(query: string) {
     const q = (query || '').trim();
-    if (!q) return { threads: [] };
-    return { threads: await this.google.gmailSearchThreads(q, 5) };
+    if (!q) return { threads: [], gmailQuery: '' };
+    const gmailQuery = await this.buildGmailQuery(q);
+    return { threads: await this.google.gmailSearchThreads(gmailQuery || q, 5), gmailQuery };
   }
 
   private shape(r: any) {
@@ -86,7 +114,8 @@ export class GmailRequestService {
     if (!r) return null;
     let threadId = r.threadId;
     if (!threadId) {
-      const hits = await this.google.gmailSearchThreads(r.query, 1);
+      const gq = await this.buildGmailQuery(r.query);
+      const hits = await this.google.gmailSearchThreads(gq || r.query, 1);
       threadId = hits[0]?.threadId || null;
     }
     if (!threadId) return this.shape(r);
