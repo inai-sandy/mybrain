@@ -1,6 +1,8 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, ServiceUnavailableException } from '@nestjs/common';
 import { GoogleService } from './google.service';
 import { GmailBriefService } from './gmail-brief.service';
+import { GmailRequestService } from './gmail-request.service';
+import { Public } from '../auth/public.decorator';
 
 /** Map internal gws errors to friendly HTTP errors. */
 function mapErr(e: any): never {
@@ -15,7 +17,107 @@ export class GoogleController {
   constructor(
     private readonly google: GoogleService,
     private readonly brief: GmailBriefService,
+    private readonly requests: GmailRequestService,
   ) {}
+
+  // ---- Gmail Requests (public shared read first so it isn't shadowed) ----
+  @Public()
+  @Get('gmail/requests/shared/:shareId')
+  async requestShared(@Param('shareId') shareId: string) {
+    const doc = await this.requests.getShared(shareId);
+    if (!doc) throw new NotFoundException('This link is not shared (or no longer shared).');
+    return doc;
+  }
+
+  @Post('gmail/requests/search')
+  async requestSearch(@Body() body: { query?: string }) {
+    try {
+      return await this.requests.search(body?.query || '');
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('gmail/requests')
+  async requestCreate(@Body() body: { query?: string; threadId?: string; title?: string }) {
+    try {
+      if (!body?.threadId) throw new BadRequestException('Pick an email thread first.');
+      return await this.requests.create(body.query || '', body.threadId, body.title);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Get('gmail/requests')
+  async requestList() {
+    return this.requests.list();
+  }
+
+  @Get('gmail/requests/:id')
+  async requestGet(@Param('id') id: string) {
+    const r = await this.requests.get(id);
+    if (!r) throw new NotFoundException('Request not found.');
+    return r;
+  }
+
+  @Post('gmail/requests/:id/refresh')
+  async requestRefresh(@Param('id') id: string) {
+    try {
+      const r = await this.requests.refresh(id);
+      if (!r) throw new NotFoundException('Request not found.');
+      return r;
+    } catch (e) {
+      if (e instanceof NotFoundException) throw e;
+      mapErr(e);
+    }
+  }
+
+  @Patch('gmail/requests/:id')
+  async requestRename(@Param('id') id: string, @Body() body: { title?: string }) {
+    const r = await this.requests.rename(id, body?.title || '');
+    if (!r) throw new NotFoundException('Request not found.');
+    return r;
+  }
+
+  @Delete('gmail/requests/:id')
+  async requestDelete(@Param('id') id: string) {
+    return this.requests.remove(id);
+  }
+
+  @Post('gmail/requests/:id/share')
+  async requestShare(@Param('id') id: string, @Body() body: { shared?: boolean }) {
+    const r = await this.requests.setShared(id, body?.shared !== false);
+    if (!r) throw new NotFoundException('Request not found.');
+    return r;
+  }
+
+  @Post('gmail/requests/:id/memory')
+  async requestMemory(@Param('id') id: string) {
+    const r = await this.requests.saveMemory(id);
+    if (!r) throw new NotFoundException('Request not found.');
+    return r;
+  }
+
+  @Post('gmail/requests/:id/capture')
+  async requestCapture(@Param('id') id: string) {
+    try {
+      const r = await this.requests.importCapture(id);
+      if (!r) throw new NotFoundException('Request not found.');
+      return r;
+    } catch (e) {
+      if (e instanceof NotFoundException) throw e;
+      mapErr(e);
+    }
+  }
+
+  @Post('gmail/requests/:id/tasks')
+  async requestTasks(@Param('id') id: string) {
+    try {
+      return await this.requests.toTasks(id);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
 
   @Get('status')
   async status() {

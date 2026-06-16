@@ -26,6 +26,7 @@ import { MeetingDetail } from './pages/MeetingDetail';
 import { MeetingViewer } from './pages/MeetingViewer';
 import { GoogleHome } from './pages/google/GoogleHome';
 import { GoogleService } from './pages/google/GoogleService';
+import { RequestViewer } from './pages/RequestViewer';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/view/:id" element={<Viewer />} />
           <Route path="/skill/:id" element={<SkillViewer />} />
           <Route path="/meeting-view/:id" element={<MeetingViewer />} />
+          <Route path="/request-view/:shareId" element={<RequestViewer />} />
           {/* Everything else is behind auth. */}
           <Route path="/*" element={<AuthedApp />} />
         </Routes>

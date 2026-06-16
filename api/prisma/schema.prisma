@@ -384,6 +384,23 @@ model GmailBrief {
   updatedAt   DateTime @updatedAt
 }
 
+/// A saved "Gmail request": a natural-language email search turned into an AI briefing of one thread.
+/// Frozen snapshot (Refresh re-runs it). Optionally shared via a public link, saved to memory, etc.
+model GmailRequest {
+  id            String   @id @default(uuid())
+  query         String // the natural-language ask
+  title         String // auto-titled from the query; user-renamable
+  threadId      String? // the chosen Gmail thread
+  threadSubject String?
+  summary       String   @default("") // AI description + key points (markdown)
+  emailCopy     String? // the relevant email copy used to build the summary
+  shared        Boolean  @default(false)
+  shareId       String?  @unique // public token for the share link
+  itemId        String? // set if imported to Capture
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 /// A recorded meeting. Audio is captured first; transcription + AI summary are opt-in (ticket B).
 model Meeting {
   id            String    @id @default(uuid())

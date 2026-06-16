@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, Sparkles, Inbox } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
+import { RequestsSection } from './GmailRequests';
 
 export function fmtWhen(iso: string | null) {
   if (!iso) return '';
@@ -45,6 +46,15 @@ function hhmm(t: string): string {
 }
 
 export function GmailPanel() {
+  return (
+    <div className="space-y-4">
+      <DailyBriefCard />
+      <RequestsSection />
+    </div>
+  );
+}
+
+function DailyBriefCard() {
   const [today, setToday] = useState<string | null>(null);
   const [day, setDay] = useState<string | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);

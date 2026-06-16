@@ -197,6 +197,43 @@ export class GoogleService {
     return { id: item.id, title: item.title };
   }
 
+  /** Search Gmail and return up to `max` distinct matching threads (newest message per thread). */
+  async gmailSearchThreads(query: string, max = 5): Promise<{ threadId: string; subject: string; from: string; date: string; snippet: string }[]> {
+    const params = JSON.stringify({ userId: 'me', q: query, maxResults: 20 });
+    const list = await this.run(['gmail', 'users', 'messages', 'list', '--params', params, '--format', 'json']);
+    const ids: string[] = ((list?.messages as any[]) || []).map((m) => m.id).filter(Boolean).slice(0, 20);
+    const seen = new Set<string>();
+    const out: { threadId: string; subject: string; from: string; date: string; snippet: string }[] = [];
+    for (const id of ids) {
+      if (out.length >= max) break;
+      try {
+        const p = JSON.stringify({ userId: 'me', id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] });
+        const m = await this.run(['gmail', 'users', 'messages', 'get', '--params', p, '--format', 'json']);
+        const tid = m?.threadId || id;
+        if (seen.has(tid)) continue;
+        seen.add(tid);
+        const h = headerMap(m?.payload);
+        out.push({ threadId: tid, subject: h.subject || '(no subject)', from: h.from || '', date: h.date || '', snippet: m?.snippet || '' });
+      } catch {
+        /* skip */
+      }
+    }
+    return out;
+  }
+
+  /** Fetch a whole Gmail thread as readable text (subject + each message's from/date/body). */
+  async gmailThread(threadId: string): Promise<{ subject: string; copy: string; messages: { from: string; date: string; body: string }[] }> {
+    const p = JSON.stringify({ userId: 'me', id: threadId, format: 'full' });
+    const t = await this.run(['gmail', 'users', 'threads', 'get', '--params', p, '--format', 'json']);
+    const messages = ((t?.messages as any[]) || []).map((m) => {
+      const h = headerMap(m?.payload);
+      return { from: h.from || '', date: h.date || '', subject: h.subject || '', body: (extractBody(m?.payload) || m?.snippet || '').slice(0, 8000) };
+    });
+    const subject = messages.find((m) => m.subject)?.subject || '(no subject)';
+    const copy = messages.map((m) => `From: ${m.from}\nDate: ${m.date}\n\n${m.body}`).join('\n\n— — — — —\n\n');
+    return { subject, copy, messages };
+  }
+
   // ---- Drive / Docs / Sheets ----
 
   async driveList(q?: string): Promise<{ id: string; name: string; mimeType: string; modified: string; link: string }[]> {
