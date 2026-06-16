@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'framer-motion';
 import { lockBodyScroll, unlockBodyScroll } from './scrollLock';
 
@@ -22,8 +22,12 @@ export function Sheet({
   const [show, setShow] = useState(true);
   const reduce = useReducedMotion();
   const controls = useDragControls();
+  // Ignore close for a beat after opening so the very tap that opened the sheet can't fall through
+  // onto the just-mounted backdrop and dismiss it instantly (mobile tap-through).
+  const openedAt = useRef(Date.now());
   const allow = () => (canClose ? canClose() : true);
   const requestClose = () => {
+    if (Date.now() - openedAt.current < 300) return;
     if (allow()) setShow(false);
   };
 
