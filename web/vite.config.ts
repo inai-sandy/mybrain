@@ -6,8 +6,10 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      // We register + poll for updates manually in main.tsx (self-healing), so
+      // 'prompt' so updates wait for the user: the app shows a bottom "Update" toast
+      // (ui/UpdatePrompt.tsx) that activates the new SW + reloads on tap — no surprise reloads.
+      registerType: 'prompt',
+      // We register + poll for updates via the useRegisterSW hook (UpdatePrompt), so
       // disable the plugin's own auto-injected registration to avoid double-register.
       injectRegister: null,
       includeAssets: ['favicon-32.png', 'icons/icon-180.png'],
@@ -31,7 +33,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
         navigateFallback: '/index.html',
         // SPA routes fall back to index.html, but API + public pages must NOT.
-        navigateFallbackDenylist: [/^\/api/, /^\/help/, /^\/view\//, /^\/skill\//, /^\/meeting-view\//],
+        navigateFallbackDenylist: [/^\/api/, /^\/help/, /^\/view\//, /^\/skill\//, /^\/meeting-view\//, /^\/request-view\//],
         runtimeCaching: [
           // Never serve a stale API response — the app's data is always live.
           { urlPattern: ({ url }) => url.pathname.startsWith('/api'), handler: 'NetworkOnly' },

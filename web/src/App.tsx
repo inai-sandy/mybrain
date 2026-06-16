@@ -27,12 +27,14 @@ import { MeetingViewer } from './pages/MeetingViewer';
 import { GoogleHome } from './pages/google/GoogleHome';
 import { GoogleService } from './pages/google/GoogleService';
 import { RequestViewer } from './pages/RequestViewer';
+import { UpdatePrompt } from './ui/UpdatePrompt';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
 export default function App() {
   return (
     <ToastProvider>
+      <UpdatePrompt />
       <BrowserRouter>
         <Routes>
           {/* Public, no login required — shared links must open for anyone. */}
