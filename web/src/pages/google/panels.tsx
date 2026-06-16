@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, Sparkles, Inbox } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
 import { RequestsSection } from './GmailRequests';
 
@@ -50,6 +50,33 @@ export function GmailPanel() {
     <div className="space-y-4">
       <DailyBriefCard />
       <RequestsSection />
+    </div>
+  );
+}
+
+/** Brief text, collapsed to ~30% of the screen by default with a fade + Expand/Show-less toggle. */
+function CollapsibleSummary({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (expanded) return; // keep the measurement taken while collapsed
+    const el = ref.current;
+    if (el) setOverflowing(el.scrollHeight > el.clientHeight + 4);
+  }, [text, expanded]);
+
+  return (
+    <div>
+      <div ref={ref} className={'relative text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200 ' + (expanded ? '' : 'max-h-[30vh] overflow-hidden')}>
+        {text}
+        {!expanded && overflowing && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white dark:from-zinc-900 to-transparent" />}
+      </div>
+      {(overflowing || expanded) && (
+        <button onClick={() => setExpanded((v) => !v)} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-500">
+          {expanded ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Expand</>}
+        </button>
+      )}
     </div>
   );
 }
@@ -130,7 +157,7 @@ function DailyBriefCard() {
       ) : brief?.summary ? (
         <>
           <div className="flex items-center gap-2 mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600"><Sparkles size={13} /> Daily brief</div>
-          <div className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{brief.summary}</div>
+          <CollapsibleSummary text={brief.summary} />
           {brief.items.length > 0 && (
             <div className="mt-4">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>
