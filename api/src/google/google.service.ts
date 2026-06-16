@@ -239,4 +239,25 @@ export class GoogleService {
     await this.run(['tasks', 'tasks', 'patch', '--params', JSON.stringify({ tasklist: listId, task: taskId }), '--json', JSON.stringify({ status: 'completed' }), '--format', 'json']);
     return { ok: true };
   }
+
+  // ---- Meet + Sheets + Slides (safe writes: create NEW only) ----
+
+  async meetCreate(): Promise<{ uri: string | null; code: string | null }> {
+    const r = await this.run(['meet', 'spaces', 'create', '--format', 'json']);
+    return { uri: r?.meetingUri || null, code: r?.meetingCode || null };
+  }
+
+  async sheetCreate(title: string): Promise<{ id: string; link: string }> {
+    const r = await this.run(['sheets', 'spreadsheets', 'create', '--json', JSON.stringify({ properties: { title: (title || 'Untitled').slice(0, 200) } }), '--format', 'json']);
+    const id = r?.spreadsheetId;
+    if (!id) throw new Error('Could not create the spreadsheet.');
+    return { id, link: `https://docs.google.com/spreadsheets/d/${id}/edit` };
+  }
+
+  async slidesCreate(title: string): Promise<{ id: string; link: string }> {
+    const r = await this.run(['slides', 'presentations', 'create', '--json', JSON.stringify({ title: (title || 'Untitled').slice(0, 200) }), '--format', 'json']);
+    const id = r?.presentationId;
+    if (!id) throw new Error('Could not create the presentation.');
+    return { id, link: `https://docs.google.com/presentation/d/${id}/edit` };
+  }
 }

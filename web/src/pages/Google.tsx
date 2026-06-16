@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Search, Download, Check, Loader2, RefreshCw, HardDrive, FilePlus2, ExternalLink, FileText, CalendarDays, ListChecks, Clock, Circle } from 'lucide-react';
+import { Mail, Search, Download, Check, Loader2, RefreshCw, HardDrive, FilePlus2, ExternalLink, FileText, CalendarDays, ListChecks, Clock, Circle, Video, Copy } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Status = { connected: boolean; email: string | null; gws: boolean; bridge: boolean };
@@ -41,6 +41,10 @@ export function Google() {
   const [docBody, setDocBody] = useState('');
   const [creating, setCreating] = useState(false);
   const [createdLink, setCreatedLink] = useState('');
+  const [createType, setCreateType] = useState<'doc' | 'sheet' | 'slides'>('doc');
+  // Meet
+  const [meetLink, setMeetLink] = useState('');
+  const [creatingMeet, setCreatingMeet] = useState(false);
   // Calendar + Tasks
   const [events, setEvents] = useState<Event[] | null>(null);
   const [taskLists, setTaskLists] = useState<TaskList[] | null>(null);
@@ -126,20 +130,38 @@ export function Google() {
     }
   }
 
-  async function createDoc() {
-    if (!docTitle.trim() && !docBody.trim()) return;
+  async function createFile() {
+    if (!docTitle.trim() && !(createType === 'doc' && docBody.trim())) return;
     setCreating(true);
     setCreatedLink('');
     try {
-      const r = await fetch('/api/google/docs/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: docTitle, content: docBody }) });
+      const ep = createType === 'doc' ? '/api/google/docs/create' : createType === 'sheet' ? '/api/google/sheets/create' : '/api/google/slides/create';
+      const payload = createType === 'doc' ? { title: docTitle, content: docBody } : { title: docTitle };
+      const r = await fetch(ep, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const d = await r.json();
-      if (!r.ok) throw new Error(d.message || 'Could not create the doc');
+      if (!r.ok) throw new Error(d.message || 'Could not create');
       setCreatedLink(d.link);
-      toast('success', 'Google Doc created');
+      toast('success', `${createType === 'doc' ? 'Doc' : createType === 'sheet' ? 'Sheet' : 'Slides'} created`);
     } catch (e: any) {
-      toast('error', e.message || 'Could not create the doc');
+      toast('error', e.message || 'Could not create');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function createMeet() {
+    setCreatingMeet(true);
+    setMeetLink('');
+    try {
+      const r = await fetch('/api/google/meet/create', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || 'Could not create a Meet');
+      setMeetLink(d.uri || '');
+      toast('success', 'Meet link created');
+    } catch (e: any) {
+      toast('error', e.message || 'Could not create a Meet');
+    } finally {
+      setCreatingMeet(false);
     }
   }
 
@@ -302,19 +324,47 @@ export function Google() {
         )}
       </section>
 
-      {/* Create a new Google Doc (safe write) */}
-      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-        <h2 className="font-semibold flex items-center gap-2 mb-1"><FilePlus2 size={16} className="text-blue-500" /> New Google Doc</h2>
-        <p className="text-xs text-zinc-500 mb-3">Create a brand-new Google Doc from text. (Only creates new files — never edits or deletes your existing Drive.)</p>
-        <input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} placeholder="Document title" className="w-full mb-2 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-        <textarea value={docBody} onChange={(e) => setDocBody(e.target.value)} rows={4} placeholder="Content…" className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-        <div className="mt-3 flex items-center gap-3">
-          <button onClick={createDoc} disabled={creating || (!docTitle.trim() && !docBody.trim())} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-            {creating ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : <><FilePlus2 size={14} /> Create Doc</>}
-          </button>
-          {createdLink && <a href={createdLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-emerald-600 hover:underline">Open the new Doc <ExternalLink size={13} /></a>}
-        </div>
-      </section>
+      {/* Create a new Google file (safe write) */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <h2 className="font-semibold flex items-center gap-2 mb-1"><FilePlus2 size={16} className="text-blue-500" /> Create</h2>
+          <p className="text-xs text-zinc-500 mb-3">Make a brand-new Google file. (Only creates new files — never edits or deletes your existing Drive.)</p>
+          <div className="flex gap-2 mb-2">
+            <select value={createType} onChange={(e) => setCreateType(e.target.value as any)} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-2 text-sm">
+              <option value="doc">Doc</option>
+              <option value="sheet">Sheet</option>
+              <option value="slides">Slides</option>
+            </select>
+            <input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} placeholder="Title" className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          </div>
+          {createType === 'doc' && <textarea value={docBody} onChange={(e) => setDocBody(e.target.value)} rows={4} placeholder="Content (optional)…" className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
+          <div className="mt-3 flex items-center gap-3">
+            <button onClick={createFile} disabled={creating || (!docTitle.trim() && !(createType === 'doc' && docBody.trim()))} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+              {creating ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : <><FilePlus2 size={14} /> Create {createType === 'doc' ? 'Doc' : createType === 'sheet' ? 'Sheet' : 'Slides'}</>}
+            </button>
+            {createdLink && <a href={createdLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-emerald-600 hover:underline">Open it <ExternalLink size={13} /></a>}
+          </div>
+        </section>
+      )}
+
+      {/* Meet — create a link */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <h2 className="font-semibold flex items-center gap-2 mb-1"><Video size={16} className="text-green-600" /> Google Meet</h2>
+          <p className="text-xs text-zinc-500 mb-3">Spin up a fresh meeting link in one tap.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={createMeet} disabled={creatingMeet} className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 hover:bg-green-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+              {creatingMeet ? <><Loader2 size={14} className="animate-spin" /> Creating…</> : <><Video size={14} /> Create a Meet link</>}
+            </button>
+            {meetLink && (
+              <span className="inline-flex items-center gap-2 text-sm">
+                <a href={meetLink} target="_blank" rel="noreferrer" className="text-emerald-600 hover:underline break-all">{meetLink.replace(/^https?:\/\//, '')}</a>
+                <button onClick={() => { navigator.clipboard?.writeText(meetLink); toast('success', 'Copied'); }} title="Copy" className="p-1 text-zinc-400 hover:text-emerald-600"><Copy size={13} /></button>
+              </span>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

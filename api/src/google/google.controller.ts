@@ -97,4 +97,32 @@ export class GoogleController {
       mapErr(e);
     }
   }
+
+  // ---- Meet + Sheets + Slides ----
+  @Post('meet/create')
+  async meetCreate() {
+    try {
+      return await this.google.meetCreate();
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('sheets/create')
+  async sheetCreate(@Body() body: { title?: string }) {
+    try {
+      return await this.google.sheetCreate(body?.title || 'Untitled');
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('slides/create')
+  async slidesCreate(@Body() body: { title?: string }) {
+    try {
+      return await this.google.slidesCreate(body?.title || 'Untitled');
+    } catch (e) {
+      mapErr(e);
+    }
+  }
 }
