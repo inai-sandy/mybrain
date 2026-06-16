@@ -55,34 +55,28 @@ export function GmailPanel() {
 }
 
 /** Brief body (summary + email list), collapsed to ~30% of the screen with a fade + Expand/Show-less.
- *  Measures the full content height against 30vh after layout (rAF + resize), so the toggle is reliable. */
+ *  The collapsed height is a FIXED pixel value frozen at mount (≈30% of the initial viewport). We do
+ *  NOT use `vh` or a window-resize listener: on mobile, scrolling shows/hides the URL bar (changing the
+ *  viewport height), which with `vh`/resize would re-clamp + reflow mid-scroll and make the page stick. */
 function CollapsibleBrief({ children }: { children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const [needsToggle, setNeedsToggle] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // Frozen once: stable while scrolling regardless of the mobile URL-bar collapse.
+  const [capPx] = useState(() => Math.max(200, Math.round((typeof window !== 'undefined' ? window.innerHeight : 760) * 0.3)));
 
   useEffect(() => {
-    // scrollHeight is the full content height in BOTH collapsed and expanded states (overflow:hidden
-    // clips clientHeight, not scrollHeight), so comparing it to the 30vh cap is stable either way.
-    const measure = () => {
-      const el = ref.current;
-      if (!el) return;
-      const cap = Math.max(180, window.innerHeight * 0.3);
-      setNeedsToggle(el.scrollHeight > cap + 8);
-    };
-    const id = requestAnimationFrame(measure);
-    window.addEventListener('resize', measure);
-    return () => {
-      cancelAnimationFrame(id);
-      window.removeEventListener('resize', measure);
-    };
-  }); // no deps: re-measure on every render so a new/refreshed brief is re-evaluated
+    // scrollHeight is the full content height in both collapsed + expanded states (overflow:hidden
+    // clips clientHeight, not scrollHeight), so comparing it to the fixed cap is stable either way.
+    const el = ref.current;
+    if (el) setNeedsToggle(el.scrollHeight > capPx + 8);
+  }); // re-measure on render (content changes) — cheap, no resize listener, no vh.
 
   const clamp = !expanded && needsToggle;
 
   return (
     <div>
-      <div ref={ref} style={clamp ? { maxHeight: '30vh' } : undefined} className={'relative ' + (clamp ? 'overflow-hidden' : '')}>
+      <div ref={ref} style={clamp ? { maxHeight: capPx } : undefined} className={'relative ' + (clamp ? 'overflow-hidden' : '')}>
         {children}
         {clamp && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white dark:from-zinc-900 to-transparent" />}
       </div>
