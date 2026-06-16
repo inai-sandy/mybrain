@@ -372,6 +372,18 @@ model AgentActionLog {
   createdAt DateTime @default(now())
 }
 
+/// One day's Gmail "Daily Brief": unread count + an AI summary of that day's important emails.
+/// Generated nightly (11:58 PM local) and on first open; keyed by local day so history is instant.
+model GmailBrief {
+  day         String   @id // YYYY-MM-DD in the user's timezone
+  unread      Int      @default(0)
+  summary     String   @default("")
+  items       String? // JSON array of {from, subject, time} important emails
+  model       String?
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 /// A recorded meeting. Audio is captured first; transcription + AI summary are opt-in (ticket B).
 model Meeting {
   id            String    @id @default(uuid())

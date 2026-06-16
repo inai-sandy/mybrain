@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Get, Param, Post, Query, ServiceUnavailableException } from '@nestjs/common';
 import { GoogleService } from './google.service';
+import { GmailBriefService } from './gmail-brief.service';
 
 /** Map internal gws errors to friendly HTTP errors. */
 function mapErr(e: any): never {
@@ -11,7 +12,10 @@ function mapErr(e: any): never {
 
 @Controller('google')
 export class GoogleController {
-  constructor(private readonly google: GoogleService) {}
+  constructor(
+    private readonly google: GoogleService,
+    private readonly brief: GmailBriefService,
+  ) {}
 
   @Get('status')
   async status() {
@@ -33,6 +37,27 @@ export class GoogleController {
   async gmail(@Query('q') q?: string) {
     try {
       return { messages: await this.google.gmailList(q) };
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  // ---- Gmail Daily Brief ----
+  @Get('gmail/brief')
+  async gmailBrief(@Query('day') day?: string) {
+    try {
+      const d = day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : await this.brief.today();
+      return await this.brief.getForDay(d);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('gmail/brief/generate')
+  async gmailBriefGenerate(@Body() body: { day?: string }) {
+    try {
+      const day = body?.day && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : await this.brief.today();
+      return await this.brief.generate(day, true);
     } catch (e) {
       mapErr(e);
     }

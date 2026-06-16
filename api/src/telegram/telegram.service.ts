@@ -939,6 +939,16 @@ export class TelegramService implements OnModuleInit {
         });
       }
     }
+    const gDay = await this.getSetting('telegram.pushGmailBrief');
+    if (gDay) {
+      await this.setSetting('telegram.pushGmailBrief', '');
+      const gb = await this.prisma.gmailBrief.findUnique({ where: { day: gDay } });
+      if (gb?.summary) {
+        await this.send(owner, `📧 <b>Email brief</b> · ${gDay}${gb.unread ? ` · ${gb.unread} unread` : ''}\n\n${this.esc(gb.summary).slice(0, 3500)}`, {
+          reply_markup: { inline_keyboard: [[{ text: '📧 Open Gmail', url: `${PUBLIC_URL}/google/gmail` }]] },
+        });
+      }
+    }
     const wWeek = await this.getSetting('telegram.pushWeekly');
     if (wWeek) {
       await this.setSetting('telegram.pushWeekly', '');

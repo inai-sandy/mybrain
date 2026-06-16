@@ -19,6 +19,13 @@ const SERVICE_MAP: { key: string; label: string; match: string[]; unsupported?: 
   { key: 'keep', label: 'Keep', match: ['keep'], unsupported: true },
 ];
 
+/** Add n days to a YYYY-MM-DD key (n can be negative). */
+function dayAdd(day: string, n: number): string {
+  const d = new Date(day + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 function headerMap(payload: any): Record<string, string> {
   const out: Record<string, string> = {};
   for (const h of payload?.headers || []) if (h?.name) out[String(h.name).toLowerCase()] = h.value;
@@ -138,6 +145,38 @@ export class GoogleService {
           const m = await this.run(['gmail', 'users', 'messages', 'get', '--params', p, '--format', 'json']);
           const h = headerMap(m?.payload);
           return { id, from: h.from || '', subject: h.subject || '(no subject)', date: h.date || '', snippet: m?.snippet || '' };
+        } catch {
+          return null;
+        }
+      }),
+    );
+    return metas.filter(Boolean) as any[];
+  }
+
+  /** Unread inbox messages received on a specific local day (cheap — uses resultSizeEstimate). */
+  async gmailDayUnread(day: string): Promise<number | null> {
+    const next = dayAdd(day, 1);
+    const q = `is:unread after:${day.replace(/-/g, '/')} before:${next.replace(/-/g, '/')}`;
+    const params = JSON.stringify({ userId: 'me', q, maxResults: 1 });
+    const r = await this.run(['gmail', 'users', 'messages', 'list', '--params', params, '--format', 'json']);
+    const n = Number(r?.resultSizeEstimate);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /** The "important" emails received on a local day — Promotions/Social/Updates + Chats excluded. */
+  async gmailImportantForDay(day: string, max = 25): Promise<{ from: string; subject: string; date: string; snippet: string }[]> {
+    const next = dayAdd(day, 1);
+    const q = `after:${day.replace(/-/g, '/')} before:${next.replace(/-/g, '/')} -category:promotions -category:social -category:updates -in:chats`;
+    const params = JSON.stringify({ userId: 'me', q, maxResults: max });
+    const list = await this.run(['gmail', 'users', 'messages', 'list', '--params', params, '--format', 'json']);
+    const ids: string[] = ((list?.messages as any[]) || []).map((m) => m.id).filter(Boolean).slice(0, max);
+    const metas = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const p = JSON.stringify({ userId: 'me', id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] });
+          const m = await this.run(['gmail', 'users', 'messages', 'get', '--params', p, '--format', 'json']);
+          const h = headerMap(m?.payload);
+          return { from: h.from || '', subject: h.subject || '(no subject)', date: h.date || '', snippet: m?.snippet || '' };
         } catch {
           return null;
         }
