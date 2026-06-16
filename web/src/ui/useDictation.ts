@@ -27,6 +27,18 @@ export function useDictationStatus(): Status {
 
 const MAX_MS = 120_000; // hard safety cap on a single hold
 
+/** Instant, no-network tidy: drop the most common spoken fillers + de-dupe immediate repeats.
+ *  (Deepgram smart_format already handles caps/punctuation/numbers.) */
+function tidy(t: string): string {
+  return (t || '')
+    .replace(/\b(?:um+|uh+|er+|ah+|hmm+|mm+|uhh+|erm+)\b[,]?/gi, '')
+    .replace(/\b(\w+)(\s+\1\b)+/gi, '$1') // "the the the" -> "the"
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s*[,.]?\s*/, '')
+    .trim();
+}
+
 /**
  * Hold-to-talk dictation. Held → audio streams live to Deepgram (real-time words) AND is recorded
  * in parallel as a safety net. On release: if streaming produced text it's cleaned + inserted; if it
@@ -75,24 +87,6 @@ export function useDictation(onText: (text: string) => void) {
   function releaseStream() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-  }
-
-  async function finalize(text: string) {
-    const raw = (text || '').trim();
-    if (!raw) {
-      setStatus({ listening: false, phase: 'idle', interim: '' });
-      return;
-    }
-    setStatus({ listening: false, phase: 'transcribing', interim: 'Tidying up…' });
-    try {
-      const r = await fetch('/api/voice/clean', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: raw }) });
-      const d = await r.json().catch(() => ({}));
-      onText(((d?.text || raw).trim() || raw) + ' ');
-    } catch {
-      onText(raw + ' ');
-    } finally {
-      setStatus({ listening: false, phase: 'idle', interim: '' });
-    }
   }
 
   async function batchTranscribe(blob: Blob) {
@@ -197,7 +191,7 @@ export function useDictation(onText: (text: string) => void) {
 
   function attachProcessor(ctx: AudioContext, stream: MediaStream, onPcm: (b: ArrayBuffer) => void): number {
     const src = ctx.createMediaStreamSource(stream);
-    const proc = ctx.createScriptProcessor(4096, 1, 1);
+    const proc = ctx.createScriptProcessor(2048, 1, 1);
     procRef.current = proc;
     const mute = ctx.createGain();
     mute.gain.value = 0; // silent route to destination so onaudioprocess fires without echo
@@ -330,14 +324,20 @@ export function useDictation(onText: (text: string) => void) {
     });
 
     const streamed = liveText();
+    if (streamed.replace(/\s/g, '').length >= 2) {
+      // Streaming worked → insert instantly (Deepgram already formatted it; tidy fillers locally).
+      onText(tidy(streamed) + ' ');
+      setStatus({ listening: false, phase: 'idle', interim: '' });
+      blobP.then(() => undefined).catch(() => undefined); // let the safety recording wind down in the background
+      releaseStream();
+      chunksRef.current = [];
+      return;
+    }
+    // Streaming caught nothing → fall back to transcribing the recording.
     const blob = await blobP;
     releaseStream();
     chunksRef.current = [];
-    if (streamed.replace(/\s/g, '').length >= 2) {
-      await finalize(streamed); // streaming worked → clean + insert (fast)
-    } else {
-      await batchTranscribe(blob); // streaming caught nothing → use the recording
-    }
+    await batchTranscribe(blob);
   }
 
   useEffect(
