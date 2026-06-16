@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox } from 'lucide-react';
 import { useToast } from '../../ui/Toast';
 import { RequestsSection } from './GmailRequests';
@@ -54,25 +54,39 @@ export function GmailPanel() {
   );
 }
 
-/** Brief text, collapsed to ~30% of the screen by default with a fade + Expand/Show-less toggle. */
-function CollapsibleSummary({ text }: { text: string }) {
+/** Brief body (summary + email list), collapsed to ~30% of the screen with a fade + Expand/Show-less.
+ *  Measures the full content height against 30vh after layout (rAF + resize), so the toggle is reliable. */
+function CollapsibleBrief({ children }: { children: ReactNode }) {
   const [expanded, setExpanded] = useState(false);
-  const [overflowing, setOverflowing] = useState(false);
+  const [needsToggle, setNeedsToggle] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (expanded) return; // keep the measurement taken while collapsed
-    const el = ref.current;
-    if (el) setOverflowing(el.scrollHeight > el.clientHeight + 4);
-  }, [text, expanded]);
+    // scrollHeight is the full content height in BOTH collapsed and expanded states (overflow:hidden
+    // clips clientHeight, not scrollHeight), so comparing it to the 30vh cap is stable either way.
+    const measure = () => {
+      const el = ref.current;
+      if (!el) return;
+      const cap = Math.max(180, window.innerHeight * 0.3);
+      setNeedsToggle(el.scrollHeight > cap + 8);
+    };
+    const id = requestAnimationFrame(measure);
+    window.addEventListener('resize', measure);
+    return () => {
+      cancelAnimationFrame(id);
+      window.removeEventListener('resize', measure);
+    };
+  }); // no deps: re-measure on every render so a new/refreshed brief is re-evaluated
+
+  const clamp = !expanded && needsToggle;
 
   return (
     <div>
-      <div ref={ref} className={'relative text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200 ' + (expanded ? '' : 'max-h-[30vh] overflow-hidden')}>
-        {text}
-        {!expanded && overflowing && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white dark:from-zinc-900 to-transparent" />}
+      <div ref={ref} style={clamp ? { maxHeight: '30vh' } : undefined} className={'relative ' + (clamp ? 'overflow-hidden' : '')}>
+        {children}
+        {clamp && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-white dark:from-zinc-900 to-transparent" />}
       </div>
-      {(overflowing || expanded) && (
+      {needsToggle && (
         <button onClick={() => setExpanded((v) => !v)} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-500">
           {expanded ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Expand</>}
         </button>
@@ -157,23 +171,25 @@ function DailyBriefCard() {
       ) : brief?.summary ? (
         <>
           <div className="flex items-center gap-2 mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600"><Sparkles size={13} /> Daily brief</div>
-          <CollapsibleSummary text={brief.summary} />
-          {brief.items.length > 0 && (
-            <div className="mt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>
-              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {brief.items.map((it, i) => (
-                  <li key={i} className="flex items-start gap-2 py-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium truncate">{it.subject}</div>
-                      <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
-                    </div>
-                    {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <CollapsibleBrief>
+            <div className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{brief.summary}</div>
+            {brief.items.length > 0 && (
+              <div className="mt-4">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>
+                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {brief.items.map((it, i) => (
+                    <li key={i} className="flex items-start gap-2 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{it.subject}</div>
+                        <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
+                      </div>
+                      {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CollapsibleBrief>
           <div className="mt-4 flex items-center justify-between">
             {brief.generatedAt && <span className="text-[11px] text-zinc-400">Updated {new Date(brief.generatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}
             <button onClick={() => day && generate(day)} disabled={generating} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
