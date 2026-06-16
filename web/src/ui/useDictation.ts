@@ -109,7 +109,9 @@ export function useDictation(onText: (text: string) => void) {
       punctuate: 'true',
       endpointing: '300',
     });
-    const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params.toString()}`, ['token', token]);
+    // Deepgram temporary (grant) tokens authenticate over the 'bearer' sub-protocol (NOT 'token',
+    // which is for raw API keys and 401s here). Verified against the live API.
+    const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params.toString()}`, ['bearer', token]);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
     ws.onopen = () => {
