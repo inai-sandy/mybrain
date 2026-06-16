@@ -71,11 +71,11 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     const today = this.dayKey(tz);
     if (this.localHM(tz) >= BRIEF_AT) {
       if (await this.prisma.gmailBrief.findUnique({ where: { day: today } })) return;
-      await this.generate(today).catch((e) => this.log.warn(`brief ${today}: ${e?.message || e}`));
+      await this.generate(today, false, true).catch((e) => this.log.warn(`brief ${today}: ${e?.message || e}`));
     } else {
       const y = this.dayAdd(today, -1);
       if (await this.prisma.gmailBrief.findUnique({ where: { day: y } })) return;
-      await this.generate(y).catch(() => undefined);
+      await this.generate(y, false, true).catch(() => undefined);
     }
   }
 
@@ -98,8 +98,9 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     return { day, unread, summary: null, items: [], generated: false, generatedAt: null };
   }
 
-  /** Build (or rebuild) a day's brief: count unread, summarise the day's important emails, store, push. */
-  async generate(day: string, force = false): Promise<Brief> {
+  /** Build (or rebuild) a day's brief: count unread, summarise the day's important emails, store.
+   *  Only the nightly run pushes to Telegram (push=true) — on-demand/refresh builds stay silent. */
+  async generate(day: string, force = false, push = false): Promise<Brief> {
     if (!force) {
       const existing = await this.prisma.gmailBrief.findUnique({ where: { day } });
       if (existing) return this.shape(existing);
@@ -132,8 +133,8 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       create: { day, unread: unread ?? 0, summary, items: JSON.stringify(items), model: BRIEF_MODEL.model },
       update: { unread: unread ?? 0, summary, items: JSON.stringify(items), model: BRIEF_MODEL.model },
     });
-    // Hand the finished brief to the Telegram push loop (same mechanism as the nightly Story of the Day).
-    await this.setSetting('telegram.pushGmailBrief', day).catch(() => undefined);
+    // Only the nightly build hands the brief to the Telegram push loop (same mechanism as the Story of the Day).
+    if (push) await this.setSetting('telegram.pushGmailBrief', day).catch(() => undefined);
     return this.shape(row);
   }
 }
