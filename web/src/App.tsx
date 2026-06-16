@@ -24,7 +24,8 @@ import { ChatDoc } from './pages/ChatDoc';
 import { Meetings } from './pages/Meetings';
 import { MeetingDetail } from './pages/MeetingDetail';
 import { MeetingViewer } from './pages/MeetingViewer';
-import { Google } from './pages/Google';
+import { GoogleHome } from './pages/google/GoogleHome';
+import { GoogleService } from './pages/google/GoogleService';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
@@ -100,7 +101,8 @@ function AuthedApp() {
         <Route path="tasks" element={<Tasks />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="meeting/:id" element={<MeetingDetail />} />
-        <Route path="google" element={<Google />} />
+        <Route path="google" element={<GoogleHome />} />
+        <Route path="google/:subpage" element={<GoogleService />} />
         <Route path="chat" element={<Chat />} />
         <Route path="activity" element={<Activity />} />
         <Route path="mentor" element={<Mentor />} />

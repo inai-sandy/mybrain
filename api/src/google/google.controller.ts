@@ -23,6 +23,11 @@ export class GoogleController {
     return this.google.services();
   }
 
+  @Get('hints')
+  async hints() {
+    return this.google.hints();
+  }
+
   // ---- Gmail ----
   @Get('gmail')
   async gmail(@Query('q') q?: string) {

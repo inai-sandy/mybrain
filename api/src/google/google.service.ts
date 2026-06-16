@@ -218,6 +218,28 @@ export class GoogleService {
     }));
   }
 
+  // ---- Live hints for the launcher grid (cheap, best-effort) ----
+
+  /** Small glance-able numbers for the Google tile grid. Never throws — missing bits come back null. */
+  async hints(): Promise<{ connected: boolean; gmailUnread: number | null; calendarNext: { summary: string; start: string | null } | null; tasksOpen: number | null }> {
+    const st = await this.status();
+    if (!st.connected) return { connected: false, gmailUnread: null, calendarNext: null, tasksOpen: null };
+    const [gmailUnread, calendarNext, tasksOpen] = await Promise.all([
+      this.gmailUnreadCount().catch(() => null),
+      this.calendar().then((evs) => (evs[0] ? { summary: evs[0].summary, start: evs[0].start } : null)).catch(() => null),
+      this.tasks().then((lists) => lists.reduce((n, l) => n + l.tasks.length, 0)).catch(() => null),
+    ]);
+    return { connected: true, gmailUnread, calendarNext, tasksOpen };
+  }
+
+  /** Count of unread inbox messages (uses Gmail's resultSizeEstimate — one cheap call). */
+  async gmailUnreadCount(): Promise<number | null> {
+    const params = JSON.stringify({ userId: 'me', q: 'is:unread in:inbox', maxResults: 1 });
+    const r = await this.run(['gmail', 'users', 'messages', 'list', '--params', params, '--format', 'json']);
+    const n = Number(r?.resultSizeEstimate);
+    return Number.isFinite(n) ? n : null;
+  }
+
   // ---- Google Tasks ----
 
   async tasks(): Promise<{ listId: string; title: string; tasks: { id: string; title: string; due: string | null; notes: string | null }[] }[]> {
