@@ -36,13 +36,14 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'models' | 'usage' | 'prompts' | 'sync' | 'appearance';
+type Tab = 'account' | 'integrations' | 'google' | 'models' | 'usage' | 'prompts' | 'sync' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'integrations', label: 'Integrations', icon: Plug },
+    { id: 'google', label: 'Google', icon: Globe },
     { id: 'models', label: 'Models', icon: Cpu },
     { id: 'usage', label: 'Usage', icon: Wallet },
     { id: 'prompts', label: 'Prompts', icon: MessageSquare },
@@ -76,6 +77,7 @@ export function Settings({ email }: { email?: string }) {
 
       {tab === 'account' && <AccountSection email={email} />}
       {tab === 'integrations' && <IntegrationsSection />}
+      {tab === 'google' && <GoogleServicesSection />}
       {tab === 'models' && <ModelsSection />}
       {tab === 'usage' && <UsageCard />}
       {tab === 'prompts' && <PromptsSection />}
@@ -1245,6 +1247,60 @@ function SuperMemorySyncCard() {
         <span className="text-xs text-zinc-400">{lastSync ? `Last synced: ${new Date(lastSync).toLocaleString()}` : 'Never synced yet'}</span>
       </div>
     </section>
+  );
+}
+
+type GServices = { connected: boolean; email: string | null; project: string | null; services: { key: string; label: string; access: string; enabled: boolean; unsupported: boolean }[] };
+
+/** The dedicated Google tab — every Workspace service and its access level. */
+function GoogleServicesSection() {
+  const [d, setD] = useState<GServices | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/google/services');
+      if (r.ok) setD(await r.json());
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+  const badge = (s: { access: string; unsupported: boolean }) => {
+    if (s.unsupported) return <span className="text-[11px] rounded-full bg-rose-500/10 text-rose-600 px-2 py-0.5">Not available</span>;
+    if (s.access === 'read-write') return <span className="text-[11px] rounded-full bg-emerald-500/10 text-emerald-600 px-2 py-0.5">Read &amp; write</span>;
+    if (s.access === 'read-only') return <span className="text-[11px] rounded-full bg-amber-500/10 text-amber-600 px-2 py-0.5">Read only</span>;
+    return <span className="text-[11px] rounded-full bg-zinc-500/10 text-zinc-500 px-2 py-0.5">Off</span>;
+  };
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 font-semibold"><Globe size={18} className="text-blue-500" /> Google Workspace</h2>
+          <button onClick={load} disabled={busy} className="text-xs text-zinc-400 hover:text-blue-500">{busy ? '…' : 'refresh'}</button>
+        </div>
+        {!d ? (
+          <p className="mt-3 text-sm text-zinc-400">Loading…</p>
+        ) : !d.connected ? (
+          <div className="mt-3 text-sm rounded-lg bg-amber-500/10 border border-amber-300/30 dark:border-amber-500/20 px-3 py-2 text-amber-700 dark:text-amber-300">
+            Not connected yet. Go to <b>Settings → Integrations → Google</b> to connect.
+          </div>
+        ) : (
+          <>
+            <p className="mt-1 mb-3 text-sm text-zinc-500">Connected as <b className="text-zinc-700 dark:text-zinc-200">{d.email || 'your Google account'}</b>{d.project ? <> · project <code className="text-zinc-400">{d.project}</code></> : ''}.</p>
+            <div className="rounded-lg border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
+              {d.services.map((s) => (
+                <div key={s.key} className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm">
+                  <span className={s.enabled ? 'font-medium' : 'text-zinc-400'}>{s.label}</span>
+                  {badge(s)}
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-zinc-400">“Read &amp; write” = the app can read your data and create new items, but never sends, edits, or deletes your existing Google content. <b>Keep</b> isn’t available through a personal Google sign-in (Google restricts it to enterprise service accounts).</p>
+          </>
+        )}
+      </section>
+    </div>
   );
 }
 

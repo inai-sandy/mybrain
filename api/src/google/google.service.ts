@@ -3,6 +3,22 @@ import { ItemsService } from '../items/items.service';
 
 const BASE = process.env.GWS_RUNNER_URL || 'http://172.18.0.1:8766';
 
+// All Workspace services we surface, and the scope prefixes that mean "this service is on".
+const SERVICE_MAP: { key: string; label: string; match: string[]; unsupported?: boolean }[] = [
+  { key: 'gmail', label: 'Gmail', match: ['gmail'] },
+  { key: 'drive', label: 'Drive', match: ['drive'] },
+  { key: 'docs', label: 'Docs', match: ['documents'] },
+  { key: 'sheets', label: 'Sheets', match: ['spreadsheets'] },
+  { key: 'slides', label: 'Slides', match: ['presentations'] },
+  { key: 'calendar', label: 'Calendar', match: ['calendar'] },
+  { key: 'tasks', label: 'Tasks', match: ['tasks'] },
+  { key: 'forms', label: 'Forms', match: ['forms'] },
+  { key: 'meet', label: 'Meet', match: ['meetings.space'] },
+  { key: 'chat', label: 'Chat', match: ['chat'] },
+  { key: 'contacts', label: 'Contacts', match: ['contacts', 'directory'] },
+  { key: 'keep', label: 'Keep', match: ['keep'], unsupported: true },
+];
+
 function headerMap(payload: any): Record<string, string> {
   const out: Record<string, string> = {};
   for (const h of payload?.headers || []) if (h?.name) out[String(h.name).toLowerCase()] = h.value;
@@ -51,6 +67,32 @@ export class GoogleService {
     } catch {
       return { connected: false, email: null, gws: false, bridge: false };
     }
+  }
+
+  /** Per-service status + access level (Read & write / Read-only / Off), derived from the granted scopes. */
+  async services(): Promise<{ connected: boolean; email: string | null; project: string | null; services: { key: string; label: string; access: string; enabled: boolean; unsupported: boolean }[] }> {
+    let raw: any = {};
+    let connected = false;
+    let email: string | null = null;
+    try {
+      const r = await fetch(`${BASE}/status`, { signal: AbortSignal.timeout(8000) });
+      if (r.ok) {
+        const d: any = await r.json();
+        raw = d.raw || {};
+        connected = !!d.connected;
+        email = d.email || raw.user || null;
+      }
+    } catch {
+      /* offline — return all off */
+    }
+    const granted: string[] = Array.isArray(raw.scopes) ? raw.scopes.map((s: string) => String(s).replace(/^https:\/\/www\.googleapis\.com\/auth\//, '')) : [];
+    const services = SERVICE_MAP.map((svc) => {
+      const matched = granted.filter((g) => svc.match.some((m) => g === m || g.startsWith(`${m}.`) || g.startsWith(m)));
+      let access = 'off';
+      if (matched.length) access = matched.some((g) => !g.endsWith('.readonly')) ? 'read-write' : 'read-only';
+      return { key: svc.key, label: svc.label, access, enabled: access !== 'off', unsupported: !!svc.unsupported };
+    });
+    return { connected, email, project: raw.project_id || null, services };
   }
 
   /** Run a gws command via the bridge and return its parsed JSON.

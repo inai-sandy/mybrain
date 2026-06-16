@@ -18,6 +18,11 @@ export class GoogleController {
     return this.google.status();
   }
 
+  @Get('services')
+  async services() {
+    return this.google.services();
+  }
+
   // ---- Gmail ----
   @Get('gmail')
   async gmail(@Query('q') q?: string) {
