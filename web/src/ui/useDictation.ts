@@ -28,10 +28,10 @@ export function useDictationStatus(): Status {
 const MAX_MS = 120_000; // hard safety cap on a single hold
 
 /**
- * Hold-to-talk dictation. While held, audio streams live to Deepgram (real-time words in the
- * indicator); on release the transcript gets a quick AI clean-up and is handed to onText. If the
- * streaming token isn't available (or streaming fails), it falls back to record-then-transcribe so
- * dictation always works. iOS-PWA-safe (PCM via Web Audio, not the unsupported Web Speech API).
+ * Hold-to-talk dictation. Held → audio streams live to Deepgram (real-time words) AND is recorded
+ * in parallel as a safety net. On release: if streaming produced text it's cleaned + inserted; if it
+ * produced nothing (streaming unavailable/blocked), the recorded clip is transcribed instead — so
+ * your words are never lost. iOS-PWA-safe: the AudioContext is woken inside the press gesture.
  */
 export function useDictation(onText: (text: string) => void) {
   const streamRef = useRef<MediaStream | null>(null);
@@ -41,24 +41,20 @@ export function useDictation(onText: (text: string) => void) {
   const preBufRef = useRef<ArrayBuffer[]>([]); // PCM captured before the socket opened
   const finalRef = useRef(''); // committed (final) transcript
   const interimRef = useRef(''); // in-progress tail
-  const recRef = useRef<MediaRecorder | null>(null); // fallback recorder
+  const recRef = useRef<MediaRecorder | null>(null); // parallel safety recording
   const chunksRef = useRef<Blob[]>([]);
   const modeRef = useRef<'stream' | 'batch' | null>(null);
   const capRef = useRef<any>(null);
-  const startedRef = useRef(0);
   const [active, setActive] = useState(false);
 
-  const supported =
-    typeof navigator !== 'undefined' &&
-    !!navigator.mediaDevices?.getUserMedia &&
-    typeof window !== 'undefined' &&
-    (typeof (window as any).AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined' || typeof (window as any).MediaRecorder !== 'undefined');
+  const supported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof window !== 'undefined' && typeof (window as any).MediaRecorder !== 'undefined';
 
   function liveText() {
     return (finalRef.current + ' ' + interimRef.current).replace(/\s+/g, ' ').trim();
   }
 
-  function cleanupAudio() {
+  /** Stop PCM capture + close the audio context, but leave the mic stream tracks for the recorder. */
+  function stopCapture() {
     if (capRef.current) {
       clearTimeout(capRef.current);
       capRef.current = null;
@@ -75,6 +71,8 @@ export function useDictation(onText: (text: string) => void) {
       /* ignore */
     }
     ctxRef.current = null;
+  }
+  function releaseStream() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
   }
@@ -97,6 +95,61 @@ export function useDictation(onText: (text: string) => void) {
     }
   }
 
+  async function batchTranscribe(blob: Blob) {
+    if (!blob || !blob.size) {
+      setStatus({ listening: false, phase: 'idle', interim: '' });
+      return;
+    }
+    setStatus({ listening: false, phase: 'transcribing', interim: 'Transcribing…' });
+    try {
+      const ext = blob.type.includes('mp4') ? 'm4a' : 'webm';
+      const fd = new FormData();
+      fd.append('audio', blob, `dictation.${ext}`);
+      const r = await fetch('/api/voice/transcribe', { method: 'POST', body: fd });
+      const d = await r.json().catch(() => ({}));
+      const text = (d?.text || '').trim();
+      if (text) onText(text + ' ');
+    } catch {
+      /* ignore */
+    } finally {
+      setStatus({ listening: false, phase: 'idle', interim: '' });
+    }
+  }
+
+  // ---- parallel safety recorder ----
+  function startRecorder(stream: MediaStream) {
+    try {
+      const MR: any = (window as any).MediaRecorder;
+      if (!MR) {
+        recRef.current = null;
+        return;
+      }
+      const mime = MR.isTypeSupported?.('audio/webm') ? 'audio/webm' : MR.isTypeSupported?.('audio/mp4') ? 'audio/mp4' : '';
+      const rec: MediaRecorder = mime ? new MR(stream, { mimeType: mime }) : new MR(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e: BlobEvent) => {
+        if (e.data?.size) chunksRef.current.push(e.data);
+      };
+      recRef.current = rec;
+      rec.start();
+    } catch {
+      recRef.current = null;
+    }
+  }
+  function stopRecorder(): Promise<Blob> {
+    const rec = recRef.current;
+    recRef.current = null;
+    return new Promise((resolve) => {
+      if (!rec || rec.state === 'inactive') return resolve(new Blob(chunksRef.current, { type: 'audio/webm' }));
+      rec.onstop = () => resolve(new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' }));
+      try {
+        rec.stop();
+      } catch {
+        resolve(new Blob(chunksRef.current, { type: 'audio/webm' }));
+      }
+    });
+  }
+
   // ---- streaming (Deepgram) ----
   function openSocket(token: string, model: string, sampleRate: number) {
     const params = new URLSearchParams({
@@ -107,10 +160,9 @@ export function useDictation(onText: (text: string) => void) {
       interim_results: 'true',
       smart_format: 'true',
       punctuate: 'true',
-      endpointing: '300',
+      endpointing: '400',
     });
-    // Deepgram temporary (grant) tokens authenticate over the 'bearer' sub-protocol (NOT 'token',
-    // which is for raw API keys and 401s here). Verified against the live API.
+    // Deepgram temporary (grant) tokens authenticate over the 'bearer' sub-protocol (NOT 'token').
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${params.toString()}`, ['bearer', token]);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
@@ -127,33 +179,28 @@ export function useDictation(onText: (text: string) => void) {
     ws.onmessage = (ev) => {
       try {
         const d = JSON.parse(ev.data);
-        const alt = d?.channel?.alternatives?.[0];
-        const t = (alt?.transcript || '').trim();
-        if (d?.type === 'Results' && t) {
-          if (d.is_final) {
-            finalRef.current = (finalRef.current + ' ' + t).replace(/\s+/g, ' ').trim();
-            interimRef.current = '';
-          } else {
-            interimRef.current = t;
-          }
-          setStatus({ interim: liveText() });
+        if (d?.type !== 'Results') return;
+        const t = (d?.channel?.alternatives?.[0]?.transcript || '').trim();
+        if (!t) return;
+        if (d.is_final) {
+          finalRef.current = (finalRef.current + ' ' + t).replace(/\s+/g, ' ').trim();
+          interimRef.current = '';
+        } else {
+          interimRef.current = t;
         }
+        setStatus({ interim: liveText() });
       } catch {
         /* ignore non-JSON */
       }
     };
   }
 
-  function startProcessor(stream: MediaStream, onPcm: (b: ArrayBuffer) => void) {
-    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-    const ctx: AudioContext = new AC();
-    ctxRef.current = ctx;
-    ctx.resume().catch(() => undefined);
+  function attachProcessor(ctx: AudioContext, stream: MediaStream, onPcm: (b: ArrayBuffer) => void): number {
     const src = ctx.createMediaStreamSource(stream);
     const proc = ctx.createScriptProcessor(4096, 1, 1);
     procRef.current = proc;
     const mute = ctx.createGain();
-    mute.gain.value = 0; // route to destination silently so onaudioprocess fires without echo
+    mute.gain.value = 0; // silent route to destination so onaudioprocess fires without echo
     proc.onaudioprocess = (e) => {
       const input = e.inputBuffer.getChannelData(0);
       const pcm = new Int16Array(input.length);
@@ -174,12 +221,26 @@ export function useDictation(onText: (text: string) => void) {
     finalRef.current = '';
     interimRef.current = '';
     preBufRef.current = [];
+    chunksRef.current = [];
     modeRef.current = null;
     setActive(true);
     setStatus({ listening: true, phase: 'listening', interim: '', stop });
-    startedRef.current = Date.now();
 
-    // Ask for a streaming token in parallel with mic permission.
+    // 1) Wake the audio engine INSIDE the gesture (before any await) — iOS keeps it suspended otherwise.
+    let ctx: AudioContext | null = null;
+    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (AC) {
+      try {
+        ctx = new AC();
+        ctxRef.current = ctx;
+        void ctx.resume?.();
+      } catch {
+        ctx = null;
+        ctxRef.current = null;
+      }
+    }
+
+    // 2) Ask for a streaming token in parallel with the mic permission.
     const tokenP = fetch('/api/voice/stream-token', { method: 'POST' })
       .then((r) => r.json())
       .catch(() => ({ available: false }));
@@ -188,124 +249,94 @@ export function useDictation(onText: (text: string) => void) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } as any });
     } catch {
+      stopCapture();
       setActive(false);
       setStatus({ listening: false, phase: 'idle', interim: '' });
       return;
     }
     streamRef.current = stream;
 
-    const tok: any = await tokenP;
-    const canStream = !!tok?.available && !!tok?.token && typeof (window as any).AudioContext !== 'undefined';
+    // 3) Always record in parallel (accuracy safety-net).
+    startRecorder(stream);
 
-    if (canStream) {
+    const tok: any = await tokenP;
+    const canStream = !!tok?.available && !!tok?.token && !!ctx;
+    if (canStream && ctx) {
       modeRef.current = 'stream';
       try {
-        const rate = startProcessor(stream, (b) => {
+        const rate = attachProcessor(ctx, stream, (b) => {
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) ws.send(b);
           else preBufRef.current.push(b);
         });
+        void ctx.resume?.();
         openSocket(tok.token, tok.model, rate);
       } catch {
         modeRef.current = 'batch';
       }
     }
-
     if (modeRef.current !== 'stream') {
-      // Fallback: record the whole clip, transcribe on release.
       modeRef.current = 'batch';
       try {
-        const MR: any = (window as any).MediaRecorder;
-        const mime = MR?.isTypeSupported?.('audio/webm') ? 'audio/webm' : MR?.isTypeSupported?.('audio/mp4') ? 'audio/mp4' : '';
-        const rec: MediaRecorder = mime ? new MR(stream, { mimeType: mime }) : new MR(stream);
-        chunksRef.current = [];
-        rec.ondataavailable = (e: BlobEvent) => {
-          if (e.data?.size) chunksRef.current.push(e.data);
-        };
-        recRef.current = rec;
-        rec.start();
+        ctx?.close();
       } catch {
-        /* no recorder either — give up quietly */
-        cleanupAudio();
-        setActive(false);
-        setStatus({ listening: false, phase: 'idle', interim: '' });
-        return;
+        /* ignore */
       }
+      ctxRef.current = null;
     }
 
-    // Safety cap.
     capRef.current = setTimeout(() => stop(), MAX_MS);
   }
 
   async function stop() {
     if (!active) return;
     setActive(false);
-    if (capRef.current) {
-      clearTimeout(capRef.current);
-      capRef.current = null;
-    }
 
-    if (modeRef.current === 'batch') {
-      const rec = recRef.current;
-      recRef.current = null;
-      const blob = await new Promise<Blob>((resolve) => {
-        if (!rec || rec.state === 'inactive') return resolve(new Blob(chunksRef.current, { type: 'audio/webm' }));
-        rec.onstop = () => resolve(new Blob(chunksRef.current, { type: rec.mimeType || 'audio/webm' }));
-        try {
-          rec.stop();
-        } catch {
-          resolve(new Blob(chunksRef.current, { type: 'audio/webm' }));
-        }
-      });
-      cleanupAudio();
+    const blobP = stopRecorder(); // begin finishing the safety recording
+    const wasStream = modeRef.current === 'stream';
+    stopCapture(); // halt PCM/ctx immediately
+
+    if (!wasStream) {
+      const blob = await blobP;
+      releaseStream();
       chunksRef.current = [];
-      if (!blob.size) {
-        setStatus({ listening: false, phase: 'idle', interim: '' });
-        return;
-      }
-      setStatus({ listening: false, phase: 'transcribing', interim: 'Transcribing…' });
-      try {
-        const ext = blob.type.includes('mp4') ? 'm4a' : 'webm';
-        const fd = new FormData();
-        fd.append('audio', blob, `dictation.${ext}`);
-        const r = await fetch('/api/voice/transcribe', { method: 'POST', body: fd });
-        const d = await r.json().catch(() => ({}));
-        const text = (d?.text || '').trim();
-        if (text) onText(text + ' ');
-      } catch {
-        /* ignore */
-      } finally {
-        setStatus({ listening: false, phase: 'idle', interim: '' });
-      }
+      await batchTranscribe(blob);
       return;
     }
 
-    // streaming: tell Deepgram we're done, gather trailing finals, then clean + insert.
+    // streaming: tell Deepgram we're done, gather trailing finals.
     const ws = wsRef.current;
     wsRef.current = null;
-    cleanupAudio(); // stop capturing immediately on release
-    const done = () => finalize(liveText());
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      let finished = false;
-      const finish = () => {
-        if (finished) return;
-        finished = true;
+    await new Promise<void>((resolve) => {
+      if (!ws || (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING)) return resolve();
+      let done = false;
+      const fin = () => {
+        if (done) return;
+        done = true;
         try {
           ws.close();
         } catch {
           /* ignore */
         }
-        done();
+        resolve();
       };
-      ws.addEventListener('close', finish);
+      ws.addEventListener('close', fin);
       try {
         ws.send(JSON.stringify({ type: 'CloseStream' }));
       } catch {
         /* ignore */
       }
-      setTimeout(finish, 1500); // don't wait forever for trailing finals
+      setTimeout(fin, 1500);
+    });
+
+    const streamed = liveText();
+    const blob = await blobP;
+    releaseStream();
+    chunksRef.current = [];
+    if (streamed.replace(/\s/g, '').length >= 2) {
+      await finalize(streamed); // streaming worked → clean + insert (fast)
     } else {
-      done();
+      await batchTranscribe(blob); // streaming caught nothing → use the recording
     }
   }
 
@@ -316,7 +347,8 @@ export function useDictation(onText: (text: string) => void) {
       } catch {
         /* ignore */
       }
-      cleanupAudio();
+      stopCapture();
+      releaseStream();
     },
     [],
   );
