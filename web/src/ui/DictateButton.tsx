@@ -1,40 +1,43 @@
+import { useEffect, useRef } from 'react';
 import { Mic } from 'lucide-react';
 import { useDictation } from './useDictation';
 
 /**
  * Hold-to-talk mic button. Press & hold to dictate (audio streams live), release to insert the
- * cleaned text via onText. Uses pointer capture so sliding a finger off the button doesn't stop it.
- * Renders nothing when the device can't record.
+ * cleaned text. Release is caught GLOBALLY (anywhere you lift your finger) — iPad/iOS don't always
+ * deliver pointerup to the button itself, which would leave the mic stuck on. Renders nothing when
+ * the device can't record.
  */
 export function DictateButton({ onText, size = 16, className = '' }: { onText: (text: string) => void; size?: number; className?: string }) {
   const { supported, active, start, stop } = useDictation(onText);
+  const holdingRef = useRef(false);
+  const endRef = useRef<() => void>(() => undefined);
+
+  // Always have a current "release" handler that detaches the global listeners + stops.
+  endRef.current = () => {
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    for (const ev of RELEASE_EVENTS) window.removeEventListener(ev, endRef.current as any);
+    stop();
+  };
+
+  // Safety: if the button unmounts mid-hold, release.
+  useEffect(() => () => endRef.current(), []);
+
   if (!supported) return null;
 
-  const down = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const begin = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
+    if (holdingRef.current) return;
+    holdingRef.current = true;
+    for (const ev of RELEASE_EVENTS) window.addEventListener(ev, endRef.current as any);
     start();
-  };
-  const up = (e: React.PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    stop();
   };
 
   return (
     <button
       type="button"
-      onPointerDown={down}
-      onPointerUp={up}
-      onPointerCancel={up}
+      onPointerDown={begin}
       onContextMenu={(e) => e.preventDefault()}
       title="Hold to talk"
       aria-label="Hold to talk"
@@ -48,3 +51,5 @@ export function DictateButton({ onText, size = 16, className = '' }: { onText: (
     </button>
   );
 }
+
+const RELEASE_EVENTS = ['pointerup', 'pointercancel', 'touchend', 'touchcancel', 'mouseup', 'blur'] as const;
