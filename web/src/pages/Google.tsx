@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Search, Download, Check, Loader2, RefreshCw, HardDrive, FilePlus2, ExternalLink, FileText } from 'lucide-react';
+import { Mail, Search, Download, Check, Loader2, RefreshCw, HardDrive, FilePlus2, ExternalLink, FileText, CalendarDays, ListChecks, Clock, Circle } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Status = { connected: boolean; email: string | null; gws: boolean; bridge: boolean };
 type Email = { id: string; from: string; subject: string; date: string; snippet: string };
 type DriveFile = { id: string; name: string; mimeType: string; modified: string; link: string };
+type Event = { id: string; summary: string; start: string | null; end: string | null; location: string | null; link: string | null };
+type TaskList = { listId: string; title: string; tasks: { id: string; title: string; due: string | null; notes: string | null }[] };
+
+function fmtWhen(iso: string | null) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const dateOnly = iso.length <= 10;
+  return d.toLocaleString(undefined, dateOnly ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
 function fileKind(mt: string) {
   if (mt.includes('document')) return 'Doc';
@@ -32,11 +41,34 @@ export function Google() {
   const [docBody, setDocBody] = useState('');
   const [creating, setCreating] = useState(false);
   const [createdLink, setCreatedLink] = useState('');
+  // Calendar + Tasks
+  const [events, setEvents] = useState<Event[] | null>(null);
+  const [taskLists, setTaskLists] = useState<TaskList[] | null>(null);
+  const [doneTasks, setDoneTasks] = useState<Record<string, boolean>>({});
   const toast = useToast();
 
   useEffect(() => {
-    fetch('/api/google/status').then((r) => r.json()).then(setStatus).catch(() => setStatus(null));
+    fetch('/api/google/status')
+      .then((r) => r.json())
+      .then((s) => {
+        setStatus(s);
+        if (s?.connected) {
+          fetch('/api/google/calendar').then((r) => (r.ok ? r.json() : null)).then((d) => d && setEvents(d.events || [])).catch(() => undefined);
+          fetch('/api/google/tasks').then((r) => (r.ok ? r.json() : null)).then((d) => d && setTaskLists(d.lists || [])).catch(() => undefined);
+        }
+      })
+      .catch(() => setStatus(null));
   }, []);
+
+  async function completeTask(listId: string, taskId: string) {
+    setDoneTasks((p) => ({ ...p, [taskId]: true }));
+    const r = await fetch(`/api/google/tasks/${listId}/${taskId}/complete`, { method: 'POST' });
+    if (r.ok) toast('success', 'Marked done in Google Tasks');
+    else {
+      setDoneTasks((p) => ({ ...p, [taskId]: false }));
+      toast('error', 'Could not update the task');
+    }
+  }
 
   async function loadEmails() {
     setLoading(true);
@@ -127,6 +159,67 @@ export function Google() {
       ) : connected ? (
         <p className="text-sm text-zinc-500">Connected{status?.email ? ` as ${status.email}` : ''}.</p>
       ) : null}
+
+      {/* Calendar — upcoming agenda */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <h2 className="font-semibold flex items-center gap-2 mb-3"><CalendarDays size={16} className="text-blue-500" /> Upcoming</h2>
+          {events === null ? (
+            <p className="text-sm text-zinc-400">Loading your calendar…</p>
+          ) : events.length ? (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {events.map((e) => (
+                <li key={e.id} className="flex items-start gap-3 py-2">
+                  <span className="shrink-0 w-28 text-[11px] text-zinc-400 tabular-nums inline-flex items-center gap-1"><Clock size={11} /> {fmtWhen(e.start)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{e.summary}</div>
+                    {e.location && <div className="text-[11px] text-zinc-400 truncate">{e.location}</div>}
+                  </div>
+                  {e.link && <a href={e.link} target="_blank" rel="noreferrer" className="shrink-0 p-1 text-zinc-400 hover:text-emerald-600"><ExternalLink size={13} /></a>}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-zinc-400">Nothing on your calendar coming up.</p>
+          )}
+        </section>
+      )}
+
+      {/* Google Tasks */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <h2 className="font-semibold flex items-center gap-2 mb-3"><ListChecks size={16} className="text-violet-500" /> Google Tasks</h2>
+          {taskLists === null ? (
+            <p className="text-sm text-zinc-400">Loading your tasks…</p>
+          ) : taskLists.some((l) => l.tasks.length) ? (
+            <div className="space-y-4">
+              {taskLists.filter((l) => l.tasks.length).map((l) => (
+                <div key={l.listId}>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{l.title}</div>
+                  <ul className="space-y-1">
+                    {l.tasks.map((t) => {
+                      const done = doneTasks[t.id];
+                      return (
+                        <li key={t.id} className="flex items-start gap-2 text-sm">
+                          <button onClick={() => completeTask(l.listId, t.id)} disabled={done} className="mt-0.5 shrink-0 text-zinc-300 dark:text-zinc-600 hover:text-emerald-600 disabled:text-emerald-600">
+                            {done ? <Check size={16} /> : <Circle size={16} />}
+                          </button>
+                          <div className="min-w-0">
+                            <span className={done ? 'line-through text-zinc-400' : ''}>{t.title}</span>
+                            {t.due && <span className="ml-2 text-[11px] text-zinc-400">due {fmtWhen(t.due)}</span>}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-400">No open tasks. 🎉</p>
+          )}
+        </section>
+      )}
 
       {/* Gmail */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">

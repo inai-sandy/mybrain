@@ -197,4 +197,46 @@ export class GoogleService {
     }
     return { id: docId, link: `https://docs.google.com/document/d/${docId}/edit` };
   }
+
+  // ---- Calendar ----
+
+  async calendar(): Promise<{ id: string; summary: string; start: string | null; end: string | null; location: string | null; link: string | null }[]> {
+    const now = new Date().toISOString();
+    const params = JSON.stringify({ calendarId: 'primary', maxResults: 12, timeMin: now, singleEvents: true, orderBy: 'startTime' });
+    const r = await this.run(['calendar', 'events', 'list', '--params', params, '--format', 'json']);
+    return ((r?.items as any[]) || []).map((e) => ({
+      id: e.id,
+      summary: e.summary || '(no title)',
+      start: e.start?.dateTime || e.start?.date || null,
+      end: e.end?.dateTime || e.end?.date || null,
+      location: e.location || null,
+      link: e.htmlLink || null,
+    }));
+  }
+
+  // ---- Google Tasks ----
+
+  async tasks(): Promise<{ listId: string; title: string; tasks: { id: string; title: string; due: string | null; notes: string | null }[] }[]> {
+    const lists = await this.run(['tasks', 'tasklists', 'list', '--format', 'json']);
+    const out: any[] = [];
+    for (const l of ((lists?.items as any[]) || []).slice(0, 10)) {
+      try {
+        const t = await this.run(['tasks', 'tasks', 'list', '--params', JSON.stringify({ tasklist: l.id, showCompleted: false, maxResults: 50 }), '--format', 'json']);
+        out.push({
+          listId: l.id,
+          title: l.title || 'Tasks',
+          tasks: ((t?.items as any[]) || []).filter((x) => x.title).map((x) => ({ id: x.id, title: x.title, due: x.due || null, notes: x.notes || null })),
+        });
+      } catch {
+        out.push({ listId: l.id, title: l.title || 'Tasks', tasks: [] });
+      }
+    }
+    return out;
+  }
+
+  /** Mark a Google task complete (safe write). */
+  async taskComplete(listId: string, taskId: string): Promise<{ ok: boolean }> {
+    await this.run(['tasks', 'tasks', 'patch', '--params', JSON.stringify({ tasklist: listId, task: taskId }), '--json', JSON.stringify({ status: 'completed' }), '--format', 'json']);
+    return { ok: true };
+  }
 }

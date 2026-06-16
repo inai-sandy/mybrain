@@ -69,4 +69,32 @@ export class GoogleController {
       mapErr(e);
     }
   }
+
+  // ---- Calendar + Tasks ----
+  @Get('calendar')
+  async calendar() {
+    try {
+      return { events: await this.google.calendar() };
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Get('tasks')
+  async tasks() {
+    try {
+      return { lists: await this.google.tasks() };
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Post('tasks/:list/:task/complete')
+  async taskComplete(@Param('list') list: string, @Param('task') task: string) {
+    try {
+      return await this.google.taskComplete(list, task);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
 }
