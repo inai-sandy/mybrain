@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Search, Download, Check, Loader2, RefreshCw, HardDrive, FilePlus2, ExternalLink, FileText, CalendarDays, ListChecks, Clock, Circle, Video, Copy } from 'lucide-react';
+import { Mail, Search, Download, Check, Loader2, RefreshCw, HardDrive, FilePlus2, ExternalLink, FileText, CalendarDays, ListChecks, Clock, Circle, Video, Copy, ClipboardList, MessageSquare, Users, Phone } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Status = { connected: boolean; email: string | null; gws: boolean; bridge: boolean };
@@ -8,6 +8,9 @@ type Email = { id: string; from: string; subject: string; date: string; snippet:
 type DriveFile = { id: string; name: string; mimeType: string; modified: string; link: string };
 type Event = { id: string; summary: string; start: string | null; end: string | null; location: string | null; link: string | null };
 type TaskList = { listId: string; title: string; tasks: { id: string; title: string; due: string | null; notes: string | null }[] };
+type Form = { id: string; name: string; modified: string; link: string };
+type ChatSpace = { id: string; name: string; type: string };
+type Contact = { name: string; email: string | null; phone: string | null };
 
 function fmtWhen(iso: string | null) {
   if (!iso) return '';
@@ -49,6 +52,15 @@ export function Google() {
   const [events, setEvents] = useState<Event[] | null>(null);
   const [taskLists, setTaskLists] = useState<TaskList[] | null>(null);
   const [doneTasks, setDoneTasks] = useState<Record<string, boolean>>({});
+  // Forms / Chat / Contacts (load on demand)
+  const [forms, setForms] = useState<Form[] | null>(null);
+  const [formsLoading, setFormsLoading] = useState(false);
+  const [spaces, setSpaces] = useState<ChatSpace[] | null>(null);
+  const [spacesNote, setSpacesNote] = useState('');
+  const [spacesLoading, setSpacesLoading] = useState(false);
+  const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactQ, setContactQ] = useState('');
   const toast = useToast();
 
   useEffect(() => {
@@ -146,6 +158,49 @@ export function Google() {
       toast('error', e.message || 'Could not create');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function loadForms() {
+    setFormsLoading(true);
+    try {
+      const r = await fetch('/api/google/forms');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || 'Could not load forms');
+      setForms(d.forms || []);
+    } catch (e: any) {
+      toast('error', e.message || 'Could not load forms');
+    } finally {
+      setFormsLoading(false);
+    }
+  }
+
+  async function loadSpaces() {
+    setSpacesLoading(true);
+    try {
+      const r = await fetch('/api/google/chat');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || 'Could not load Chat');
+      setSpaces(d.spaces || []);
+      setSpacesNote(d.available === false ? d.note || '' : '');
+    } catch (e: any) {
+      toast('error', e.message || 'Could not load Chat');
+    } finally {
+      setSpacesLoading(false);
+    }
+  }
+
+  async function loadContacts() {
+    setContactsLoading(true);
+    try {
+      const r = await fetch('/api/google/contacts');
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.message || 'Could not load contacts');
+      setContacts(d.contacts || []);
+    } catch (e: any) {
+      toast('error', e.message || 'Could not load contacts');
+    } finally {
+      setContactsLoading(false);
     }
   }
 
@@ -363,6 +418,114 @@ export function Google() {
               </span>
             )}
           </div>
+        </section>
+      )}
+
+      {/* Google Forms */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold flex items-center gap-2"><ClipboardList size={16} className="text-purple-500" /> Forms</h2>
+            <button onClick={loadForms} disabled={formsLoading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
+              {formsLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {forms === null ? 'Load' : 'Refresh'}
+            </button>
+          </div>
+          {forms === null ? (
+            <p className="text-sm text-zinc-400">Tap <b>Load</b> to list your Google Forms.</p>
+          ) : forms.length ? (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {forms.map((f) => (
+                <li key={f.id} className="flex items-center gap-2 py-2.5">
+                  <ClipboardList size={14} className="shrink-0 text-zinc-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{f.name}</div>
+                    {f.modified && <div className="text-[11px] text-zinc-400">{new Date(f.modified).toLocaleDateString()}</div>}
+                  </div>
+                  <a href={f.link} target="_blank" rel="noreferrer" title="Open form" className="shrink-0 p-1 text-zinc-400 hover:text-emerald-600"><ExternalLink size={14} /></a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-zinc-400">No forms yet. When you create Google Forms they’ll show up here.</p>
+          )}
+        </section>
+      )}
+
+      {/* Google Chat */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold flex items-center gap-2"><MessageSquare size={16} className="text-teal-500" /> Chat</h2>
+            <button onClick={loadSpaces} disabled={spacesLoading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
+              {spacesLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {spaces === null ? 'Load' : 'Refresh'}
+            </button>
+          </div>
+          {spaces === null ? (
+            <p className="text-sm text-zinc-400">Tap <b>Load</b> to list your Chat spaces and direct messages.</p>
+          ) : spaces.length ? (
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {spaces.map((s) => (
+                <li key={s.id} className="flex items-center gap-2 py-2.5">
+                  <MessageSquare size={14} className="shrink-0 text-zinc-400" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium truncate">{s.name}</div>
+                    <div className="text-[11px] text-zinc-400 capitalize">{String(s.type).replace(/_/g, ' ').toLowerCase()}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : spacesNote ? (
+            <p className="text-sm text-zinc-400">{spacesNote}</p>
+          ) : (
+            <p className="text-sm text-zinc-400">No Chat spaces yet. Rooms and direct messages will appear here.</p>
+          )}
+        </section>
+      )}
+
+      {/* Google Contacts */}
+      {connected && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold flex items-center gap-2"><Users size={16} className="text-sky-500" /> Contacts</h2>
+            <button onClick={loadContacts} disabled={contactsLoading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
+              {contactsLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {contacts === null ? 'Load' : 'Refresh'}
+            </button>
+          </div>
+          {contacts === null ? (
+            <p className="text-sm text-zinc-400">Tap <b>Load</b> to list your Google Contacts.</p>
+          ) : contacts.length ? (
+            <>
+              <div className="relative mb-3">
+                <Search size={15} className="absolute left-2.5 top-2.5 text-zinc-400" />
+                <input value={contactQ} onChange={(e) => setContactQ(e.target.value)} placeholder="Filter by name, email or phone…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-8 pr-3 py-2 text-sm outline-none focus:border-emerald-500" />
+              </div>
+              {(() => {
+                const term = contactQ.trim().toLowerCase();
+                const shown = term ? contacts.filter((c) => `${c.name} ${c.email || ''} ${c.phone || ''}`.toLowerCase().includes(term)) : contacts;
+                return shown.length ? (
+                  <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {shown.map((c, i) => (
+                      <li key={`${c.email || c.name}-${i}`} className="flex items-center gap-3 py-2.5">
+                        <span className="shrink-0 w-8 h-8 rounded-full bg-sky-500/10 text-sky-600 inline-flex items-center justify-center text-xs font-semibold uppercase">{(c.name || '?').charAt(0)}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-medium truncate">{c.name}</div>
+                          <div className="text-[11px] text-zinc-400 truncate flex items-center gap-2">
+                            {c.email && <span className="inline-flex items-center gap-1"><Mail size={10} /> {c.email}</span>}
+                            {c.phone && <span className="inline-flex items-center gap-1"><Phone size={10} /> {c.phone}</span>}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-zinc-400">No contacts match “{contactQ}”.</p>
+                );
+              })()}
+              <p className="mt-2 text-[11px] text-zinc-400">{contacts.length} contact{contacts.length === 1 ? '' : 's'}</p>
+            </>
+          ) : (
+            <p className="text-sm text-zinc-400">No contacts found.</p>
+          )}
         </section>
       )}
     </div>

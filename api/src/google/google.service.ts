@@ -114,8 +114,12 @@ export class GoogleService {
     }
     if (!d.ok) {
       if (d.code === 2) throw new Error('not-connected');
-      const msg = (d.stderr || '').split('\n')[0] || 'gws command failed';
-      throw new Error(msg);
+      const apiMsg = d?.json?.error?.message;
+      const stderrLine = String(d.stderr || '')
+        .split('\n')
+        .map((s) => s.replace(/^error\[[^\]]*\]:\s*/, '').trim())
+        .filter((s) => s && !/^Using keyring backend/i.test(s))[0];
+      throw new Error(apiMsg || stderrLine || 'gws command failed');
     }
     return d.json ?? d.text;
   }
@@ -259,5 +263,56 @@ export class GoogleService {
     const id = r?.presentationId;
     if (!id) throw new Error('Could not create the presentation.');
     return { id, link: `https://docs.google.com/presentation/d/${id}/edit` };
+  }
+
+  // ---- Forms / Chat / Contacts (read-only listings) ----
+
+  /** Google Forms owned/visible to the user (found via Drive by mime type). */
+  async forms(): Promise<{ id: string; name: string; modified: string; link: string }[]> {
+    const params = JSON.stringify({
+      q: "mimeType='application/vnd.google-apps.form' and trashed=false",
+      pageSize: 30,
+      orderBy: 'modifiedTime desc',
+      fields: 'files(id,name,modifiedTime,webViewLink)',
+    });
+    const r = await this.run(['drive', 'files', 'list', '--params', params, '--format', 'json']);
+    return ((r?.files as any[]) || []).map((f) => ({
+      id: f.id,
+      name: f.name || 'Untitled form',
+      modified: f.modifiedTime || '',
+      link: f.webViewLink || `https://docs.google.com/forms/d/${f.id}/edit`,
+    }));
+  }
+
+  /** Google Chat spaces (rooms + direct messages) the user belongs to.
+   *  Chat needs a Chat app configured in Google Cloud; when that's absent the API 404s —
+   *  we degrade to an informative, non-error empty state rather than failing the request. */
+  async chatSpaces(): Promise<{ spaces: { id: string; name: string; type: string }[]; available: boolean; note?: string }> {
+    try {
+      const r = await this.run(['chat', 'spaces', 'list', '--params', JSON.stringify({ pageSize: 50 }), '--format', 'json']);
+      const spaces = ((r?.spaces as any[]) || []).map((s) => ({
+        id: s.name || '',
+        name: s.displayName || (s.spaceType === 'DIRECT_MESSAGE' ? 'Direct message' : 'Untitled space'),
+        type: s.spaceType || s.type || 'SPACE',
+      }));
+      return { spaces, available: true };
+    } catch (e) {
+      const m = String((e as Error)?.message || e);
+      if (m === 'not-connected' || m === 'bridge-down') throw e;
+      return { spaces: [], available: false, note: 'Google Chat needs a Chat app turned on in Google Cloud for this account before spaces can be listed.' };
+    }
+  }
+
+  /** The user's Google Contacts (name + email + phone). */
+  async contacts(): Promise<{ name: string; email: string | null; phone: string | null }[]> {
+    const params = JSON.stringify({ resourceName: 'people/me', pageSize: 100, personFields: 'names,emailAddresses,phoneNumbers' });
+    const r = await this.run(['people', 'people', 'connections', 'list', '--params', params, '--format', 'json']);
+    return ((r?.connections as any[]) || [])
+      .map((p) => ({
+        name: p.names?.[0]?.displayName || p.emailAddresses?.[0]?.value || 'Unnamed contact',
+        email: p.emailAddresses?.[0]?.value || null,
+        phone: p.phoneNumbers?.[0]?.value || null,
+      }))
+      .filter((c) => c.name || c.email || c.phone);
   }
 }

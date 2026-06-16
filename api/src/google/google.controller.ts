@@ -125,4 +125,32 @@ export class GoogleController {
       mapErr(e);
     }
   }
+
+  // ---- Forms + Chat + Contacts ----
+  @Get('forms')
+  async forms() {
+    try {
+      return { forms: await this.google.forms() };
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Get('chat')
+  async chat() {
+    try {
+      return await this.google.chatSpaces();
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
+  @Get('contacts')
+  async contacts() {
+    try {
+      return { contacts: await this.google.contacts() };
+    } catch (e) {
+      mapErr(e);
+    }
+  }
 }
