@@ -79,22 +79,24 @@ export class GmailRequestService {
     return t ? t.charAt(0).toUpperCase() + t.slice(1) : 'Email request';
   }
 
-  private async summarize(query: string, thread: Thread): Promise<string> {
+  private async summarize(query: string, thread: Thread, messageCount: number): Promise<string> {
     const prompt =
       `The user searched their email for: "${query}".\n` +
-      `Below is the full email thread "${thread.subject}". Write a clean briefing the user can read at a glance:\n` +
-      `- **Description** — 2–4 sentences on what this thread is about.\n` +
-      `- **Key points** — bullets: decisions, numbers, dates, commitments, who said what.\n` +
+      `Below is the FULL email thread "${thread.subject}" — all ${messageCount} message(s), oldest first, with quoted reply history already removed. ` +
+      `Cover the WHOLE back-and-forth, not just the first message. Write a clean briefing:\n` +
+      `- **Description** — 2–4 sentences on what this thread is about and where it stands now.\n` +
+      `- **The conversation** — a short chronological walk-through of who said/asked/decided what across the messages.\n` +
+      `- **Key points** — bullets: decisions, numbers, dates, commitments, open questions.\n` +
       `- **Action items / next steps** — bullets, only if there are real ones.\n` +
       `Use plain Markdown. No preamble, no sign-off.\n\n` +
-      `=== EMAIL THREAD ===\n${thread.copy.slice(0, 18000)}`;
-    return (await this.llm.completeWith(MODEL, prompt, 1200, 'gmail-request'))?.trim() || 'Could not summarise this thread.';
+      `=== EMAIL THREAD (${messageCount} messages) ===\n${thread.copy.slice(0, 60000)}`;
+    return (await this.llm.completeWith(MODEL, prompt, 1600, 'gmail-request'))?.trim() || 'Could not summarise this thread.';
   }
 
   /** Step 2 — build + save the request from the chosen thread. */
   async create(query: string, threadId: string, title?: string) {
     const thread = await this.google.gmailThread(threadId);
-    const summary = await this.summarize(query, thread);
+    const summary = await this.summarize(query, thread, thread.messages.length);
     const row = await this.prisma.gmailRequest.create({
       data: {
         query: (query || '').trim().slice(0, 500),
@@ -102,7 +104,7 @@ export class GmailRequestService {
         threadId,
         threadSubject: thread.subject,
         summary,
-        emailCopy: thread.copy.slice(0, 20000),
+        emailCopy: thread.copy.slice(0, 60000),
       },
     });
     return this.shape(row);
@@ -120,10 +122,10 @@ export class GmailRequestService {
     }
     if (!threadId) return this.shape(r);
     const thread = await this.google.gmailThread(threadId);
-    const summary = await this.summarize(r.query, thread);
+    const summary = await this.summarize(r.query, thread, thread.messages.length);
     const row = await this.prisma.gmailRequest.update({
       where: { id },
-      data: { threadId, threadSubject: thread.subject, summary, emailCopy: thread.copy.slice(0, 20000) },
+      data: { threadId, threadSubject: thread.subject, summary, emailCopy: thread.copy.slice(0, 60000) },
     });
     return this.shape(row);
   }

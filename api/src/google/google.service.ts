@@ -42,6 +42,33 @@ function b64url(data?: string): string {
   }
 }
 
+/** Remove quoted reply history so each message keeps only its NEW content (Gmail + Outlook styles). */
+function stripQuoted(body: string): string {
+  if (!body) return '';
+  const norm = body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = norm.split('\n');
+  const isCut = (raw: string) => {
+    const t = raw.trim();
+    return (
+      /^On\b.{0,200}\bwrote:?$/i.test(t) || // Gmail "On <date>, <name> wrote:"
+      /^_{5,}$/.test(t) || // Outlook "________________"
+      /^-{2,}\s*Original Message\s*-{2,}/i.test(t) ||
+      /^-{2,}\s*Forwarded message\s*-{2,}/i.test(t) ||
+      /^From:\s.+\S+@\S+/i.test(t) || // Outlook quote header "From: name <email>"
+      /^>{1,}/.test(t) // ">"-quoted line
+    );
+  };
+  const out: string[] = [];
+  for (const ln of lines) {
+    if (isCut(ln)) break;
+    out.push(ln);
+  }
+  let res = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // Top-posted reply where everything got cut? fall back to a trimmed original so we never lose content.
+  if (res.length < 30) res = norm.replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
+  return res;
+}
+
 /** Walk a Gmail payload tree for the best text body (prefer text/plain, fall back to stripped html). */
 function extractBody(payload: any): string {
   if (!payload) return '';
@@ -227,10 +254,11 @@ export class GoogleService {
     const t = await this.run(['gmail', 'users', 'threads', 'get', '--params', p, '--format', 'json']);
     const messages = ((t?.messages as any[]) || []).map((m) => {
       const h = headerMap(m?.payload);
-      return { from: h.from || '', date: h.date || '', subject: h.subject || '', body: (extractBody(m?.payload) || m?.snippet || '').slice(0, 8000) };
+      const raw = extractBody(m?.payload) || m?.snippet || '';
+      return { from: h.from || '', date: h.date || '', subject: h.subject || '', body: stripQuoted(raw).slice(0, 6000) };
     });
     const subject = messages.find((m) => m.subject)?.subject || '(no subject)';
-    const copy = messages.map((m) => `From: ${m.from}\nDate: ${m.date}\n\n${m.body}`).join('\n\n— — — — —\n\n');
+    const copy = messages.map((m, i) => `--- Message ${i + 1} of ${messages.length} ---\nFrom: ${m.from}\nDate: ${m.date}\n\n${m.body}`).join('\n\n');
     return { subject, copy, messages };
   }
 

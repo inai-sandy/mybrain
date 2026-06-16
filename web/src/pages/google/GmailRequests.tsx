@@ -58,7 +58,7 @@ export function RequestsSection() {
 
       <DataTable<GmailRequest>
         columns={[
-          { key: 'title', label: 'Request', sortable: true, render: (r) => <span className="font-medium">{r.title}</span> },
+          { key: 'title', label: 'Request', sortable: true, render: (r) => <button onClick={() => setOpen(r)} className="font-medium text-left hover:text-emerald-600 inline-flex items-center gap-1.5">{r.title}{r.shared && <Share2 size={12} className="text-emerald-500 shrink-0" />}</button> },
           { key: 'threadSubject', label: 'Email', render: (r) => <span className="text-zinc-500">{r.threadSubject || '—'}</span> },
           { key: 'createdAt', label: 'Created', sortable: true, align: 'right', render: (r) => <span className="text-zinc-400 text-xs">{new Date(r.createdAt).toLocaleDateString()}</span> },
         ]}
@@ -127,7 +127,7 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <div className="p-5">
+        <div>
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-bold flex items-center gap-2"><Sparkles size={18} className="text-emerald-500" /> New request</h3>
             <button onClick={close} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
@@ -248,7 +248,7 @@ function DetailSheet({ request, onClose, onChanged, onDeleted }: { request: Gmai
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <div className="p-5">
+        <div>
           <div className="flex items-start justify-between gap-2 mb-1">
             {editing ? (
               <div className="flex-1 flex gap-2">
