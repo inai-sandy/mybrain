@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useToast } from '../../ui/Toast';
+import { mdComponents } from '../../ui/markdown';
 import { RequestsSection } from './GmailRequests';
 
 export function fmtWhen(iso: string | null) {
@@ -166,7 +169,9 @@ function DailyBriefCard() {
         <>
           <div className="flex items-center gap-2 mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600"><Sparkles size={13} /> Daily brief</div>
           <CollapsibleBrief>
-            <div className="text-sm leading-relaxed whitespace-pre-wrap text-zinc-700 dark:text-zinc-200">{brief.summary}</div>
+            <article className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-headings:font-bold prose-headings:text-zinc-900 dark:prose-headings:text-zinc-100 prose-headings:mt-3 prose-headings:mb-1 prose-strong:font-semibold prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100 prose-p:my-1.5 prose-ul:my-1.5 prose-ul:pl-4 prose-li:my-0.5 prose-li:marker:text-emerald-500">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{brief.summary}</ReactMarkdown>
+            </article>
             {brief.items.length > 0 && (
               <div className="mt-4">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>

@@ -117,13 +117,13 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     } else {
       const lines = emails.map((e, i) => `${i + 1}. From: ${cleanFrom(e.from)} — ${e.subject}\n   ${(e.snippet || '').slice(0, 200)}`).join('\n');
       const prompt =
-        `You are writing a short end-of-day email brief for the owner of this inbox. The promotions, social and newsletter emails have already been removed — everything below is potentially important.\n\n` +
-        `Summarise the day's email clearly and briefly:\n` +
-        `- Lead with one short sentence on the overall picture.\n` +
-        `- Then concise bullet points grouped by topic or sender.\n` +
-        `- Call out anything that needs a reply or an action.\n` +
-        `- Skip anything that's clearly automated/unimportant even if it slipped through.\n` +
-        `Keep it skimmable, plain text, no preamble.\n\n` +
+        `You are writing a short end-of-day email brief for the owner of this inbox. Promotions, social and newsletter emails are already removed — everything below is potentially important.\n\n` +
+        `Write it as clean **Markdown** so it renders nicely in a card:\n` +
+        `- Start with ONE plain sentence giving the overall picture (no heading).\n` +
+        `- Then group the rest into sections. Each section gets a short **bold heading** (a topic or sender), e.g. \`**Staff & leave**\` or \`**KIOT reports**\`.\n` +
+        `- Under each heading, 1–4 concise bullet points (use \`-\`).\n` +
+        `- **Bold** people's names, companies, amounts, and dates inline. Prefix anything needing a reply/action with **Action:**.\n` +
+        `- Keep it skimmable and brief. No preamble, no closing line, no "here is your brief".\n\n` +
         `=== IMPORTANT EMAILS ON ${day} (${emails.length}) ===\n${lines}`;
       summary = (await this.llm.completeWith(BRIEF_MODEL, prompt, 900, 'gmail-brief'))?.trim() || `${emails.length} important email(s) today.`;
     }
