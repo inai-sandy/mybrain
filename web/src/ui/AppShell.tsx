@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
@@ -10,6 +10,31 @@ import { DictationIndicator } from './DictationIndicator';
 import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useTheme } from './theme';
 
+/** Keep --vvh synced to the visible viewport height (shrinks when the keyboard opens) and report
+ *  whether the on-screen keyboard is up. When `pin`, hold the window at the top so iOS can't scroll
+ *  the page up to chase a focused input. */
+function useVisualViewport(pin: boolean): boolean {
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+      const open = window.innerHeight - vv.height > 120;
+      setKeyboardOpen(open);
+      if (pin && open) window.scrollTo(0, 0);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, [pin]);
+  return keyboardOpen;
+}
+
 export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () => void }) {
   const { theme, toggle } = useTheme();
   const [drawer, setDrawer] = useState(false);
@@ -18,6 +43,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const navigate = useNavigate();
   const location = useLocation();
   const isChat = location.pathname === '/chat';
+  const keyboardOpen = useVisualViewport(isChat);
 
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
@@ -152,7 +178,15 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           </div>
         </header>
 
-        <main className={isChat ? 'h-[calc(100vh-7rem-env(safe-area-inset-top))] md:h-[calc(100vh-3.5rem-env(safe-area-inset-top))] overflow-hidden' : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'}>
+        <main
+          className={
+            isChat
+              ? (keyboardOpen
+                  ? 'h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))]'
+                  : 'h-[calc(var(--vvh)-7rem-env(safe-area-inset-top))]') + ' md:h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] overflow-hidden'
+              : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'
+          }
+        >
           {isChat ? (
             <Outlet />
           ) : (
@@ -184,9 +218,10 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </button>
       )}
 
-      {/* Bottom tab bar — mobile (5 primary tabs; the rest are in the drawer) */}
+      {/* Bottom tab bar — mobile (5 primary tabs; the rest are in the drawer).
+          Hidden while typing in Chat so the keyboard + input own the bottom of the screen. */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900"
+        className={'fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ' + (isChat && keyboardOpen ? 'hidden' : 'md:hidden')}
         style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {BOTTOM_NAV.map((n) => (

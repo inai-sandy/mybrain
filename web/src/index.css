@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Visible viewport height — JS keeps this in sync with window.visualViewport.height so the chat
+   area shrinks above the on-screen keyboard instead of being pushed behind it (iOS). */
+:root {
+  --vvh: 100vh;
+}
+
 /* Prevent stray horizontal scroll at the viewport edge only —
    never on the padded content column, so cards are never clipped. */
 @layer base {
