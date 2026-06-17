@@ -1,11 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { writeFileSync } from 'fs';
+
+// One build id, baked into the app (__APP_BUILD__) AND written to dist/version.json. The client
+// compares them and force-reloads when they differ — drags a stuck/cached PWA onto the latest.
+const BUILD_ID = new Date().toISOString().slice(5, 16).replace('T', ' '); // UTC "MM-DD HH:MM"
 
 export default defineConfig({
-  // Build fingerprint (UTC MM-DD HH:MM) — shown in the dictation bar so we can confirm the live version.
-  define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(5, 16).replace('T', ' ')) },
+  define: { __APP_BUILD__: JSON.stringify(BUILD_ID) },
   plugins: [
+    {
+      name: 'emit-version-json',
+      closeBundle() {
+        try {
+          writeFileSync('dist/version.json', JSON.stringify({ build: BUILD_ID }));
+        } catch {
+          /* ignore */
+        }
+      },
+    },
     react(),
     VitePWA({
       // 'prompt' so updates wait for the user: the app shows a bottom "Update" toast
@@ -35,7 +49,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
         navigateFallback: '/index.html',
         // SPA routes fall back to index.html, but API + public pages must NOT.
-        navigateFallbackDenylist: [/^\/api/, /^\/help/, /^\/view\//, /^\/skill\//, /^\/meeting-view\//, /^\/request-view\//],
+        navigateFallbackDenylist: [/^\/api/, /^\/help/, /^\/view\//, /^\/skill\//, /^\/meeting-view\//, /^\/request-view\//, /^\/version\.json/],
         runtimeCaching: [
           // Never serve a stale API response — the app's data is always live.
           { urlPattern: ({ url }) => url.pathname.startsWith('/api'), handler: 'NetworkOnly' },

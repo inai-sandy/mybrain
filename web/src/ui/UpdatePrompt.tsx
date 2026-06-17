@@ -1,5 +1,55 @@
+import { useEffect } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { RefreshCw, X } from 'lucide-react';
+
+/** Nuke caches + service workers and hard-reload — used when the running build is stale. */
+async function forceUpdate() {
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations?.()) || [];
+    await Promise.all(regs.map((r) => r.unregister()));
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof caches !== 'undefined') {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch {
+    /* ignore */
+  }
+  location.reload();
+}
+
+/**
+ * Self-healing version gate. /version.json is written at build with the SAME id baked into the app
+ * (__APP_BUILD__), is never SW-cached, and is fetched no-store. If the deployed build differs from the
+ * running one, force a clean reload — this defeats iOS PWAs that get stuck on an old cached version.
+ */
+function useVersionGate() {
+  useEffect(() => {
+    let stop = false;
+    const check = async () => {
+      try {
+        const r = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!stop && d?.build && typeof __APP_BUILD__ === 'string' && d.build !== __APP_BUILD__) forceUpdate();
+      } catch {
+        /* offline — ignore */
+      }
+    };
+    check();
+    const id = setInterval(check, 60_000);
+    const onVis = () => document.visibilityState === 'visible' && check();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      stop = true;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+}
 
 /**
  * Registers the service worker and shows a bottom "Update" toast when a new version is waiting.
@@ -7,6 +57,7 @@ import { RefreshCw, X } from 'lucide-react';
  * updates aggressively (every minute, on tab focus, on reconnect) so the toast appears promptly.
  */
 export function UpdatePrompt() {
+  useVersionGate();
   const {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,

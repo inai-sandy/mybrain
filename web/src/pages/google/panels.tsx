@@ -125,6 +125,7 @@ function DailyBriefCard() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [emailsOpen, setEmailsOpen] = useState(false);
   const toast = useToast();
 
   async function loadDay(target?: string) {
@@ -213,19 +214,26 @@ function DailyBriefCard() {
           )}
 
           {brief.items.length > 0 && (
-            <div className="mt-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>
-              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {brief.items.map((it, i) => (
-                  <li key={i} className="flex items-start gap-2 py-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium truncate">{it.subject}</div>
-                      <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
-                    </div>
-                    {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
-                  </li>
-                ))}
-              </ul>
+            <div className="mt-4 rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <button onClick={() => setEmailsOpen((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60">
+                <ChevronRight size={15} className={'shrink-0 text-zinc-400 transition-transform ' + (emailsOpen ? 'rotate-90' : '')} />
+                <Inbox size={13} className="shrink-0 text-zinc-400" />
+                <span className="flex-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Important emails</span>
+                <span className="shrink-0 text-[11px] text-zinc-400">{brief.items.length}</span>
+              </button>
+              {emailsOpen && (
+                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800 px-3 pb-1">
+                  {brief.items.map((it, i) => (
+                    <li key={i} className="flex items-start gap-2 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{it.subject}</div>
+                        <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
+                      </div>
+                      {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
