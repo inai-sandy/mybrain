@@ -31,7 +31,8 @@ type ChatSpace = { id: string; name: string; type: string };
 type Contact = { name: string; email: string | null; phone: string | null };
 
 // ---- Gmail: the Daily Brief (per-day unread + AI summary of important emails) ----
-type Brief = { day: string; unread: number | null; summary: string | null; items: { from: string; subject: string; time: string }[]; generated: boolean; generatedAt: string | null };
+type BriefSection = { heading: string; points: string[]; link: string | null };
+type Brief = { day: string; unread: number | null; overview: string; summary: string | null; sections: BriefSection[]; items: { from: string; subject: string; time: string }[]; generated: boolean; generatedAt: string | null };
 
 function addDays(day: string, n: number): string {
   const d = new Date(day + 'T12:00:00Z');
@@ -87,6 +88,32 @@ function CollapsibleBrief({ children }: { children: ReactNode }) {
         <button onClick={() => setExpanded((v) => !v)} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:text-emerald-500">
           {expanded ? <><ChevronUp size={14} /> Show less</> : <><ChevronDown size={14} /> Expand</>}
         </button>
+      )}
+    </div>
+  );
+}
+
+/** One topic of the Daily Brief as a collapsible card (collapsed by default) with an Open-in-Gmail link. */
+function BriefSectionCard({ section }: { section: BriefSection }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 overflow-hidden">
+      <button onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60">
+        <ChevronRight size={15} className={'shrink-0 text-zinc-400 transition-transform ' + (open ? 'rotate-90' : '')} />
+        <span className="flex-1 text-sm font-bold text-zinc-900 dark:text-zinc-100">{section.heading}</span>
+        {!open && <span className="shrink-0 text-[11px] text-zinc-400">{section.points.length}</span>}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pl-9">
+          <article className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-strong:font-semibold prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100 prose-ul:my-0 prose-ul:pl-4 prose-li:my-0.5 prose-li:marker:text-emerald-500">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{section.points.map((p) => `- ${p}`).join('\n')}</ReactMarkdown>
+          </article>
+          {section.link && (
+            <a href={section.link} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 hover:text-emerald-600">
+              <ExternalLink size={12} /> Open in Gmail
+            </a>
+          )}
+        </div>
       )}
     </div>
   );
@@ -168,27 +195,40 @@ function DailyBriefCard() {
       ) : brief?.summary ? (
         <>
           <div className="flex items-center gap-2 mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600"><Sparkles size={13} /> Daily brief</div>
-          <CollapsibleBrief>
-            <article className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-headings:font-bold prose-headings:text-zinc-900 dark:prose-headings:text-zinc-100 prose-headings:mt-3 prose-headings:mb-1 prose-strong:font-semibold prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100 prose-p:my-1.5 prose-ul:my-1.5 prose-ul:pl-4 prose-li:my-0.5 prose-li:marker:text-emerald-500">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{brief.summary}</ReactMarkdown>
-            </article>
-            {brief.items.length > 0 && (
-              <div className="mt-4">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>
-                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {brief.items.map((it, i) => (
-                    <li key={i} className="flex items-start gap-2 py-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">{it.subject}</div>
-                        <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
-                      </div>
-                      {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
-                    </li>
-                  ))}
-                </ul>
+
+          {brief.sections && brief.sections.length > 0 ? (
+            <>
+              {brief.overview && <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-3">{brief.overview}</p>}
+              <div className="space-y-2">
+                {brief.sections.map((s, i) => <BriefSectionCard key={i} section={s} />)}
               </div>
-            )}
-          </CollapsibleBrief>
+            </>
+          ) : (
+            // Fallback for briefs written before structured sections existed.
+            <CollapsibleBrief>
+              <article className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-headings:font-bold prose-strong:font-semibold prose-p:my-1.5 prose-ul:my-1.5 prose-ul:pl-4 prose-li:my-0.5 prose-li:marker:text-emerald-500">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{brief.summary}</ReactMarkdown>
+              </article>
+            </CollapsibleBrief>
+          )}
+
+          {brief.items.length > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5 flex items-center gap-1"><Inbox size={12} /> Important emails ({brief.items.length})</div>
+              <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {brief.items.map((it, i) => (
+                  <li key={i} className="flex items-start gap-2 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate">{it.subject}</div>
+                      <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
+                    </div>
+                    {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="mt-4 flex items-center justify-between">
             {brief.generatedAt && <span className="text-[11px] text-zinc-400">Updated {new Date(brief.generatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}
             <button onClick={() => day && generate(day)} disabled={generating} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">

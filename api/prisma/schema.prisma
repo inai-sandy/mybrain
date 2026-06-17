@@ -378,6 +378,7 @@ model GmailBrief {
   day         String   @id // YYYY-MM-DD in the user's timezone
   unread      Int      @default(0)
   summary     String   @default("")
+  sections    String? // JSON array of {heading, points[], link} accordion topic cards
   items       String? // JSON array of {from, subject, time} important emails
   model       String?
   generatedAt DateTime @default(now())

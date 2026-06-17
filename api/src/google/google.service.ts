@@ -191,7 +191,7 @@ export class GoogleService {
   }
 
   /** The "important" emails received on a local day — Promotions/Social/Updates + Chats excluded. */
-  async gmailImportantForDay(day: string, max = 25): Promise<{ from: string; subject: string; date: string; snippet: string }[]> {
+  async gmailImportantForDay(day: string, max = 25): Promise<{ id: string; threadId: string; from: string; subject: string; date: string; snippet: string }[]> {
     const next = dayAdd(day, 1);
     const q = `after:${day.replace(/-/g, '/')} before:${next.replace(/-/g, '/')} -category:promotions -category:social -category:updates -in:chats`;
     const params = JSON.stringify({ userId: 'me', q, maxResults: max });
@@ -203,7 +203,7 @@ export class GoogleService {
           const p = JSON.stringify({ userId: 'me', id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] });
           const m = await this.run(['gmail', 'users', 'messages', 'get', '--params', p, '--format', 'json']);
           const h = headerMap(m?.payload);
-          return { from: h.from || '', subject: h.subject || '(no subject)', date: h.date || '', snippet: m?.snippet || '' };
+          return { id, threadId: m?.threadId || id, from: h.from || '', subject: h.subject || '(no subject)', date: h.date || '', snippet: m?.snippet || '' };
         } catch {
           return null;
         }
