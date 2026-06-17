@@ -53,7 +53,7 @@ export function Sheet({
   return (
     <AnimatePresence onExitComplete={onClose}>
       {show && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+        <div className="fixed inset-x-0 top-0 z-50 flex items-end sm:items-center justify-center" style={{ height: 'var(--vvh, 100vh)' }}>
           <motion.div className="absolute inset-0 bg-black/50" onClick={requestClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />
           <motion.div
             {...panelMotion}
@@ -65,7 +65,7 @@ export function Sheet({
             onDragEnd={(_e, info) => {
               if (info.offset.y > 110 || info.velocity.y > 700) requestClose();
             }}
-            className={'relative w-full rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[90vh] overflow-y-auto ' + (size === 'sm' ? 'sm:max-w-sm' : 'sm:max-w-lg')}
+            className={'relative w-full rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[calc(var(--vvh,100vh)-1.25rem)] overflow-y-auto ' + (size === 'sm' ? 'sm:max-w-sm' : 'sm:max-w-lg')}
           >
             {/* grab handle (mobile) — drag this to dismiss */}
             <div className="sm:hidden mx-auto -mt-1.5 mb-3 h-1.5 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 cursor-grab touch-none" onPointerDown={(e) => controls.start(e)} />
