@@ -158,3 +158,104 @@ describe('MemoryService.searchScoped (strict scoping)', () => {
     expect(hits[0].content).toContain('saved document');
   });
 });
+
+describe('MemoryService.reconcile (BEA-333 safety net)', () => {
+  function makeReconcilePrisma(seed: Record<string, any[]>) {
+    const outbox: any[] = [];
+    const tableFor = (name: string) => (seed[name] = seed[name] || []);
+    const filtered = (name: string, where: any) => {
+      let rows = tableFor(name);
+      if (where?.OR) rows = rows.filter((r: any) => r.ragId == null || r.supermemoryId == null);
+      return rows;
+    };
+    const prisma: any = {
+      memoryOutbox: {
+        createMany: async ({ data }: any) => {
+          data.forEach((d: any) => outbox.push({ id: String(outbox.length + 1), status: 'pending', attempts: 0, ...d }));
+          return { count: data.length };
+        },
+        findMany: async () => outbox.filter((r) => r.status === 'pending' && r.attempts < 3),
+        update: async ({ where, data }: any) => {
+          Object.assign(outbox.find((x) => x.id === where.id), data);
+          return {};
+        },
+        updateMany: async ({ where, data }: any) => {
+          let n = 0;
+          outbox.forEach((r) => {
+            if (r.status === where.status) {
+              Object.assign(r, data);
+              n++;
+            }
+          });
+          return { count: n };
+        },
+        groupBy: async () => [],
+      },
+      _outbox: outbox,
+    };
+    for (const t of ['item', 'idea', 'meeting', 'task', 'story']) {
+      prisma[t] = {
+        findMany: async ({ where, take }: any = {}) => {
+          const rows = filtered(t, where);
+          return take ? rows.slice(0, take) : rows;
+        },
+        count: async ({ where }: any = {}) => filtered(t, where).length,
+        update: async ({ where, data }: any) => {
+          const r = tableFor(t).find((x: any) => x.id === where.id);
+          if (r) Object.assign(r, data);
+          return r || {};
+        },
+      };
+    }
+    return prisma;
+  }
+
+  it('re-enqueues a both-null meeting and links it on drain', async () => {
+    const seed: any = { meeting: [{ id: 'm1', title: 'Sync', summary: 'we decided X', ragId: null, supermemoryId: null }] };
+    const prisma = makeReconcilePrisma(seed);
+    const sm: any = { save: jest.fn(async () => 'sm-m'), getContent: jest.fn(), delete: jest.fn() };
+    const rag: any = { save: jest.fn(async () => 'rag-m'), delete: jest.fn() };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    const res = await svc.reconcile();
+    await svc.drain();
+
+    expect(res.reEnqueued).toBe(1);
+    expect(sm.save).toHaveBeenCalled();
+    expect(rag.save).toHaveBeenCalled();
+    expect(seed.meeting[0].supermemoryId).toBe('sm-m');
+    expect(seed.meeting[0].ragId).toBe('rag-m');
+  });
+
+  it('fills ONLY the missing RAG side by copying content from SuperMemory (no SM dup)', async () => {
+    const seed: any = { item: [{ id: 'i1', title: 'Doc', summary: 's', ragId: null, supermemoryId: 'sm-existing' }] };
+    const prisma = makeReconcilePrisma(seed);
+    const sm: any = {
+      save: jest.fn(async () => 'sm-NEW'),
+      getContent: jest.fn(async () => ({ content: 'full doc body', title: 'Doc', summary: '', tags: ['research'] })),
+      delete: jest.fn(),
+    };
+    const rag: any = { save: jest.fn(async () => 'rag-i'), delete: jest.fn() };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    await svc.reconcile();
+    await svc.drain();
+
+    expect(sm.getContent).toHaveBeenCalledWith('sm-existing');
+    expect(rag.save).toHaveBeenCalled(); // added to RAG
+    expect(sm.save).not.toHaveBeenCalled(); // SM untouched — no duplicate
+    expect(seed.item[0].ragId).toBe('rag-i');
+    expect(seed.item[0].supermemoryId).toBe('sm-existing'); // unchanged
+  });
+
+  it('revives failed outbox rows', async () => {
+    const seed: any = {};
+    const prisma = makeReconcilePrisma(seed);
+    prisma._outbox.push({ id: '99', status: 'failed', attempts: 3, target: 'rag', payload: '{}' });
+    const svc = new MemoryService(prisma, { save: jest.fn() } as any, { save: jest.fn() } as any);
+
+    const res = await svc.reconcile();
+    expect(res.retried).toBe(1);
+    expect(prisma._outbox[0].status).toBe('pending');
+  });
+});

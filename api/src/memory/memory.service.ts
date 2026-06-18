@@ -1,15 +1,22 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SuperMemoryStore } from './supermemory.store';
 import { RagStore } from './rag.store';
 
 const MAX_ATTEMPTS = 3;
 const DRAIN_INTERVAL_MS = Number(process.env.MEMORY_DRAIN_MS) || 5000;
+const RECONCILE_INTERVAL_MS = Number(process.env.MEMORY_RECONCILE_MS) || 15 * 60 * 1000;
+
+/** Row types that carry supermemoryId/ragId columns and should be kept in the index. */
+const INDEXABLE: Array<'item' | 'idea' | 'meeting' | 'task' | 'story'> = ['item', 'idea', 'meeting', 'task', 'story'];
 
 @Injectable()
 export class MemoryService implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger('MemoryService');
   private timer: NodeJS.Timeout | null = null;
+  private reconcileTimer: NodeJS.Timeout | null = null;
   private draining = false;
+  private reconciling = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -20,9 +27,12 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     // Background worker drains the outbox to both stores.
     this.timer = setInterval(() => this.drain().catch(() => undefined), DRAIN_INTERVAL_MS);
+    // Slower safety-net: revive failed writes + re-enqueue any row that never got linked. (BEA-333)
+    this.reconcileTimer = setInterval(() => this.reconcile().catch(() => undefined), RECONCILE_INTERVAL_MS);
   }
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer);
   }
 
   /** Queue a doc for dual-write to BOTH stores (one outbox row each).
@@ -30,17 +40,29 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
    *  `itemId` is kept for back-compat and implies refType 'item'. */
   async enqueue(
     content: string,
-    opts: { itemId?: string; refType?: string; refId?: string; title?: string; tags?: string[] } = {},
+    opts: {
+      itemId?: string;
+      refType?: string;
+      refId?: string;
+      title?: string;
+      tags?: string[];
+      targets?: Array<'supermemory' | 'rag'>;
+    } = {},
   ): Promise<void> {
     const payload = JSON.stringify({ content, title: opts.title, tags: opts.tags ?? [] });
     const refId = opts.refId ?? opts.itemId;
     const refType = opts.refType ?? (opts.itemId ? 'item' : undefined);
-    await this.prisma.memoryOutbox.createMany({
-      data: [
-        { itemId: refId, refType, target: 'supermemory', payload },
-        { itemId: refId, refType, target: 'rag', payload },
-      ],
-    });
+    const targets = opts.targets ?? ['supermemory', 'rag'];
+    try {
+      await this.prisma.memoryOutbox.createMany({
+        data: targets.map((target) => ({ itemId: refId, refType, target, payload })),
+      });
+    } catch (e) {
+      // Don't silently swallow: if the outbox insert itself fails the write would be lost.
+      // The reconcile sweep is the backstop (it re-enqueues any null-id row), but log it loudly.
+      this.log.error(`outbox enqueue failed (refType=${refType} refId=${refId}): ${(e as Error)?.message ?? e}`);
+      throw e;
+    }
   }
 
   /** Index (or re-index) a row's content into both stores. Deletes any prior docs first so an
@@ -158,6 +180,109 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       data: { status: 'pending', attempts: 0, lastError: null },
     });
     return { retried: res.count };
+  }
+
+  /** Per-table count of indexable rows not yet fully linked into BOTH stores. */
+  async unindexedCounts(): Promise<Array<{ type: string; unindexed: number }>> {
+    const out: Array<{ type: string; unindexed: number }> = [];
+    for (const t of INDEXABLE) {
+      const unindexed = await (this.prisma as any)[t].count({
+        where: { OR: [{ ragId: null }, { supermemoryId: null }] },
+      });
+      if (unindexed) out.push({ type: t, unindexed });
+    }
+    return out;
+  }
+
+  /** Build searchable text for a row that needs re-indexing (reconcile backstop). */
+  private buildContent(table: string, row: any): { content: string; title: string; tags: string[] } | null {
+    const parseTags = (s: any) => {
+      try {
+        const a = JSON.parse(s || '[]');
+        return Array.isArray(a) ? a.map((x) => String(x)) : [];
+      } catch {
+        return [];
+      }
+    };
+    switch (table) {
+      case 'task': {
+        const parts = [row.title, row.note || '', row.category ? `Category: ${row.category}` : '', `Status: ${row.status === 'done' ? 'done' : 'open'}`, row.day ? `Day: ${row.day}` : ''].filter(Boolean);
+        return { content: `Task — ${parts.join('\n')}`, title: `Task: ${row.title}`.slice(0, 120), tags: ['task', row.sphere || 'work', ...(row.category ? [String(row.category).toLowerCase()] : [])] };
+      }
+      case 'story':
+        return { content: `His own story — ${row.day}${row.mood ? ` (mood: ${row.mood})` : ''}\n\n${row.rawText}`, title: `Your story ${row.day}`, tags: ['activity', 'story'] };
+      case 'idea':
+        return { content: [row.title, row.content, row.rawDump].filter(Boolean).join('\n\n'), title: row.title || 'Idea', tags: ['idea'] };
+      case 'meeting': {
+        const text = [row.title, row.summary, (row.transcript || '').slice(0, 6000), row.takeaways, row.decisions].filter(Boolean).join('\n\n');
+        return text ? { content: text, title: row.title || 'Meeting', tags: ['meeting', ...parseTags(row.tags)] } : null;
+      }
+      case 'item': {
+        const text = [row.title, row.summary].filter(Boolean).join('\n\n');
+        return text ? { content: text, title: row.title || 'Document', tags: parseTags(row.tags) } : null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Safety net so nothing is ever silently lost from the index. (BEA-333)
+   *  (a) revives failed outbox rows, and
+   *  (b) re-enqueues any indexable row missing a store id — copying existing content from the
+   *      store that DOES have it when possible (so we fill the missing side without duplicating).
+   */
+  async reconcile(): Promise<{ retried: number; reEnqueued: number; perType: Record<string, number> }> {
+    if (this.reconciling) return { retried: 0, reEnqueued: 0, perType: {} };
+    this.reconciling = true;
+    try {
+      const { retried } = await this.retryFailed();
+      let reEnqueued = 0;
+      const perType: Record<string, number> = {};
+      for (const table of INDEXABLE) {
+        const rows = await (this.prisma as any)[table].findMany({
+          where: { OR: [{ ragId: null }, { supermemoryId: null }] },
+          take: 200,
+        });
+        for (const row of rows) {
+          const missingSm = !row.supermemoryId;
+          const missingRag = !row.ragId;
+          if (!missingSm && !missingRag) continue;
+
+          let content: string | undefined;
+          let title: string | undefined;
+          let tags: string[] | undefined;
+
+          // Prefer copying the real content from the store that already has it.
+          if (missingRag && !missingSm) {
+            const sm = await this.getSuperMemoryContent(row.supermemoryId);
+            if (sm?.content) {
+              content = sm.content;
+              title = sm.title;
+              tags = sm.tags;
+            }
+          }
+          if (!content) {
+            const built = this.buildContent(table, row);
+            if (!built) continue;
+            content = built.content;
+            title = built.title;
+            tags = built.tags;
+          }
+
+          const targets: Array<'supermemory' | 'rag'> = [];
+          if (missingSm) targets.push('supermemory');
+          if (missingRag) targets.push('rag');
+          await this.enqueue(content, { refType: table, refId: row.id, title, tags, targets }).catch(() => undefined);
+          reEnqueued++;
+          perType[table] = (perType[table] || 0) + 1;
+        }
+      }
+      if (reEnqueued || retried) this.log.log(`reconcile: retried ${retried} failed, re-enqueued ${reEnqueued} unlinked rows`);
+      return { retried, reEnqueued, perType };
+    } finally {
+      this.reconciling = false;
+    }
   }
 
   /** Search both stores (for verification / the search feature). */
