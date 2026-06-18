@@ -135,6 +135,7 @@ export class RagStore implements OnModuleDestroy {
           tags: w.tags ?? [],
           score: w.similarity,
           similarity: w.similarity,
+          createdAt: w.created_at,
         });
       }
       for (const ch of chunked?.results ?? []) {
@@ -145,6 +146,7 @@ export class RagStore implements OnModuleDestroy {
           tags: ch.parent_tags ?? [],
           score: ch.similarity,
           similarity: ch.similarity,
+          createdAt: ch.created_at,
           heading: ch.chunk_heading ?? undefined,
           isChunk: true,
         });

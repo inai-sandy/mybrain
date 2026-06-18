@@ -259,3 +259,51 @@ describe('MemoryService.reconcile (BEA-333 safety net)', () => {
     expect(prisma._outbox[0].status).toBe('pending');
   });
 });
+
+describe('MemoryService retrieval (BEA-332 whole-brain merge/re-rank/fallback)', () => {
+  function svcWith(smResults: any[], ragResults: any[]) {
+    const sm: any = { search: jest.fn(async () => smResults) };
+    const rag: any = { search: jest.fn(async () => ragResults) };
+    return { svc: new MemoryService(fakePrisma(), sm, rag), sm, rag };
+  }
+
+  it('returns the higher-scoring RAG hit over a lower SM hit (no SuperMemory-first short-circuit)', async () => {
+    const sm = [{ id: 's1', content: 'weak supermemory hit', score: 0.3 }];
+    const rag = [{ id: 'r1', content: 'strong rag hit', score: 0.9 }];
+    const { svc, sm: smMock, rag: ragMock } = svcWith(sm, rag);
+    const hits = await svc.searchBrain('q', 5);
+    expect(smMock.search).toHaveBeenCalled();
+    expect(ragMock.search).toHaveBeenCalled(); // BOTH queried, in parallel
+    expect(hits[0].content).toBe('strong rag hit');
+    expect(hits[0].source).toBe('rag');
+  });
+
+  it('de-dups the same doc living in both stores (dual-write twins), keeping the higher score', async () => {
+    const sm = [{ id: 's1', title: 'Doc', content: 'identical body of the document', score: 0.6 }];
+    const rag = [{ id: 'r1', title: 'Doc', content: 'identical body of the document', score: 0.85 }];
+    const { svc } = svcWith(sm, rag);
+    const hits = await svc.searchBrain('q', 5);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].score).toBe(0.85);
+  });
+
+  it('boosts recent + spine (activity/task) content in the ranking', async () => {
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
+    // Lower raw score but recent + activity should outrank a slightly higher, old, untagged hit.
+    const sm = [{ id: 's1', content: 'old generic note', score: 0.7, createdAt: old, metadata: { tags: '' } }];
+    const rag = [{ id: 'r1', content: 'todays story', score: 0.62, createdAt: recent, tags: ['activity', 'story'] }];
+    const { svc } = svcWith(sm, rag);
+    const hits = await svc.searchBrain('q', 5);
+    expect(hits[0].content).toBe('todays story');
+  });
+
+  it('whole-brain fallback: a scoped query that finds nothing in-scope widens instead of returning empty', async () => {
+    // Only a bookmark exists; an Activity-scoped search finds nothing in scope → should fall back to whole brain.
+    const sm = [{ id: 's1', content: 'a useful bookmark', score: 0.8, metadata: { tags: 'bookmark' } }];
+    const { svc } = svcWith(sm, []);
+    const hits = await svc.searchScoped('q', ['activity'], 5);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].content).toContain('bookmark');
+  });
+});

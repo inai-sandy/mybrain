@@ -285,9 +285,9 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Search both stores (for verification / the search feature). */
+  /** Search both stores (for verification / the raw search feature). */
   async searchBoth(q: string) {
-    const [sm, rag] = await Promise.allSettled([this.sm.search(q, 3), this.rag.search(q, 3)]);
+    const [sm, rag] = await Promise.allSettled([this.sm.search(q, 8), this.rag.search(q, 8)]);
     return {
       supermemory: sm.status === 'fulfilled' ? sm.value : { error: String((sm as any).reason?.message ?? sm) },
       rag: rag.status === 'fulfilled' ? rag.value : { error: String((rag as any).reason?.message ?? rag) },
@@ -305,8 +305,9 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Scoped semantic search for the chat. `include` = tags that MUST be present; `exclude` = tags that must be ABSENT.
-   * The scope is enforced on BOTH stores — when a scope is set we NEVER widen to the whole brain (strict).
-   * SuperMemory (tag-filtered) first, RAG as a same-scope fallback.
+   * Queries BOTH stores IN PARALLEL, merges, de-dups and re-ranks by relevance × recency × importance — so the
+   * best hit is never dropped just because SuperMemory answered first. The scope stays strict (chat correctness);
+   * the ONLY widening is a safe whole-brain retry when the scoped search finds literally nothing. (BEA-332)
    */
   async searchScoped(q: string, include: string[] = [], limit = 5, exclude: string[] = []): Promise<MemHit[]> {
     const scoped = include.length > 0 || exclude.length > 0;
@@ -319,28 +320,57 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       return true;
     };
     // Over-fetch when scoped so post-filtering still leaves enough results.
-    const fetchN = scoped ? Math.max(limit * 4, 20) : limit;
-    try {
-      const sm = await this.sm.search(q, fetchN, include);
-      const norm = (sm || [])
-        .filter((r) => !scoped || ok(this.smTags(r)))
-        .map((r) => this.normSm(r))
-        .filter((x) => x.content)
-        .slice(0, limit);
-      if (norm.length) return norm;
-    } catch {
-      /* fall through to RAG (still same-scope) */
+    const fetchN = scoped ? Math.max(limit * 4, 20) : Math.max(limit, 12);
+    const [smR, ragR] = await Promise.allSettled([this.sm.search(q, fetchN, include), this.rag.search(q, fetchN)]);
+    const smHits = smR.status === 'fulfilled' ? (smR.value || []).filter((r) => !scoped || ok(this.smTags(r))).map((r) => this.normSm(r)) : [];
+    const ragHits = ragR.status === 'fulfilled' ? (ragR.value || []).filter((r) => !scoped || ok(Array.isArray(r?.tags) ? r.tags : [])).map((r) => this.normRag(r)) : [];
+    const merged = this.rerank([...smHits, ...ragHits], limit);
+    // Safe fallback: a scoped query that found NOTHING widens to the whole brain (it had nothing to lose).
+    if (scoped && merged.length === 0) return this.searchBrain(q, limit);
+    return merged;
+  }
+
+  /** Whole-brain semantic search — both stores in parallel, merged + re-ranked, no scope. For Explore. (BEA-332) */
+  async searchBrain(q: string, limit = 14): Promise<MemHit[]> {
+    const fetchN = Math.max(limit, 16);
+    const [smR, ragR] = await Promise.allSettled([this.sm.search(q, fetchN), this.rag.search(q, fetchN)]);
+    const smHits = smR.status === 'fulfilled' ? (smR.value || []).map((r) => this.normSm(r)) : [];
+    const ragHits = ragR.status === 'fulfilled' ? (ragR.value || []).map((r) => this.normRag(r)) : [];
+    return this.rerank([...smHits, ...ragHits], limit);
+  }
+
+  /** Merge + de-dup + re-rank hits by relevance × recency × importance. */
+  private rerank(hits: MemHit[], limit: number): MemHit[] {
+    const now = Date.now();
+    const importanceFor = (h: MemHit) => {
+      const t = (h.tags || []).map((x) => String(x).toLowerCase());
+      if (t.includes('story') || t.includes('activity')) return 0.12; // the day's context — the spine
+      if (t.includes('task')) return 0.08;
+      return 0;
+    };
+    const recencyFor = (h: MemHit) => {
+      if (!h.when) return 0;
+      const ageDays = (now - new Date(h.when).getTime()) / 86_400_000;
+      if (!isFinite(ageDays) || ageDays < 0) return 0;
+      if (ageDays <= 7) return 0.15;
+      if (ageDays <= 30) return 0.08;
+      if (ageDays <= 90) return 0.03;
+      return 0;
+    };
+    const seen = new Map<string, MemHit & { _rank?: number }>();
+    for (const h of hits) {
+      if (!h.content) continue;
+      // Content fingerprint (not store id): the dual-write means the SAME doc lives in BOTH stores
+      // under different ids, so de-dup by what the text IS — this collapses those cross-store twins.
+      const key = `${h.title}|${h.content.slice(0, 120)}`.toLowerCase().replace(/\s+/g, ' ').trim();
+      const rank = (h.score ?? 0) * (1 + recencyFor(h) + importanceFor(h));
+      const prev = seen.get(key);
+      if (!prev || rank > (prev._rank ?? 0)) seen.set(key, { ...h, _rank: rank });
     }
-    try {
-      const rag = await this.rag.search(q, fetchN);
-      return (rag || [])
-        .filter((r) => !scoped || ok(Array.isArray(r?.tags) ? r.tags : []))
-        .map((r) => this.normRag(r))
-        .filter((x) => x.content)
-        .slice(0, limit);
-    } catch {
-      return [];
-    }
+    return [...seen.values()]
+      .sort((a, b) => (b._rank ?? 0) - (a._rank ?? 0))
+      .slice(0, limit)
+      .map(({ _rank, ...h }) => h);
   }
 
   private normSm(r: any): MemHit {
@@ -349,9 +379,11 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return {
       memId: r.documentId || r.id || r.memoryId || r.memory?.id || undefined,
       title: r.title || r.metadata?.title || r.document?.title || '',
-      content: String(content).slice(0, 2200),
+      content: String(content).slice(0, 4000),
       url: r.url || r.metadata?.url || undefined,
       score: typeof r.score === 'number' ? r.score : undefined,
+      when: r.createdAt || r.updatedAt || r.metadata?.createdAt || undefined,
+      tags: this.smTags(r),
       source: 'supermemory',
     };
   }
@@ -361,12 +393,23 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return {
       memId: r.id || r.doc_id || undefined,
       title: r.title || r.metadata?.title || '',
-      content: String(content).slice(0, 2200),
+      content: String(content).slice(0, 4000),
       url: r.url || r.metadata?.url || undefined,
       score: typeof r.score === 'number' ? r.score : undefined,
+      when: r.createdAt || r.created_at || undefined,
+      tags: Array.isArray(r?.tags) ? r.tags : [],
       source: 'rag',
     };
   }
 }
 
-export type MemHit = { memId?: string; title: string; content: string; url?: string; score?: number; source: 'supermemory' | 'rag' };
+export type MemHit = {
+  memId?: string;
+  title: string;
+  content: string;
+  url?: string;
+  score?: number;
+  when?: string;
+  tags?: string[];
+  source: 'supermemory' | 'rag';
+};
