@@ -9,11 +9,15 @@
 }
 
 /* Prevent stray horizontal scroll at the viewport edge only —
-   never on the padded content column, so cards are never clipped. */
+   never on the padded content column, so cards are never clipped.
+   IMPORTANT: use `clip`, NOT `hidden`. `overflow-x: hidden` forces overflow-y to compute as `auto`,
+   turning <body> into a nested scroll container — which breaks SINGLE-FINGER touch scroll on some
+   Android Chrome builds (two-finger viewport-pan still works). `clip` hides the horizontal overflow
+   without creating a scroll container, so the page scrolls normally with one finger. */
 @layer base {
   html,
   body {
-    overflow-x: hidden;
+    overflow-x: clip;
     max-width: 100%;
     /* Stop the rubber-band overscroll bounce at the top/bottom edges. On phones that bounce
        visibly drags the fixed bottom tab bar (and the sticky header) up and down while scrolling,
