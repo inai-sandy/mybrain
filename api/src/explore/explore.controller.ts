@@ -1,9 +1,24 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { ExploreService } from './explore.service';
 
 @Controller('explore')
 export class ExploreController {
   constructor(private readonly explore: ExploreService) {}
+
+  // --- answer model (cost control: Sonnet ⇄ Haiku) ---
+  @Get('model')
+  async getModel() {
+    return this.explore.getModel();
+  }
+  @Put('model')
+  async setModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.explore.setModel(body.provider || 'openrouter', body.model);
+  }
+  @Get('models')
+  async models() {
+    return { models: await this.explore.listModels() };
+  }
 
   /** Ask the brain a plain-English question → synthesised answer + sources. */
   @Post('ask')

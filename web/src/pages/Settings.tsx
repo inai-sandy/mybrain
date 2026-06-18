@@ -679,6 +679,8 @@ function ModelsSection() {
     <div className="space-y-4">
       <AiModelCard />
       <ChatModelCard />
+      <EngineModelCard title="Explore answer model" icon={Sparkles} base="/api/explore/model"
+        desc="Writes your Explore answers from your indexed brain. Sonnet (default) is the most capable; switch to Haiku to cut the cost per question by ~3–4× (each ask is mostly the model reading your retrieved notes)." />
       <BookmarksModelCard />
       <TasksModelCard />
       <MeetingsEngineCard />

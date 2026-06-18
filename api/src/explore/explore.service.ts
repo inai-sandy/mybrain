@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService, MemHit } from '../memory/memory.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 
-const EXPLORE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+const DEFAULT_EXPLORE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 const SYSTEM = `You are the owner's second brain. You answer their questions using ONLY the passages retrieved from their own saved tasks, daily stories, documents, bookmarks, ideas, meetings and research.`;
 
@@ -20,9 +21,32 @@ type Source = {
 @Injectable()
 export class ExploreService {
   constructor(
+    private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
   ) {}
+
+  /** The model that writes Explore answers (configurable in Settings → Models). */
+  async getModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'explore.llm' } });
+    if (!row) return DEFAULT_EXPLORE_MODEL;
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : DEFAULT_EXPLORE_MODEL;
+    } catch {
+      return DEFAULT_EXPLORE_MODEL;
+    }
+  }
+
+  async setModel(provider: string, model: string): Promise<LlmConfig> {
+    const cfg = { provider: provider === 'anthropic' ? 'anthropic' : 'openrouter', model } as LlmConfig;
+    await this.prisma.setting.upsert({ where: { key: 'explore.llm' }, create: { key: 'explore.llm', value: JSON.stringify(cfg) }, update: { value: JSON.stringify(cfg) } });
+    return cfg;
+  }
+
+  listModels() {
+    return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
+  }
 
   /** Classify a hit into a human source type from its tags. */
   private typeOf(tags: string[] = []): string {
@@ -99,7 +123,8 @@ ${context}
 
 Answer the question using ONLY these sources. Cite the sources you draw on inline like [1], [2]. If the sources don't contain the answer, say so plainly rather than guessing. Be concise, direct, and write in second person ("you").`;
 
-    const answer = (await this.llm.completeWith(EXPLORE_MODEL, prompt, 900, 'explore-ask')) || 'Sorry — I could not generate an answer just now.';
+    const model = await this.getModel();
+    const answer = (await this.llm.completeWith(model, prompt, 900, 'explore-ask')) || 'Sorry — I could not generate an answer just now.';
     return { answer, sources, matches: hits.length };
   }
 
