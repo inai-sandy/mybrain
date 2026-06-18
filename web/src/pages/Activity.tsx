@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -1000,8 +1001,11 @@ function YearCard() {
 type TabId = 'day' | 'suggested' | 'insights' | 'calendar' | 'book' | 'me';
 
 export function Activity() {
+  const [params] = useSearchParams();
+  const dayParam = params.get('day');
+  // Deep-link from an Explore story source: ?day=YYYY-MM-DD opens that day on the Day tab. (BEA-340)
   const [tab, setTab] = useState<TabId>('day');
-  const [day, setDay] = useState<string | null>(null);
+  const [day, setDay] = useState<string | null>(dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : null);
 
   const tabs: { id: TabId; label: string; icon: any }[] = [
     { id: 'day', label: 'Day', icon: ListTree },

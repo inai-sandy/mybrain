@@ -1,7 +1,7 @@
 import { ExploreService } from './explore.service';
 
-function make(hits: any[], answer = 'You shipped it on Tuesday [1].') {
-  const memory: any = { searchBrain: jest.fn(async () => hits) };
+function make(hits: any[], answer = 'You shipped it on Tuesday [1].', resolved: any = {}) {
+  const memory: any = { searchBrain: jest.fn(async () => hits), resolveRefs: jest.fn(async () => resolved) };
   const llm: any = { completeWith: jest.fn(async () => answer) };
   // No explore.llm setting → ask() falls back to the default model.
   const prisma: any = { setting: { findUnique: async () => null } };
@@ -93,5 +93,29 @@ describe('ExploreService saved answers (BEA-339)', () => {
     const saved = await s.saveAnswer('q', 'a', []);
     await s.deleteSave(saved!.id);
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('ExploreService.ask — source deep links (BEA-340)', () => {
+  it('deep-links a resolved document source to /doc/:id', async () => {
+    const hits = [{ memId: 'sm-x', title: 'My research', content: 'long research', tags: ['research'], score: 0.9, source: 'supermemory' }];
+    const { svc } = make(hits, 'see [1]', { 'sm-x': { type: 'item', id: 'item-99' } });
+    const out = await svc.ask('what did my research say?');
+    expect(out.sources[0].link).toBe('/doc/item-99');
+    expect(out.sources[0].sourceType).toBe('document');
+  });
+
+  it('deep-links a story source to /activity?day and never to the dead /find', async () => {
+    const hits = [{ memId: 'rag-y', title: 'Story', content: 'the day', tags: ['activity', 'story'], score: 0.8, source: 'rag' }];
+    const { svc } = make(hits, 'see [1]', { 'rag-y': { type: 'story', id: 's1', day: '2026-06-16' } });
+    const out = await svc.ask('what happened that day?');
+    expect(out.sources[0].link).toBe('/activity?day=2026-06-16');
+  });
+
+  it('falls back to a real section (not /find) when a hit cannot be resolved', async () => {
+    const hits = [{ memId: 'unknown', title: 'External doc', content: 'x', tags: [], score: 0.5, source: 'supermemory' }];
+    const { svc } = make(hits, 'see [1]', {}); // no resolution
+    const out = await svc.ask('q');
+    expect(out.sources[0].link).toBe('/explore'); // was the dead '/find'
   });
 });
