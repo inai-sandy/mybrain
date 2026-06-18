@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Moon, X, BookOpen, Plus, Trash2, MessageSquare, Clock, Check, Sparkles, Loader2 } from 'lucide-react';
+import { Moon, X, BookOpen, Plus, Trash2, MessageSquare, Clock, Check, Sparkles, Loader2, ArrowRight } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { isDictating } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
@@ -26,18 +26,26 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<'story' | 'wrap'>('story');
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [openTasks, setOpenTasks] = useState<{ id: string; title: string }[]>([]);
+  const [carry, setCarry] = useState<Record<string, 'roll' | 'drop' | undefined>>({});
   const [hours, setHours] = useState('');
   const [wrapBusy, setWrapBusy] = useState(false);
   const toast = useToast();
   const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
-  // When we reach the wrap-up step, fetch the finished tasks the AI found in the story.
+  // When we reach the wrap-up step, load everything it needs: found tasks, a suggested hours figure,
+  // and the day's unfinished tasks for carry-forward.
   useEffect(() => {
     if (step !== 'wrap' || candidates !== null) return;
-    fetch('/api/daily/done-candidates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
-      .then((r) => (r.ok ? r.json() : { candidates: [] }))
-      .then((d) => setCandidates(d.candidates || []))
+    fetch('/api/daily/wrap-up-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
+      .then((r) => (r.ok ? r.json() : { candidates: [], openTasks: [], suggestedMinutes: null }))
+      .then((d) => {
+        setCandidates(d.candidates || []);
+        setOpenTasks(d.openTasks || []);
+        if (d.suggestedMinutes && !hours) setHours((d.suggestedMinutes / 60).toFixed(1).replace(/\.0$/, ''));
+      })
       .catch(() => setCandidates([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, candidates, day]);
 
   async function save() {
@@ -63,7 +71,9 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
     try {
       const h = parseFloat(hours);
       const workedMinutes = Number.isFinite(h) && h > 0 ? Math.round(h * 60) : undefined;
-      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: candidates || [], workedMinutes }) });
+      const roll = Object.entries(carry).filter(([, v]) => v === 'roll').map(([id]) => id);
+      const drop = Object.entries(carry).filter(([, v]) => v === 'drop').map(([id]) => id);
+      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: candidates || [], workedMinutes, roll, drop }) });
       const n = candidates?.length || 0;
       toast('success', n ? `Logged ${n} finished task${n === 1 ? '' : 's'} ✓` : 'Day wrapped up ✓');
       onSaved();
@@ -107,6 +117,28 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
                 <p className="text-sm text-zinc-400">No extra finished tasks found — nice and tidy.</p>
               )}
             </div>
+
+            {/* Carry-forward — unfinished tasks */}
+            {openTasks.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs text-zinc-500 mb-2">Still unfinished — carry forward or drop?</p>
+                <ul className="space-y-1.5">
+                  {openTasks.map((t) => {
+                    const c = carry[t.id];
+                    return (
+                      <li key={t.id} className={'flex items-center gap-2 rounded-lg border px-3 py-2 ' + (c === 'drop' ? 'border-rose-300/60 dark:border-rose-500/30 opacity-60' : c === 'roll' ? 'border-emerald-400/60' : 'border-zinc-200 dark:border-zinc-800')}>
+                        <div className={'min-w-0 flex-1 text-sm truncate ' + (c === 'drop' ? 'line-through text-zinc-400' : '')}>{t.title}</div>
+                        <button onClick={() => setCarry((m) => ({ ...m, [t.id]: m[t.id] === 'roll' ? undefined : 'roll' }))} title="Roll to tomorrow" className={'shrink-0 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ' + (c === 'roll' ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-emerald-500')}>
+                          <ArrowRight size={12} /> Tomorrow
+                        </button>
+                        <button onClick={() => setCarry((m) => ({ ...m, [t.id]: m[t.id] === 'drop' ? undefined : 'drop' }))} title="Drop" className={'shrink-0 p-1 rounded-md ' + (c === 'drop' ? 'text-rose-600' : 'text-zinc-400 hover:text-rose-600')}><Trash2 size={14} /></button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="mt-1 text-[11px] text-zinc-400">Leave untouched to keep them — they roll over on their own.</p>
+              </div>
+            )}
 
             {/* Working hours */}
             <div className="mb-4">

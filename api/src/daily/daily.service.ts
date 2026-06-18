@@ -152,8 +152,32 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { day, candidates };
   }
 
-  /** Wrap up the day: log the approved finished tasks as DONE + save the user-stated working minutes. */
-  async wrapUp(dayInput: string | undefined, tasks: { title?: string; category?: string | null }[], workedMinutes?: number) {
+  /** Everything the wrap-up step needs in one call: finished-task candidates, a suggested hours figure
+   *  (from the day's activity span), and the day's still-unfinished tasks for carry-forward. */
+  async wrapUpData(dayInput?: string) {
+    const tz = await this.tz();
+    const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
+    const [{ candidates }, feed, open] = await Promise.all([
+      this.doneCandidates(day),
+      this.feed(day, tz),
+      this.prisma.task.findMany({ where: { day, status: { not: 'done' } }, orderBy: { createdAt: 'asc' }, select: { id: true, title: true } }),
+    ]);
+    // Suggest hours from the span between the first and last thing the user did in the app that day.
+    let suggestedMinutes: number | null = null;
+    const times = feed
+      .map((e) => new Date(e.at as any).getTime())
+      .filter((t) => Number.isFinite(t))
+      .sort((a, b) => a - b);
+    if (times.length >= 2) {
+      const span = Math.round((times[times.length - 1] - times[0]) / 60000);
+      suggestedMinutes = Math.max(30, Math.min(16 * 60, span));
+    }
+    return { day, candidates, suggestedMinutes, openTasks: open };
+  }
+
+  /** Wrap up the day: log the approved finished tasks as DONE, save the stated working minutes,
+   *  and carry-forward unfinished tasks (roll to tomorrow / drop). */
+  async wrapUp(dayInput: string | undefined, tasks: { title?: string; category?: string | null }[], workedMinutes?: number, roll: string[] = [], drop: string[] = []) {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
     let created = 0;
@@ -167,7 +191,19 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
       if (story) await this.prisma.story.update({ where: { id: story.id }, data: { workedMinutes: wm } }).catch(() => undefined);
     }
-    return { day, created, workedMinutes: wm };
+    // Carry-forward: roll the chosen unfinished tasks to tomorrow, drop the ones the user dropped.
+    const tomorrow = this.dayAdd(day, 1);
+    let rolled = 0;
+    let dropped = 0;
+    for (const id of (roll || []).slice(0, 50)) {
+      const r = await this.prisma.task.update({ where: { id }, data: { day: tomorrow, status: 'open', rolloverCount: { increment: 1 } } }).catch(() => null);
+      if (r) rolled++;
+    }
+    for (const id of (drop || []).slice(0, 50)) {
+      const r = await this.prisma.task.delete({ where: { id } }).catch(() => null);
+      if (r) dropped++;
+    }
+    return { day, created, workedMinutes: wm, rolled, dropped };
   }
 
   // ---- daytime notes ----

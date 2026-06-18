@@ -56,15 +56,20 @@ export class DailyController {
     return this.daily.submitStory(body.text, body.source || 'app', body.mood, body.day);
   }
 
-  // ---- daily wrap-up: finished tasks found in the story + working hours ----
+  // ---- daily wrap-up: finished tasks found in the story + working hours + carry-forward ----
   @Post('done-candidates')
   async doneCandidates(@Body() body: { day?: string }) {
     return this.daily.doneCandidates(body?.day);
   }
 
+  @Post('wrap-up-data')
+  async wrapUpData(@Body() body: { day?: string }) {
+    return this.daily.wrapUpData(body?.day);
+  }
+
   @Post('wrap-up')
-  async wrapUp(@Body() body: { day?: string; tasks?: { title?: string; category?: string | null }[]; workedMinutes?: number }) {
-    return this.daily.wrapUp(body?.day, body?.tasks || [], body?.workedMinutes);
+  async wrapUp(@Body() body: { day?: string; tasks?: { title?: string; category?: string | null }[]; workedMinutes?: number; roll?: string[]; drop?: string[] }) {
+    return this.daily.wrapUp(body?.day, body?.tasks || [], body?.workedMinutes, body?.roll || [], body?.drop || []);
   }
 
   // ---- Story of the Day (nightly woven narrative) ----
