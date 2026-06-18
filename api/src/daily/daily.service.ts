@@ -152,6 +152,34 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { day, candidates };
   }
 
+  /** AI split of the stated working minutes across 3–6 topics, from the story + that day's finished tasks. */
+  private async computeWorkedBreakdown(day: string, wm: number): Promise<{ category: string; minutes: number }[] | null> {
+    const [story, doneTasks] = await Promise.all([
+      this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.task.findMany({ where: { day, status: 'done' }, select: { title: true, category: true } }),
+    ]);
+    const taskLines = doneTasks.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''}`).join('\n');
+    const prompt =
+      `The user worked ${wm} minutes today. Split that time across 3–6 simple work categories based on what they actually did. ` +
+      `Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where the minutes sum to about ${wm}.\n\n` +
+      `Finished tasks:\n${taskLines || '(none logged)'}\n\nStory of the day:\n${(story?.rawText || '').slice(0, 3000)}`;
+    const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 400, 'worked-breakdown'))?.trim() || '';
+    let list: { category?: string; minutes?: number }[] = [];
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (Array.isArray(json?.breakdown)) list = json.breakdown;
+    } catch {
+      return null;
+    }
+    const cleaned = list
+      .map((b) => ({ category: String(b?.category || '').trim().slice(0, 40), minutes: Math.max(0, Math.round(Number(b?.minutes) || 0)) }))
+      .filter((b) => b.category && b.minutes > 0)
+      .slice(0, 8);
+    if (!cleaned.length) return null;
+    const sum = cleaned.reduce((s, b) => s + b.minutes, 0) || 1;
+    return cleaned.map((b) => ({ category: b.category, minutes: Math.round((b.minutes / sum) * wm) })); // normalise to sum ≈ wm
+  }
+
   /** Everything the wrap-up step needs in one call: finished-task candidates, a suggested hours figure
    *  (from the day's activity span), and the day's still-unfinished tasks for carry-forward. */
   async wrapUpData(dayInput?: string) {
@@ -189,7 +217,13 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (workedMinutes != null && Number.isFinite(workedMinutes)) {
       wm = Math.max(0, Math.min(24 * 60, Math.round(workedMinutes)));
       const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
-      if (story) await this.prisma.story.update({ where: { id: story.id }, data: { workedMinutes: wm } }).catch(() => undefined);
+      if (story) {
+        // Split the stated hours across topics (uses the done tasks we just created above).
+        const breakdown = wm > 0 ? await this.computeWorkedBreakdown(day, wm).catch(() => null) : null;
+        await this.prisma.story
+          .update({ where: { id: story.id }, data: { workedMinutes: wm, ...(breakdown && breakdown.length ? { workedBreakdown: JSON.stringify(breakdown) } : {}) } })
+          .catch(() => undefined);
+      }
     }
     // Carry-forward: roll the chosen unfinished tasks to tomorrow, drop the ones the user dropped.
     const tomorrow = this.dayAdd(day, 1);
@@ -1087,7 +1121,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       const c = t.category || 'Uncategorized';
       catMap[c] = (catMap[c] || 0) + (t.actualMin || t.estimateMin || 0);
     }
-    const categoryTime = Object.entries(catMap)
+    const taskCategoryTime = Object.entries(catMap)
       .map(([category, minutes]) => ({ category, minutes }))
       .sort((a, b) => b.minutes - a.minutes);
 
@@ -1096,10 +1130,27 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const estimated = withBoth.reduce((s, t) => s + (t.estimateMin || 0), 0);
     const actual = withBoth.reduce((s, t) => s + (t.actualMin || 0), 0);
 
-    // user-stated working minutes per day (the real working-hours figure)
-    const workStories = await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true, workedMinutes: true } });
+    // user-stated working minutes per day (the real working-hours figure) + the AI category split
+    const workStories = await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true, workedMinutes: true, workedBreakdown: true } });
     const workedByDay: Record<string, number> = {};
-    for (const s of workStories) if (s.workedMinutes) workedByDay[s.day] = (workedByDay[s.day] || 0) + s.workedMinutes;
+    const breakdownCat: Record<string, number> = {};
+    for (const s of workStories) {
+      if (s.workedMinutes) workedByDay[s.day] = (workedByDay[s.day] || 0) + s.workedMinutes;
+      if (s.workedBreakdown) {
+        try {
+          for (const b of JSON.parse(s.workedBreakdown) as { category: string; minutes: number }[]) {
+            const c = (b?.category || 'Other').trim() || 'Other';
+            if (Number.isFinite(b?.minutes)) breakdownCat[c] = (breakdownCat[c] || 0) + Math.max(0, Math.round(b.minutes));
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    // Prefer the stated-hours split when we have it; otherwise fall back to the task-time estimate.
+    const categoryTime = Object.keys(breakdownCat).length
+      ? Object.entries(breakdownCat).map(([category, minutes]) => ({ category, minutes })).sort((a, b) => b.minutes - a.minutes)
+      : taskCategoryTime;
 
     // per-day done/total (+ worked minutes) for the bar strips
     const perDay: { day: string; done: number; total: number; worked: number }[] = [];

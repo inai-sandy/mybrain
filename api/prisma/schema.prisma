@@ -118,6 +118,7 @@ model Story {
   source        String   @default("app") // app | telegram | voice
   mood          String? // optional one-tap mood/energy
   workedMinutes Int? // user-stated hours worked that day (the real working-hours figure)
+  workedBreakdown String? // JSON [{category, minutes}] — AI split of the stated hours across topics
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
