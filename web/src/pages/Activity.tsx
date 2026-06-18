@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Sheet } from '../ui/Sheet';
@@ -19,10 +19,11 @@ type Dash = {
   totals: { tasksTotal: number; tasksDone: number; followThrough: number };
   minutesSpent: number;
   minutesWorked?: number;
+  worked?: { today: number; week: number; prevWeek: number; window: number; weekAvg: number };
   categoryTime: { category: string; minutes: number }[];
   estimateVsActual: { estimated: number; actual: number; count: number };
   streak: number;
-  perDay: { day: string; done: number; total: number }[];
+  perDay: { day: string; done: number; total: number; worked?: number }[];
 };
 type Cal = { start: string; end: string; days: { day: string; done: number; total: number; dumped: boolean; story: boolean; suggested?: number }[] };
 
@@ -285,6 +286,39 @@ function InsightsView() {
         <Stat big={`${d.totals.followThrough}%`} label="follow-through" />
         <Stat big={d.minutesWorked ? mins(d.minutesWorked) : mins(d.minutesSpent)} label={d.minutesWorked ? 'worked' : 'time spent'} />
       </div>
+
+      {/* working hours — the real timesheet (from your stated hours) */}
+      {d.worked && (() => {
+        const w = d.worked;
+        const delta = w.week - w.prevWeek;
+        const maxW = Math.max(1, ...d.perDay.map((p) => p.worked || 0));
+        return (
+          <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-sm flex items-center gap-1.5"><Clock size={15} className="text-emerald-500" /> Working hours</h2>
+              {w.prevWeek > 0 && (
+                <span className={'inline-flex items-center gap-1 text-xs ' + (delta >= 0 ? 'text-emerald-600' : 'text-rose-500')}>
+                  {delta >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />} {delta >= 0 ? '+' : ''}{mins(Math.abs(delta))} vs last week
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <Stat big={mins(w.today)} label="today" />
+              <Stat big={mins(w.week)} label={`this week${w.weekAvg ? ` · ${mins(w.weekAvg)}/day` : ''}`} />
+              <Stat big={mins(w.window)} label={`last ${d.days}d`} />
+            </div>
+            {maxW > 1 && (
+              <div className="mt-4 flex items-end gap-1 h-16">
+                {d.perDay.map((p) => (
+                  <div key={p.day} className="flex-1 flex flex-col items-center justify-end gap-1" title={`${prettyDay(p.day)} · ${mins(p.worked || 0)}`}>
+                    <div className="w-full rounded-t bg-emerald-500/80" style={{ height: `${Math.round(((p.worked || 0) / maxW) * 100)}%` }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })()}
 
       {/* time by category */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">

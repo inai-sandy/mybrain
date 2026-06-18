@@ -1096,11 +1096,16 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const estimated = withBoth.reduce((s, t) => s + (t.estimateMin || 0), 0);
     const actual = withBoth.reduce((s, t) => s + (t.actualMin || 0), 0);
 
-    // per-day done/total for the bar strip
-    const perDay: { day: string; done: number; total: number }[] = [];
+    // user-stated working minutes per day (the real working-hours figure)
+    const workStories = await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true, workedMinutes: true } });
+    const workedByDay: Record<string, number> = {};
+    for (const s of workStories) if (s.workedMinutes) workedByDay[s.day] = (workedByDay[s.day] || 0) + s.workedMinutes;
+
+    // per-day done/total (+ worked minutes) for the bar strips
+    const perDay: { day: string; done: number; total: number; worked: number }[] = [];
     for (let i = span - 1; i >= 0; i--) {
       const d = this.dayAdd(today, -i);
-      perDay.push({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length });
+      perDay.push({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length, worked: workedByDay[d] || 0 });
     }
 
     // brain-dump streak (consecutive days ending today or yesterday)
@@ -1119,9 +1124,13 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       return win.length ? Math.round((d / win.length) * 100) : null;
     };
 
-    // user-stated working minutes across the window (the real working-hours figure)
-    const workStories = await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { workedMinutes: true } });
-    const minutesWorked = workStories.reduce((s, x) => s + (x.workedMinutes || 0), 0);
+    const minutesWorked = Object.values(workedByDay).reduce((s, x) => s + x, 0);
+    // working-hours: this week's total + the prior week's (for the trend arrow), and a working-day average
+    const workedBetween = (from: string, to: string) => perDay.filter((p) => p.day >= from && p.day <= to).reduce((s, p) => s + p.worked, 0);
+    const weekWorked = workedBetween(this.dayAdd(today, -6), today);
+    const prevWeekWorked = workedBetween(this.dayAdd(today, -13), this.dayAdd(today, -7));
+    const workedDays = perDay.filter((p) => p.day >= this.dayAdd(today, -6) && p.worked > 0).length;
+    const todayWorked = workedByDay[today] || 0;
 
     return {
       days: span,
@@ -1129,6 +1138,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       followTrend: { week: ftBetween(this.dayAdd(today, -6), today), prevWeek: ftBetween(this.dayAdd(today, -13), this.dayAdd(today, -7)) },
       minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
       minutesWorked,
+      worked: { today: todayWorked, week: weekWorked, prevWeek: prevWeekWorked, window: minutesWorked, weekAvg: workedDays ? Math.round(weekWorked / workedDays) : 0 },
       categoryTime,
       estimateVsActual: { estimated, actual, count: withBoth.length },
       streak,
