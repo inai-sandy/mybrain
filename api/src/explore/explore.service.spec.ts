@@ -3,7 +3,9 @@ import { ExploreService } from './explore.service';
 function make(hits: any[], answer = 'You shipped it on Tuesday [1].') {
   const memory: any = { searchBrain: jest.fn(async () => hits) };
   const llm: any = { completeWith: jest.fn(async () => answer) };
-  return { svc: new ExploreService(memory, llm), memory, llm };
+  // No explore.llm setting → ask() falls back to the default model.
+  const prisma: any = { setting: { findUnique: async () => null } };
+  return { svc: new ExploreService(prisma, memory, llm), memory, llm };
 }
 
 describe('ExploreService.ask', () => {
