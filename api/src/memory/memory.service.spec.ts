@@ -193,7 +193,7 @@ describe('MemoryService.reconcile (BEA-333 safety net)', () => {
       },
       _outbox: outbox,
     };
-    for (const t of ['item', 'idea', 'meeting', 'task', 'story']) {
+    for (const t of ['item', 'idea', 'meeting', 'task', 'story', 'note', 'gmailBrief', 'gmailRequest']) {
       prisma[t] = {
         findMany: async ({ where, take }: any = {}) => {
           const rows = filtered(t, where);

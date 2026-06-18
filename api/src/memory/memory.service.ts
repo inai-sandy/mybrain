@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SuperMemoryStore } from './supermemory.store';
 import { RagStore } from './rag.store';
@@ -7,19 +7,22 @@ const MAX_ATTEMPTS = 3;
 const DRAIN_INTERVAL_MS = Number(process.env.MEMORY_DRAIN_MS) || 5000;
 const RECONCILE_INTERVAL_MS = Number(process.env.MEMORY_RECONCILE_MS) || 15 * 60 * 1000;
 
-/** Row types that carry supermemoryId/ragId columns and can be indexed (manageable sections). */
-const ALL_SOURCES = ['task', 'story', 'item', 'idea', 'meeting', 'note'] as const;
-type SourceType = (typeof ALL_SOURCES)[number];
-const SOURCE_LABELS: Record<SourceType, string> = {
-  task: 'Tasks',
-  story: 'Stories & Daily',
-  item: 'Documents & Bookmarks',
-  idea: 'Ideas',
-  meeting: 'Meetings',
-  note: 'Notes',
+/**
+ * The manageable index sections. `model` = the Prisma delegate name, `pk` = its primary-key field
+ * (GmailBrief is keyed by `day`, not `id`). `mandatory` sections are always on and can't be disabled.
+ */
+type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean };
+const SOURCE_META: Record<string, SourceMeta> = {
+  task: { label: 'Tasks', model: 'task', pk: 'id' },
+  story: { label: 'Stories & Daily', model: 'story', pk: 'id' },
+  item: { label: 'Documents & Bookmarks', model: 'item', pk: 'id' },
+  idea: { label: 'Ideas', model: 'idea', pk: 'id' },
+  meeting: { label: 'Meetings', model: 'meeting', pk: 'id' },
+  note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true },
+  gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true },
+  gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true },
 };
-/** Sources that start DISABLED (Notes were historically local-only). */
-const DEFAULT_DISABLED: SourceType[] = ['note'];
+const ALL_SOURCES = Object.keys(SOURCE_META);
 
 @Injectable()
 export class MemoryService implements OnModuleInit, OnModuleDestroy {
@@ -48,22 +51,33 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     this.loadSources().catch((e) => this.log.warn(`source load failed: ${e?.message ?? e}`));
   }
 
+  /** Prisma delegate + primary-key field for a source type (handles camelCase + non-`id` PKs). */
+  private modelOf(type: string): any {
+    return (this.prisma as any)[SOURCE_META[type]?.model ?? type];
+  }
+  private pkOf(type: string): string {
+    return SOURCE_META[type]?.pk ?? 'id';
+  }
+
   /** Seed IndexSource rows (first run) and populate the enabled cache. */
   private async loadSources(): Promise<void> {
     for (const type of ALL_SOURCES) {
-      const def = !DEFAULT_DISABLED.includes(type);
+      const meta = SOURCE_META[type];
+      const def = meta.mandatory ? true : !meta.defaultDisabled;
       const row = await this.prisma.indexSource
-        .upsert({ where: { type }, create: { type, enabled: def }, update: {} })
+        .upsert({ where: { type }, create: { type, enabled: def }, update: meta.mandatory ? { enabled: true } : {} })
         .catch(() => ({ type, enabled: def }) as any);
-      this.enabled.set(type, row.enabled);
+      this.enabled.set(type, meta.mandatory ? true : row.enabled);
     }
   }
 
-  /** Is this section currently indexed? (defaults: everything on except Notes). */
+  /** Is this section currently indexed? (mandatory = always; defaults: everything on except Notes). */
   sourceEnabled(type?: string): boolean {
     if (!type) return true;
+    const meta = SOURCE_META[type];
+    if (meta?.mandatory) return true;
     if (this.enabled.has(type)) return this.enabled.get(type)!;
-    return !DEFAULT_DISABLED.includes(type as SourceType);
+    return !meta?.defaultDisabled;
   }
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
@@ -121,31 +135,25 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     await this.enqueue(text, { refType: opts.refType, refId: opts.refId, title: opts.title, tags: opts.tags });
   }
 
-  /** Write a returned store doc id back onto the right table (item/task/story/idea/meeting/note). */
+  /** Write a returned store doc id back onto the right table (by its delegate + primary key). */
   private async writeBackId(refType: string | null | undefined, id: string, target: string, resultId: string) {
     const data = target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId };
-    const models: Record<string, any> = {
-      item: this.prisma.item,
-      task: this.prisma.task,
-      story: this.prisma.story,
-      idea: this.prisma.idea,
-      meeting: this.prisma.meeting,
-      note: this.prisma.note,
-    };
-    const model = models[refType || 'item'] ?? this.prisma.item;
-    await model.update({ where: { id }, data }).catch(() => undefined);
+    const type = refType || 'item';
+    await this.modelOf(type)
+      .update({ where: { [this.pkOf(type)]: id }, data })
+      .catch(() => undefined);
     this.bumpLastIndexed(refType);
   }
 
   /** Record that a section was just indexed (throttled to ~once/30s per type). (BEA-335) */
   private bumpLastIndexed(refType: string | null | undefined) {
     const type = refType || 'item';
-    if (!(ALL_SOURCES as readonly string[]).includes(type)) return;
+    if (!ALL_SOURCES.includes(type)) return;
     const now = Date.now();
     if (now - (this.lastBump.get(type) || 0) < 30_000) return;
     this.lastBump.set(type, now);
     this.prisma.indexSource
-      .upsert({ where: { type }, create: { type, enabled: !DEFAULT_DISABLED.includes(type as SourceType), lastIndexedAt: new Date() }, update: { lastIndexedAt: new Date() } })
+      .upsert({ where: { type }, create: { type, enabled: !SOURCE_META[type]?.defaultDisabled, lastIndexedAt: new Date() }, update: { lastIndexedAt: new Date() } })
       .catch(() => undefined);
   }
 
@@ -238,7 +246,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     const out: Array<{ type: string; unindexed: number }> = [];
     for (const t of ALL_SOURCES) {
       if (!this.sourceEnabled(t)) continue;
-      const unindexed = await (this.prisma as any)[t].count({
+      const unindexed = await this.modelOf(t).count({
         where: { OR: [{ ragId: null }, { supermemoryId: null }] },
       });
       if (unindexed) out.push({ type: t, unindexed });
@@ -247,20 +255,22 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Status of every manageable section for the Settings index manager. (BEA-335) */
-  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean }>> {
+  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean; mandatory: boolean }>> {
     const out = [];
     for (const type of ALL_SOURCES) {
-      const total = await (this.prisma as any)[type].count();
-      const indexed = await (this.prisma as any)[type].count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
+      const total = await this.modelOf(type).count();
+      const indexed = await this.modelOf(type).count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
       const src = await this.prisma.indexSource.findUnique({ where: { type } }).catch(() => null);
-      out.push({ type, label: SOURCE_LABELS[type], total, indexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type) });
+      out.push({ type, label: SOURCE_META[type].label, total, indexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type), mandatory: !!SOURCE_META[type].mandatory });
     }
     return out;
   }
 
-  /** Toggle a section. Disable = stop + PURGE from the index. Enable = resume + re-index. (BEA-335) */
+  /** Toggle a section. Disable = stop + PURGE from the index. Enable = resume + re-index. (BEA-335)
+   *  Mandatory sections (Daily Email Brief, Email Requests) can't be disabled. (BEA-336) */
   async setSourceEnabled(type: string, enabled: boolean): Promise<{ type: string; enabled: boolean; reindexed?: number; purged?: number }> {
-    if (!(ALL_SOURCES as readonly string[]).includes(type)) throw new Error(`unknown section: ${type}`);
+    if (!ALL_SOURCES.includes(type)) throw new BadRequestException(`unknown section: ${type}`);
+    if (SOURCE_META[type].mandatory && !enabled) throw new BadRequestException(`${SOURCE_META[type].label} is always indexed and can't be turned off.`);
     await this.prisma.indexSource.upsert({ where: { type }, create: { type, enabled }, update: { enabled } });
     this.enabled.set(type, enabled);
     if (enabled) return { type, enabled, reindexed: await this.reindexType(type) };
@@ -269,10 +279,11 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
 
   /** Remove a section's docs from BOTH stores and clear its link ids. Source rows are untouched. */
   async purgeType(type: string): Promise<number> {
-    const rows = await (this.prisma as any)[type].findMany({ where: { OR: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
+    const pk = this.pkOf(type);
+    const rows = await this.modelOf(type).findMany({ where: { OR: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
     for (const r of rows) {
       await this.deleteDoc(r.supermemoryId, r.ragId);
-      await (this.prisma as any)[type].update({ where: { id: r.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+      await this.modelOf(type).update({ where: { [pk]: r[pk] }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
     }
     return rows.length;
   }
@@ -280,12 +291,13 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   /** (Re)index every row of a section (used by manual reindex + enabling). Idempotent. */
   async reindexType(type: string): Promise<number> {
     if (!this.sourceEnabled(type)) return 0;
-    const rows = await (this.prisma as any)[type].findMany({});
+    const pk = this.pkOf(type);
+    const rows = await this.modelOf(type).findMany({});
     let n = 0;
     for (const r of rows) {
       const built = this.buildContent(type, r);
       if (!built) continue;
-      await this.indexEntity({ refType: type, refId: r.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: r.supermemoryId, prevRagId: r.ragId });
+      await this.indexEntity({ refType: type, refId: r[pk], content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: r.supermemoryId, prevRagId: r.ragId });
       n++;
     }
     return n;
@@ -328,6 +340,20 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         const text = [row.title, row.content, checklist].filter(Boolean).join('\n');
         return text ? { content: text, title: row.title || 'Note', tags: ['note', ...parseTags(row.tags)] } : null;
       }
+      case 'gmailbrief': {
+        let sections = '';
+        try {
+          sections = (JSON.parse(row.sections || '[]') as any[]).map((s) => `## ${s.heading}\n${(s.points || []).map((p: string) => `- ${p}`).join('\n')}`).join('\n\n');
+        } catch {
+          /* ignore */
+        }
+        const text = [`Daily Email Brief — ${row.day}`, row.summary, sections].filter(Boolean).join('\n\n');
+        return text.trim() ? { content: text, title: `Daily Email Brief ${row.day}`, tags: ['email', 'brief', 'activity'] } : null;
+      }
+      case 'gmailrequest': {
+        const text = [row.title, row.query, row.threadSubject, row.summary].filter(Boolean).join('\n\n');
+        return text.trim() ? { content: text, title: row.title || 'Email request', tags: ['email', 'request'] } : null;
+      }
       default:
         return null;
     }
@@ -348,7 +374,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       const perType: Record<string, number> = {};
       for (const table of ALL_SOURCES) {
         if (!this.sourceEnabled(table)) continue; // disabled sections aren't auto-indexed
-        const rows = await (this.prisma as any)[table].findMany({
+        const rows = await this.modelOf(table).findMany({
           where: { OR: [{ ragId: null }, { supermemoryId: null }] },
           take: 200,
         });
@@ -381,7 +407,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
           const targets: Array<'supermemory' | 'rag'> = [];
           if (missingSm) targets.push('supermemory');
           if (missingRag) targets.push('rag');
-          await this.enqueue(content, { refType: table, refId: row.id, title, tags, targets }).catch(() => undefined);
+          await this.enqueue(content, { refType: table, refId: row[this.pkOf(table)], title, tags, targets }).catch(() => undefined);
           reEnqueued++;
           perType[table] = (perType[table] || 0) + 1;
         }
