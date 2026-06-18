@@ -35,6 +35,8 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   private enabled = new Map<string, boolean>();
   /** type -> last time we bumped lastIndexedAt, to throttle those writes. */
   private lastBump = new Map<string, number>();
+  /** Progress of the one-time re-chunk optimize job. (BEA-337) */
+  private rechunk = { running: false, total: 0, done: 0, rechunked: 0, skipped: 0, startedAt: 0, finishedAt: 0 };
 
   constructor(
     private readonly prisma: PrismaService,
@@ -286,6 +288,59 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       await this.modelOf(type).update({ where: { [pk]: r[pk] }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
     }
     return rows.length;
+  }
+
+  rechunkStatus() {
+    return { ...this.rechunk };
+  }
+
+  /**
+   * One-time optimize: re-save content-heavy RAG docs as proper chunks using the FULL content from
+   * SuperMemory — fixes old whole-doc entries that were truncated at 8000 chars before the chunking
+   * fix (BEA-330). SuperMemory is untouched (it chunks server-side). Runs in the background. (BEA-337)
+   */
+  async startRechunk(): Promise<{ started: boolean; total: number; running: boolean }> {
+    if (this.rechunk.running) return { started: false, total: this.rechunk.total, running: true };
+    const types = ['item', 'idea', 'meeting'];
+    let total = 0;
+    for (const t of types) total += await this.modelOf(t).count({ where: { supermemoryId: { not: null } } });
+    this.rechunk = { running: true, total, done: 0, rechunked: 0, skipped: 0, startedAt: Date.now(), finishedAt: 0 };
+
+    void (async () => {
+      try {
+        for (const type of types) {
+          const pk = this.pkOf(type);
+          const rows = await this.modelOf(type).findMany({ where: { supermemoryId: { not: null } } });
+          for (const r of rows) {
+            try {
+              const sm = await this.getSuperMemoryContent(r.supermemoryId);
+              const full = sm?.content?.trim();
+              if (!full || full.length < 100) {
+                this.rechunk.skipped++;
+              } else {
+                if (r.ragId) await this.rag.delete(r.ragId).catch(() => undefined);
+                const newRagId = await this.rag.save(full, sm.title || undefined, sm.tags || []);
+                if (newRagId && newRagId !== 'saved') {
+                  await this.modelOf(type).update({ where: { [pk]: r[pk] }, data: { ragId: newRagId } }).catch(() => undefined);
+                  this.rechunk.rechunked++;
+                } else {
+                  this.rechunk.skipped++;
+                }
+              }
+            } catch {
+              this.rechunk.skipped++;
+            }
+            this.rechunk.done++;
+          }
+        }
+      } finally {
+        this.rechunk.running = false;
+        this.rechunk.finishedAt = Date.now();
+        this.log.log(`rechunk done: ${this.rechunk.rechunked} re-chunked, ${this.rechunk.skipped} skipped`);
+      }
+    })();
+
+    return { started: true, total, running: true };
   }
 
   /** (Re)index every row of a section (used by manual reindex + enabling). Idempotent. */

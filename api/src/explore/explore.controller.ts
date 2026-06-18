@@ -28,4 +28,15 @@ export class ExploreController {
   async reindex(@Param('type') type: string) {
     return this.explore.reindex(type);
   }
+
+  /** Start the one-time re-chunk optimize of existing docs (BEA-337). */
+  @Post('rechunk')
+  async rechunk() {
+    return this.explore.startRechunk();
+  }
+
+  @Get('rechunk-status')
+  async rechunkStatus() {
+    return this.explore.rechunkStatus();
+  }
 }
