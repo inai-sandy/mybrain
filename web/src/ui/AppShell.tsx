@@ -8,7 +8,7 @@ import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
 import { DictationIndicator } from './DictationIndicator';
 import { ForceUpdatePill } from './ForceUpdatePill';
-import { forceUpdate } from './UpdatePrompt';
+import { forceUpdate } from './forceUpdate';
 import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useTheme } from './theme';
 

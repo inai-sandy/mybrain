@@ -1,25 +1,7 @@
 import { useEffect } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { RefreshCw, X } from 'lucide-react';
-
-/** Nuke caches + service workers and hard-reload — used when the running build is stale. */
-export async function forceUpdate() {
-  try {
-    const regs = (await navigator.serviceWorker?.getRegistrations?.()) || [];
-    await Promise.all(regs.map((r) => r.unregister()));
-  } catch {
-    /* ignore */
-  }
-  try {
-    if (typeof caches !== 'undefined') {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } catch {
-    /* ignore */
-  }
-  location.reload();
-}
+import { forceUpdate } from './forceUpdate';
 
 /**
  * Self-healing version gate. /version.json is written at build with the SAME id baked into the app

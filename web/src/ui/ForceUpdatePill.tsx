@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { RefreshCw, Loader2 } from 'lucide-react';
-import { forceUpdate } from './UpdatePrompt';
+import { forceUpdate } from './forceUpdate';
 
 /** Always-visible "Update app" pill — taps force a clean reload to the latest version (clears cache + SW). */
 export function ForceUpdatePill() {
