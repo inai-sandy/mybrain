@@ -1,10 +1,11 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, Compass, StickyNote, Mic, Mail, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, Compass, StickyNote, Mic, Mail, Sparkles, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
 // Settings is intentionally NOT here — it lives in the top-right account menu (and the mobile drawer).
 export const NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
+  { to: '/explore', label: 'Explore', icon: Sparkles },
   { to: '/capture', label: 'Capture', icon: FilePlus2 },
   { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
   { to: '/ideas', label: 'Ideas', icon: Lightbulb },
