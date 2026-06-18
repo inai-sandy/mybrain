@@ -24,6 +24,13 @@ function fakePrisma() {
         return {};
       },
     },
+    taskUpdates: [] as any[],
+    task: {
+      update: async ({ where, data }: any) => {
+        (prisma.taskUpdates as any[]).push({ id: where.id, data });
+        return {};
+      },
+    },
   };
   return prisma as any;
 }
@@ -72,6 +79,39 @@ describe('MemoryService outbox', () => {
 
     expect(prisma.itemUpdates.some((u: any) => u.data.supermemoryId === 'sm-id-1')).toBe(true);
     expect(prisma.itemUpdates.some((u: any) => u.data.ragId === 'rag-id-1')).toBe(true);
+  });
+
+  it('writes the store ids back to the RIGHT table for a non-item refType (task)', async () => {
+    const prisma = fakePrisma();
+    const sm: any = { save: jest.fn(async () => 'sm-t'), delete: jest.fn(async () => undefined) };
+    const rag: any = { save: jest.fn(async () => 'rag-t'), delete: jest.fn(async () => undefined) };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    await svc.indexEntity({ refType: 'task', refId: 'task-1', content: 'do the thing', title: 'Task: do the thing' });
+    await svc.drain();
+
+    // Linked onto the task table, NOT the item table (the old bug indexed but never linked tasks).
+    expect(prisma.taskUpdates.some((u: any) => u.id === 'task-1' && u.data.supermemoryId === 'sm-t')).toBe(true);
+    expect(prisma.taskUpdates.some((u: any) => u.id === 'task-1' && u.data.ragId === 'rag-t')).toBe(true);
+    expect(prisma.itemUpdates).toHaveLength(0);
+  });
+
+  it('indexEntity deletes the previous docs first so a re-index replaces (no dupes)', async () => {
+    const prisma = fakePrisma();
+    const sm: any = { save: jest.fn(async () => 'sm-new'), delete: jest.fn(async () => undefined) };
+    const rag: any = { save: jest.fn(async () => 'rag-new'), delete: jest.fn(async () => undefined) };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    await svc.indexEntity({
+      refType: 'task',
+      refId: 'task-1',
+      content: 'edited',
+      prevSupermemoryId: 'sm-old',
+      prevRagId: 'rag-old',
+    });
+
+    expect(sm.delete).toHaveBeenCalledWith('sm-old');
+    expect(rag.delete).toHaveBeenCalledWith('rag-old');
   });
 });
 

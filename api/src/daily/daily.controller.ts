@@ -56,6 +56,12 @@ export class DailyController {
     return this.daily.submitStory(body.text, body.source || 'app', body.mood, body.day);
   }
 
+  /** One-shot: (re)index stories into the brain. ?all=1 re-indexes everything, else only un-indexed. (BEA-331) */
+  @Post('reindex-stories')
+  async reindexStories(@Query('all') all?: string) {
+    return this.daily.backfillStories(all === '1' || all === 'true');
+  }
+
   // ---- daily wrap-up: finished tasks found in the story + working hours + carry-forward ----
   @Post('done-candidates')
   async doneCandidates(@Body() body: { day?: string }) {

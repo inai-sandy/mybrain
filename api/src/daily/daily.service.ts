@@ -93,12 +93,44 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const row = existing
       ? await this.prisma.story.update({ where: { id: existing.id }, data: { rawText: text, source, mood: mood ?? existing.mood } })
       : await this.prisma.story.create({ data: { day, rawText: text, source, mood: mood || null } });
-    // Index his own words into memory so "My life" chat can answer from them ("what was I worried about in May?").
-    await this.memory.enqueue(`His own story — ${day}${mood ? ` (mood: ${mood})` : ''}\n\n${text}`, { title: `Your story ${day}`, tags: ['activity'] }).catch(() => undefined);
+    // Index his own words so "My life" chat + Explore can answer from them ("what was I worried about in May?").
+    // Linked to the Story row (refType 'story') so rewriting a day REPLACES its doc instead of duplicating. (BEA-331)
+    this.memory
+      .indexEntity({
+        refType: 'story',
+        refId: row.id,
+        title: `Your story ${day}`,
+        content: `His own story — ${day}${mood ? ` (mood: ${mood})` : ''}\n\n${text}`,
+        tags: ['activity', 'story'],
+        prevSupermemoryId: (existing as any)?.supermemoryId,
+        prevRagId: (existing as any)?.ragId,
+      })
+      .catch(() => undefined);
     // If that day's Story of the Day was already written, rewrite it around the user's own words.
     const woven = await this.prisma.dayStory.findUnique({ where: { day } });
     if (woven) this.generateDayStory(day, true).catch(() => undefined);
     return { ...this.shapeStory(row), rewriting: !!woven };
+  }
+
+  /** (Re)index stories not yet linked into the brain (or all). Idempotent — indexEntity deletes
+   *  prior docs first, so re-running never duplicates. (BEA-331) */
+  async backfillStories(all = false): Promise<{ stories: number }> {
+    const where = all ? {} : { OR: [{ ragId: null }, { supermemoryId: null }] };
+    const rows = await this.prisma.story.findMany({ where });
+    for (const row of rows) {
+      this.memory
+        .indexEntity({
+          refType: 'story',
+          refId: row.id,
+          title: `Your story ${row.day}`,
+          content: `His own story — ${row.day}${row.mood ? ` (mood: ${row.mood})` : ''}\n\n${row.rawText}`,
+          tags: ['activity', 'story'],
+          prevSupermemoryId: (row as any).supermemoryId,
+          prevRagId: (row as any).ragId,
+        })
+        .catch(() => undefined);
+    }
+    return { stories: rows.length };
   }
 
   private shapeStory(s: any) {
