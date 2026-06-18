@@ -36,7 +36,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'google' | 'models' | 'usage' | 'prompts' | 'sync' | 'appearance';
+type Tab = 'account' | 'integrations' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
@@ -46,6 +46,7 @@ export function Settings({ email }: { email?: string }) {
     { id: 'google', label: 'Google', icon: Globe },
     { id: 'models', label: 'Models', icon: Cpu },
     { id: 'usage', label: 'Usage', icon: Wallet },
+    { id: 'index', label: 'Index', icon: Database },
     { id: 'prompts', label: 'Prompts', icon: MessageSquare },
     { id: 'sync', label: 'Sync', icon: RefreshCw },
     { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -80,6 +81,7 @@ export function Settings({ email }: { email?: string }) {
       {tab === 'google' && <GoogleServicesSection />}
       {tab === 'models' && <ModelsSection />}
       {tab === 'usage' && <UsageCard />}
+      {tab === 'index' && <IndexSection />}
       {tab === 'prompts' && <PromptsSection />}
       {tab === 'sync' && <SyncSection />}
       {tab === 'appearance' && <AppearanceSection />}
@@ -155,6 +157,158 @@ function AppearanceSection() {
           {theme} mode
         </button>
       </div>
+    </section>
+  );
+}
+
+type IndexSrc = { type: string; label: string; total: number; indexed: number; lastIndexedAt: string | null; enabled: boolean };
+
+function relTime(iso: string | null): string {
+  if (!iso) return 'never';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (!isFinite(diff) || diff < 0) return 'just now';
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'yesterday' : `${d}d ago`;
+}
+
+/** Index manager: see what's indexed per section, when, and turn each on/off. (BEA-335) */
+function IndexSection() {
+  const toast = useToast();
+  const [rows, setRows] = useState<IndexSrc[] | null>(null);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [confirmOff, setConfirmOff] = useState<IndexSrc | null>(null);
+
+  async function load() {
+    try {
+      const r = await fetch('/api/explore/sources');
+      setRows(await r.json());
+    } catch {
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function setEnabled(s: IndexSrc, enabled: boolean) {
+    setBusy((b) => ({ ...b, [s.type]: true }));
+    try {
+      const r = await fetch(`/api/explore/sources/${s.type}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error();
+      toast('success', enabled ? `${s.label} enabled — indexing ${d.reindexed ?? 0} item${d.reindexed === 1 ? '' : 's'}…` : `${s.label} disabled — removed ${d.purged ?? 0} from search`);
+      await load();
+    } catch {
+      toast('error', 'Could not update that section.');
+    } finally {
+      setBusy((b) => ({ ...b, [s.type]: false }));
+    }
+  }
+
+  async function reindex(s: IndexSrc) {
+    setBusy((b) => ({ ...b, [s.type]: true }));
+    try {
+      const r = await fetch(`/api/explore/sources/${s.type}/reindex`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error();
+      toast('success', `Re-indexing ${d.reindexed ?? 0} ${s.label.toLowerCase()}…`);
+      setTimeout(load, 1500);
+    } catch {
+      toast('error', 'Could not reindex.');
+    } finally {
+      setBusy((b) => ({ ...b, [s.type]: false }));
+    }
+  }
+
+  return (
+    <section className="space-y-4 max-w-2xl">
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="flex items-center gap-2 font-semibold mb-1">
+          <Database size={18} className="text-emerald-600" /> Search index
+        </h2>
+        <p className="text-sm text-zinc-500 mb-4">
+          What your <span className="font-medium text-zinc-600 dark:text-zinc-300">Explore</span> brain can search. Turn a section off to remove it from search (your actual data is never deleted — turning it back on re-indexes it).
+        </p>
+
+        {rows === null && <div className="text-sm text-zinc-400">Loading…</div>}
+        {rows?.length === 0 && <div className="text-sm text-zinc-400">No sections yet.</div>}
+
+        <div className="space-y-2.5">
+          {rows?.map((s) => {
+            const pct = s.total ? Math.round((s.indexed / s.total) * 100) : 0;
+            return (
+              <div key={s.type} className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium flex items-center gap-2">
+                      {s.label}
+                      {!s.enabled && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border border-zinc-200 dark:border-zinc-700">off</span>}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      {s.enabled ? (
+                        <>
+                          <span className="tabular-nums">{s.indexed}</span> of <span className="tabular-nums">{s.total}</span> indexed · last {relTime(s.lastIndexedAt)}
+                        </>
+                      ) : (
+                        <>
+                          <span className="tabular-nums">{s.total}</span> item{s.total === 1 ? '' : 's'} · not in search
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {s.enabled && s.total > 0 && (
+                      <button
+                        onClick={() => reindex(s)}
+                        disabled={busy[s.type]}
+                        title="Re-index now"
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-50 transition"
+                      >
+                        <RefreshCw size={15} className={busy[s.type] ? 'animate-spin' : ''} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => (s.enabled ? setConfirmOff(s) : setEnabled(s, true))}
+                      disabled={busy[s.type]}
+                      aria-label={s.enabled ? 'Disable' : 'Enable'}
+                      className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ' + (s.enabled ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}
+                    >
+                      <span className={'inline-block h-4 w-4 transform rounded-full bg-white transition-transform ' + (s.enabled ? 'translate-x-6' : 'translate-x-1')} />
+                    </button>
+                  </div>
+                </div>
+                {s.enabled && s.total > 0 && (
+                  <div className="mt-2 h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={!!confirmOff}
+        title={`Turn off ${confirmOff?.label}?`}
+        message={`${confirmOff?.label} will be removed from Explore search. Your actual ${confirmOff?.label.toLowerCase()} are NOT deleted — turning this back on re-indexes them.`}
+        confirmLabel="Turn off"
+        onCancel={() => setConfirmOff(null)}
+        onConfirm={() => {
+          const s = confirmOff!;
+          setConfirmOff(null);
+          setEnabled(s, false);
+        }}
+      />
     </section>
   );
 }

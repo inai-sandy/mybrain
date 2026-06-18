@@ -7,8 +7,19 @@ const MAX_ATTEMPTS = 3;
 const DRAIN_INTERVAL_MS = Number(process.env.MEMORY_DRAIN_MS) || 5000;
 const RECONCILE_INTERVAL_MS = Number(process.env.MEMORY_RECONCILE_MS) || 15 * 60 * 1000;
 
-/** Row types that carry supermemoryId/ragId columns and should be kept in the index. */
-const INDEXABLE: Array<'item' | 'idea' | 'meeting' | 'task' | 'story'> = ['item', 'idea', 'meeting', 'task', 'story'];
+/** Row types that carry supermemoryId/ragId columns and can be indexed (manageable sections). */
+const ALL_SOURCES = ['task', 'story', 'item', 'idea', 'meeting', 'note'] as const;
+type SourceType = (typeof ALL_SOURCES)[number];
+const SOURCE_LABELS: Record<SourceType, string> = {
+  task: 'Tasks',
+  story: 'Stories & Daily',
+  item: 'Documents & Bookmarks',
+  idea: 'Ideas',
+  meeting: 'Meetings',
+  note: 'Notes',
+};
+/** Sources that start DISABLED (Notes were historically local-only). */
+const DEFAULT_DISABLED: SourceType[] = ['note'];
 
 @Injectable()
 export class MemoryService implements OnModuleInit, OnModuleDestroy {
@@ -17,6 +28,10 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   private reconcileTimer: NodeJS.Timeout | null = null;
   private draining = false;
   private reconciling = false;
+  /** type -> enabled, cached so the index gate doesn't hit the DB on every write. */
+  private enabled = new Map<string, boolean>();
+  /** type -> last time we bumped lastIndexedAt, to throttle those writes. */
+  private lastBump = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -29,6 +44,26 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => this.drain().catch(() => undefined), DRAIN_INTERVAL_MS);
     // Slower safety-net: revive failed writes + re-enqueue any row that never got linked. (BEA-333)
     this.reconcileTimer = setInterval(() => this.reconcile().catch(() => undefined), RECONCILE_INTERVAL_MS);
+    // Load (and seed) the per-section enable flags. (BEA-335)
+    this.loadSources().catch((e) => this.log.warn(`source load failed: ${e?.message ?? e}`));
+  }
+
+  /** Seed IndexSource rows (first run) and populate the enabled cache. */
+  private async loadSources(): Promise<void> {
+    for (const type of ALL_SOURCES) {
+      const def = !DEFAULT_DISABLED.includes(type);
+      const row = await this.prisma.indexSource
+        .upsert({ where: { type }, create: { type, enabled: def }, update: {} })
+        .catch(() => ({ type, enabled: def }) as any);
+      this.enabled.set(type, row.enabled);
+    }
+  }
+
+  /** Is this section currently indexed? (defaults: everything on except Notes). */
+  sourceEnabled(type?: string): boolean {
+    if (!type) return true;
+    if (this.enabled.has(type)) return this.enabled.get(type)!;
+    return !DEFAULT_DISABLED.includes(type as SourceType);
   }
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
@@ -78,13 +113,15 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   }): Promise<void> {
     const text = (opts.content || '').trim();
     if (!text) return;
+    // Respect the per-section toggle — a disabled section is not indexed. (BEA-335)
+    if (!this.sourceEnabled(opts.refType)) return;
     if (opts.prevSupermemoryId || opts.prevRagId) {
       await this.deleteDoc(opts.prevSupermemoryId, opts.prevRagId);
     }
     await this.enqueue(text, { refType: opts.refType, refId: opts.refId, title: opts.title, tags: opts.tags });
   }
 
-  /** Write a returned store doc id back onto the right table (item/task/story/idea/meeting). */
+  /** Write a returned store doc id back onto the right table (item/task/story/idea/meeting/note). */
   private async writeBackId(refType: string | null | undefined, id: string, target: string, resultId: string) {
     const data = target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId };
     const models: Record<string, any> = {
@@ -93,9 +130,23 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       story: this.prisma.story,
       idea: this.prisma.idea,
       meeting: this.prisma.meeting,
+      note: this.prisma.note,
     };
     const model = models[refType || 'item'] ?? this.prisma.item;
     await model.update({ where: { id }, data }).catch(() => undefined);
+    this.bumpLastIndexed(refType);
+  }
+
+  /** Record that a section was just indexed (throttled to ~once/30s per type). (BEA-335) */
+  private bumpLastIndexed(refType: string | null | undefined) {
+    const type = refType || 'item';
+    if (!(ALL_SOURCES as readonly string[]).includes(type)) return;
+    const now = Date.now();
+    if (now - (this.lastBump.get(type) || 0) < 30_000) return;
+    this.lastBump.set(type, now);
+    this.prisma.indexSource
+      .upsert({ where: { type }, create: { type, enabled: !DEFAULT_DISABLED.includes(type as SourceType), lastIndexedAt: new Date() }, update: { lastIndexedAt: new Date() } })
+      .catch(() => undefined);
   }
 
   /** Process pending outbox rows. Each goes to its target with retries; never leaves the two inconsistent silently. */
@@ -182,16 +233,62 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return { retried: res.count };
   }
 
-  /** Per-table count of indexable rows not yet fully linked into BOTH stores. */
+  /** Per-table count of ENABLED-section rows not yet fully linked into BOTH stores. */
   async unindexedCounts(): Promise<Array<{ type: string; unindexed: number }>> {
     const out: Array<{ type: string; unindexed: number }> = [];
-    for (const t of INDEXABLE) {
+    for (const t of ALL_SOURCES) {
+      if (!this.sourceEnabled(t)) continue;
       const unindexed = await (this.prisma as any)[t].count({
         where: { OR: [{ ragId: null }, { supermemoryId: null }] },
       });
       if (unindexed) out.push({ type: t, unindexed });
     }
     return out;
+  }
+
+  /** Status of every manageable section for the Settings index manager. (BEA-335) */
+  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean }>> {
+    const out = [];
+    for (const type of ALL_SOURCES) {
+      const total = await (this.prisma as any)[type].count();
+      const indexed = await (this.prisma as any)[type].count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
+      const src = await this.prisma.indexSource.findUnique({ where: { type } }).catch(() => null);
+      out.push({ type, label: SOURCE_LABELS[type], total, indexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type) });
+    }
+    return out;
+  }
+
+  /** Toggle a section. Disable = stop + PURGE from the index. Enable = resume + re-index. (BEA-335) */
+  async setSourceEnabled(type: string, enabled: boolean): Promise<{ type: string; enabled: boolean; reindexed?: number; purged?: number }> {
+    if (!(ALL_SOURCES as readonly string[]).includes(type)) throw new Error(`unknown section: ${type}`);
+    await this.prisma.indexSource.upsert({ where: { type }, create: { type, enabled }, update: { enabled } });
+    this.enabled.set(type, enabled);
+    if (enabled) return { type, enabled, reindexed: await this.reindexType(type) };
+    return { type, enabled, purged: await this.purgeType(type) };
+  }
+
+  /** Remove a section's docs from BOTH stores and clear its link ids. Source rows are untouched. */
+  async purgeType(type: string): Promise<number> {
+    const rows = await (this.prisma as any)[type].findMany({ where: { OR: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
+    for (const r of rows) {
+      await this.deleteDoc(r.supermemoryId, r.ragId);
+      await (this.prisma as any)[type].update({ where: { id: r.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+    }
+    return rows.length;
+  }
+
+  /** (Re)index every row of a section (used by manual reindex + enabling). Idempotent. */
+  async reindexType(type: string): Promise<number> {
+    if (!this.sourceEnabled(type)) return 0;
+    const rows = await (this.prisma as any)[type].findMany({});
+    let n = 0;
+    for (const r of rows) {
+      const built = this.buildContent(type, r);
+      if (!built) continue;
+      await this.indexEntity({ refType: type, refId: r.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: r.supermemoryId, prevRagId: r.ragId });
+      n++;
+    }
+    return n;
   }
 
   /** Build searchable text for a row that needs re-indexing (reconcile backstop). */
@@ -221,6 +318,16 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         const text = [row.title, row.summary].filter(Boolean).join('\n\n');
         return text ? { content: text, title: row.title || 'Document', tags: parseTags(row.tags) } : null;
       }
+      case 'note': {
+        let checklist = '';
+        try {
+          checklist = (JSON.parse(row.checklist || '[]') as any[]).map((c) => `- [${c.done ? 'x' : ' '}] ${c.text}`).join('\n');
+        } catch {
+          /* ignore */
+        }
+        const text = [row.title, row.content, checklist].filter(Boolean).join('\n');
+        return text ? { content: text, title: row.title || 'Note', tags: ['note', ...parseTags(row.tags)] } : null;
+      }
       default:
         return null;
     }
@@ -239,7 +346,8 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       const { retried } = await this.retryFailed();
       let reEnqueued = 0;
       const perType: Record<string, number> = {};
-      for (const table of INDEXABLE) {
+      for (const table of ALL_SOURCES) {
+        if (!this.sourceEnabled(table)) continue; // disabled sections aren't auto-indexed
         const rows = await (this.prisma as any)[table].findMany({
           where: { OR: [{ ragId: null }, { supermemoryId: null }] },
           take: 200,
