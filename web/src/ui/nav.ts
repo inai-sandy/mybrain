@@ -22,8 +22,8 @@ export const NAV: NavItem[] = [
 // The 5 primary tabs shown in the mobile bottom bar. Everything else lives in the drawer/sidebar.
 export const BOTTOM_NAV: NavItem[] = [
   { to: '/', label: 'Home', icon: LayoutDashboard, end: true },
-  { to: '/ideas', label: 'Ideas', icon: Lightbulb },
-  { to: '/activity', label: 'Activity', icon: Activity },
-  { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/today', label: 'Today', icon: Sun },
+  { to: '/tasks', label: 'Tasks', icon: CheckSquare },
+  { to: '/activity', label: 'Activity', icon: Activity },
+  { to: '/ideas', label: 'Ideas', icon: Lightbulb },
 ];
