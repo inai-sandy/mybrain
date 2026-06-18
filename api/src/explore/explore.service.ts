@@ -152,4 +152,39 @@ Answer the question using ONLY these sources. Cite the sources you draw on inlin
   rechunkStatus() {
     return this.memory.rechunkStatus();
   }
+
+  // ---- Saved answers (separate from the index) ----
+
+  private shapeSave(r: any) {
+    let sources: any[] = [];
+    try {
+      sources = r.sources ? JSON.parse(r.sources) : [];
+    } catch {
+      sources = [];
+    }
+    return { id: r.id, question: r.question, answer: r.answer, sources, createdAt: r.createdAt };
+  }
+
+  async saveAnswer(question: string, answer: string, sources: any[]) {
+    const q = (question || '').trim();
+    const a = (answer || '').trim();
+    if (!q || !a) return null;
+    const row = await this.prisma.exploreSave.create({
+      data: { question: q.slice(0, 1000), answer: a, sources: JSON.stringify(Array.isArray(sources) ? sources : []) },
+    });
+    return this.shapeSave(row);
+  }
+
+  /** All saved answers, newest first; optional case-insensitive keyword filter over question+answer. */
+  async listSaves(q?: string) {
+    const rows = await this.prisma.exploreSave.findMany({ orderBy: { createdAt: 'desc' }, take: 500 });
+    const needle = (q || '').trim().toLowerCase();
+    const filtered = needle ? rows.filter((r) => `${r.question}\n${r.answer}`.toLowerCase().includes(needle)) : rows;
+    return filtered.map((r) => this.shapeSave(r));
+  }
+
+  async deleteSave(id: string) {
+    await this.prisma.exploreSave.delete({ where: { id } }).catch(() => null);
+    return { ok: true };
+  }
 }

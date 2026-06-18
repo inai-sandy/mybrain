@@ -1,9 +1,24 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ExploreService } from './explore.service';
 
 @Controller('explore')
 export class ExploreController {
   constructor(private readonly explore: ExploreService) {}
+
+  // --- saved answers ---
+  @Post('saves')
+  async save(@Body() body: { question?: string; answer?: string; sources?: any[] }) {
+    if (!body?.question || !body?.answer) throw new BadRequestException('Nothing to save');
+    return this.explore.saveAnswer(body.question, body.answer, body.sources || []);
+  }
+  @Get('saves')
+  async saves(@Query('q') q?: string) {
+    return this.explore.listSaves(q);
+  }
+  @Delete('saves/:id')
+  async deleteSave(@Param('id') id: string) {
+    return this.explore.deleteSave(id);
+  }
 
   // --- answer model (cost control: Sonnet ⇄ Haiku) ---
   @Get('model')

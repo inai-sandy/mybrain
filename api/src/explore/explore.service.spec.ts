@@ -46,3 +46,52 @@ describe('ExploreService.ask', () => {
     expect(llm.completeWith).not.toHaveBeenCalled();
   });
 });
+
+describe('ExploreService saved answers (BEA-339)', () => {
+  function make() {
+    const rows: any[] = [];
+    const prisma: any = {
+      setting: { findUnique: async () => null },
+      exploreSave: {
+        create: async ({ data }: any) => {
+          const r = { id: String(rows.length + 1), createdAt: new Date(), ...data };
+          rows.push(r);
+          return r;
+        },
+        findMany: async () => [...rows].reverse(), // newest first
+        delete: async ({ where }: any) => {
+          const i = rows.findIndex((x) => x.id === where.id);
+          if (i >= 0) rows.splice(i, 1);
+          return {};
+        },
+      },
+    };
+    return { s: new ExploreService(prisma, {} as any, {} as any), rows };
+  }
+
+  it('saves and lists newest-first, parsing sources', async () => {
+    const { s } = make();
+    await s.saveAnswer('q1', 'a1', [{ n: 1 }] as any);
+    await s.saveAnswer('pricing question', 'about pricing', []);
+    const list = await s.listSaves();
+    expect(list).toHaveLength(2);
+    expect(list[0].question).toBe('pricing question');
+    expect(Array.isArray(list[0].sources)).toBe(true);
+  });
+
+  it('keyword-filters over question + answer (case-insensitive)', async () => {
+    const { s } = make();
+    await s.saveAnswer('q1', 'about Diksha and pricing', []);
+    await s.saveAnswer('unrelated', 'nothing here', []);
+    const hits = await s.listSaves('diksha');
+    expect(hits).toHaveLength(1);
+    expect(hits[0].answer).toContain('Diksha');
+  });
+
+  it('deletes a saved answer', async () => {
+    const { s, rows } = make();
+    const saved = await s.saveAnswer('q', 'a', []);
+    await s.deleteSave(saved!.id);
+    expect(rows).toHaveLength(0);
+  });
+});
