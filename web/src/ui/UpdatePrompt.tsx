@@ -3,7 +3,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { RefreshCw, X } from 'lucide-react';
 
 /** Nuke caches + service workers and hard-reload — used when the running build is stale. */
-async function forceUpdate() {
+export async function forceUpdate() {
   try {
     const regs = (await navigator.serviceWorker?.getRegistrations?.()) || [];
     await Promise.all(regs.map((r) => r.unregister()));

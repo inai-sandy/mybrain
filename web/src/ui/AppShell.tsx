@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search } from 'lucide-react';
+import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search, RefreshCw } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
 import { DictationIndicator } from './DictationIndicator';
+import { ForceUpdatePill } from './ForceUpdatePill';
+import { forceUpdate } from './UpdatePrompt';
 import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useTheme } from './theme';
 
@@ -167,6 +169,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
                   <button onClick={() => { setMenu(false); navigate('/settings'); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
                     <SettingsIcon size={16} /> Settings
                   </button>
+                  <button onClick={() => forceUpdate()} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                    <RefreshCw size={16} /> Force update
+                  </button>
                   {onSignOut && (
                     <button onClick={() => { setMenu(false); onSignOut(); }} className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
                       <LogOut size={16} /> Sign out
@@ -207,6 +212,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Live voice-dictation banner — shows what's being heard + a Stop button, globally */}
       <DictationIndicator />
+
+      {/* Always-visible "Update app" pill — force a clean reload to the latest version anytime */}
+      <ForceUpdatePill />
 
       {/* Floating "chat with your brain" button — every page except the chat itself */}
       {!isChat && (
