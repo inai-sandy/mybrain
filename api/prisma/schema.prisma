@@ -209,6 +209,15 @@ model IndexSource {
   updatedAt     DateTime @updatedAt
 }
 
+/// A saved Explore answer (question + synthesised answer + its sources). Separate from the index. (BEA-339)
+model ExploreSave {
+  id        String   @id @default(uuid())
+  question  String
+  answer    String
+  sources   String? // JSON array of the source cards shown with the answer
+  createdAt DateTime @default(now())
+}
+
 /// A focus area / direction the Mentor tracks — derived from stories or set by the user, then confirmed.
 model FocusArea {
   id          String   @id @default(uuid())
