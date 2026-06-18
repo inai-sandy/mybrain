@@ -195,8 +195,18 @@ model Note {
   tags      String? // JSON array of strings
   pinned    Boolean  @default(false)
   archived  Boolean  @default(false)
+  supermemoryId String? // Explore index doc ids (only set when Notes indexing is enabled)
+  ragId         String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Per-section index control for Explore: whether a source is indexed + when it last was. (BEA-335)
+model IndexSource {
+  type          String   @id // task | story | item | idea | meeting | note
+  enabled       Boolean  @default(true)
+  lastIndexedAt DateTime?
+  updatedAt     DateTime @updatedAt
 }
 
 /// A focus area / direction the Mentor tracks — derived from stories or set by the user, then confirmed.

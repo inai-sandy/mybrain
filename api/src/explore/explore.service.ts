@@ -102,4 +102,21 @@ Answer the question using ONLY these sources. Cite the sources you draw on inlin
     const answer = (await this.llm.completeWith(EXPLORE_MODEL, prompt, 900, 'explore-ask')) || 'Sorry — I could not generate an answer just now.';
     return { answer, sources, matches: hits.length };
   }
+
+  // ---- Index manager (Settings) ----
+
+  /** Per-section index status (counts, last-indexed, enabled). */
+  sources() {
+    return this.memory.sourceStatus();
+  }
+
+  /** Enable/disable a section. Disable purges it from search; enable re-indexes it. */
+  setSource(type: string, enabled: boolean) {
+    return this.memory.setSourceEnabled(type, !!enabled);
+  }
+
+  /** Re-index one section now. */
+  async reindex(type: string) {
+    return { type, reindexed: await this.memory.reindexType(type) };
+  }
 }

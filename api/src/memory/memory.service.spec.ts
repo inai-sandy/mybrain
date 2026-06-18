@@ -307,3 +307,28 @@ describe('MemoryService retrieval (BEA-332 whole-brain merge/re-rank/fallback)',
     expect(hits[0].content).toContain('bookmark');
   });
 });
+
+describe('MemoryService index-source gate (BEA-335)', () => {
+  it('does NOT index a disabled section', async () => {
+    const prisma = fakePrisma();
+    const svc = new MemoryService(prisma, { save: jest.fn() } as any, { save: jest.fn() } as any);
+    (svc as any).enabled.set('note', false);
+    await svc.indexEntity({ refType: 'note', refId: 'n1', content: 'a private note' });
+    expect(prisma.rows.length).toBe(0); // gated — nothing enqueued
+  });
+
+  it('DOES index an enabled section', async () => {
+    const prisma = fakePrisma();
+    const svc = new MemoryService(prisma, { save: jest.fn() } as any, { save: jest.fn() } as any);
+    (svc as any).enabled.set('task', true);
+    await svc.indexEntity({ refType: 'task', refId: 't1', content: 'a task' });
+    expect(prisma.rows.length).toBe(2); // both stores enqueued
+  });
+
+  it('defaults Notes off and everything else on', async () => {
+    const svc = new MemoryService(fakePrisma(), {} as any, {} as any);
+    expect(svc.sourceEnabled('task')).toBe(true);
+    expect(svc.sourceEnabled('story')).toBe(true);
+    expect(svc.sourceEnabled('note')).toBe(false);
+  });
+});

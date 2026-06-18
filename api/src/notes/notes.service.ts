@@ -1,14 +1,43 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MemoryService } from '../memory/memory.service';
 
 export type ChecklistItem = { text: string; done: boolean };
 
 const COLORS = ['default', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink', 'gray'];
 
-/** Quick-capture notes (Keep style). Deliberately LOCAL ONLY — never written to RAG/SuperMemory. */
+/** Quick-capture notes (Keep style). Indexed into Explore ONLY when the Notes section is enabled
+ *  in Settings (off by default — historically local-only). The MemoryService gate enforces that. */
 @Injectable()
 export class NotesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly memory: MemoryService,
+  ) {}
+
+  /** (Re)index a note into the brain — no-op when the Notes section is disabled (gated downstream). */
+  private indexNote(row: any): void {
+    if (!row?.id) return;
+    let checklist = '';
+    try {
+      checklist = (JSON.parse(row.checklist || '[]') as ChecklistItem[]).map((c) => `- [${c.done ? 'x' : ' '}] ${c.text}`).join('\n');
+    } catch {
+      /* ignore */
+    }
+    const content = [row.title, row.content, checklist].filter(Boolean).join('\n');
+    if (!content.trim()) return;
+    this.memory
+      .indexEntity({
+        refType: 'note',
+        refId: row.id,
+        title: row.title || 'Note',
+        content,
+        tags: ['note'],
+        prevSupermemoryId: row.supermemoryId,
+        prevRagId: row.ragId,
+      })
+      .catch(() => undefined);
+  }
 
   private shape(n: any) {
     const parse = (s: any, fb: any) => {
@@ -82,6 +111,7 @@ export class NotesService {
         archived: c.archived ?? false,
       },
     });
+    this.indexNote(row);
     return this.shape(row);
   }
 
@@ -101,10 +131,13 @@ export class NotesService {
         archived: c.archived !== undefined ? c.archived : existing.archived,
       },
     });
+    this.indexNote(row);
     return this.shape(row);
   }
 
   async remove(id: string) {
+    const existing = await this.prisma.note.findUnique({ where: { id } });
+    if (existing) this.memory.deleteDoc((existing as any).supermemoryId, (existing as any).ragId).catch(() => undefined);
     await this.prisma.note.delete({ where: { id } }).catch(() => null);
     return { ok: true };
   }

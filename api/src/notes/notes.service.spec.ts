@@ -27,7 +27,8 @@ function make() {
       },
     },
   };
-  return { svc: new NotesService(prisma), rows };
+  const memory: any = { indexEntity: async () => undefined, deleteDoc: async () => undefined };
+  return { svc: new NotesService(prisma, memory), rows };
 }
 
 describe('NotesService', () => {
