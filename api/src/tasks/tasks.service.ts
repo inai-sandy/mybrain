@@ -280,6 +280,16 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(t);
   }
 
+  /** Create a task that's already DONE on a given day (used by the daily wrap-up to log work done "in the flow"). */
+  async createDoneTask(title: string, category: string | null, day: string) {
+    const t = String(title || '').trim().slice(0, 160);
+    if (!t) return null;
+    const row = await this.prisma.task.create({
+      data: { title: t, category: category ? String(category).trim().slice(0, 40) : null, priority: 'medium', sphere: 'work', day, status: 'done', progress: 100, completedAt: new Date() },
+    });
+    return this.shape(row);
+  }
+
   async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;

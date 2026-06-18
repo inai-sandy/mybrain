@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Moon, X, Mic, BookOpen, Plus, Trash2, MessageSquare } from 'lucide-react';
+import { Moon, X, BookOpen, Plus, Trash2, MessageSquare, Clock, Check, Sparkles, Loader2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { isDictating } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
@@ -18,12 +18,27 @@ function timeOf(iso: string): string {
 }
 
 /** The story-telling window. Pass `day` + `title` to narrate a past day (from Activity); without them it saves for today. */
+type Candidate = { title: string; category: string | null };
+
 export function StoryModal({ initial, day, title, onClose, onSaved }: { initial: { text?: string; mood?: string | null } | null; day?: string; title?: string; onClose: () => void; onSaved: () => void }) {
   const [text, setText] = useState(initial?.text || '');
   const [mood, setMood] = useState(initial?.mood || '');
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<'story' | 'wrap'>('story');
+  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
+  const [hours, setHours] = useState('');
+  const [wrapBusy, setWrapBusy] = useState(false);
   const toast = useToast();
   const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
+
+  // When we reach the wrap-up step, fetch the finished tasks the AI found in the story.
+  useEffect(() => {
+    if (step !== 'wrap' || candidates !== null) return;
+    fetch('/api/daily/done-candidates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
+      .then((r) => (r.ok ? r.json() : { candidates: [] }))
+      .then((d) => setCandidates(d.candidates || []))
+      .catch(() => setCandidates([]));
+  }, [step, candidates, day]);
 
   async function save() {
     if (!text.trim()) return;
@@ -32,9 +47,9 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
       const r = await fetch('/api/daily/story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mood: mood || undefined, day }) });
       if (r.ok) {
         const j = await r.json().catch(() => ({} as any));
-        toast('success', j?.rewriting ? 'Story saved — rewriting that day’s Story of the Day ✨' : 'Story saved — sleep well 🌙');
+        toast('success', j?.rewriting ? 'Story saved — rewriting that day’s Story of the Day ✨' : 'Story saved 🌙');
         onSaved();
-        onClose();
+        setStep('wrap'); // → wrap-up: finished tasks + working hours
       } else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
     } catch {
       toast('error', 'Could not save');
@@ -43,10 +58,79 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
     }
   }
 
+  async function submitWrap(close: () => void) {
+    setWrapBusy(true);
+    try {
+      const h = parseFloat(hours);
+      const workedMinutes = Number.isFinite(h) && h > 0 ? Math.round(h * 60) : undefined;
+      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: candidates || [], workedMinutes }) });
+      const n = candidates?.length || 0;
+      toast('success', n ? `Logged ${n} finished task${n === 1 ? '' : 's'} ✓` : 'Day wrapped up ✓');
+      onSaved();
+      close();
+    } catch {
+      toast('error', 'Could not save the wrap-up');
+    } finally {
+      setWrapBusy(false);
+    }
+  }
+
   return (
     <Sheet onClose={onClose} canClose={() => !isDictating()}>
-      {(close) => (
-        <>
+      {(close) =>
+        step === 'wrap' ? (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold flex items-center gap-2"><Sparkles className="text-emerald-500" size={18} /> Wrap up your day</h3>
+              <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+            </div>
+
+            {/* Finished tasks found in the story */}
+            <div className="mb-4">
+              <p className="text-xs text-zinc-500 mb-2">Finished tasks I spotted in your story (delete any that aren’t real, the rest get logged as done today):</p>
+              {candidates === null ? (
+                <div className="py-4 text-center text-sm text-zinc-400"><Loader2 size={16} className="animate-spin inline mr-2" /> Reading your story…</div>
+              ) : candidates.length ? (
+                <ul className="space-y-1.5">
+                  {candidates.map((c, i) => (
+                    <li key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 px-3 py-2">
+                      <Check size={15} className="shrink-0 text-emerald-500" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{c.title}</div>
+                        {c.category && <div className="text-[11px] text-zinc-400">{c.category}</div>}
+                      </div>
+                      <button onClick={() => setCandidates((arr) => (arr || []).filter((_, j) => j !== i))} aria-label="Remove" className="shrink-0 p-1 text-zinc-400 hover:text-rose-600"><X size={15} /></button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-zinc-400">No extra finished tasks found — nice and tidy.</p>
+              )}
+            </div>
+
+            {/* Working hours */}
+            <div className="mb-4">
+              <p className="text-xs text-zinc-500 mb-2 flex items-center gap-1.5"><Clock size={13} /> How many hours did you work today?</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                {['4', '6', '8', '10'].map((h) => (
+                  <button key={h} onClick={() => setHours(h)} className={'rounded-full border px-3 py-1 text-sm ' + (hours === h ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>{h}h</button>
+                ))}
+                <div className="relative">
+                  <input type="number" inputMode="decimal" min="0" max="24" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} placeholder="e.g. 7.5" className="w-24 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-3 pr-7 py-1.5 text-sm outline-none focus:border-emerald-500" />
+                  <span className="absolute right-2.5 top-1.5 text-xs text-zinc-400">h</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Skip</button>
+              <button onClick={() => submitWrap(close)} disabled={wrapBusy || candidates === null} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+                {wrapBusy ? 'Saving…' : 'Submit'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> {title || "Tonight's story"}</h3>
             <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>

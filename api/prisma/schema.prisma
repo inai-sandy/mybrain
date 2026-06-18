@@ -112,13 +112,14 @@ model BrainDump {
 
 /// The mandatory nightly story — the user's free narrative of the day (problems, joy, events).
 model Story {
-  id        String   @id @default(uuid())
-  day       String // local day key YYYY-MM-DD
-  rawText   String
-  source    String   @default("app") // app | telegram | voice
-  mood      String? // optional one-tap mood/energy
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(uuid())
+  day           String // local day key YYYY-MM-DD
+  rawText       String
+  source        String   @default("app") // app | telegram | voice
+  mood          String? // optional one-tap mood/energy
+  workedMinutes Int? // user-stated hours worked that day (the real working-hours figure)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// The AI's end-of-day summary of everything the user did — stored to Activity + RAG/SuperMemory.

@@ -10,6 +10,7 @@ const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
 const STORY_AT = '23:58'; // local time the nightly Story of the Day fires
 const DEFAULT_STORY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+const DONE_EXTRACT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }; // tiny job: pull finished tasks from the story
 
 type TimelineEvent = { type: string; title: string; detail?: string; at: string };
 
@@ -104,6 +105,71 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { id: s.id, day: s.day, text: s.rawText, source: s.source, mood: s.mood, createdAt: s.createdAt, updatedAt: s.updatedAt };
   }
 
+  // ---- daily wrap-up: finished tasks from the story + working hours ----
+
+  /** Read the day's story and surface concrete tasks the user MENTIONS having finished but never logged. */
+  async doneCandidates(dayInput?: string): Promise<{ day: string; candidates: { title: string; category: string | null }[] }> {
+    const tz = await this.tz();
+    const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
+    const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
+    const text = (story?.rawText || '').trim();
+    if (text.length < 15) return { day, candidates: [] };
+
+    const existing = await this.prisma.task.findMany({ where: { day }, select: { title: true } });
+    const existingTitles = existing.map((e) => e.title);
+    const prompt =
+      `From the user's diary entry below, extract the concrete tasks/work they say they DID or FINISHED today.\n` +
+      `Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket"}]}.\n` +
+      `Rules: only real, completed work — not feelings, not plans, not things they failed to do; short titles; {"tasks":[]} if none.\n` +
+      `Do NOT include anything already in this already-logged list:\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
+      `DIARY:\n${text.slice(0, 4000)}`;
+    const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 500, 'done-extract'))?.trim() || '';
+    let list: { title?: string; category?: string }[] = [];
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (Array.isArray(json?.tasks)) list = json.tasks;
+    } catch {
+      list = [];
+    }
+
+    // Drop anything that overlaps an already-logged task (significant-word overlap).
+    const sig = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 3));
+    const existSets = existingTitles.map((t) => sig(t)).filter((set) => set.size);
+    const isDup = (title: string) => {
+      const n = sig(title);
+      if (!n.size) return false;
+      return existSets.some((o) => {
+        const inter = [...n].filter((w) => o.has(w)).length;
+        const minSize = Math.min(n.size, o.size);
+        return minSize >= 2 ? inter / minSize >= 0.6 : inter >= 1;
+      });
+    };
+    const seen = new Set<string>();
+    const candidates = list
+      .map((t) => ({ title: String(t?.title || '').trim().slice(0, 160), category: t?.category ? String(t.category).trim().slice(0, 40) : null }))
+      .filter((t) => t.title && !isDup(t.title) && !seen.has(t.title.toLowerCase()) && seen.add(t.title.toLowerCase()))
+      .slice(0, 12);
+    return { day, candidates };
+  }
+
+  /** Wrap up the day: log the approved finished tasks as DONE + save the user-stated working minutes. */
+  async wrapUp(dayInput: string | undefined, tasks: { title?: string; category?: string | null }[], workedMinutes?: number) {
+    const tz = await this.tz();
+    const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
+    let created = 0;
+    for (const t of (tasks || []).slice(0, 20)) {
+      const task = await this.tasks.createDoneTask(String(t?.title || ''), t?.category ?? null, day).catch(() => null);
+      if (task) created++;
+    }
+    let wm: number | null = null;
+    if (workedMinutes != null && Number.isFinite(workedMinutes)) {
+      wm = Math.max(0, Math.min(24 * 60, Math.round(workedMinutes)));
+      const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
+      if (story) await this.prisma.story.update({ where: { id: story.id }, data: { workedMinutes: wm } }).catch(() => undefined);
+    }
+    return { day, created, workedMinutes: wm };
+  }
+
   // ---- daytime notes ----
 
   async addNote(text: string, source = 'app') {
@@ -165,7 +231,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
 
   async stats(day: string) {
-    const dayTasks = await this.prisma.task.findMany({ where: { day } });
+    const [dayTasks, story] = await Promise.all([
+      this.prisma.task.findMany({ where: { day } }),
+      this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { workedMinutes: true } }),
+    ]);
     const done = dayTasks.filter((t) => t.status === 'done');
     const minutesSpent = done.reduce((s, t) => s + (t.actualMin || 0), 0);
     const estimated = dayTasks.reduce((s, t) => s + (t.estimateMin || 0), 0);
@@ -175,6 +244,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       tasksOpen: dayTasks.length - done.length,
       minutesSpent,
       minutesEstimated: estimated,
+      // the user-stated working minutes for the day (the real working-hours figure); null if not set
+      workedMinutes: story?.workedMinutes ?? null,
     };
   }
 
@@ -1012,11 +1083,16 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       return win.length ? Math.round((d / win.length) * 100) : null;
     };
 
+    // user-stated working minutes across the window (the real working-hours figure)
+    const workStories = await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { workedMinutes: true } });
+    const minutesWorked = workStories.reduce((s, x) => s + (x.workedMinutes || 0), 0);
+
     return {
       days: span,
       totals: { tasksTotal: tasks.length, tasksDone: done.length, followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : 0 },
       followTrend: { week: ftBetween(this.dayAdd(today, -6), today), prevWeek: ftBetween(this.dayAdd(today, -13), this.dayAdd(today, -7)) },
       minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
+      minutesWorked,
       categoryTime,
       estimateVsActual: { estimated, actual, count: withBoth.length },
       streak,

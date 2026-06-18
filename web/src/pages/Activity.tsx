@@ -8,7 +8,7 @@ import { StoryModal } from './DailyStory';
 import { CloseDaySheet } from './CloseDay';
 
 type Ev = { type: string; title: string; detail?: string; at: string };
-type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number };
+type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutesSpent: number; minutesEstimated: number; workedMinutes?: number | null };
 type Summary = { day: string; text: string; stats: Stats | null } | null;
 type Story = { text: string; mood?: string | null } | null;
 type DayStoryT = { text: string; personalText?: string | null; mood?: string | null; moodScore?: number | null; proMoodScore?: number | null; personalMoodScore?: number | null } | null;
@@ -18,6 +18,7 @@ type Dash = {
   days: number;
   totals: { tasksTotal: number; tasksDone: number; followThrough: number };
   minutesSpent: number;
+  minutesWorked?: number;
   categoryTime: { category: string; minutes: number }[];
   estimateVsActual: { estimated: number; actual: number; count: number };
   streak: number;
@@ -133,7 +134,7 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
       {st && (
         <div className="grid grid-cols-3 gap-3">
           <Stat big={`${st.tasksDone}/${st.tasksTotal}`} label="tasks done" />
-          <Stat big={mins(st.minutesSpent)} label="time spent" />
+          <Stat big={st.workedMinutes != null ? mins(st.workedMinutes) : mins(st.minutesSpent)} label={st.workedMinutes != null ? 'worked' : 'time spent'} />
           <Stat big={`${pct}%`} label="follow-through" />
         </div>
       )}
@@ -282,7 +283,7 @@ function InsightsView() {
         </div>
         <Stat big={`${d.totals.tasksDone}/${d.totals.tasksTotal}`} label="tasks done" />
         <Stat big={`${d.totals.followThrough}%`} label="follow-through" />
-        <Stat big={mins(d.minutesSpent)} label="time spent" />
+        <Stat big={d.minutesWorked ? mins(d.minutesWorked) : mins(d.minutesSpent)} label={d.minutesWorked ? 'worked' : 'time spent'} />
       </div>
 
       {/* time by category */}
