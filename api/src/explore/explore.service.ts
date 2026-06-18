@@ -60,8 +60,8 @@ export class ExploreService {
     return 'document';
   }
 
-  /** Best-effort deep link to the section a source lives in (we have the store doc id, not the app row id). */
-  private linkOf(type: string): string {
+  /** Section fallback when a hit can't be resolved to a specific app row (e.g. external SuperMemory docs). */
+  private sectionLink(type: string): string {
     switch (type) {
       case 'task':
         return '/tasks';
@@ -73,8 +73,33 @@ export class ExploreService {
         return '/ideas';
       case 'meeting':
         return '/meetings';
+      case 'email':
+        return '/google/gmail';
       default:
-        return '/find';
+        return '/explore';
+    }
+  }
+
+  /** A REAL deep link to the resolved app row, plus its display type. (BEA-340) */
+  private resolvedLink(ent: { type: string; id: string; day?: string }): { link: string; sourceType: string } {
+    switch (ent.type) {
+      case 'item':
+        return { link: `/doc/${ent.id}`, sourceType: 'document' };
+      case 'idea':
+        return { link: `/ideas/${ent.id}`, sourceType: 'idea' };
+      case 'meeting':
+        return { link: `/meeting/${ent.id}`, sourceType: 'meeting' };
+      case 'story':
+        return { link: ent.day ? `/activity?day=${ent.day}` : '/activity', sourceType: 'story' };
+      case 'task':
+        return { link: '/tasks', sourceType: 'task' };
+      case 'note':
+        return { link: '/notes', sourceType: 'note' };
+      case 'gmailbrief':
+      case 'gmailrequest':
+        return { link: '/google/gmail', sourceType: 'email' };
+      default:
+        return { link: '/explore', sourceType: 'document' };
     }
   }
 
@@ -92,15 +117,20 @@ export class ExploreService {
       return { answer: "I couldn't find anything in your brain about that yet.", sources: [], matches: 0 };
     }
 
+    // Resolve each hit's store-doc id back to its real app row, so sources deep-link to the actual item.
+    const resolved = await this.memory.resolveRefs(hits.map((h) => h.memId).filter(Boolean) as string[]);
+
     const sources: Source[] = hits.map((h, i) => {
-      const sourceType = this.typeOf(h.tags);
+      const ent = h.memId ? resolved[h.memId] : undefined;
+      const tagType = this.typeOf(h.tags);
+      const { link, sourceType } = ent ? this.resolvedLink(ent) : { link: this.sectionLink(tagType), sourceType: tagType };
       return {
         n: i + 1,
         sourceType,
         title: h.title || `Source ${i + 1}`,
         snippet: h.content.slice(0, 400),
         when: h.when,
-        link: this.linkOf(sourceType),
+        link,
         source: h.source,
         score: h.score,
       };

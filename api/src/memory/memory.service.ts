@@ -243,6 +243,33 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return { retried: res.count };
   }
 
+  /**
+   * Map store-doc ids (supermemoryId/ragId) back to the real app rows that own them, so an Explore
+   * source can deep-link to the actual item. Returns { storeId -> { type, id, day? } }. (BEA-340)
+   */
+  async resolveRefs(ids: string[]): Promise<Record<string, { type: string; id: string; day?: string }>> {
+    const uniq = [...new Set((ids || []).filter(Boolean))];
+    const out: Record<string, { type: string; id: string; day?: string }> = {};
+    if (!uniq.length) return out;
+    for (const type of ALL_SOURCES) {
+      const pk = this.pkOf(type);
+      const select: any = { [pk]: true, supermemoryId: true, ragId: true };
+      if (type === 'story') select.day = true; // story has a separate `day` column
+      let rows: any[] = [];
+      try {
+        rows = await this.modelOf(type).findMany({ where: { OR: [{ supermemoryId: { in: uniq } }, { ragId: { in: uniq } }] }, select });
+      } catch {
+        continue;
+      }
+      for (const r of rows) {
+        const entity = { type, id: String(r[pk]), day: type === 'gmailbrief' ? String(r[pk]) : r.day };
+        if (r.supermemoryId) out[r.supermemoryId] = entity;
+        if (r.ragId) out[r.ragId] = entity;
+      }
+    }
+    return out;
+  }
+
   /** Per-table count of ENABLED-section rows not yet fully linked into BOTH stores. */
   async unindexedCounts(): Promise<Array<{ type: string; unindexed: number }>> {
     const out: Array<{ type: string; unindexed: number }> = [];
