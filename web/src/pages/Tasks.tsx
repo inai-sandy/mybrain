@@ -110,7 +110,7 @@ export function Tasks() {
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
   const hasFilters = !!(q || fPriority || fCategory || fSphere || fPerson);
-  const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-emerald-500';
+  const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1.5 text-xs sm:text-sm outline-none focus:border-emerald-500 w-full sm:w-auto truncate';
 
   return (
     <div className="space-y-3">
@@ -150,21 +150,21 @@ export function Tasks() {
         </div>
       )}
 
-      {/* Always-visible dropdown filters: priority + category */}
+      {/* Filters — a compact 3-per-row grid on mobile (2 rows); inline on desktop */}
       {!history && (
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <select aria-label="Filter by priority" value={fPriority} onChange={(e) => setFPriority(e.target.value)} className={sel}>
-          <option value="">All priorities</option>
+          <option value="">Priority</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
         <select aria-label="Filter by category" value={fCategory} onChange={(e) => setFCategory(e.target.value)} className={sel}>
-          <option value="">All categories</option>
+          <option value="">Category</option>
           {categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
         <select aria-label="Filter by life" value={fSphere} onChange={(e) => setFSphere(e.target.value)} className={sel}>
-          <option value="">Work + Personal</option>
+          <option value="">💼 + 🏠</option>
           <option value="work">💼 Work</option>
           <option value="personal">🏠 Personal</option>
         </select>
@@ -175,12 +175,12 @@ export function Tasks() {
           </select>
         )}
         <select aria-label="Sort tasks" value={sort} onChange={(e) => setSort(e.target.value)} className={sel}>
-          <option value="newest">Newest first</option>
-          <option value="oldest">Oldest first</option>
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
           <option value="priority">By priority</option>
         </select>
         {hasFilters && (
-          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setFPerson(''); setShowSearch(false); }} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-rose-600"><X size={12} /> clear</button>
+          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setFPerson(''); setShowSearch(false); }} className="inline-flex items-center justify-center gap-1 text-xs text-zinc-500 hover:text-rose-600 rounded-lg border border-zinc-200 dark:border-zinc-800 px-2 py-1.5 w-full sm:w-auto sm:border-0"><X size={12} /> Clear</button>
         )}
       </div>
       )}
