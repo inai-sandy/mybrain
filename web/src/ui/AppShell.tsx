@@ -18,19 +18,21 @@ function useVisualViewport(pin: boolean): boolean {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    let lastH = -1;
     const update = () => {
-      document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+      const h = Math.round(vv.height);
+      if (h !== lastH) {
+        document.documentElement.style.setProperty('--vvh', `${h}px`); // only write when it actually changes
+        lastH = h;
+      }
       const open = window.innerHeight - vv.height > 120;
       setKeyboardOpen(open);
       if (pin && open) window.scrollTo(0, 0);
     };
     update();
+    // Only 'resize' (keyboard show/hide). NOT 'scroll' — that fires every frame while scrolling and thrashed style.
     vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    return () => {
-      vv.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
-    };
+    return () => vv.removeEventListener('resize', update);
   }, [pin]);
   return keyboardOpen;
 }
@@ -102,7 +104,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Main column */}
       <div className="md:pl-60">
-        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
             <button onClick={() => setDrawer(true)} aria-label="Menu" className="md:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
