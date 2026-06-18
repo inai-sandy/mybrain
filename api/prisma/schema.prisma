@@ -398,6 +398,8 @@ model GmailBrief {
   sections    String? // JSON array of {heading, points[], link} accordion topic cards
   items       String? // JSON array of {from, subject, time} important emails
   model       String?
+  supermemoryId String? // Explore index doc ids (mandatory section)
+  ragId         String?
   generatedAt DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -415,6 +417,8 @@ model GmailRequest {
   shared        Boolean  @default(false)
   shareId       String?  @unique // public token for the share link
   itemId        String? // set if imported to Capture
+  supermemoryId String? // Explore index doc ids (mandatory section)
+  ragId         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }

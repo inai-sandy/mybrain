@@ -94,6 +94,24 @@ export class GmailRequestService {
   }
 
   /** Step 2 — build + save the request from the chosen thread. */
+  /** Index an Email Request into Explore (mandatory section). (BEA-336) */
+  private indexRequest(row: any): void {
+    if (!row?.id) return;
+    const content = [row.title, row.query, row.threadSubject, row.summary].filter(Boolean).join('\n\n');
+    if (!content.trim()) return;
+    this.memory
+      .indexEntity({
+        refType: 'gmailrequest',
+        refId: row.id,
+        title: row.title || 'Email request',
+        content,
+        tags: ['email', 'request'],
+        prevSupermemoryId: row.supermemoryId,
+        prevRagId: row.ragId,
+      })
+      .catch(() => undefined);
+  }
+
   async create(query: string, threadId: string, title?: string) {
     const thread = await this.google.gmailThread(threadId);
     const summary = await this.summarize(query, thread, thread.messages.length);
@@ -107,6 +125,7 @@ export class GmailRequestService {
         emailCopy: thread.copy.slice(0, 60000),
       },
     });
+    this.indexRequest(row);
     return this.shape(row);
   }
 
@@ -127,6 +146,7 @@ export class GmailRequestService {
       where: { id },
       data: { threadId, threadSubject: thread.subject, summary, emailCopy: thread.copy.slice(0, 60000) },
     });
+    this.indexRequest(row);
     return this.shape(row);
   }
 

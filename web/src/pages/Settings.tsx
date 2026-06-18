@@ -161,7 +161,7 @@ function AppearanceSection() {
   );
 }
 
-type IndexSrc = { type: string; label: string; total: number; indexed: number; lastIndexedAt: string | null; enabled: boolean };
+type IndexSrc = { type: string; label: string; total: number; indexed: number; lastIndexedAt: string | null; enabled: boolean; mandatory?: boolean };
 
 function relTime(iso: string | null): string {
   if (!iso) return 'never';
@@ -276,14 +276,20 @@ function IndexSection() {
                         <RefreshCw size={15} className={busy[s.type] ? 'animate-spin' : ''} />
                       </button>
                     )}
-                    <button
-                      onClick={() => (s.enabled ? setConfirmOff(s) : setEnabled(s, true))}
-                      disabled={busy[s.type]}
-                      aria-label={s.enabled ? 'Disable' : 'Enable'}
-                      className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ' + (s.enabled ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}
-                    >
-                      <span className={'inline-block h-4 w-4 transform rounded-full bg-white transition-transform ' + (s.enabled ? 'translate-x-6' : 'translate-x-1')} />
-                    </button>
+                    {s.mandatory ? (
+                      <span title="Always indexed — can't be turned off" className="text-[10px] px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 font-medium">
+                        Always on
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => (s.enabled ? setConfirmOff(s) : setEnabled(s, true))}
+                        disabled={busy[s.type]}
+                        aria-label={s.enabled ? 'Disable' : 'Enable'}
+                        className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ' + (s.enabled ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}
+                      >
+                        <span className={'inline-block h-4 w-4 transform rounded-full bg-white transition-transform ' + (s.enabled ? 'translate-x-6' : 'translate-x-1')} />
+                      </button>
+                    )}
                   </div>
                 </div>
                 {s.enabled && s.total > 0 && (

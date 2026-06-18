@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { GoogleService } from './google.service';
+import { MemoryService } from '../memory/memory.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const BRIEF_AT = '23:58'; // 11:58 PM local — write today's email brief
@@ -22,7 +23,26 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly google: GoogleService,
+    private readonly memory: MemoryService,
   ) {}
+
+  /** Index the day's brief into Explore (mandatory section). (BEA-336) */
+  private indexBrief(row: any): void {
+    if (!row?.day) return;
+    const content = `Daily Email Brief — ${row.day}\n\n${row.summary || ''}`;
+    if (!row.summary) return;
+    this.memory
+      .indexEntity({
+        refType: 'gmailbrief',
+        refId: row.day,
+        title: `Daily Email Brief ${row.day}`,
+        content,
+        tags: ['email', 'brief', 'activity'],
+        prevSupermemoryId: row.supermemoryId,
+        prevRagId: row.ragId,
+      })
+      .catch(() => undefined);
+  }
 
   onModuleInit() {
     this.tick = setInterval(() => this.briefTick().catch(() => undefined), 60_000);
@@ -168,6 +188,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       create: { day, unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: BRIEF_MODEL.model },
       update: { unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: BRIEF_MODEL.model },
     });
+    this.indexBrief(row);
     // Only the nightly build hands the brief to the Telegram push loop (same mechanism as the Story of the Day).
     if (push) await this.setSetting('telegram.pushGmailBrief', day).catch(() => undefined);
     return this.shape(row);
