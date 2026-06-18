@@ -25,15 +25,55 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  /** Queue a doc for dual-write to BOTH stores (one outbox row each). */
-  async enqueue(content: string, opts: { itemId?: string; title?: string; tags?: string[] } = {}): Promise<void> {
+  /** Queue a doc for dual-write to BOTH stores (one outbox row each).
+   *  `refType` + `refId` link the result back to any table (item/task/story/idea/meeting);
+   *  `itemId` is kept for back-compat and implies refType 'item'. */
+  async enqueue(
+    content: string,
+    opts: { itemId?: string; refType?: string; refId?: string; title?: string; tags?: string[] } = {},
+  ): Promise<void> {
     const payload = JSON.stringify({ content, title: opts.title, tags: opts.tags ?? [] });
+    const refId = opts.refId ?? opts.itemId;
+    const refType = opts.refType ?? (opts.itemId ? 'item' : undefined);
     await this.prisma.memoryOutbox.createMany({
       data: [
-        { itemId: opts.itemId, target: 'supermemory', payload },
-        { itemId: opts.itemId, target: 'rag', payload },
+        { itemId: refId, refType, target: 'supermemory', payload },
+        { itemId: refId, refType, target: 'rag', payload },
       ],
     });
+  }
+
+  /** Index (or re-index) a row's content into both stores. Deletes any prior docs first so an
+   *  edit REPLACES rather than duplicates, then queues a fresh dual-write linked back to the row. */
+  async indexEntity(opts: {
+    refType: string;
+    refId: string;
+    content: string;
+    title?: string;
+    tags?: string[];
+    prevSupermemoryId?: string | null;
+    prevRagId?: string | null;
+  }): Promise<void> {
+    const text = (opts.content || '').trim();
+    if (!text) return;
+    if (opts.prevSupermemoryId || opts.prevRagId) {
+      await this.deleteDoc(opts.prevSupermemoryId, opts.prevRagId);
+    }
+    await this.enqueue(text, { refType: opts.refType, refId: opts.refId, title: opts.title, tags: opts.tags });
+  }
+
+  /** Write a returned store doc id back onto the right table (item/task/story/idea/meeting). */
+  private async writeBackId(refType: string | null | undefined, id: string, target: string, resultId: string) {
+    const data = target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId };
+    const models: Record<string, any> = {
+      item: this.prisma.item,
+      task: this.prisma.task,
+      story: this.prisma.story,
+      idea: this.prisma.idea,
+      meeting: this.prisma.meeting,
+    };
+    const model = models[refType || 'item'] ?? this.prisma.item;
+    await model.update({ where: { id }, data }).catch(() => undefined);
   }
 
   /** Process pending outbox rows. Each goes to its target with retries; never leaves the two inconsistent silently. */
@@ -62,14 +102,9 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         if (row.target === 'supermemory') resultId = await this.sm.save(p.content, p.tags ?? []);
         else resultId = await this.rag.save(p.content, p.title, p.tags ?? []);
         await this.prisma.memoryOutbox.update({ where: { id: row.id }, data: { status: 'done' } });
-        // Record where it landed so the UI can show per-store status.
+        // Record where it landed so the UI can show per-store status — on the right table.
         if (row.itemId && resultId) {
-          await this.prisma.item
-            .update({
-              where: { id: row.itemId },
-              data: row.target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId },
-            })
-            .catch(() => undefined);
+          await this.writeBackId((row as any).refType, row.itemId, row.target, resultId);
         }
         processed++;
       } catch (e: any) {

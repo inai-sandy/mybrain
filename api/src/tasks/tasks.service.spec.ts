@@ -56,7 +56,9 @@ function makeService(llmText: string | null) {
   };
   const llm: any = { completeWith: async () => llmText, listOpenRouterModels: async () => [] };
   const prompts: any = { get: async () => 'Turn this brain-dump into tasks as JSON.' };
-  return { svc: new TasksService(prisma, llm, prompts), tasks };
+  // Indexing is fire-and-forget; a no-op memory keeps the unit tests focused on task logic.
+  const memory: any = { indexEntity: async () => undefined, deleteDoc: async () => undefined, enqueue: async () => undefined };
+  return { svc: new TasksService(prisma, llm, prompts, memory), tasks };
 }
 
 describe('TasksService', () => {

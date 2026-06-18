@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { MemoryService } from '../memory/memory.service';
 
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const DEFAULT_TASKS_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -25,7 +26,39 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly prompts: PromptsService,
+    private readonly memory: MemoryService,
   ) {}
+
+  /** Build the searchable text for a task and (re-)index it into the brain. Fire-and-forget:
+   *  indexing must never block or fail a task operation. (BEA-331) */
+  private indexTask(t: any): void {
+    if (!t?.id) return;
+    const tags = JSON.parse((t.tags as string) || '[]');
+    const parts = [
+      t.title,
+      t.note || '',
+      t.category ? `Category: ${t.category}` : '',
+      `Status: ${t.status === 'done' ? 'done' : 'open'}${t.progress ? ` (${t.progress}%)` : ''}`,
+      t.day ? `Day: ${t.day}` : '',
+    ].filter(Boolean);
+    this.memory
+      .indexEntity({
+        refType: 'task',
+        refId: t.id,
+        title: `Task: ${t.title}`.slice(0, 120),
+        content: `Task — ${parts.join('\n')}`,
+        tags: ['task', t.sphere || 'work', ...(t.category ? [String(t.category).toLowerCase()] : []), ...tags].slice(0, 6),
+        prevSupermemoryId: t.supermemoryId,
+        prevRagId: t.ragId,
+      })
+      .catch(() => undefined);
+  }
+
+  /** Remove a task's docs from the brain (best-effort) before/around deletion. */
+  private unindexTask(t: any): void {
+    if (!t) return;
+    this.memory.deleteDoc(t.supermemoryId, t.ragId).catch(() => undefined);
+  }
 
   onModuleInit() {
     // No automatic midnight rollover anymore: a day's open tasks stay on that day until the day is
@@ -41,7 +74,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     if (!fromDay || !toDay || fromDay >= toDay) return { rolled: 0 };
     const open = await this.prisma.task.findMany({ where: { status: 'open', day: fromDay } });
     for (const t of open) {
-      await this.prisma.task.update({ where: { id: t.id }, data: { day: toDay, rolloverCount: (t.rolloverCount || 0) + 1 } });
+      const upd = await this.prisma.task.update({ where: { id: t.id }, data: { day: toDay, rolloverCount: (t.rolloverCount || 0) + 1 } });
+      this.indexTask(upd);
     }
     return { rolled: open.length };
   }
@@ -134,6 +168,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       // LLM unavailable — keep the dump as a single task so nothing is lost.
       const d = await this.prisma.brainDump.create({ data: { day, rawText: clean, source, taskCount: 1 } });
       const t = await this.prisma.task.create({ data: { title: clean.split('\n')[0].slice(0, 120) || 'Task', day, dumpId: d.id, note: clean.length > 120 ? clean : null } });
+      this.indexTask(t);
       return { dumpId: d.id, question: undefined, tasks: [this.shape(t)] };
     }
 
@@ -165,6 +200,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
           dumpId: d.id,
         },
       });
+      this.indexTask(t);
       created.push(this.shape(t));
     }
     return { dumpId: d.id, question: undefined, tasks: created };
@@ -277,6 +313,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         day: this.dayKey(tz),
       },
     });
+    this.indexTask(t);
     return this.shape(t);
   }
 
@@ -287,6 +324,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const row = await this.prisma.task.create({
       data: { title: t, category: category ? String(category).trim().slice(0, 40) : null, priority: 'medium', sphere: 'work', day, status: 'done', progress: 100, completedAt: new Date() },
     });
+    this.indexTask(row);
     return this.shape(row);
   }
 
@@ -326,6 +364,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         ...statusFromProgress,
       },
     });
+    this.indexTask(upd);
     return this.shape(upd);
   }
 
@@ -343,6 +382,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         actualMin: done ? (Number.isFinite(actualMin as any) ? Math.max(1, Math.round(Number(actualMin))) : t.actualMin) : null,
       },
     });
+    this.indexTask(upd);
     if (done) await this.spawnFollowUp(t, followUpDate);
     return this.shape(upd);
   }
@@ -351,7 +391,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   private async spawnFollowUp(orig: any, followUpDate?: string) {
     const day = (followUpDate || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
-    return this.prisma.task.create({
+    const fu = await this.prisma.task.create({
       data: {
         title: `Follow up: ${orig.title}`.slice(0, 160),
         category: orig.category || null,
@@ -361,9 +401,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         followUp: true,
       },
     });
+    this.indexTask(fu);
+    return fu;
   }
 
   async remove(id: string) {
+    const t = await this.prisma.task.findUnique({ where: { id } });
+    if (t) this.unindexTask(t);
     await this.prisma.task.delete({ where: { id } }).catch(() => null);
     return { ok: true };
   }
@@ -430,7 +474,18 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   async removeDuplicates(ids: string[]) {
     const clean = (Array.isArray(ids) ? ids : []).map((x) => String(x)).filter(Boolean).slice(0, 2000);
     if (!clean.length) return { removed: 0 };
+    const doomed = await this.prisma.task.findMany({ where: { id: { in: clean }, status: 'open' } });
+    doomed.forEach((t) => this.unindexTask(t));
     const res = await this.prisma.task.deleteMany({ where: { id: { in: clean }, status: 'open' } });
     return { removed: res.count };
+  }
+
+  /** Index every Task/Story that isn't linked into the brain yet (or re-index all). Idempotent:
+   *  indexEntity deletes prior docs first, so re-running never duplicates. Returns counts. (BEA-331) */
+  async backfillIndex(opts: { all?: boolean } = {}): Promise<{ tasks: number; stories: number }> {
+    const where = opts.all ? {} : { OR: [{ ragId: null }, { supermemoryId: null }] };
+    const tasks = await this.prisma.task.findMany({ where });
+    for (const t of tasks) this.indexTask(t);
+    return { tasks: tasks.length, stories: 0 };
   }
 }

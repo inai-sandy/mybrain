@@ -208,7 +208,11 @@ function makeService(opts: { llmText?: string | null } = {}) {
     },
   };
   const llm: any = { completeWith: jest.fn(async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText)) };
-  const memory: any = { enqueue: async (text: string, o: any) => enqueued.push({ text, o }) };
+  const memory: any = {
+    enqueue: async (text: string, o: any) => enqueued.push({ text, o }),
+    indexEntity: async (opts: any) => enqueued.push({ text: opts.content, o: { title: opts.title, tags: opts.tags } }),
+    deleteDoc: async () => undefined,
+  };
   const rolledCalls: any[] = [];
   const tasksSvc: any = {
     getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }),
@@ -418,7 +422,7 @@ describe('DailyService', () => {
     await svc.submitStory('cracked the pricing section today', 'app', '🙂 Good');
     expect(enqueued).toHaveLength(1);
     expect(enqueued[0].text).toContain('cracked the pricing');
-    expect(enqueued[0].o.tags).toEqual(['activity']);
+    expect(enqueued[0].o.tags).toEqual(['activity', 'story']);
   });
 
   it('saves a story for a past day (the morning-after catch-up) but never for the future', async () => {

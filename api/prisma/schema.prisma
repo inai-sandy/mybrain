@@ -119,6 +119,8 @@ model Story {
   mood          String? // optional one-tap mood/energy
   workedMinutes Int? // user-stated hours worked that day (the real working-hours figure)
   workedBreakdown String? // JSON [{category, minutes}] — AI split of the stated hours across topics
+  supermemoryId String? // Explore index doc ids (so re-index replaces, no dupes)
+  ragId         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -300,6 +302,8 @@ model Task {
   progress      Int       @default(0) // 0 | 30 | 60 | 100 — how far along (100 = done)
   followUp      Boolean   @default(false) // true if this task was spawned as a follow-up to another
   rolloverCount Int       @default(0)
+  supermemoryId String? // Explore index doc ids (so re-index replaces, no dupes)
+  ragId         String?
   createdAt     DateTime  @default(now())
   completedAt   DateTime?
 }
@@ -307,7 +311,8 @@ model Task {
 /// Outbox: every memory write is queued here, then a worker drains it to both stores with retries.
 model MemoryOutbox {
   id        String   @id @default(uuid())
-  itemId    String?
+  itemId    String? // the ref row's id (named itemId for back-compat); refType says which table
+  refType   String? // item (default/null) | task | story | idea | meeting — which table to write the doc id back to
   target    String // supermemory | rag
   op        String   @default("upsert")
   payload   String // JSON

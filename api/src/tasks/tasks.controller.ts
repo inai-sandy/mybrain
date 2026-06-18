@@ -12,6 +12,12 @@ export class TasksController {
     return this.tasks.dump(body.text, body.source || 'app');
   }
 
+  /** One-shot: (re)index tasks into the brain. ?all=1 re-indexes everything, else only un-indexed. (BEA-331) */
+  @Post('reindex')
+  async reindex(@Query('all') all?: string) {
+    return this.tasks.backfillIndex({ all: all === '1' || all === 'true' });
+  }
+
   @Get('today')
   async today() {
     return this.tasks.today();
