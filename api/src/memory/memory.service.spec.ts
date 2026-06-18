@@ -332,3 +332,35 @@ describe('MemoryService index-source gate (BEA-335)', () => {
     expect(svc.sourceEnabled('note')).toBe(false);
   });
 });
+
+describe('MemoryService.startRechunk (BEA-337)', () => {
+  it('re-chunks an item from full SuperMemory content and updates its ragId', async () => {
+    const items = [{ id: 'i1', supermemoryId: 'sm1', ragId: 'old-rag' }];
+    const prisma: any = {
+      item: {
+        count: async () => items.length,
+        findMany: async () => items,
+        update: async ({ where, data }: any) => {
+          Object.assign(items.find((x) => x.id === where.id), data);
+          return {};
+        },
+      },
+      idea: { count: async () => 0, findMany: async () => [] },
+      meeting: { count: async () => 0, findMany: async () => [] },
+    };
+    const sm: any = { getContent: jest.fn(async () => ({ content: 'x'.repeat(5000), title: 'Doc', tags: ['research'] })), delete: jest.fn() };
+    const rag: any = { save: jest.fn(async () => 'new-rag'), delete: jest.fn(async () => undefined) };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    const res = await svc.startRechunk();
+    expect(res.started).toBe(true);
+    expect(res.total).toBe(1);
+    for (let i = 0; i < 100 && svc.rechunkStatus().running; i++) await new Promise((r) => setTimeout(r, 10));
+
+    expect(sm.getContent).toHaveBeenCalledWith('sm1');
+    expect(rag.delete).toHaveBeenCalledWith('old-rag'); // old whole-doc copy removed
+    expect(rag.save).toHaveBeenCalled(); // re-saved (chunks, since >2000 chars)
+    expect(items[0].ragId).toBe('new-rag'); // relinked
+    expect(svc.rechunkStatus().rechunked).toBe(1);
+  });
+});

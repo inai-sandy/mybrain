@@ -119,4 +119,12 @@ Answer the question using ONLY these sources. Cite the sources you draw on inlin
   async reindex(type: string) {
     return { type, reindexed: await this.memory.reindexType(type) };
   }
+
+  /** Start the one-time re-chunk optimize of existing docs. */
+  startRechunk() {
+    return this.memory.startRechunk();
+  }
+  rechunkStatus() {
+    return this.memory.rechunkStatus();
+  }
 }

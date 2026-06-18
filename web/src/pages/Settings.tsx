@@ -182,6 +182,7 @@ function IndexSection() {
   const [rows, setRows] = useState<IndexSrc[] | null>(null);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [confirmOff, setConfirmOff] = useState<IndexSrc | null>(null);
+  const [rechunk, setRechunk] = useState<{ running: boolean; total: number; done: number; rechunked: number; skipped: number } | null>(null);
 
   async function load() {
     try {
@@ -191,8 +192,33 @@ function IndexSection() {
       setRows([]);
     }
   }
+  async function pollRechunk() {
+    try {
+      const r = await fetch('/api/explore/rechunk-status');
+      const d = await r.json();
+      setRechunk(d);
+      if (d.running) setTimeout(pollRechunk, 2000);
+      else if (d.total) load();
+    } catch {
+      /* ignore */
+    }
+  }
+  async function startRechunk() {
+    try {
+      const r = await fetch('/api/explore/rechunk', { method: 'POST' });
+      const d = await r.json();
+      if (d.started || d.running) {
+        toast('success', 'Optimizing your documents — this runs in the background.');
+        setRechunk({ running: true, total: d.total, done: 0, rechunked: 0, skipped: 0 });
+        setTimeout(pollRechunk, 1500);
+      }
+    } catch {
+      toast('error', 'Could not start optimization.');
+    }
+  }
   useEffect(() => {
     load();
+    pollRechunk(); // reflect an already-running job
   }, []);
 
   async function setEnabled(s: IndexSrc, enabled: boolean) {
@@ -301,6 +327,34 @@ function IndexSection() {
             );
           })}
         </div>
+      </div>
+
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="flex items-center gap-2 font-semibold mb-1">
+          <RefreshCw size={18} className="text-emerald-600" /> Optimize existing documents
+        </h2>
+        <p className="text-sm text-zinc-500 mb-3">
+          Older documents were stored as one big blob (long ones could lose their tail). This re-splits them into clean, fully-searchable chunks — pulling the complete text from your cloud memory. Safe to run anytime.
+        </p>
+        {rechunk?.running ? (
+          <div>
+            <div className="text-sm text-zinc-600 dark:text-zinc-300 mb-1.5">
+              Optimizing… <span className="tabular-nums">{rechunk.done}</span> / <span className="tabular-nums">{rechunk.total}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${rechunk.total ? Math.round((rechunk.done / rechunk.total) * 100) : 0}%` }} />
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <button onClick={startRechunk} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-3.5 py-2 text-sm font-semibold transition">
+              <RefreshCw size={15} /> Optimize now
+            </button>
+            {rechunk && rechunk.total > 0 && (
+              <span className="text-xs text-zinc-400">Last run: {rechunk.rechunked} re-chunked{rechunk.skipped ? `, ${rechunk.skipped} skipped` : ''}</span>
+            )}
+          </div>
+        )}
       </div>
 
       <ConfirmDialog
