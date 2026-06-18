@@ -16,7 +16,19 @@ export class MemoryController {
 
   @Get('status')
   async status() {
-    return { outbox: await this.mem.status() };
+    return { outbox: await this.mem.status(), unindexed: await this.mem.unindexedCounts() };
+  }
+
+  /** Manually run the repair sweep: revive failed writes + re-enqueue any unlinked row. (BEA-333) */
+  @Post('reconcile')
+  async reconcile() {
+    return this.mem.reconcile();
+  }
+
+  /** Just reset failed outbox rows back to pending. */
+  @Post('retry')
+  async retry() {
+    return this.mem.retryFailed();
   }
 
   /** Browse the user's existing SuperMemory documents + total count. */
