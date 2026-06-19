@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { encryptItem as cryptoEncrypt, decryptItem as cryptoDecrypt, type EncryptedBlob } from './crypto';
-import { buildSetup, openVault } from './flow';
+import { encryptItem as cryptoEncrypt, decryptItem as cryptoDecrypt, importAesKey, type EncryptedBlob } from './crypto';
+import { buildSetup, openVault, openVaultRaw } from './flow';
 import { watchIdle, AUTO_LOCK_MS } from './idle';
+import { biometricSupported, enrollDevice, unlockWithDevice } from './webauthn';
 import { vaultApi, type VaultMeta } from './client';
 
 export type VaultStatus = 'loading' | 'setup' | 'locked' | 'unlocked';
@@ -19,6 +20,10 @@ type VaultCtx = {
   lock: () => void;
   encrypt: (payload: unknown) => Promise<EncryptedBlob>;
   decrypt: <T = any>(blob: EncryptedBlob) => Promise<T>;
+  // Biometric / passkey unlock.
+  biometricSupported: boolean;
+  enrollBiometric: (passphrase: string, label: string) => Promise<void>;
+  unlockBiometric: () => Promise<void>;
 };
 
 const Ctx = createContext<VaultCtx | null>(null);
@@ -54,6 +59,22 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     if (!m.setup) throw new Error('Vault is not set up yet');
     keyRef.current = await openVault(m, secret, mode); // throws on a wrong secret
     setMeta(m);
+    setStatus('unlocked');
+  }, []);
+
+  const enrollBiometric = useCallback(async (passphrase: string, label: string) => {
+    const m = await vaultApi.getMeta();
+    if (!m.setup) throw new Error('Vault is not set up');
+    const raw = await openVaultRaw(m, passphrase, 'passphrase'); // throws on a wrong passphrase
+    const device = await enrollDevice(label, raw);
+    await vaultApi.addDevice(device);
+  }, []);
+
+  const unlockBiometric = useCallback(async () => {
+    const devices = await vaultApi.listDevices();
+    const raw = await unlockWithDevice(devices); // prompts Face ID / fingerprint
+    keyRef.current = await importAesKey(raw);
+    setMeta(await vaultApi.getMeta());
     setStatus('unlocked');
   }, []);
 
@@ -98,7 +119,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     return cryptoDecrypt<T>(keyRef.current, blob);
   }, []);
 
-  return <Ctx.Provider value={{ status, meta, refresh, prepareSetup, unlock, verifyPassphrase, lock, encrypt, decrypt }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ status, meta, refresh, prepareSetup, unlock, verifyPassphrase, lock, encrypt, decrypt, biometricSupported: biometricSupported(), enrollBiometric, unlockBiometric }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useVault(): VaultCtx {

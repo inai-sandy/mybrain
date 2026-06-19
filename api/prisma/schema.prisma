@@ -528,3 +528,13 @@ model VaultItem {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
+
+/// A device whose biometric/passkey (WebAuthn PRF) can unlock the vault. Stores ONLY the vault key
+/// wrapped by the device's PRF-derived secret — never the key itself, never a biometric. (BEA-352)
+model VaultDevice {
+  id           String   @id @default(uuid())
+  credentialId String   @unique // base64url WebAuthn credential id
+  label        String
+  wrap         String // JSON {iv,ct}: vault key wrapped by the device's PRF secret
+  createdAt    DateTime @default(now())
+}

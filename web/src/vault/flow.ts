@@ -40,18 +40,20 @@ export async function buildSetup(passphrase: string): Promise<{ recoveryDisplay:
 
 export type UnlockMeta = { kdfParams: KdfParams; salt: string; verifier: Cipher; wrapPass: Cipher; wrapRecovery: Cipher };
 
-/** Unlock with the master passphrase OR the recovery key. Throws on a wrong secret / failed verifier. */
-export async function openVault(meta: UnlockMeta, secret: string, mode: 'passphrase' | 'recovery'): Promise<CryptoKey> {
+/** Unlock to the RAW vault key bytes (used by biometric enrollment, which must wrap them). */
+export async function openVaultRaw(meta: UnlockMeta, secret: string, mode: 'passphrase' | 'recovery'): Promise<Uint8Array> {
   const salt = b64decode(meta.salt);
-  let vaultKeyRaw: Uint8Array;
   if (mode === 'passphrase') {
     const masterKey = await deriveMasterKey(secret, salt, meta.kdfParams);
-    vaultKeyRaw = await unwrapVaultKeyRaw(masterKey, meta.wrapPass);
-  } else {
-    const recoveryKey = await importAesKey(recoveryKeyToBytes(secret));
-    vaultKeyRaw = await unwrapVaultKeyRaw(recoveryKey, meta.wrapRecovery);
+    return unwrapVaultKeyRaw(masterKey, meta.wrapPass);
   }
-  const vaultKey = await importAesKey(vaultKeyRaw);
+  const recoveryKey = await importAesKey(recoveryKeyToBytes(secret));
+  return unwrapVaultKeyRaw(recoveryKey, meta.wrapRecovery);
+}
+
+/** Unlock with the master passphrase OR the recovery key. Throws on a wrong secret / failed verifier. */
+export async function openVault(meta: UnlockMeta, secret: string, mode: 'passphrase' | 'recovery'): Promise<CryptoKey> {
+  const vaultKey = await importAesKey(await openVaultRaw(meta, secret, mode));
   if (!(await checkVerifier(vaultKey, meta.verifier))) throw new Error('Could not verify the vault key');
   return vaultKey;
 }
