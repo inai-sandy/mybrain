@@ -78,10 +78,12 @@ export class LlmService {
       // Subscription agents (Codex / Gemini) — route the prompt to the host runner; no per-call API $.
       if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
         const url = cfg.provider === 'codex' ? CODEX_RUNNER : GEMINI_RUNNER;
+        // For Gemini, cfg.model carries the specific Antigravity model name (e.g. "Gemini 3.5 Flash").
+        const model = cfg.provider === 'gemini' && cfg.model && cfg.model !== 'gemini' ? cfg.model : undefined;
         const r = await fetch(`${url}/run`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, model }),
           signal: AbortSignal.timeout(190_000),
         });
         if (!r.ok) return null;

@@ -730,10 +730,11 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
     { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
     { id: 'openai/gpt-4o', name: 'GPT-4o' },
   ];
-  // Subscription agents (no per-use API cost) — offered where latency is OK. (BEA-360)
+  // Subscription agents (no per-use API cost) — offered where latency is OK. (BEA-360/361)
   const AGENT_OPTS = [
+    { id: 'gemini::Gemini 3.5 Flash', name: '✦ Gemini 3.5 Flash — your Google plan (free · ~13s)' },
+    { id: 'gemini::Gemini 3.1 Pro', name: '✦ Gemini 3.1 Pro — your Google plan (free · deeper)' },
     { id: 'codex', name: '⚡ Codex — your ChatGPT plan (free · ~25s)' },
-    { id: 'gemini', name: '✦ Gemini — your Google plan (free · ~15s)' },
   ];
   const [opts, setOpts] = useState<{ id: string; name: string }[]>([]);
   const [model, setModel] = useState('');

@@ -169,7 +169,10 @@ export class DailyController {
 
   @Get('story-model')
   async getStoryModel() {
-    return this.daily.storyModel();
+    // Return the picker-format id so the dropdown shows the current selection (agents use composite ids).
+    const c = await this.daily.storyModel();
+    const model = c.provider === 'gemini' ? `gemini::${c.model}` : c.provider === 'codex' ? 'codex' : c.model;
+    return { provider: c.provider, model };
   }
 
   @Put('story-model')
