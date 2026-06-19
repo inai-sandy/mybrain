@@ -1,4 +1,4 @@
-import { KeyRound, StickyNote, CreditCard, Landmark, Bitcoin, IdCard, Terminal, type LucideIcon } from 'lucide-react';
+import { KeyRound, StickyNote, CreditCard, Landmark, Bitcoin, IdCard, Terminal, FileText, BadgeCheck, Wifi, Ticket, type LucideIcon } from 'lucide-react';
 import type { VaultItemDTO } from './client';
 
 // Which searchable metadata column a field maps to. Fields WITHOUT `meta` are secret → encrypted blob.
@@ -19,6 +19,7 @@ export type VaultType = {
   label: string;
   icon: LucideIcon;
   fields: VaultField[];
+  file?: boolean; // this type carries an encrypted file attachment (Secure documents)
   // Optional: derive extra searchable metadata from the secret (e.g. a card's last-4) — never a full secret.
   deriveMeta?: (secret: Record<string, string>) => Partial<Record<MetaCol, string | null>>;
   // Optional: a safe one-line subtitle for the list card (metadata only).
@@ -132,6 +133,55 @@ export const VAULT_TYPES: VaultType[] = [
       { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
     ],
     subtitle: (item) => item.username || '',
+  },
+  {
+    type: 'document',
+    label: 'Document',
+    icon: FileText,
+    file: true,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. Passport scan' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+  },
+  {
+    type: 'license',
+    label: 'Software license',
+    icon: BadgeCheck,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. Photoshop' },
+      { key: 'product', label: 'Product', meta: 'username', placeholder: 'product name' },
+      { key: 'key', label: 'License key', kind: 'password' },
+      { key: 'email', label: 'Registered email', kind: 'text' },
+      { key: 'notes', label: 'Notes', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+  },
+  {
+    type: 'wifi',
+    label: 'Wi-Fi',
+    icon: Wifi,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. Home Wi-Fi' },
+      { key: 'ssid', label: 'Network (SSID)', meta: 'username', placeholder: 'network name' },
+      { key: 'password', label: 'Password', kind: 'password', generate: true },
+      { key: 'security', label: 'Security', kind: 'text', placeholder: 'WPA2, WPA3…' },
+      { key: 'notes', label: 'Notes', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+  },
+  {
+    type: 'membership',
+    label: 'Membership',
+    icon: Ticket,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. Gym' },
+      { key: 'provider', label: 'Provider', meta: 'username', placeholder: 'provider name' },
+      { key: 'number', label: 'Membership number', kind: 'text' },
+      { key: 'pin', label: 'PIN', kind: 'password' },
+      { key: 'notes', label: 'Notes', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
   },
 ];
 

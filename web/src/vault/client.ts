@@ -52,4 +52,12 @@ export const vaultApi = {
   remove: (id: string) => fetch(`/api/vault/items/${id}`, { method: 'DELETE' }).then((r) => j(r)),
 
   count: () => fetch('/api/vault/items/count').then((r) => j<{ count: number }>(r)),
+
+  // Encrypted document attachments (the bytes are already ciphertext).
+  uploadFile: (id: string, cipher: Uint8Array) => {
+    const fd = new FormData();
+    fd.append('file', new Blob([cipher as BlobPart]), 'blob');
+    return fetch(`/api/vault/items/${id}/file`, { method: 'POST', body: fd }).then((r) => j(r));
+  },
+  downloadFile: (id: string) => fetch(`/api/vault/items/${id}/file`).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('No file')))),
 };

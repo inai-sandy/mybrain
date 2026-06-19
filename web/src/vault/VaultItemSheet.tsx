@@ -4,9 +4,11 @@ import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { useVault } from './VaultContext';
 import { vaultApi, type VaultItemDTO } from './client';
+import { Paperclip, Download } from 'lucide-react';
 import { typeDef, splitForm, mergeForm, COLLECTIONS, VAULT_TYPES, type FormValues, type VaultField } from './types';
 import { copySecret } from './clipboard';
 import { generatePassword, generatePassphrase, DEFAULT_PW_OPTS, type PasswordOpts } from './generator';
+import { encryptFile, decryptFile, humanSize, type DocMeta } from './documents';
 
 const input = 'w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2.5 text-sm outline-none focus:border-emerald-500';
 const label = 'block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1';
@@ -26,11 +28,18 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
   // Extra-sensitive fields (seed phrase / private key) require re-entering the passphrase before reveal/copy.
   const [reauthed, setReauthed] = useState<Set<string>>(new Set());
   const [reauthField, setReauthField] = useState<string | null>(null);
+  // Secure documents: the decrypted file metadata (existing) + a newly-picked file.
+  const [docMeta, setDocMeta] = useState<DocMeta | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (!item) return;
     decrypt<Record<string, string>>(item.blob)
-      .then((secret) => setValues(mergeForm(def, item, secret)))
+      .then((secret) => {
+        setValues(mergeForm(def, item, secret));
+        if (def.file) setDocMeta(secret as unknown as DocMeta);
+      })
       .catch(() => toast('error', 'Could not decrypt this item'))
       .finally(() => setLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -44,16 +53,50 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
     setBusy(true);
     try {
       const { metadata, secret } = splitForm(def, values);
-      const blob = await encrypt(secret); // encrypt the secret fields client-side
-      const body = { type: def.type, blob, ...metadata, collection: values.collection || null };
-      if (item) await vaultApi.update(item.id, body);
-      else await vaultApi.create(body as any);
+      if (def.file) {
+        // Secure document. New: encrypt the file in the browser, create the item, upload ciphertext.
+        if (item) {
+          await vaultApi.update(item.id, { ...metadata, collection: values.collection || null }); // metadata-only edit
+        } else {
+          if (!file) {
+            setBusy(false);
+            return toast('error', 'Choose a file to attach');
+          }
+          const { secret: docSecret, cipher } = await encryptFile(file);
+          const blob = await encrypt(docSecret);
+          const created = await vaultApi.create({ type: 'document', blob, ...metadata, collection: values.collection || null } as any);
+          await vaultApi.uploadFile(created.id, cipher);
+        }
+      } else {
+        const blob = await encrypt(secret); // encrypt the secret fields client-side
+        const body = { type: def.type, blob, ...metadata, collection: values.collection || null };
+        if (item) await vaultApi.update(item.id, body);
+        else await vaultApi.create(body as any);
+      }
       toast('success', item ? 'Saved' : 'Added to your vault');
       onSaved();
       close();
     } catch {
       toast('error', 'Could not save');
       setBusy(false);
+    }
+  }
+
+  async function download() {
+    if (!item || !docMeta) return;
+    setDownloading(true);
+    try {
+      const bytes = new Uint8Array(await vaultApi.downloadFile(item.id));
+      const blob = await decryptFile(docMeta, bytes); // decrypts in the browser
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = docMeta.filename || 'document';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      toast('error', 'Could not open the file');
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -136,6 +179,30 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
                     setReauthField(null);
                   }}
                 />
+              )}
+
+              {def.file && (
+                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
+                  {item && docMeta ? (
+                    <div className="flex items-center gap-3">
+                      <Paperclip size={16} className="text-zinc-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{docMeta.filename}</div>
+                        <div className="text-xs text-zinc-500">{humanSize(docMeta.size)} · encrypted</div>
+                      </div>
+                      <button onClick={download} disabled={downloading} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1.5 disabled:opacity-50">
+                        {downloading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14} />} Open
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="block cursor-pointer text-center py-4 text-sm text-zinc-500 hover:text-emerald-600">
+                      <input type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+                      <Paperclip size={18} className="mx-auto mb-1" />
+                      {file ? `${file.name} · ${humanSize(file.size)}` : 'Choose a file to encrypt & attach'}
+                      <div className="text-[11px] text-zinc-400 mt-1">Encrypted in your browser · max 25 MB</div>
+                    </label>
+                  )}
+                </div>
               )}
 
               <div>
