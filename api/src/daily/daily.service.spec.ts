@@ -510,8 +510,8 @@ describe('DailyService', () => {
     expect(out.mood).toBe('determined');
     expect(out.moodScore).toBe(78);
     expect(dayStories).toHaveLength(1);
-    // stored to memory (RAG + SuperMemory) stamped "activity" so the sync never re-imports it
-    expect(enqueued[0].o.tags).toEqual(['activity']);
+    // stored to memory (RAG + SuperMemory) stamped "activity" (+ "story") so the sync never re-imports it
+    expect(enqueued[0].o.tags).toEqual(['activity', 'story']);
     expect(enqueued[0].text).toContain('Story of the Day');
   });
 

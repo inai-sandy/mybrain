@@ -295,7 +295,8 @@ export class MeetingsService {
     ].filter(Boolean);
     const text = parts.join('\n\n').trim();
     if (!text) return { saved: false };
-    await this.memory.enqueue(text, { title: m.title, tags: ['meeting'] });
+    // Replace-on-edit, linked to the meeting row (re-summarising replaces, no duplicate). (BEA-342)
+    await this.memory.indexEntity({ refType: 'meeting', refId: id, title: m.title, content: text, tags: ['meeting'], prevSupermemoryId: (m as any).supermemoryId, prevRagId: (m as any).ragId });
     await this.prisma.meeting.update({ where: { id }, data: { savedToMemory: true } });
     return { saved: true };
   }

@@ -11,7 +11,7 @@ const RECONCILE_INTERVAL_MS = Number(process.env.MEMORY_RECONCILE_MS) || 15 * 60
  * The manageable index sections. `model` = the Prisma delegate name, `pk` = its primary-key field
  * (GmailBrief is keyed by `day`, not `id`). `mandatory` sections are always on and can't be disabled.
  */
-type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean };
+type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean; manageable?: boolean };
 const SOURCE_META: Record<string, SourceMeta> = {
   task: { label: 'Tasks', model: 'task', pk: 'id' },
   story: { label: 'Stories & Daily', model: 'story', pk: 'id' },
@@ -21,6 +21,12 @@ const SOURCE_META: Record<string, SourceMeta> = {
   note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true },
   gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true },
   gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true },
+  // Derived day-context (regenerate from the user's story) — indexed + reconciled, but not shown as
+  // separate toggles in the manager (they follow the 'story' section). manageable:false. (BEA-342)
+  daysummary: { label: 'Day summaries', model: 'daySummary', pk: 'id', manageable: false },
+  daystory: { label: 'Story of the Day', model: 'dayStory', pk: 'id', manageable: false },
+  monthstory: { label: 'Month stories', model: 'monthStory', pk: 'id', manageable: false },
+  yearstory: { label: 'Year stories', model: 'yearStory', pk: 'id', manageable: false },
 };
 const ALL_SOURCES = Object.keys(SOURCE_META);
 
@@ -77,7 +83,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   sourceEnabled(type?: string): boolean {
     if (!type) return true;
     const meta = SOURCE_META[type];
-    if (meta?.mandatory) return true;
+    if (meta?.mandatory || meta?.manageable === false) return true; // always-on / not user-toggleable
     if (this.enabled.has(type)) return this.enabled.get(type)!;
     return !meta?.defaultDisabled;
   }
@@ -287,6 +293,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean; mandatory: boolean }>> {
     const out = [];
     for (const type of ALL_SOURCES) {
+      if (SOURCE_META[type].manageable === false) continue; // derived/internal sources aren't shown as toggles
       const total = await this.modelOf(type).count();
       const indexed = await this.modelOf(type).count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
       const src = await this.prisma.indexSource.findUnique({ where: { type } }).catch(() => null);
@@ -436,6 +443,14 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         const text = [row.title, row.query, row.threadSubject, row.summary].filter(Boolean).join('\n\n');
         return text.trim() ? { content: text, title: row.title || 'Email request', tags: ['email', 'request'] } : null;
       }
+      case 'daysummary':
+        return row.text?.trim() ? { content: `Day summary — ${row.day}\n\n${row.text}`, title: `Day summary ${row.day}`, tags: ['activity'] } : null;
+      case 'daystory':
+        return row.text?.trim() ? { content: `Story of the Day — ${row.day}\n\n${row.text}${row.personalText ? `\n\nPERSONAL LIFE:\n${row.personalText}` : ''}`, title: `Story of the Day ${row.day}`, tags: ['activity', 'story'] } : null;
+      case 'monthstory':
+        return row.text?.trim() ? { content: `Story of the Month — ${row.month}${row.title ? ` — ${row.title}` : ''}\n\n${row.text}`, title: `Story of the Month ${row.month}`, tags: ['activity'] } : null;
+      case 'yearstory':
+        return row.text?.trim() && !row.partial ? { content: `Story of the Year — ${row.year}${row.title ? ` — ${row.title}` : ''}\n\n${row.text}`, title: `Story of the Year ${row.year}`, tags: ['activity'] } : null;
       default:
         return null;
     }

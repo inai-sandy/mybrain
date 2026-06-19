@@ -148,6 +148,8 @@ model DayStory {
   proMoodScore      Int? // 0-100 work mood
   personalMoodScore Int? // 0-100 personal/home mood
   model             String? // which LLM produced it
+  supermemoryId     String? // Explore index doc ids (re-index replaces, no dupes)
+  ragId             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
@@ -258,6 +260,8 @@ model MonthStory {
   month     String   @unique // YYYY-MM
   title     String? // chapter title
   text      String
+  supermemoryId String? // Explore index doc ids (re-index replaces, no dupes)
+  ragId         String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -269,6 +273,8 @@ model YearStory {
   title     String?
   text      String
   partial   Boolean  @default(false) // true = a "year so far" draft, rewritten as months land
+  supermemoryId String? // Explore index doc ids (re-index replaces, no dupes)
+  ragId         String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

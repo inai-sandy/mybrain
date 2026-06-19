@@ -101,8 +101,8 @@ export class IdeasService {
     const researchPrompt = `/deep-research\n\n${research}`;
     const idea = await this.prisma.idea.create({ data: { rawDump: clean, title, content, researchPrompt, status: 'open' } });
     await this.writeIdeaFile({ id: idea.id, title, content, researchPrompt });
-    // Index the idea text so even un-researched ideas are searchable by meaning (stamped "idea").
-    await this.memory.enqueue(`${title}\n\n${content}`, { title, tags: ['idea'] });
+    // Index the idea text (replace-on-edit, linked to the row) so it's searchable by meaning. (BEA-342)
+    await this.memory.indexEntity({ refType: 'idea', refId: idea.id, title, content: `${title}\n\n${content}`, tags: ['idea'], prevSupermemoryId: (idea as any).supermemoryId, prevRagId: (idea as any).ragId });
     return { id: idea.id, title, snippet: this.snippet(content), researchPrompt, status: 'open', createdAt: idea.createdAt, linkedCount: 0 };
   }
 
