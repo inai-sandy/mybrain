@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -777,6 +777,7 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
         </select>
       </label>
       {custom && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openrouter model id (e.g. anthropic/claude-sonnet-4.6)" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
+      {agents && <p className="mt-3 flex items-start gap-1.5 text-xs text-zinc-500 dark:text-zinc-400"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600" />The free engines (✦/⚡) cost nothing but run on your server. If one is ever busy or offline, this feature automatically falls back to <b>Claude Sonnet</b> on the API — so it never silently fails.</p>}
       <div className="mt-4 text-right">
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
       </div>

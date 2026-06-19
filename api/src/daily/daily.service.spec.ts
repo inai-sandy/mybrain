@@ -207,7 +207,11 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
   };
-  const llm: any = { completeWith: jest.fn(async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText)) };
+  const llmText = async () => (opts.llmText === undefined ? 'You had a solid day.' : opts.llmText);
+  const llm: any = {
+    completeWith: jest.fn(llmText),
+    completeWithModel: jest.fn(async () => ({ text: await llmText(), model: 'test-model' })),
+  };
   const memory: any = {
     enqueue: async (text: string, o: any) => enqueued.push({ text, o }),
     indexEntity: async (opts: any) => enqueued.push({ text: opts.content, o: { title: opts.title, tags: opts.tags } }),
