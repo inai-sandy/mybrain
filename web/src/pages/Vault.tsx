@@ -9,6 +9,8 @@ import { vaultApi, type VaultItemDTO } from '../vault/client';
 import { VaultItemSheet } from '../vault/VaultItemSheet';
 import { typeDef, itemSubtitle, COLLECTIONS, VAULT_TYPES } from '../vault/types';
 import { isWeakPassword, sha256Hex } from '../vault/generator';
+import { Upload, Star } from 'lucide-react';
+import { parseExport, recordToItem } from '../vault/import';
 
 type Audit = { weak?: boolean; reused?: boolean };
 
@@ -274,13 +276,26 @@ function VaultUnlock() {
 
 // ---- unlocked landing: the item list + CRUD (BEA-348) ----
 function VaultHome() {
-  const { lock, decrypt, biometricSupported } = useVault();
+  const { lock, decrypt, encrypt, biometricSupported } = useVault();
   const [rows, setRows] = useState<VaultItemDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<VaultItemDTO | null>(null);
   const [creating, setCreating] = useState(false);
   const [audit, setAudit] = useState<Record<string, Audit>>({});
   const [bioOpen, setBioOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  async function exportVault() {
+    const all = await vaultApi.list({ pageSize: 1000 });
+    // The blobs are already ciphertext — this backup is only readable with your vault key.
+    const data = { app: 'mybrain-vault', exportedAt: new Date().toISOString(), items: all.items };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'mybrain-vault-backup.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   async function refresh() {
     setLoading(true);
@@ -341,7 +356,13 @@ function VaultHome() {
   const filters: Filter[] = [
     { key: 'type', label: 'Type', options: VAULT_TYPES.map((t) => ({ value: t.type, label: t.label })), match: (r, v) => r.type === v },
     { key: 'collection', label: 'Collection', options: COLLECTIONS.map((c) => ({ value: c, label: c })), match: (r, v) => r.collection === v },
+    { key: 'favorite', label: 'Pinned', options: [{ value: '1', label: '★ Favorites' }], match: (r) => !!r.favorite },
   ];
+
+  async function toggleFav(it: VaultItemDTO) {
+    setRows((rs) => rs.map((r) => (r.id === it.id ? { ...r, favorite: !r.favorite } : r)));
+    await vaultApi.setFavorite(it.id, !it.favorite).catch(() => refresh());
+  }
   const sortOptions: SortOption[] = [
     { label: 'Newest', key: 'createdAt', dir: -1 },
     { label: 'Oldest', key: 'createdAt', dir: 1 },
@@ -358,6 +379,12 @@ function VaultHome() {
         <div className="flex items-center gap-2">
           <button onClick={() => setCreating(true)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm flex items-center gap-1.5">
             <Plus size={15} /> Add
+          </button>
+          <button onClick={() => setImportOpen(true)} title="Import" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <Upload size={15} />
+          </button>
+          <button onClick={exportVault} title="Export encrypted backup" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <Download size={15} />
           </button>
           {biometricSupported && (
             <button onClick={() => setBioOpen(true)} title="Biometric unlock" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -381,12 +408,75 @@ function VaultHome() {
         cardsOnly
         gridClassName="grid grid-cols-1 sm:grid-cols-2 gap-3"
         emptyText="Your vault is empty. Tap “Add” to store your first login."
-        renderCard={(it) => <ItemCard key={it.id} item={it} audit={audit[it.id]} onClick={() => setEditing(it)} />}
+        renderCard={(it) => <ItemCard key={it.id} item={it} audit={audit[it.id]} onClick={() => setEditing(it)} onFav={() => toggleFav(it)} />}
       />
 
       {creating && <VaultItemSheet defaultType="login" onClose={() => setCreating(false)} onSaved={refresh} />}
       {editing && <VaultItemSheet item={editing} onClose={() => setEditing(null)} onSaved={refresh} />}
+      {importOpen && <ImportSheet encrypt={encrypt} onClose={() => setImportOpen(false)} onDone={refresh} />}
     </div>
+  );
+}
+
+function ImportSheet({ encrypt, onClose, onDone }: { encrypt: (p: unknown) => Promise<any>; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [records, setRecords] = useState<ReturnType<typeof parseExport>>([]);
+  const [filename, setFilename] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(0);
+
+  async function pick(file: File) {
+    const text = await file.text();
+    const recs = parseExport(file.name, text);
+    setFilename(file.name);
+    setRecords(recs);
+    if (!recs.length) toast('error', 'No items found in that file');
+  }
+
+  async function run(close: () => void) {
+    setBusy(true);
+    try {
+      let n = 0;
+      for (const rec of records) {
+        const { type, metadata, secret } = recordToItem(rec);
+        const blob = await encrypt(secret); // each record encrypted in the browser before upload
+        await vaultApi.create({ type, blob, ...metadata } as any);
+        setDone(++n);
+      }
+      toast('success', `Imported ${n} item${n === 1 ? '' : 's'}`);
+      onDone();
+      close();
+    } catch {
+      toast('error', 'Import failed partway — some items may have been added');
+      onDone();
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Sheet onClose={onClose} canClose={() => !busy}>
+      {(close) => (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Upload size={18} className="text-emerald-600" />
+            <h2 className="font-semibold">Import</h2>
+          </div>
+          <p className="text-sm text-zinc-500 mb-4">From Bitwarden (JSON), 1Password or any CSV export. Everything is encrypted in your browser before it's saved — nothing is uploaded in plain text.</p>
+
+          <label className="block cursor-pointer text-center py-5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 text-sm text-zinc-500 hover:text-emerald-600 mb-3">
+            <input type="file" accept=".json,.csv,.txt" className="hidden" onChange={(e) => e.target.files?.[0] && pick(e.target.files[0])} />
+            <Upload size={18} className="mx-auto mb-1" />
+            {filename ? `${filename} — ${records.length} item(s)` : 'Choose an export file (.json / .csv)'}
+          </label>
+
+          {records.length > 0 && (
+            <button onClick={() => run(close)} disabled={busy} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2">
+              {busy ? <><Loader2 className="animate-spin" size={15} /> Importing {done}/{records.length}…</> : <><Check size={15} /> Import {records.length} item{records.length === 1 ? '' : 's'}</>}
+            </button>
+          )}
+        </div>
+      )}
+    </Sheet>
   );
 }
 
@@ -463,25 +553,30 @@ function BiometricSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ItemCard({ item, audit, onClick }: { item: VaultItemDTO; audit?: Audit; onClick: () => void }) {
+function ItemCard({ item, audit, onClick, onFav }: { item: VaultItemDTO; audit?: Audit; onClick: () => void; onFav: () => void }) {
   const def = typeDef(item.type);
   const sub = itemSubtitle(item);
   const warn = audit?.weak ? 'Weak' : audit?.reused ? 'Reused' : '';
   return (
-    <button onClick={onClick} className="text-left w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors flex items-center gap-3">
-      <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600">
-        <def.icon size={18} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium truncate">{item.title || 'Untitled'}</div>
-        {sub && <div className="text-xs text-zinc-500 truncate">{sub}</div>}
-      </div>
-      {warn && (
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0 flex items-center gap-1">
-          <AlertTriangle size={10} /> {warn}
-        </span>
-      )}
-      {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 shrink-0">{item.collection}</span>}
-    </button>
+    <div className="relative w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors">
+      <button onClick={onClick} className="text-left w-full p-4 flex items-center gap-3">
+        <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600">
+          <def.icon size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium truncate pr-6">{item.title || 'Untitled'}</div>
+          {sub && <div className="text-xs text-zinc-500 truncate">{sub}</div>}
+        </div>
+        {warn && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0 flex items-center gap-1">
+            <AlertTriangle size={10} /> {warn}
+          </span>
+        )}
+        {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 shrink-0">{item.collection}</span>}
+      </button>
+      <button onClick={onFav} title={item.favorite ? 'Unpin' : 'Pin'} className="absolute top-2 right-2 p-1 text-zinc-300 hover:text-amber-500">
+        <Star size={14} className={item.favorite ? 'fill-amber-400 text-amber-400' : ''} />
+      </button>
+    </div>
   );
 }

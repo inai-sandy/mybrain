@@ -122,7 +122,9 @@ export class VaultService {
   }
 
   async createItem(input: VaultItemInput) {
-    return this.shape(await this.prisma.vaultItem.create({ data: this.toData(input, true) }));
+    const row = await this.prisma.vaultItem.create({ data: this.toData(input, true) });
+    await this.prisma.vaultAudit.create({ data: { itemId: row.id, action: 'created' } }).catch(() => undefined);
+    return this.shape(row);
   }
 
   async updateItem(id: string, input: Partial<VaultItemInput>) {
@@ -134,6 +136,7 @@ export class VaultService {
   async deleteItem(id: string) {
     if (!(await this.prisma.vaultItem.findUnique({ where: { id } }))) throw new NotFoundException('Item not found');
     await this.prisma.vaultItem.delete({ where: { id } });
+    await this.prisma.vaultAudit.deleteMany({ where: { itemId: id } }).catch(() => undefined);
     await fs.unlink(this.filePath(id)).catch(() => undefined);
     return { ok: true };
   }
@@ -193,6 +196,27 @@ export class VaultService {
     if (!(await this.prisma.vaultDevice.findUnique({ where: { id } }))) throw new NotFoundException('Device not found');
     await this.prisma.vaultDevice.delete({ where: { id } });
     return { ok: true };
+  }
+
+  // ---- per-item audit trail (timestamps + action only — never a value) ----
+  private static AUDIT_ACTIONS = ['created', 'edited', 'revealed', 'copied'];
+  async addAudit(itemId: string, action: string) {
+    if (!VaultService.AUDIT_ACTIONS.includes(action)) throw new BadRequestException('invalid action');
+    await this.prisma.vaultAudit.create({ data: { itemId, action } });
+    // keep only the last 50 events per item
+    const old = await this.prisma.vaultAudit.findMany({ where: { itemId }, orderBy: { at: 'desc' }, skip: 50, select: { id: true } });
+    if (old.length) await this.prisma.vaultAudit.deleteMany({ where: { id: { in: old.map((o) => o.id) } } });
+    return { ok: true };
+  }
+
+  async listAudit(itemId: string) {
+    return this.prisma.vaultAudit.findMany({ where: { itemId }, orderBy: { at: 'desc' }, take: 50 });
+  }
+
+  /** Toggle favorite/pinned. */
+  async setFavorite(id: string, favorite: boolean) {
+    if (!(await this.prisma.vaultItem.findUnique({ where: { id } }))) throw new NotFoundException('Item not found');
+    return this.shape(await this.prisma.vaultItem.update({ where: { id }, data: { favorite } }));
   }
 
   // ---- helpers ----

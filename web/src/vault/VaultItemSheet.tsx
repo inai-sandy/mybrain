@@ -4,7 +4,7 @@ import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { useVault } from './VaultContext';
 import { vaultApi, type VaultItemDTO } from './client';
-import { Paperclip, Download } from 'lucide-react';
+import { Paperclip, Download, History } from 'lucide-react';
 import { typeDef, splitForm, mergeForm, COLLECTIONS, VAULT_TYPES, type FormValues, type VaultField } from './types';
 import { copySecret } from './clipboard';
 import { generatePassword, generatePassphrase, DEFAULT_PW_OPTS, type PasswordOpts } from './generator';
@@ -32,6 +32,11 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
   const [docMeta, setDocMeta] = useState<DocMeta | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [history, setHistory] = useState<{ action: string; at: string }[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const logAudit = (action: string) => {
+    if (item) vaultApi.addAudit(item.id, action);
+  };
 
   useEffect(() => {
     if (!item) return;
@@ -42,6 +47,7 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
       })
       .catch(() => toast('error', 'Could not decrypt this item'))
       .finally(() => setLoaded(true));
+    vaultApi.listAudit(item.id).then(setHistory).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item]);
 
@@ -73,6 +79,7 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
         if (item) await vaultApi.update(item.id, body);
         else await vaultApi.create(body as any);
       }
+      if (item) logAudit('edited');
       toast('success', item ? 'Saved' : 'Added to your vault');
       onSaved();
       close();
@@ -156,11 +163,15 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
                     locked={gated}
                     onReveal={() => {
                       if (gated) return setReauthField(f.key);
-                      setRevealed((p) => ({ ...p, [f.key]: !p[f.key] }));
+                      setRevealed((p) => {
+                        if (!p[f.key]) logAudit('revealed');
+                        return { ...p, [f.key]: !p[f.key] };
+                      });
                     }}
                     onCopy={async () => {
                       if (gated) return setReauthField(f.key);
                       await copySecret(values[f.key] || '');
+                      logAudit('copied');
                       toast('success', `${f.label} copied — clears in 30s`);
                     }}
                     onGenerate={f.generate ? (v) => { set(f.key, v); setRevealed((p) => ({ ...p, [f.key]: true })); } : undefined}
@@ -176,6 +187,7 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
                   onOk={() => {
                     setReauthed((s) => new Set(s).add(reauthField));
                     setRevealed((p) => ({ ...p, [reauthField]: true }));
+                    logAudit('revealed');
                     setReauthField(null);
                   }}
                 />
@@ -233,6 +245,24 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
                     <button onClick={() => del(close)} disabled={busy} className="rounded-lg bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-500">Delete</button>
                     <button onClick={() => setConfirmDel(false)} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
                   </div>
+                </div>
+              )}
+
+              {item && history.length > 0 && (
+                <div className="pt-1">
+                  <button onClick={() => setShowHistory((s) => !s)} className="text-xs text-zinc-400 hover:text-zinc-600 flex items-center gap-1">
+                    <History size={12} /> History ({history.length})
+                  </button>
+                  {showHistory && (
+                    <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                      {history.map((h, i) => (
+                        <li key={i} className="text-xs text-zinc-500 flex justify-between">
+                          <span className="capitalize">{h.action}</span>
+                          <span>{new Date(h.at).toLocaleString()}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </div>

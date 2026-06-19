@@ -81,6 +81,21 @@ export class VaultController {
     return this.vault.updateItem(id, body);
   }
 
+  @Put('items/:id/favorite')
+  setFavorite(@Param('id') id: string, @Body() body: { favorite?: boolean }) {
+    return this.vault.setFavorite(id, !!body?.favorite);
+  }
+
+  @Get('items/:id/audit')
+  listAudit(@Param('id') id: string) {
+    return this.vault.listAudit(id);
+  }
+
+  @Post('items/:id/audit')
+  addAudit(@Param('id') id: string, @Body() body: { action?: string }) {
+    return this.vault.addAudit(id, body?.action || '');
+  }
+
   @Delete('items/:id')
   deleteItem(@Param('id') id: string) {
     return this.vault.deleteItem(id);
