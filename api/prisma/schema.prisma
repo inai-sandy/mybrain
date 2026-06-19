@@ -462,3 +462,27 @@ model Meeting {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
+
+/// A commitment the owner made ("I'll send X by Friday") — extracted from the day. (BEA-355)
+model Commitment {
+  id          String    @id @default(uuid())
+  text        String
+  party       String? // who it's to / with
+  dueDate     String? // YYYY-MM-DD if stated
+  status      String    @default("open") // open | done | dropped
+  source      String    @default("story") // story | task | meeting | summary
+  sourceDay   String // the day it was extracted from
+  confirmed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+}
+
+/// A decision that was made ("we're going with the rust design") — extracted from the day. (BEA-355)
+model Decision {
+  id        String   @id @default(uuid())
+  text      String
+  context   String?
+  source    String   @default("story")
+  sourceDay String
+  createdAt DateTime @default(now())
+}
