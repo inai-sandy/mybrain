@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { encryptItem as cryptoEncrypt, decryptItem as cryptoDecrypt, type EncryptedBlob } from './crypto';
 import { buildSetup, openVault } from './flow';
+import { watchIdle, AUTO_LOCK_MS } from './idle';
 import { vaultApi, type VaultMeta } from './client';
 
 export type VaultStatus = 'loading' | 'setup' | 'locked' | 'unlocked';
@@ -58,6 +59,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     keyRef.current = null;
     setStatus((s) => (s === 'setup' || s === 'loading' ? s : 'locked'));
   }, []);
+
+  // Auto-lock: 5 min idle wipes the in-memory key (a tab left hidden has no activity, so it
+  // locks 5 min after you switch away). Also wipe on tab close/refresh. Only armed while unlocked.
+  // (Logout unmounts this provider, which drops the key too.)
+  useEffect(() => {
+    if (status !== 'unlocked') return;
+    const stopIdle = watchIdle(lock, AUTO_LOCK_MS);
+    window.addEventListener('pagehide', lock);
+    window.addEventListener('beforeunload', lock);
+    return () => {
+      stopIdle();
+      window.removeEventListener('pagehide', lock);
+      window.removeEventListener('beforeunload', lock);
+    };
+  }, [status, lock]);
 
   const encrypt = useCallback(async (payload: unknown) => {
     if (!keyRef.current) throw new Error('Vault is locked');
