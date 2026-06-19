@@ -95,7 +95,7 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
       .join('\n\n');
     if (!material.trim()) return { commitments: 0, decisions: 0, day };
 
-    const raw = (await this.llm.completeWith(EXTRACT_MODEL, `${SYSTEM}\n\n=== THE DAY (${day}) ===\n${material}`, 800, 'commitments-extract'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.model(), `${SYSTEM}\n\n=== THE DAY (${day}) ===\n${material}`, 800, 'commitments-extract'))?.trim() || '';
     let parsed: any;
     try {
       parsed = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -173,5 +173,27 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
   async removeDecision(id: string) {
     await this.prisma.decision.delete({ where: { id } }).catch(() => null);
     return { ok: true };
+  }
+
+  // ---- engine picker (own model; defaults to Haiku — a tiny job — can run free on Codex/Gemini) ----
+  async model(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'accountability.llm' } });
+    if (row) {
+      try {
+        const v = JSON.parse(row.value);
+        if (v?.provider && v?.model) return v;
+      } catch {
+        /* ignore */
+      }
+    }
+    return EXTRACT_MODEL;
+  }
+  async setModel(provider: string, model: string): Promise<LlmConfig> {
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.prisma.setting.upsert({ where: { key: 'accountability.llm' }, create: { key: 'accountability.llm', value: JSON.stringify(cfg) }, update: { value: JSON.stringify(cfg) } });
+    return cfg;
+  }
+  async listModels() {
+    return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
   }
 }

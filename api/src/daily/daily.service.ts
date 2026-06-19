@@ -377,7 +377,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Other activity in the app:\n${activityLines.join('\n') || '(none)'}\n\n` +
       `His story of the day${story?.mood ? ` (mood: ${story.mood})` : ''}:\n${story?.rawText?.slice(0, 2000) || '(not told)'}`;
 
-    const text = (await this.llm.completeWith(await this.tasks.getModel(), prompt, 900, 'day-summary'))?.trim() || this.fallbackSummary(st, doneList, openList);
+    const text = (await this.llm.completeWith(await this.summaryModel(), prompt, 900, 'day-summary'))?.trim() || this.fallbackSummary(st, doneList, openList);
     const stats = JSON.stringify(st);
     const row = await this.prisma.daySummary.upsert({
       where: { day },
@@ -730,6 +730,14 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
   async setPeopleModel(provider: string, model: string) {
     return this.setPickerModel('people.llm', provider, model);
+  }
+
+  /** Model that writes the daily summary (own picker; until set it follows the Tasks engine). */
+  async summaryModel(): Promise<LlmConfig> {
+    return this.pickerModel('summary.llm', await this.tasks.getModel());
+  }
+  async setSummaryModel(provider: string, model: string) {
+    return this.setPickerModel('summary.llm', provider, model);
   }
 
   // ---- people memory: who appears in his stories ----

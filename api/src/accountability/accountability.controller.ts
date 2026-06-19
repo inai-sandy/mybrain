@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { AccountabilityService } from './accountability.service';
 
 @Controller('accountability')
@@ -35,5 +35,22 @@ export class AccountabilityController {
   @Delete('decisions/:id')
   removeDecision(@Param('id') id: string) {
     return this.acc.removeDecision(id);
+  }
+
+  // ---- engine picker ----
+  @Get('model')
+  getModel() {
+    return this.acc.model();
+  }
+
+  @Put('model')
+  setModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.acc.setModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('models')
+  async models() {
+    return { models: await this.acc.listModels() };
   }
 }

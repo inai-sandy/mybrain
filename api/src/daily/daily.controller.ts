@@ -184,6 +184,22 @@ export class DailyController {
     return { models: await this.daily.listModels() };
   }
 
+  @Get('summary-model')
+  async getSummaryModel() {
+    return this.daily.summaryModel();
+  }
+
+  @Put('summary-model')
+  async setSummaryModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.daily.setSummaryModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('summary-models')
+  async summaryModels() {
+    return { models: await this.daily.listModels() };
+  }
+
   // ---- predictive (suggested) tasks for tomorrow ----
   @Get('suggestions')
   async suggestions(@Query('day') day?: string) {
