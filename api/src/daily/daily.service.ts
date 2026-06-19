@@ -385,8 +385,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       update: { text, stats },
     });
 
-    // Index the day so it's searchable by meaning, stamped "activity" so SuperMemory sync never duplicates it.
-    await this.memory.enqueue(`Day summary — ${day}\n\n${text}`, { title: `Day summary ${day}`, tags: ['activity'] }).catch(() => undefined);
+    // Index the day, REPLACING any prior version (re-generates when the story changes). (BEA-342)
+    this.memory
+      .indexEntity({ refType: 'daysummary', refId: row.id, title: `Day summary ${day}`, content: `Day summary — ${day}\n\n${text}`, tags: ['activity'], prevSupermemoryId: (row as any).supermemoryId, prevRagId: (row as any).ragId })
+      .catch(() => undefined);
     return this.shapeSummary(row);
   }
 
@@ -596,8 +598,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       update: { text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: cfg.model },
     });
 
-    // Store the Story of the Day in BOTH memory stores (tagged "activity" so SuperMemory sync never re-imports it).
-    await this.memory.enqueue(`Story of the Day — ${day}\n\n${text}${personalText ? `\n\nPERSONAL LIFE:\n${personalText}` : ''}`, { title: `Story of the Day ${day}`, tags: ['activity'] }).catch(() => undefined);
+    // Store the Story of the Day, REPLACING any prior version (re-weaves when the user's story changes). (BEA-342)
+    this.memory
+      .indexEntity({ refType: 'daystory', refId: row.id, title: `Story of the Day ${day}`, content: `Story of the Day — ${day}\n\n${text}${personalText ? `\n\nPERSONAL LIFE:\n${personalText}` : ''}`, tags: ['activity', 'story'], prevSupermemoryId: (row as any).supermemoryId, prevRagId: (row as any).ragId })
+      .catch(() => undefined);
     // People memory: remember who appeared in his own words — story, tasks AND quick notes
     // (tasks come from his brain dumps, so "Discuss payments with Srikar" counts as a mention).
     const dayNotes = await this.prisma.dayNote.findMany({ where: { day } }).catch(() => [] as any[]);
@@ -667,7 +671,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       create: { month, title, text },
       update: { title, text },
     });
-    await this.memory.enqueue(`Story of the Month — ${month}${title ? ` — ${title}` : ''}\n\n${text}`, { title: `Story of the Month ${month}`, tags: ['activity'] }).catch(() => undefined);
+    this.memory
+      .indexEntity({ refType: 'monthstory', refId: row.id, title: `Story of the Month ${month}`, content: `Story of the Month — ${month}${title ? ` — ${title}` : ''}\n\n${text}`, tags: ['activity'], prevSupermemoryId: (row as any).supermemoryId, prevRagId: (row as any).ragId })
+      .catch(() => undefined);
     return this.shapeMonthStory(row);
   }
 
@@ -892,7 +898,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       create: { year, title, text, partial },
       update: { title, text, partial },
     });
-    if (!partial) await this.memory.enqueue(`Story of the Year — ${year}${title ? ` — ${title}` : ''}\n\n${text}`, { title: `Story of the Year ${year}`, tags: ['activity'] }).catch(() => undefined);
+    if (!partial)
+      this.memory
+        .indexEntity({ refType: 'yearstory', refId: row.id, title: `Story of the Year ${year}`, content: `Story of the Year — ${year}${title ? ` — ${title}` : ''}\n\n${text}`, tags: ['activity'], prevSupermemoryId: (row as any).supermemoryId, prevRagId: (row as any).ragId })
+        .catch(() => undefined);
     return this.shapeYearStory(row);
   }
 
