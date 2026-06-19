@@ -163,7 +163,18 @@ function AppearanceSection() {
   );
 }
 
-type IndexSrc = { type: string; label: string; total: number; indexed: number; lastIndexedAt: string | null; enabled: boolean; mandatory?: boolean };
+type IndexSrc = { type: string; label: string; total: number; indexed: number; lastIndexedAt: string | null; enabled: boolean; mandatory?: boolean; cadence?: 'live' | 'on-update' | 'nightly' };
+
+const CADENCE_STYLE: Record<string, string> = {
+  live: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+  nightly: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
+  'on-update': 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30',
+};
+const CADENCE_TITLE: Record<string, string> = {
+  live: 'Indexed the moment you save it',
+  nightly: 'Indexed at the nightly finalize (11:58 PM) — never a partial daytime version',
+  'on-update': 'Re-indexed whenever it regenerates from your story',
+};
 
 function relTime(iso: string | null): string {
   if (!iso) return 'never';
@@ -279,6 +290,11 @@ function IndexSection() {
                   <div className="min-w-0">
                     <div className="font-medium flex items-center gap-2">
                       {s.label}
+                      {s.cadence && (
+                        <span title={CADENCE_TITLE[s.cadence]} className={'text-[10px] px-1.5 py-0.5 rounded-full border ' + (CADENCE_STYLE[s.cadence] || CADENCE_STYLE.live)}>
+                          {s.cadence}
+                        </span>
+                      )}
                       {!s.enabled && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border border-zinc-200 dark:border-zinc-700">off</span>}
                     </div>
                     <div className="text-xs text-zinc-500 mt-0.5">

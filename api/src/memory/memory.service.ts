@@ -11,22 +11,24 @@ const RECONCILE_INTERVAL_MS = Number(process.env.MEMORY_RECONCILE_MS) || 15 * 60
  * The manageable index sections. `model` = the Prisma delegate name, `pk` = its primary-key field
  * (GmailBrief is keyed by `day`, not `id`). `mandatory` sections are always on and can't be disabled.
  */
-type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean; manageable?: boolean };
+// cadence = WHEN it indexes: live (on save) · on-update (re-indexes when it regenerates) · nightly (finalized at night)
+type Cadence = 'live' | 'on-update' | 'nightly';
+type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean; manageable?: boolean; cadence?: Cadence };
 const SOURCE_META: Record<string, SourceMeta> = {
-  task: { label: 'Tasks', model: 'task', pk: 'id' },
-  story: { label: 'Stories & Daily', model: 'story', pk: 'id' },
-  item: { label: 'Documents & Bookmarks', model: 'item', pk: 'id' },
-  idea: { label: 'Ideas', model: 'idea', pk: 'id' },
-  meeting: { label: 'Meetings', model: 'meeting', pk: 'id' },
-  note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true },
-  gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true },
-  gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true },
+  task: { label: 'Tasks', model: 'task', pk: 'id', cadence: 'live' },
+  story: { label: 'Stories & Daily', model: 'story', pk: 'id', cadence: 'live' },
+  item: { label: 'Documents & Bookmarks', model: 'item', pk: 'id', cadence: 'live' },
+  idea: { label: 'Ideas', model: 'idea', pk: 'id', cadence: 'live' },
+  meeting: { label: 'Meetings', model: 'meeting', pk: 'id', cadence: 'live' },
+  note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true, cadence: 'live' },
+  gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true, cadence: 'nightly' },
+  gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true, cadence: 'live' },
   // Derived day-context (regenerate from the user's story) — indexed + reconciled, but not shown as
   // separate toggles in the manager (they follow the 'story' section). manageable:false. (BEA-342)
-  daysummary: { label: 'Day summaries', model: 'daySummary', pk: 'id', manageable: false },
-  daystory: { label: 'Story of the Day', model: 'dayStory', pk: 'id', manageable: false },
-  monthstory: { label: 'Month stories', model: 'monthStory', pk: 'id', manageable: false },
-  yearstory: { label: 'Year stories', model: 'yearStory', pk: 'id', manageable: false },
+  daysummary: { label: 'Day summaries', model: 'daySummary', pk: 'id', manageable: false, cadence: 'on-update' },
+  daystory: { label: 'Story of the Day', model: 'dayStory', pk: 'id', manageable: false, cadence: 'on-update' },
+  monthstory: { label: 'Month stories', model: 'monthStory', pk: 'id', manageable: false, cadence: 'on-update' },
+  yearstory: { label: 'Year stories', model: 'yearStory', pk: 'id', manageable: false, cadence: 'on-update' },
 };
 const ALL_SOURCES = Object.keys(SOURCE_META);
 
@@ -290,14 +292,14 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Status of every manageable section for the Settings index manager. (BEA-335) */
-  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean; mandatory: boolean }>> {
+  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean; mandatory: boolean; cadence: string }>> {
     const out = [];
     for (const type of ALL_SOURCES) {
       if (SOURCE_META[type].manageable === false) continue; // derived/internal sources aren't shown as toggles
       const total = await this.modelOf(type).count();
       const indexed = await this.modelOf(type).count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
       const src = await this.prisma.indexSource.findUnique({ where: { type } }).catch(() => null);
-      out.push({ type, label: SOURCE_META[type].label, total, indexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type), mandatory: !!SOURCE_META[type].mandatory });
+      out.push({ type, label: SOURCE_META[type].label, total, indexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type), mandatory: !!SOURCE_META[type].mandatory, cadence: SOURCE_META[type].cadence || 'live' });
     }
     return out;
   }
