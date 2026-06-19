@@ -1639,6 +1639,70 @@ function CodexCard() {
   );
 }
 
+type GeminiStatus = { connected: boolean; installed: boolean; version: string | null; loggedIn: boolean; ready: boolean; workdir: string | null; reason?: string };
+
+/** Gemini / Antigravity CLI agent setup — connects your server's `agy` (on your Google AI Pro/Ultra plan). */
+function GeminiCard() {
+  const [s, setS] = useState<GeminiStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/gemini/status');
+      if (r.ok) setS(await r.json());
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+
+  const Step = ({ ok, children }: { ok: boolean; children: React.ReactNode }) => (
+    <li className="flex items-center gap-2 text-sm">
+      <span className={ok ? 'text-emerald-500' : 'text-zinc-400'}>{ok ? '✓' : '○'}</span>
+      <span className={ok ? 'text-zinc-700 dark:text-zinc-200' : 'text-zinc-500'}>{children}</span>
+    </li>
+  );
+
+  return (
+    <div className="rounded-xl border border-sky-300/40 dark:border-sky-500/30 bg-gradient-to-br from-sky-500/5 to-transparent p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-bold flex items-center gap-2">✦ Gemini agent <span className="text-[10px] uppercase tracking-wide rounded-full bg-sky-500/15 text-sky-500 px-2 py-0.5">setup</span></h3>
+          <p className="text-xs text-zinc-500 mt-1">Let your server run tasks using <b>Google's Antigravity CLI on your Gemini AI Pro/Ultra plan</b> — a second agent alongside Codex, on your own subscription.</p>
+        </div>
+        <button onClick={load} disabled={busy} className="text-xs text-zinc-400 hover:text-sky-500 shrink-0">{busy ? '…' : 'refresh'}</button>
+      </div>
+
+      {!s ? (
+        <p className="mt-3 text-sm text-zinc-400">Checking your server…</p>
+      ) : !s.connected ? (
+        <div className="mt-3 text-sm rounded-lg bg-amber-500/10 border border-amber-300/30 dark:border-amber-500/20 px-3 py-2 text-amber-700 dark:text-amber-300">
+          The server bridge isn’t reachable yet{s.reason ? ` (${s.reason})` : ''}. It comes online with the next deploy.
+        </div>
+      ) : (
+        <>
+          <ul className="mt-3 space-y-1.5">
+            <Step ok={s.installed}>Antigravity CLI installed on your server{s.version ? ` (v${s.version})` : ''}</Step>
+            <Step ok={s.loggedIn}>Connected to your Google AI Pro/Ultra plan</Step>
+            <Step ok={s.ready}>Ready to run tasks</Step>
+          </ul>
+          {!s.loggedIn && (
+            <div className="mt-3 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2.5">
+              <p className="text-zinc-600 dark:text-zinc-300 mb-1.5 font-medium">One step only you can do — sign Gemini into your plan:</p>
+              <p className="text-zinc-500">On your server, run <code className="rounded bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.5 text-emerald-600 dark:text-emerald-400">agy</code>, open the sign-in link it prints, and authorise it with your <b>Google AI Pro/Ultra</b> account. Then tap “refresh” above.</p>
+            </div>
+          )}
+          {s.ready && (
+            <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">✓ Your Gemini agent is connected. Running tasks from the app is the next thing we’ll switch on — carefully, inside a safe folder.</p>
+          )}
+          {s.workdir && <p className="mt-2 text-[11px] text-zinc-400">Sandbox folder: <code>{s.workdir}</code> — the agent will be confined here.</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function IntegrationsSection() {
   const [status, setStatus] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Integration | null>(null);
@@ -1686,6 +1750,7 @@ function IntegrationsSection() {
     <div className="space-y-4">
       <GoogleCard />
       <CodexCard />
+      <GeminiCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {
           const managed = !!it.managed;
