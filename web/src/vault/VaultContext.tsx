@@ -14,6 +14,8 @@ type VaultCtx = {
   prepareSetup: (passphrase: string) => Promise<{ recoveryDisplay: string; commit: () => Promise<void> }>;
   /** Unlock with the master passphrase OR the recovery key. Throws on a wrong secret. */
   unlock: (secret: string, mode: 'passphrase' | 'recovery') => Promise<void>;
+  /** Re-verify the passphrase (re-auth) without changing the unlock state — for revealing seed phrases / private keys. */
+  verifyPassphrase: (passphrase: string) => Promise<boolean>;
   lock: () => void;
   encrypt: (payload: unknown) => Promise<EncryptedBlob>;
   decrypt: <T = any>(blob: EncryptedBlob) => Promise<T>;
@@ -55,6 +57,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setStatus('unlocked');
   }, []);
 
+  const verifyPassphrase = useCallback(async (passphrase: string) => {
+    try {
+      const m = await vaultApi.getMeta();
+      if (!m.setup) return false;
+      await openVault(m, passphrase, 'passphrase'); // throws on a wrong passphrase
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const lock = useCallback(() => {
     keyRef.current = null;
     setStatus((s) => (s === 'setup' || s === 'loading' ? s : 'locked'));
@@ -85,7 +98,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     return cryptoDecrypt<T>(keyRef.current, blob);
   }, []);
 
-  return <Ctx.Provider value={{ status, meta, refresh, prepareSetup, unlock, lock, encrypt, decrypt }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ status, meta, refresh, prepareSetup, unlock, verifyPassphrase, lock, encrypt, decrypt }}>{children}</Ctx.Provider>;
 }
 
 export function useVault(): VaultCtx {

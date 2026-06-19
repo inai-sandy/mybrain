@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Eye, EyeOff, Copy, Trash2, Loader2, Check, Wand2, RefreshCw } from 'lucide-react';
+import { Eye, EyeOff, Copy, Trash2, Loader2, Check, Wand2, RefreshCw, Lock, ShieldAlert } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { useVault } from './VaultContext';
@@ -12,7 +12,7 @@ const input = 'w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc
 const label = 'block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1';
 
 export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }: { item?: VaultItemDTO | null; defaultType?: string; onClose: () => void; onSaved: () => void }) {
-  const { encrypt, decrypt } = useVault();
+  const { encrypt, decrypt, verifyPassphrase } = useVault();
   const toast = useToast();
   const isNew = !item;
   const [newType, setNewType] = useState(defaultType);
@@ -23,6 +23,9 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
   const [confirmDel, setConfirmDel] = useState(false);
   // In a NEW item you're typing the secret, so show it; an existing item is masked until revealed.
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  // Extra-sensitive fields (seed phrase / private key) require re-entering the passphrase before reveal/copy.
+  const [reauthed, setReauthed] = useState<Set<string>>(new Set());
+  const [reauthField, setReauthField] = useState<string | null>(null);
 
   useEffect(() => {
     if (!item) return;
@@ -98,9 +101,42 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
             </div>
           ) : (
             <div className="space-y-3">
-              {def.fields.map((f) => (
-                <FieldRow key={f.key} f={f} value={values[f.key] || ''} onChange={(v) => set(f.key, v)} revealed={isRevealed(f.key)} onReveal={() => setRevealed((p) => ({ ...p, [f.key]: !p[f.key] }))} onCopy={async () => { await copySecret(values[f.key] || ''); toast('success', `${f.label} copied — clears in 30s`); }} onGenerate={f.generate ? (v) => { set(f.key, v); setRevealed((p) => ({ ...p, [f.key]: true })); } : undefined} />
-              ))}
+              {def.fields.map((f) => {
+                const gated = !!f.reauth && !isNew && !reauthed.has(f.key); // needs re-auth before showing/copying
+                return (
+                  <FieldRow
+                    key={f.key}
+                    f={f}
+                    value={values[f.key] || ''}
+                    onChange={(v) => set(f.key, v)}
+                    revealed={isRevealed(f.key) && !gated}
+                    locked={gated}
+                    onReveal={() => {
+                      if (gated) return setReauthField(f.key);
+                      setRevealed((p) => ({ ...p, [f.key]: !p[f.key] }));
+                    }}
+                    onCopy={async () => {
+                      if (gated) return setReauthField(f.key);
+                      await copySecret(values[f.key] || '');
+                      toast('success', `${f.label} copied — clears in 30s`);
+                    }}
+                    onGenerate={f.generate ? (v) => { set(f.key, v); setRevealed((p) => ({ ...p, [f.key]: true })); } : undefined}
+                  />
+                );
+              })}
+
+              {reauthField && (
+                <ReauthPrompt
+                  label={def.fields.find((f) => f.key === reauthField)?.label || 'this field'}
+                  verify={verifyPassphrase}
+                  onCancel={() => setReauthField(null)}
+                  onOk={() => {
+                    setReauthed((s) => new Set(s).add(reauthField));
+                    setRevealed((p) => ({ ...p, [reauthField]: true }));
+                    setReauthField(null);
+                  }}
+                />
+              )}
 
               <div>
                 <label className={label}>Collection</label>
@@ -140,17 +176,19 @@ export function VaultItemSheet({ item, defaultType = 'login', onClose, onSaved }
   );
 }
 
-function FieldRow({ f, value, onChange, revealed, onReveal, onCopy, onGenerate }: { f: VaultField; value: string; onChange: (v: string) => void; revealed: boolean; onReveal: () => void; onCopy: () => void; onGenerate?: (v: string) => void }) {
+function FieldRow({ f, value, onChange, revealed, locked, onReveal, onCopy, onGenerate }: { f: VaultField; value: string; onChange: (v: string) => void; revealed: boolean; locked?: boolean; onReveal: () => void; onCopy: () => void; onGenerate?: (v: string) => void }) {
   const secret = !f.meta;
   const [genOpen, setGenOpen] = useState(false);
+  const RevealIcon = locked ? Lock : revealed ? EyeOff : Eye;
   if (f.kind === 'textarea') {
     return (
       <div>
         <div className="flex items-center justify-between mb-1">
           <label className={label}>{f.label}</label>
           {secret && (
-            <div className="flex gap-2">
-              <button type="button" onClick={onReveal} className="text-zinc-400 hover:text-zinc-600">{revealed ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+            <div className="flex gap-2 items-center">
+              {f.reauth && <span className="text-[10px] text-amber-500 flex items-center gap-0.5"><ShieldAlert size={11} /> re-auth</span>}
+              <button type="button" onClick={onReveal} className={`hover:text-zinc-600 ${locked ? 'text-amber-500' : 'text-zinc-400'}`}><RevealIcon size={14} /></button>
               <button type="button" onClick={onCopy} className="text-zinc-400 hover:text-emerald-600"><Copy size={14} /></button>
             </div>
           )}
@@ -180,7 +218,7 @@ function FieldRow({ f, value, onChange, revealed, onReveal, onCopy, onGenerate }
         />
         {secret && (
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2">
-            <button type="button" onClick={onReveal} className="text-zinc-400 hover:text-zinc-600">{revealed ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+            <button type="button" onClick={onReveal} className={`hover:text-zinc-600 ${locked ? 'text-amber-500' : 'text-zinc-400'}`}><RevealIcon size={15} /></button>
             <button type="button" onClick={onCopy} className="text-zinc-400 hover:text-emerald-600"><Copy size={15} /></button>
           </div>
         )}
@@ -233,6 +271,38 @@ function GeneratorPopover({ onUse }: { onUse: (v: string) => void }) {
         </label>
       )}
       <button onClick={() => onUse(preview)} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-xs font-medium">Use this</button>
+    </div>
+  );
+}
+
+// Re-enter the master passphrase to reveal an extra-sensitive field (seed phrase / private key).
+function ReauthPrompt({ label, verify, onOk, onCancel }: { label: string; verify: (p: string) => Promise<boolean>; onOk: () => void; onCancel: () => void }) {
+  const toast = useToast();
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function go() {
+    if (!pass) return;
+    setBusy(true);
+    const ok = await verify(pass);
+    if (ok) {
+      onOk();
+    } else {
+      toast('error', 'Wrong passphrase');
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="rounded-lg border border-amber-400/50 bg-amber-50 dark:bg-amber-950/30 p-3">
+      <p className="text-sm text-amber-800 dark:text-amber-200 mb-2 flex items-center gap-1.5">
+        <ShieldAlert size={15} /> Re-enter your passphrase to reveal <b>{label}</b>.
+      </p>
+      <input type="password" value={pass} autoFocus onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} placeholder="master passphrase" className="w-full rounded-lg bg-white dark:bg-zinc-950 border border-amber-300 dark:border-amber-800 px-3 py-2 text-sm outline-none focus:border-amber-500 mb-2" />
+      <div className="flex gap-2">
+        <button onClick={go} disabled={busy || !pass} className="rounded-lg bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 text-sm disabled:opacity-40 flex items-center gap-1.5">
+          {busy ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />} Reveal
+        </button>
+        <button onClick={onCancel} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+      </div>
     </div>
   );
 }
