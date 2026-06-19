@@ -538,3 +538,12 @@ model VaultDevice {
   wrap         String // JSON {iv,ct}: vault key wrapped by the device's PRF secret
   createdAt    DateTime @default(now())
 }
+
+/// Per-item audit trail — records WHEN an action happened (revealed/edited/copied/created), never the
+/// value. Lets the owner see access history. (BEA-353)
+model VaultAudit {
+  id        String   @id @default(uuid())
+  itemId    String
+  action    String // created | edited | revealed | copied
+  at        DateTime @default(now())
+}

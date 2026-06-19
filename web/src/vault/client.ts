@@ -66,4 +66,10 @@ export const vaultApi = {
   addDevice: (body: { credentialId: string; label: string; wrap: Cipher }) =>
     fetch('/api/vault/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => j(r)),
   removeDevice: (id: string) => fetch(`/api/vault/devices/${id}`, { method: 'DELETE' }).then((r) => j(r)),
+
+  setFavorite: (id: string, favorite: boolean) =>
+    fetch(`/api/vault/items/${id}/favorite`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite }) }).then((r) => j<VaultItemDTO>(r)),
+  listAudit: (id: string) => fetch(`/api/vault/items/${id}/audit`).then((r) => j<{ id: string; action: string; at: string }[]>(r)),
+  addAudit: (id: string, action: string) =>
+    fetch(`/api/vault/items/${id}/audit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }).catch(() => undefined),
 };

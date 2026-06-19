@@ -45,6 +45,11 @@ function makePrisma() {
         return {};
       },
     },
+    vaultAudit: {
+      create: async () => ({}),
+      findMany: async () => [],
+      deleteMany: async () => ({ count: 0 }),
+    },
   } as any;
 }
 
