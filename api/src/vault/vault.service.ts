@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { promises as fs } from 'fs';
+import { join } from 'path';
+
+// Where encrypted document blobs live on the data volume (ciphertext only — same volume as the DB).
+const FILE_DIR = join(process.env.DATA_DIR || '/app/data', 'vault-files');
 
 // A wrapped/encrypted blob as produced on the client. The server treats these as opaque ciphertext.
 type Cipher = { iv: string; ct: string };
@@ -125,11 +130,39 @@ export class VaultService {
     return this.shape(await this.prisma.vaultItem.update({ where: { id }, data: this.toData(input, false) }));
   }
 
-  /** Delete ONE item by id (no bulk/"delete all" — honors no-blind-delete). */
+  /** Delete ONE item by id (no bulk/"delete all" — honors no-blind-delete). Also removes any encrypted file. */
   async deleteItem(id: string) {
     if (!(await this.prisma.vaultItem.findUnique({ where: { id } }))) throw new NotFoundException('Item not found');
     await this.prisma.vaultItem.delete({ where: { id } });
+    await fs.unlink(this.filePath(id)).catch(() => undefined);
     return { ok: true };
+  }
+
+  // ---- encrypted document attachments (ciphertext at rest) ----
+  private filePath(id: string) {
+    return join(FILE_DIR, id.replace(/[^a-zA-Z0-9-]/g, '')); // id is a uuid; sanitize defensively
+  }
+
+  /** Store the already-encrypted file bytes for a document item. The bytes are opaque ciphertext. */
+  async saveFile(id: string, bytes: Buffer) {
+    const item = await this.prisma.vaultItem.findUnique({ where: { id } });
+    if (!item) throw new NotFoundException('Item not found');
+    if (item.type !== 'document') throw new BadRequestException('Only document items can hold a file');
+    if (!bytes?.length) throw new BadRequestException('Empty file');
+    await fs.mkdir(FILE_DIR, { recursive: true });
+    await fs.writeFile(this.filePath(id), bytes);
+    return { ok: true };
+  }
+
+  /** Read back the encrypted file bytes (still ciphertext — decryption happens in the browser). */
+  async readFile(id: string): Promise<Buffer> {
+    const item = await this.prisma.vaultItem.findUnique({ where: { id } });
+    if (!item) throw new NotFoundException('Item not found');
+    try {
+      return await fs.readFile(this.filePath(id));
+    } catch {
+      throw new NotFoundException('No file attached');
+    }
   }
 
   async count() {

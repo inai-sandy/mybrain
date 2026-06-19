@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { VaultService, VaultItemInput, VaultMetaInput } from './vault.service';
 
 @Controller('vault')
@@ -66,5 +68,19 @@ export class VaultController {
   @Delete('items/:id')
   deleteItem(@Param('id') id: string) {
     return this.vault.deleteItem(id);
+  }
+
+  // ---- encrypted document attachments (the bytes are already ciphertext from the browser) ----
+  @Post('items/:id/file')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 25 * 1024 * 1024 } }))
+  uploadFile(@Param('id') id: string, @UploadedFile() file: { buffer: Buffer }) {
+    return this.vault.saveFile(id, file?.buffer as Buffer);
+  }
+
+  @Get('items/:id/file')
+  async downloadFile(@Param('id') id: string, @Res() res: Response) {
+    const buf = await this.vault.readFile(id);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.send(buf);
   }
 }
