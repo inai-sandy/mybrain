@@ -420,9 +420,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     }
   }
   async setStoryModel(provider: string, model: string) {
-    const value = JSON.stringify({ provider, model });
+    // The model picker sends just the model id; 'codex'/'gemini' select the subscription agents.
+    const prov = model === 'codex' ? 'codex' : model === 'gemini' ? 'gemini' : provider === 'anthropic' ? 'anthropic' : 'openrouter';
+    const value = JSON.stringify({ provider: prov, model });
     await this.prisma.setting.upsert({ where: { key: 'story.llm' }, create: { key: 'story.llm', value }, update: { value } });
-    return { provider, model };
+    return { provider: prov, model };
   }
   /** OpenAI + Anthropic models for the Settings pickers (shared with Tasks). */
   async listModels() {

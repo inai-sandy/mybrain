@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type LlmConfig = { provider: 'anthropic' | 'openrouter'; model: string };
+export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini'; model: string };
+
+// Host-side agent runners (subscription-based engines). The container reaches them on the Docker gateway.
+const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
+const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
 
 @Injectable()
 export class LlmService {
@@ -71,6 +75,19 @@ export class LlmService {
   async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     try {
+      // Subscription agents (Codex / Gemini) — route the prompt to the host runner; no per-call API $.
+      if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
+        const url = cfg.provider === 'codex' ? CODEX_RUNNER : GEMINI_RUNNER;
+        const r = await fetch(`${url}/run`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prompt }),
+          signal: AbortSignal.timeout(190_000),
+        });
+        if (!r.ok) return null;
+        const d: any = await r.json();
+        return String(d?.text || '').trim() || null;
+      }
       if (cfg.provider === 'anthropic') {
         const c = await this.connectors.get<{ apiKey: string }>('anthropic');
         if (!c?.apiKey) return null;
