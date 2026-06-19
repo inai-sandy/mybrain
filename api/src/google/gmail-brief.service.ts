@@ -90,6 +90,9 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     if (!st.connected) return;
     const tz = await this.tz();
     const today = this.dayKey(tz);
+    // Catch-up: index any complete PAST-day brief that isn't linked yet (covers mid-day-only builds,
+    // missed nights, downtime). Runs before the nightly-generate branch so its early returns don't skip it. (BEA-343)
+    await this.finalizeRecentBriefs(today).catch(() => undefined);
     if (this.localHM(tz) >= BRIEF_AT) {
       if (await this.prisma.gmailBrief.findUnique({ where: { day: today } })) return;
       await this.generate(today, false, true).catch((e) => this.log.warn(`brief ${today}: ${e?.message || e}`));
@@ -97,6 +100,16 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       const y = this.dayAdd(today, -1);
       if (await this.prisma.gmailBrief.findUnique({ where: { day: y } })) return;
       await this.generate(y, false, true).catch(() => undefined);
+    }
+  }
+
+  /** Index complete PAST-day briefs (last 3 days) that aren't linked yet. Idempotent — only fires while
+   *  a day's brief is unlinked, so it stops once indexed. The safety-net for the night-only rule. (BEA-343) */
+  private async finalizeRecentBriefs(today: string): Promise<void> {
+    for (let i = 1; i <= 3; i++) {
+      const d = this.dayAdd(today, -i);
+      const row = await this.prisma.gmailBrief.findUnique({ where: { day: d } });
+      if (row && row.summary && (!row.ragId || !row.supermemoryId)) this.indexBrief(row);
     }
   }
 
@@ -188,7 +201,10 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       create: { day, unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: BRIEF_MODEL.model },
       update: { unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: BRIEF_MODEL.model },
     });
-    this.indexBrief(row);
+    // Index only a FINALIZED brief — the nightly build (push), or a PAST day (already complete).
+    // A partial mid-day on-open build of TODAY's brief is NOT indexed; tonight's finalize handles it. (BEA-343)
+    const todayKey = this.dayKey(await this.tz());
+    if (push || day < todayKey) this.indexBrief(row);
     // Only the nightly build hands the brief to the Telegram push loop (same mechanism as the Story of the Day).
     if (push) await this.setSetting('telegram.pushGmailBrief', day).catch(() => undefined);
     return this.shape(row);
