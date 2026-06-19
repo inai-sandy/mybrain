@@ -497,3 +497,34 @@ model Connection {
   anchorKey String // type:id of the anchor, for dedup
   createdAt DateTime @default(now())
 }
+
+/// Vault metadata — the zero-knowledge crypto envelope. Server stores ONLY ciphertext
+/// + wrapped keys; never the passphrase, never a raw key, never a plaintext secret. (BEA-345)
+model VaultMeta {
+  id           String   @id @default(uuid())
+  kdfParams    String // JSON: Argon2id memory/iterations/parallelism/hashLength
+  salt         String // base64
+  verifier     String // JSON {iv,ct}: a known constant encrypted by the vault key
+  wrapPass     String // JSON {iv,ct}: vault key wrapped by the passphrase-derived master key
+  wrapRecovery String // JSON {iv,ct}: vault key wrapped by the recovery key
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// One encrypted vault item. `blob` is the envelope-encrypted secret (ciphertext only).
+/// The other columns are SEARCHABLE METADATA only — never a secret value. (BEA-345)
+model VaultItem {
+  id         String   @id @default(uuid())
+  type       String // login | apisecret | card | bank | crypto | identity | document | note | license | wifi | membership
+  blob       String // JSON EncryptedBlob {v, item:{iv,ct}, dataKey:{iv,ct}}
+  title      String? // searchable
+  website    String? // searchable
+  username   String? // searchable
+  tags       String? // searchable (comma-separated)
+  cardType   String? // searchable (e.g. "Visa")
+  bankName   String? // searchable
+  collection String? // Personal | Work | Beakn | Family
+  favorite   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
