@@ -704,8 +704,8 @@ function ModelsSection() {
       <MeetingsEngineCard />
       <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
         desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
-      <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model"
-        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. A strong model like Claude Sonnet is best here. Uses your OpenRouter key." />
+      <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model" agents
+        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. Pick a Claude/GPT API model, or run it FREE on your Codex/Gemini subscription (slower, but it's a nightly job). [Pilot — works on every feature once proven.]" />
       <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model"
         desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. A strong model like Claude Sonnet is best. Uses your OpenRouter key." />
       <EngineModelCard title="Weekly review model" icon={Compass} base="/api/mentor/weekly-model"
@@ -722,13 +722,18 @@ function ModelsSection() {
 }
 
 /** Reusable model picker for an engine that exposes GET/PUT `${base}` + GET `${base}s`. */
-function EngineModelCard({ title, desc, icon: Icon, base }: { title: string; desc: string; icon: LucideIcon; base: string }) {
+function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: string; desc: string; icon: LucideIcon; base: string; agents?: boolean }) {
   const FALLBACK = [
     { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6 (best, recommended)' },
     { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6 (deepest)' },
     { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (fast)' },
     { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
     { id: 'openai/gpt-4o', name: 'GPT-4o' },
+  ];
+  // Subscription agents (no per-use API cost) — offered where latency is OK. (BEA-360)
+  const AGENT_OPTS = [
+    { id: 'codex', name: '⚡ Codex — your ChatGPT plan (free · ~25s)' },
+    { id: 'gemini', name: '✦ Gemini — your Google plan (free · ~15s)' },
   ];
   const [opts, setOpts] = useState<{ id: string; name: string }[]>([]);
   const [model, setModel] = useState('');
@@ -742,7 +747,7 @@ function EngineModelCard({ title, desc, icon: Icon, base }: { title: string; des
     ])
       .then(([cfg, list]) => {
         const models = (list.models || []) as { id: string; name: string }[];
-        const finalOpts = models.length ? models : FALLBACK;
+        const finalOpts = [...(agents ? AGENT_OPTS : []), ...(models.length ? models : FALLBACK)];
         setOpts(finalOpts);
         const m = cfg.model || '';
         setModel(m);
