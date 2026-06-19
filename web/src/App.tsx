@@ -29,6 +29,8 @@ import { GoogleService } from './pages/google/GoogleService';
 import { RequestViewer } from './pages/RequestViewer';
 import { Find as Explore } from './pages/Find';
 import { Commitments } from './pages/Commitments';
+import { Vault } from './pages/Vault';
+import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
 type AuthState = 'loading' | 'anon' | 'authed';
@@ -92,9 +94,10 @@ function AuthedApp() {
   }
 
   return (
-    <Routes>
-      <Route element={<AppShell email={email} onSignOut={logout} />}>
-        <Route index element={<Dashboard />} />
+    <VaultProvider>
+      <Routes>
+        <Route element={<AppShell email={email} onSignOut={logout} />}>
+          <Route index element={<Dashboard />} />
         <Route path="explore" element={<Explore />} />
         <Route path="commitments" element={<Commitments />} />
         <Route path="capture" element={<Capture />} />
@@ -115,9 +118,11 @@ function AuthedApp() {
         <Route path="activity" element={<Activity />} />
         <Route path="mentor" element={<Mentor />} />
         <Route path="notes" element={<Notes />} />
+        <Route path="vault" element={<Vault />} />
         <Route path="settings" element={<Settings email={email} />} />
         <Route path="*" element={<Dashboard />} />
       </Route>
-    </Routes>
+      </Routes>
+    </VaultProvider>
   );
 }
