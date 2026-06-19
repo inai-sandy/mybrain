@@ -1,4 +1,4 @@
-import { KeyRound, type LucideIcon } from 'lucide-react';
+import { KeyRound, StickyNote, CreditCard, type LucideIcon } from 'lucide-react';
 import type { VaultItemDTO } from './client';
 
 // Which searchable metadata column a field maps to. Fields WITHOUT `meta` are secret → encrypted blob.
@@ -10,6 +10,7 @@ export type VaultField = {
   meta?: MetaCol; // present = stored as searchable plaintext; absent = secret (encrypted)
   kind?: 'text' | 'password' | 'textarea' | 'url';
   placeholder?: string;
+  generate?: boolean; // show the password generator on this field
   reauth?: boolean; // requires re-entering the passphrase to reveal (seed phrases, private keys) — BEA-350
 };
 
@@ -18,9 +19,12 @@ export type VaultType = {
   label: string;
   icon: LucideIcon;
   fields: VaultField[];
+  // Optional: derive extra searchable metadata from the secret (e.g. a card's last-4) — never a full secret.
+  deriveMeta?: (secret: Record<string, string>) => Partial<Record<MetaCol, string | null>>;
+  // Optional: a safe one-line subtitle for the list card (metadata only).
+  subtitle?: (item: VaultItemDTO) => string;
 };
 
-// The Logins type (BEA-348). More types are appended by later issues.
 export const VAULT_TYPES: VaultType[] = [
   {
     type: 'login',
@@ -30,11 +34,41 @@ export const VAULT_TYPES: VaultType[] = [
       { key: 'title', label: 'Name', meta: 'title', placeholder: 'e.g. Gmail' },
       { key: 'website', label: 'Website / URL', meta: 'website', kind: 'url', placeholder: 'mail.google.com' },
       { key: 'username', label: 'Username / email', meta: 'username', placeholder: 'you@example.com' },
-      { key: 'password', label: 'Password', kind: 'password' },
+      { key: 'password', label: 'Password', kind: 'password', generate: true },
       { key: 'totp', label: '2FA / TOTP secret', kind: 'text', placeholder: 'optional' },
       { key: 'notes', label: 'Notes', kind: 'textarea', placeholder: 'optional' },
       { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
     ],
+  },
+  {
+    type: 'note',
+    label: 'Secure note',
+    icon: StickyNote,
+    fields: [
+      { key: 'title', label: 'Title', meta: 'title', placeholder: 'e.g. Door codes' },
+      { key: 'content', label: 'Note', kind: 'textarea', placeholder: 'anything private…' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+  },
+  {
+    type: 'card',
+    label: 'Payment card',
+    icon: CreditCard,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. HDFC Credit Card' },
+      { key: 'cardType', label: 'Card type', meta: 'cardType', placeholder: 'Visa, Mastercard, Amex…' },
+      { key: 'bank', label: 'Bank', meta: 'bankName', placeholder: 'issuing bank' },
+      { key: 'cardholder', label: 'Cardholder name', kind: 'text' },
+      { key: 'number', label: 'Card number', kind: 'text' },
+      { key: 'expiry', label: 'Expiry (MM/YY)', kind: 'text' },
+      { key: 'cvv', label: 'CVV', kind: 'password' },
+      { key: 'pin', label: 'PIN', kind: 'password' },
+      { key: 'billing', label: 'Billing address', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+    // Store only the last 4 digits as searchable metadata so the list can show "Visa •••• 1234" without decrypting.
+    deriveMeta: (secret) => ({ username: secret.number ? secret.number.replace(/\D/g, '').slice(-4) || null : null }),
+    subtitle: (item) => [item.cardType, item.username ? `•••• ${item.username}` : ''].filter(Boolean).join(' '),
   },
 ];
 
@@ -55,6 +89,7 @@ export function splitForm(def: VaultType, values: FormValues): { metadata: Recor
     if (f.meta) metadata[f.meta] = v || null;
     else if (v) secret[f.key] = v;
   }
+  if (def.deriveMeta) Object.assign(metadata, def.deriveMeta(secret));
   return { metadata, secret };
 }
 
@@ -68,7 +103,9 @@ export function mergeForm(def: VaultType, item: VaultItemDTO, secret: Record<str
   return values;
 }
 
-/** A short subtitle for the list card — first available metadata, never a secret. */
+/** A short subtitle for the list card — metadata only, never a secret. */
 export function itemSubtitle(item: VaultItemDTO): string {
-  return item.username || item.website || item.bankName || item.cardType || '';
+  const def = typeDef(item.type);
+  if (def.subtitle) return def.subtitle(item);
+  return item.username || item.website || item.bankName || '';
 }
