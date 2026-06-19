@@ -1,4 +1,4 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, Compass, StickyNote, Mic, Mail, Sparkles, Handshake, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, Compass, StickyNote, Mic, Mail, Sparkles, Handshake, Lock, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -16,6 +16,7 @@ export const NAV: NavItem[] = [
   { to: '/meetings', label: 'Meetings', icon: Mic },
   { to: '/google', label: 'Google', icon: Mail },
   { to: '/notes', label: 'Notes', icon: StickyNote },
+  { to: '/vault', label: 'Vault', icon: Lock },
   { to: '/chat', label: 'Chat', icon: MessageCircle },
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/mentor', label: 'Mentor', icon: Compass },
