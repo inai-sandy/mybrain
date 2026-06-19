@@ -486,3 +486,14 @@ model Decision {
   sourceDay String
   createdAt DateTime @default(now())
 }
+
+/// A proactive connection the brain surfaced on its own (cross-type related items). (BEA-357)
+model Connection {
+  id        String   @id @default(uuid())
+  summary   String
+  items     String // JSON [{type, id, title, link}]
+  score     Float    @default(0)
+  status    String   @default("new") // new | seen | dismissed
+  anchorKey String // type:id of the anchor, for dedup
+  createdAt DateTime @default(now())
+}
