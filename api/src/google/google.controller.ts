@@ -144,6 +144,16 @@ export class GoogleController {
     }
   }
 
+  /** Full email thread (subject + messages) for the in-app email viewer. (BEA-354) */
+  @Get('gmail/thread/:threadId')
+  async gmailThread(@Param('threadId') threadId: string) {
+    try {
+      return await this.google.gmailThread(threadId);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
   // ---- Gmail Daily Brief ----
   @Get('gmail/brief')
   async gmailBrief(@Query('day') day?: string) {
