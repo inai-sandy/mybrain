@@ -64,9 +64,10 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     }
   }
   async setMentorModel(provider: string, model: string) {
-    const value = JSON.stringify({ provider, model });
+    const cfg = this.llm.agentConfig(provider, model);
+    const value = JSON.stringify(cfg);
     await this.prisma.setting.upsert({ where: { key: 'mentor.llm' }, create: { key: 'mentor.llm', value }, update: { value } });
-    return { provider, model };
+    return cfg;
   }
   async listModels() {
     return this.tasks.listModels();
@@ -84,8 +85,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     }
   }
   async setWeeklyModel(provider: string, model: string) {
-    await this.setSetting('weekly.llm', JSON.stringify({ provider, model }));
-    return { provider, model };
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.setSetting('weekly.llm', JSON.stringify(cfg));
+    return cfg;
   }
 
   // ---- focus areas ----

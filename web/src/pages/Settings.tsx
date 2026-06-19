@@ -705,17 +705,17 @@ function ModelsSection() {
       <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
         desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
       <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model" agents
-        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. Pick a Claude/GPT API model, or run it FREE on your Codex/Gemini subscription (slower, but it's a nightly job). [Pilot — works on every feature once proven.]" />
-      <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model"
-        desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. A strong model like Claude Sonnet is best. Uses your OpenRouter key." />
-      <EngineModelCard title="Weekly review model" icon={Compass} base="/api/mentor/weekly-model"
-        desc="Writes the Sunday-night weekly review (wins, drift, the pattern, the experiment). Until you pick one it follows the Mentor model." />
-      <EngineModelCard title="Book model (chapters & year)" icon={Moon} base="/api/daily/book-model"
-        desc="Writes the monthly chapters and the Story of the Year — the best writing in the app. Until you pick one it follows the Story of the Day model." />
-      <EngineModelCard title="4 PM nudge model" icon={Compass} base="/api/telegram/nudge-model"
-        desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal and costs ~1¢." />
-      <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model"
-        desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal." />
+        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. Pick a Claude/GPT API model, or run it FREE on your Codex/Gemini subscription (slower, but it's a nightly job)." />
+      <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model" agents
+        desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. Pick a strong Claude API model, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Weekly review model" icon={Compass} base="/api/mentor/weekly-model" agents
+        desc="Writes the Sunday-night weekly review (wins, drift, the pattern, the experiment). Until you pick one it follows the Mentor model. Can run FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Book model (chapters & year)" icon={Moon} base="/api/daily/book-model" agents
+        desc="Writes the monthly chapters and the Story of the Year — the best writing in the app. Until you pick one it follows the Story of the Day model. Can run FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="4 PM nudge model" icon={Compass} base="/api/telegram/nudge-model" agents
+        desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model" agents
+        desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <VoiceModelCard />
     </div>
   );
@@ -750,7 +750,8 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
         const models = (list.models || []) as { id: string; name: string }[];
         const finalOpts = [...(agents ? AGENT_OPTS : []), ...(models.length ? models : FALLBACK)];
         setOpts(finalOpts);
-        const m = cfg.model || '';
+        // Derive the picker id from the saved engine: agents store provider gemini/codex with a plain model name.
+        const m = cfg.provider === 'gemini' ? `gemini::${cfg.model}` : cfg.provider === 'codex' ? 'codex' : (cfg.model || '');
         setModel(m);
         setCustom(!!m && !finalOpts.some((o) => o.id === m));
       })
