@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -36,13 +36,14 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance';
+type Tab = 'account' | 'integrations' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'integrations', label: 'Integrations', icon: Plug },
+    { id: 'cli', label: 'CLI', icon: Terminal },
     { id: 'google', label: 'Google', icon: Globe },
     { id: 'models', label: 'Models', icon: Cpu },
     { id: 'usage', label: 'Usage', icon: Wallet },
@@ -78,6 +79,7 @@ export function Settings({ email }: { email?: string }) {
 
       {tab === 'account' && <AccountSection email={email} />}
       {tab === 'integrations' && <IntegrationsSection />}
+      {tab === 'cli' && <CliSection />}
       {tab === 'google' && <GoogleServicesSection />}
       {tab === 'models' && <ModelsSection />}
       {tab === 'usage' && <UsageCard />}
@@ -1703,6 +1705,24 @@ function GeminiCard() {
   );
 }
 
+/** Server-side CLI agents (run tasks on your own subscriptions) — kept separate from data connectors. */
+function CliSection() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <h2 className="flex items-center gap-2 font-semibold mb-1">
+          <Terminal size={18} className="text-emerald-600" /> Command-line agents
+        </h2>
+        <p className="text-sm text-zinc-500">
+          AI agents that live on your server and can run tasks for you — each on <b>your own subscription</b>, so there's no separate API bill. Sign each one into its account below.
+        </p>
+      </div>
+      <CodexCard />
+      <GeminiCard />
+    </div>
+  );
+}
+
 function IntegrationsSection() {
   const [status, setStatus] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Integration | null>(null);
@@ -1749,8 +1769,6 @@ function IntegrationsSection() {
   return (
     <div className="space-y-4">
       <GoogleCard />
-      <CodexCard />
-      <GeminiCard />
       <div className="grid sm:grid-cols-2 gap-3">
         {INTEGRATIONS.map((it) => {
           const managed = !!it.managed;
