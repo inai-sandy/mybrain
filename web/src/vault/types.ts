@@ -1,4 +1,4 @@
-import { KeyRound, StickyNote, CreditCard, type LucideIcon } from 'lucide-react';
+import { KeyRound, StickyNote, CreditCard, Landmark, Bitcoin, IdCard, Terminal, type LucideIcon } from 'lucide-react';
 import type { VaultItemDTO } from './client';
 
 // Which searchable metadata column a field maps to. Fields WITHOUT `meta` are secret → encrypted blob.
@@ -69,6 +69,69 @@ export const VAULT_TYPES: VaultType[] = [
     // Store only the last 4 digits as searchable metadata so the list can show "Visa •••• 1234" without decrypting.
     deriveMeta: (secret) => ({ username: secret.number ? secret.number.replace(/\D/g, '').slice(-4) || null : null }),
     subtitle: (item) => [item.cardType, item.username ? `•••• ${item.username}` : ''].filter(Boolean).join(' '),
+  },
+  {
+    type: 'bank',
+    label: 'Bank account',
+    icon: Landmark,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. HDFC Savings' },
+      { key: 'bank', label: 'Bank name', meta: 'bankName', placeholder: 'issuing bank' },
+      { key: 'holder', label: 'Account holder', kind: 'text' },
+      { key: 'number', label: 'Account number', kind: 'password' },
+      { key: 'ifsc', label: 'IFSC / IBAN / routing', kind: 'text' },
+      { key: 'accountType', label: 'Account type', kind: 'text', placeholder: 'savings / current' },
+      { key: 'notes', label: 'Notes', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+    deriveMeta: (secret) => ({ username: secret.number ? secret.number.replace(/\s/g, '').slice(-4) || null : null }),
+    subtitle: (item) => [item.bankName, item.username ? `•••• ${item.username}` : ''].filter(Boolean).join(' '),
+  },
+  {
+    type: 'crypto',
+    label: 'Crypto wallet',
+    icon: Bitcoin,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. Ledger ETH' },
+      { key: 'network', label: 'Network', kind: 'text', placeholder: 'BTC, ETH, Solana…' },
+      { key: 'wallet', label: 'Wallet', kind: 'text', placeholder: 'Metamask, Ledger…' },
+      { key: 'address', label: 'Public address', kind: 'text' },
+      { key: 'seed', label: 'Seed phrase', kind: 'textarea', reauth: true },
+      { key: 'privateKey', label: 'Private key', kind: 'password', reauth: true },
+      { key: 'notes', label: 'Notes', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+  },
+  {
+    type: 'identity',
+    label: 'Identity',
+    icon: IdCard,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. Passport' },
+      { key: 'fullName', label: 'Full name', kind: 'text' },
+      { key: 'dob', label: 'Date of birth', kind: 'text', placeholder: 'DD/MM/YYYY' },
+      { key: 'passport', label: 'Passport no', kind: 'text' },
+      { key: 'license', label: "Driver's license", kind: 'text' },
+      { key: 'govId', label: 'Aadhaar / PAN / national ID', kind: 'password' },
+      { key: 'address', label: 'Address', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+  },
+  {
+    type: 'apisecret',
+    label: 'API secret',
+    icon: Terminal,
+    fields: [
+      { key: 'title', label: 'Label', meta: 'title', placeholder: 'e.g. OpenAI prod key' },
+      { key: 'service', label: 'Service', meta: 'username', placeholder: 'OpenAI, AWS…' },
+      { key: 'key', label: 'Key / client ID', kind: 'text' },
+      { key: 'secret', label: 'Secret', kind: 'password' },
+      { key: 'environment', label: 'Environment', kind: 'text', placeholder: 'prod / dev' },
+      { key: 'expiry', label: 'Expiry', kind: 'text', placeholder: 'optional' },
+      { key: 'notes', label: 'Notes', kind: 'textarea' },
+      { key: 'tags', label: 'Tags', meta: 'tags', placeholder: 'comma, separated' },
+    ],
+    subtitle: (item) => item.username || '',
   },
 ];
 

@@ -38,3 +38,36 @@ describe('login field mapping (metadata vs secret boundary)', () => {
     expect(values).toMatchObject({ title: 'Gmail', website: 'mail.google.com', username: 'sandy', password: 's3cr3t', notes: 'n', collection: 'Personal' });
   });
 });
+
+describe('high-stakes types (BEA-350)', () => {
+  it('bank account: name searchable, account number encrypted, last-4 derived to metadata', () => {
+    const { metadata, secret } = splitForm(typeDef('bank'), { title: 'HDFC', bank: 'HDFC Bank', holder: 'Sandeep', number: '123456789012', ifsc: 'HDFC0001' });
+    expect(metadata.bankName).toBe('HDFC Bank');
+    expect(metadata.username).toBe('9012'); // last-4 only
+    expect(Object.values(metadata)).not.toContain('123456789012'); // full number never in metadata
+    expect(secret.number).toBe('123456789012');
+    expect(secret.ifsc).toBe('HDFC0001');
+  });
+
+  it('crypto wallet: seed phrase + private key are flagged reauth, address/network are not', () => {
+    const fields = typeDef('crypto').fields;
+    expect(fields.find((f) => f.key === 'seed')?.reauth).toBe(true);
+    expect(fields.find((f) => f.key === 'privateKey')?.reauth).toBe(true);
+    expect(fields.find((f) => f.key === 'address')?.reauth).toBeFalsy();
+    // and they are secret (no metadata column)
+    expect(fields.find((f) => f.key === 'seed')?.meta).toBeUndefined();
+  });
+
+  it('api secret: service is searchable metadata, key/secret are encrypted', () => {
+    const { metadata, secret } = splitForm(typeDef('apisecret'), { title: 'OpenAI', service: 'OpenAI', key: 'ck_123', secret: 'sk_live_xyz' });
+    expect(metadata.username).toBe('OpenAI');
+    expect(Object.values(metadata)).not.toContain('sk_live_xyz');
+    expect(secret).toEqual({ key: 'ck_123', secret: 'sk_live_xyz' });
+  });
+
+  it('identity: government id stays out of metadata', () => {
+    const { metadata, secret } = splitForm(typeDef('identity'), { title: 'Passport', fullName: 'Sandeep', govId: 'ABCDE1234F' });
+    expect(Object.values(metadata)).not.toContain('ABCDE1234F');
+    expect(secret.govId).toBe('ABCDE1234F');
+  });
+});
