@@ -471,6 +471,9 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       const perType: Record<string, number> = {};
       for (const table of ALL_SOURCES) {
         if (!this.sourceEnabled(table)) continue; // disabled sections aren't auto-indexed
+        // The Daily Email Brief is clock-bound — its own service indexes only the finalized nightly
+        // build, so the generic safety-net must NOT pull in today's partial brief. (BEA-343)
+        if (table === 'gmailbrief') continue;
         const rows = await this.modelOf(table).findMany({
           where: { OR: [{ ragId: null }, { supermemoryId: null }] },
           take: 200,
