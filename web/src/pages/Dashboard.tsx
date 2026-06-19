@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Brain, MessageCircle, Upload, Sun, Flame, FileText, Bookmark, Lightbulb, Wand2, ArrowRight, Fingerprint, Star, BookOpen, Sparkles, Coins, Timer, Target, type LucideIcon } from 'lucide-react';
 import { openSearch } from '../ui/SearchOverlay';
 import { Skeleton } from '../ui/Skeleton';
+import { ConnectionsCard } from '../ui/ConnectionsCard';
 
 type Home = {
   today: { dumped: boolean; storyDone: boolean; counts: { total: number; done: number; open: number }; mustDos: { id: string; title: string; pinned: boolean; priority: string }[] };
@@ -89,6 +90,9 @@ export function Dashboard() {
         <Kpi icon={Timer} tint="text-sky-500" label="Time spent" value={d ? mins(d.insights.minutesToday ?? 0) : '—'} context={d ? `today · ${mins(d.insights.minutesSpent)} in 30 days` : 'today'} />
         <Kpi icon={Coins} tint="text-violet-500" label="AI cost" value={aiWeek === null ? '—' : fmtUsd(aiWeek)} context="this week" />
       </div>
+
+      {/* Proactive connections the brain surfaced (hidden when none) */}
+      <ConnectionsCard />
 
       {/* Work area — Today (hero) + Day summary / Portrait */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
