@@ -60,4 +60,10 @@ export const vaultApi = {
     return fetch(`/api/vault/items/${id}/file`, { method: 'POST', body: fd }).then((r) => j(r));
   },
   downloadFile: (id: string) => fetch(`/api/vault/items/${id}/file`).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('No file')))),
+
+  // Biometric / passkey devices.
+  listDevices: () => fetch('/api/vault/devices').then((r) => j<{ id: string; credentialId: string; label: string; wrap: Cipher; createdAt: string }[]>(r)),
+  addDevice: (body: { credentialId: string; label: string; wrap: Cipher }) =>
+    fetch('/api/vault/devices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => j(r)),
+  removeDevice: (id: string) => fetch(`/api/vault/devices/${id}`, { method: 'DELETE' }).then((r) => j(r)),
 };

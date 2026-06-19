@@ -50,6 +50,22 @@ export class VaultController {
     return this.vault.count();
   }
 
+  // ---- biometric / passkey devices ----
+  @Get('devices')
+  listDevices() {
+    return this.vault.listDevices();
+  }
+
+  @Post('devices')
+  addDevice(@Body() body: { credentialId: string; label: string; wrap: { iv: string; ct: string } }) {
+    return this.vault.addDevice(body);
+  }
+
+  @Delete('devices/:id')
+  removeDevice(@Param('id') id: string) {
+    return this.vault.removeDevice(id);
+  }
+
   @Get('items/:id')
   getItem(@Param('id') id: string) {
     return this.vault.getItem(id);

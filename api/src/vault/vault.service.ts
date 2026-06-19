@@ -169,6 +169,32 @@ export class VaultService {
     return { count: await this.prisma.vaultItem.count() };
   }
 
+  // ---- biometric / passkey devices (WebAuthn PRF) ----
+  async listDevices() {
+    const rows = await this.prisma.vaultDevice.findMany({ orderBy: { createdAt: 'desc' } });
+    return rows.map((d) => ({ id: d.id, credentialId: d.credentialId, label: d.label, wrap: JSON.parse(d.wrap), createdAt: d.createdAt }));
+  }
+
+  async addDevice(input: { credentialId: string; label: string; wrap: Cipher }) {
+    if (!input?.credentialId || typeof input.credentialId !== 'string') throw new BadRequestException('credentialId required');
+    this.requireCipher(input.wrap, 'wrap');
+    const wrap = JSON.stringify(input.wrap);
+    const label = (input.label || 'This device').slice(0, 80);
+    await this.prisma.vaultDevice.upsert({
+      where: { credentialId: input.credentialId },
+      create: { credentialId: input.credentialId, label, wrap },
+      update: { label, wrap },
+    });
+    return { ok: true };
+  }
+
+  /** Revoke ONE device by id (no bulk). */
+  async removeDevice(id: string) {
+    if (!(await this.prisma.vaultDevice.findUnique({ where: { id } }))) throw new NotFoundException('Device not found');
+    await this.prisma.vaultDevice.delete({ where: { id } });
+    return { ok: true };
+  }
+
   // ---- helpers ----
   private requireCipher(c: any, name: string) {
     if (!c || typeof c.iv !== 'string' || typeof c.ct !== 'string') throw new BadRequestException(`${name} must be {iv,ct}`);

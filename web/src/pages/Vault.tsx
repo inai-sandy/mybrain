@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2, Plus } from 'lucide-react';
+import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2, Plus, Fingerprint, Trash2 } from 'lucide-react';
+import { Sheet } from '../ui/Sheet';
+import { vaultApi as vApi } from '../vault/client';
 import { useToast } from '../ui/Toast';
 import { useVault } from '../vault/VaultContext';
 import { DataTable, type Column, type Filter, type SortOption } from '../ui/DataTable';
@@ -192,7 +194,7 @@ function VaultSetup() {
 
 // ---- unlock (passphrase OR recovery key) ----
 function VaultUnlock() {
-  const { unlock } = useVault();
+  const { unlock, unlockBiometric, biometricSupported } = useVault();
   const toast = useToast();
   const [mode, setMode] = useState<'passphrase' | 'recovery'>('passphrase');
   const [secret, setSecret] = useState('');
@@ -208,6 +210,14 @@ function VaultUnlock() {
     } catch {
       toast('error', mode === 'passphrase' ? 'Wrong passphrase' : 'That recovery key did not work');
       setBusy(false);
+    }
+  }
+
+  async function bio() {
+    try {
+      await unlockBiometric();
+    } catch (e: any) {
+      toast('error', e?.message?.includes('No biometric') ? 'No biometric set up yet — unlock once, then enable it' : 'Biometric unlock failed');
     }
   }
 
@@ -244,6 +254,11 @@ function VaultUnlock() {
         {busy ? <Loader2 className="inline animate-spin mr-2" size={15} /> : null}
         Unlock
       </button>
+      {biometricSupported && mode === 'passphrase' && (
+        <button onClick={bio} className="mt-3 w-full rounded-lg border border-zinc-300 dark:border-zinc-700 px-4 py-2.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center gap-2">
+          <Fingerprint size={16} className="text-emerald-600" /> Unlock with biometrics
+        </button>
+      )}
       <button
         onClick={() => {
           setMode((m) => (m === 'passphrase' ? 'recovery' : 'passphrase'));
@@ -259,12 +274,13 @@ function VaultUnlock() {
 
 // ---- unlocked landing: the item list + CRUD (BEA-348) ----
 function VaultHome() {
-  const { lock, decrypt } = useVault();
+  const { lock, decrypt, biometricSupported } = useVault();
   const [rows, setRows] = useState<VaultItemDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<VaultItemDTO | null>(null);
   const [creating, setCreating] = useState(false);
   const [audit, setAudit] = useState<Record<string, Audit>>({});
+  const [bioOpen, setBioOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -343,11 +359,17 @@ function VaultHome() {
           <button onClick={() => setCreating(true)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm flex items-center gap-1.5">
             <Plus size={15} /> Add
           </button>
+          {biometricSupported && (
+            <button onClick={() => setBioOpen(true)} title="Biometric unlock" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <Fingerprint size={15} />
+            </button>
+          )}
           <button onClick={lock} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1.5">
             <Lock size={14} /> Lock
           </button>
         </div>
       </div>
+      {bioOpen && <BiometricSheet onClose={() => setBioOpen(false)} />}
 
       <DataTable
         columns={columns}
@@ -365,6 +387,79 @@ function VaultHome() {
       {creating && <VaultItemSheet defaultType="login" onClose={() => setCreating(false)} onSaved={refresh} />}
       {editing && <VaultItemSheet item={editing} onClose={() => setEditing(null)} onSaved={refresh} />}
     </div>
+  );
+}
+
+function BiometricSheet({ onClose }: { onClose: () => void }) {
+  const { enrollBiometric } = useVault();
+  const toast = useToast();
+  const [devices, setDevices] = useState<{ id: string; label: string; createdAt: string }[]>([]);
+  const [pass, setPass] = useState('');
+  const [label, setLabel] = useState('This device');
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    setDevices(await vApi.listDevices().catch(() => []));
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function enroll() {
+    if (!pass) return toast('error', 'Enter your passphrase to enable biometrics');
+    setBusy(true);
+    try {
+      await enrollBiometric(pass, label.trim() || 'This device');
+      toast('success', 'Biometric unlock enabled on this device');
+      setPass('');
+      await refresh();
+    } catch (e: any) {
+      toast('error', e?.message?.includes('PRF') ? "This device/browser doesn't support biometric vault unlock" : e?.message?.includes('verify') || e?.message?.includes('wrap') ? 'Wrong passphrase' : 'Could not enable biometrics');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(id: string) {
+    await vApi.removeDevice(id).catch(() => undefined);
+    toast('success', 'Device removed');
+    refresh();
+  }
+
+  const inp = 'w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2.5 text-sm outline-none focus:border-emerald-500';
+  return (
+    <Sheet onClose={onClose} canClose={() => !busy}>
+      {() => (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Fingerprint size={18} className="text-emerald-600" />
+            <h2 className="font-semibold">Biometric unlock</h2>
+          </div>
+          <p className="text-sm text-zinc-500 mb-4">Use Face ID / fingerprint to unlock on this device. Your passphrase stays the master key and is still required here.</p>
+
+          {devices.length > 0 && (
+            <div className="space-y-2 mb-4">
+              {devices.map((d) => (
+                <div key={d.id} className="flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-2">
+                  <Fingerprint size={15} className="text-zinc-400" />
+                  <span className="text-sm flex-1 truncate">{d.label}</span>
+                  <button onClick={() => revoke(d.id)} className="text-red-500 hover:text-red-600"><Trash2 size={14} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3 space-y-2">
+            <p className="text-xs font-medium text-zinc-500">Enable on this device</p>
+            <input className={inp} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Device name (e.g. iPhone)" />
+            <input className={inp} type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="Confirm with your passphrase" />
+            <button onClick={enroll} disabled={busy} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm font-medium disabled:opacity-40 flex items-center justify-center gap-2">
+              {busy ? <Loader2 className="animate-spin" size={14} /> : <Fingerprint size={14} />} Enable biometric unlock
+            </button>
+          </div>
+        </div>
+      )}
+    </Sheet>
   );
 }
 
