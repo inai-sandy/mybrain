@@ -420,22 +420,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     }
   }
   async setStoryModel(provider: string, model: string) {
-    // The picker sends an id; 'codex' / 'gemini::<model>' select the subscription agents.
-    let prov = provider === 'anthropic' ? 'anthropic' : 'openrouter';
-    let mdl = model;
-    if (model === 'codex') {
-      prov = 'codex';
-      mdl = 'codex';
-    } else if (model.startsWith('gemini::')) {
-      prov = 'gemini';
-      mdl = model.slice('gemini::'.length);
-    } else if (model === 'gemini') {
-      prov = 'gemini';
-      mdl = 'Gemini 3.5 Flash';
-    }
-    const value = JSON.stringify({ provider: prov, model: mdl });
+    // The picker sends an id; agentConfig() resolves 'codex' / 'gemini::<model>' to the right engine.
+    const cfg = this.llm.agentConfig(provider, model);
+    const value = JSON.stringify(cfg);
     await this.prisma.setting.upsert({ where: { key: 'story.llm' }, create: { key: 'story.llm', value }, update: { value } });
-    return { provider: prov, model: mdl };
+    return cfg;
   }
   /** OpenAI + Anthropic models for the Settings pickers (shared with Tasks). */
   async listModels() {
@@ -722,8 +711,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     }
   }
   private async setPickerModel(key: string, provider: string, model: string) {
-    await this.setSetting(key, JSON.stringify({ provider, model }));
-    return { provider, model };
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.setSetting(key, JSON.stringify(cfg));
+    return cfg;
   }
 
   /** Model that writes the monthly chapters + Story of the Year (own picker; falls back to the Story model). */

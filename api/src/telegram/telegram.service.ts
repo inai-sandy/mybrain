@@ -994,8 +994,9 @@ export class TelegramService implements OnModuleInit {
     return { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
   }
   async setNudgeModel(provider: string, model: string) {
-    await this.setSetting('nudge.llm', JSON.stringify({ provider, model }));
-    return { provider, model };
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.setSetting('nudge.llm', JSON.stringify(cfg));
+    return cfg;
   }
 
   /** Monday of the week containing `day` — the rate-limit window for daytime mentor nudges. */
