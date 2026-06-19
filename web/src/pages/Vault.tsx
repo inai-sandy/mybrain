@@ -1,7 +1,11 @@
-import { useState } from 'react';
-import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2, Plus } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { useVault } from '../vault/VaultContext';
+import { DataTable, type Column, type Filter, type SortOption } from '../ui/DataTable';
+import { vaultApi, type VaultItemDTO } from '../vault/client';
+import { VaultItemSheet } from '../vault/VaultItemSheet';
+import { typeDef, itemSubtitle, COLLECTIONS, VAULT_TYPES } from '../vault/types';
 
 // ---- local passphrase strength (never leaves the browser) ----
 function scorePass(s: string): { score: number; label: string; cls: string } {
@@ -250,28 +254,93 @@ function VaultUnlock() {
   );
 }
 
-// ---- unlocked landing (the list + CRUD arrive in BEA-348) ----
+// ---- unlocked landing: the item list + CRUD (BEA-348) ----
 function VaultHome() {
   const { lock } = useVault();
+  const [rows, setRows] = useState<VaultItemDTO[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<VaultItemDTO | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const r = await vaultApi.list({ pageSize: 1000 }); // list is metadata + ciphertext only
+      setRows(r.items);
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  // Search runs over METADATA columns only — the encrypted blob is never a column, so it can't be searched.
+  const columns: Column<VaultItemDTO>[] = [
+    { key: 'title', label: 'Name' },
+    { key: 'username', label: 'Username' },
+    { key: 'website', label: 'Website' },
+    { key: 'tags', label: 'Tags' },
+  ];
+  const filters: Filter[] = [
+    { key: 'type', label: 'Type', options: VAULT_TYPES.map((t) => ({ value: t.type, label: t.label })), match: (r, v) => r.type === v },
+    { key: 'collection', label: 'Collection', options: COLLECTIONS.map((c) => ({ value: c, label: c })), match: (r, v) => r.collection === v },
+  ];
+  const sortOptions: SortOption[] = [
+    { label: 'Newest', key: 'createdAt', dir: -1 },
+    { label: 'Oldest', key: 'createdAt', dir: 1 },
+    { label: 'Name', key: 'title', dir: 1 },
+  ];
+
   return (
-    <div className={card}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-3">
-          <div className="grid place-items-center h-11 w-11 rounded-xl bg-emerald-600/10 text-emerald-600">
-            <ShieldCheck size={22} />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold">Vault unlocked</h1>
-            <p className="text-sm text-zinc-500">Your secrets are decrypted only here, in this tab.</p>
-          </div>
+    <div className="-mt-2">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2.5">
+          <ShieldCheck size={20} className="text-emerald-600" />
+          <h1 className="text-lg font-semibold">Vault</h1>
         </div>
-        <button onClick={lock} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1.5">
-          <Lock size={14} /> Lock
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setCreating(true)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm flex items-center gap-1.5">
+            <Plus size={15} /> Add
+          </button>
+          <button onClick={lock} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1.5">
+            <Lock size={14} /> Lock
+          </button>
+        </div>
       </div>
-      <p className="text-sm text-zinc-500 mt-6 text-center py-10 border-t border-zinc-100 dark:border-zinc-800">
-        Your vault is empty. Adding logins, cards and secrets is coming next.
-      </p>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        filters={filters}
+        sortOptions={sortOptions}
+        pageSize={12}
+        cardsOnly
+        gridClassName="grid grid-cols-1 sm:grid-cols-2 gap-3"
+        emptyText="Your vault is empty. Tap “Add” to store your first login."
+        renderCard={(it) => <ItemCard key={it.id} item={it} onClick={() => setEditing(it)} />}
+      />
+
+      {creating && <VaultItemSheet defaultType="login" onClose={() => setCreating(false)} onSaved={refresh} />}
+      {editing && <VaultItemSheet item={editing} onClose={() => setEditing(null)} onSaved={refresh} />}
     </div>
+  );
+}
+
+function ItemCard({ item, onClick }: { item: VaultItemDTO; onClick: () => void }) {
+  const def = typeDef(item.type);
+  const sub = itemSubtitle(item);
+  return (
+    <button onClick={onClick} className="text-left w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors flex items-center gap-3">
+      <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600">
+        <def.icon size={18} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="font-medium truncate">{item.title || 'Untitled'}</div>
+        {sub && <div className="text-xs text-zinc-500 truncate">{sub}</div>}
+      </div>
+      {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 shrink-0">{item.collection}</span>}
+    </button>
   );
 }
