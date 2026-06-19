@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox } from 'lucide-react';
+import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from '../../ui/Toast';
 import { mdComponents } from '../../ui/markdown';
+import { Sheet } from '../../ui/Sheet';
 import { RequestsSection } from './GmailRequests';
 
 export function fmtWhen(iso: string | null) {
@@ -31,8 +32,109 @@ type ChatSpace = { id: string; name: string; type: string };
 type Contact = { name: string; email: string | null; phone: string | null };
 
 // ---- Gmail: the Daily Brief (per-day unread + AI summary of important emails) ----
-type BriefSection = { heading: string; points: string[]; link: string | null };
-type Brief = { day: string; unread: number | null; overview: string; summary: string | null; sections: BriefSection[]; items: { from: string; subject: string; time: string }[]; generated: boolean; generatedAt: string | null };
+type BriefSection = { heading: string; points: string[]; link: string | null; threadId?: string };
+type Brief = { day: string; unread: number | null; overview: string; summary: string | null; sections: BriefSection[]; items: { from: string; subject: string; time: string; threadId?: string }[]; generated: boolean; generatedAt: string | null };
+type ThreadMsg = { from: string; date: string; body: string };
+
+function senderName(from: string): string {
+  const m = from.match(/^\s*"?([^"<]+?)"?\s*</);
+  return (m ? m[1] : from).trim() || from;
+}
+function senderEmail(from: string): string {
+  const m = from.match(/<([^>]+)>/);
+  return m ? m[1] : '';
+}
+function initials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+}
+function fmtFullDate(d: string): string {
+  const t = new Date(d);
+  return isNaN(+t) ? d : t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+/** In-app email thread viewer — opens the full email properly, on phone + desktop. (BEA-354) */
+function EmailThreadViewer({ threadId, onClose }: { threadId: string; onClose: () => void }) {
+  const [data, setData] = useState<{ subject: string; messages: ThreadMsg[] } | null>(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/google/gmail/thread/${encodeURIComponent(threadId)}`)
+      .then((r) => {
+        if (!r.ok) throw new Error();
+        return r.json();
+      })
+      .then((d) => live && setData(d))
+      .catch(() => live && setErr(true));
+    return () => {
+      live = false;
+    };
+  }, [threadId]);
+
+  return (
+    <Sheet onClose={onClose} size="lg">
+      {(close) => (
+        <div className="flex flex-col max-h-[86vh]">
+          <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600 flex items-center gap-1.5">
+                <Mail size={12} /> Email{data && data.messages.length > 1 ? ` · ${data.messages.length} messages` : ''}
+              </div>
+              <h2 className="font-bold text-lg leading-snug mt-0.5 line-clamp-2">{data?.subject || (err ? 'Couldn’t load this email' : 'Loading…')}</h2>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <a
+                href={`https://mail.google.com/mail/u/0/#all/${threadId}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Open in Gmail"
+                className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs text-zinc-500 hover:border-emerald-500 hover:text-emerald-600"
+              >
+                Gmail <ExternalLink size={12} />
+              </a>
+              <button onClick={close} aria-label="Close" className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-y-auto px-4 sm:px-5 py-4 space-y-3">
+            {!data && !err && (
+              <div className="space-y-3 animate-pulse">
+                {[0, 1].map((i) => (
+                  <div key={i} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4">
+                    <div className="h-9 w-40 rounded bg-zinc-200 dark:bg-zinc-800 mb-3" />
+                    <div className="h-3 w-full rounded bg-zinc-100 dark:bg-zinc-800/70 mb-1.5" />
+                    <div className="h-3 w-4/5 rounded bg-zinc-100 dark:bg-zinc-800/70" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {err && <div className="rounded-lg bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-sm px-3 py-2.5">Couldn’t load this email. It may have moved, or Gmail isn’t reachable right now.</div>}
+            {data?.messages.map((m, i) => {
+              const name = senderName(m.from);
+              const email = senderEmail(m.from);
+              return (
+                <div key={i} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+                  <div className="flex items-center gap-3 px-4 py-3 bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-100 dark:border-zinc-800">
+                    <div className="shrink-0 w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs font-bold">{initials(name)}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-sm truncate">{name}</div>
+                      {email && <div className="text-[11px] text-zinc-400 truncate">{email}</div>}
+                    </div>
+                    <div className="shrink-0 text-[11px] text-zinc-400">{fmtFullDate(m.date)}</div>
+                  </div>
+                  <div className="px-4 py-3.5 text-sm leading-relaxed text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap break-words">
+                    {m.body?.trim() || <span className="text-zinc-400 italic">(no text content)</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
 
 function addDays(day: string, n: number): string {
   const d = new Date(day + 'T12:00:00Z');
@@ -93,8 +195,8 @@ function CollapsibleBrief({ children }: { children: ReactNode }) {
   );
 }
 
-/** One topic of the Daily Brief as a collapsible card (collapsed by default) with an Open-in-Gmail link. */
-function BriefSectionCard({ section }: { section: BriefSection }) {
+/** One topic of the Daily Brief as a collapsible card (collapsed by default); opens the email in-app. */
+function BriefSectionCard({ section, onOpen }: { section: BriefSection; onOpen: (threadId: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 overflow-hidden">
@@ -108,10 +210,19 @@ function BriefSectionCard({ section }: { section: BriefSection }) {
           <article className="prose prose-sm prose-zinc dark:prose-invert max-w-none prose-strong:font-semibold prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100 prose-ul:my-0 prose-ul:pl-4 prose-li:my-0.5 prose-li:marker:text-emerald-500">
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{section.points.map((p) => `- ${p}`).join('\n')}</ReactMarkdown>
           </article>
-          {section.link && (
-            <a href={section.link} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 hover:text-emerald-600">
-              <ExternalLink size={12} /> Open in Gmail
-            </a>
+          {(section.threadId || section.link) && (
+            <div className="mt-2.5 flex items-center gap-2">
+              {section.threadId && (
+                <button onClick={() => onOpen(section.threadId!)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-2.5 py-1 text-xs font-semibold transition">
+                  <Mail size={12} /> Open email
+                </button>
+              )}
+              {section.link && (
+                <a href={section.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs text-zinc-500 hover:border-emerald-500 hover:text-emerald-600">
+                  <ExternalLink size={12} /> Gmail
+                </a>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -126,6 +237,7 @@ function DailyBriefCard() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [emailsOpen, setEmailsOpen] = useState(false);
+  const [viewThread, setViewThread] = useState<string | null>(null);
   const toast = useToast();
 
   async function loadDay(target?: string) {
@@ -201,7 +313,7 @@ function DailyBriefCard() {
             <>
               {brief.overview && <p className="text-sm text-zinc-600 dark:text-zinc-300 mb-3">{brief.overview}</p>}
               <div className="space-y-2">
-                {brief.sections.map((s, i) => <BriefSectionCard key={i} section={s} />)}
+                {brief.sections.map((s, i) => <BriefSectionCard key={i} section={s} onOpen={setViewThread} />)}
               </div>
             </>
           ) : (
@@ -222,16 +334,26 @@ function DailyBriefCard() {
                 <span className="shrink-0 text-[11px] text-zinc-400">{brief.items.length}</span>
               </button>
               {emailsOpen && (
-                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800 px-3 pb-1">
-                  {brief.items.map((it, i) => (
-                    <li key={i} className="flex items-start gap-2 py-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">{it.subject}</div>
-                        <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
-                      </div>
-                      {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
-                    </li>
-                  ))}
+                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800 px-1.5 pb-1">
+                  {brief.items.map((it, i) => {
+                    const openable = !!it.threadId;
+                    return (
+                      <li key={i}>
+                        <button
+                          onClick={() => it.threadId && setViewThread(it.threadId)}
+                          disabled={!openable}
+                          className={'w-full flex items-center gap-2 py-2 px-1.5 text-left rounded-lg transition ' + (openable ? 'hover:bg-zinc-100/70 dark:hover:bg-zinc-900/60 cursor-pointer' : 'cursor-default')}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium truncate">{it.subject}</div>
+                            <div className="text-[11px] text-zinc-400 truncate">{it.from}</div>
+                          </div>
+                          {hhmm(it.time) && <span className="shrink-0 text-[11px] text-zinc-400 tabular-nums">{hhmm(it.time)}</span>}
+                          {openable && <Mail size={13} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -252,6 +374,7 @@ function DailyBriefCard() {
           </button>
         </div>
       )}
+      {viewThread && <EmailThreadViewer threadId={viewThread} onClose={() => setViewThread(null)} />}
     </section>
   );
 }

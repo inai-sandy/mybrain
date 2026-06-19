@@ -8,8 +8,8 @@ const DEFAULT_TZ = 'Asia/Kolkata';
 const BRIEF_AT = '23:58'; // 11:58 PM local — write today's email brief
 const BRIEF_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
-type BriefItem = { from: string; subject: string; time: string };
-type BriefSection = { heading: string; points: string[]; link: string | null };
+type BriefItem = { from: string; subject: string; time: string; threadId?: string };
+type BriefSection = { heading: string; points: string[]; link: string | null; threadId?: string };
 export type Brief = { day: string; unread: number | null; overview: string; summary: string | null; sections: BriefSection[]; items: BriefItem[]; generated: boolean; generatedAt: string | null };
 
 /** Builds the Gmail "Daily Brief": per-day unread count + an AI summary of that day's important emails.
@@ -154,7 +154,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       this.google.gmailImportantForDay(day, 25).catch(() => [] as { id: string; threadId: string; from: string; subject: string; date: string; snippet: string }[]),
     ]);
 
-    const items: BriefItem[] = emails.map((e) => ({ from: cleanFrom(e.from), subject: e.subject, time: e.date }));
+    const items: BriefItem[] = emails.map((e) => ({ from: cleanFrom(e.from), subject: e.subject, time: e.date, threadId: e.threadId }));
     let summary: string;
     let sections: BriefSection[] = [];
     if (!emails.length) {
@@ -183,7 +183,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
               const idxs = Array.isArray(s?.emails) ? s.emails.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n) && n >= 1 && n <= emails.length) : [];
               const tid = idxs.length ? emails[idxs[0] - 1]?.threadId : null;
               const link = tid ? `https://mail.google.com/mail/u/0/#all/${tid}` : null;
-              return heading && points.length ? { heading, points, link } : null;
+              return heading && points.length ? { heading, points, link, threadId: tid || undefined } : null;
             })
             .filter(Boolean) as BriefSection[];
         }
