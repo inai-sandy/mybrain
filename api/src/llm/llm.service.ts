@@ -8,6 +8,9 @@ export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemi
 const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
 const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
 
+// When a free subscription agent is down/slow/empty, work never silently fails — it falls back to the API on Sonnet.
+const AGENT_FALLBACK: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+
 @Injectable()
 export class LlmService {
   constructor(
@@ -71,24 +74,63 @@ export class LlmService {
     return this.completeWith(await this.getConfig(), prompt, maxTokens, label);
   }
 
+  /**
+   * Map a Settings-picker selection to a real LlmConfig. The picker sends only a model id; the
+   * subscription agents are encoded in it: 'codex', 'gemini', or 'gemini::<Antigravity model>'.
+   * Anything else is a normal API model id (default provider openrouter).
+   */
+  agentConfig(provider: string | undefined, model: string): LlmConfig {
+    if (model === 'codex') return { provider: 'codex', model: 'codex' };
+    if (model === 'gemini') return { provider: 'gemini', model: 'Gemini 3.5 Flash' };
+    if (model.startsWith('gemini::')) return { provider: 'gemini', model: model.slice('gemini::'.length) };
+    return { provider: provider === 'anthropic' ? 'anthropic' : 'openrouter', model };
+  }
+
+  /** Run a prompt on a subscription agent (Codex / Gemini) via its host runner. Returns null on any failure. */
+  private async runAgent(cfg: LlmConfig, prompt: string): Promise<string | null> {
+    try {
+      const url = cfg.provider === 'codex' ? CODEX_RUNNER : GEMINI_RUNNER;
+      // For Gemini, cfg.model carries the specific Antigravity model name (e.g. "Gemini 3.5 Flash").
+      const model = cfg.provider === 'gemini' && cfg.model && cfg.model !== 'gemini' ? cfg.model : undefined;
+      const r = await fetch(`${url}/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt, model }),
+        signal: AbortSignal.timeout(190_000),
+      });
+      if (!r.ok) return null;
+      const d: any = await r.json();
+      return String(d?.text || '').trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Like completeWith, but also reports which model ACTUALLY produced the text — so a feature that
+   * records its engine (e.g. the Story of the Day) shows the truth after an agent→Sonnet fallback.
+   */
+  async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; model: string | null }> {
+    if (!cfg?.provider || !cfg?.model) return { text: null, model: null };
+    if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
+      const text = await this.runAgent(cfg, prompt);
+      if (text) return { text, model: cfg.model };
+      const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
+      return { text: fb, model: fb ? 'Claude Sonnet 4.6 (fallback)' : cfg.model };
+    }
+    return { text: await this.completeWith(cfg, prompt, maxTokens, label), model: cfg.model };
+  }
+
   /** Single-shot completion forcing a specific provider+model (e.g. the Tasks engine's Sonnet). */
   async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     try {
-      // Subscription agents (Codex / Gemini) — route the prompt to the host runner; no per-call API $.
+      // Subscription agents (Codex / Gemini) — route to the host runner (no per-call API $). If the
+      // runner is down/slow/empty, fall back to the API on Sonnet so the feature never silently dies.
       if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-        const url = cfg.provider === 'codex' ? CODEX_RUNNER : GEMINI_RUNNER;
-        // For Gemini, cfg.model carries the specific Antigravity model name (e.g. "Gemini 3.5 Flash").
-        const model = cfg.provider === 'gemini' && cfg.model && cfg.model !== 'gemini' ? cfg.model : undefined;
-        const r = await fetch(`${url}/run`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ prompt, model }),
-          signal: AbortSignal.timeout(190_000),
-        });
-        if (!r.ok) return null;
-        const d: any = await r.json();
-        return String(d?.text || '').trim() || null;
+        const text = await this.runAgent(cfg, prompt);
+        if (text) return text;
+        return this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
       }
       if (cfg.provider === 'anthropic') {
         const c = await this.connectors.get<{ apiKey: string }>('anthropic');

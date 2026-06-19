@@ -581,7 +581,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `ACTIVITY TIMELINE:\n${activityLines.join('\n') || '(quiet day in the app)'}`;
 
     const cfg = await this.storyModel();
-    const raw = (await this.llm.completeWith(cfg, prompt, 2000, 'story-of-day'))?.trim() || '';
+    const { text: rawText, model: usedModel } = await this.llm.completeWithModel(cfg, prompt, 2000, 'story-of-day');
+    const raw = (rawText || '').trim();
+    const storyModelLabel = usedModel || cfg.model;
     let text = raw;
     let personalText: string | null = null;
     let mood: string | null = told?.mood || null;
@@ -607,8 +609,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     const row = await this.prisma.dayStory.upsert({
       where: { day },
-      create: { day, text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: cfg.model },
-      update: { text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: cfg.model },
+      create: { day, text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: storyModelLabel },
+      update: { text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: storyModelLabel },
     });
 
     // Store the Story of the Day, REPLACING any prior version (re-weaves when the user's story changes). (BEA-342)
