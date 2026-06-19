@@ -6,6 +6,9 @@ import { DataTable, type Column, type Filter, type SortOption } from '../ui/Data
 import { vaultApi, type VaultItemDTO } from '../vault/client';
 import { VaultItemSheet } from '../vault/VaultItemSheet';
 import { typeDef, itemSubtitle, COLLECTIONS, VAULT_TYPES } from '../vault/types';
+import { isWeakPassword, sha256Hex } from '../vault/generator';
+
+type Audit = { weak?: boolean; reused?: boolean };
 
 // ---- local passphrase strength (never leaves the browser) ----
 function scorePass(s: string): { score: number; label: string; cls: string } {
@@ -256,11 +259,12 @@ function VaultUnlock() {
 
 // ---- unlocked landing: the item list + CRUD (BEA-348) ----
 function VaultHome() {
-  const { lock } = useVault();
+  const { lock, decrypt } = useVault();
   const [rows, setRows] = useState<VaultItemDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<VaultItemDTO | null>(null);
   const [creating, setCreating] = useState(false);
+  const [audit, setAudit] = useState<Record<string, Audit>>({});
 
   async function refresh() {
     setLoading(true);
@@ -274,6 +278,42 @@ function VaultHome() {
   useEffect(() => {
     refresh();
   }, []);
+
+  // Local password health: decrypt logins in-memory, flag weak + reused (by hash, never storing the plaintext).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const logins = rows.filter((r) => r.type === 'login');
+      const got = await Promise.all(
+        logins.map(async (r) => {
+          try {
+            const s = await decrypt<Record<string, string>>(r.blob);
+            return { id: r.id, pw: s.password || '' };
+          } catch {
+            return { id: r.id, pw: '' };
+          }
+        }),
+      );
+      const hashes: Record<string, string> = {};
+      const counts: Record<string, number> = {};
+      for (const g of got) {
+        if (!g.pw) continue;
+        const h = await sha256Hex(g.pw);
+        hashes[g.id] = h;
+        counts[h] = (counts[h] || 0) + 1;
+      }
+      if (cancelled) return;
+      const map: Record<string, Audit> = {};
+      for (const g of got) {
+        if (!g.pw) continue;
+        map[g.id] = { weak: isWeakPassword(g.pw), reused: counts[hashes[g.id]] > 1 };
+      }
+      setAudit(map);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rows, decrypt]);
 
   // Search runs over METADATA columns only — the encrypted blob is never a column, so it can't be searched.
   const columns: Column<VaultItemDTO>[] = [
@@ -319,7 +359,7 @@ function VaultHome() {
         cardsOnly
         gridClassName="grid grid-cols-1 sm:grid-cols-2 gap-3"
         emptyText="Your vault is empty. Tap “Add” to store your first login."
-        renderCard={(it) => <ItemCard key={it.id} item={it} onClick={() => setEditing(it)} />}
+        renderCard={(it) => <ItemCard key={it.id} item={it} audit={audit[it.id]} onClick={() => setEditing(it)} />}
       />
 
       {creating && <VaultItemSheet defaultType="login" onClose={() => setCreating(false)} onSaved={refresh} />}
@@ -328,9 +368,10 @@ function VaultHome() {
   );
 }
 
-function ItemCard({ item, onClick }: { item: VaultItemDTO; onClick: () => void }) {
+function ItemCard({ item, audit, onClick }: { item: VaultItemDTO; audit?: Audit; onClick: () => void }) {
   const def = typeDef(item.type);
   const sub = itemSubtitle(item);
+  const warn = audit?.weak ? 'Weak' : audit?.reused ? 'Reused' : '';
   return (
     <button onClick={onClick} className="text-left w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors flex items-center gap-3">
       <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600">
@@ -340,6 +381,11 @@ function ItemCard({ item, onClick }: { item: VaultItemDTO; onClick: () => void }
         <div className="font-medium truncate">{item.title || 'Untitled'}</div>
         {sub && <div className="text-xs text-zinc-500 truncate">{sub}</div>}
       </div>
+      {warn && (
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0 flex items-center gap-1">
+          <AlertTriangle size={10} /> {warn}
+        </span>
+      )}
       {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 shrink-0">{item.collection}</span>}
     </button>
   );
