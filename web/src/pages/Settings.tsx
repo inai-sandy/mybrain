@@ -716,6 +716,12 @@ function ModelsSection() {
         desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model" agents
         desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Day summary model" icon={FileText} base="/api/daily/summary-model" agents
+        desc="Writes the short end-of-day summary (tasks done, what's pending, the gist). Until you pick one it follows the Tasks engine. Can run FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Email Daily Brief model" icon={Send} base="/api/google/gmail-brief-model" agents
+        desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
+      <EngineModelCard title="Commitments scan model" icon={CheckSquare} base="/api/accountability/model" agents
+        desc="Scans your day for promises you made and decisions you took (Commitments & Decisions). A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <VoiceModelCard />
     </div>
   );

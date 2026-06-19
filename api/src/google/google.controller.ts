@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query, ServiceUnavailableException } from '@nestjs/common';
 import { GoogleService } from './google.service';
 import { GmailBriefService } from './gmail-brief.service';
 import { GmailRequestService } from './gmail-request.service';
@@ -163,6 +163,22 @@ export class GoogleController {
     } catch (e) {
       mapErr(e);
     }
+  }
+
+  @Get('gmail-brief-model')
+  async getBriefModel() {
+    return this.brief.briefModel();
+  }
+
+  @Put('gmail-brief-model')
+  async setBriefModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.brief.setBriefModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('gmail-brief-models')
+  async briefModels() {
+    return { models: await this.brief.listModels() };
   }
 
   @Post('gmail/brief/generate')

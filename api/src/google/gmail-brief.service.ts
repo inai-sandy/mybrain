@@ -83,6 +83,28 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
   }
 
+  // ---- engine picker (own model; defaults to Sonnet, can run free on Codex/Gemini) ----
+  async briefModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'gmailbrief.llm' } });
+    if (row) {
+      try {
+        const v = JSON.parse(row.value);
+        if (v?.provider && v?.model) return v;
+      } catch {
+        /* ignore */
+      }
+    }
+    return BRIEF_MODEL;
+  }
+  async setBriefModel(provider: string, model: string): Promise<LlmConfig> {
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.setSetting('gmailbrief.llm', JSON.stringify(cfg));
+    return cfg;
+  }
+  async listModels() {
+    return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
+  }
+
   /** Once past 11:58 PM local, write today's brief if it isn't done. If that window was missed
    *  (restart), backfill yesterday's the next day so the history has no gaps. */
   async briefTick(): Promise<void> {
@@ -157,6 +179,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     const items: BriefItem[] = emails.map((e) => ({ from: cleanFrom(e.from), subject: e.subject, time: e.date, threadId: e.threadId }));
     let summary: string;
     let sections: BriefSection[] = [];
+    let briefModelUsed = BRIEF_MODEL.model;
     if (!emails.length) {
       summary = 'No important emails today — just promotions and newsletters, which were skipped.';
     } else {
@@ -170,7 +193,9 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
         `- In points you may use **bold** for names, companies, amounts, dates. Prefix anything needing a reply with "Action:".\n` +
         `- Keep it brief and skimmable.\n\n` +
         `=== IMPORTANT EMAILS ON ${day} (${emails.length}) ===\n${lines}`;
-      const raw = (await this.llm.completeWith(BRIEF_MODEL, prompt, 1200, 'gmail-brief'))?.trim() || '';
+      const res = await this.llm.completeWithModel(await this.briefModel(), prompt, 1200, 'gmail-brief');
+      const raw = (res.text || '').trim();
+      briefModelUsed = res.model || briefModelUsed;
       let overview = '';
       try {
         const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -198,8 +223,8 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
 
     const row = await this.prisma.gmailBrief.upsert({
       where: { day },
-      create: { day, unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: BRIEF_MODEL.model },
-      update: { unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: BRIEF_MODEL.model },
+      create: { day, unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: briefModelUsed },
+      update: { unread: unread ?? 0, summary, sections: JSON.stringify(sections), items: JSON.stringify(items), model: briefModelUsed },
     });
     // Index only a FINALIZED brief — the nightly build (push), or a PAST day (already complete).
     // A partial mid-day on-open build of TODAY's brief is NOT indexed; tonight's finalize handles it. (BEA-343)
