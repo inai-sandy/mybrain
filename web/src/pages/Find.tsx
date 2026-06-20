@@ -21,6 +21,7 @@ const TYPE_STYLE: Record<string, string> = {
   meeting: 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/30',
   skill: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30',
   email: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30',
+  vault: 'bg-emerald-600/10 text-emerald-700 dark:text-emerald-400 border-emerald-600/30',
   document: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
 };
 

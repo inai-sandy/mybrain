@@ -21,6 +21,9 @@ const SOURCE_META: Record<string, SourceMeta> = {
   idea: { label: 'Ideas', model: 'idea', pk: 'id', cadence: 'live' },
   meeting: { label: 'Meetings', model: 'meeting', pk: 'id', cadence: 'live' },
   note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true, cadence: 'live' },
+  // Vault — LABELS ONLY (BEA-368). Index the searchable metadata so items are findable from the brain;
+  // the encrypted secret is NEVER indexed (see buildVaultIndexText). User-toggleable; default on.
+  vault: { label: 'Vault (labels only)', model: 'vaultItem', pk: 'id', cadence: 'live' },
   gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true, cadence: 'nightly' },
   gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true, cadence: 'live' },
   // Derived day-context (regenerate from the user's story) — indexed + reconciled, but not shown as
@@ -31,6 +34,37 @@ const SOURCE_META: Record<string, SourceMeta> = {
   yearstory: { label: 'Year stories', model: 'yearStory', pk: 'id', manageable: false, cadence: 'on-update' },
 };
 const ALL_SOURCES = Object.keys(SOURCE_META);
+
+// Human label per vault type, for readable index text (kept in sync with the web `types.ts`).
+const VAULT_TYPE_LABEL: Record<string, string> = {
+  login: 'Login', note: 'Secure note', card: 'Payment card', bank: 'Bank account', crypto: 'Crypto wallet',
+  identity: 'Identity', apisecret: 'API secret', document: 'Document', license: 'Software license', wifi: 'Wi-Fi', membership: 'Membership',
+};
+
+/**
+ * Build the LABEL-ONLY index text for a vault row (BEA-368). SECURITY: this reads ONLY the plaintext
+ * metadata columns — title, type, website, username, cardType, bankName, collection, tags. It must
+ * NEVER touch `blob` (the encrypted secret) or any decrypted value. Anything added here is sent to
+ * RAG + SuperMemory + the embedding API, so it must stay metadata-only.
+ */
+export function buildVaultIndexText(row: {
+  type: string; title?: string | null; website?: string | null; username?: string | null;
+  cardType?: string | null; bankName?: string | null; collection?: string | null; tags?: string | null;
+}): { content: string; title: string; tags: string[] } {
+  const typeLabel = VAULT_TYPE_LABEL[row.type] || 'Vault item';
+  const name = (row.title || '').trim() || typeLabel;
+  const lines = [
+    `Vault — ${typeLabel}: ${name}`,
+    row.website ? `Website: ${row.website}` : '',
+    row.username ? `Username: ${row.username}` : '',
+    row.cardType ? `Card: ${row.cardType}` : '',
+    row.bankName ? `Bank: ${row.bankName}` : '',
+    row.collection ? `Collection: ${row.collection}` : '',
+    row.tags ? `Tags: ${row.tags}` : '',
+  ].filter(Boolean);
+  const userTags = (row.tags || '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
+  return { content: lines.join('\n'), title: `Vault: ${name}`.slice(0, 120), tags: ['vault', row.type, ...userTags] };
+}
 
 @Injectable()
 export class MemoryService implements OnModuleInit, OnModuleDestroy {
@@ -143,6 +177,19 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       await this.deleteDoc(opts.prevSupermemoryId, opts.prevRagId);
     }
     await this.enqueue(text, { refType: opts.refType, refId: opts.refId, title: opts.title, tags: opts.tags });
+  }
+
+  /**
+   * Index (or re-index) a vault item's LABELS ONLY (BEA-368). The encrypted secret is never passed.
+   * Best-effort: indexing must never block or fail the vault write. Respects the section toggle.
+   */
+  async indexVaultItem(row: any): Promise<void> {
+    try {
+      const built = buildVaultIndexText(row);
+      await this.indexEntity({ refType: 'vault', refId: row.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: row.supermemoryId, prevRagId: row.ragId });
+    } catch (e) {
+      this.log.warn(`vault index failed (${row?.id}): ${(e as Error)?.message ?? e}`);
+    }
   }
 
   /** Write a returned store doc id back onto the right table (by its delegate + primary key). */
@@ -283,6 +330,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     const out: Array<{ type: string; unindexed: number }> = [];
     for (const t of ALL_SOURCES) {
       if (!this.sourceEnabled(t)) continue;
+      if (!this.modelOf(t)) continue;
       const unindexed = await this.modelOf(t).count({
         where: { OR: [{ ragId: null }, { supermemoryId: null }] },
       });
@@ -296,6 +344,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     const out = [];
     for (const type of ALL_SOURCES) {
       if (SOURCE_META[type].manageable === false) continue; // derived/internal sources aren't shown as toggles
+      if (!this.modelOf(type)) continue;
       const total = await this.modelOf(type).count();
       const indexed = await this.modelOf(type).count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
       const src = await this.prisma.indexSource.findUnique({ where: { type } }).catch(() => null);
@@ -317,6 +366,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
 
   /** Remove a section's docs from BOTH stores and clear its link ids. Source rows are untouched. */
   async purgeType(type: string): Promise<number> {
+    if (!this.modelOf(type)) return 0;
     const pk = this.pkOf(type);
     const rows = await this.modelOf(type).findMany({ where: { OR: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
     for (const r of rows) {
@@ -382,6 +432,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   /** (Re)index every row of a section (used by manual reindex + enabling). Idempotent. */
   async reindexType(type: string): Promise<number> {
     if (!this.sourceEnabled(type)) return 0;
+    if (!this.modelOf(type)) return 0;
     const pk = this.pkOf(type);
     const rows = await this.modelOf(type).findMany({});
     let n = 0;
@@ -421,6 +472,9 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         const text = [row.title, row.summary].filter(Boolean).join('\n\n');
         return text ? { content: text, title: row.title || 'Document', tags: parseTags(row.tags) } : null;
       }
+      case 'vault':
+        // Metadata-only — never the encrypted blob. (BEA-368)
+        return row.title || row.website || row.username ? buildVaultIndexText(row) : null;
       case 'note': {
         let checklist = '';
         try {
@@ -476,6 +530,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         // The Daily Email Brief is clock-bound — its own service indexes only the finalized nightly
         // build, so the generic safety-net must NOT pull in today's partial brief. (BEA-343)
         if (table === 'gmailbrief') continue;
+        if (!this.modelOf(table)) continue; // unknown/missing delegate — never let one source halt the sweep
         const rows = await this.modelOf(table).findMany({
           where: { OR: [{ ragId: null }, { supermemoryId: null }] },
           take: 200,

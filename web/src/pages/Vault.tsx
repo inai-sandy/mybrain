@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2, Plus, Fingerprint, Trash2 } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { vaultApi as vApi } from '../vault/client';
@@ -284,6 +285,8 @@ function VaultHome() {
   const [audit, setAudit] = useState<Record<string, Audit>>({});
   const [bioOpen, setBioOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  // Deep-link from global search (/vault?item=<id>) — open that item once the vault is unlocked + loaded.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   async function exportVault() {
     const all = await vaultApi.list({ pageSize: 1000 });
@@ -309,6 +312,16 @@ function VaultHome() {
   useEffect(() => {
     refresh();
   }, []);
+
+  // Open the deep-linked item (from global search), then clear the param so re-locking won't reopen it.
+  const wantItem = searchParams.get('item');
+  useEffect(() => {
+    if (!wantItem || loading) return;
+    const found = rows.find((r) => r.id === wantItem);
+    if (found) setEditing(found);
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantItem, loading, rows]);
 
   // Local password health: decrypt logins in-memory, flag weak + reused (by hash, never storing the plaintext).
   useEffect(() => {
