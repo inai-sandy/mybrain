@@ -340,15 +340,21 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Status of every manageable section for the Settings index manager. (BEA-335) */
-  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; lastIndexedAt: Date | null; enabled: boolean; mandatory: boolean; cadence: string }>> {
+  async sourceStatus(): Promise<Array<{ type: string; label: string; total: number; indexed: number; ragIndexed: number; smIndexed: number; lastIndexedAt: Date | null; enabled: boolean; mandatory: boolean; cadence: string }>> {
     const out = [];
     for (const type of ALL_SOURCES) {
       if (SOURCE_META[type].manageable === false) continue; // derived/internal sources aren't shown as toggles
       if (!this.modelOf(type)) continue;
-      const total = await this.modelOf(type).count();
-      const indexed = await this.modelOf(type).count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } });
+      const model = this.modelOf(type);
+      // Per-store counts so the UI can show whether RAG and SuperMemory are actually in sync. (BEA-370)
+      const [total, indexed, ragIndexed, smIndexed] = await Promise.all([
+        model.count(),
+        model.count({ where: { AND: [{ ragId: { not: null } }, { supermemoryId: { not: null } }] } }),
+        model.count({ where: { ragId: { not: null } } }),
+        model.count({ where: { supermemoryId: { not: null } } }),
+      ]);
       const src = await this.prisma.indexSource.findUnique({ where: { type } }).catch(() => null);
-      out.push({ type, label: SOURCE_META[type].label, total, indexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type), mandatory: !!SOURCE_META[type].mandatory, cadence: SOURCE_META[type].cadence || 'live' });
+      out.push({ type, label: SOURCE_META[type].label, total, indexed, ragIndexed, smIndexed, lastIndexedAt: src?.lastIndexedAt ?? null, enabled: this.sourceEnabled(type), mandatory: !!SOURCE_META[type].mandatory, cadence: SOURCE_META[type].cadence || 'live' });
     }
     return out;
   }
