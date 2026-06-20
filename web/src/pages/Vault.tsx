@@ -292,9 +292,9 @@ function VaultHome() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   async function exportVault() {
-    const all = await vaultApi.list({ pageSize: 1000 });
+    const items = await vaultApi.listAll(); // ALL items, not just the first page (BEA-390)
     // The blobs are already ciphertext — this backup is only readable with your vault key.
-    const data = { app: 'mybrain-vault', exportedAt: new Date().toISOString(), items: all.items };
+    const data = { app: 'mybrain-vault', exportedAt: new Date().toISOString(), items };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -306,8 +306,8 @@ function VaultHome() {
   async function refresh() {
     setLoading(true);
     try {
-      const r = await vaultApi.list({ pageSize: 1000 }); // list is metadata + ciphertext only
-      setRows(r.items);
+      const items = await vaultApi.listAll(); // every item (paged) — metadata + ciphertext only (BEA-390)
+      setRows(items);
     } finally {
       setLoading(false);
     }

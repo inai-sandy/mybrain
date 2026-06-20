@@ -126,6 +126,13 @@ describe('VaultService', () => {
     expect((await svc.listItems({ search: 'nothere' })).total).toBe(0);
   });
 
+  it('allows a large page so big imports load (cap 500, default 25)', async () => {
+    const svc = new VaultService(makePrisma(), memory);
+    expect((await svc.listItems({})).pageSize).toBe(25); // default
+    expect((await svc.listItems({ pageSize: 1000 })).pageSize).toBe(500); // clamped up to 500, not 100
+    expect((await svc.listItems({ pageSize: 300 })).pageSize).toBe(300);
+  });
+
   it('deletes one item by id (no bulk delete)', async () => {
     const svc = new VaultService(makePrisma(), memory);
     const a = await svc.createItem({ type: 'note', blob: blob(), title: 'A' });

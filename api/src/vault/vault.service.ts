@@ -100,7 +100,7 @@ export class VaultService {
   // ---- items (ciphertext only) ----
   async listItems(q: { search?: string; type?: string; collection?: string; favorite?: boolean; sort?: string; page?: number; pageSize?: number }) {
     const page = Math.max(1, Number(q.page) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(q.pageSize) || 25));
+    const pageSize = Math.min(500, Math.max(1, Number(q.pageSize) || 25));
     const where: any = {};
     if (q.type) where.type = q.type;
     if (q.collection) where.collection = q.collection;
