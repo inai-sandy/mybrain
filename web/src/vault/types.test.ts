@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { typeDef, splitForm, mergeForm } from './types';
+import { typeDef, splitForm, mergeForm, sectionedFields, VAULT_GROUPS, VAULT_TYPES } from './types';
 import type { VaultItemDTO } from './client';
 
 describe('login field mapping (metadata vs secret boundary)', () => {
@@ -69,5 +69,31 @@ describe('high-stakes types (BEA-350)', () => {
     const { metadata, secret } = splitForm(typeDef('identity'), { title: 'Passport', fullName: 'Sandeep', govId: 'ABCDE1234F' });
     expect(Object.values(metadata)).not.toContain('ABCDE1234F');
     expect(secret.govId).toBe('ABCDE1234F');
+  });
+});
+
+describe('editor layout helpers (BEA-366)', () => {
+  it('sectionedFields keeps the name field first and unsectioned, then groups by section', () => {
+    const groups = sectionedFields(typeDef('card'));
+    expect(groups[0].section).toBeNull();
+    expect(groups[0].fields.map((f) => f.key)).toEqual(['title']);
+    const labels = groups.map((g) => g.section);
+    expect(labels).toContain('Card details');
+    expect(labels).toContain('Security');
+    // cvv + pin belong to the same "Security" block
+    const security = groups.find((g) => g.section === 'Security');
+    expect(security?.fields.map((f) => f.key)).toEqual(['cvv', 'pin']);
+  });
+
+  it('every section group preserves all of the type’s fields exactly once', () => {
+    for (const def of VAULT_TYPES) {
+      const flat = sectionedFields(def).flatMap((g) => g.fields.map((f) => f.key));
+      expect(flat).toEqual(def.fields.map((f) => f.key));
+    }
+  });
+
+  it('VAULT_GROUPS covers every type exactly once', () => {
+    const grouped = VAULT_GROUPS.flatMap((g) => g.types.map((t) => t.type)).sort();
+    expect(grouped).toEqual(VAULT_TYPES.map((t) => t.type).sort());
   });
 });
