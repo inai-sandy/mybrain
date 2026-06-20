@@ -365,7 +365,7 @@ function VaultHome() {
 
   const toast = useToast();
   // Card/table view, remembered per device (default table — fastest to scan a big vault). (BEA-391)
-  const [view, setView] = useState<'table' | 'cards'>(() => (localStorage.getItem('vault.view') === 'cards' ? 'cards' : 'table'));
+  const [view, setView] = useState<'table' | 'cards'>(() => (localStorage.getItem('vault.view') === 'table' ? 'table' : 'cards'));
   useEffect(() => { localStorage.setItem('vault.view', view); }, [view]);
   // Active type tab.
   const [tab, setTab] = useState<string>('all');
@@ -432,41 +432,38 @@ function VaultHome() {
   }, [rows, tab, securityIds]);
 
   const cellBtn = 'text-zinc-400 hover:text-emerald-600 transition-colors';
-  // Table columns (BEA-391). Metadata only in the table; the password is copied via decrypt, never shown.
+  // Table columns (BEA-391/392). Fixed layout — columns fill the width and truncate, no horizontal scroll.
+  // Primary column is the Website (falls back to the title). Metadata only; password copied via decrypt.
   const columns: Column<VaultItemDTO>[] = [
     {
-      key: 'title', label: 'Name', sortable: true,
+      key: 'website', label: 'Website', sortable: true, width: '42%',
       render: (r) => (
         <div className="flex items-center gap-2.5 min-w-0">
-          <LetterAvatar name={r.title || r.website || '?'} type={r.type} />
-          <span className="font-medium truncate max-w-[200px]">{r.title || 'Untitled'}</span>
+          <LetterAvatar name={r.website || r.title || '?'} type={r.type} />
+          <span className="font-medium truncate">{r.website || r.title || 'Untitled'}</span>
         </div>
       ),
     },
     {
-      key: 'username', label: 'Username',
+      key: 'username', label: 'Username', width: '30%',
       render: (r) => (r.username ? (
-        <span className="inline-flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300">
-          <span className="truncate max-w-[160px]">{r.username}</span>
-          <button onClick={(e) => { e.stopPropagation(); copyUsername(r); }} title="Copy username" className={cellBtn}><Copy size={13} /></button>
+        <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300 min-w-0">
+          <span className="truncate">{r.username}</span>
+          <button onClick={(e) => { e.stopPropagation(); copyUsername(r); }} title="Copy username" className={cellBtn + ' shrink-0'}><Copy size={13} /></button>
         </span>
       ) : <span className="text-zinc-300 dark:text-zinc-600">—</span>),
     },
     {
-      key: 'website', label: 'Website',
-      render: (r) => (r.website ? <span className="text-zinc-500 truncate max-w-[180px] inline-block align-bottom">{r.website}</span> : <span className="text-zinc-300 dark:text-zinc-600">—</span>),
-    },
-    {
-      key: 'collection', label: '',
+      key: 'collection', label: '', width: '16%',
       render: (r) => (
-        <div className="flex items-center gap-1.5">
-          {audit[r.id]?.weak ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">Weak</span> : audit[r.id]?.reused ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">Reused</span> : null}
-          {r.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{r.collection}</span>}
+        <div className="flex items-center gap-1.5 min-w-0">
+          {audit[r.id]?.weak ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">Weak</span> : audit[r.id]?.reused ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">Reused</span> : null}
+          {r.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 truncate">{r.collection}</span>}
         </div>
       ),
     },
     {
-      key: 'id', label: '', align: 'right',
+      key: 'id', label: '', align: 'right', width: '12%',
       render: (r) => (
         <div className="flex items-center justify-end gap-2">
           {hasQuickPassword(r.type) && <button onClick={(e) => { e.stopPropagation(); copyPassword(r); }} title="Copy password" className={cellBtn}><KeyRound size={14} /></button>}
@@ -556,7 +553,7 @@ function VaultHome() {
       {/* Sticky icon-only type tabs + view toggle (BEA-391) */}
       <div className="sticky top-0 z-20 -mx-4 px-4 py-2 mb-2 bg-white/85 dark:bg-zinc-950/85 backdrop-blur border-b border-zinc-200/60 dark:border-zinc-800/60">
         <div className="flex items-center gap-2">
-          <div className="flex-1 flex gap-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          <div className="flex-1 flex flex-wrap gap-1">
             {tabs.map((t) => {
               const on = tab === t.key;
               const warn = t.key === 'security';
@@ -601,6 +598,7 @@ function VaultHome() {
           filters={filters}
           sortOptions={sortOptions}
           pageSize={15}
+          tableLayoutFixed
           emptyText={tab === 'fav' ? 'No pinned items yet — tap the ☆ on any item to pin it.' : tab === 'security' ? 'No weak or reused passwords. 🎉' : 'Nothing here yet.'}
           onRowClick={(it) => setEditing(it)}
         />

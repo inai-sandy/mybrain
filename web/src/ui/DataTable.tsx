@@ -5,6 +5,7 @@ export type Column<T> = {
   label: string;
   sortable?: boolean;
   align?: 'left' | 'right';
+  width?: string; // used with tableLayoutFixed to give the column a fixed share (e.g. '40%')
   render?: (row: T) => ReactNode;
 };
 
@@ -34,6 +35,7 @@ export function DataTable<T extends Record<string, any>>({
   gridClassName,
   sortOptions = [],
   onRowClick,
+  tableLayoutFixed = false,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -47,6 +49,7 @@ export function DataTable<T extends Record<string, any>>({
   gridClassName?: string;
   sortOptions?: SortOption[];
   onRowClick?: (row: T) => void;
+  tableLayoutFixed?: boolean; // fixed layout: columns fill the width, content truncates, no horizontal scroll
 }) {
   const [q, setQ] = useState('');
   const [active, setActive] = useState<Record<string, string>>({});
@@ -145,13 +148,14 @@ export function DataTable<T extends Record<string, any>>({
 
       {/* Desktop table (hidden in cardsOnly mode) */}
       {!cardsOnly && (
-      <div className={(renderCard ? 'hidden sm:block ' : '') + 'overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800'}>
-        <table className="w-full text-sm">
+      <div className={(renderCard ? 'hidden sm:block ' : '') + (tableLayoutFixed ? 'overflow-hidden' : 'overflow-x-auto') + ' rounded-lg border border-zinc-200 dark:border-zinc-800'}>
+        <table className={'w-full text-sm ' + (tableLayoutFixed ? 'table-fixed' : '')}>
           <thead className="bg-zinc-50 dark:bg-zinc-900 text-left">
             <tr>
               {columns.map((c) => (
                 <th
                   key={c.key}
+                  style={tableLayoutFixed && c.width ? { width: c.width } : undefined}
                   className={'px-3 py-2 font-semibold text-zinc-500 dark:text-zinc-400 select-none ' + (c.align === 'right' ? 'text-right' : '')}
                 >
                   {c.sortable ? (
@@ -190,7 +194,7 @@ export function DataTable<T extends Record<string, any>>({
                   className={'border-t border-zinc-100 dark:border-zinc-800 ' + (onRowClick ? 'cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50' : '')}
                 >
                   {columns.map((c) => (
-                    <td key={c.key} className={'px-3 py-2 ' + (c.align === 'right' ? 'text-right' : '')}>
+                    <td key={c.key} className={'px-3 py-2 ' + (c.align === 'right' ? 'text-right ' : '') + (tableLayoutFixed ? 'overflow-hidden' : '')}>
                       {c.render ? c.render(row) : String(row[c.key] ?? '')}
                     </td>
                   ))}
