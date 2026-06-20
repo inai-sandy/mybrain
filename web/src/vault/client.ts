@@ -40,6 +40,19 @@ export const vaultApi = {
     for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '') params.set(k, String(v));
     return fetch(`/api/vault/items?${params.toString()}`).then((r) => j<{ items: VaultItemDTO[]; total: number; page: number; pageSize: number }>(r));
   },
+  // Fetch EVERY item by paging through (the server caps a single request), so the Vault list and export
+  // cover all items, not just the first page. (BEA-390)
+  listAll: async (): Promise<VaultItemDTO[]> => {
+    const pageSize = 500;
+    const all: VaultItemDTO[] = [];
+    for (let page = 1; ; page++) {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      const r = await fetch(`/api/vault/items?${params.toString()}`).then((res) => j<{ items: VaultItemDTO[]; total: number }>(res));
+      all.push(...r.items);
+      if (all.length >= r.total || r.items.length < pageSize) break;
+    }
+    return all;
+  },
 
   get: (id: string) => fetch(`/api/vault/items/${id}`).then((r) => j<VaultItemDTO>(r)),
 
