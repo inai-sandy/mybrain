@@ -38,7 +38,7 @@ const btn = 'rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2
 export function Vault() {
   const { status } = useVault();
   return (
-    <div className="mx-auto max-w-xl px-4 py-8">
+    <div className="mx-auto max-w-3xl px-4 py-8">
       {status === 'loading' && (
         <div className="flex items-center justify-center py-20 text-zinc-400">
           <Loader2 className="animate-spin" size={20} />
