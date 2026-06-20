@@ -33,6 +33,7 @@ export function DataTable<T extends Record<string, any>>({
   cardsOnly = false,
   gridClassName,
   sortOptions = [],
+  onRowClick,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -45,6 +46,7 @@ export function DataTable<T extends Record<string, any>>({
   cardsOnly?: boolean;
   gridClassName?: string;
   sortOptions?: SortOption[];
+  onRowClick?: (row: T) => void;
 }) {
   const [q, setQ] = useState('');
   const [active, setActive] = useState<Record<string, string>>({});
@@ -182,7 +184,11 @@ export function DataTable<T extends Record<string, any>>({
               </tr>
             ) : (
               pageRows.map((row, i) => (
-                <tr key={i} className="border-t border-zinc-100 dark:border-zinc-800">
+                <tr
+                  key={i}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  className={'border-t border-zinc-100 dark:border-zinc-800 ' + (onRowClick ? 'cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50' : '')}
+                >
                   {columns.map((c) => (
                     <td key={c.key} className={'px-3 py-2 ' + (c.align === 'right' ? 'text-right' : '')}>
                       {c.render ? c.render(row) : String(row[c.key] ?? '')}
