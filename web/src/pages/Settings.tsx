@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -163,7 +163,8 @@ function AppearanceSection() {
   );
 }
 
-type IndexSrc = { type: string; label: string; total: number; indexed: number; lastIndexedAt: string | null; enabled: boolean; mandatory?: boolean; cadence?: 'live' | 'on-update' | 'nightly' };
+type IndexSrc = { type: string; label: string; total: number; indexed: number; ragIndexed: number; smIndexed: number; lastIndexedAt: string | null; enabled: boolean; mandatory?: boolean; cadence?: 'live' | 'on-update' | 'nightly' };
+type SyncHealth = { outbox: Array<{ status: string; count: number }>; unindexed: Array<{ type: string; unindexed: number }> };
 
 const CADENCE_STYLE: Record<string, string> = {
   live: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
@@ -196,13 +197,44 @@ function IndexSection() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [confirmOff, setConfirmOff] = useState<IndexSrc | null>(null);
   const [rechunk, setRechunk] = useState<{ running: boolean; total: number; done: number; rechunked: number; skipped: number } | null>(null);
+  const [health, setHealth] = useState<SyncHealth | null>(null);
+  const [syncBusy, setSyncBusy] = useState(false);
 
   async function load() {
     try {
-      const r = await fetch('/api/explore/sources');
-      setRows(await r.json());
+      const [srcR, healthR] = await Promise.all([fetch('/api/explore/sources'), fetch('/api/memory/status')]);
+      setRows(await srcR.json());
+      setHealth(await healthR.json().catch(() => null));
     } catch {
       setRows([]);
+    }
+  }
+
+  const pendingJobs = health?.outbox.find((o) => o.status === 'pending')?.count ?? 0;
+  const failedJobs = health?.outbox.find((o) => o.status === 'failed')?.count ?? 0;
+
+  async function retryFailed() {
+    setSyncBusy(true);
+    try {
+      await fetch('/api/memory/retry', { method: 'POST' });
+      toast('success', 'Retrying failed syncs…');
+      setTimeout(load, 1500);
+    } catch {
+      toast('error', 'Could not retry.');
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+  async function reconcileNow() {
+    setSyncBusy(true);
+    try {
+      await fetch('/api/memory/reconcile', { method: 'POST' });
+      toast('success', 'Reconciling RAG ↔ SuperMemory…');
+      setTimeout(load, 1500);
+    } catch {
+      toast('error', 'Could not reconcile.');
+    } finally {
+      setSyncBusy(false);
     }
   }
   async function pollRechunk() {
@@ -275,8 +307,26 @@ function IndexSection() {
           <Database size={18} className="text-emerald-600" /> Search index
         </h2>
         <p className="text-sm text-zinc-500 mb-4">
-          What your <span className="font-medium text-zinc-600 dark:text-zinc-300">Explore</span> brain can search. Turn a section off to remove it from search (your actual data is never deleted — turning it back on re-indexes it).
+          What your <span className="font-medium text-zinc-600 dark:text-zinc-300">Explore</span> brain can search. Everything is mirrored to <b>two</b> stores — <b>RAG</b> (on your server) and <b>SuperMemory</b> (cloud). Turn a section off to remove it from search (your actual data is never deleted — turning it back on re-indexes it).
         </p>
+
+        {/* Sync health: queue state across both stores, with manual retry / reconcile. (BEA-370) */}
+        {health && (
+          <div className={'mb-4 rounded-lg border p-3 flex items-center justify-between gap-3 ' + (failedJobs > 0 ? 'border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30' : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950')}>
+            <div className="text-sm flex items-center gap-2 min-w-0">
+              {failedJobs > 0 ? <AlertTriangle size={15} className="text-amber-500 shrink-0" /> : pendingJobs > 0 ? <RefreshCw size={15} className="text-emerald-600 shrink-0 animate-spin" /> : <Check size={15} className="text-emerald-600 shrink-0" />}
+              <span className="text-zinc-600 dark:text-zinc-300 truncate">
+                {failedJobs > 0 ? `${failedJobs} sync${failedJobs === 1 ? '' : 's'} failed` : pendingJobs > 0 ? `Syncing ${pendingJobs} item${pendingJobs === 1 ? '' : 's'}…` : 'RAG & SuperMemory in sync'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {failedJobs > 0 && (
+                <button onClick={retryFailed} disabled={syncBusy} className="rounded-lg border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 px-2.5 py-1 text-xs hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50">Retry failed</button>
+              )}
+              <button onClick={reconcileNow} disabled={syncBusy} title="Re-check both stores and fill any gaps" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">Reconcile now</button>
+            </div>
+          </div>
+        )}
 
         {rows === null && <div className="text-sm text-zinc-400">Loading…</div>}
         {rows?.length === 0 && <div className="text-sm text-zinc-400">No sections yet.</div>}
@@ -308,6 +358,16 @@ function IndexSection() {
                         </>
                       )}
                     </div>
+                    {s.enabled && s.total > 0 && (
+                      <div className="text-[11px] mt-1 flex items-center gap-2 flex-wrap">
+                        <span className="text-zinc-500">RAG <span className="tabular-nums text-zinc-600 dark:text-zinc-300">{s.ragIndexed}</span> · SuperMemory <span className="tabular-nums text-zinc-600 dark:text-zinc-300">{s.smIndexed}</span></span>
+                        {s.ragIndexed === s.smIndexed ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> in sync</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> out of sync</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {s.enabled && s.total > 0 && (
