@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2, Plus, Fingerprint, Trash2 } from 'lucide-react';
+import { Lock, ShieldCheck, Eye, EyeOff, KeyRound, Copy, Download, Check, AlertTriangle, Loader2, Plus, Fingerprint, Trash2, LayoutGrid, Rows3, ShieldAlert, Layers } from 'lucide-react';
+import { copySecret } from '../vault/clipboard';
 import { Sheet } from '../ui/Sheet';
 import { vaultApi as vApi } from '../vault/client';
 import { useToast } from '../ui/Toast';
@@ -362,28 +363,37 @@ function VaultHome() {
     };
   }, [rows, decrypt]);
 
-  // Search runs over METADATA columns only — the encrypted blob is never a column, so it can't be searched.
-  const columns: Column<VaultItemDTO>[] = [
-    { key: 'title', label: 'Name' },
-    { key: 'username', label: 'Username' },
-    { key: 'website', label: 'Website' },
-    { key: 'tags', label: 'Tags' },
-  ];
-  const filters: Filter[] = [
-    { key: 'type', label: 'Type', options: VAULT_TYPES.map((t) => ({ value: t.type, label: t.label })), match: (r, v) => r.type === v },
-    { key: 'collection', label: 'Collection', options: COLLECTIONS.map((c) => ({ value: c, label: c })), match: (r, v) => r.collection === v },
-    { key: 'favorite', label: 'Pinned', options: [{ value: '1', label: '★ Favorites' }], match: (r) => !!r.favorite },
-  ];
+  const toast = useToast();
+  // Card/table view, remembered per device (default table — fastest to scan a big vault). (BEA-391)
+  const [view, setView] = useState<'table' | 'cards'>(() => (localStorage.getItem('vault.view') === 'cards' ? 'cards' : 'table'));
+  useEffect(() => { localStorage.setItem('vault.view', view); }, [view]);
+  // Active type tab.
+  const [tab, setTab] = useState<string>('all');
 
   async function toggleFav(it: VaultItemDTO) {
     setRows((rs) => rs.map((r) => (r.id === it.id ? { ...r, favorite: !r.favorite } : r)));
     await vaultApi.setFavorite(it.id, !it.favorite).catch(() => refresh());
   }
-  const sortOptions: SortOption[] = [
-    { label: 'Newest', key: 'createdAt', dir: -1 },
-    { label: 'Oldest', key: 'createdAt', dir: 1 },
-    { label: 'Name', key: 'title', dir: 1 },
-  ];
+  // Inline copy — never opens the item; clipboard auto-clears in 30s; audit-logged.
+  async function copyUsername(it: VaultItemDTO) {
+    if (!it.username) return;
+    await copySecret(it.username);
+    vaultApi.addAudit(it.id, 'copied');
+    toast('success', 'Username copied — clears in 30s');
+  }
+  async function copyPassword(it: VaultItemDTO) {
+    try {
+      const s = await decrypt<Record<string, string>>(it.blob); // decrypts in-browser only
+      const pw = s.password || '';
+      if (!pw) return toast('error', 'No password on this item');
+      await copySecret(pw);
+      vaultApi.addAudit(it.id, 'copied');
+      toast('success', 'Password copied — clears in 30s');
+    } catch {
+      toast('error', 'Could not copy');
+    }
+  }
+  const hasQuickPassword = (t: string) => t === 'login' || t === 'wifi';
 
   // Local security summary (all derived in-memory, nothing leaves the browser).
   const total = rows.length;
@@ -392,6 +402,87 @@ function VaultHome() {
   const favCount = rows.filter((r) => r.favorite).length;
   const allHealthy = !loading && total > 0 && weakCount === 0 && reusedCount === 0;
   const iconBtn = 'rounded-lg border border-zinc-300 dark:border-zinc-700 p-2 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors';
+
+  // ---- Tabs: All · ★ Favorites · ⚠ Security (if any) · then each type that has items. ----
+  const typeCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of rows) m[r.type] = (m[r.type] || 0) + 1;
+    return m;
+  }, [rows]);
+  const securityIds = useMemo(() => new Set(Object.entries(audit).filter(([, a]) => a.weak || a.reused).map(([id]) => id)), [audit]);
+  const tabs = useMemo(() => {
+    const list: { key: string; icon: typeof Layers; label: string; count: number }[] = [
+      { key: 'all', icon: Layers, label: 'All items', count: total },
+      { key: 'fav', icon: Star, label: 'Favorites', count: favCount },
+    ];
+    if (securityIds.size > 0) list.push({ key: 'security', icon: ShieldAlert, label: 'Needs attention', count: securityIds.size });
+    for (const t of VAULT_TYPES) if (typeCounts[t.type]) list.push({ key: t.type, icon: t.icon, label: t.label, count: typeCounts[t.type] });
+    return list;
+  }, [rows, total, favCount, securityIds, typeCounts]);
+  const activeTab = tabs.find((t) => t.key === tab) || tabs[0];
+  // If the active tab disappears (last item of a type deleted, or Security cleared), fall back to All.
+  useEffect(() => {
+    if (!tabs.some((t) => t.key === tab)) setTab('all');
+  }, [tabs, tab]);
+  const tabRows = useMemo(() => {
+    if (tab === 'all') return rows;
+    if (tab === 'fav') return rows.filter((r) => r.favorite);
+    if (tab === 'security') return rows.filter((r) => securityIds.has(r.id));
+    return rows.filter((r) => r.type === tab);
+  }, [rows, tab, securityIds]);
+
+  const cellBtn = 'text-zinc-400 hover:text-emerald-600 transition-colors';
+  // Table columns (BEA-391). Metadata only in the table; the password is copied via decrypt, never shown.
+  const columns: Column<VaultItemDTO>[] = [
+    {
+      key: 'title', label: 'Name', sortable: true,
+      render: (r) => (
+        <div className="flex items-center gap-2.5 min-w-0">
+          <LetterAvatar name={r.title || r.website || '?'} type={r.type} />
+          <span className="font-medium truncate max-w-[200px]">{r.title || 'Untitled'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'username', label: 'Username',
+      render: (r) => (r.username ? (
+        <span className="inline-flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300">
+          <span className="truncate max-w-[160px]">{r.username}</span>
+          <button onClick={(e) => { e.stopPropagation(); copyUsername(r); }} title="Copy username" className={cellBtn}><Copy size={13} /></button>
+        </span>
+      ) : <span className="text-zinc-300 dark:text-zinc-600">—</span>),
+    },
+    {
+      key: 'website', label: 'Website',
+      render: (r) => (r.website ? <span className="text-zinc-500 truncate max-w-[180px] inline-block align-bottom">{r.website}</span> : <span className="text-zinc-300 dark:text-zinc-600">—</span>),
+    },
+    {
+      key: 'collection', label: '',
+      render: (r) => (
+        <div className="flex items-center gap-1.5">
+          {audit[r.id]?.weak ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">Weak</span> : audit[r.id]?.reused ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">Reused</span> : null}
+          {r.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{r.collection}</span>}
+        </div>
+      ),
+    },
+    {
+      key: 'id', label: '', align: 'right',
+      render: (r) => (
+        <div className="flex items-center justify-end gap-2">
+          {hasQuickPassword(r.type) && <button onClick={(e) => { e.stopPropagation(); copyPassword(r); }} title="Copy password" className={cellBtn}><KeyRound size={14} /></button>}
+          <button onClick={(e) => { e.stopPropagation(); toggleFav(r); }} title={r.favorite ? 'Unpin' : 'Pin'} className="text-zinc-300 dark:text-zinc-600 hover:text-amber-500 transition-colors"><Star size={14} className={r.favorite ? 'fill-amber-400 text-amber-400' : ''} /></button>
+        </div>
+      ),
+    },
+  ];
+  const filters: Filter[] = [
+    { key: 'collection', label: 'Collection', options: COLLECTIONS.map((c) => ({ value: c, label: c })), match: (r, v) => r.collection === v },
+  ];
+  const sortOptions: SortOption[] = [
+    { label: 'Newest', key: 'createdAt', dir: -1 },
+    { label: 'Oldest', key: 'createdAt', dir: 1 },
+    { label: 'Name', key: 'title', dir: 1 },
+  ];
 
   return (
     <div className="-mt-2">
@@ -462,18 +553,72 @@ function VaultHome() {
       </div>
       {bioOpen && <BiometricSheet onClose={() => setBioOpen(false)} />}
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        loading={loading}
-        filters={filters}
-        sortOptions={sortOptions}
-        pageSize={12}
-        cardsOnly
-        gridClassName="grid grid-cols-1 sm:grid-cols-2 gap-3"
-        emptyText="Your vault is empty. Tap “Add” to store your first login."
-        renderCard={(it) => <ItemCard key={it.id} item={it} audit={audit[it.id]} onClick={() => setEditing(it)} onFav={() => toggleFav(it)} />}
-      />
+      {/* Sticky icon-only type tabs + view toggle (BEA-391) */}
+      <div className="sticky top-0 z-20 -mx-4 px-4 py-2 mb-2 bg-white/85 dark:bg-zinc-950/85 backdrop-blur border-b border-zinc-200/60 dark:border-zinc-800/60">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex gap-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+            {tabs.map((t) => {
+              const on = tab === t.key;
+              const warn = t.key === 'security';
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  title={`${t.label}${t.count ? ` · ${t.count}` : ''}`}
+                  aria-label={t.label}
+                  className={'relative shrink-0 grid place-items-center h-10 w-11 rounded-lg transition-colors ' + (on ? (warn ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white') : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800')}
+                >
+                  <t.icon size={18} />
+                  {t.count > 0 && (
+                    <span className={'absolute -top-1 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-medium grid place-items-center ' + (on ? 'bg-white ' + (warn ? 'text-amber-600' : 'text-emerald-700') : (warn ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300'))}>
+                      {t.count > 999 ? '999+' : t.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 overflow-hidden">
+            <button onClick={() => setView('table')} title="Table view" aria-label="Table view" className={'p-2 transition-colors ' + (view === 'table' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800')}><Rows3 size={16} /></button>
+            <button onClick={() => setView('cards')} title="Card view" aria-label="Card view" className={'p-2 transition-colors ' + (view === 'cards' ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800')}><LayoutGrid size={16} /></button>
+          </div>
+        </div>
+      </div>
+
+      {/* Active tab heading — keeps the icon-only tabs unambiguous */}
+      <div className="flex items-center gap-2 mb-2">
+        <activeTab.icon size={16} className={tab === 'security' ? 'text-amber-500' : 'text-emerald-600'} />
+        <h2 className="font-semibold">{activeTab.label}</h2>
+        <span className="text-sm text-zinc-400 tabular-nums">· {tabRows.length}</span>
+      </div>
+
+      {view === 'table' ? (
+        <DataTable
+          key="table"
+          columns={columns}
+          rows={tabRows}
+          loading={loading}
+          filters={filters}
+          sortOptions={sortOptions}
+          pageSize={15}
+          emptyText={tab === 'fav' ? 'No pinned items yet — tap the ☆ on any item to pin it.' : tab === 'security' ? 'No weak or reused passwords. 🎉' : 'Nothing here yet.'}
+          onRowClick={(it) => setEditing(it)}
+        />
+      ) : (
+        <DataTable
+          key="cards"
+          columns={columns}
+          rows={tabRows}
+          loading={loading}
+          filters={filters}
+          sortOptions={sortOptions}
+          pageSize={12}
+          cardsOnly
+          gridClassName="grid grid-cols-1 sm:grid-cols-2 gap-3"
+          emptyText={tab === 'fav' ? 'No pinned items yet — tap the ☆ on any item to pin it.' : tab === 'security' ? 'No weak or reused passwords. 🎉' : 'Your vault is empty. Tap “Add” to store your first item.'}
+          renderCard={(it) => <ItemCard key={it.id} item={it} audit={audit[it.id]} onClick={() => setEditing(it)} onFav={() => toggleFav(it)} onCopyUser={() => copyUsername(it)} onCopyPass={() => copyPassword(it)} quickPass={hasQuickPassword(it.type)} />}
+        />
+      )}
 
       {creating && <VaultItemSheet defaultType="login" onClose={() => setCreating(false)} onSaved={refresh} />}
       {editing && <VaultItemSheet item={editing} onClose={() => setEditing(null)} onSaved={refresh} />}
@@ -627,16 +772,37 @@ function BiometricSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ItemCard({ item, audit, onClick, onFav }: { item: VaultItemDTO; audit?: Audit; onClick: () => void; onFav: () => void }) {
+// Local, privacy-safe letter avatar (no external favicons) + a small type-icon badge. (BEA-391)
+const AVATAR_COLORS = ['bg-emerald-500', 'bg-blue-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500', 'bg-indigo-500', 'bg-pink-500', 'bg-cyan-600', 'bg-orange-500', 'bg-fuchsia-500', 'bg-sky-500'];
+function LetterAvatar({ name, type }: { name: string; type: string }) {
+  const def = typeDef(type);
+  const clean = (name || '').trim();
+  const letter = clean ? clean.charAt(0).toUpperCase() : '?';
+  let h = 0;
+  for (let i = 0; i < clean.length; i++) h = (h * 31 + clean.charCodeAt(i)) >>> 0;
+  const color = AVATAR_COLORS[h % AVATAR_COLORS.length];
+  return (
+    <div className="relative shrink-0">
+      <div className={`h-9 w-9 rounded-lg grid place-items-center text-white text-sm font-semibold ${color}`}>{letter}</div>
+      <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-md bg-white dark:bg-zinc-900 ring-1 ring-zinc-200 dark:ring-zinc-700 grid place-items-center text-zinc-500">
+        <def.icon size={9} />
+      </div>
+    </div>
+  );
+}
+
+function ItemCard({ item, audit, onClick, onFav, onCopyUser, onCopyPass, quickPass }: { item: VaultItemDTO; audit?: Audit; onClick: () => void; onFav: () => void; onCopyUser: () => void; onCopyPass: () => void; quickPass: boolean }) {
   const def = typeDef(item.type);
   const sub = itemSubtitle(item);
   const warn = audit?.weak ? 'Weak' : audit?.reused ? 'Reused' : '';
+  const stop = (fn: () => void) => (e: { stopPropagation: () => void }) => { e.stopPropagation(); fn(); };
   return (
-    <div className="group relative w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-700 hover:shadow-sm transition-all">
-      <button onClick={onClick} className="text-left w-full p-4 flex items-center gap-3 active:scale-[0.99] transition-transform">
-        <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600 group-hover:bg-emerald-600/15 transition-colors">
-          <def.icon size={18} />
-        </div>
+    <div
+      onClick={onClick}
+      className="group relative w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-700 hover:shadow-sm transition-all cursor-pointer p-3.5 active:scale-[0.99]"
+    >
+      <div className="flex items-center gap-3">
+        <LetterAvatar name={item.title || item.website || '?'} type={item.type} />
         <div className="min-w-0 flex-1">
           <div className="font-medium truncate pr-6">{item.title || 'Untitled'}</div>
           <div className="text-xs text-zinc-500 truncate">{sub || def.label}</div>
@@ -649,8 +815,22 @@ function ItemCard({ item, audit, onClick, onFav }: { item: VaultItemDTO; audit?:
           )}
           {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{item.collection}</span>}
         </div>
-      </button>
-      <button onClick={onFav} title={item.favorite ? 'Unpin' : 'Pin'} aria-label={item.favorite ? 'Unpin' : 'Pin'} className="absolute top-2 right-2 p-1 text-zinc-300 dark:text-zinc-600 hover:text-amber-500 transition-colors">
+      </div>
+      {(item.username || quickPass) && (
+        <div className="flex items-center gap-1.5 mt-2.5 ml-12">
+          {item.username && (
+            <button onClick={stop(onCopyUser)} className="inline-flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-500 hover:text-emerald-600 hover:border-emerald-400 transition-colors">
+              <Copy size={11} /> User
+            </button>
+          )}
+          {quickPass && (
+            <button onClick={stop(onCopyPass)} className="inline-flex items-center gap-1 rounded-md border border-zinc-200 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-500 hover:text-emerald-600 hover:border-emerald-400 transition-colors">
+              <KeyRound size={11} /> Password
+            </button>
+          )}
+        </div>
+      )}
+      <button onClick={stop(onFav)} title={item.favorite ? 'Unpin' : 'Pin'} aria-label={item.favorite ? 'Unpin' : 'Pin'} className="absolute top-2 right-2 p-1 text-zinc-300 dark:text-zinc-600 hover:text-amber-500 transition-colors">
         <Star size={14} className={item.favorite ? 'fill-amber-400 text-amber-400' : ''} />
       </button>
     </div>
