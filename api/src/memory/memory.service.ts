@@ -66,6 +66,31 @@ export function buildVaultIndexText(row: {
   return { content: lines.join('\n'), title: `Vault: ${name}`.slice(0, 120), tags: ['vault', row.type, ...userTags] };
 }
 
+/** A real in-app deep-link + display type for a resolved source row. Shared by Explore + Chat. (BEA-373) */
+export function deepLinkFor(ent: { type: string; id: string; day?: string }): { link: string; sourceType: string } {
+  switch (ent.type) {
+    case 'item':
+      return { link: `/doc/${ent.id}`, sourceType: 'document' };
+    case 'idea':
+      return { link: `/ideas/${ent.id}`, sourceType: 'idea' };
+    case 'meeting':
+      return { link: `/meeting/${ent.id}`, sourceType: 'meeting' };
+    case 'story':
+      return { link: ent.day ? `/activity?day=${ent.day}` : '/activity', sourceType: 'story' };
+    case 'task':
+      return { link: '/tasks', sourceType: 'task' };
+    case 'note':
+      return { link: '/notes', sourceType: 'note' };
+    case 'vault':
+      return { link: `/vault?item=${ent.id}`, sourceType: 'vault' };
+    case 'gmailbrief':
+    case 'gmailrequest':
+      return { link: '/google/gmail', sourceType: 'email' };
+    default:
+      return { link: '/explore', sourceType: 'document' };
+  }
+}
+
 @Injectable()
 export class MemoryService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('MemoryService');

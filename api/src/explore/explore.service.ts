@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { MemoryService, MemHit } from '../memory/memory.service';
+import { MemoryService, MemHit, deepLinkFor } from '../memory/memory.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 
 const DEFAULT_EXPLORE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -83,29 +83,9 @@ export class ExploreService {
     }
   }
 
-  /** A REAL deep link to the resolved app row, plus its display type. (BEA-340) */
+  /** A REAL deep link to the resolved app row, plus its display type. Shared with Chat. (BEA-340, BEA-373) */
   private resolvedLink(ent: { type: string; id: string; day?: string }): { link: string; sourceType: string } {
-    switch (ent.type) {
-      case 'item':
-        return { link: `/doc/${ent.id}`, sourceType: 'document' };
-      case 'idea':
-        return { link: `/ideas/${ent.id}`, sourceType: 'idea' };
-      case 'meeting':
-        return { link: `/meeting/${ent.id}`, sourceType: 'meeting' };
-      case 'story':
-        return { link: ent.day ? `/activity?day=${ent.day}` : '/activity', sourceType: 'story' };
-      case 'task':
-        return { link: '/tasks', sourceType: 'task' };
-      case 'note':
-        return { link: '/notes', sourceType: 'note' };
-      case 'vault':
-        return { link: `/vault?item=${ent.id}`, sourceType: 'vault' };
-      case 'gmailbrief':
-      case 'gmailrequest':
-        return { link: '/google/gmail', sourceType: 'email' };
-      default:
-        return { link: '/explore', sourceType: 'document' };
-    }
+    return deepLinkFor(ent);
   }
 
   /**

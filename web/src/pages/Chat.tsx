@@ -10,7 +10,7 @@ import { DictateButton } from '../ui/DictateButton';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { mdComponents } from '../ui/markdown';
 
-export type Source = { title: string; url?: string; itemId?: string };
+export type Source = { title: string; url?: string; itemId?: string; link?: string; sourceType?: string };
 export type Msg = { id: string; role: 'user' | 'assistant'; content: string; sources: Source[]; followups: string[]; starred: boolean; createdAt: string };
 type Session = { id: string; title: string; scope: string; pinned: boolean; lastMessageAt: string | null; createdAt: string; messages: Msg[] };
 type Starred = { id: string; messageId: string; sessionId: string | null; sessionTitle: string | null; scope: string; role: string; content: string; sources: Source[]; createdAt: string };
@@ -71,6 +71,7 @@ function SourceChip({ s }: { s: Source }) {
       <ExternalLink size={10} className="shrink-0" /> <span className="truncate">{s.title}</span>
     </span>
   );
+  if (s.link) return <Link to={s.link}>{inner}</Link>; // resolved in-app deep-link (vault/task/idea/meeting/doc…) (BEA-373)
   if (s.itemId) return <Link to={`/doc/${s.itemId}`}>{inner}</Link>;
   if (s.url) return <a href={s.url} target="_blank" rel="noopener noreferrer">{inner}</a>;
   return inner;
