@@ -232,7 +232,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           Hidden while typing in Chat so the keyboard + input own the bottom of the screen. */}
       <nav
         className={'fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ' + (isChat && keyboardOpen ? 'hidden' : 'md:hidden')}
-        style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
+        // Promote to its own compositor layer so iOS WebKit stops repainting/drifting the fixed bar
+        // against the scrolling body. (BEA-371)
+        style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)', transform: 'translateZ(0)', willChange: 'transform', backfaceVisibility: 'hidden' }}
       >
         {BOTTOM_NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px]">
