@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { encryptItem as cryptoEncrypt, decryptItem as cryptoDecrypt, importAesKey, type EncryptedBlob } from './crypto';
 import { buildSetup, openVault, openVaultRaw } from './flow';
 import { watchIdle, AUTO_LOCK_MS } from './idle';
-import { biometricSupported, enrollDevice, unlockWithDevice } from './webauthn';
+import { platformBiometricAvailable, enrollDevice, unlockWithDevice } from './webauthn';
 import { vaultApi, type VaultMeta } from './client';
 
 export type VaultStatus = 'loading' | 'setup' | 'locked' | 'unlocked';
@@ -33,6 +33,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [meta, setMeta] = useState<VaultMeta | null>(null);
   // The unlocked vault key lives ONLY here, in memory. Never state (no accidental serialization), never storage.
   const keyRef = useRef<CryptoKey | null>(null);
+  // Only offer biometrics where a real PLATFORM authenticator (Touch ID / Face ID / Windows Hello) exists.
+  // The check is async, so it starts false and flips on once confirmed — never show it where it would crash/fail.
+  const [bioSupported, setBioSupported] = useState(false);
+  useEffect(() => {
+    platformBiometricAvailable().then(setBioSupported).catch(() => setBioSupported(false));
+  }, []);
 
   const refresh = useCallback(async () => {
     const m = await vaultApi.getMeta().catch(() => ({ setup: false }) as VaultMeta);
@@ -120,7 +126,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ status, meta, refresh, prepareSetup, unlock, verifyPassphrase, lock, encrypt, decrypt, biometricSupported: biometricSupported(), enrollBiometric, unlockBiometric }}>
+    <Ctx.Provider value={{ status, meta, refresh, prepareSetup, unlock, verifyPassphrase, lock, encrypt, decrypt, biometricSupported: bioSupported, enrollBiometric, unlockBiometric }}>
       {children}
     </Ctx.Provider>
   );
