@@ -369,32 +369,80 @@ function VaultHome() {
     { label: 'Name', key: 'title', dir: 1 },
   ];
 
+  // Local security summary (all derived in-memory, nothing leaves the browser).
+  const total = rows.length;
+  const weakCount = Object.values(audit).filter((a) => a.weak).length;
+  const reusedCount = Object.values(audit).filter((a) => a.reused).length;
+  const favCount = rows.filter((r) => r.favorite).length;
+  const allHealthy = !loading && total > 0 && weakCount === 0 && reusedCount === 0;
+  const iconBtn = 'rounded-lg border border-zinc-300 dark:border-zinc-700 p-2 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors';
+
   return (
     <div className="-mt-2">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2.5">
-          <ShieldCheck size={20} className="text-emerald-600" />
-          <h1 className="text-lg font-semibold">Vault</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setCreating(true)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm flex items-center gap-1.5">
-            <Plus size={15} /> Add
-          </button>
-          <button onClick={() => setImportOpen(true)} title="Import" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <Upload size={15} />
-          </button>
-          <button onClick={exportVault} title="Export encrypted backup" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <Download size={15} />
-          </button>
-          {biometricSupported && (
-            <button onClick={() => setBioOpen(true)} title="Biometric unlock" className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-              <Fingerprint size={15} />
-            </button>
-          )}
-          <button onClick={lock} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1.5">
+      {/* Header card — status + security summary */}
+      <div className="rounded-2xl border border-emerald-200/70 dark:border-emerald-900/50 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-zinc-900 p-4 sm:p-5 mb-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="grid place-items-center h-11 w-11 shrink-0 rounded-xl bg-emerald-600/15 text-emerald-600">
+              <ShieldCheck size={22} />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold leading-tight">Vault</h1>
+              <p className="text-sm text-zinc-500">
+                {loading ? 'Loading…' : total === 0 ? 'Unlocked · empty' : `Unlocked · ${total} item${total === 1 ? '' : 's'}`}
+              </p>
+            </div>
+          </div>
+          <button onClick={lock} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-white/70 dark:hover:bg-zinc-800 flex items-center gap-1.5 transition-colors">
             <Lock size={14} /> Lock
           </button>
         </div>
+        {total > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            {allHealthy && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-xs px-2.5 py-1">
+                <ShieldCheck size={12} /> All passwords strong
+              </span>
+            )}
+            {weakCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs px-2.5 py-1">
+                <AlertTriangle size={12} /> {weakCount} weak
+              </span>
+            )}
+            {reusedCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs px-2.5 py-1">
+                <AlertTriangle size={12} /> {reusedCount} reused
+              </span>
+            )}
+            {favCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-xs px-2.5 py-1">
+                <Star size={12} className="fill-amber-400 text-amber-400" /> {favCount} pinned
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-xs px-2.5 py-1">
+              <Lock size={11} /> Auto-locks when idle
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Action bar */}
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={() => setCreating(true)} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 text-sm font-medium flex items-center gap-1.5 transition-colors">
+          <Plus size={16} /> Add item
+        </button>
+        <div className="flex-1" />
+        <button onClick={() => setImportOpen(true)} title="Import" aria-label="Import" className={iconBtn}>
+          <Upload size={16} />
+        </button>
+        <button onClick={exportVault} title="Export encrypted backup" aria-label="Export encrypted backup" className={iconBtn}>
+          <Download size={16} />
+        </button>
+        {biometricSupported && (
+          <button onClick={() => setBioOpen(true)} title="Biometric unlock" aria-label="Biometric unlock" className={iconBtn}>
+            <Fingerprint size={16} />
+          </button>
+        )}
       </div>
       {bioOpen && <BiometricSheet onClose={() => setBioOpen(false)} />}
 
@@ -457,11 +505,16 @@ function ImportSheet({ encrypt, onClose, onDone }: { encrypt: (p: unknown) => Pr
     <Sheet onClose={onClose} canClose={() => !busy}>
       {(close) => (
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Upload size={18} className="text-emerald-600" />
-            <h2 className="font-semibold">Import</h2>
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="grid place-items-center h-9 w-9 shrink-0 rounded-xl bg-emerald-600/10 text-emerald-600">
+              <Upload size={18} />
+            </div>
+            <div>
+              <h2 className="font-semibold leading-tight">Import</h2>
+              <p className="text-xs text-zinc-500">Bitwarden · 1Password · CSV</p>
+            </div>
           </div>
-          <p className="text-sm text-zinc-500 mb-4">From Bitwarden (JSON), 1Password or any CSV export. Everything is encrypted in your browser before it's saved — nothing is uploaded in plain text.</p>
+          <p className="text-sm text-zinc-500 mb-4">Everything is encrypted in your browser before it's saved — nothing is uploaded in plain text.</p>
 
           <label className="block cursor-pointer text-center py-5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 text-sm text-zinc-500 hover:text-emerald-600 mb-3">
             <input type="file" accept=".json,.csv,.txt" className="hidden" onChange={(e) => e.target.files?.[0] && pick(e.target.files[0])} />
@@ -521,11 +574,16 @@ function BiometricSheet({ onClose }: { onClose: () => void }) {
     <Sheet onClose={onClose} canClose={() => !busy}>
       {() => (
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Fingerprint size={18} className="text-emerald-600" />
-            <h2 className="font-semibold">Biometric unlock</h2>
+          <div className="flex items-center gap-2.5 mb-3">
+            <div className="grid place-items-center h-9 w-9 shrink-0 rounded-xl bg-emerald-600/10 text-emerald-600">
+              <Fingerprint size={18} />
+            </div>
+            <div>
+              <h2 className="font-semibold leading-tight">Biometric unlock</h2>
+              <p className="text-xs text-zinc-500">Face ID / Touch ID on this device</p>
+            </div>
           </div>
-          <p className="text-sm text-zinc-500 mb-4">Use Face ID / fingerprint to unlock on this device. Your passphrase stays the master key and is still required here.</p>
+          <p className="text-sm text-zinc-500 mb-4">Your passphrase stays the master key and is still required here.</p>
 
           {devices.length > 0 && (
             <div className="space-y-2 mb-4">
@@ -558,23 +616,25 @@ function ItemCard({ item, audit, onClick, onFav }: { item: VaultItemDTO; audit?:
   const sub = itemSubtitle(item);
   const warn = audit?.weak ? 'Weak' : audit?.reused ? 'Reused' : '';
   return (
-    <div className="relative w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-700 transition-colors">
-      <button onClick={onClick} className="text-left w-full p-4 flex items-center gap-3">
-        <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600">
+    <div className="group relative w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-emerald-400 dark:hover:border-emerald-700 hover:shadow-sm transition-all">
+      <button onClick={onClick} className="text-left w-full p-4 flex items-center gap-3 active:scale-[0.99] transition-transform">
+        <div className="grid place-items-center h-10 w-10 shrink-0 rounded-lg bg-emerald-600/10 text-emerald-600 group-hover:bg-emerald-600/15 transition-colors">
           <def.icon size={18} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-medium truncate pr-6">{item.title || 'Untitled'}</div>
-          {sub && <div className="text-xs text-zinc-500 truncate">{sub}</div>}
+          <div className="text-xs text-zinc-500 truncate">{sub || def.label}</div>
         </div>
-        {warn && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0 flex items-center gap-1">
-            <AlertTriangle size={10} /> {warn}
-          </span>
-        )}
-        {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 shrink-0">{item.collection}</span>}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {warn && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center gap-1">
+              <AlertTriangle size={10} /> {warn}
+            </span>
+          )}
+          {item.collection && <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500">{item.collection}</span>}
+        </div>
       </button>
-      <button onClick={onFav} title={item.favorite ? 'Unpin' : 'Pin'} className="absolute top-2 right-2 p-1 text-zinc-300 hover:text-amber-500">
+      <button onClick={onFav} title={item.favorite ? 'Unpin' : 'Pin'} aria-label={item.favorite ? 'Unpin' : 'Pin'} className="absolute top-2 right-2 p-1 text-zinc-300 dark:text-zinc-600 hover:text-amber-500 transition-colors">
         <Star size={14} className={item.favorite ? 'fill-amber-400 text-amber-400' : ''} />
       </button>
     </div>
