@@ -23,6 +23,22 @@ export function biometricSupported(): boolean {
   return typeof window !== 'undefined' && !!(window as any).PublicKeyCredential && !!navigator.credentials?.create;
 }
 
+/**
+ * True only when a real PLATFORM authenticator (Touch ID / Face ID / Windows Hello) is present.
+ * This must gate the biometric UI: if we offer biometrics where only a security key is eligible,
+ * Safari on macOS builds an `ASAuthorizationSecurityKeyPublicKeyCredential…Request` and calling the
+ * PRF extension on it crashes the whole web app (SIGABRT) — a native abort no try/catch can catch.
+ */
+export async function platformBiometricAvailable(): Promise<boolean> {
+  if (!biometricSupported()) return false;
+  try {
+    const PKC: any = (window as any).PublicKeyCredential;
+    return !!(await PKC.isUserVerifyingPlatformAuthenticatorAvailable?.());
+  } catch {
+    return false;
+  }
+}
+
 // ---- pure, testable wrap/unwrap (the security boundary; WebAuthn ceremony is separate) ----
 export async function wrapForDevice(prfSecret: Uint8Array, vaultKeyRaw: Uint8Array): Promise<Cipher> {
   return aesEncrypt(await importAesKey(prfSecret), vaultKeyRaw);
@@ -44,7 +60,9 @@ async function assertPrf(allowIds: Uint8Array[]): Promise<{ secret: Uint8Array; 
   const assertion = (await navigator.credentials.get({
     publicKey: {
       challenge: ab(randomBytes(32)),
-      allowCredentials: allowIds.map((id) => ({ type: 'public-key', id: ab(id) })),
+      // `transports: ['internal']` steers the request to the PLATFORM authenticator (Touch ID / Face ID)
+      // rather than a security key, so Safari uses the credential class that supports the PRF extension.
+      allowCredentials: allowIds.map((id) => ({ type: 'public-key', id: ab(id), transports: ['internal'] as AuthenticatorTransport[] })),
       userVerification: 'required',
       timeout: 60000,
       extensions: { prf: { eval: { first: ab(PRF_SALT) } } } as any,
@@ -64,7 +82,11 @@ export async function enrollDevice(label: string, vaultKeyRaw: Uint8Array): Prom
       rp: { name: RP_NAME, id: location.hostname },
       user: { id: ab(randomBytes(16)), name: 'vault', displayName: 'My Brain Vault' },
       pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-      authenticatorSelection: { userVerification: 'required', residentKey: 'preferred' },
+      // Pin the PLATFORM authenticator (Touch ID / Face ID / Windows Hello). Without this, Safari on
+      // macOS treats a security key as eligible and builds an ASAuthorizationSecurityKey…Request, which
+      // has no PRF support — calling setPrf: on it crashes the whole web app (SIGABRT). Forcing 'platform'
+      // routes to the class that supports PRF.
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
       timeout: 60000,
       extensions: { prf: { eval: { first: ab(PRF_SALT) } } } as any,
     },
