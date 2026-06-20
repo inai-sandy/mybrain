@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
-import { MemoryService, MemHit } from '../memory/memory.service';
+import { MemoryService, MemHit, deepLinkFor } from '../memory/memory.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 
@@ -43,7 +43,7 @@ function scopeLabel(scope: string): string {
   return SCOPE_LABEL[scope] || 'brain';
 }
 
-type Source = { title: string; url?: string; itemId?: string };
+type Source = { title: string; url?: string; itemId?: string; link?: string; sourceType?: string };
 
 @Injectable()
 export class ChatService implements OnModuleInit, OnModuleDestroy {
@@ -327,22 +327,34 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   private async toSources(hits: MemHit[]): Promise<Source[]> {
     const out: Source[] = [];
     const seen = new Set<string>();
+    // Resolve every hit's store-doc id back to its real app row in one batch, so a source can deep-link
+    // to the actual item (vault, task, idea, meeting, story, note, doc…) — not just documents. (BEA-373)
+    const resolved = await this.memory.resolveRefs(hits.map((h) => h.memId).filter(Boolean) as string[]);
     for (const h of hits) {
       let itemId: string | undefined;
       let title = h.title;
       let url = h.url;
-      if (h.memId) {
-        const it = await this.prisma.item.findFirst({ where: { OR: [{ supermemoryId: h.memId }, { ragId: h.memId }] }, select: { id: true, title: true, sourceUrl: true } });
-        if (it) {
-          itemId = it.id;
-          title = title || it.title || 'Saved item';
-          url = url || it.sourceUrl || undefined;
+      let link: string | undefined;
+      let sourceType: string | undefined;
+      const ent = h.memId ? resolved[h.memId] : undefined;
+      if (ent) {
+        const dl = deepLinkFor(ent);
+        link = dl.link;
+        sourceType = dl.sourceType;
+        if (ent.type === 'item') {
+          // Enrich documents with their title + original url (kept for back-compat with /doc links).
+          const it = await this.prisma.item.findUnique({ where: { id: ent.id }, select: { id: true, title: true, sourceUrl: true } });
+          if (it) {
+            itemId = it.id;
+            title = title || it.title || 'Saved item';
+            url = url || it.sourceUrl || undefined;
+          }
         }
       }
-      const key = itemId || url || title;
+      const key = link || itemId || url || title;
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      out.push({ title: title || 'Memory', url, itemId });
+      out.push({ title: title || 'Memory', url, itemId, link, sourceType });
     }
     return out;
   }

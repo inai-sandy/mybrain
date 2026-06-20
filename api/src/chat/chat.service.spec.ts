@@ -46,7 +46,7 @@ function make(opts: { session?: any; hits?: any[]; answer?: string; item?: any; 
       },
       findMany: async () => stars.slice(),
     },
-    item: { findFirst: async () => opts.item ?? null },
+    item: { findFirst: async () => opts.item ?? null, findUnique: async () => opts.item ?? null },
     setting: {
       findUnique: async ({ where }: any) => (settings[where.key] !== undefined ? { key: where.key, value: settings[where.key] } : null),
       upsert: async ({ where, create, update }: any) => {
@@ -55,7 +55,11 @@ function make(opts: { session?: any; hits?: any[]; answer?: string; item?: any; 
       },
     },
   };
-  const memory: any = { searchScoped: jest.fn(async () => opts.hits ?? []) };
+  const memory: any = {
+    searchScoped: jest.fn(async () => opts.hits ?? []),
+    // Resolve store-doc ids back to app rows (BEA-373). In tests, map any hit to the provided item.
+    resolveRefs: jest.fn(async (ids: string[]) => (opts.item ? Object.fromEntries((ids || []).map((id) => [id, { type: 'item', id: opts.item.id }])) : {})),
+  };
   const reply = async () => opts.answer ?? 'An answer.\nFOLLOWUPS: a? | b?';
   const llm: any = { complete: jest.fn(reply), completeWith: jest.fn(reply), getConfig: async () => ({ provider: 'openrouter', model: 'x' }), listOpenRouterModels: async () => [] };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
@@ -104,7 +108,15 @@ describe('ChatService', () => {
       item: { id: 'item-9', title: 'Cloud SEO video', sourceUrl: 'https://x' },
     });
     const r = await svc.sendMessage('s1', 'the seo one');
-    expect(r!.message.sources[0]).toEqual({ title: 'Cloud SEO video', url: 'https://x', itemId: 'item-9' });
+    expect(r!.message.sources[0]).toEqual({ title: 'Cloud SEO video', url: 'https://x', itemId: 'item-9', link: '/doc/item-9', sourceType: 'document' });
+  });
+
+  it('maps a vault hit to a /vault deep-link source (no item-table row)', async () => {
+    const { svc } = make({ hits: [{ memId: 'sm-v', title: 'Vault: accounts.hetzner.com', content: 'Vault — Login', source: 'supermemory' }] });
+    // override resolveRefs for this case: the hit resolves to a vault item
+    (svc as any).memory.resolveRefs = jest.fn(async () => ({ 'sm-v': { type: 'vault', id: 'v-123' } }));
+    const r = await svc.sendMessage('s1', 'my hetzner login');
+    expect(r!.message.sources[0]).toMatchObject({ link: '/vault?item=v-123', sourceType: 'vault' });
   });
 
   it('answers from the thread (no search) for a follow-up, but searches a fresh first message', async () => {

@@ -203,6 +203,9 @@ function VaultUnlock() {
   const [secret, setSecret] = useState('');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Came in via a deep-link (/vault?item=…) from search/chat — tell the user it'll open after unlock.
+  const [sp] = useSearchParams();
+  const deepLinked = !!sp.get('item');
 
   async function go() {
     if (!secret.trim()) return;
@@ -232,7 +235,7 @@ function VaultUnlock() {
         </div>
         <div>
           <h1 className="text-lg font-semibold">Vault locked</h1>
-          <p className="text-sm text-zinc-500">Unlock with your passphrase to view your secrets.</p>
+          <p className="text-sm text-zinc-500">{deepLinked ? 'Unlock to open the item you selected.' : 'Unlock with your passphrase to view your secrets.'}</p>
         </div>
       </div>
 
