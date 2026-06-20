@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MemoryService } from '../memory/memory.service';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 
@@ -37,7 +38,10 @@ export type VaultItemInput = {
 
 @Injectable()
 export class VaultService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly memory: MemoryService,
+  ) {}
 
   // ---- meta (the crypto envelope) ----
   async getMeta() {
@@ -124,20 +128,25 @@ export class VaultService {
   async createItem(input: VaultItemInput) {
     const row = await this.prisma.vaultItem.create({ data: this.toData(input, true) });
     await this.prisma.vaultAudit.create({ data: { itemId: row.id, action: 'created' } }).catch(() => undefined);
+    void this.memory.indexVaultItem(row); // labels-only, fire-and-forget (BEA-368)
     return this.shape(row);
   }
 
   async updateItem(id: string, input: Partial<VaultItemInput>) {
     if (!(await this.prisma.vaultItem.findUnique({ where: { id } }))) throw new NotFoundException('Item not found');
-    return this.shape(await this.prisma.vaultItem.update({ where: { id }, data: this.toData(input, false) }));
+    const row = await this.prisma.vaultItem.update({ where: { id }, data: this.toData(input, false) });
+    void this.memory.indexVaultItem(row); // re-index labels (replaces the prior doc via its prev ids) (BEA-368)
+    return this.shape(row);
   }
 
   /** Delete ONE item by id (no bulk/"delete all" — honors no-blind-delete). Also removes any encrypted file. */
   async deleteItem(id: string) {
-    if (!(await this.prisma.vaultItem.findUnique({ where: { id } }))) throw new NotFoundException('Item not found');
+    const existing = await this.prisma.vaultItem.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Item not found');
     await this.prisma.vaultItem.delete({ where: { id } });
     await this.prisma.vaultAudit.deleteMany({ where: { itemId: id } }).catch(() => undefined);
     await fs.unlink(this.filePath(id)).catch(() => undefined);
+    void this.memory.deleteDoc(existing.supermemoryId, existing.ragId); // drop its label doc from both stores (BEA-368)
     return { ok: true };
   }
 

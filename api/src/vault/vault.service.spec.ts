@@ -1,5 +1,8 @@
 import { VaultService } from './vault.service';
 
+// Stub MemoryService — label indexing is fire-and-forget and must never affect vault behaviour. (BEA-368)
+const memory: any = { indexVaultItem: async () => undefined, deleteDoc: async () => undefined };
+
 // Minimal in-memory Prisma stand-in for the two vault tables.
 function makePrisma() {
   const metas: any[] = [];
@@ -74,7 +77,7 @@ const blob = () => ({ v: 1, item: cipher('item'), dataKey: cipher('dk') });
 describe('VaultService', () => {
   it('setup stores only ciphertext + can only run once', async () => {
     const prisma = makePrisma();
-    const svc = new VaultService(prisma);
+    const svc = new VaultService(prisma, memory);
     expect((await svc.getMeta()).setup).toBe(false);
 
     await svc.createMeta({ kdfParams: { type: 'argon2id' }, salt: 'c2FsdA==', verifier: cipher('v'), wrapPass: cipher('p'), wrapRecovery: cipher('r') });
@@ -88,24 +91,24 @@ describe('VaultService', () => {
   });
 
   it('rejects setup missing a wrapped key', async () => {
-    const svc = new VaultService(makePrisma());
+    const svc = new VaultService(makePrisma(), memory);
     await expect(svc.createMeta({ kdfParams: {}, salt: 'x', verifier: cipher('v'), wrapPass: undefined as any, wrapRecovery: cipher('r') })).rejects.toThrow();
   });
 
   it('rejects an item whose blob is not a client EncryptedBlob', async () => {
-    const svc = new VaultService(makePrisma());
+    const svc = new VaultService(makePrisma(), memory);
     await expect(svc.createItem({ type: 'login', blob: { password: 'plaintext!' } as any })).rejects.toThrow(/EncryptedBlob/);
     await expect(svc.createItem({ type: 'login', blob: 'nope' as any })).rejects.toThrow();
   });
 
   it('rejects an unknown item type', async () => {
-    const svc = new VaultService(makePrisma());
+    const svc = new VaultService(makePrisma(), memory);
     await expect(svc.createItem({ type: 'evil', blob: blob() })).rejects.toThrow(/type/);
   });
 
   it('stores searchable metadata and the ciphertext blob, never a plaintext secret column', async () => {
     const prisma = makePrisma();
-    const svc = new VaultService(prisma);
+    const svc = new VaultService(prisma, memory);
     const created = await svc.createItem({ type: 'login', blob: blob(), title: 'Gmail', website: 'mail.google.com', username: 'sandy' });
     const raw = prisma._items[0];
     expect(typeof raw.blob).toBe('string'); // stored as JSON string ciphertext
@@ -115,7 +118,7 @@ describe('VaultService', () => {
   });
 
   it('search matches metadata only', async () => {
-    const svc = new VaultService(makePrisma());
+    const svc = new VaultService(makePrisma(), memory);
     await svc.createItem({ type: 'login', blob: blob(), title: 'Gmail', username: 'sandy' });
     await svc.createItem({ type: 'login', blob: blob(), title: 'GitHub', username: 'octocat' });
     expect((await svc.listItems({ search: 'sandy' })).total).toBe(1);
@@ -124,7 +127,7 @@ describe('VaultService', () => {
   });
 
   it('deletes one item by id (no bulk delete)', async () => {
-    const svc = new VaultService(makePrisma());
+    const svc = new VaultService(makePrisma(), memory);
     const a = await svc.createItem({ type: 'note', blob: blob(), title: 'A' });
     await svc.createItem({ type: 'note', blob: blob(), title: 'B' });
     await svc.deleteItem(a.id);

@@ -525,6 +525,10 @@ model VaultItem {
   bankName   String? // searchable
   collection String? // Personal | Work | Beakn | Family
   favorite   Boolean  @default(false)
+  // Pointers to the LABEL-ONLY index docs (BEA-368). Store-doc ids only — never a secret. Lets an
+  // edit replace its indexed metadata and a delete remove it. The encrypted `blob` is NEVER indexed.
+  supermemoryId String?
+  ragId         String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }

@@ -57,6 +57,7 @@ export class ExploreService {
     if (t.includes('idea')) return 'idea';
     if (t.includes('meeting')) return 'meeting';
     if (t.includes('skill')) return 'skill';
+    if (t.includes('vault')) return 'vault';
     return 'document';
   }
 
@@ -73,6 +74,8 @@ export class ExploreService {
         return '/ideas';
       case 'meeting':
         return '/meetings';
+      case 'vault':
+        return '/vault';
       case 'email':
         return '/google/gmail';
       default:
@@ -95,6 +98,8 @@ export class ExploreService {
         return { link: '/tasks', sourceType: 'task' };
       case 'note':
         return { link: '/notes', sourceType: 'note' };
+      case 'vault':
+        return { link: `/vault?item=${ent.id}`, sourceType: 'vault' };
       case 'gmailbrief':
       case 'gmailrequest':
         return { link: '/google/gmail', sourceType: 'email' };
