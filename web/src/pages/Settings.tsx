@@ -363,6 +363,9 @@ function IndexSection() {
                         <span className="text-zinc-500">RAG <span className="tabular-nums text-zinc-600 dark:text-zinc-300">{s.ragIndexed}</span> · SuperMemory <span className="tabular-nums text-zinc-600 dark:text-zinc-300">{s.smIndexed}</span></span>
                         {s.ragIndexed === s.smIndexed ? (
                           <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> in sync</span>
+                        ) : pendingJobs > 0 ? (
+                          // Counts differ but the queue is still draining — normal mid-sync, not a problem.
+                          <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400"><RefreshCw size={10} className="animate-spin" /> syncing…</span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> out of sync</span>
                         )}
