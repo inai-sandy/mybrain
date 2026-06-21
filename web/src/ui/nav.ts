@@ -10,16 +10,17 @@ export const NAV: NavItem[] = [
   { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
   { to: '/ideas', label: 'Ideas', icon: Lightbulb },
   { to: '/skills', label: 'Skills', icon: Wand2 },
+  // Daily-flow cluster, in one order (BEA-440)
   { to: '/today', label: 'Today', icon: Sun },
+  { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
+  { to: '/mentor', label: 'Mentor', icon: Compass },
   { to: '/commitments', label: 'Commitments', icon: Handshake },
   { to: '/meetings', label: 'Meetings', icon: Mic },
   { to: '/google', label: 'Google', icon: Mail },
   { to: '/notes', label: 'Notes', icon: StickyNote },
   { to: '/vault', label: 'Vault', icon: Lock },
   { to: '/chat', label: 'Chat', icon: MessageCircle },
-  { to: '/activity', label: 'Activity', icon: Activity },
-  { to: '/mentor', label: 'Mentor', icon: Compass },
 ];
 
 // The 5 primary tabs shown in the mobile bottom bar. Everything else lives in the drawer/sidebar.

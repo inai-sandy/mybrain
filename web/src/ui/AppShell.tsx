@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search, RefreshCw } from 'lucide-react';
+import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search, RefreshCw, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
@@ -48,25 +48,41 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const location = useLocation();
   const isChat = location.pathname === '/chat';
   const keyboardOpen = useVisualViewport(isChat);
+  // Desktop sidebar collapse (icon-only rail), remembered per device. (BEA-440)
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar.collapsed') === '1');
+  useEffect(() => { localStorage.setItem('sidebar.collapsed', collapsed ? '1' : '0'); }, [collapsed]);
 
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
     (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
+  // Desktop sidebar item — centers the icon and drops the label when collapsed.
+  const deskItemCls = ({ isActive }: { isActive: boolean }) =>
+    'flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors ' +
+    (collapsed ? 'justify-center px-0 ' : 'px-3 ') +
+    (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:flex-col md:fixed md:inset-y-0 md:w-60 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4">
-        <div className="flex items-center gap-2 px-2 mb-6 font-bold text-lg">
-          <Logo size={34} /> My Brain
+      {/* Desktop sidebar (collapsible to an icon-only rail) */}
+      <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
+        <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
+          <Logo size={collapsed ? 30 : 34} /> {!collapsed && 'My Brain'}
         </div>
         <nav className="flex-1 space-y-1">
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={itemCls}>
-              <n.icon size={18} /> {n.label}
+            <NavLink key={n.to} to={n.to} end={n.end} title={collapsed ? n.label : undefined} className={deskItemCls}>
+              <n.icon size={18} /> {!collapsed && n.label}
             </NavLink>
           ))}
         </nav>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className={'mt-2 flex items-center gap-3 rounded-lg py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors ' + (collapsed ? 'justify-center px-0' : 'px-3')}
+        >
+          {collapsed ? <PanelLeftOpen size={18} /> : <><PanelLeftClose size={18} /> Collapse</>}
+        </button>
       </aside>
 
       {/* Mobile drawer */}
@@ -105,7 +121,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       )}
 
       {/* Main column */}
-      <div className="md:pl-60">
+      <div className={'transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
         <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
