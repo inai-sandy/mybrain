@@ -551,3 +551,23 @@ model VaultAudit {
   action    String // created | edited | revealed | copied
   at        DateTime @default(now())
 }
+
+/// One important email stored in memory (BEA-439). PK = Gmail message id so re-sync upserts (no dupes).
+/// Full body is indexed into RAG + SuperMemory for whole-brain recall. supermemoryId/ragId are the
+/// index doc pointers (replace-on-edit), never the secret.
+model EmailMemory {
+  id            String   @id // Gmail message id
+  threadId      String
+  fromAddr      String
+  subject       String
+  day           String // YYYY-MM-DD the email belongs to
+  sentAt        DateTime?
+  snippet       String?
+  body          String? // full plain-text body
+  supermemoryId String?
+  ragId         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([day])
+}

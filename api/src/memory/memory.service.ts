@@ -26,6 +26,8 @@ const SOURCE_META: Record<string, SourceMeta> = {
   vault: { label: 'Vault (labels only)', model: 'vaultItem', pk: 'id', cadence: 'live' },
   gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true, cadence: 'nightly' },
   gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true, cadence: 'live' },
+  // Each important email stored in memory, full body (BEA-439). User-toggleable; default on.
+  email: { label: 'Important Emails', model: 'emailMemory', pk: 'id', cadence: 'nightly' },
   // Derived day-context (regenerate from the user's story) — indexed + reconciled, but not shown as
   // separate toggles in the manager (they follow the 'story' section). manageable:false. (BEA-342)
   daysummary: { label: 'Day summaries', model: 'daySummary', pk: 'id', manageable: false, cadence: 'on-update' },
@@ -85,6 +87,7 @@ export function deepLinkFor(ent: { type: string; id: string; day?: string }): { 
       return { link: `/vault?item=${ent.id}`, sourceType: 'vault' };
     case 'gmailbrief':
     case 'gmailrequest':
+    case 'email':
       return { link: '/google/gmail', sourceType: 'email' };
     default:
       return { link: '/explore', sourceType: 'document' };
@@ -214,6 +217,17 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       await this.indexEntity({ refType: 'vault', refId: row.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: row.supermemoryId, prevRagId: row.ragId });
     } catch (e) {
       this.log.warn(`vault index failed (${row?.id}): ${(e as Error)?.message ?? e}`);
+    }
+  }
+
+  /** Index (or re-index) one important email's full content into both stores (BEA-439). Best-effort. */
+  async indexEmail(row: any): Promise<void> {
+    try {
+      const built = this.buildContent('email', row);
+      if (!built) return;
+      await this.indexEntity({ refType: 'email', refId: row.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: row.supermemoryId, prevRagId: row.ragId });
+    } catch (e) {
+      this.log.warn(`email index failed (${row?.id}): ${(e as Error)?.message ?? e}`);
     }
   }
 
@@ -506,6 +520,11 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       case 'vault':
         // Metadata-only — never the encrypted blob. (BEA-368)
         return row.title || row.website || row.username ? buildVaultIndexText(row) : null;
+      case 'email':
+        // Full important email (BEA-439): sender + subject + date + body.
+        return row.subject || row.body || row.snippet
+          ? { content: `From: ${row.fromAddr || ''}\nSubject: ${row.subject || ''}\nDate: ${row.day || ''}\n\n${row.body || row.snippet || ''}`.trim(), title: (row.subject || 'Email').slice(0, 120), tags: ['email', 'important'] }
+          : null;
       case 'note': {
         let checklist = '';
         try {

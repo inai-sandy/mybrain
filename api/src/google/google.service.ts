@@ -262,6 +262,14 @@ export class GoogleService {
     return { subject, copy, messages };
   }
 
+  /** Full plain-text body of ONE message (de-quoted, capped). For storing important emails in memory. (BEA-439) */
+  async gmailMessageFull(id: string): Promise<string> {
+    const p = JSON.stringify({ userId: 'me', id, format: 'full' });
+    const m = await this.run(['gmail', 'users', 'messages', 'get', '--params', p, '--format', 'json']);
+    const raw = extractBody(m?.payload) || m?.snippet || '';
+    return stripQuoted(raw).slice(0, 20000);
+  }
+
   // ---- Drive / Docs / Sheets ----
 
   async driveList(q?: string): Promise<{ id: string; name: string; mimeType: string; modified: string; link: string }[]> {
