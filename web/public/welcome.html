@@ -116,7 +116,7 @@
       <div class="relative h-28 w-28 rounded-full bg-gradient-to-br from-emerald-500/30 to-indigo-600/30 border border-emerald-400/40 flex items-center justify-center text-6xl backdrop-blur">🧠</div>
     </div>
     <h1 class="text-5xl sm:text-7xl font-black tracking-tight">My <span class="gtext">Brain</span></h1>
-    <p class="mt-4 max-w-2xl text-lg sm:text-2xl text-zinc-300 font-light">Not another app to fill in.<br/>A second brain that <span class="text-emerald-400 font-medium">listens to your day</span>, <span class="text-indigo-400 font-medium">remembers your life</span>, and <span class="text-pink-400 font-medium">mentors you back</span>.</p>
+    <p class="mt-4 max-w-2xl text-lg sm:text-2xl text-zinc-300 font-light">Not another app to fill in.<br/>A second brain that <span class="text-emerald-400 font-medium">remembers everything</span>, <span class="text-indigo-400 font-medium">keeps it safe in two places</span>, and <span class="text-pink-400 font-medium">answers anything you ask</span>.</p>
     <p class="mt-5 text-sm uppercase tracking-[0.25em] text-zinc-500">Designed by <span class="text-zinc-300">Sandeep Karnati</span></p>
     <div class="mt-9 flex flex-wrap items-center justify-center gap-5 sm:gap-6 text-sm text-zinc-400">
       <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="150">0</span><span class="text-3xl font-extrabold text-emerald-400">+</span><br/>features, and growing</div>
@@ -141,14 +141,14 @@
         </div>
         <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
           <p class="text-sm text-emerald-400 uppercase tracking-wide mb-3">My Brain</p>
-          <ul class="space-y-2 text-zinc-200"><li>🎙️ You <b>speak</b>, it builds the day</li><li>📖 Every evening becomes a written story</li><li>🧭 A mentor reads it all and answers back</li><li>📈 Day 1000 knows 999 days more about you</li></ul>
+          <ul class="space-y-2 text-zinc-200"><li>🎙️ You <b>speak</b> — it remembers, forever</li><li>🔍 <b>Ask anything</b> — it answers from your own life</li><li>🔐 Passwords, emails, people, notes — one safe place</li><li>📈 Day 1000 knows 999 days more about you</li></ul>
         </div>
       </div>
     </div>
 
     <div class="reveal text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">The whole idea, in one line</p>
-      <h2 class="text-2xl sm:text-4xl font-extrabold leading-snug max-w-3xl mx-auto">Everything you capture goes into <span class="text-emerald-400">one brain</span> — kept safe in <span class="text-indigo-400">two places</span> — and the brain gives it back as <span class="text-pink-400">tasks, stories, answers and guidance.</span></h2>
+      <h2 class="text-2xl sm:text-4xl font-extrabold leading-snug max-w-3xl mx-auto">Everything you capture goes into <span class="text-emerald-400">one brain</span> — kept safe in <span class="text-indigo-400">two places</span> — and the brain gives it back as <span class="text-pink-400">answers, memories and stories — and keeps your secrets safe.</span></h2>
       <p class="mt-5 text-zinc-400">Next chapter shows it happening to a single thought. Keep going. →</p>
     </div>
   </div>
@@ -219,6 +219,17 @@
     <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 min-h-[92px]"><p class="text-sm text-zinc-300" id="flowDetail">▶︎ Playing… watch the thought move down. Tap any stage to explore it.</p></div>
 
     <p class="text-center text-sm text-zinc-500">That’s the entire architecture. One thought in, four stages, and it lives in your brain forever — ready to come back.</p>
+
+    <div class="reveal">
+      <p class="text-center text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">and it’s not just to-dos</p>
+      <div class="grid sm:grid-cols-3 gap-3 text-sm">
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><div class="text-2xl mb-1">🔐</div>“the studio wi-fi is sunrise-42” <span class="text-zinc-500">→ a fact, safe in your vault, ready any time</span></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><div class="text-2xl mb-1">👤</div>“Diksha is our new architect” <span class="text-zinc-500">→ a person your brain now knows</span></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><div class="text-2xl mb-1">💬</div>“what did I decide about pricing?” <span class="text-zinc-500">→ an answer, pulled from your own days</span></div>
+      </div>
+      <p class="mt-3 text-center text-xs text-zinc-500">Same machinery, anything you give it — a task, a password, a person, a question, a whole meeting.</p>
+    </div>
+
     <details class="curious">
       <summary>For the curious — the real stack</summary>
       <div class="body">A React progressive web app + a NestJS (TypeScript) API in one Docker image, behind a Caddy reverse-proxy with automatic HTTPS. Operational data in SQLite (Prisma). The two “twin memories” are <b>RAG</b> — a Postgres + pgvector store on your own server — and <b>SuperMemory</b>, an independent cloud store. Every save goes to <b>both</b> through a retrying outbox queue, with a reconcile sweep so they can never silently drift apart. AI is called only for the moments of intelligence; it keeps nothing.</div>
@@ -258,11 +269,75 @@
   </div>
 </section>
 
-<!-- ================= CHAPTER 4 — MEMORY ================= -->
+<!-- ================= CHAPTER 4 — INDEXING ================= -->
+<section class="chapter" data-title="Indexing">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 4 · how it remembers</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Remembered <span class="gtext">twice</span>. Never lost.</h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Everything you save is written into <b>two</b> independent memories at once — one a memory engine <b>we built ourselves</b>, running on your own server — and quietly kept in perfect sync. If one ever falls behind, it heals itself.</p>
+    </div>
+
+    <div class="reveal">
+      <div id="twin" class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-3xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+          <p class="text-xs text-zinc-500">a memory being saved…</p>
+          <span id="syncBadge" class="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400">idle</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <div class="flex items-center gap-2 mb-2 text-sm font-bold text-emerald-300">📚 RAG <span class="text-xs font-normal text-zinc-500">· your server</span></div>
+            <div id="colA" class="space-y-2 min-h-[148px]"></div>
+          </div>
+          <div>
+            <div class="flex items-center gap-2 mb-2 text-sm font-bold text-indigo-300">☁️ SuperMemory <span class="text-xs font-normal text-zinc-500">· cloud twin</span></div>
+            <div id="colB" class="space-y-2 min-h-[148px]"></div>
+          </div>
+        </div>
+        <p id="twinNote" class="mt-4 text-center text-xs text-zinc-500 min-h-[18px]"></p>
+      </div>
+    </div>
+
+    <div class="reveal">
+      <h3 class="text-lg font-bold mb-4 text-center text-zinc-300">What flows into your memory — and how often</h3>
+      <div class="flex flex-wrap justify-center gap-2 text-xs">
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5">✅ Tasks <span class="text-emerald-400">· live</span></span>
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5">📥 Notes <span class="text-emerald-400">· live</span></span>
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5">💡 Ideas <span class="text-emerald-400">· live</span></span>
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5">🎙️ Meetings <span class="text-emerald-400">· live</span></span>
+        <span class="rounded-full border border-indigo-500/30 bg-indigo-500/5 px-3 py-1.5">📖 Stories <span class="text-indigo-400">· on update</span></span>
+        <span class="rounded-full border border-pink-500/30 bg-pink-500/5 px-3 py-1.5">📧 Emails <span class="text-pink-400">· nightly</span></span>
+        <span class="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5">🔐 Vault <span class="text-zinc-400">· labels only — secrets never indexed</span></span>
+      </div>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-2 gap-5">
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+        <h3 class="font-bold">📚 RAG — our own memory engine <span class="text-xs font-normal text-zinc-500">(on your server)</span></h3>
+        <p class="mt-2 text-sm text-zinc-400">We didn’t rent this — we <b>built</b> our own meaning-aware memory engine, running on hardware <b>you</b> control. Everything you save is searchable by what it <i>means</i>, not just keywords — and it never leaves your box.</p>
+      </div>
+      <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6">
+        <h3 class="font-bold">☁️ The cloud twin <span class="text-xs font-normal text-zinc-500">(SuperMemory)</span></h3>
+        <p class="mt-2 text-sm text-zinc-400">A second, fully independent memory — redundancy by design. A queue keeps both in lock-step so a memory can never be lost.</p>
+      </div>
+    </div>
+
+    <div class="reveal text-center">
+      <p class="text-sm text-zinc-400 max-w-2xl mx-auto">And <b>you</b> hold the controls: a Settings → Index panel shows every section, what’s indexed, when it last synced, live RAG-vs-SuperMemory counts — with a one-tap <b class="text-emerald-300">Reconcile&nbsp;now</b>. Turn any section off and it’s purged from search.</p>
+    </div>
+
+    <details class="curious max-w-2xl mx-auto">
+      <summary>For the curious — the sync engine</summary>
+      <div class="body">Every save is queued and dual-written to both stores by a retrying outbox worker (about every 5 seconds). A reconcile sweep every 15 minutes is the safety net — it re-queues anything missing from either store and retries failures, so the two can never silently drift. RAG is a Postgres&nbsp;+&nbsp;pgvector store on your own server; SuperMemory is an independent cloud store. Content is chunked and embedded; an optimizer can re-chunk older documents.</div>
+    </details>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 5 — MEMORY ================= -->
 <section class="chapter" data-title="Memory">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 4 · memory &amp; search</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 5 · memory &amp; search</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Ask your brain, <span class="gtext">with receipts</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">It searches by <b>meaning</b>, not keywords — and every answer cites the real things it came from.</p>
     </div>
@@ -287,37 +362,6 @@
       <div id="memAnswer" class="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-sm text-zinc-300 opacity-0 transition-opacity duration-700 min-h-[80px]"></div>
     </div>
 
-    <div class="reveal">
-      <h3 class="text-xl font-bold mb-4 text-center">A real exchange, replayed</h3>
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-2xl mx-auto">
-        <div class="flex gap-2 mb-4 text-xs">
-          <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🌐 Everything</span>
-          <span class="rounded-full bg-indigo-600 px-3 py-1 text-white">📊 My life</span>
-          <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🔖 Bookmarks</span>
-        </div>
-        <div class="space-y-3" id="chatDemo">
-          <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[80%]">When did I last feel really great?</div></div>
-          <div class="msg text-[11px] text-zinc-500 pl-1">🧭 deciding: this needs a memory search → searching <b>My life</b>…</div>
-          <div class="msg flex gap-2 text-[11px]">
-            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🌙 Story · Jun 8</span>
-            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🌙 Story · May 30</span>
-            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">📜 Weekly review</span>
-          </div>
-          <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-zinc-800 px-4 py-2.5 text-sm max-w-[85%] text-zinc-200" id="chatAns"></div></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="reveal grid sm:grid-cols-2 gap-5">
-      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
-        <h3 class="font-bold">📚 Your private memory <span class="text-xs font-normal text-zinc-500">(on your server)</span></h3>
-        <p class="mt-2 text-sm text-zinc-400">Holds everything you save and every story, searchable by meaning. When it answers, it can show you the original.</p>
-      </div>
-      <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6">
-        <h3 class="font-bold">☁️ The cloud twin <span class="text-xs font-normal text-zinc-500">(SuperMemory)</span></h3>
-        <p class="mt-2 text-sm text-zinc-400">A second, independent memory — redundancy by design. A queue keeps both in lock-step, and a sync panel lets you see and reconcile them anytime.</p>
-      </div>
-    </div>
     <details class="curious max-w-2xl mx-auto">
       <summary>For the curious — search internals</summary>
       <div class="body">Your question becomes the same kind of meaning-vector and is matched across both stores; a scope filters by tags, results merge + re-rank, and the answer is grounded in the retrieved passages with sources attached. Explore (Ask · Everything · Saved), a ⌘K global search, and a per-document chat all ride the same engine. An index manager shows what’s indexed per section, when each last synced, and RAG-vs-SuperMemory counts — with one-tap reconcile.</div>
@@ -325,11 +369,49 @@
   </div>
 </section>
 
-<!-- ================= CHAPTER 5 — THE DAILY LOOP ================= -->
+<!-- ================= CHAPTER 6 — CHAT ================= -->
+<section class="chapter" data-title="Chat">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 6 · talk to your brain</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Just <span class="gtext">ask</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">No menus, no folders to dig through. Ask in plain words — it works out where to look, reads your memory, and answers with the receipts.</p>
+    </div>
+
+    <div class="reveal">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-2xl mx-auto">
+        <div class="flex gap-2 mb-4 text-xs">
+          <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🌐 Everything</span>
+          <span class="rounded-full bg-emerald-600 px-3 py-1 text-white">📊 My life</span>
+          <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🔖 Bookmarks</span>
+        </div>
+        <div class="space-y-3" id="chatDemo">
+          <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[80%]">what did I owe Diksha?</div></div>
+          <div class="msg text-[11px] text-zinc-500 pl-1">🧭 deciding: this needs a memory search → searching <b>your brain</b>…</div>
+          <div class="msg flex flex-wrap gap-2 text-[11px]">
+            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">📖 Story · Jun 14</span>
+            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">✅ Task · open</span>
+            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🎙️ Meeting · client sync</span>
+          </div>
+          <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-zinc-800 px-4 py-2.5 text-sm max-w-[85%] text-zinc-200" id="chatAns"></div></div>
+        </div>
+        <p class="mt-3 text-[11px] text-zinc-600">in the real app, tap any source chip to open the exact item it came from.</p>
+      </div>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">🎯</div><h3 class="font-bold text-sm">Scoped or whole-brain</h3><p class="mt-1 text-xs text-zinc-400">Ask inside one area — bookmarks, your life, a single document — or let it search absolutely everything at once.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-indigo-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">🔗</div><h3 class="font-bold text-sm">Answers you can open</h3><p class="mt-1 text-xs text-zinc-400">Every answer cites its sources — tap one to jump straight to the real task, story, email or doc it came from.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">💬</div><h3 class="font-bold text-sm">It keeps the thread</h3><p class="mt-1 text-xs text-zinc-400">Suggested follow-ups, saved answers, and a private chat on any single document — plus ask by voice, or ⌘K from anywhere.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 7 — THE DAILY LOOP ================= -->
 <section class="chapter" data-title="The Loop">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-14">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 5 · the daily loop</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 7 · the daily loop</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Your day, <span class="gtext">written for you</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">One gentle loop, every day. Tap a step.</p>
     </div>
@@ -375,7 +457,7 @@
 <section class="chapter" data-title="The Vault">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 6 · the vault</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 8 · the vault</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Your secrets, <span class="gtext">sealed shut</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">A full password manager built in — and built so that <b>even the app can’t read it</b>.</p>
     </div>
@@ -406,7 +488,7 @@
 <section class="chapter" data-title="Connected">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 7 · works with your world</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 9 · works with your world</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Plugged into <span class="gtext">your real life</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">It meets you where your day already happens — and treats every connection like a vault.</p>
     </div>
@@ -436,11 +518,66 @@
   </div>
 </section>
 
-<!-- ================= CHAPTER 8 — EVERYTHING IT DOES ================= -->
+<!-- ================= CHAPTER 10 — WORKSHOP ================= -->
+<section class="chapter" data-title="Workshop">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 10 · make &amp; know</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Your <span class="gtext">workshop</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">A second brain isn’t only memory — it’s where you <b>make</b> things and keep what you learn. Capture a thought, grow a rough idea into a real plan, save what matters, and let it record the rooms you’re in.</p>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">📥</div><h3 class="font-bold">Capture anything</h3><p class="mt-1 text-sm text-zinc-400">Paste, type, dictate or import — a link, a doc, a stray thought. One box; the brain files it.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">📝</div><h3 class="font-bold">Notes</h3><p class="mt-1 text-sm text-zinc-400">Quick notes and checklists — searchable forever, never lost in a folder.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🔖</div><h3 class="font-bold">Bookmarks</h3><p class="mt-1 text-sm text-zinc-400">Save links with a summary; ask your brain for “that article about pricing” months later.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🗣️</div><h3 class="font-bold">Voice dictation</h3><p class="mt-1 text-sm text-zinc-400">Hold to talk — live, Wispr-style, with an AI clean-up pass. Speak anywhere you’d type.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🎙️</div><h3 class="font-bold">Meeting recorder</h3><p class="mt-1 text-sm text-zinc-400">Record a meeting → transcript → a clean summary with takeaways and decisions, kept in your brain.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🧩</div><h3 class="font-bold">Claude Skills</h3><p class="mt-1 text-sm text-zinc-400">Reusable skills you’ve built — your brain knows them and can run them on command.</p></div>
+    </div>
+
+    <div class="reveal rounded-2xl border border-pink-500/30 bg-pink-500/5 p-6 sm:p-8">
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-300 mb-2">the standout</p>
+      <h3 class="text-2xl font-extrabold">💡 Ideas → an <span class="gtext">agentic workflow</span></h3>
+      <p class="mt-2 text-zinc-300 max-w-2xl">Drop in a rough idea and your brain grows it into a real plan — then hands you a ready-to-run <b>agentic prompt</b> for a coding agent. From a sentence on the bus to a workflow an AI can execute. Your ideas don’t just sit there; they get built.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 11 — YOU RUN THE AI ================= -->
+<section class="chapter" data-title="You run the AI">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-amber-400 mb-3">Chapter 11 · the engine room</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">You run the <span class="gtext">AI</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Most “AI apps” quietly run up an API bill and hide the controls. My Brain hands them to you — pick the engine for every feature, read and edit the prompts, watch the usage, and run the heavy work on subscriptions you already pay for.</p>
+    </div>
+
+    <div class="reveal rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 sm:p-8 text-center">
+      <h3 class="text-2xl font-extrabold">Near-<span class="gtext">zero</span> API cost</h3>
+      <p class="mt-2 text-zinc-300 max-w-2xl mx-auto">Background AI work runs through your <b>Codex</b> and <b>Gemini</b> CLI agents — on subscriptions you already have — instead of metered API calls. If an engine is ever down, it falls back automatically to <b>Claude Sonnet</b> so nothing stalls. Real power, without the runaway bill.</p>
+      <div class="mt-4 flex flex-wrap justify-center gap-2 text-xs">
+        <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">⚡ Codex CLI</span>
+        <span class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">✨ Gemini CLI</span>
+        <span class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5">🛟 Sonnet fallback</span>
+      </div>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-2 gap-5">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🎛️</div><h3 class="font-bold">A model picker per feature</h3><p class="mt-1 text-sm text-zinc-400">Choose which engine writes your story, your email brief, your commitments — feature by feature, in Settings.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">✍️</div><h3 class="font-bold">Edit the prompts</h3><p class="mt-1 text-sm text-zinc-400">The system prompts behind every feature are yours to read and tune. Nothing is a black box.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">📊</div><h3 class="font-bold">See the usage</h3><p class="mt-1 text-sm text-zinc-400">A usage view shows what the AI is doing under the hood — no surprises.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🗂️</div><h3 class="font-bold">Control the memory</h3><p class="mt-1 text-sm text-zinc-400">The Index manager: turn any section of your memory on or off, see RAG-vs-cloud counts, and Reconcile in one tap.</p></div>
+    </div>
+    <p class="reveal text-center text-sm text-zinc-500">In short: <b class="text-zinc-300">you</b> are in control of the AI, the models, the cost and the memory — not the other way round.</p>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 12 — EVERYTHING IT DOES ================= -->
 <section class="chapter" data-title="Everything it does">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-8">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 8 · the full catalog</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 12 · the full catalog</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Everything it <span class="gtext">does</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The whole brain, end to end — nothing left out. Sixteen areas, a hundred and fifty-plus little powers.</p>
     </div>
@@ -452,7 +589,7 @@
 <section class="chapter" data-title="Coming next">
   <div class="max-w-4xl mx-auto px-6 pt-16 pb-10 space-y-10">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 9 · the road ahead</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 13 · the road ahead</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">It’s only <span class="gtext">getting started</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The brain lives in your pocket and on your server today. Next, it reaches into the physical world.</p>
     </div>
@@ -478,7 +615,7 @@
 <section class="chapter" data-title="Built &amp; Growing">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 10 · built right</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 14 · built right</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Built by AI — <span class="gtext">held to discipline</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Every single feature shipped through an enforced pipeline. Nothing reaches you on trust.</p>
     </div>
@@ -540,7 +677,7 @@
 
   // ---------- chapter paging ----------
   const chapters = [...document.querySelectorAll('.chapter')];
-  const SHORT = ['Story', 'Flow', 'Capture', 'Memory', 'Loop', 'Vault', 'Connected', 'Everything', 'Next', 'Built'];
+  const SHORT = ['Story', 'Flow', 'Capture', 'Index', 'Memory', 'Chat', 'Loop', 'Vault', 'Connected', 'Workshop', 'Engine', 'Everything', 'Next', 'Built'];
   const tabs = document.getElementById('chtabs');
   const dots = document.getElementById('dots');
   const chBtn = document.getElementById('chBtn');
@@ -656,7 +793,7 @@
 
   // ---------- ch4: chat replay ----------
   const chatMsgs = [...document.querySelectorAll('#chatDemo .msg')];
-  const CHAT_ANS = 'Two days stand out recently. June 8 was the big one — you wrote “the kind of tired that feels earned” after the launch. Your weekly review also flagged that days you close one open thread early consistently score higher.';
+  const CHAT_ANS = 'You promised Diksha the revised quote by Friday — it came up in your June 14 story and again in the client sync. The task is still open, so it isn’t done yet. Want me to bump it to the top of tomorrow?';
   let chatPlayed = false;
   const chio = new IntersectionObserver((es) => es.forEach((e) => {
     if (!e.isIntersecting || chatPlayed) return; chatPlayed = true; chio.disconnect();
@@ -733,11 +870,11 @@
     ['🤝', 'Commitments', ['“I’ll send it Friday” auto-extracted', 'Confirm · done · drop, overdue tracking', 'Decisions captured from the day too']],
     ['🎙️', 'Meetings', ['Record &amp; transcribe', 'AI summary with takeaways &amp; decisions', 'Searchable forever, in-app viewer']],
     ['🔐', 'The Vault', ['Zero-knowledge — encrypted in your browser', '11 secret types · biometric / passkey unlock · auto-lock', 'Generator · weak/reused detection · security view', 'Copy with 30-second clipboard auto-clear', 'Re-auth before revealing a seed phrase / private key', 'Import (1Password/Bitwarden/CSV) · encrypted export · audit log', 'Encrypted file attachments · collections · favorites', 'Labels-only indexing — the secret is never indexed']],
-    ['📧', 'Google &amp; Gmail', ['Nightly Daily Brief (with Telegram push)', 'Email Requests · in-app Gmail thread viewer', 'Important emails recalled from memory', 'Drive, Calendar, Tasks &amp; an 11-service launcher']],
+    ['📧', 'Google &amp; Gmail', ['Nightly Daily Brief (with Telegram push)', 'Email Requests · in-app Gmail thread viewer', 'Important emails stored in memory — full body, with a 30-day backfill', 'Drive, Calendar, Tasks &amp; an 11-service launcher']],
     ['🔗', 'Connections', ['“Noticed in your brain” — daily link discovery', 'Non-obvious connections across everything you’ve saved', 'Surfaced on your home screen, dismissible']],
-    ['📥', 'Notes · Ideas · Bookmarks · Skills', ['Notes — Keep-style: colors, tags, checklists, voice (kept local)', 'Ideas — messy thought → organized idea + research brief', 'Bookmarks — auto-imported, videos watched by AI, meaning search', 'Skills — auto-described, shareable, “stale &amp; forgotten” rediscovery']],
+    ['📥', 'Notes · Ideas · Bookmarks · Skills', ['Notes — Keep-style: colors, tags, checklists, voice (kept local)', 'Ideas — messy thought → organized idea, research brief + a ready agentic prompt', 'Bookmarks — auto-imported, videos watched by AI, meaning search', 'Skills — auto-described, shareable, “stale &amp; forgotten” rediscovery']],
     ['🔔', 'Notifications', ['Telegram + push for briefs, nudges &amp; reminders', 'Backup success/failure alerts', 'Tap-to-done reminder buttons']],
-    ['🎛️', 'AI engines', ['Right model for each job — long-form writer, fast sprinter, a model with eyes, the ears', 'Per-feature model pickers in Settings', 'Free background engines with automatic Sonnet fallback', 'Every instruction is an editable prompt']],
+    ['🎛️', 'AI engines', ['Right model for each job — long-form writer, fast sprinter, a model with eyes, the ears', 'Per-feature model pickers in Settings', 'Background work runs on your Codex &amp; Gemini CLI subscriptions — near-zero API cost, with automatic Sonnet fallback', 'Every instruction is an editable prompt']],
     ['⚙️', 'Settings &amp; admin', ['Account · change password · Update app', 'Integrations with live “Test” buttons', 'Usage log · prompts editor · appearance / dark mode', 'Index &amp; sync controls']],
     ['📱', 'Platform', ['Installable PWA — works like a native app, full dark mode', 'Self-heal &amp; force-update', 'Collapsible sidebar, bottom tabs, native-feel mobile scroll', 'Accounts, HTTPS, auto-logout on idle']],
     ['🛡️', 'Safety &amp; backups', ['Nightly encrypted backups pulled to a second machine', 'Every backup checksummed &amp; integrity-tested', 'A watchdog guarding the server', 'Your data, on hardware you control']],
@@ -751,7 +888,53 @@
     catEl.appendChild(d);
   });
 
-  // ---------- ch10: timeline ----------
+  // ---------- ch4: twin-store sync (RAG + SuperMemory, self-healing) ----------
+  (function () {
+    const colA = document.getElementById('colA'), colB = document.getElementById('colB');
+    const badge = document.getElementById('syncBadge'), tnote = document.getElementById('twinNote');
+    if (!colA || !colB) return;
+    const ITEMS = [['✅', 'task · revised quote'], ['📖', 'story · Jun 14'], ['💡', 'idea · newsletter'], ['📧', 'email · vendor contract']];
+    function chip(ic, txt) {
+      const d = document.createElement('div');
+      d.className = 'rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-[11px] text-zinc-300';
+      d.innerHTML = '<span>' + ic + '</span> ' + txt;
+      d.style.opacity = 0; d.style.transform = 'translateY(6px)'; d.style.transition = 'all .35s ease';
+      requestAnimationFrame(() => { d.style.opacity = 1; d.style.transform = 'none'; });
+      return d;
+    }
+    function setBadge(state) {
+      if (state === 'sync') { badge.textContent = '✓ in sync'; badge.className = 'rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300'; }
+      else if (state === 'drift') { badge.textContent = '↻ reconciling…'; badge.className = 'rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300'; }
+      else { badge.textContent = 'idle'; badge.className = 'rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400'; }
+    }
+    function finalState() { colA.innerHTML = ''; colB.innerHTML = ''; ITEMS.forEach(([ic, t]) => { colA.appendChild(chip(ic, t)); colB.appendChild(chip(ic, t)); }); setBadge('sync'); tnote.textContent = 'Both memories hold everything — in sync.'; }
+    function play() {
+      colA.innerHTML = ''; colB.innerHTML = ''; tnote.textContent = '';
+      let i = 0;
+      const tick = () => {
+        if (i < 3) {
+          const [ic, t] = ITEMS[i]; colA.appendChild(chip(ic, t)); setBadge('drift');
+          setTimeout(() => { colB.appendChild(chip(ic, t)); setBadge('sync'); }, 300);
+          i++; setTimeout(tick, 950);
+        } else if (i === 3) {
+          const [ic, t] = ITEMS[3]; colA.appendChild(chip(ic, t)); setBadge('drift');
+          tnote.textContent = 'one memory got it first — the other is catching up…';
+          setTimeout(() => { colB.appendChild(chip(ic, t)); setBadge('sync'); tnote.textContent = '✓ reconciled automatically — nothing was ever at risk.'; }, 1500);
+          i++;
+        }
+      };
+      tick();
+    }
+    let played = false;
+    const twio = new IntersectionObserver((es) => es.forEach((e) => {
+      if (!e.isIntersecting || played) return; played = true; twio.disconnect();
+      if (reduceMo) { finalState(); return; }
+      play();
+    }), { threshold: 0.35 });
+    twio.observe(document.getElementById('twin'));
+  })();
+
+  // ---------- ch12: timeline ----------
   const tlio = new IntersectionObserver((es) => es.forEach((e) => {
     if (!e.isIntersecting) return; tlio.disconnect();
     document.querySelectorAll('.tl-item').forEach((m, i) => setTimeout(() => m.classList.add('in'), i * 250));
