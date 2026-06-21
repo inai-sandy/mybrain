@@ -4,13 +4,13 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>My Brain — a second brain that knows you</title>
-<meta name="description" content="A second brain that listens to your day, remembers your life, and mentors you back. Designed by Sandeep Karnati." />
+<meta name="description" content="A second brain that listens to your day, remembers your life, keeps your secrets, and mentors you back. Designed by Sandeep Karnati." />
 <link rel="icon" href="/favicon-32.png" />
 <!-- Open Graph (WhatsApp, Telegram, LinkedIn, iMessage…) -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="My Brain" />
 <meta property="og:title" content="My Brain — a second brain that knows you" />
-<meta property="og:description" content="Not another to-do app. It listens to your day, remembers your life, and mentors you back — your story, written daily. Designed by Sandeep Karnati." />
+<meta property="og:description" content="Not another to-do app. It listens to your day, remembers your life, keeps your secrets, and mentors you back — your story, written daily. Designed by Sandeep Karnati." />
 <meta property="og:url" content="https://1site.ai/" />
 <meta property="og:image" content="https://1site.ai/og.png" />
 <meta property="og:image:secure_url" content="https://1site.ai/og.png" />
@@ -19,7 +19,7 @@
 <meta property="og:image:height" content="630" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="My Brain — a second brain that knows you" />
-<meta name="twitter:description" content="It listens to your day, remembers your life, and mentors you back. Designed by Sandeep Karnati." />
+<meta name="twitter:description" content="It listens to your day, remembers your life, keeps your secrets, and mentors you back. Designed by Sandeep Karnati." />
 <meta name="twitter:image" content="https://1site.ai/og.png" />
 <meta name="theme-color" content="#07090f" />
 <script src="https://cdn.tailwindcss.com"></script>
@@ -65,6 +65,15 @@
   /* timeline */
   .tl-item { opacity:0; transform:translateX(-14px); transition:all .5s ease; }
   .tl-item.in { opacity:1; transform:none; }
+  /* ===== Follow-one-thought flow (the centerpiece) ===== */
+  .fstage { transition:border-color .45s ease, box-shadow .45s ease, transform .45s ease, background-color .45s ease; }
+  .fstage.lit { border-color:#34d399 !important; background:rgba(52,211,153,.06); box-shadow:0 0 40px rgba(52,211,153,.16); transform:translateY(-2px); }
+  .fdot { transition:all .45s ease; }
+  .fstage.lit .fdot { background:radial-gradient(circle at 38% 34%,#6ee7b7,#059669); box-shadow:0 0 26px 7px rgba(52,211,153,.5); transform:scale(1.18); }
+  .fthought { opacity:0; transform:translateX(-8px) scale(.96); transition:all .45s ease; }
+  .fstage.lit .fthought { opacity:1; transform:none; }
+  .fpip { opacity:.35; transition:all .4s ease; }
+  .fpip.on { opacity:1; }
   @media (prefers-reduced-motion: reduce) {
     .orb,.pulse-ring,.flow-path,.caret::after { animation:none !important; }
     .reveal{transition:none;opacity:1;transform:none}
@@ -77,9 +86,9 @@
 <nav class="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-black/40 border-b border-zinc-800/80">
   <div class="max-w-6xl mx-auto px-4 py-2.5 grid grid-cols-[auto_1fr_auto] items-center gap-3">
     <button onclick="go(0)" class="font-extrabold shrink-0">🧠 My <span class="gtext">Brain</span></button>
-    <div class="hidden md:flex justify-center gap-6 text-sm text-zinc-500" id="chtabs"></div>
+    <div class="hidden md:flex justify-center gap-5 text-sm text-zinc-500" id="chtabs"></div>
     <button id="chBtn" onclick="toggleMenu(true)" class="md:hidden justify-self-center rounded-full border border-zinc-700 bg-zinc-900/70 px-3.5 py-1.5 text-xs text-zinc-300 max-w-[58vw] truncate"></button>
-    <a href="https://mybrain.1site.ai/?login=1" class="shrink-0 rounded-full border border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-1.5 text-sm font-medium text-emerald-300 transition-colors">Login</a>
+    <a href="https://mybrain.1site.ai/?login=1" class="shrink-0 rounded-full border border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-1.5 text-sm font-medium text-emerald-300 transition-colors">Open app</a>
   </div>
 </nav>
 
@@ -107,15 +116,18 @@
       <div class="relative h-28 w-28 rounded-full bg-gradient-to-br from-emerald-500/30 to-indigo-600/30 border border-emerald-400/40 flex items-center justify-center text-6xl backdrop-blur">🧠</div>
     </div>
     <h1 class="text-5xl sm:text-7xl font-black tracking-tight">My <span class="gtext">Brain</span></h1>
-    <p class="mt-4 max-w-2xl text-lg sm:text-2xl text-zinc-300 font-light">Not another to-do app.<br/>A second brain that <span class="text-emerald-400 font-medium">listens to your day</span>, <span class="text-indigo-400 font-medium">remembers your life</span>, and <span class="text-pink-400 font-medium">mentors you back</span>.</p>
+    <p class="mt-4 max-w-2xl text-lg sm:text-2xl text-zinc-300 font-light">Not another app to fill in.<br/>A second brain that <span class="text-emerald-400 font-medium">listens to your day</span>, <span class="text-indigo-400 font-medium">remembers your life</span>, and <span class="text-pink-400 font-medium">mentors you back</span>.</p>
     <p class="mt-5 text-sm uppercase tracking-[0.25em] text-zinc-500">Designed by <span class="text-zinc-300">Sandeep Karnati</span></p>
-    <div class="mt-9 flex flex-wrap items-center justify-center gap-6 text-sm text-zinc-400">
-      <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="2">0</span><br/>minutes of effort a day</div>
+    <div class="mt-9 flex flex-wrap items-center justify-center gap-5 sm:gap-6 text-sm text-zinc-400">
+      <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="150">0</span><span class="text-3xl font-extrabold text-emerald-400">+</span><br/>features, and growing</div>
       <div class="h-10 w-px bg-zinc-700"></div>
-      <div><span class="tick text-3xl font-extrabold text-indigo-400" data-count="365">0</span><br/>days woven into one book a year</div>
+      <div><span class="tick text-3xl font-extrabold text-indigo-400" data-count="16">0</span><br/>areas of your life</div>
       <div class="h-10 w-px bg-zinc-700"></div>
-      <div><span class="tick text-3xl font-extrabold text-pink-400" data-count="100">0</span><span class="text-3xl font-extrabold text-pink-400">%</span><br/>yours — private &amp; self-hosted</div>
+      <div><span class="tick text-3xl font-extrabold text-pink-400" data-count="2">0</span><br/>memories, always in sync</div>
+      <div class="h-10 w-px bg-zinc-700 hidden sm:block"></div>
+      <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="100">0</span><span class="text-3xl font-extrabold text-emerald-400">%</span><br/>yours — private by design</div>
     </div>
+    <p class="mt-10 text-zinc-600 text-sm animate-bounce">↓ scroll, or tap the chapters above</p>
   </header>
 
   <div class="max-w-5xl mx-auto px-6 pb-10 space-y-24">
@@ -124,8 +136,8 @@
       <h2 class="text-3xl sm:text-5xl font-extrabold leading-tight">Every app organizes your <span class="text-zinc-500 line-through">tasks</span>.<br/>None of them understand your <span class="gtext">life</span>.</h2>
       <div class="mt-8 grid sm:grid-cols-2 gap-5">
         <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
-          <p class="text-sm text-zinc-500 uppercase tracking-wide mb-3">A normal to-do app</p>
-          <ul class="space-y-2 text-zinc-400"><li>☑️ Stores what you type</li><li>😶 Forgets how the day felt</li><li>📦 A filing cabinet — tasks go in, silence comes out</li><li>🔁 Day 1000 works exactly like day 1</li></ul>
+          <p class="text-sm text-zinc-500 uppercase tracking-wide mb-3">A normal app</p>
+          <ul class="space-y-2 text-zinc-400"><li>☑️ Stores what you type</li><li>😶 Forgets how the day felt</li><li>📦 A filing cabinet — things go in, silence comes out</li><li>🔁 Day 1000 works exactly like day 1</li></ul>
         </div>
         <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
           <p class="text-sm text-emerald-400 uppercase tracking-wide mb-3">My Brain</p>
@@ -135,39 +147,96 @@
     </div>
 
     <div class="reveal text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">How a day works</p>
-      <h2 class="text-3xl sm:text-4xl font-extrabold">One day in the loop <span class="text-zinc-500 text-xl font-normal">— tap each step</span></h2>
-      <div class="mt-8 grid sm:grid-cols-5 gap-3 relative">
-        <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
-        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="0"><div class="text-3xl">🌅</div><div class="mt-1 font-bold text-sm">Morning dump</div><div class="text-[11px] text-zinc-500">60 seconds</div></div>
-        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="1"><div class="text-3xl">✅</div><div class="mt-1 font-bold text-sm">Your day, built</div><div class="text-[11px] text-zinc-500">AI-crafted tasks</div></div>
-        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="2"><div class="text-3xl">🌙</div><div class="mt-1 font-bold text-sm">Evening story</div><div class="text-[11px] text-zinc-500">your words</div></div>
-        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="3"><div class="text-3xl">📖</div><div class="mt-1 font-bold text-sm">Story of the Day</div><div class="text-[11px] text-zinc-500">auto-written</div></div>
-        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="4"><div class="text-3xl">🧭</div><div class="mt-1 font-bold text-sm">Mentor speaks</div><div class="text-[11px] text-zinc-500">honest, nightly</div></div>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">The whole idea, in one line</p>
+      <h2 class="text-2xl sm:text-4xl font-extrabold leading-snug max-w-3xl mx-auto">Everything you capture goes into <span class="text-emerald-400">one brain</span> — kept safe in <span class="text-indigo-400">two places</span> — and the brain gives it back as <span class="text-pink-400">tasks, stories, answers and guidance.</span></h2>
+      <p class="mt-5 text-zinc-400">Next chapter shows it happening to a single thought. Keep going. →</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 2 — FOLLOW ONE THOUGHT ================= -->
+<section class="chapter" data-title="Follow one thought">
+  <div class="max-w-3xl mx-auto px-6 pt-16 pb-10 space-y-9">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 2 · how it works</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Follow <span class="gtext">one thought</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-xl mx-auto">No diagrams to decode. Just watch one little thought travel all the way through the system. Tap any stage, or let it play.</p>
+    </div>
+
+    <!-- the spoken thought -->
+    <div class="text-center">
+      <div class="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-5 py-2.5 text-emerald-200">
+        <span class="text-lg">💭</span><span class="font-medium">“call Diksha Friday”</span>
       </div>
-      <div class="mt-5 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[110px]"><p class="text-sm text-zinc-300" id="loopText">👆 Tap a step to see what happens there.</p></div>
+      <p class="mt-2 text-xs text-zinc-500">you say it once — then forget it. The brain doesn’t.</p>
+    </div>
+
+    <div id="flow" class="space-y-0">
+      <!-- stage 0 -->
+      <div class="fstage fstep rounded-2xl border border-zinc-700 bg-zinc-900 p-4 flex items-center gap-4" data-step="0">
+        <div class="fdot h-11 w-11 shrink-0 rounded-full bg-zinc-800 grid place-items-center text-xl">🎙️</div>
+        <div class="min-w-0 flex-1 text-left"><div class="font-bold">1 · Capture</div><div class="text-xs text-zinc-500">your voice becomes text — instantly</div></div>
+        <span class="fthought text-xs text-emerald-300 shrink-0">💭 here</span>
+      </div>
+      <div class="flex justify-center py-1"><svg width="4" height="26"><line x1="2" y1="0" x2="2" y2="26" stroke="#34d399" stroke-width="2" class="flow-path"/></svg></div>
+      <!-- stage 1 -->
+      <div class="fstage fstep rounded-2xl border border-zinc-700 bg-zinc-900 p-4 flex items-center gap-4" data-step="1">
+        <div class="fdot h-11 w-11 shrink-0 rounded-full bg-zinc-800 grid place-items-center text-xl">🧠</div>
+        <div class="min-w-0 flex-1 text-left"><div class="font-bold">2 · Understand</div><div class="text-xs text-zinc-500">AI works out what you meant — quietly</div></div>
+        <span class="fthought text-xs text-emerald-300 shrink-0">💭 here</span>
+      </div>
+      <div class="flex justify-center py-1"><svg width="4" height="26"><line x1="2" y1="0" x2="2" y2="26" stroke="#818cf8" stroke-width="2" class="flow-path"/></svg></div>
+      <!-- stage 2 -->
+      <div class="fstage fstep rounded-2xl border border-zinc-700 bg-zinc-900 p-4" data-step="2">
+        <div class="flex items-center gap-4">
+          <div class="fdot h-11 w-11 shrink-0 rounded-full bg-zinc-800 grid place-items-center text-xl">🗄️</div>
+          <div class="min-w-0 flex-1 text-left"><div class="font-bold">3 · Remember <span class="text-xs font-normal text-zinc-500">— into two twin memories</span></div><div class="text-xs text-zinc-500">saved twice, kept perfectly in sync</div></div>
+          <span class="fthought text-xs text-emerald-300 shrink-0">💭 here</span>
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-center text-xs"><b class="text-emerald-300">📚 Your server</b><div class="text-zinc-500">private memory</div></div>
+          <div class="rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-3 py-2 text-center text-xs"><b class="text-indigo-300">☁️ Cloud twin</b><div class="text-zinc-500">backup brain</div></div>
+        </div>
+      </div>
+      <div class="flex justify-center py-1"><svg width="4" height="26"><line x1="2" y1="0" x2="2" y2="26" stroke="#f472b6" stroke-width="2" class="flow-path"/></svg></div>
+      <!-- stage 3 -->
+      <div class="fstage fstep rounded-2xl border border-zinc-700 bg-zinc-900 p-4" data-step="3">
+        <div class="flex items-center gap-4">
+          <div class="fdot h-11 w-11 shrink-0 rounded-full bg-zinc-800 grid place-items-center text-xl">↩️</div>
+          <div class="min-w-0 flex-1 text-left"><div class="font-bold">4 · Comes back <span class="text-xs font-normal text-zinc-500">— right when you need it</span></div><div class="text-xs text-zinc-500">one thought, three ways home</div></div>
+          <span class="fthought text-xs text-emerald-300 shrink-0">💭 here</span>
+        </div>
+        <div class="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+          <div class="rounded-xl border border-zinc-700 bg-zinc-900 px-2 py-2">✅<div class="text-zinc-400 mt-0.5">a task,<br/>for Friday</div></div>
+          <div class="rounded-xl border border-zinc-700 bg-zinc-900 px-2 py-2">📖<div class="text-zinc-400 mt-0.5">a line in<br/>your story</div></div>
+          <div class="rounded-xl border border-zinc-700 bg-zinc-900 px-2 py-2">💬<div class="text-zinc-400 mt-0.5">an answer<br/>when you ask</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- progress pips + detail -->
+    <div class="flex justify-center gap-2"><span class="fpip h-1.5 w-8 rounded-full bg-emerald-500"></span><span class="fpip h-1.5 w-8 rounded-full bg-indigo-500"></span><span class="fpip h-1.5 w-8 rounded-full bg-pink-500"></span><span class="fpip h-1.5 w-8 rounded-full bg-emerald-400"></span></div>
+    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 min-h-[92px]"><p class="text-sm text-zinc-300" id="flowDetail">▶︎ Playing… watch the thought move down. Tap any stage to explore it.</p></div>
+
+    <p class="text-center text-sm text-zinc-500">That’s the entire architecture. One thought in, four stages, and it lives in your brain forever — ready to come back.</p>
+    <details class="curious">
+      <summary>For the curious — the real stack</summary>
+      <div class="body">A React progressive web app + a NestJS (TypeScript) API in one Docker image, behind a Caddy reverse-proxy with automatic HTTPS. Operational data in SQLite (Prisma). The two “twin memories” are <b>RAG</b> — a Postgres + pgvector store on your own server — and <b>SuperMemory</b>, an independent cloud store. Every save goes to <b>both</b> through a retrying outbox queue, with a reconcile sweep so they can never silently drift apart. AI is called only for the moments of intelligence; it keeps nothing.</div>
+    </details>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 3 — CAPTURE ================= -->
+<section class="chapter" data-title="Capture">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 3 · capture</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Speak your mind. <span class="gtext">Literally.</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">No forms, no fields. Talk for a minute and a whole day assembles itself — work and family, sorted, prioritized, timed.</p>
     </div>
 
     <div class="reveal text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">One story · two lives</p>
-      <h2 class="text-3xl sm:text-4xl font-extrabold">It separates <span class="text-emerald-400">work</span> from <span class="text-violet-400">family</span> — and watches the balance</h2>
-      <div class="mt-7 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 max-w-2xl mx-auto">
-        <div class="flex gap-2 mb-4">
-          <button id="tabPro" class="rounded-full px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white">💼 Professional</button>
-          <button id="tabPer" class="rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400">🏠 Personal</button>
-        </div>
-        <p id="tabText" class="text-sm leading-relaxed text-zinc-300 min-h-[84px]">The client call you dreaded turned into the win of the week — they signed. You closed three threads you’d been circling for days, and it shows: you ended work lighter than you started it.</p>
-        <div class="mt-5 space-y-2">
-          <div class="flex items-center gap-3 text-xs"><span class="w-20 text-zinc-500">Work mood</span><div class="flex-1 h-2.5 rounded-full bg-zinc-800 overflow-hidden"><div id="barPro" class="bar h-full bg-emerald-500" style="width:0%"></div></div><span id="numPro" class="tick w-8 text-emerald-400 font-bold">—</span></div>
-          <div class="flex items-center gap-3 text-xs"><span class="w-20 text-zinc-500">Home mood</span><div class="flex-1 h-2.5 rounded-full bg-zinc-800 overflow-hidden"><div id="barPer" class="bar h-full bg-violet-500" style="width:0%"></div></div><span id="numPer" class="tick w-8 text-violet-400 font-bold">—</span></div>
-        </div>
-        <p class="mt-4 text-xs rounded-lg bg-pink-500/10 border border-pink-500/20 px-3 py-2 text-pink-200">🧭 <b>Mentor:</b> “Work is winning at 78 while home sits at 52 for the third week. The proposal can wait one evening — Thursday’s dinner cannot.”</p>
-      </div>
-    </div>
-
-    <div class="reveal text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Feel it</p>
-      <h2 class="text-3xl sm:text-4xl font-extrabold mb-7">60 seconds of speaking → a day that runs itself</h2>
+      <h3 class="text-xl font-bold mb-7">60 seconds of speaking → a day that runs itself</h3>
       <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 font-mono text-sm max-w-2xl mx-auto shadow-2xl shadow-emerald-500/5">
         <p class="text-zinc-500 mb-2">🎙️ 7:02 AM — you, speaking:</p>
         <p class="text-emerald-300 caret" id="typeLine"></p>
@@ -180,93 +249,27 @@
         </div>
       </div>
     </div>
+
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🎙️</div><h3 class="font-bold">Voice everywhere</h3><p class="mt-1 text-sm text-zinc-400">Hold-to-talk on every screen, with live transcription and an AI tidy-up. Morning dump, night story, a quick note — all by speaking.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-indigo-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">📥</div><h3 class="font-bold">Capture anything</h3><p class="mt-1 text-sm text-zinc-400">Paste text, drop a file, import from Google Drive. It’s summarized, filed into memory, and gets its own private chat.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">✈️</div><h3 class="font-bold">From your pocket</h3><p class="mt-1 text-sm text-zinc-400">Forward a link to Telegram, send a voice note, reply to a reminder — it all lands in the same brain.</p></div>
+    </div>
   </div>
 </section>
 
-<!-- ================= CHAPTER 2 — EVERYTHING IT DOES ================= -->
-<section class="chapter" data-title="Everything it does">
-  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 2</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">One brain, <span class="gtext">ten rooms</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Tasks are just the heartbeat. Tap any room to see what lives inside.</p>
-    </div>
-    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3" id="rooms"></div>
-    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 min-h-[150px]" id="roomDetail">
-      <p class="text-sm text-zinc-300">👆 Tap a room.</p>
-    </div>
-    <p class="text-center text-sm text-zinc-500">Everything in every room flows into the same memory — that’s the next chapter.</p>
-  </div>
-</section>
-
-<!-- ================= CHAPTER 3 — ARCHITECTURE ================= -->
-<section class="chapter" data-title="Architecture">
-  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 3</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">The architecture, <span class="gtext">as a living picture</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Four layers. Everything you see talks to the layer below it — and your data never leaves your control. Tap any block.</p>
-    </div>
-
-    <div class="space-y-3" id="arch">
-      <div class="grid grid-cols-2 gap-3">
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="0"><div class="text-2xl">📱</div><div class="font-bold text-sm mt-1">Phone app</div><div class="text-[11px] text-zinc-500">installable · works like a native app</div></div>
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="1"><div class="text-2xl">✈️</div><div class="font-bold text-sm mt-1">Telegram companion</div><div class="text-[11px] text-zinc-500">voice notes · reminders · save anything</div></div>
-      </div>
-      <div class="flex justify-center"><svg width="4" height="22"><line x1="2" y1="0" x2="2" y2="22" stroke="#34d399" stroke-width="2" class="flow-path"/></svg></div>
-      <div class="tap arch-node rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5 text-center" data-arch="2">
-        <div class="text-2xl">🖥️</div><div class="font-bold mt-1">Your private server</div>
-        <div class="text-[11px] text-zinc-500">the app + its engines: the story-weaver, the mentor, the watchdogs — ticking on schedule all night</div>
-      </div>
-      <div class="flex justify-center"><svg width="4" height="22"><line x1="2" y1="0" x2="2" y2="22" stroke="#818cf8" stroke-width="2" class="flow-path"/></svg></div>
-      <div class="grid grid-cols-3 gap-3">
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="3"><div class="text-2xl">🗄️</div><div class="font-bold text-sm mt-1">App database</div><div class="text-[11px] text-zinc-500">tasks · stories · settings</div></div>
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="4"><div class="text-2xl">📚</div><div class="font-bold text-sm mt-1">Memory vault</div><div class="text-[11px] text-zinc-500">meaning-searchable, on your server</div></div>
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="5"><div class="text-2xl">☁️</div><div class="font-bold text-sm mt-1">SuperMemory</div><div class="text-[11px] text-zinc-500">second memory, in the cloud</div></div>
-      </div>
-      <div class="flex justify-center"><svg width="4" height="22"><line x1="2" y1="0" x2="2" y2="22" stroke="#f472b6" stroke-width="2" class="flow-path"/></svg></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="6"><div class="text-2xl">🤖</div><div class="font-bold text-sm mt-1">AI brains</div><div class="text-[11px] text-zinc-500">called only for moments of intelligence — they keep nothing</div></div>
-        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="7"><div class="text-2xl">🏠</div><div class="font-bold text-sm mt-1">Home backup</div><div class="text-[11px] text-zinc-500">verified copies, every night</div></div>
-      </div>
-    </div>
-
-    <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[120px]"><p class="text-sm text-zinc-300" id="archText">👆 Tap any block of the architecture.</p></div>
-
-    <details class="curious">
-      <summary>For the curious — the real stack</summary>
-      <div class="body">A React progressive web app and a NestJS (TypeScript) API, shipped as one Docker image behind a Caddy reverse-proxy with automatic HTTPS. Operational data in SQLite via Prisma; the memory vault is a Postgres database with the pgvector extension running beside the app; SuperMemory is the cloud twin. Background engines are in-process schedulers (per-minute ticks) for the nightly story, mentor, weekly review, monthly chapters, suggestions and watchdogs. Nightly backups: SQLite online snapshot + Postgres dump, pulled (not pushed) by a home server over SSH, with checksums and integrity checks on every single pull.</div>
-    </details>
-  </div>
-</section>
-
-<!-- ================= CHAPTER 4 — MEMORY & RETRIEVAL ================= -->
+<!-- ================= CHAPTER 4 — MEMORY ================= -->
 <section class="chapter" data-title="Memory">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 4</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">How remembering <span class="gtext">actually works</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">This is the heart of the whole system — and the part most apps don’t have at all.</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 4 · memory &amp; search</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Ask your brain, <span class="gtext">with receipts</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">It searches by <b>meaning</b>, not keywords — and every answer cites the real things it came from.</p>
     </div>
 
     <div class="reveal">
-      <h3 class="text-xl font-bold mb-4 text-center">Writing a memory <span class="text-zinc-500 font-normal text-sm">— what happens when you save anything</span></h3>
-      <div class="grid sm:grid-cols-4 gap-3 relative">
-        <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
-        <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">📄</div><div class="font-bold text-sm mt-1">Anything arrives</div><div class="text-[11px] text-zinc-500">a document · a link · a video · tonight’s story</div></div>
-        <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">✍️</div><div class="font-bold text-sm mt-1">AI distills it</div><div class="text-[11px] text-zinc-500">a faithful summary — videos are literally watched</div></div>
-        <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🧬</div><div class="font-bold text-sm mt-1">Meaning, not words</div><div class="text-[11px] text-zinc-500">converted into a “meaning fingerprint”</div></div>
-        <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-center"><div class="text-2xl">📚☁️</div><div class="font-bold text-sm mt-1">Written twice</div><div class="text-[11px] text-zinc-500">memory vault + SuperMemory — a queue retries until BOTH have it</div></div>
-      </div>
-      <details class="curious mt-4">
-        <summary>For the curious — the write path</summary>
-        <div class="body">Content → model-generated summary → OpenAI text-embedding vectors → an <b>outbox queue</b> writes to both stores (RAG/pgvector + SuperMemory) with retries, so the two memories can never silently drift apart. Every memory carries tags (bookmark, idea, activity, skill…) that power the scope system below. Long documents are auto-chunked along headings with overlapping windows so retrieval can land on the exact passage.</div>
-      </details>
-    </div>
-
-    <div class="reveal">
-      <h3 class="text-xl font-bold mb-1 text-center">Finding a memory <span class="text-zinc-500 font-normal text-sm">— ask, and watch what happens</span></h3>
-      <p class="text-sm text-zinc-500 mb-4 text-center">This is a live simulation — tap a question.</p>
+      <h3 class="text-xl font-bold mb-1 text-center">Ask, and watch it light up</h3>
+      <p class="text-sm text-zinc-500 mb-4 text-center">A live, illustrative simulation — tap a question.</p>
       <div class="flex flex-wrap justify-center gap-2 mb-5">
         <button class="memq tap rounded-full border border-zinc-700 px-4 py-1.5 text-sm text-zinc-300" data-q="0">“What did I save about SEO?”</button>
         <button class="memq tap rounded-full border border-zinc-700 px-4 py-1.5 text-sm text-zinc-300" data-q="1">“When did I last feel really great?”</button>
@@ -282,152 +285,230 @@
         <div class="mem-chip rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-400">📄 Doc: vendor comparison</div>
       </div>
       <div id="memAnswer" class="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 text-sm text-zinc-300 opacity-0 transition-opacity duration-700 min-h-[80px]"></div>
-      <details class="curious mt-4">
-        <summary>For the curious — the read path</summary>
-        <div class="body">Your question is converted into the same kind of meaning-fingerprint and compared against every memory — matching by <b>meaning</b>, not keywords (“cloud SEO skills” finds a video that never says those words). The chosen <b>scope</b> (Bookmarks, Capture, My life…) filters by tags on BOTH stores, results are merged and ranked, and the answer is grounded in the retrieved passages with sources attached. If the scope truly has nothing, it says so honestly instead of guessing.</div>
-      </details>
+    </div>
+
+    <div class="reveal">
+      <h3 class="text-xl font-bold mb-4 text-center">A real exchange, replayed</h3>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-2xl mx-auto">
+        <div class="flex gap-2 mb-4 text-xs">
+          <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🌐 Everything</span>
+          <span class="rounded-full bg-indigo-600 px-3 py-1 text-white">📊 My life</span>
+          <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🔖 Bookmarks</span>
+        </div>
+        <div class="space-y-3" id="chatDemo">
+          <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[80%]">When did I last feel really great?</div></div>
+          <div class="msg text-[11px] text-zinc-500 pl-1">🧭 deciding: this needs a memory search → searching <b>My life</b>…</div>
+          <div class="msg flex gap-2 text-[11px]">
+            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🌙 Story · Jun 8</span>
+            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🌙 Story · May 30</span>
+            <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">📜 Weekly review</span>
+          </div>
+          <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-zinc-800 px-4 py-2.5 text-sm max-w-[85%] text-zinc-200" id="chatAns"></div></div>
+        </div>
+      </div>
     </div>
 
     <div class="reveal grid sm:grid-cols-2 gap-5">
       <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
-        <h3 class="font-bold">📚 The memory vault <span class="text-xs font-normal text-zinc-500">(on your server)</span></h3>
-        <p class="mt-2 text-sm text-zinc-400">Stores everything <b>verbatim</b> — the exact words, retrievable exactly. Built for receipts: when the app answers, it can show you the original.</p>
+        <h3 class="font-bold">📚 Your private memory <span class="text-xs font-normal text-zinc-500">(on your server)</span></h3>
+        <p class="mt-2 text-sm text-zinc-400">Holds everything you save and every story, searchable by meaning. When it answers, it can show you the original.</p>
       </div>
       <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6">
-        <h3 class="font-bold">☁️ SuperMemory <span class="text-xs font-normal text-zinc-500">(cloud twin)</span></h3>
-        <p class="mt-2 text-sm text-zinc-400">A second, independent memory with its own intelligence — redundancy by design. Two memories, one truth: the queue keeps them in lock-step.</p>
+        <h3 class="font-bold">☁️ The cloud twin <span class="text-xs font-normal text-zinc-500">(SuperMemory)</span></h3>
+        <p class="mt-2 text-sm text-zinc-400">A second, independent memory — redundancy by design. A queue keeps both in lock-step, and a sync panel lets you see and reconcile them anytime.</p>
       </div>
     </div>
+    <details class="curious max-w-2xl mx-auto">
+      <summary>For the curious — search internals</summary>
+      <div class="body">Your question becomes the same kind of meaning-vector and is matched across both stores; a scope filters by tags, results merge + re-rank, and the answer is grounded in the retrieved passages with sources attached. Explore (Ask · Everything · Saved), a ⌘K global search, and a per-document chat all ride the same engine. An index manager shows what’s indexed per section, when each last synced, and RAG-vs-SuperMemory counts — with one-tap reconcile.</div>
+    </details>
   </div>
 </section>
 
-<!-- ================= CHAPTER 5 — THE CHAT ================= -->
-<section class="chapter" data-title="The Chat">
-  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
+<!-- ================= CHAPTER 5 — THE DAILY LOOP ================= -->
+<section class="chapter" data-title="The Loop">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-14">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 5</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">Talk to your brain — <span class="gtext">with receipts</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Every conversation is scoped to a part of your life, and every claim comes with its source. Watch a real exchange replay:</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 5 · the daily loop</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Your day, <span class="gtext">written for you</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">One gentle loop, every day. Tap a step.</p>
     </div>
 
-    <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-2xl mx-auto">
-      <div class="flex gap-2 mb-4 text-xs">
-        <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🌐 Everything</span>
-        <span class="rounded-full bg-indigo-600 px-3 py-1 text-white">📊 My life</span>
-        <span class="rounded-full border border-zinc-700 px-3 py-1 text-zinc-500">🔖 Bookmarks</span>
+    <div class="reveal">
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 relative">
+        <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
+        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="0"><div class="text-3xl">🌅</div><div class="mt-1 font-bold text-sm">Morning dump</div><div class="text-[11px] text-zinc-500">60 seconds</div></div>
+        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="1"><div class="text-3xl">✅</div><div class="mt-1 font-bold text-sm">Your day, built</div><div class="text-[11px] text-zinc-500">AI-crafted tasks</div></div>
+        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="2"><div class="text-3xl">🌙</div><div class="mt-1 font-bold text-sm">Evening story</div><div class="text-[11px] text-zinc-500">your words</div></div>
+        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="3"><div class="text-3xl">📖</div><div class="mt-1 font-bold text-sm">Story of the Day</div><div class="text-[11px] text-zinc-500">auto-written</div></div>
+        <div class="tap loop-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="4"><div class="text-3xl">🧭</div><div class="mt-1 font-bold text-sm">Mentor speaks</div><div class="text-[11px] text-zinc-500">honest, nightly</div></div>
       </div>
-      <div class="space-y-3" id="chatDemo">
-        <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[80%]">When did I last feel really great?</div></div>
-        <div class="msg text-[11px] text-zinc-500 pl-1">🧭 deciding: this needs a memory search → searching <b>My life</b>…</div>
-        <div class="msg flex gap-2 text-[11px]">
-          <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🌙 Story · Jun 8</span>
-          <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">🌙 Story · May 30</span>
-          <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">📜 Weekly review</span>
+      <div class="mt-5 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[110px]"><p class="text-sm text-zinc-300" id="loopText">👆 Tap a step to see what happens there.</p></div>
+    </div>
+
+    <div class="reveal text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">One story · two lives</p>
+      <h2 class="text-2xl sm:text-4xl font-extrabold">It separates <span class="text-emerald-400">work</span> from <span class="text-violet-400">family</span> — and watches the balance</h2>
+      <div class="mt-7 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-6 max-w-2xl mx-auto">
+        <div class="flex gap-2 mb-4">
+          <button id="tabPro" class="rounded-full px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white">💼 Professional</button>
+          <button id="tabPer" class="rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400">🏠 Personal</button>
         </div>
-        <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-zinc-800 px-4 py-2.5 text-sm max-w-[85%] text-zinc-200" id="chatAns"></div></div>
+        <p id="tabText" class="text-sm leading-relaxed text-zinc-300 min-h-[84px] text-left">The client call you dreaded turned into the win of the week — they signed. You closed three threads you’d been circling for days, and it shows: you ended work lighter than you started it.</p>
+        <div class="mt-5 space-y-2">
+          <div class="flex items-center gap-3 text-xs"><span class="w-20 text-zinc-500 text-left">Work mood</span><div class="flex-1 h-2.5 rounded-full bg-zinc-800 overflow-hidden"><div id="barPro" class="bar h-full bg-emerald-500" style="width:0%"></div></div><span id="numPro" class="tick w-8 text-emerald-400 font-bold">—</span></div>
+          <div class="flex items-center gap-3 text-xs"><span class="w-20 text-zinc-500 text-left">Home mood</span><div class="flex-1 h-2.5 rounded-full bg-zinc-800 overflow-hidden"><div id="barPer" class="bar h-full bg-violet-500" style="width:0%"></div></div><span id="numPer" class="tick w-8 text-violet-400 font-bold">—</span></div>
+        </div>
+        <p class="mt-4 text-xs rounded-lg bg-pink-500/10 border border-pink-500/20 px-3 py-2 text-pink-200 text-left">🧭 <b>Mentor:</b> “Work is winning at 78 while home sits at 52 for the third week. The proposal can wait one evening — Thursday’s dinner cannot.”</p>
       </div>
     </div>
 
-    <div class="grid sm:grid-cols-3 gap-4">
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">🎯 Scoped, not soup</h3><p class="mt-1 text-xs text-zinc-400">Ask your bookmarks, your documents, your ideas, your skills — or your life. Each scope searches only its own shelf, and says so honestly when the shelf is empty.</p></div>
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">🧾 Receipts attached</h3><p class="mt-1 text-xs text-zinc-400">Answers cite the actual saved items they came from — tap a source and read the original. No hallucinated confidence.</p></div>
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">⚡ A router thinks first</h3><p class="mt-1 text-xs text-zinc-400">A fast small model decides per message: does this need a fresh memory search, or is it a follow-up? Searches happen only when they should.</p></div>
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">📜 A longer memory</h3><p class="mt-1 text-xs text-zinc-400">Daily stories roll up into weekly reviews, monthly chapters, and a Story of the Year — your life, written as a book.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">🧭 An honest mentor</h3><p class="mt-1 text-xs text-zinc-400">Focus areas, an on-track score with a trend line, a nightly note, and a 4 PM nudge to land the day well.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><h3 class="font-bold text-sm">👥 It learns your people</h3><p class="mt-1 text-xs text-zinc-400">Who matters keeps surfacing — names, context, and how your weeks revolve around them.</p></div>
     </div>
-    <details class="curious max-w-2xl mx-auto">
-      <summary>For the curious — chat internals</summary>
-      <div class="body">Sessions carry a scope; a lightweight router model classifies each message (new retrieval vs follow-up) and writes a standalone search query when needed. Retrieval merges both memory stores with tag filters, then the answer streams token-by-token to the screen. A per-document chat mode binds a session to one document. Conversations are kept on a retention schedule you control.</div>
-    </details>
   </div>
 </section>
 
-<!-- ================= CHAPTER 6 — THE BRAINS ================= -->
-<section class="chapter" data-title="The Brains">
-  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 6</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">The right brain <span class="gtext">for the right job</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">One AI model would be either wasteful or weak. My Brain runs a crew — each picked for its task, each swappable from Settings without touching code.</p>
-    </div>
-    <div class="grid sm:grid-cols-2 gap-5">
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-indigo-500/50 hover:-translate-y-1 transition-all">
-        <div class="text-3xl mb-2">🖋️</div><h3 class="font-bold">The Storyteller <span class="text-xs text-zinc-500 font-normal">— a deep, careful model</span></h3>
-        <p class="mt-1 text-sm text-zinc-400">Writes what deserves craft: the nightly Story of the Day, the mentor’s guidance, the Sunday review, the monthly chapters, the book of the year.</p>
-      </div>
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all">
-        <div class="text-3xl mb-2">⚡</div><h3 class="font-bold">The Sprinter <span class="text-xs text-zinc-500 font-normal">— a fast, tiny model</span></h3>
-        <p class="mt-1 text-sm text-zinc-400">Handles hundreds of small jobs: routing chat messages, cleaning voice transcripts, spotting people’s names, phrasing the 4 PM nudge. Instant and frugal.</p>
-      </div>
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-pink-500/50 hover:-translate-y-1 transition-all">
-        <div class="text-3xl mb-2">👁️</div><h3 class="font-bold">The Watcher <span class="text-xs text-zinc-500 font-normal">— a model with eyes</span></h3>
-        <p class="mt-1 text-sm text-zinc-400">Literally watches the YouTube videos you bookmark and reads the pages you save, writing faithful summaries so your memory holds the substance, not just the link.</p>
-      </div>
-      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all">
-        <div class="text-3xl mb-2">👂</div><h3 class="font-bold">The Ears <span class="text-xs text-zinc-500 font-normal">— speech-to-text engines</span></h3>
-        <p class="mt-1 text-sm text-zinc-400">Turn your voice into clean text everywhere — the morning dump, the night story, Telegram voice notes — with a choice of engines and automatic fallback.</p>
-      </div>
-    </div>
-    <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 text-center">
-      <p class="text-sm text-zinc-300">🎛️ Every role has its own picker in Settings — and every instruction the AI follows is an <b>editable prompt</b>. The owner can re-tune any brain, any time, without a developer.</p>
-    </div>
-    <details class="curious max-w-2xl mx-auto">
-      <summary>For the curious — the actual crew</summary>
-      <div class="body">Claude Sonnet for the long-form writing and mentoring; Claude Haiku for routing, cleanup, extraction and nudges; Gemini (multimodal) for watching bookmarked videos and reading pages; GPT-4o-transcribe / Whisper, ElevenLabs Scribe and Deepgram Nova as selectable speech engines. All routed through one gateway with per-request usage logging, and every role’s model + prompt is user-configurable.</div>
-    </details>
-  </div>
-</section>
-
-<!-- ================= CHAPTER 7 — CONNECTIONS ================= -->
-<section class="chapter" data-title="Connections">
-  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-10">
-    <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 7</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">Connected to your world, <span class="gtext">guarded like a vault</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Tap a connection to see its role. Every key is encrypted at rest — even someone holding the database file couldn’t read them.</p>
-    </div>
-    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="conns"></div>
-    <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 min-h-[110px]"><p class="text-sm text-zinc-300" id="connText">👆 Tap a connection.</p></div>
-    <details class="curious max-w-2xl mx-auto">
-      <summary>For the curious — the key vault</summary>
-      <div class="body">All third-party credentials live in an encrypted connector registry (AES-256-GCM, key derived from a server-side secret) — never in code, never in the repository. Each connector has a live “Test” button in Settings that makes one real, cheap call to prove the key works.</div>
-    </details>
-  </div>
-</section>
-
-<!-- ================= CHAPTER 8 — BUILT & GROWING ================= -->
-<section class="chapter" data-title="Built & Growing">
+<!-- ================= CHAPTER 6 — THE VAULT ================= -->
+<section class="chapter" data-title="The Vault">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 8</p>
-      <h2 class="text-3xl sm:text-5xl font-extrabold">Built by AI — <span class="gtext">held to engineering discipline</span></h2>
-      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The entire application was built by an AI working under an enforced pipeline — nothing ships on trust.</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 6 · the vault</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Your secrets, <span class="gtext">sealed shut</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">A full password manager built in — and built so that <b>even the app can’t read it</b>.</p>
     </div>
 
-    <div class="grid sm:grid-cols-5 gap-3 relative">
-      <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
-      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🎫</div><div class="font-bold text-sm mt-1">Ticket</div><div class="text-[11px] text-zinc-500">every feature is tracked</div></div>
-      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">⌨️</div><div class="font-bold text-sm mt-1">Code</div><div class="text-[11px] text-zinc-500">one branch per feature</div></div>
-      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🧪</div><div class="font-bold text-sm mt-1">130+ tests</div><div class="text-[11px] text-zinc-500">red = nothing ships</div></div>
-      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🚀</div><div class="font-bold text-sm mt-1">Deploy</div><div class="text-[11px] text-zinc-500">all-or-nothing gate</div></div>
-      <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-center"><div class="text-2xl">✅</div><div class="font-bold text-sm mt-1">Verified live</div><div class="text-[11px] text-zinc-500">then — and only then — done</div></div>
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6"><div class="text-3xl mb-2">🔒</div><h3 class="font-bold">Zero-knowledge</h3><p class="mt-1 text-sm text-zinc-400">Everything is encrypted <b>in your browser</b> with your master passphrase before it’s ever stored. The server only ever holds an unreadable blob — no one can decrypt it but you.</p></div>
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6"><div class="text-3xl mb-2">👆</div><h3 class="font-bold">Unlock with a touch</h3><p class="mt-1 text-sm text-zinc-400">Face ID / fingerprint unlock on your device, a forced Recovery Key at setup, and auto-lock the moment you step away.</p></div>
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6"><div class="text-3xl mb-2">🙈</div><h3 class="font-bold">Never indexed</h3><p class="mt-1 text-sm text-zinc-400">Only the labels (the site name) are searchable — the secret itself is never added to memory, never sent to any AI.</p></div>
     </div>
-    <p class="text-center text-sm text-zinc-500">Everything versioned on a private repository · data backed up to a second machine nightly, with every backup integrity-tested.</p>
+
+    <div class="reveal">
+      <h3 class="text-lg font-bold mb-4 text-center text-zinc-300">…and it’s a <span class="text-emerald-400">complete</span> manager, not a side feature</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>11 secret types</b><p class="text-xs text-zinc-500 mt-1">logins, cards, bank, crypto, identity, API keys, docs, licenses, Wi-Fi, memberships, notes</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Strong by default</b><p class="text-xs text-zinc-500 mt-1">password generator + weak / reused detection + a security view</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Copy that vanishes</b><p class="text-xs text-zinc-500 mt-1">tap to copy a password — the clipboard auto-clears in 30 seconds</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Extra-guarded</b><p class="text-xs text-zinc-500 mt-1">re-enter your passphrase before a seed phrase or private key is ever shown</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Move in easily</b><p class="text-xs text-zinc-500 mt-1">import from 1Password, Bitwarden or CSV — encrypted in your browser</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Encrypted files</b><p class="text-xs text-zinc-500 mt-1">attach a passport scan or doc — sealed the same way</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Tidy &amp; fast</b><p class="text-xs text-zinc-500 mt-1">type tabs, table or card views, collections, favorites, audit log</p></div>
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4"><b>Encrypted backup</b><p class="text-xs text-zinc-500 mt-1">export the whole vault — still only readable with your key</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 7 — CONNECTED ================= -->
+<section class="chapter" data-title="Connected">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 7 · works with your world</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Plugged into <span class="gtext">your real life</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">It meets you where your day already happens — and treats every connection like a vault.</p>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-2 gap-5">
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+        <h3 class="font-bold">📧 Gmail, distilled</h3>
+        <p class="mt-2 text-sm text-zinc-400">A nightly <b>Daily Brief</b> of what actually mattered, an in-app thread viewer, and important emails recalled by your brain. <span class="text-zinc-300">Connected through Google’s own secure sign-in — you stay in control, and can switch it off and purge anytime.</span></p>
+      </div>
+      <div class="rounded-2xl border border-pink-500/30 bg-pink-500/5 p-6">
+        <h3 class="font-bold">🔗 Noticed in your brain</h3>
+        <p class="mt-2 text-sm text-zinc-400">A daily pass quietly finds non-obvious links across everything you’ve saved — “this idea connects to that meeting three weeks ago” — and surfaces them on your home screen.</p>
+      </div>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-indigo-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">🎙️</div><h3 class="font-bold text-sm">Meetings</h3><p class="mt-1 text-xs text-zinc-400">Record &amp; transcribe, then an AI summary with takeaways and decisions — searchable forever.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">🤝</div><h3 class="font-bold text-sm">Commitments</h3><p class="mt-1 text-xs text-zinc-400">“I’ll send it by Friday” is caught automatically and tracked until it’s done or dropped.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">📅</div><h3 class="font-bold text-sm">Calendar &amp; Drive</h3><p class="mt-1 text-xs text-zinc-400">Your day’s events at a glance and one-tap import of Docs, Sheets and Slides into memory.</p></div>
+    </div>
+
+    <div class="reveal">
+      <p class="text-center text-sm text-zinc-500 mb-3">Tap a connection to see its role.</p>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="conns"></div>
+      <div class="mt-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 min-h-[100px]"><p class="text-sm text-zinc-300" id="connText">👆 Tap a connection.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 8 — EVERYTHING IT DOES ================= -->
+<section class="chapter" data-title="Everything it does">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-8">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 8 · the full catalog</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Everything it <span class="gtext">does</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The whole brain, end to end — nothing left out. Sixteen areas, a hundred and fifty-plus little powers.</p>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-4 text-sm" id="catalog"></div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 9 — COMING NEXT ================= -->
+<section class="chapter" data-title="Coming next">
+  <div class="max-w-4xl mx-auto px-6 pt-16 pb-10 space-y-10">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 9 · the road ahead</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">It’s only <span class="gtext">getting started</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The brain lives in your pocket and on your server today. Next, it reaches into the physical world.</p>
+    </div>
+    <div class="reveal grid sm:grid-cols-2 gap-5">
+      <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-7 text-center">
+        <div class="text-5xl mb-3">🤖</div>
+        <h3 class="text-xl font-bold">Hardware</h3>
+        <p class="mt-2 text-sm text-zinc-400">Dedicated devices for a few focused use-cases — so capturing a thought and getting it back is as natural as speaking into the air.</p>
+        <span class="mt-4 inline-block rounded-full border border-indigo-500/40 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-300">in the works</span>
+      </div>
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-7 text-center">
+        <div class="text-5xl mb-3">📱</div>
+        <h3 class="text-xl font-bold">A native Android app</h3>
+        <p class="mt-2 text-sm text-zinc-400">A purpose-built Android app for a handful of high-value use-cases — faster capture, deeper notifications, always within reach.</p>
+        <span class="mt-4 inline-block rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300">next up</span>
+      </div>
+    </div>
+    <p class="text-center text-sm text-zinc-500">Same brain, more doors into it.</p>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 10 — BUILT & GROWING ================= -->
+<section class="chapter" data-title="Built &amp; Growing">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 10 · built right</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Built by AI — <span class="gtext">held to discipline</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Every single feature shipped through an enforced pipeline. Nothing reaches you on trust.</p>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-5 gap-3 relative">
+      <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🎫</div><div class="font-bold text-sm mt-1">Ticket</div><div class="text-[11px] text-zinc-500">every feature tracked</div></div>
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">⌨️</div><div class="font-bold text-sm mt-1">Code</div><div class="text-[11px] text-zinc-500">one branch per feature</div></div>
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🧪</div><div class="font-bold text-sm mt-1">Tests</div><div class="text-[11px] text-zinc-500">red = nothing ships</div></div>
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center"><div class="text-2xl">🚀</div><div class="font-bold text-sm mt-1">Deploy</div><div class="text-[11px] text-zinc-500">all-or-nothing</div></div>
+      <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 text-center"><div class="text-2xl">✅</div><div class="font-bold text-sm mt-1">Verified live</div><div class="text-[11px] text-zinc-500">then — only then — done</div></div>
+    </div>
+    <p class="text-center text-sm text-zinc-500">Versioned privately · data pulled to a second machine at home every night · every backup integrity-tested · a watchdog guarding it all.</p>
 
     <div class="reveal">
       <h3 class="text-xl font-bold mb-6 text-center">From zero to a life companion — in days, not years</h3>
       <div class="space-y-0" id="timeline">
-        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm">Born</b><p class="text-xs text-zinc-500">Skeleton, login, the twin-memory engine, the design system.</p></div></div>
-        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm">It started remembering</b><p class="text-xs text-zinc-500">Capture for documents; bookmarks imported and literally watched; ideas and skills organized by AI.</p></div></div>
-        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-indigo-500"></span><div><b class="text-sm">It started listening</b><p class="text-xs text-zinc-500">The daily loop: morning dumps, evening stories, the woven Story of the Day, Telegram by voice.</p></div></div>
-        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-indigo-500"></span><div><b class="text-sm">It started understanding</b><p class="text-xs text-zinc-500">The mentor, focus areas, the on-track score, suggested tomorrows.</p></div></div>
-        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-pink-500"></span><div><b class="text-sm">It grew a long memory</b><p class="text-xs text-zinc-500">Weekly reviews with patterns and experiments; monthly chapters; the Story of the Year; people memory.</p></div></div>
-        <div class="tl-item flex gap-4 pb-0 border-l-2 border-transparent pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-pink-500"></span><div><b class="text-sm">It embraced the whole life</b><p class="text-xs text-zinc-500">Work and family as equal citizens — two narratives, two moods, one mentor watching the balance.</p></div></div>
+        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm">It was born</b><p class="text-xs text-zinc-500">Login, the twin-memory engine, the design system.</p></div></div>
+        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm">It started remembering</b><p class="text-xs text-zinc-500">Capture, bookmarks watched by AI, ideas and skills organized.</p></div></div>
+        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-indigo-500"></span><div><b class="text-sm">It started listening</b><p class="text-xs text-zinc-500">The daily loop, the Story of the Day, Telegram by voice.</p></div></div>
+        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-indigo-500"></span><div><b class="text-sm">It started understanding</b><p class="text-xs text-zinc-500">The mentor, focus areas, on-track score, suggested tomorrows.</p></div></div>
+        <div class="tl-item flex gap-4 pb-6 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-pink-500"></span><div><b class="text-sm">It connected to your world</b><p class="text-xs text-zinc-500">Gmail, meetings, commitments, connections, semantic Explore.</p></div></div>
+        <div class="tl-item flex gap-4 pb-0 border-l-2 border-transparent pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-pink-500"></span><div><b class="text-sm">It learned to keep secrets</b><p class="text-xs text-zinc-500">A zero-knowledge vault — and next, hardware and a native app.</p></div></div>
       </div>
     </div>
 
     <div class="reveal text-center pt-4">
       <h2 class="text-4xl sm:text-5xl font-black leading-tight">Most apps manage what you <span class="text-zinc-500">do</span>.<br/><span class="gtext">This one understands who you are.</span></h2>
       <p class="mt-5 text-zinc-400 max-w-xl mx-auto">Every day it runs, it knows one day more. The version you meet next year will know its owner better than any product ever has.</p>
-      <div class="mt-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-emerald-300 font-medium">🧠 My Brain — one life, fully remembered</div>
+      <a href="https://mybrain.1site.ai/?login=1" class="mt-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 px-6 py-3 text-emerald-300 font-medium transition-colors">🧠 Open My Brain →</a>
     </div>
   </div>
 </section>
@@ -446,7 +527,7 @@
 </footer>
 
 <script>
-  // ---------- shared: reveal + counters ----------
+  // ---------- shared: reveal + counters (MUST come before paging — go() re-observes .reveal) ----------
   const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('shown')), { threshold: 0.12 });
   document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
   const cio = new IntersectionObserver((es) => es.forEach((e) => {
@@ -459,7 +540,7 @@
 
   // ---------- chapter paging ----------
   const chapters = [...document.querySelectorAll('.chapter')];
-  const SHORT = ['Story', 'Rooms', 'Architecture', 'Memory', 'Chat', 'Brains', 'Connections', 'Growth'];
+  const SHORT = ['Story', 'Flow', 'Capture', 'Memory', 'Loop', 'Vault', 'Connected', 'Everything', 'Next', 'Built'];
   const tabs = document.getElementById('chtabs');
   const dots = document.getElementById('dots');
   const chBtn = document.getElementById('chBtn');
@@ -516,39 +597,35 @@
   const h = parseInt((location.hash || '').slice(1));
   if (h >= 1 && h <= chapters.length) go(h - 1);
 
-  // ---------- ch1: loop ----------
-  const LOOP = [
-    ['🌅 Morning dump', 'You talk for a minute — everything on your mind, work and family mixed. The AI turns it into a clean, prioritized task list with time estimates and your must-dos pinned, then shows a review pop-up of exactly what landed.'],
-    ['✅ Your day, built', 'Tasks carry a Work or Personal tag automatically. Tap 30% / 60% as you progress; unfinished tasks roll to tomorrow on their own.'],
-    ['🌙 Evening story', 'You tell the story of your day in your own words — typed or spoken, even from Telegram, even the next morning if life got busy.'],
-    ['📖 Story of the Day', 'Near midnight the AI weaves your story, tasks and activity into two written narratives — professional and personal — each with its own mood score.'],
-    ['🧭 Mentor speaks', 'A mentor that has read everything gives an honest nightly note — and on Sundays, the week’s one provable pattern and one experiment for the next.'],
+  // ---------- ch2: follow one thought ----------
+  const FLOW = [
+    ['🎙️ Capture', 'You speak — “call Diksha Friday.” Your voice becomes clean text in about a second. No form, no fields, nothing to file.'],
+    ['🧠 Understand', 'The AI quietly works out what you meant: it’s a <b>task</b>, the person is <b>Diksha</b>, the time is <b>Friday</b>, the area is <b>work</b>. You tagged nothing.'],
+    ['🗄️ Remember', 'It’s written into <b>two</b> twin memories at once — your private store on your own server, and an independent cloud twin — kept perfectly in sync so a memory can never be lost.'],
+    ['↩️ Comes back', 'It returns exactly when useful: a <b>task for Friday</b>, a <b>line in tonight’s story</b>, and a ready <b>answer</b> the day you ask “what did I owe Diksha?”'],
   ];
-  const steps = document.querySelectorAll('.loop-step'); const loopText = document.getElementById('loopText');
-  steps.forEach((s) => s.addEventListener('click', () => {
-    steps.forEach((x) => x.classList.remove('active')); s.classList.add('active');
-    const [t, d] = LOOP[+s.dataset.step]; loopText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
-  }));
-
-  // ---------- ch1: two lives ----------
-  const PRO = 'The client call you dreaded turned into the win of the week — they signed. You closed three threads you’d been circling for days, and it shows: you ended work lighter than you started it.';
-  const PER = 'The evening belonged to the kids — homework, then the school project that turned the living room into a workshop. Dinner ran long and nobody minded. The dentist is finally booked.';
-  const tabPro = document.getElementById('tabPro'), tabPer = document.getElementById('tabPer'), tabText = document.getElementById('tabText');
-  function setTab(pro) {
-    tabText.textContent = pro ? PRO : PER;
-    tabPro.className = pro ? 'rounded-full px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white' : 'rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400';
-    tabPer.className = !pro ? 'rounded-full px-4 py-1.5 text-sm font-medium bg-violet-600 text-white' : 'rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400';
+  const fsteps = [...document.querySelectorAll('#flow .fstep')];
+  const fpips = [...document.querySelectorAll('.fpip')];
+  const flowDetail = document.getElementById('flowDetail');
+  let flowAuto = null;
+  function litStage(i) {
+    fsteps.forEach((s, j) => s.classList.toggle('lit', j === i));
+    fpips.forEach((p, j) => p.classList.toggle('on', j <= i));
+    const [t, d] = FLOW[i];
+    flowDetail.innerHTML = '<b class="text-emerald-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
   }
-  tabPro.onclick = () => setTab(true); tabPer.onclick = () => setTab(false);
-  const mio = new IntersectionObserver((es) => es.forEach((e) => {
-    if (!e.isIntersecting) return;
-    document.getElementById('barPro').style.width = '78%'; document.getElementById('barPer').style.width = '52%';
-    animateNum('numPro', 78); animateNum('numPer', 52); mio.disconnect();
-  }), { threshold: 0.4 });
-  mio.observe(document.getElementById('barPro'));
-  function animateNum(id, target) { const el = document.getElementById(id); const t0 = performance.now(); const step = (t) => { const p = Math.min(1, (t - t0) / 1100); el.textContent = Math.round(target * p); if (p < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+  fsteps.forEach((s, i) => s.addEventListener('click', () => { if (flowAuto) { clearInterval(flowAuto); flowAuto = null; } litStage(i); }));
+  const reduceMo = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const fio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting || flowAuto || fsteps[0].classList.contains('lit')) return;
+    fio.disconnect();
+    if (reduceMo) { litStage(0); return; }
+    let i = 0; litStage(0);
+    flowAuto = setInterval(() => { i++; if (i >= fsteps.length) { clearInterval(flowAuto); flowAuto = null; return; } litStage(i); }, 1500);
+  }), { threshold: 0.35 });
+  if (fsteps.length) fio.observe(document.getElementById('flow'));
 
-  // ---------- ch1: typing demo ----------
+  // ---------- ch3: typing demo ----------
   const SCRIPT_TXT = '“okay so… need to send the architect the revised quote, it’s urgent… book the dentist for amma, pick up the kids’ project supplies, and that vendor contract needs a proper read…”';
   const typeLine = document.getElementById('typeLine'); const typedTasks = document.getElementById('typedTasks');
   const tio = new IntersectionObserver((es) => es.forEach((e) => {
@@ -556,52 +633,7 @@
     let i = 0; const tick = () => { typeLine.textContent = SCRIPT_TXT.slice(0, ++i); if (i < SCRIPT_TXT.length) setTimeout(tick, 26); else { typeLine.classList.remove('caret'); setTimeout(() => (typedTasks.style.opacity = 1), 350); } };
     tick();
   }), { threshold: 0.5 });
-  tio.observe(typeLine);
-
-  // ---------- ch2: rooms ----------
-  const ROOMS = [
-    ['🌅','Today','Your command center each morning: dump your brain by voice, see your must-dos, capture quick notes through the day, tell tonight’s story.'],
-    ['✅','Tasks','The full list with search, filters, Work/Personal, progress taps, time tracking, reminders via Telegram, a finished-tasks calendar — and tasks that roll over by themselves.'],
-    ['📊','Activity','Every day reconstructed: what you did, finished and felt. The Story of the Day with its two tabs, the calendar heatmap, and “Your book” — the monthly chapters and the Story of the Year.'],
-    ['🧭','Mentor','Your focus areas, a nightly honest read with an on-track score, the trend graph, and the Sunday weekly review with its pattern and experiment.'],
-    ['💬','Chat','Scoped conversations with your whole brain — with sources attached to every answer. Star the great ones, pin the important ones.'],
-    ['📥','Capture','Drop in anything — documents, text, files. AI enriches it, files it into memory, and each document gets its own private chat.'],
-    ['🔖','Bookmarks','Your saved links flow in automatically. Videos are watched by AI and summarized; ask for “that video about cloud SEO” in plain words and it finds it by meaning.'],
-    ['💡','Ideas','A messy thought goes in; an organized idea with a research brief comes out. Nothing brilliant gets lost at a red light again.'],
-    ['🪄','Skills','Tracks the AI skills you build elsewhere — auto-described, shareable as public pages, with “stale and forgotten” rediscovery.'],
-    ['📒','Notes','A Keep-style quick pad — colors, tags, checklists, voice input. Deliberately local: the one space that stays out of the AI’s reach.'],
-  ];
-  const roomsEl = document.getElementById('rooms'); const roomDetail = document.getElementById('roomDetail');
-  ROOMS.forEach(([ic, name, desc], i) => {
-    const b = document.createElement('button');
-    b.className = 'tap room rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center';
-    b.innerHTML = '<div class="text-2xl">' + ic + '</div><div class="mt-1 font-bold text-sm">' + name + '</div>';
-    b.onclick = () => {
-      document.querySelectorAll('.room').forEach((x) => x.classList.remove('active'));
-      b.classList.add('active');
-      roomDetail.innerHTML = '<p class="text-sm"><b class="text-emerald-300">' + ic + ' ' + name + '</b><br/><span class="text-zinc-300">' + desc + '</span></p>';
-    };
-    roomsEl.appendChild(b);
-  });
-
-  // ---------- ch3: architecture ----------
-  const ARCH = [
-    ['📱 Phone app','Installs from the browser, works like a native app, full dark mode, voice everywhere. No app store, no middleman.'],
-    ['✈️ Telegram companion','The app reaches you where you already are: morning nudges, task reminders with tap-to-done buttons, voice-note dumps, save-anything by forwarding, and the nightly story + mentor delivered to chat.'],
-    ['🖥️ Your private server','The heart. The application and all its engines run on hardware the owner controls — schedulers tick all day: the day-summary at 9:30 PM, the story-weaver at 11:58, the mentor at 11:59, the weekly review on Sundays, chapters on the 1st.'],
-    ['🗄️ App database','The operational truth: tasks, stories, moods, settings, people, the cost log. Small, fast, snapshot-backed-up nightly.'],
-    ['📚 Memory vault','The verbatim long-term memory with meaning-search — every document, summary and story, retrievable by what it means rather than the words it uses.'],
-    ['☁️ SuperMemory','An independent cloud memory holding the same knowledge — redundancy and a second retrieval brain. Both stores are always written together.'],
-    ['🤖 AI brains','External intelligence, called per moment: weave this story, judge this day, watch this video. They process and respond — they store nothing and learn nothing about you.'],
-    ['🏠 Home backup','Every night a second machine at home pulls verified copies of everything — checksummed, decompressed, integrity-tested — and the app confirms it on Telegram. Losing one machine loses nothing.'],
-  ];
-  const archText = document.getElementById('archText');
-  document.querySelectorAll('.arch-node').forEach((n) => n.addEventListener('click', () => {
-    document.querySelectorAll('.arch-node').forEach((x) => x.classList.remove('active-i'));
-    n.classList.add('active-i');
-    const [t, d] = ARCH[+n.dataset.arch];
-    archText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
-  }));
+  if (typeLine) tio.observe(typeLine);
 
   // ---------- ch4: memory demo ----------
   const MEMQ = [
@@ -615,14 +647,14 @@
     chips.forEach((c) => c.classList.remove('hit'));
     memAnswer.style.opacity = 0;
     const q = MEMQ[+b.dataset.q];
-    q.hits.forEach((i, j) => setTimeout(() => chips[i].classList.add('hit'), 350 + j * 280));
+    q.hits.forEach((i, j) => setTimeout(() => chips[i] && chips[i].classList.add('hit'), 350 + j * 280));
     setTimeout(() => {
       memAnswer.innerHTML = '<p>' + q.answer + '</p><p class="mt-2 text-[11px] text-zinc-500">' + q.srcs + '</p>';
       memAnswer.style.opacity = 1;
     }, 350 + q.hits.length * 280 + 400);
   }));
 
-  // ---------- ch5: chat replay ----------
+  // ---------- ch4: chat replay ----------
   const chatMsgs = [...document.querySelectorAll('#chatDemo .msg')];
   const CHAT_ANS = 'Two days stand out recently. June 8 was the big one — you wrote “the kind of tired that feels earned” after the launch. Your weekly review also flagged that days you close one open thread early consistently score higher.';
   let chatPlayed = false;
@@ -635,19 +667,51 @@
       tick();
     }, 300 + chatMsgs.length * 800);
   }), { threshold: 0.4 });
-  chio.observe(document.getElementById('chatDemo'));
+  if (document.getElementById('chatDemo')) chio.observe(document.getElementById('chatDemo'));
+
+  // ---------- ch5: loop ----------
+  const LOOP = [
+    ['🌅 Morning dump', 'You talk for a minute — everything on your mind, work and family mixed. The AI turns it into a clean, prioritized task list with time estimates and your must-dos pinned.'],
+    ['✅ Your day, built', 'Tasks carry a Work or Personal tag automatically. Tap your progress as you go; unfinished tasks roll to tomorrow on their own.'],
+    ['🌙 Evening story', 'You tell the story of your day in your own words — typed or spoken, even from Telegram, even the next morning if life got busy.'],
+    ['📖 Story of the Day', 'Near midnight the AI weaves your story, tasks and activity into two written narratives — professional and personal — each with its own mood score.'],
+    ['🧭 Mentor speaks', 'A mentor that has read everything gives an honest nightly note — and on Sundays, the week’s one provable pattern and one experiment for the next.'],
+  ];
+  const steps = document.querySelectorAll('.loop-step'); const loopText = document.getElementById('loopText');
+  steps.forEach((s) => s.addEventListener('click', () => {
+    steps.forEach((x) => x.classList.remove('active')); s.classList.add('active');
+    const [t, d] = LOOP[+s.dataset.step]; loopText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
+  }));
+
+  // ---------- ch5: two lives ----------
+  const PRO = 'The client call you dreaded turned into the win of the week — they signed. You closed three threads you’d been circling for days, and it shows: you ended work lighter than you started it.';
+  const PER = 'The evening belonged to the kids — homework, then the school project that turned the living room into a workshop. Dinner ran long and nobody minded. The dentist is finally booked.';
+  const tabPro = document.getElementById('tabPro'), tabPer = document.getElementById('tabPer'), tabText = document.getElementById('tabText');
+  function setTab(pro) {
+    tabText.textContent = pro ? PRO : PER;
+    tabPro.className = pro ? 'rounded-full px-4 py-1.5 text-sm font-medium bg-emerald-600 text-white' : 'rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400';
+    tabPer.className = !pro ? 'rounded-full px-4 py-1.5 text-sm font-medium bg-violet-600 text-white' : 'rounded-full px-4 py-1.5 text-sm font-medium border border-zinc-700 text-zinc-400';
+  }
+  if (tabPro) { tabPro.onclick = () => setTab(true); tabPer.onclick = () => setTab(false); }
+  function animateNum(id, target) { const el = document.getElementById(id); const t0 = performance.now(); const step = (t) => { const p = Math.min(1, (t - t0) / 1100); el.textContent = Math.round(target * p); if (p < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); }
+  const mio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    document.getElementById('barPro').style.width = '78%'; document.getElementById('barPer').style.width = '52%';
+    animateNum('numPro', 78); animateNum('numPer', 52); mio.disconnect();
+  }), { threshold: 0.4 });
+  if (document.getElementById('barPro')) mio.observe(document.getElementById('barPro'));
 
   // ---------- ch7: connections ----------
   const CONNS = [
-    ['✈️','Telegram','Two-way companion: reminders out, voice notes and saved links in. The app’s presence in your pocket even outside the app.'],
-    ['💧','Raindrop','Your bookmark collector. Everything you save anywhere flows in on a schedule and becomes watchable, searchable memory.'],
-    ['🧠','SuperMemory','The cloud twin of your memory vault — independent storage and retrieval, written in lock-step with the local vault.'],
-    ['🛣️','OpenRouter','One gateway to many AI models — lets each job use the best brain for it, switchable any time without code changes.'],
-    ['🌀','OpenAI','Powers the meaning-fingerprints behind search, and the primary speech-to-text engine.'],
-    ['🎙️','Voice engines','ElevenLabs Scribe and Deepgram Nova as alternative ears — selectable in Settings, with automatic fallback if one stumbles.'],
+    ['✈️', 'Telegram', 'Two-way companion: reminders out, voice notes and saved links in — your brain in your pocket, even outside the app.'],
+    ['📧', 'Google / Gmail', 'A nightly Daily Brief, an in-app thread viewer, Drive &amp; Calendar — connected through Google’s secure sign-in, switch-off-and-purge anytime.'],
+    ['🧠', 'SuperMemory', 'The cloud twin of your memory — independent storage and retrieval, written in lock-step with your private store.'],
+    ['🛣️', 'Model gateway', 'One doorway to many AI models — each job uses the best brain for it, swappable from Settings without touching code.'],
+    ['🗣️', 'Voice engines', 'A choice of speech-to-text engines with automatic fallback — your voice, reliably turned to text.'],
+    ['🔐', 'Encrypted keys', 'Every third-party key is encrypted at rest — even someone holding the database couldn’t read them. Each has a live “Test” button.'],
   ];
   const connsEl = document.getElementById('conns'); const connText = document.getElementById('connText');
-  CONNS.forEach(([ic, name, desc]) => {
+  if (connsEl) CONNS.forEach(([ic, name, desc]) => {
     const b = document.createElement('button');
     b.className = 'tap conn rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center';
     b.innerHTML = '<div class="text-2xl">' + ic + '</div><div class="mt-1 font-bold text-sm">' + name + '</div>';
@@ -659,12 +723,40 @@
     connsEl.appendChild(b);
   });
 
-  // ---------- ch8: timeline ----------
+  // ---------- ch8: the complete catalog (every area, nothing left out) ----------
+  const CATALOG = [
+    ['🎙️', 'Capture &amp; input', ['Quick Capture — paste/type anything, saved + indexed', 'Voice dictation everywhere: hold-to-talk, live transcription + AI clean-up, batch fallback', 'Document &amp; Google-Drive import', 'Morning brain-dump → an auto-built, prioritized day']],
+    ['🧠', 'Memory &amp; search', ['Dual memory: your server (RAG) + cloud twin (SuperMemory), every item mirrored', 'Self-healing sync: retrying write-queue + reconcile sweep', 'Explore — meaning search + ask, with Ask / Everything / Saved tabs', '⌘K global search · whole-brain chat with cited deep-links', 'Index manager: per-section toggle, counts, last-sync, cadence tags', 'Per-store sync health + one-tap reconcile / retry']],
+    ['📖', 'The daily loop', ['Story of the Day (nightly) + Day Summary', 'Month chapters &amp; the Story of the Year', 'Personality portrait that deepens over time', 'People memory — who matters, surfaced']],
+    ['🧭', 'Mentor &amp; growth', ['Honest nightly note + on-track score &amp; trend', 'Focus areas &amp; suggested tomorrows', 'Sunday weekly review: one pattern, one experiment', '4 PM nudge to land the day']],
+    ['✅', 'Tasks &amp; activity', ['Voice dump → tasks; Work/Personal auto-tags', 'Search, filters, progress taps, time tracking', 'Telegram reminders, auto-rollover, finished-tasks calendar', 'Activity timeline + heatmap; the Today command center']],
+    ['🤝', 'Commitments', ['“I’ll send it Friday” auto-extracted', 'Confirm · done · drop, overdue tracking', 'Decisions captured from the day too']],
+    ['🎙️', 'Meetings', ['Record &amp; transcribe', 'AI summary with takeaways &amp; decisions', 'Searchable forever, in-app viewer']],
+    ['🔐', 'The Vault', ['Zero-knowledge — encrypted in your browser', '11 secret types · biometric / passkey unlock · auto-lock', 'Generator · weak/reused detection · security view', 'Copy with 30-second clipboard auto-clear', 'Re-auth before revealing a seed phrase / private key', 'Import (1Password/Bitwarden/CSV) · encrypted export · audit log', 'Encrypted file attachments · collections · favorites', 'Labels-only indexing — the secret is never indexed']],
+    ['📧', 'Google &amp; Gmail', ['Nightly Daily Brief (with Telegram push)', 'Email Requests · in-app Gmail thread viewer', 'Important emails recalled from memory', 'Drive, Calendar, Tasks &amp; an 11-service launcher']],
+    ['🔗', 'Connections', ['“Noticed in your brain” — daily link discovery', 'Non-obvious connections across everything you’ve saved', 'Surfaced on your home screen, dismissible']],
+    ['📥', 'Notes · Ideas · Bookmarks · Skills', ['Notes — Keep-style: colors, tags, checklists, voice (kept local)', 'Ideas — messy thought → organized idea + research brief', 'Bookmarks — auto-imported, videos watched by AI, meaning search', 'Skills — auto-described, shareable, “stale &amp; forgotten” rediscovery']],
+    ['🔔', 'Notifications', ['Telegram + push for briefs, nudges &amp; reminders', 'Backup success/failure alerts', 'Tap-to-done reminder buttons']],
+    ['🎛️', 'AI engines', ['Right model for each job — long-form writer, fast sprinter, a model with eyes, the ears', 'Per-feature model pickers in Settings', 'Free background engines with automatic Sonnet fallback', 'Every instruction is an editable prompt']],
+    ['⚙️', 'Settings &amp; admin', ['Account · change password · Update app', 'Integrations with live “Test” buttons', 'Usage log · prompts editor · appearance / dark mode', 'Index &amp; sync controls']],
+    ['📱', 'Platform', ['Installable PWA — works like a native app, full dark mode', 'Self-heal &amp; force-update', 'Collapsible sidebar, bottom tabs, native-feel mobile scroll', 'Accounts, HTTPS, auto-logout on idle']],
+    ['🛡️', 'Safety &amp; backups', ['Nightly encrypted backups pulled to a second machine', 'Every backup checksummed &amp; integrity-tested', 'A watchdog guarding the server', 'Your data, on hardware you control']],
+  ];
+  const catEl = document.getElementById('catalog');
+  if (catEl) CATALOG.forEach(([ic, title, items]) => {
+    const d = document.createElement('div');
+    d.className = 'rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-emerald-500/40 transition-colors';
+    d.innerHTML = '<div class="flex items-center gap-2 mb-2"><span class="text-xl">' + ic + '</span><h3 class="font-bold">' + title + '</h3></div>' +
+      '<ul class="space-y-1 text-xs text-zinc-400">' + items.map((x) => '<li class="flex gap-2"><span class="text-emerald-500">›</span><span>' + x + '</span></li>').join('') + '</ul>';
+    catEl.appendChild(d);
+  });
+
+  // ---------- ch10: timeline ----------
   const tlio = new IntersectionObserver((es) => es.forEach((e) => {
     if (!e.isIntersecting) return; tlio.disconnect();
     document.querySelectorAll('.tl-item').forEach((m, i) => setTimeout(() => m.classList.add('in'), i * 250));
   }), { threshold: 0.3 });
-  tlio.observe(document.getElementById('timeline'));
+  if (document.getElementById('timeline')) tlio.observe(document.getElementById('timeline'));
 </script>
 </body>
 </html>
