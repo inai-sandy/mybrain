@@ -7,7 +7,6 @@ import { NAV, BOTTOM_NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
 import { DictationIndicator } from './DictationIndicator';
-import { ForceUpdatePill } from './ForceUpdatePill';
 import { forceUpdate } from './forceUpdate';
 import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useTheme } from './theme';
@@ -228,9 +227,6 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
       {/* Live voice-dictation banner — shows what's being heard + a Stop button, globally */}
       <DictationIndicator />
-
-      {/* Always-visible "Update app" pill — force a clean reload to the latest version anytime */}
-      <ForceUpdatePill />
 
       {/* Floating "chat with your brain" button — every page except the chat itself */}
       {!isChat && (
