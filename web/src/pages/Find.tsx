@@ -202,7 +202,7 @@ function SavedResources() {
 
 export function Find() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ask' | 'saved'>('ask');
+  const [tab, setTab] = useState<'ask' | 'everything' | 'saved'>('ask');
   const [q, setQ] = useState('');
   const [askedQ, setAskedQ] = useState('');
   const [asking, setAsking] = useState(false);
@@ -309,7 +309,7 @@ export function Find() {
       </div>
 
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {(['ask', 'saved'] as const).map((t) => (
+        {(['ask', 'everything', 'saved'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -318,13 +318,29 @@ export function Find() {
               (tab === t ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')
             }
           >
-            {t === 'saved' ? 'Saved' : 'Ask'}
+            {t === 'saved' ? 'Saved' : t === 'everything' ? 'Everything' : 'Ask'}
           </button>
         ))}
       </div>
 
       {tab === 'saved' ? (
         <SavedResources />
+      ) : tab === 'everything' ? (
+        <div className="pt-2">
+          <h2 className="text-sm font-bold text-zinc-500 mb-2">
+            Everything in your brain — {total} item{total === 1 ? '' : 's'}
+          </h2>
+          <DataTable<SMDoc>
+            columns={cols}
+            rows={docs}
+            loading={loading}
+            sortOptions={sortOptions}
+            renderCard={card}
+            cardsOnly
+            pageSize={12}
+            emptyText="Nothing here yet."
+          />
+        </div>
       ) : (
         <>
           <form onSubmit={ask} className="relative">
@@ -383,22 +399,6 @@ export function Find() {
               <span className="text-zinc-600 dark:text-zinc-300">“the day I argued pricing with Diksha”</span>
             </div>
           )}
-
-          <div className="pt-2">
-            <h2 className="text-sm font-bold text-zinc-500 mb-2">
-              Everything in your brain — {total} item{total === 1 ? '' : 's'}
-            </h2>
-            <DataTable<SMDoc>
-              columns={cols}
-              rows={docs}
-              loading={loading}
-              sortOptions={sortOptions}
-              renderCard={card}
-              cardsOnly
-              pageSize={12}
-              emptyText="Nothing here yet."
-            />
-          </div>
         </>
       )}
     </div>

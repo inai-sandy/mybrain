@@ -8,7 +8,7 @@ type Conn = { id: string; summary: string; items: ConnItem[]; status: string };
 /** "Noticed in your brain" — proactive cross-type connections the index surfaced. Non-naggy: hidden when empty. (BEA-358) */
 export function ConnectionsCard() {
   const [conns, setConns] = useState<Conn[] | null>(null);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false); // collapsed by default (BEA-440)
 
   useEffect(() => {
     fetch('/api/connections')
