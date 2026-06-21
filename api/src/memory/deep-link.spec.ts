@@ -12,6 +12,9 @@ describe('deepLinkFor (source deep-links)', () => {
     expect(deepLinkFor({ type: 'task', id: 't1' })).toEqual({ link: '/tasks', sourceType: 'task' });
     expect(deepLinkFor({ type: 'note', id: 'n1' })).toEqual({ link: '/notes', sourceType: 'note' });
   });
+  it('important emails link to the Gmail page', () => {
+    expect(deepLinkFor({ type: 'email', id: 'e1' })).toEqual({ link: '/google/gmail', sourceType: 'email' });
+  });
   it('story links to its day; unknown types fall back to Explore', () => {
     expect(deepLinkFor({ type: 'story', id: 's1', day: '2026-06-20' })).toEqual({ link: '/activity?day=2026-06-20', sourceType: 'story' });
     expect(deepLinkFor({ type: 'whatever', id: 'x' })).toEqual({ link: '/explore', sourceType: 'document' });

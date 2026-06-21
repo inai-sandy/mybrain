@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { GoogleService } from './google.service';
 import { MemoryService } from '../memory/memory.service';
+import { EmailMemoryService } from './email-memory.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const BRIEF_AT = '23:58'; // 11:58 PM local — write today's email brief
@@ -24,6 +25,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     private readonly llm: LlmService,
     private readonly google: GoogleService,
     private readonly memory: MemoryService,
+    private readonly emailMemory: EmailMemoryService,
   ) {}
 
   /** Index the day's brief into Explore (mandatory section). (BEA-336) */
@@ -229,7 +231,11 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     // Index only a FINALIZED brief — the nightly build (push), or a PAST day (already complete).
     // A partial mid-day on-open build of TODAY's brief is NOT indexed; tonight's finalize handles it. (BEA-343)
     const todayKey = this.dayKey(await this.tz());
-    if (push || day < todayKey) this.indexBrief(row);
+    if (push || day < todayKey) {
+      this.indexBrief(row);
+      // Also store each important email itself (full body) in memory — same finalize gate. (BEA-439)
+      void this.emailMemory.syncDay(day, emails).catch(() => undefined);
+    }
     // Only the nightly build hands the brief to the Telegram push loop (same mechanism as the Story of the Day).
     if (push) await this.setSetting('telegram.pushGmailBrief', day).catch(() => undefined);
     return this.shape(row);
