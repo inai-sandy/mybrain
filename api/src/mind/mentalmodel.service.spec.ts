@@ -42,7 +42,8 @@ function harness(opts: { llmJson: string; existing?: any[] }) {
   };
   const llm: any = { completeWith: jest.fn(async () => opts.llmJson) };
   const ingestion: any = { gatherDaySignals: jest.fn(async () => SIGNALS) };
-  const svc = new MentalModelService(prisma, llm, ingestion);
+  const lifecycle: any = { runDaily: jest.fn(async () => ({ merged: 0, decayed: 0, promoted: 0, retired: 0 })) };
+  const svc = new MentalModelService(prisma, llm, ingestion, lifecycle);
   return { svc, created, updated, evidence, llm, ingestion };
 }
 
