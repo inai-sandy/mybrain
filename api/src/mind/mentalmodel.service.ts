@@ -24,7 +24,7 @@ Rules:
 - If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do not duplicate.
 - Confidence reflects how strongly this single day's evidence supports it: 0.1–0.6 for one day.
 - Never re-propose anything listed under REFUTED.
-- Return AT MOST 8 findings — only the well-supported ones.
+- Return AT MOST 6 findings, each with AT MOST 2 short evidence snippets — only the well-supported ones. Keep the JSON compact.
 
 Return ONLY JSON, no prose:
 {"findings":[{"reinforcesId":"<existing id or null>","statement":"...","kind":"emotional|behavioural|relational|temporal|causal","subject":"...","relation":"...","object":"...","valence":"energizing|draining|neutral","confidence":0.0,"cadence":"daily|weekly|situational|null","evidence":[{"signal":"done|postponed|skipped|told|created","snippet":"..."}]}]}`;
@@ -110,7 +110,7 @@ export class MentalModelService implements OnModuleInit {
       (existing.length ? existing.map((e) => `${e.id}: ${e.statement}`).join('\n') : '(none yet)') +
       (refuted.length ? `\n\n=== REFUTED (never re-propose) ===\n${refuted.map((r) => `- ${r.statement}`).join('\n')}` : '');
 
-    const raw = (await this.llm.completeWith(await this.model(), prompt, 1800, 'mind-model'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.model(), prompt, 4000, 'mind-model'))?.trim() || '';
     const findings = this.parse(raw);
     if (!findings.length) return { proposed: 0, reinforced: 0 };
 
@@ -174,15 +174,30 @@ export class MentalModelService implements OnModuleInit {
     await this.prisma.mindEvidence.createMany({ data: ev.map((e) => ({ findingId, ...e })) }).catch(() => undefined);
   }
 
-  /** Parse + guard the LLM JSON. A bad response never corrupts the store — it just yields nothing. */
+  /** Parse + guard the LLM JSON. Tolerates a TRUNCATED response by salvaging the complete findings.
+   *  A bad response never corrupts the store — it just yields nothing. */
   private parse(raw: string): RawFinding[] {
-    try {
-      const json = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1);
-      const obj = JSON.parse(json);
-      return Array.isArray(obj?.findings) ? (obj.findings as RawFinding[]) : [];
-    } catch {
-      return [];
+    const start = raw.indexOf('{');
+    if (start < 0) return [];
+    const body = raw.slice(start);
+    const tryParse = (s: string): RawFinding[] | null => {
+      try {
+        const o = JSON.parse(s);
+        return Array.isArray(o?.findings) ? (o.findings as RawFinding[]) : null;
+      } catch {
+        return null;
+      }
+    };
+    // 1) Clean response → to the last closing brace.
+    const whole = tryParse(body.slice(0, body.lastIndexOf('}') + 1));
+    if (whole) return whole;
+    // 2) Truncated mid-array → cut at the last COMPLETE finding object and re-close the array + object.
+    const lastObj = body.lastIndexOf('}');
+    if (lastObj > 0) {
+      const salvaged = tryParse(body.slice(0, lastObj + 1) + ']}');
+      if (salvaged) return salvaged;
     }
+    return [];
   }
 
   private formatSignals(s: DaySignals): string {
