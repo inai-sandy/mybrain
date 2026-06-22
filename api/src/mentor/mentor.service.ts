@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { MentalModelService } from '../mind/mentalmodel.service';
 import { TasksService } from '../tasks/tasks.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
@@ -18,6 +19,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     private readonly llm: LlmService,
     private readonly prompts: PromptsService,
     private readonly tasks: TasksService,
+    private readonly mind: MentalModelService,
   ) {}
 
   onModuleInit() {
@@ -145,7 +147,11 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       .slice(0, 8)
       .map((c) => `- ${c}: ${catCount[c]} tasks, ~${catMin[c]}m`);
 
+    // What the brain has actually learned about him (The Lab) — ground the focus areas in real patterns. (BEA-454)
+    const patterns = await this.mind.summaryForMentor().catch(() => '');
+
     const corpus =
+      (patterns ? `What I've learned about him (validated patterns):\n${patterns}\n\n` : '') +
       `Recent Stories of the Day:\n${dayStories.map((s) => `• (${s.day}) ${s.text.slice(0, 400)}`).join('\n') || '(none yet)'}\n\n` +
       `Recent told stories:\n${stories.map((s) => `• ${s.rawText.slice(0, 240)}`).join('\n') || '(none)'}\n\n` +
       `Where his task effort goes (by category):\n${catLines.join('\n') || '(no task data yet)'}\n\n` +
@@ -221,8 +227,10 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
 
     const tmpl = await this.prompts.get('mentor.guidance');
     const bigger = await this.trendBlock(day).catch(() => '');
+    const patterns = await this.mind.summaryForMentor().catch(() => ''); // what the brain has learned about him (BEA-454)
     const prompt =
       `${tmpl}\n\n` +
+      (patterns ? `=== WHAT I'VE LEARNED ABOUT HIM (validated patterns — use these; nudge on the draining/avoided ones) ===\n${patterns}\n\n` : '') +
       `=== HIS FOCUS AREAS ===\n${focusLines.join('\n') || '(none set yet — give general direction and infer what matters)'}\n\n` +
       `=== TODAY (${day}) ===\n` +
       `Story of the Day (professional):\n${narrative.slice(0, 2200) || '(none)'}\n\n` +

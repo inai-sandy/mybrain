@@ -105,6 +105,18 @@ export class MentalModelService implements OnModuleInit {
     return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
   }
 
+  /** A compact, plain-English digest of the strongest findings — for grounding the Mentor. (BEA-454) */
+  async summaryForMentor(limit = 12): Promise<string> {
+    const rows = await this.prisma.mindFinding.findMany({
+      where: { status: { in: ['established', 'emerging'] }, NOT: { validated: 'refuted' } },
+      orderBy: [{ confidence: 'desc' }],
+      take: limit,
+      select: { statement: true, valence: true, confidence: true },
+    });
+    if (!rows.length) return '';
+    return rows.map((r) => `- ${r.statement} (${r.valence}, ${Math.round(r.confidence * 100)}% sure)`).join('\n');
+  }
+
   /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
   async run(day: string): Promise<{ proposed: number; reinforced: number }> {
     const signals = await this.ingestion.gatherDaySignals(day);

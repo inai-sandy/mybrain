@@ -89,7 +89,8 @@ function makeService(llmText: string | null) {
   const llm: any = { completeWith: jest.fn(async () => llmText) };
   const prompts: any = { get: async (k: string) => `[${k}]` };
   const tasksSvc: any = { listModels: async () => [] };
-  return { svc: new MentorService(prisma, llm, prompts, tasksSvc), llm, focus, mentorDays, dayStories, stories, tasks, summaries, weeklies, settings };
+  const mind: any = { summaryForMentor: async () => '' }; // The Lab grounding stub (BEA-454)
+  return { svc: new MentorService(prisma, llm, prompts, tasksSvc, mind), llm, focus, mentorDays, dayStories, stories, tasks, summaries, weeklies, settings };
 }
 
 describe('MentorService', () => {
