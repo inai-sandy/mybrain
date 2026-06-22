@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MindIngestionService } from './ingestion.service';
+import { MindLifecycleService } from './lifecycle.service';
 import { DaySignals } from './mind.types';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
@@ -55,6 +56,7 @@ export class MentalModelService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly ingestion: MindIngestionService,
+    private readonly lifecycle: MindLifecycleService,
   ) {}
 
   onModuleInit() {
@@ -72,6 +74,8 @@ export class MentalModelService implements OnModuleInit {
     this.lastRunDay = yesterday;
     const r = await this.run(yesterday);
     if (r.proposed || r.reinforced) this.log.log(`mind: ${yesterday} → ${r.proposed} new, ${r.reinforced} reinforced`);
+    // The living mechanics run every night after the reasoning pass. (BEA-448)
+    await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
   }
 
   private async model(): Promise<LlmConfig> {
