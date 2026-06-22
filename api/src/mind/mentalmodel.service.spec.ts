@@ -65,6 +65,17 @@ describe('MentalModelService.run (BEA-447)', () => {
     expect(evidence.length).toBe(2);
   });
 
+  it('salvages complete findings from a TRUNCATED (token-capped) LLM response', async () => {
+    const truncated =
+      '{"findings":[' +
+      '{"reinforcesId":null,"statement":"Gym lifts you","kind":"causal","subject":"gym","relation":"energizes","object":"you","valence":"energizing","confidence":0.4,"cadence":"situational","evidence":[{"signal":"done","snippet":"Gym felt great"}]},' +
+      '{"reinforcesId":null,"statement":"Admin drains you","kind":"behavioural","subject":"admin","relation":"drains","object":"you","valence":"draining","confidence":0.5,"cadence":"situational","evidence":[{"signal":"postponed","snippet":"put it o'; // cut off mid-second finding
+    const { svc, created } = harness({ llmJson: truncated });
+    const r = await svc.run('2026-06-20');
+    expect(r.proposed).toBe(1); // the first complete finding is recovered
+    expect(created[0].subject).toBe('gym');
+  });
+
   it('a malformed LLM response never corrupts the store', async () => {
     const { svc, created, updated } = harness({ llmJson: 'sorry, I cannot do that' });
     const r = await svc.run('2026-06-20');
