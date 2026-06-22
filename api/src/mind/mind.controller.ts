@@ -66,6 +66,12 @@ export class MindController {
     return this.lifecycle.runDaily(new Date().toISOString().slice(0, 10));
   }
 
+  /** Merge duplicate findings now (lexical + semantic). (BEA-459) */
+  @Post('dedupe')
+  async dedupe() {
+    return { merged: await this.lifecycle.dedupe() };
+  }
+
   // ---- engine picker (Settings → Models): which model reasons about you. (BEA-452) ----
   @Get('model')
   getModel() {
