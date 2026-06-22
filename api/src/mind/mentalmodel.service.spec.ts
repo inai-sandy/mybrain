@@ -13,6 +13,8 @@ const SIGNALS: DaySignals = {
   story: { rawText: 'Gym felt great. Dreading that contract, put it off again.', mood: 'mixed', workedMinutes: 300, workedBreakdown: null },
   daySummary: null,
   ideas: [],
+  emails: [],
+  meetings: [],
   hasSignal: true,
 };
 

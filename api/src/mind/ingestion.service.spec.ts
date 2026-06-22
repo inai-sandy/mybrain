@@ -1,11 +1,15 @@
 import { MindIngestionService } from './ingestion.service';
 
-function make(data: { tasks?: any[]; ideas?: any[]; stories?: any[]; summaries?: any[] }) {
+function make(data: { tasks?: any[]; ideas?: any[]; stories?: any[]; summaries?: any[]; emails?: any[]; meetings?: any[] }) {
   const tasks = data.tasks || [];
   const ideas = data.ideas || [];
   const stories = data.stories || [];
   const summaries = data.summaries || [];
+  const emails = data.emails || [];
+  const meetings = data.meetings || [];
   const prisma: any = {
+    emailMemory: { findMany: async ({ where }: any) => emails.filter((e) => e.day === where.day) },
+    meeting: { findMany: async ({ where }: any) => meetings.filter((m) => m.createdAt >= where.createdAt.gte && m.createdAt < where.createdAt.lt) },
     task: {
       findMany: async ({ where = {} }: any) => {
         let r = tasks;
@@ -65,5 +69,16 @@ describe('MindIngestionService.gatherDaySignals (BEA-446)', () => {
     const s = await svc.gatherDaySignals(D, TODAY);
     expect(s.hasSignal).toBe(false);
     expect(s.tasks.done).toHaveLength(0);
+  });
+
+  it('includes that day\'s important emails + meetings (BEA-453)', async () => {
+    const svc = make({
+      emails: [{ day: D, fromAddr: 'vendor@acme.com', subject: 'June invoice', snippet: 'attached' }],
+      meetings: [{ createdAt: new Date(D + 'T15:00:00'), title: 'Sales sync', summary: 'discussed pipeline', decisions: JSON.stringify(['ship Friday']) }],
+    });
+    const s = await svc.gatherDaySignals(D, TODAY);
+    expect(s.emails[0]).toMatchObject({ from: 'vendor@acme.com', subject: 'June invoice' });
+    expect(s.meetings[0]).toMatchObject({ title: 'Sales sync', decisions: ['ship Friday'] });
+    expect(s.hasSignal).toBe(true);
   });
 });

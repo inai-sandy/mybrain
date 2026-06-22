@@ -21,6 +21,8 @@ export type StorySignal = {
 };
 
 export type IdeaSignal = { id: string; title: string; content: string };
+export type EmailSignal = { from: string; subject: string; snippet: string };
+export type MeetingSignal = { title: string; summary: string; decisions: string[] };
 
 /** Everything the engine needs to model the user for one day — including INACTION (postpone/skip). */
 export type DaySignals = {
@@ -35,5 +37,7 @@ export type DaySignals = {
   story: StorySignal | null; // the day's story + mood (the feelings layer)
   daySummary: string | null; // the AI day summary
   ideas: IdeaSignal[];
+  emails: EmailSignal[]; // that day's important emails (BEA-453)
+  meetings: MeetingSignal[]; // that day's meetings (BEA-453)
   hasSignal: boolean; // false → nothing to reason about; engine should skip
 };

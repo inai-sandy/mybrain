@@ -223,6 +223,8 @@ export class MentalModelService implements OnModuleInit {
       `SKIPPED (planned, never done):\n${tl(s.tasks.skipped)}`,
       `CAPTURED today:\n${tl(s.tasks.created)}`,
       s.ideas.length ? `IDEAS:\n${s.ideas.map((i) => `  - ${i.title}`).join('\n')}` : '',
+      s.meetings.length ? `MEETINGS:\n${s.meetings.map((m) => `  - ${m.title}${m.summary ? `: ${m.summary.slice(0, 200)}` : ''}${m.decisions.length ? ` [decisions: ${m.decisions.join('; ')}]` : ''}`).join('\n')}` : '',
+      s.emails.length ? `IMPORTANT EMAILS:\n${s.emails.map((e) => `  - from ${e.from}: ${e.subject}`).join('\n')}` : '',
       s.story ? `STORY (mood: ${s.story.mood || '—'}${s.story.workedMinutes ? `, worked ${s.story.workedMinutes}m` : ''}):\n  ${s.story.rawText.slice(0, 2500)}` : '',
       s.daySummary ? `DAY SUMMARY:\n  ${s.daySummary.slice(0, 1200)}` : '',
     ].filter(Boolean);
