@@ -571,3 +571,48 @@ model EmailMemory {
 
   @@index([day])
 }
+
+/// "The Lab" — the mini mental model (BEA-446). One MindFinding = one hypothesis/edge about the user,
+/// learned from tasks (done/postponed/skipped) + stories + activity + ideas. It lives: reinforced by
+/// recurrence, decays when evidence dries up (by its own cadence), confirmed/refuted by the user.
+model MindFinding {
+  id            String   @id @default(uuid())
+  statement     String // human-readable hypothesis, e.g. "Money/deep-work tasks tend to drain you"
+  kind          String // emotional | behavioural | relational | temporal | causal
+  subject       String // the "from" node, e.g. "money tasks"
+  relation      String // e.g. drains | energizes | precedes | avoids | co-occurs
+  object        String // the "to" node, e.g. "you" / "anxiety"
+  valence       String   @default("neutral") // energizing | draining | neutral
+  confidence    Float    @default(0.2) // 0–1
+  evidenceCount Int      @default(1) // n
+  status        String   @default("proposed") // proposed | emerging | established | fading | retired
+  cadence       String? // daily | weekly | situational | null
+  trend         String   @default("rising") // rising | steady | fading
+  validated     String? // null | confirmed | refuted  (user ✓/✗)
+  pinned        Boolean  @default(false) // never decays
+  firstSeenDay  String // YYYY-MM-DD
+  lastSeenDay   String // YYYY-MM-DD
+  supermemoryId String? // dual-store index pointers
+  ragId         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  evidence MindEvidence[]
+
+  @@index([status])
+}
+
+/// A concrete piece of evidence behind a MindFinding — the task/story/activity/idea that supports it.
+model MindEvidence {
+  id         String      @id @default(uuid())
+  findingId  String
+  finding    MindFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  sourceType String // task | story | activity | idea
+  sourceId   String?
+  day        String // YYYY-MM-DD
+  signal     String // done | postponed | skipped | told | created
+  snippet    String?
+  createdAt  DateTime @default(now())
+
+  @@index([findingId])
+}
