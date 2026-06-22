@@ -20,6 +20,14 @@ export type Finding = {
   evidence?: Evidence[];
 };
 
+export type Stats = {
+  moodSeries: { day: string; mood: number }[]; // mood 0–100, oldest→newest
+  dowMood: { dow: number; avg: number | null; n: number }[]; // dow 0=Sun..6=Sat
+  energizers: { label: string; statement: string; strength: number; n: number }[];
+  drainers: { label: string; statement: string; strength: number; n: number }[];
+  categories: { category: string; done: number; deferred: number; total: number; avoidance: number }[];
+};
+
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error(String(r.status));
   return r.json();
@@ -30,6 +38,7 @@ const post = (url: string, body?: unknown) =>
 export const mindApi = {
   review: () => fetch('/api/mind/review').then((r) => j<{ pending: Finding[]; fading: Finding[] }>(r)),
   findings: () => fetch('/api/mind/findings').then((r) => j<Finding[]>(r)),
+  stats: () => fetch('/api/mind/stats').then((r) => j<Stats>(r)),
   confirm: (id: string) => post(`/api/mind/findings/${id}/confirm`),
   refute: (id: string) => post(`/api/mind/findings/${id}/refute`),
   amend: (id: string, patch: Partial<Pick<Finding, 'statement' | 'subject' | 'relation' | 'object' | 'valence'>>) =>

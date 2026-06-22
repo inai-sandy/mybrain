@@ -3,20 +3,23 @@ import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, Chevro
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { MindReview } from '../mind/MindReview';
-import { mindApi, valenceClass, type Finding } from '../mind/client';
+import { mindApi, valenceClass, type Finding, type Stats } from '../mind/client';
 
 const YOU = '__you__';
 const isYou = (s: string) => /^(you|me|i|myself)$/i.test(s.trim());
 const edgeColor = (v: string) => (v === 'energizing' ? '#34d399' : v === 'draining' ? '#f43f5e' : '#71717a');
 const trendArrow = (t: string) => (t === 'rising' ? '▲' : t === 'fading' ? '▼' : '–');
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Tab = 'map' | 'findings' | 'review';
+type Tab = 'map' | 'mood' | 'heatmaps' | 'findings' | 'review';
 
 export function Lab() {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>('map');
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [running, setRunning] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null); // null = not loaded yet
+  const statsReq = useRef(false);
 
   async function load() {
     try {
@@ -28,6 +31,14 @@ export function Lab() {
   useEffect(() => {
     load();
   }, []);
+
+  // Lazy-load analytics the first time the Mood/Heatmaps tab is opened.
+  useEffect(() => {
+    if ((tab === 'mood' || tab === 'heatmaps') && !statsReq.current) {
+      statsReq.current = true;
+      mindApi.stats().then(setStats).catch(() => setStats({ moodSeries: [], dowMood: [], energizers: [], drainers: [], categories: [] }));
+    }
+  }, [tab]);
 
   async function runNow() {
     setRunning(true);
@@ -65,18 +76,22 @@ export function Lab() {
         </button>
       </div>
 
-      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {(['map', 'findings', 'review'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={'px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ' + (tab === t ? 'border-violet-500 text-violet-600 dark:text-violet-400' : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
-            {t === 'map' ? 'Map' : t === 'findings' ? 'Findings' : 'Review'}
+      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto">
+        {(['map', 'mood', 'heatmaps', 'findings', 'review'] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} className={'shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ' + (tab === t ? 'border-violet-500 text-violet-600 dark:text-violet-400' : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
+            {t}
           </button>
         ))}
       </div>
 
-      {findings === null ? (
-        <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>
-      ) : tab === 'review' ? (
+      {tab === 'review' ? (
         <MindReview />
+      ) : tab === 'mood' ? (
+        <MoodView stats={stats} />
+      ) : tab === 'heatmaps' ? (
+        <HeatmapsView stats={stats} />
+      ) : findings === null ? (
+        <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>
       ) : tab === 'map' ? (
         <MindGraph findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} />
       ) : (
@@ -301,6 +316,134 @@ function Empty() {
     <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-8 text-center text-sm text-zinc-500">
       <FlaskConical size={22} className="mx-auto mb-2 text-violet-500" />
       The Lab is still warming up. As you log tasks and tell your nightly story, your brain learns patterns about you — they'll appear here. Tap <b>Run now</b> to reflect on your recent days.
+    </div>
+  );
+}
+
+// ---------------- Mood: trend sparkline + what-moves-your-mood ----------------
+function MoodView({ stats }: { stats: Stats | null }) {
+  if (!stats) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
+  const noData = stats.moodSeries.length === 0 && stats.energizers.length === 0 && stats.drainers.length === 0;
+  if (noData) return <Empty />;
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold">Mood over time</h3>
+          {stats.moodSeries.length > 0 && (
+            <span className="text-xs text-zinc-400 tabular-nums">latest {stats.moodSeries[stats.moodSeries.length - 1].mood}/100 · last {stats.moodSeries.length} days</span>
+          )}
+        </div>
+        <Sparkline data={stats.moodSeries} />
+      </section>
+      <section>
+        <h3 className="text-sm font-semibold mb-1">What moves your mood</h3>
+        <p className="text-xs text-zinc-400 mb-3">Measured from your validated patterns — strength = confidence, n = times seen.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Movers title="Energizes you" items={stats.energizers} tone="emerald" />
+          <Movers title="Drains you" items={stats.drainers} tone="rose" />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Sparkline({ data }: { data: { day: string; mood: number }[] }) {
+  if (data.length < 2) return <p className="text-sm text-zinc-400 py-6 text-center">Not enough mood data yet — tell a few more nightly stories and your trend will appear.</p>;
+  const W = 600, H = 120, pad = 10;
+  const xs = data.map((_, i) => pad + (i / (data.length - 1)) * (W - 2 * pad));
+  const ys = data.map((d) => H - pad - (Math.max(0, Math.min(100, d.mood)) / 100) * (H - 2 * pad));
+  const line = xs.map((x, i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+  const area = `${line} L${xs[xs.length - 1].toFixed(1)},${H - pad} L${xs[0].toFixed(1)},${H - pad} Z`;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none" style={{ height: 120 }}>
+      <defs>
+        <linearGradient id="moodgrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#34d399" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="#34d399" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <line x1={pad} y1={H - pad - 0.5 * (H - 2 * pad)} x2={W - pad} y2={H - pad - 0.5 * (H - 2 * pad)} stroke="currentColor" className="text-zinc-200 dark:text-zinc-800" strokeWidth={1} strokeDasharray="3 4" />
+      <path d={area} fill="url(#moodgrad)" />
+      <path d={line} fill="none" stroke="#34d399" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+      <circle cx={xs[xs.length - 1]} cy={ys[ys.length - 1]} r={3.5} fill="#34d399" />
+    </svg>
+  );
+}
+
+function Movers({ title, items, tone }: { title: string; items: Stats['energizers']; tone: 'emerald' | 'rose' }) {
+  const bar = tone === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500';
+  const head = tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
+      <div className={'text-[11px] font-semibold uppercase tracking-wide mb-2 ' + head}>{title}</div>
+      {items.length === 0 ? (
+        <p className="text-xs text-zinc-400 py-3">Nothing strong enough yet.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {items.map((m, i) => (
+            <div key={i}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-sm font-medium truncate">{m.label}</span>
+                <span className="text-[10px] text-zinc-400 shrink-0 tabular-nums">n={m.n}</span>
+              </div>
+              {m.statement && <p className="text-[11px] text-zinc-500 leading-snug truncate">{m.statement}</p>}
+              <div className="mt-1 h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden"><div className={'h-full ' + bar} style={{ width: `${Math.max(4, Math.min(100, m.strength))}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------- Heatmaps: mood by day-of-week + the avoidance map ----------------
+function moodCell(avg: number | null): string {
+  if (avg == null) return 'rgba(113,113,122,0.14)';
+  return avg < 50 ? `rgba(244,63,94,${(0.2 + ((50 - avg) / 50) * 0.45).toFixed(2)})` : `rgba(52,211,153,${(0.2 + ((avg - 50) / 50) * 0.45).toFixed(2)})`;
+}
+
+function HeatmapsView({ stats }: { stats: Stats | null }) {
+  if (!stats) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
+  const hasDow = stats.dowMood.some((d) => d.avg != null);
+  if (!hasDow && stats.categories.length === 0) return <Empty />;
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+        <h3 className="text-sm font-semibold mb-1">Mood by day of the week</h3>
+        <p className="text-xs text-zinc-400 mb-3">Average mood per weekday — which days lift you, which weigh on you.</p>
+        <div className="grid grid-cols-7 gap-1.5">
+          {stats.dowMood.map((d) => (
+            <div key={d.dow} className="text-center">
+              <div title={`${d.n} day${d.n === 1 ? '' : 's'}`} className="rounded-lg h-12 grid place-items-center text-sm font-semibold tabular-nums" style={{ background: moodCell(d.avg) }}>
+                {d.avg ?? '–'}
+              </div>
+              <div className="text-[10px] text-zinc-400 mt-1">{DOW[d.dow]}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+        <h3 className="text-sm font-semibold mb-1">The avoidance map</h3>
+        <p className="text-xs text-zinc-400 mb-3">By task category — how much you defer vs. finish. The longest bars are where the friction lives.</p>
+        {stats.categories.length === 0 ? (
+          <p className="text-xs text-zinc-400 py-3">Not enough categorised tasks yet.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {stats.categories.map((c) => (
+              <div key={c.category}>
+                <div className="flex items-baseline justify-between gap-2 mb-1">
+                  <span className="text-sm font-medium truncate">{c.category}</span>
+                  <span className="text-[10px] text-zinc-400 shrink-0 tabular-nums">{c.deferred} deferred · {c.done} done</span>
+                </div>
+                <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${Math.max(3, c.avoidance)}%`, background: `rgba(244,63,94,${(0.35 + (c.avoidance / 100) * 0.5).toFixed(2)})` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

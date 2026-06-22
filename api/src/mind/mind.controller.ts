@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import { MentalModelService } from './mentalmodel.service';
 import { MindLifecycleService } from './lifecycle.service';
 import { MindReviewService } from './review.service';
+import { MindStatsService } from './stats.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 // "The Lab" API. Run the engine + lifecycle, inspect findings, and review them with ✓/✗/almost. (BEA-447/448/449)
@@ -11,8 +12,15 @@ export class MindController {
     private readonly engine: MentalModelService,
     private readonly lifecycle: MindLifecycleService,
     private readonly review_: MindReviewService,
+    private readonly stats_: MindStatsService,
     private readonly prisma: PrismaService,
   ) {}
+
+  /** Scientist dashboard analytics — mood trend, what-moves-your-mood, heatmaps. (BEA-455) */
+  @Get('stats')
+  stats() {
+    return this.stats_.stats();
+  }
 
   /** The nightly "what I understood" review — pending findings + fading "still you?" ones. */
   @Get('review')
