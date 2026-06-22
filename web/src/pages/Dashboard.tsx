@@ -1,10 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Brain, MessageCircle, Upload, Sun, Flame, FileText, Bookmark, Lightbulb, Wand2, ArrowRight, Fingerprint, Star, BookOpen, Sparkles, Coins, Timer, Target, FlaskConical, type LucideIcon } from 'lucide-react';
+import { Search, Brain, MessageCircle, Upload, Sun, Flame, FileText, Bookmark, Lightbulb, Wand2, ArrowRight, Fingerprint, Star, BookOpen, Sparkles, Coins, Timer, Target, type LucideIcon } from 'lucide-react';
 import { openSearch } from '../ui/SearchOverlay';
 import { Skeleton } from '../ui/Skeleton';
 import { ConnectionsCard } from '../ui/ConnectionsCard';
-import { MindReview } from '../mind/MindReview';
 
 type Home = {
   today: { dumped: boolean; storyDone: boolean; counts: { total: number; done: number; open: number }; mustDos: { id: string; title: string; pinned: boolean; priority: string }[] };
@@ -94,15 +93,6 @@ export function Dashboard() {
 
       {/* Proactive connections the brain surfaced (hidden when none) */}
       <ConnectionsCard />
-
-      {/* The Lab — what the mini mental model understood about you; ✓/✗ to teach it. (BEA-449) */}
-      <section className="rounded-xl border border-violet-200/70 dark:border-violet-900/50 bg-gradient-to-br from-violet-500/5 to-transparent p-4">
-        <div className="flex items-center justify-between mb-3">
-          <SectionLabel><FlaskConical size={13} className="text-violet-500" /> What I've understood about you</SectionLabel>
-          <button onClick={() => navigate('/lab')} className="text-xs text-violet-600 hover:underline inline-flex items-center gap-0.5">The Lab <ArrowRight size={12} /></button>
-        </div>
-        <MindReview />
-      </section>
 
       {/* Work area — Today (hero) + Day summary / Portrait */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
