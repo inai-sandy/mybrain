@@ -78,7 +78,8 @@ export class MentalModelService implements OnModuleInit {
     await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
   }
 
-  private async model(): Promise<LlmConfig> {
+  /** The engine that reasons about you — own picker (Setting `mind.llm`), defaults to Sonnet. (BEA-452) */
+  async model(): Promise<LlmConfig> {
     const row = await this.prisma.setting.findUnique({ where: { key: MODEL_KEY } }).catch(() => null);
     if (row?.value) {
       try {
@@ -89,6 +90,19 @@ export class MentalModelService implements OnModuleInit {
       }
     }
     return DEFAULT_MODEL;
+  }
+
+  /** Set the Lab engine; the picker id resolves the free Codex/Gemini agents via agentConfig. */
+  async setModel(provider: string, model: string): Promise<LlmConfig> {
+    const cfg = this.llm.agentConfig(provider, model);
+    const value = JSON.stringify(cfg);
+    await this.prisma.setting.upsert({ where: { key: MODEL_KEY }, create: { key: MODEL_KEY, value }, update: { value } });
+    return cfg;
+  }
+
+  /** OpenAI + Anthropic models for the Settings picker (agent engines added by the card). */
+  listModels() {
+    return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
   }
 
   /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */

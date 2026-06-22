@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -800,6 +800,8 @@ function ModelsSection() {
         desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
       <EngineModelCard title="Commitments scan model" icon={CheckSquare} base="/api/accountability/model" agents
         desc="Scans your day for promises you made and decisions you took (Commitments & Decisions). A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="The Lab — how it reasons about you" icon={FlaskConical} base="/api/mind/model" agents
+        desc="The mini mental model that learns your patterns from your tasks + stories each night. Sonnet (default) does the deep reasoning, or run it FREE on your Codex/Gemini subscription with Sonnet auto-fallback." />
       <VoiceModelCard />
     </div>
   );
