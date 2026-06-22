@@ -193,7 +193,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
         `Rules:\n` +
         `- Group the emails into a few clear topics. Each section: a short heading, 1–4 concise points, and "emails" = the NUMBERS (from the list) the section is based on.\n` +
         `- In points you may use **bold** for names, companies, amounts, dates. Prefix anything needing a reply with "Action:".\n` +
-        `- Keep it brief and skimmable.\n\n` +
+        `- Keep it brief and skimmable. Write in simple, plain, everyday English — short words and short sentences, no fancy words.\n\n` +
         `=== IMPORTANT EMAILS ON ${day} (${emails.length}) ===\n${lines}`;
       const res = await this.llm.completeWithModel(await this.briefModel(), prompt, 1200, 'gmail-brief');
       const raw = (res.text || '').trim();

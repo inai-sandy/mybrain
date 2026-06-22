@@ -21,6 +21,7 @@ causal, emotional, relational and temporal patterns.
 Rules:
 - Ground every hypothesis in THIS day's concrete evidence. No generic pop-psychology, no flattery.
 - Be specific: "money/admin tasks drain you and you keep deferring them" beats "you procrastinate".
+- Write every statement in simple, plain, everyday English — short words and short sentences. No fancy, academic, or flowery words.
 - If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do not duplicate.
 - Confidence reflects how strongly this single day's evidence supports it: 0.1–0.6 for one day.
 - Never re-propose anything listed under REFUTED.
