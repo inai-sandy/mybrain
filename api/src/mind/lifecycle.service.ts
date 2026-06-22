@@ -23,6 +23,27 @@ function daysBetween(a: string, b: string): number {
 }
 const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
+// Treat all the ways the user refers to themselves as one node, so "you avoid X" and "X drains you" line up.
+const YOU_RE = /^(you|i|me|myself|my|your)$/;
+const normYou = (s: string) => {
+  const n = norm(s);
+  return YOU_RE.test(n) ? '__you__' : n;
+};
+// The thing a finding is ABOUT: the endpoint that isn't "you" (most findings have you on one side).
+const topicOf = (subject: string, object: string) => {
+  const a = normYou(subject);
+  const b = normYou(object);
+  return a !== '__you__' ? a : b !== '__you__' ? b : a;
+};
+const STOP = new Set('the a an and or but you your my me i to of in on for with that this it is are be your you keep at as it’s its'.split(' '));
+const wordsOf = (s: string) => new Set(norm(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w)));
+const jaccard = (a: Set<string>, b: Set<string>) => {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const w of a) if (b.has(w)) inter++;
+  return inter / (a.size + b.size - inter);
+};
+
 /**
  * The "living" mechanics (BEA-448): rhythm-aware decay, emerging→established promotion, fading→retired,
  * and structural consolidation of duplicate findings. Pure, deterministic, well-tested — runs daily.
@@ -92,16 +113,24 @@ export class MindLifecycleService {
     return { decayed, promoted, retired };
   }
 
-  /** Merge findings that assert the same subject–relation–object: combine evidence + take the strongest. */
+  /**
+   * Merge duplicate findings. The model rephrases the same insight ("avoids Beakn tasks" vs "Beakn work is
+   * deferred"), so exact subject–relation–object matching misses them. We group by TOPIC (the non-you node) +
+   * valence, then merge when the two findings share the same pair of nodes OR their statements overlap strongly.
+   */
   async consolidate(): Promise<number> {
     const rows = await this.prisma.mindFinding.findMany({ where: { NOT: { status: 'retired' } }, orderBy: { confidence: 'desc' } });
-    const byKey = new Map<string, typeof rows[number]>();
+    // Each primary keeps its derived signature so later rows can be compared against it.
+    const primaries: { row: (typeof rows)[number]; topic: string; valence: string; pair: string; words: Set<string> }[] = [];
     let merged = 0;
     for (const f of rows) {
-      const key = `${norm(f.subject)}|${norm(f.relation)}|${norm(f.object)}`;
-      const primary = byKey.get(key);
+      const topic = topicOf(f.subject, f.object);
+      const pair = [normYou(f.subject), normYou(f.object)].sort().join('|');
+      const words = wordsOf(f.statement);
+      // A duplicate = same topic & valence, and either the very same two nodes or near-identical wording.
+      const primary = primaries.find((p) => p.topic === topic && p.valence === f.valence && (p.pair === pair || jaccard(p.words, words) >= 0.4))?.row;
       if (!primary) {
-        byKey.set(key, f);
+        primaries.push({ row: f, topic, valence: f.valence, pair, words });
         continue;
       }
       // Fold f into primary (primary has >= confidence since rows are confidence-desc).

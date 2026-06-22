@@ -74,4 +74,23 @@ describe('MindLifecycleService (BEA-448)', () => {
     expect(a.evidenceCount).toBe(5); // 3 + 2
     expect(a.firstSeenDay).toBe('2026-05-20'); // earliest kept
   });
+
+  it('merges REWORDED duplicates about the same topic + valence (BEA-459)', async () => {
+    const a = { ...base, id: 'a', statement: 'You keep deferring Beakn product tasks', subject: 'Beakn product tasks', relation: 'are deferred by', object: 'you', valence: 'draining', confidence: 0.7, evidenceCount: 3, status: 'established', firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
+    const b = { ...base, id: 'b', statement: 'You avoid Beakn product tasks again and again', subject: 'you', relation: 'avoids', object: 'Beakn product tasks', valence: 'draining', confidence: 0.4, evidenceCount: 2, status: 'emerging', firstSeenDay: '2026-06-05', lastSeenDay: '2026-06-18' };
+    const { prisma, deletes } = makePrisma([a, b]);
+    const merged = await new MindLifecycleService(prisma).consolidate();
+    expect(merged).toBe(1); // same topic (Beakn product tasks) + same valence + swapped you/topic → one node-pair
+    expect(deletes).toContain('b');
+    expect(a.evidenceCount).toBe(5);
+  });
+
+  it('does NOT merge different insights about the same topic (BEA-459)', async () => {
+    const a = { ...base, id: 'a', statement: 'Gym lifts your mood', subject: 'gym', relation: 'energizes', object: 'you', valence: 'energizing', confidence: 0.7, evidenceCount: 3, status: 'established', firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
+    const b = { ...base, id: 'b', statement: 'Gym sharpens your focus for deep work', subject: 'gym', relation: 'improves', object: 'focus', valence: 'energizing', confidence: 0.5, evidenceCount: 2, status: 'emerging', firstSeenDay: '2026-06-05', lastSeenDay: '2026-06-18' };
+    const { prisma, deletes } = makePrisma([a, b]);
+    const merged = await new MindLifecycleService(prisma).consolidate();
+    expect(merged).toBe(0); // different node-pair AND low word overlap → kept apart
+    expect(deletes).not.toContain('b');
+  });
 });

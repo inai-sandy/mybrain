@@ -249,6 +249,8 @@ export class MentalModelService implements OnModuleInit {
         proposed++;
       }
     }
+    // Fold any near-duplicates the model just created into existing ones, so the list never piles up. (BEA-459)
+    if (proposed) await this.lifecycle.consolidate().catch((e) => this.log.warn(`mind consolidate: ${e?.message ?? e}`));
     return { proposed, reinforced };
   }
 
