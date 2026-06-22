@@ -97,8 +97,9 @@ export function Dashboard() {
 
       {/* The Lab — what the mini mental model understood about you; ✓/✗ to teach it. (BEA-449) */}
       <section className="rounded-xl border border-violet-200/70 dark:border-violet-900/50 bg-gradient-to-br from-violet-500/5 to-transparent p-4">
-        <div className="mb-3">
+        <div className="flex items-center justify-between mb-3">
           <SectionLabel><FlaskConical size={13} className="text-violet-500" /> What I've understood about you</SectionLabel>
+          <button onClick={() => navigate('/lab')} className="text-xs text-violet-600 hover:underline inline-flex items-center gap-0.5">The Lab <ArrowRight size={12} /></button>
         </div>
         <MindReview />
       </section>
