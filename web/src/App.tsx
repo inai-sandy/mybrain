@@ -30,6 +30,7 @@ import { RequestViewer } from './pages/RequestViewer';
 import { Find as Explore } from './pages/Find';
 import { Commitments } from './pages/Commitments';
 import { Vault } from './pages/Vault';
+import { Lab } from './pages/Lab';
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -119,6 +120,7 @@ function AuthedApp() {
         <Route path="mentor" element={<Mentor />} />
         <Route path="notes" element={<Notes />} />
         <Route path="vault" element={<Vault />} />
+        <Route path="lab" element={<Lab />} />
         <Route path="settings" element={<Settings email={email} />} />
         <Route path="*" element={<Dashboard />} />
       </Route>
