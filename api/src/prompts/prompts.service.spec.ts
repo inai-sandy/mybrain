@@ -29,7 +29,9 @@ describe('PromptsService', () => {
   it('returns the override once set, and reports it as customized', async () => {
     const { svc } = make();
     await svc.set('tasks.dump', 'My custom planner instructions.');
-    expect(await svc.get('tasks.dump')).toBe('My custom planner instructions.');
+    const got = await svc.get('tasks.dump');
+    expect(got).toContain('My custom planner instructions.');
+    expect(got).toContain('plain, everyday English'); // global plain-English style is always appended (BEA-457)
     const list = await svc.list();
     expect(list.find((p) => p.key === 'tasks.dump')!.customized).toBe(true);
   });

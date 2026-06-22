@@ -279,12 +279,16 @@ export class PromptsService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** The active instruction for a key — the user's override if set, else the built-in default. */
+  // Global style rule added to every prompt — the user wants all generated text in plain English. (BEA-457)
+  static readonly PLAIN_ENGLISH = '\n\nSTYLE: Write any text in simple, plain, everyday English. Use short words and short sentences. No fancy, academic, or flowery words. (Do not change any required JSON shape.)';
+
   async get(key: PromptKey): Promise<string> {
     const def = MAP.get(key);
     const fallback = def?.default || '';
     const row = await this.prisma.setting.findUnique({ where: { key: `prompt.${key}` } });
     const v = row?.value?.trim();
-    return v ? row!.value : fallback;
+    const base = v ? row!.value : fallback;
+    return base + PromptsService.PLAIN_ENGLISH;
   }
 
   /** All prompts with their current (possibly overridden) value + default, for the Settings editor. */
