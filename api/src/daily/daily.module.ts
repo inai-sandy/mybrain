@@ -2,11 +2,12 @@ import { Module } from '@nestjs/common';
 import { MemoryModule } from '../memory/memory.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { MentorModule } from '../mentor/mentor.module';
+import { MindModule } from '../mind/mind.module';
 import { DailyController } from './daily.controller';
 import { DailyService } from './daily.service';
 
 @Module({
-  imports: [MemoryModule, TasksModule, MentorModule],
+  imports: [MemoryModule, TasksModule, MentorModule, MindModule],
   controllers: [DailyController],
   providers: [DailyService],
   exports: [DailyService],

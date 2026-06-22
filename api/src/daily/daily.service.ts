@@ -5,6 +5,7 @@ import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { MentorService } from '../mentor/mentor.service';
+import { MentalModelService } from '../mind/mentalmodel.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
@@ -25,6 +26,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     private readonly tasks: TasksService,
     private readonly prompts: PromptsService,
     private readonly mentor: MentorService,
+    private readonly mind: MentalModelService,
   ) {}
 
   onModuleInit() {
@@ -490,6 +492,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const rolled = (await this.tasks.rollDayForward(day, target)).rolled;
     // 3. seal it — its artifacts are now "final" (provisional is derived from this row's absence)
     await this.prisma.dayClose.upsert({ where: { day }, create: { day, auto }, update: { auto } });
+    // 4. The Lab reflects on the day NOW that it's complete — not on a blind nightly clock. Fire-and-forget. (BEA-458)
+    void this.mind.learnDay(day).catch(() => undefined);
     return { day, closed: true, auto, rolled };
   }
 
