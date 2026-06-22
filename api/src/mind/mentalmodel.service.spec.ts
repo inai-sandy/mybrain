@@ -18,13 +18,21 @@ const SIGNALS: DaySignals = {
   hasSignal: true,
 };
 
-function harness(opts: { llmJson: string; existing?: any[] }) {
+function harness(opts: { llmJson: string; existing?: any[]; closed?: string[] }) {
   const created: any[] = [];
   const updated: any[] = [];
   const evidence: any[] = [];
   const existing = opts.existing || [];
+  const settings: Record<string, string> = {};
   const prisma: any = {
-    setting: { findUnique: async () => null },
+    setting: {
+      findUnique: async ({ where }: any) => (where?.key in settings ? { key: where.key, value: settings[where.key] } : null),
+      upsert: async ({ where, create }: any) => {
+        settings[where.key] = create.value;
+        return { key: where.key, value: create.value };
+      },
+    },
+    dayClose: { findMany: async () => (opts.closed || []).map((day) => ({ day })) },
     mindFinding: {
       findMany: async ({ where }: any) => {
         if (where?.validated === 'refuted') return [];
@@ -46,8 +54,39 @@ function harness(opts: { llmJson: string; existing?: any[] }) {
   const ingestion: any = { gatherDaySignals: jest.fn(async () => SIGNALS) };
   const lifecycle: any = { runDaily: jest.fn(async () => ({ merged: 0, decayed: 0, promoted: 0, retired: 0 })) };
   const svc = new MentalModelService(prisma, llm, ingestion, lifecycle);
-  return { svc, created, updated, evidence, llm, ingestion };
+  return { svc, created, updated, evidence, llm, ingestion, settings };
 }
+
+const ONE_FINDING = JSON.stringify({
+  findings: [{ reinforcesId: null, statement: 'Gym lifts you', kind: 'causal', subject: 'gym', relation: 'energizes', object: 'you', valence: 'energizing', confidence: 0.4, cadence: 'situational', evidence: [{ signal: 'done', snippet: 'Gym felt great' }] }],
+});
+
+describe('MentalModelService close-day learning (BEA-458)', () => {
+  it('runNow learns only CLOSED days that were not learned yet, and marks them learned', async () => {
+    const { svc, ingestion, settings } = harness({ llmJson: ONE_FINDING, closed: ['2026-06-18', '2026-06-19'] });
+    const r = await svc.runNow();
+    expect(r.days).toBe(2); // both closed days, none learned yet
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-18');
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-19');
+    expect(JSON.parse(settings['mind.learnedDays'])).toEqual(['2026-06-18', '2026-06-19']);
+  });
+
+  it('runNow re-reflects on the latest closed day once everything is already learned', async () => {
+    const { svc, ingestion } = harness({ llmJson: ONE_FINDING, closed: ['2026-06-18', '2026-06-19'] });
+    await svc.runNow(); // learns both
+    ingestion.gatherDaySignals.mockClear();
+    const r = await svc.runNow(); // nothing new → re-reflect on the latest
+    expect(r.days).toBe(1);
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledTimes(1);
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-19');
+  });
+
+  it('learnDay reflects on the given day and records it as learned', async () => {
+    const { svc, settings } = harness({ llmJson: ONE_FINDING, closed: [] });
+    await svc.learnDay('2026-06-20');
+    expect(JSON.parse(settings['mind.learnedDays'])).toContain('2026-06-20');
+  });
+});
 
 describe('MentalModelService.run (BEA-447)', () => {
   it('creates new findings and reinforces existing ones from the LLM output', async () => {

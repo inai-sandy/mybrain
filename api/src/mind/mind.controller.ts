@@ -53,11 +53,11 @@ export class MindController {
     return this.review_.remove(id);
   }
 
-  /** Run the mental model for a day (defaults to yesterday). On-demand companion to the nightly pass. */
+  /** Run the mental model. With {day}: that day. Without: learn any closed days not yet learned (BEA-458). */
   @Post('run')
   async run(@Body() body: { day?: string }) {
-    const day = body?.day || new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    return this.engine.run(day);
+    if (body?.day) return this.engine.run(body.day);
+    return this.engine.runNow();
   }
 
   /** Run the living lifecycle (decay/promote/consolidate) on demand. */

@@ -231,7 +231,9 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const mentorCalls: any[] = [];
   const mentorSvc: any = { runMentorDay: async (day: string, force: boolean) => { mentorCalls.push({ day, force }); return { day }; } };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls };
+  const mindCalls: any[] = [];
+  const mindSvc: any = { learnDay: async (day: string) => { mindCalls.push(day); return { proposed: 0, reinforced: 0 }; } };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc, mindSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls, mindCalls };
 }
 
 describe('DailyService', () => {
@@ -357,7 +359,7 @@ describe('DailyService', () => {
 
   describe('day lifecycle — Close the day', () => {
     it('closeDay finalizes story + mentor + suggestions and rolls a past day\'s open tasks forward', async () => {
-      const { svc, tasks, dayCloses, mentorCalls, rolledCalls } = makeService({ llmText: '{"story":"A real day, sealed.","mood":"settled","moodScore":70}' });
+      const { svc, tasks, dayCloses, mentorCalls, rolledCalls, mindCalls } = makeService({ llmText: '{"story":"A real day, sealed.","mood":"settled","moodScore":70}' });
       const today = istToday();
       const past = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
       tasks.push({ id: 'a', day: past, status: 'open', title: 'leftover' }, { id: 'b', day: past, status: 'done', title: 'did it' });
@@ -366,6 +368,7 @@ describe('DailyService', () => {
       expect(r!.closed).toBe(true);
       expect(dayCloses.find((c) => c.day === past)).toBeTruthy();
       expect(mentorCalls.some((m) => m.day === past && m.force)).toBe(true); // mentor re-ran for that day
+      expect(mindCalls).toContain(past); // The Lab learns from the day once it's closed (BEA-458)
       expect(rolledCalls.some((c) => c.fromDay === past && c.toDay === today)).toBe(true);
       expect(tasks.find((t) => t.id === 'a').day).toBe(today); // leftover rolled forward
       expect(tasks.find((t) => t.id === 'b').day).toBe(past); // finished task stays on its real day

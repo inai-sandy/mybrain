@@ -7,6 +7,7 @@ import { DaySignals } from './mind.types';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
 const MODEL_KEY = 'mind.llm';
+const LEARNED_KEY = 'mind.learnedDays'; // closed days the Lab has already reflected on (BEA-458)
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 const SYSTEM = `You are a rigorous behavioural scientist building a model of ONE person from their own day.
@@ -51,7 +52,6 @@ const VALENCE = ['energizing', 'draining', 'neutral'];
 export class MentalModelService implements OnModuleInit {
   private readonly log = new Logger('MentalModelService');
   private timer: NodeJS.Timeout | null = null;
-  private lastRunDay = '';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -61,22 +61,82 @@ export class MentalModelService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    // Nightly-ish: reflect on YESTERDAY once a day (its story is finalised at 23:58). Hourly check, guarded.
-    this.timer = setInterval(() => this.nightly().catch((e) => this.log.warn(`mind nightly: ${e?.message ?? e}`)), 60 * 60 * 1000);
+    // Learn from CLOSED days, not a blind clock: you often fill a day in the next morning, so we only reflect
+    // once you've closed it (closeDay also triggers us directly). Hourly catch-up handles any missed closes. (BEA-458)
+    this.timer = setInterval(() => this.catchUp().catch((e) => this.log.warn(`mind catchup: ${e?.message ?? e}`)), 60 * 60 * 1000);
   }
 
   private ymd(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  private async nightly(): Promise<void> {
-    const yesterday = this.ymd(new Date(Date.now() - 86_400_000));
-    if (this.lastRunDay === yesterday) return;
-    this.lastRunDay = yesterday;
-    const r = await this.run(yesterday);
-    if (r.proposed || r.reinforced) this.log.log(`mind: ${yesterday} → ${r.proposed} new, ${r.reinforced} reinforced`);
-    // The living mechanics run every night after the reasoning pass. (BEA-448)
+  // ---- closed-day bookkeeping (BEA-458) ----
+  private async learnedSet(): Promise<Set<string>> {
+    const row = await this.prisma.setting.findUnique({ where: { key: LEARNED_KEY } }).catch(() => null);
+    try {
+      const arr = JSON.parse(row?.value || '[]');
+      return new Set(Array.isArray(arr) ? (arr as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  private async markLearned(day: string): Promise<void> {
+    const set = await this.learnedSet();
+    set.add(day);
+    const bounded = [...set].sort().slice(-150); // keep the set from growing without bound
+    const value = JSON.stringify(bounded);
+    await this.prisma.setting.upsert({ where: { key: LEARNED_KEY }, create: { key: LEARNED_KEY, value }, update: { value } }).catch(() => undefined);
+  }
+
+  private async closedDays(): Promise<string[]> {
+    const rows = await this.prisma.dayClose.findMany({ select: { day: true }, orderBy: { day: 'asc' } }).catch(() => [] as { day: string }[]);
+    return rows.map((r) => r.day);
+  }
+
+  /** Reflect on ONE day and remember it — called the moment a day is CLOSED (morning or night). (BEA-458) */
+  async learnDay(day: string): Promise<{ proposed: number; reinforced: number }> {
+    const r = await this.run(day);
+    await this.markLearned(day);
+    if (r.proposed || r.reinforced) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
     await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
+    return r;
+  }
+
+  /** Hourly catch-up: reflect on any CLOSED day we haven't learned yet (e.g. closed while the app was down). */
+  private async catchUp(): Promise<void> {
+    const learned = await this.learnedSet();
+    const todo = (await this.closedDays()).filter((d) => !learned.has(d));
+    if (!todo.length) return;
+    for (const day of todo) {
+      const r = await this.run(day).catch((e) => {
+        this.log.warn(`mind learn ${day}: ${e?.message ?? e}`);
+        return null;
+      });
+      await this.markLearned(day); // mark even on an empty/failed pass so we don't reprocess it forever
+      if (r && (r.proposed || r.reinforced)) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
+    }
+    await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
+  }
+
+  /** "Run now": learn every closed-but-unlearned day; if all caught up, re-reflect on the latest closed day. (BEA-458) */
+  async runNow(): Promise<{ proposed: number; reinforced: number; days: number }> {
+    const learned = await this.learnedSet();
+    const closed = await this.closedDays();
+    let targets = closed.filter((d) => !learned.has(d));
+    if (!targets.length) targets = closed.length ? [closed[closed.length - 1]] : [this.ymd(new Date(Date.now() - 86_400_000))];
+    let proposed = 0;
+    let reinforced = 0;
+    for (const day of targets) {
+      const r = await this.run(day).catch(() => null);
+      await this.markLearned(day);
+      if (r) {
+        proposed += r.proposed;
+        reinforced += r.reinforced;
+      }
+    }
+    await this.lifecycle.runDaily(this.ymd(new Date())).catch(() => undefined);
+    return { proposed, reinforced, days: targets.length };
   }
 
   /** The engine that reasons about you — own picker (Setting `mind.llm`), defaults to Sonnet. (BEA-452) */
