@@ -101,118 +101,302 @@ export function Lab() {
   );
 }
 
-// ---------------- Map: self-contained force-directed graph ----------------
-type Node = { id: string; label: string; x: number; y: number; deg: number; fixed?: boolean };
-type Edge = { from: string; to: string; f: Finding };
+// ---------------- Map: Obsidian-style force graph ----------------
+type GNode = { id: string; label: string; x: number; y: number; vx: number; vy: number; deg: number; fixed: boolean; fx: number | null; fy: number | null };
+type GEdge = { from: string; to: string; f: Finding };
+
+// One physics step: charge repulsion + edge springs (rest ~110) + centering, with velocity damping. Mutates nodes.
+function stepSim(nodes: GNode[], edges: GEdge[], W: number, H: number, alpha = 1) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i];
+      const b = nodes[j];
+      let dx = a.x - b.x;
+      let dy = a.y - b.y;
+      const d2 = dx * dx + dy * dy || 0.01;
+      const d = Math.sqrt(d2);
+      const force = ((9000 / d2) * alpha);
+      dx /= d;
+      dy /= d;
+      a.vx += dx * force; a.vy += dy * force;
+      b.vx -= dx * force; b.vy -= dy * force;
+    }
+  }
+  for (const e of edges) {
+    const a = byId.get(e.from);
+    const b = byId.get(e.to);
+    if (!a || !b) continue;
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+    const k = (d - 110) * 0.05 * alpha;
+    dx = (dx / d) * k; dy = (dy / d) * k;
+    a.vx += dx; a.vy += dy;
+    b.vx -= dx; b.vy -= dy;
+  }
+  for (const n of nodes) {
+    if (n.fixed) { n.x = W / 2; n.y = H / 2; n.vx = 0; n.vy = 0; continue; }
+    if (n.fx != null && n.fy != null) { n.x = n.fx; n.y = n.fy; n.vx = 0; n.vy = 0; continue; }
+    n.vx += (W / 2 - n.x) * 0.005 * alpha;
+    n.vy += (H / 2 - n.y) * 0.005 * alpha;
+    n.vx *= 0.85; n.vy *= 0.85;
+    n.x += n.vx; n.y += n.vy;
+    n.x = Math.max(24, Math.min(W - 24, n.x));
+    n.y = Math.max(24, Math.min(H - 24, n.y));
+  }
+}
 
 function MindGraph({ findings, onConfirm, onRefute, onPin }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void }) {
   const W = 720;
   const H = 520;
-  const [sel, setSel] = useState<string | null>(null);
-  const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
+  const svgRef = useRef<SVGSVGElement>(null);
   const reduce = useRef(typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const [sel, setSel] = useState<string | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
+  const [view, setView] = useState({ k: 1, tx: 0, ty: 0 });
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const [, setTick] = useState(0);
+  const bump = () => setTick((t) => (t + 1) % 1000000);
 
-  const { nodes, edges } = useMemo(() => {
+  // Graph topology (nodes meta + edges + adjacency) — rebuilt only when findings change.
+  const { metaList, edges, adj } = useMemo(() => {
     const top = [...findings].sort((a, b) => b.confidence - a.confidence).slice(0, 40);
-    const nodeMap = new Map<string, Node>();
-    nodeMap.set(YOU, { id: YOU, label: 'You', x: W / 2, y: H / 2, deg: 0, fixed: true });
-    const edges: Edge[] = [];
+    const meta = new Map<string, { id: string; label: string; deg: number }>();
+    meta.set(YOU, { id: YOU, label: 'You', deg: 0 });
+    const edges: GEdge[] = [];
+    const adj = new Map<string, Set<string>>();
+    const link = (a: string, b: string) => (adj.get(a) ?? adj.set(a, new Set()).get(a)!).add(b);
     const keyOf = (s: string) => (isYou(s) ? YOU : s.trim().toLowerCase());
     for (const f of top) {
       const sk = keyOf(f.subject);
       const ok = keyOf(f.object);
       for (const [k, lbl] of [[sk, f.subject], [ok, f.object]] as const) {
         if (k === YOU) continue;
-        if (!nodeMap.has(k)) nodeMap.set(k, { id: k, label: lbl, x: W / 2 + (Math.random() - 0.5) * 200, y: H / 2 + (Math.random() - 0.5) * 200, deg: 0 });
+        if (!meta.has(k)) meta.set(k, { id: k, label: lbl, deg: 0 });
       }
       if (sk !== ok) {
         edges.push({ from: sk, to: ok, f });
-        nodeMap.get(sk)!.deg++;
-        nodeMap.get(ok)!.deg++;
+        meta.get(sk)!.deg++;
+        meta.get(ok)!.deg++;
+        link(sk, ok);
+        link(ok, sk);
       }
     }
-    return { nodes: [...nodeMap.values()], edges };
+    return { metaList: [...meta.values()], edges, adj };
   }, [findings]);
 
-  // One-shot force layout (settles, then stops — reduced-motion friendly).
+  const nodesRef = useRef<GNode[]>([]);
+  const alphaRef = useRef(1);
+  const runningRef = useRef(false);
+  const reheatRef = useRef<() => void>(() => {});
+  const reheat = () => reheatRef.current();
+
+  // Rebuild node bodies (keeping positions for ids that survive), then run a continuous, cooling simulation.
   useEffect(() => {
-    if (!nodes.length) return;
-    const n = nodes.map((nd) => ({ ...nd }));
-    const byId = new Map(n.map((nd) => [nd.id, nd]));
-    const iters = reduce.current ? 120 : 320;
-    for (let it = 0; it < iters; it++) {
-      for (let i = 0; i < n.length; i++) {
-        for (let j = i + 1; j < n.length; j++) {
-          const a = n[i]; const b = n[j];
-          let dx = a.x - b.x; let dy = a.y - b.y;
-          let d2 = dx * dx + dy * dy || 0.01;
-          const force = 9000 / d2;
-          const d = Math.sqrt(d2);
-          dx /= d; dy /= d;
-          if (!a.fixed) { a.x += dx * force; a.y += dy * force; }
-          if (!b.fixed) { b.x -= dx * force; b.y -= dy * force; }
-        }
+    const prev = new Map(nodesRef.current.map((n) => [n.id, n]));
+    nodesRef.current = metaList.map((m, i) => {
+      const p = prev.get(m.id);
+      const fixed = m.id === YOU;
+      // Index-based seeding (no Math.random — keeps it deterministic and sandbox-safe).
+      const seedX = W / 2 + Math.cos(i * 1.7) * (60 + (i % 7) * 16);
+      const seedY = H / 2 + Math.sin(i * 2.3) * (60 + (i % 5) * 18);
+      return {
+        id: m.id,
+        label: m.label,
+        deg: m.deg,
+        fixed,
+        x: fixed ? W / 2 : p ? p.x : seedX,
+        y: fixed ? H / 2 : p ? p.y : seedY,
+        vx: 0,
+        vy: 0,
+        fx: null,
+        fy: null,
+      };
+    });
+
+    if (!nodesRef.current.length) { bump(); return; }
+
+    if (reduce.current) {
+      for (let i = 0; i < 300; i++) stepSim(nodesRef.current, edges, W, H, 1);
+      reheatRef.current = () => {};
+      bump();
+      return;
+    }
+
+    let raf = 0;
+    const loop = () => {
+      const a = alphaRef.current;
+      stepSim(nodesRef.current, edges, W, H, a);
+      alphaRef.current = a * 0.98;
+      bump();
+      if (alphaRef.current > 0.005) {
+        raf = requestAnimationFrame(loop);
+      } else {
+        runningRef.current = false;
+        raf = 0;
       }
-      for (const e of edges) {
-        const a = byId.get(e.from)!; const b = byId.get(e.to)!;
-        let dx = b.x - a.x; let dy = b.y - a.y;
-        const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const k = (d - 110) * 0.02;
-        dx = (dx / d) * k; dy = (dy / d) * k;
-        if (!a.fixed) { a.x += dx; a.y += dy; }
-        if (!b.fixed) { b.x -= dx; b.y -= dy; }
+    };
+    const start = () => {
+      if (!runningRef.current) {
+        runningRef.current = true;
+        raf = requestAnimationFrame(loop);
       }
-      for (const nd of n) {
-        if (nd.fixed) continue;
-        nd.x += (W / 2 - nd.x) * 0.012;
-        nd.y += (H / 2 - nd.y) * 0.012;
-        nd.x = Math.max(28, Math.min(W - 28, nd.x));
-        nd.y = Math.max(28, Math.min(H - 28, nd.y));
+    };
+    reheatRef.current = () => {
+      alphaRef.current = Math.max(alphaRef.current, 0.6);
+      start();
+    };
+    alphaRef.current = 0.9;
+    start();
+    return () => {
+      runningRef.current = false;
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [metaList, edges]);
+
+  // Screen → graph-space coordinate conversion (undoes the SVG CTM and our pan/zoom <g> transform).
+  const toGraph = (clientX: number, clientY: number) => {
+    const svg = svgRef.current;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const loc = pt.matrixTransform(ctm.inverse());
+    const v = viewRef.current;
+    return { x: (loc.x - v.tx) / v.k, y: (loc.y - v.ty) / v.k };
+  };
+
+  // Pointer drag / pan tracking.
+  const drag = useRef<{ id: string | null; pan: boolean; moved: boolean; sx: number; sy: number; startTx: number; startTy: number } | null>(null);
+
+  const onNodeDown = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    drag.current = { id, pan: false, moved: false, sx: e.clientX, sy: e.clientY, startTx: 0, startTy: 0 };
+  };
+  const onBgDown = (e: React.PointerEvent) => {
+    const v = viewRef.current;
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    drag.current = { id: null, pan: true, moved: false, sx: e.clientX, sy: e.clientY, startTx: v.tx, startTy: v.ty };
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    if (Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) > 4) d.moved = true;
+    if (d.pan) {
+      const rect = svgRef.current?.getBoundingClientRect();
+      const sx = rect ? W / rect.width : 1;
+      const sy = rect ? H / rect.height : 1;
+      setView((vw) => ({ ...vw, tx: d.startTx + (e.clientX - d.sx) * sx, ty: d.startTy + (e.clientY - d.sy) * sy }));
+    } else if (d.id) {
+      const g = toGraph(e.clientX, e.clientY);
+      const n = g && nodesRef.current.find((nn) => nn.id === d.id);
+      if (g && n && !n.fixed) {
+        n.fx = g.x;
+        n.fy = g.y;
+        reheat();
       }
     }
-    const out: Record<string, { x: number; y: number }> = {};
-    for (const nd of n) out[nd.id] = { x: nd.x, y: nd.y };
-    setPos(out);
-  }, [nodes, edges]);
+  };
+  const onUp = () => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d) return;
+    if (d.id && !d.pan) {
+      const n = nodesRef.current.find((nn) => nn.id === d.id);
+      if (n) { n.fx = null; n.fy = null; }
+      if (!d.moved) setSel((s) => (s === d.id ? null : d.id)); // a tap (not a drag) selects
+      reheat();
+    } else if (d.pan && !d.moved) {
+      setSel(null); // tap on empty canvas clears selection
+    }
+  };
+
+  // Wheel zoom toward the cursor — native non-passive listener so preventDefault works.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      const g = toGraph(e.clientX, e.clientY);
+      const k = Math.max(0.4, Math.min(3, v.k * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+      if (g) {
+        const locX = g.x * v.k + v.tx;
+        const locY = g.y * v.k + v.ty;
+        setView({ k, tx: locX - k * g.x, ty: locY - k * g.y });
+      } else {
+        setView((vw) => ({ ...vw, k }));
+      }
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
 
   if (!findings.length) return <Empty />;
 
+  const nodes = nodesRef.current;
+  const pos = new Map(nodes.map((n) => [n.id, n]));
+  const active = hover ?? sel;
+  const neigh = active ? adj.get(active) : undefined;
+  const nodeLit = (id: string) => !active || id === active || (neigh?.has(id) ?? false);
+  const edgeLit = (e: GEdge) => !active || e.from === active || e.to === active;
+  const showLabel = (n: GNode) => n.id === YOU || (!!active && nodeLit(n.id)) || view.k > 1.4 || n.deg >= 2;
+
   const selFindings = sel ? edges.filter((e) => e.from === sel || e.to === sel).map((e) => e.f) : [];
-  const connected = (id: string) => sel === null || id === sel || edges.some((e) => (e.from === sel && e.to === id) || (e.to === sel && e.from === id));
+  const selLabel = nodes.find((n) => n.id === sel)?.label;
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ touchAction: 'manipulation' }} onClick={() => setSel(null)}>
-          {edges.map((e, i) => {
-            const a = pos[e.from]; const b = pos[e.to];
-            if (!a || !b) return null;
-            const lit = sel === null || e.from === sel || e.to === sel;
-            return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={edgeColor(e.f.valence)} strokeWidth={1 + e.f.confidence * 4} strokeOpacity={(lit ? 0.5 : 0.08) * (e.f.status === 'fading' ? 0.5 : 1)} />;
-          })}
-          {nodes.map((nd) => {
-            const p = pos[nd.id];
-            if (!p) return null;
-            const r = nd.id === YOU ? 16 : 6 + Math.min(10, nd.deg * 2);
-            const on = connected(nd.id);
-            return (
-              <g key={nd.id} onClick={(ev) => { ev.stopPropagation(); setSel(nd.id === sel ? null : nd.id); }} style={{ cursor: 'pointer' }} opacity={on ? 1 : 0.25}>
-                <circle cx={p.x} cy={p.y} r={r} fill={nd.id === YOU ? '#8b5cf6' : sel === nd.id ? '#34d399' : '#3f3f46'} stroke={sel === nd.id ? '#34d399' : 'transparent'} strokeWidth={2} />
-                <text x={p.x} y={p.y + r + 11} textAnchor="middle" className="fill-zinc-500 dark:fill-zinc-400" style={{ fontSize: 10 }}>{nd.label.length > 18 ? nd.label.slice(0, 17) + '…' : nd.label}</text>
-              </g>
-            );
-          })}
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          className="w-full select-none"
+          style={{ touchAction: 'none', cursor: drag.current?.pan ? 'grabbing' : 'grab' }}
+          onPointerDown={onBgDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+        >
+          <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
+            {edges.map((e, i) => {
+              const a = pos.get(e.from);
+              const b = pos.get(e.to);
+              if (!a || !b) return null;
+              return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={edgeColor(e.f.valence)} strokeWidth={1 + e.f.confidence * 4} strokeOpacity={(edgeLit(e) ? 0.55 : 0.12) * (e.f.status === 'fading' ? 0.5 : 1)} />;
+            })}
+            {nodes.map((nd) => {
+              const r = nd.id === YOU ? 16 : 6 + Math.min(10, nd.deg * 2);
+              const lit = nodeLit(nd.id);
+              return (
+                <g key={nd.id} opacity={lit ? 1 : 0.16} style={{ cursor: 'pointer' }} onPointerDown={(ev) => onNodeDown(ev, nd.id)} onPointerEnter={() => setHover(nd.id)} onPointerLeave={() => setHover((h) => (h === nd.id ? null : h))}>
+                  <circle cx={nd.x} cy={nd.y} r={r} fill={nd.id === YOU ? '#8b5cf6' : sel === nd.id ? '#34d399' : '#3f3f46'} stroke={sel === nd.id ? '#34d399' : 'transparent'} strokeWidth={2} />
+                  {showLabel(nd) && (
+                    <text x={nd.x} y={nd.y + r + 11} textAnchor="middle" className="fill-zinc-500 dark:fill-zinc-400" style={{ fontSize: 10, pointerEvents: 'none' }}>
+                      {nd.label.length > 18 ? nd.label.slice(0, 17) + '…' : nd.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </g>
         </svg>
         <div className="flex items-center gap-3 px-3 py-2 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500">
           <span className="inline-flex items-center gap-1"><span className="h-2 w-3 rounded-full" style={{ background: '#34d399' }} /> energizing</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-3 rounded-full" style={{ background: '#f43f5e' }} /> draining</span>
-          <span className="ml-auto">{nodes.length - 1} things · {edges.length} links · tap a node</span>
+          <button onClick={() => setView({ k: 1, tx: 0, ty: 0 })} className="ml-2 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">Reset view</button>
+          <span className="ml-auto">{nodes.length - 1} things · {edges.length} links</span>
         </div>
+        <div className="px-3 pb-2 text-[10px] text-zinc-400">drag a node · scroll to zoom · drag the canvas to pan</div>
       </div>
 
       {sel && (
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{nodes.find((n) => n.id === sel)?.label}</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{selLabel}</div>
           <div className="space-y-2">
             {selFindings.map((f) => (
               <div key={f.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 flex items-center gap-2">
