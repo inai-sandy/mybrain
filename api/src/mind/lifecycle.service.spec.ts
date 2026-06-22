@@ -74,4 +74,46 @@ describe('MindLifecycleService (BEA-448)', () => {
     expect(a.evidenceCount).toBe(5); // 3 + 2
     expect(a.firstSeenDay).toBe('2026-05-20'); // earliest kept
   });
+
+  it('merges REWORDED duplicates about the same topic + valence (BEA-459)', async () => {
+    const a = { ...base, id: 'a', statement: 'You keep deferring Beakn product tasks', subject: 'Beakn product tasks', relation: 'are deferred by', object: 'you', valence: 'draining', confidence: 0.7, evidenceCount: 3, status: 'established', firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
+    const b = { ...base, id: 'b', statement: 'You avoid Beakn product tasks again and again', subject: 'you', relation: 'avoids', object: 'Beakn product tasks', valence: 'draining', confidence: 0.4, evidenceCount: 2, status: 'emerging', firstSeenDay: '2026-06-05', lastSeenDay: '2026-06-18' };
+    const { prisma, deletes } = makePrisma([a, b]);
+    const merged = await new MindLifecycleService(prisma).consolidate();
+    expect(merged).toBe(1); // same topic (Beakn product tasks) + same valence + swapped you/topic → one node-pair
+    expect(deletes).toContain('b');
+    expect(a.evidenceCount).toBe(5);
+  });
+
+  it('does NOT merge different insights about the same topic (BEA-459)', async () => {
+    const a = { ...base, id: 'a', statement: 'Gym lifts your mood', subject: 'gym', relation: 'energizes', object: 'you', valence: 'energizing', confidence: 0.7, evidenceCount: 3, status: 'established', firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
+    const b = { ...base, id: 'b', statement: 'Gym sharpens your focus for deep work', subject: 'gym', relation: 'improves', object: 'focus', valence: 'energizing', confidence: 0.5, evidenceCount: 2, status: 'emerging', firstSeenDay: '2026-06-05', lastSeenDay: '2026-06-18' };
+    const { prisma, deletes } = makePrisma([a, b]);
+    const merged = await new MindLifecycleService(prisma).consolidate();
+    expect(merged).toBe(0); // different node-pair AND low word overlap → kept apart
+    expect(deletes).not.toContain('b');
+  });
+
+  it('semanticConsolidate merges same-meaning findings the LLM groups, keeping the strongest (BEA-459)', async () => {
+    // Three re-wordings of one insight that lexical matching misses (different words + nodes), one unrelated finding.
+    const a = { ...base, id: 'a', statement: 'Family milestones lift you more than work wins', subject: 'Sandeep', object: 'family moments', valence: 'energizing', confidence: 0.92, evidenceCount: 3, status: 'established', firstSeenDay: '2026-06-10', lastSeenDay: '2026-06-20' };
+    const b = { ...base, id: 'b', statement: "A child's milestones beat work completions for joy", subject: 'Sandeep', object: 'child milestones', valence: 'energizing', confidence: 0.9, evidenceCount: 2, status: 'emerging', firstSeenDay: '2026-06-08', lastSeenDay: '2026-06-18' };
+    const c = { ...base, id: 'c', statement: 'Arya learning to cycle gave the biggest lift of the day', subject: 'Arya cycling', object: 'you', valence: 'energizing', confidence: 0.67, evidenceCount: 1, status: 'emerging', firstSeenDay: '2026-06-15', lastSeenDay: '2026-06-15' };
+    const d = { ...base, id: 'd', statement: 'Admin paperwork is deferred for weeks', subject: 'admin', object: 'you', valence: 'draining', confidence: 0.55, evidenceCount: 4, status: 'established', firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-19' };
+    const { prisma, deletes } = makePrisma([a, b, c, d]);
+    const llm: any = { completeWith: jest.fn(async () => '{"groups":[[0,1,2]]}') }; // a,b,c are the same insight
+    const merged = await new MindLifecycleService(prisma, llm).semanticConsolidate();
+    expect(merged).toBe(2); // b and c folded into a
+    expect(deletes).toEqual(expect.arrayContaining(['b', 'c']));
+    expect(deletes).not.toContain('d');
+    expect(a.evidenceCount).toBe(6); // 3 + 2 + 1
+  });
+
+  it('semanticConsolidate is a no-op without an LLM', async () => {
+    const a = { ...base, id: 'a', confidence: 0.7, status: 'established', firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
+    const b = { ...base, id: 'b', confidence: 0.5, status: 'emerging', firstSeenDay: '2026-06-05', lastSeenDay: '2026-06-18' };
+    const c = { ...base, id: 'c', confidence: 0.4, status: 'emerging', firstSeenDay: '2026-06-05', lastSeenDay: '2026-06-18' };
+    const { prisma } = makePrisma([a, b, c]);
+    expect(await new MindLifecycleService(prisma).semanticConsolidate()).toBe(0);
+  });
 });
