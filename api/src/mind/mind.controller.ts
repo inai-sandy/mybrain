@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { MentalModelService } from './mentalmodel.service';
 import { MindLifecycleService } from './lifecycle.service';
 import { MindReviewService } from './review.service';
@@ -56,6 +56,23 @@ export class MindController {
   @Post('lifecycle')
   async runLifecycle() {
     return this.lifecycle.runDaily(new Date().toISOString().slice(0, 10));
+  }
+
+  // ---- engine picker (Settings → Models): which model reasons about you. (BEA-452) ----
+  @Get('model')
+  getModel() {
+    return this.engine.model();
+  }
+
+  @Put('model')
+  setModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.engine.setModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('models')
+  async models() {
+    return { models: await this.engine.listModels() };
   }
 
   /** The current mind graph — findings ordered by confidence (retired hidden). */
