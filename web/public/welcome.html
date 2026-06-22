@@ -454,10 +454,97 @@
 </section>
 
 <!-- ================= CHAPTER 6 — THE VAULT ================= -->
+
+<!-- ================= CHAPTER 8 — THE LAB ================= -->
+<section class="chapter" data-title="The Lab">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-violet-400 mb-3">Chapter 8 · the lab</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">It doesn't just remember you —<br><span class="gtext">it understands you</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Every night, My Brain studies your day the way a scientist studies data — and slowly, carefully, learns who you actually are. Your own personal scientist. 🔬</p>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-6"><div class="text-3xl mb-2">📊</div><h3 class="font-bold">It reads your whole day</h3><p class="mt-1 text-sm text-zinc-400">What you <b>did</b>, what you <b>kept putting off</b>, what you <b>skipped</b> — plus your story, your mood, your emails and your meetings.</p></div>
+      <div class="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-6"><div class="text-3xl mb-2">🕳️</div><h3 class="font-bold">It learns from what you avoid</h3><p class="mt-1 text-sm text-zinc-400">The richest signal about a person isn't what they do — it's what they <b>defer and abandon</b>. The Lab weighs your inaction the heaviest.</p></div>
+      <div class="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-6"><div class="text-3xl mb-2">🔗</div><h3 class="font-bold">It connects acts to feelings</h3><p class="mt-1 text-sm text-zinc-400">It builds a living map of <b>what you do ↔ how you feel ↔ who's involved ↔ when</b> — the real wiring of your days.</p></div>
+    </div>
+
+    <div class="reveal text-center text-sm text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+      So it notices things like — <span class="text-rose-300">"money &amp; admin tasks drain you, and you keep deferring them"</span> · <span class="text-emerald-300">"Saturdays are your deep-work sanctuary"</span> · <span class="text-rose-300">"you avoid conversations where you have to hold someone accountable."</span>
+    </div>
+
+    <div class="reveal">
+      <h3 class="text-lg font-bold mb-1 text-center text-zinc-300">Each night it shows you <span class="text-violet-400">what it understood</span> — and you teach it</h3>
+      <p class="text-center text-sm text-zinc-500 mb-5">Tap ✓ if it's right, ✗ if it's not. Your taps are the experiment. <span class="text-zinc-600">(go on, try it 👇)</span></p>
+      <div id="labCards" class="max-w-2xl mx-auto space-y-3">
+        <div class="lab-card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all">
+          <div class="flex items-start gap-3">
+            <span class="text-rose-400 text-lg leading-none mt-0.5">●</span>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-sm">Money &amp; admin tasks drain you — and you keep deferring them.</p>
+              <div class="mt-2 flex items-center gap-2"><div class="h-1.5 flex-1 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full bg-rose-500" style="width:55%"></div></div><span class="text-[11px] text-zinc-500 shrink-0">55% · seen 6×</span></div>
+              <p class="lab-verdict text-xs mt-2" style="display:none"></p>
+            </div>
+            <div class="lab-actions flex gap-1.5 shrink-0">
+              <button class="lab-yes h-8 w-8 grid place-items-center rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition">✓</button>
+              <button class="lab-no h-8 w-8 grid place-items-center rounded-lg bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 transition">✗</button>
+            </div>
+          </div>
+        </div>
+        <div class="lab-card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all">
+          <div class="flex items-start gap-3">
+            <span class="text-emerald-400 text-lg leading-none mt-0.5">●</span>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-sm">Saturdays are your deep-work sanctuary — your best output lands then.</p>
+              <div class="mt-2 flex items-center gap-2"><div class="h-1.5 flex-1 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full bg-emerald-500" style="width:62%"></div></div><span class="text-[11px] text-zinc-500 shrink-0">62% · seen 5×</span></div>
+              <p class="lab-verdict text-xs mt-2" style="display:none"></p>
+            </div>
+            <div class="lab-actions flex gap-1.5 shrink-0">
+              <button class="lab-yes h-8 w-8 grid place-items-center rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition">✓</button>
+              <button class="lab-no h-8 w-8 grid place-items-center rounded-lg bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 transition">✗</button>
+            </div>
+          </div>
+        </div>
+        <div class="lab-card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 transition-all">
+          <div class="flex items-start gap-3">
+            <span class="text-rose-400 text-lg leading-none mt-0.5">●</span>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-sm">You avoid conversations where you must hold someone accountable.</p>
+              <div class="mt-2 flex items-center gap-2"><div class="h-1.5 flex-1 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full bg-rose-500" style="width:55%"></div></div><span class="text-[11px] text-zinc-500 shrink-0">55% · seen 11×</span></div>
+              <p class="lab-verdict text-xs mt-2" style="display:none"></p>
+            </div>
+            <div class="lab-actions flex gap-1.5 shrink-0">
+              <button class="lab-yes h-8 w-8 grid place-items-center rounded-lg bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 transition">✓</button>
+              <button class="lab-no h-8 w-8 grid place-items-center rounded-lg bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 transition">✗</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p id="labDone" style="display:none" class="text-center text-sm text-violet-300 mt-5 max-w-2xl mx-auto">That's the whole trick — every tap makes it know you a little more truly. <b>✓</b> strengthens a finding and lifts related ones; <b>✗</b> retires it for good.</p>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-2 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6"><h3 class="font-bold">🌱 Patterns that live</h3><p class="mt-1 text-sm text-zinc-400">Each insight carries a <b>confidence %</b> and its <b>evidence</b>. It grows stronger every time it recurs — and <b>fades on its own rhythm</b> when it stops (a weekly pattern won't fade on a Tuesday). Old phases quietly retire; the real you stays.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6"><h3 class="font-bold">🔬 The science of you</h3><p class="mt-1 text-sm text-zinc-400">See it all in <b>The Lab</b>: a living <b>graph</b> of you ↔ feelings ↔ people ↔ tasks, your <b>mood trend</b>, <b>what energizes vs drains you</b>, and <b>heatmaps</b> of your week and your avoidance.</p></div>
+    </div>
+
+    <div class="reveal text-center">
+      <p class="text-zinc-400 max-w-2xl mx-auto">It's <b class="text-zinc-200">honest</b> — no flattery, just what the evidence shows. It's <b class="text-zinc-200">private</b> — your patterns are yours, and you can pin or delete any of them. And <b class="text-zinc-200">nothing is ever "known" about you that you didn't confirm.</b></p>
+    </div>
+
+    <details class="curious reveal max-w-2xl mx-auto">
+      <summary>For the curious — how the model thinks</summary>
+      <div class="body">Each night a reasoning pass (Claude Sonnet by default — or your own free Codex / Gemini agents) reads the day's signals and proposes evidence-backed hypotheses about you. A separate lifecycle pass reinforces, decays and merges them on their own cadence, promoting the durable ones to “established.” Everything lives in both of your twin memories, and your ✓ / ✗ feedback trains the next run — so it gets truer every night.</div>
+    </details>
+
+    <p class="reveal text-center text-xl sm:text-2xl font-bold">It doesn't just hold your life — <span class="gtext">it understands you, and keeps understanding you better.</span></p>
+  </div>
+</section>
 <section class="chapter" data-title="The Vault">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 8 · the vault</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 9 · the vault</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Your secrets, <span class="gtext">sealed shut</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">A full password manager built in — and built so that <b>even the app can’t read it</b>.</p>
     </div>
@@ -488,7 +575,7 @@
 <section class="chapter" data-title="Connected">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 9 · works with your world</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 10 · works with your world</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Plugged into <span class="gtext">your real life</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">It meets you where your day already happens — and treats every connection like a vault.</p>
     </div>
@@ -522,7 +609,7 @@
 <section class="chapter" data-title="Workshop">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 10 · make &amp; know</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 11 · make &amp; know</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Your <span class="gtext">workshop</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">A second brain isn’t only memory — it’s where you <b>make</b> things and keep what you learn. Capture a thought, grow a rough idea into a real plan, save what matters, and let it record the rooms you’re in.</p>
     </div>
@@ -548,7 +635,7 @@
 <section class="chapter" data-title="You run the AI">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-amber-400 mb-3">Chapter 11 · the engine room</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-amber-400 mb-3">Chapter 12 · the engine room</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">You run the <span class="gtext">AI</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Most “AI apps” quietly run up an API bill and hide the controls. My Brain hands them to you — pick the engine for every feature, read and edit the prompts, watch the usage, and run the heavy work on subscriptions you already pay for.</p>
     </div>
@@ -577,7 +664,7 @@
 <section class="chapter" data-title="Everything it does">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-8">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 12 · the full catalog</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Chapter 13 · the full catalog</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Everything it <span class="gtext">does</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The whole brain, end to end — nothing left out. Sixteen areas, a hundred and fifty-plus little powers.</p>
     </div>
@@ -589,7 +676,7 @@
 <section class="chapter" data-title="Coming next">
   <div class="max-w-4xl mx-auto px-6 pt-16 pb-10 space-y-10">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 13 · the road ahead</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Chapter 14 · the road ahead</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">It’s only <span class="gtext">getting started</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The brain lives in your pocket and on your server today. Next, it reaches into the physical world.</p>
     </div>
@@ -615,7 +702,7 @@
 <section class="chapter" data-title="Built &amp; Growing">
   <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
     <div class="text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 14 · built right</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">Chapter 15 · built right</p>
       <h2 class="text-3xl sm:text-5xl font-extrabold">Built by AI — <span class="gtext">held to discipline</span></h2>
       <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Every single feature shipped through an enforced pipeline. Nothing reaches you on trust.</p>
     </div>
@@ -677,7 +764,7 @@
 
   // ---------- chapter paging ----------
   const chapters = [...document.querySelectorAll('.chapter')];
-  const SHORT = ['Story', 'Flow', 'Capture', 'Index', 'Memory', 'Chat', 'Loop', 'Vault', 'Connected', 'Workshop', 'Engine', 'Everything', 'Next', 'Built'];
+  const SHORT = ['Story', 'Flow', 'Capture', 'Index', 'Memory', 'Chat', 'Loop', 'Lab', 'Vault', 'Connected', 'Workshop', 'Engine', 'Everything', 'Next', 'Built'];
   const tabs = document.getElementById('chtabs');
   const dots = document.getElementById('dots');
   const chBtn = document.getElementById('chBtn');
@@ -734,6 +821,37 @@
   const h = parseInt((location.hash || '').slice(1));
   if (h >= 1 && h <= chapters.length) go(h - 1);
 
+
+  // ---------- ch8: the lab — teach it (✓/✗), tap-driven, reduced-motion safe ----------
+  document.querySelectorAll('#labCards .lab-card').forEach((card) => {
+    const yes = card.querySelector('.lab-yes');
+    const no = card.querySelector('.lab-no');
+    const verdict = card.querySelector('.lab-verdict');
+    const actions = card.querySelector('.lab-actions');
+    const finish = (ok) => {
+      if (actions) actions.style.display = 'none';
+      if (verdict) {
+        verdict.style.display = 'block';
+        if (ok) {
+          verdict.className = 'lab-verdict text-xs mt-2 text-emerald-300';
+          verdict.textContent = '✓ Confirmed — it grows stronger, and lifts related patterns too.';
+        } else {
+          verdict.className = 'lab-verdict text-xs mt-2 text-rose-300';
+          verdict.textContent = "✗ Retired — it won't suggest this again.";
+        }
+      }
+      if (ok) {
+        card.classList.remove('border-zinc-800');
+        card.classList.add('border-emerald-500/50', 'ring-1', 'ring-emerald-500/30');
+      } else {
+        card.classList.add('opacity-40');
+      }
+      const allDone = [...document.querySelectorAll('#labCards .lab-actions')].every((a) => a.style.display === 'none');
+      if (allDone) { const d = document.getElementById('labDone'); if (d) d.style.display = 'block'; }
+    };
+    if (yes) yes.onclick = () => finish(true);
+    if (no) no.onclick = () => finish(false);
+  });
   // ---------- ch2: follow one thought ----------
   const FLOW = [
     ['🎙️ Capture', 'You speak — “call Diksha Friday.” Your voice becomes clean text in about a second. No form, no fields, nothing to file.'],
