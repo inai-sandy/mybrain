@@ -68,9 +68,24 @@ export class MindIngestionService {
     const summaryRow = await this.prisma.daySummary.findUnique({ where: { day } }).catch(() => null);
     const daySummary = summaryRow?.text ?? null;
 
-    const counts = { done: done.length, open: openPlanned.length, skipped: skipped.length, postponed: postponed.length, created: created.length };
-    const hasSignal = done.length > 0 || skipped.length > 0 || postponed.length > 0 || !!story || !!daySummary || ideas.length > 0 || created.length > 0;
+    // Wider signals (BEA-453): that day's important emails + meetings.
+    const emailRows = await this.prisma.emailMemory.findMany({ where: { day }, take: 15 }).catch(() => [] as any[]);
+    const emails = emailRows.map((e) => ({ from: e.fromAddr || '', subject: e.subject || '', snippet: (e.snippet || '').slice(0, 200) }));
+    const meetingRows = await this.prisma.meeting.findMany({ where: { createdAt: { gte: start, lt: end } }, take: 8 }).catch(() => [] as any[]);
+    const meetings = meetingRows.map((m) => {
+      let decisions: string[] = [];
+      try {
+        const d = JSON.parse(m.decisions || '[]');
+        if (Array.isArray(d)) decisions = d.map((x) => String(x)).slice(0, 5);
+      } catch {
+        /* ignore */
+      }
+      return { title: m.title || 'Meeting', summary: (m.summary || '').slice(0, 600), decisions };
+    });
 
-    return { day, tasks: { done, skipped, postponed, created, counts }, story, daySummary, ideas, hasSignal };
+    const counts = { done: done.length, open: openPlanned.length, skipped: skipped.length, postponed: postponed.length, created: created.length };
+    const hasSignal = done.length > 0 || skipped.length > 0 || postponed.length > 0 || !!story || !!daySummary || ideas.length > 0 || created.length > 0 || emails.length > 0 || meetings.length > 0;
+
+    return { day, tasks: { done, skipped, postponed, created, counts }, story, daySummary, ideas, emails, meetings, hasSignal };
   }
 }
