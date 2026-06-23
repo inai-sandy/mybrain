@@ -3,7 +3,17 @@ import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, Chevro
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { MindReview } from '../mind/MindReview';
-import { mindApi, valenceClass, type Finding, type Stats } from '../mind/client';
+import { FindingSheet, type FindingView } from '../mind/FindingSheet';
+import { mindApi, valenceClass, sureWord, type Finding, type Stats } from '../mind/client';
+
+// One-line plain-English explainer shown under each tab. (BEA-462)
+const TAB_HELP: Record<Tab, string> = {
+  map: 'A map of what affects you. Dots are things and people; lines are patterns. Green lifts you, red drains you. "You" is in the middle — tap a dot to read it.',
+  mood: 'How you feel over time, and what gives you energy vs. what takes it. Tap any bar to read the full thing.',
+  heatmaps: 'Your week at a glance — which days lift you, and which kinds of tasks you keep putting off.',
+  findings: "Things My Brain has noticed about you from your days. A guess, not a fact — until you say. Tap one to read it and tell me if it's right.",
+  review: "Is this really you? Tap ✓ if it's true (I'll trust it more), or ✗ if it's wrong (I'll drop it).",
+};
 
 const YOU = '__you__';
 const isYou = (s: string) => /^(you|me|i|myself)$/i.test(s.trim());
@@ -20,6 +30,7 @@ export function Lab() {
   const [running, setRunning] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null); // null = not loaded yet
   const statsReq = useRef(false);
+  const [info, setInfo] = useState<FindingView | null>(null); // tap-to-read popup (BEA-462)
 
   async function load() {
     try {
@@ -56,8 +67,10 @@ export function Lab() {
   // Optimistic local mutations shared by Map + Findings.
   const patch = (id: string, fn: (f: Finding) => Finding | null) =>
     setFindings((fs) => (fs ? (fs.map((f) => (f.id === id ? fn(f) : f)).filter(Boolean) as Finding[]) : fs));
+  // Drop a refuted finding from the Mood "movers" too, so it disappears everywhere at once.
+  const pruneStats = (id: string) => setStats((s) => (s ? { ...s, energizers: s.energizers.filter((e) => e.id !== id), drainers: s.drainers.filter((d) => d.id !== id) } : s));
   const onConfirm = (id: string) => { mindApi.confirm(id).catch(() => undefined); patch(id, (f) => ({ ...f, validated: 'confirmed', confidence: Math.min(0.99, f.confidence + (1 - f.confidence) * 0.35) })); toast('success', 'Confirmed'); };
-  const onRefute = (id: string) => { mindApi.refute(id).catch(() => undefined); patch(id, () => null); toast('success', "Got it — I won't think that"); };
+  const onRefute = (id: string) => { mindApi.refute(id).catch(() => undefined); patch(id, () => null); pruneStats(id); toast('success', "Got it — I won't think that"); };
   const onPin = (id: string, pinned: boolean) => { mindApi.pin(id, pinned).catch(() => undefined); patch(id, (f) => ({ ...f, pinned })); };
   const onRemove = (id: string) => { mindApi.remove(id).catch(() => undefined); patch(id, () => null); toast('success', 'Removed'); };
   const onAmend = (id: string, statement: string) => { mindApi.amend(id, { statement }).catch(() => undefined); patch(id, (f) => ({ ...f, statement, validated: 'confirmed' })); };
@@ -84,19 +97,23 @@ export function Lab() {
         ))}
       </div>
 
+      <p className="text-xs text-zinc-500 leading-relaxed -mt-1">{TAB_HELP[tab]}</p>
+
       {tab === 'review' ? (
         <MindReview />
       ) : tab === 'mood' ? (
-        <MoodView stats={stats} />
+        <MoodView stats={stats} onOpen={setInfo} />
       ) : tab === 'heatmaps' ? (
         <HeatmapsView stats={stats} />
       ) : findings === null ? (
         <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>
       ) : tab === 'map' ? (
-        <MindGraph findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} />
+        <MindGraph findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onOpen={setInfo} />
       ) : (
-        <FindingsFeed findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onRemove={onRemove} onAmend={onAmend} />
+        <FindingsFeed findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onRemove={onRemove} onAmend={onAmend} onOpen={setInfo} />
       )}
+
+      {info && <FindingSheet item={info} onClose={() => setInfo(null)} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} />}
     </div>
   );
 }
@@ -147,7 +164,7 @@ function stepSim(nodes: GNode[], edges: GEdge[], W: number, H: number, alpha = 1
   }
 }
 
-function MindGraph({ findings, onConfirm, onRefute, onPin }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void }) {
+function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onOpen: (v: FindingView) => void }) {
   const W = 720;
   const H = 520;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -400,7 +417,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin }: { findings: Finding
           <div className="space-y-2">
             {selFindings.map((f) => (
               <div key={f.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 flex items-center gap-2">
-                <p className="flex-1 text-sm min-w-0"><span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span> <span className="text-[10px] text-zinc-400 tabular-nums">· {Math.round(f.confidence * 100)}% · {f.evidenceCount}× {trendArrow(f.trend)}</span></p>
+                <button onClick={() => onOpen(f)} className="flex-1 text-left min-w-0"><span className={'text-sm font-medium ' + valenceClass(f.valence)}>{f.statement}</span> <span className="text-[10px] text-zinc-400 tabular-nums">· {sureWord(f.confidence)} · {f.evidenceCount}× {trendArrow(f.trend)}</span></button>
                 <button title="Yes" onClick={() => onConfirm(f.id)} className="grid place-items-center h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"><Check size={14} /></button>
                 <button title="No" onClick={() => onRefute(f.id)} className="grid place-items-center h-7 w-7 rounded-lg bg-rose-500/15 text-rose-600 hover:bg-rose-500/25"><X size={14} /></button>
                 <button title="Pin" onClick={() => onPin(f.id, !f.pinned)} className={'grid place-items-center h-7 w-7 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (f.pinned ? 'text-amber-500' : 'text-zinc-400')}><Pin size={13} className={f.pinned ? 'fill-amber-400' : ''} /></button>
@@ -414,7 +431,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin }: { findings: Finding
 }
 
 // ---------------- Findings feed ----------------
-function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onRemove: (id: string) => void; onAmend: (id: string, s: string) => void }) {
+function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend, onOpen }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onRemove: (id: string) => void; onAmend: (id: string, s: string) => void; onOpen: (v: FindingView) => void }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -441,21 +458,23 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend 
             {g.items.map((f) => (
               <div key={f.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
                 <div className="flex items-start gap-2">
-                  <button onClick={() => setOpen(open === f.id ? null : f.id)} className="flex-1 text-left min-w-0">
+                  <div className="flex-1 min-w-0">
                     {editing === f.id ? (
-                      <textarea autoFocus rows={2} value={draft} onClick={(e) => e.stopPropagation()} onChange={(e) => setDraft(e.target.value)} className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-emerald-500" />
+                      <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-emerald-500" />
                     ) : (
-                      <p className="text-sm leading-snug"><span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span></p>
+                      <button onClick={() => onOpen(f)} className="text-left w-full">
+                        <p className="text-sm leading-snug"><span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span></p>
+                      </button>
                     )}
                     <div className="text-[10px] text-zinc-400 tabular-nums mt-1 flex items-center gap-2">
-                      <span>{Math.round(f.confidence * 100)}%</span>
+                      <span className="not-italic">{sureWord(f.confidence)}</span>
                       <span className="inline-block h-1 w-16 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden align-middle"><span className="block h-full bg-emerald-500" style={{ width: `${Math.round(f.confidence * 100)}%` }} /></span>
                       <span>{f.evidenceCount}× {trendArrow(f.trend)}</span>
                       {f.cadence && <span className="px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{f.cadence}</span>}
                       {f.pinned && <Pin size={10} className="text-amber-500 fill-amber-400" />}
                     </div>
-                  </button>
-                  <ChevronDown size={15} className={'text-zinc-400 shrink-0 transition-transform mt-0.5 ' + (open === f.id ? 'rotate-180' : '')} />
+                  </div>
+                  <button onClick={() => setOpen(open === f.id ? null : f.id)} title="More" className="shrink-0 mt-0.5 text-zinc-400"><ChevronDown size={15} className={'transition-transform ' + (open === f.id ? 'rotate-180' : '')} /></button>
                 </div>
                 {open === f.id && (
                   <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
@@ -505,7 +524,7 @@ function Empty() {
 }
 
 // ---------------- Mood: trend sparkline + what-moves-your-mood ----------------
-function MoodView({ stats }: { stats: Stats | null }) {
+function MoodView({ stats, onOpen }: { stats: Stats | null; onOpen: (v: FindingView) => void }) {
   if (!stats) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
   const noData = stats.moodSeries.length === 0 && stats.energizers.length === 0 && stats.drainers.length === 0;
   if (noData) return <Empty />;
@@ -522,10 +541,10 @@ function MoodView({ stats }: { stats: Stats | null }) {
       </section>
       <section>
         <h3 className="text-sm font-semibold mb-1">What moves your mood</h3>
-        <p className="text-xs text-zinc-400 mb-3">Measured from your validated patterns — strength = confidence, n = times seen.</p>
+        <p className="text-xs text-zinc-400 mb-3">From the patterns you've confirmed. Tap any one to read it in full.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Movers title="Energizes you" items={stats.energizers} tone="emerald" />
-          <Movers title="Drains you" items={stats.drainers} tone="rose" />
+          <Movers title="Energizes you" items={stats.energizers} tone="emerald" onOpen={onOpen} />
+          <Movers title="Drains you" items={stats.drainers} tone="rose" onOpen={onOpen} />
         </div>
       </section>
     </div>
@@ -555,9 +574,10 @@ function Sparkline({ data }: { data: { day: string; mood: number }[] }) {
   );
 }
 
-function Movers({ title, items, tone }: { title: string; items: Stats['energizers']; tone: 'emerald' | 'rose' }) {
+function Movers({ title, items, tone, onOpen }: { title: string; items: Stats['energizers']; tone: 'emerald' | 'rose'; onOpen: (v: FindingView) => void }) {
   const bar = tone === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500';
   const head = tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400';
+  const valence = tone === 'emerald' ? 'energizing' : 'draining';
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
       <div className={'text-[11px] font-semibold uppercase tracking-wide mb-2 ' + head}>{title}</div>
@@ -566,14 +586,14 @@ function Movers({ title, items, tone }: { title: string; items: Stats['energizer
       ) : (
         <div className="space-y-2.5">
           {items.map((m, i) => (
-            <div key={i}>
+            <button key={i} onClick={() => onOpen({ id: m.id, label: m.label, statement: m.statement, valence, confidence: m.strength, evidenceCount: m.n })} className="w-full text-left block">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="text-sm font-medium truncate">{m.label}</span>
-                <span className="text-[10px] text-zinc-400 shrink-0 tabular-nums">n={m.n}</span>
+                <span className="text-[10px] text-zinc-400 shrink-0 tabular-nums">{sureWord(m.strength)}</span>
               </div>
               {m.statement && <p className="text-[11px] text-zinc-500 leading-snug truncate">{m.statement}</p>}
               <div className="mt-1 h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden"><div className={'h-full ' + bar} style={{ width: `${Math.max(4, Math.min(100, m.strength))}%` }} /></div>
-            </div>
+            </button>
           ))}
         </div>
       )}

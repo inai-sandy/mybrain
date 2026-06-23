@@ -96,6 +96,7 @@ export class MindController {
       where: { NOT: { status: 'retired' } },
       orderBy: [{ confidence: 'desc' }],
       take: 200,
+      include: { evidence: { take: 6, orderBy: { createdAt: 'desc' } } }, // for the tap-to-read popup (BEA-462)
     });
   }
 }
