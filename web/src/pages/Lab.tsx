@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, ChevronDown, Search } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { useSearchParams } from 'react-router-dom';
 import { MindReview } from '../mind/MindReview';
+import { Mentor } from './Mentor';
 import { FindingSheet, type FindingView } from '../mind/FindingSheet';
 import { mindApi, valenceClass, sureWord, type Finding, type Stats } from '../mind/client';
 
@@ -14,6 +16,7 @@ const TAB_HELP: Record<Tab, string> = {
   findings: "Things My Brain has noticed about you from your days. A guess, not a fact — until you say. Tap one to read it and tell me if it's right.",
   review: "Is this really you? Tap ✓ if it's true (I'll trust it more), or ✗ if it's wrong (I'll drop it).",
   about: 'Tell me who you are in your own words. I use this to understand you from day one — it shapes what I notice and the guidance you get.',
+  mentor: 'Your day-to-day guidance, grounded in what the Lab knows about you — focus areas plus how each day went.',
 };
 
 const YOU = '__you__';
@@ -22,11 +25,15 @@ const edgeColor = (v: string) => (v === 'energizing' ? '#34d399' : v === 'draini
 const trendArrow = (t: string) => (t === 'rising' ? '▲' : t === 'fading' ? '▼' : '–');
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Tab = 'map' | 'mood' | 'heatmaps' | 'findings' | 'review' | 'about';
+type Tab = 'map' | 'mood' | 'heatmaps' | 'findings' | 'review' | 'about' | 'mentor';
+const TABS: Tab[] = ['map', 'mood', 'heatmaps', 'findings', 'review', 'about', 'mentor'];
 
 export function Lab() {
   const toast = useToast();
-  const [tab, setTab] = useState<Tab>('map');
+  const [params, setParams] = useSearchParams();
+  const initialTab = (TABS as string[]).includes(params.get('tab') || '') ? (params.get('tab') as Tab) : 'map';
+  const [tab, setTabState] = useState<Tab>(initialTab);
+  const setTab = (t: Tab) => { setTabState(t); setParams(t === 'map' ? {} : { tab: t }, { replace: true }); };
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [running, setRunning] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null); // null = not loaded yet
@@ -86,13 +93,15 @@ export function Lab() {
           </h1>
           <p className="text-zinc-500 text-sm">The science of you — what your brain has learned from your days.</p>
         </div>
-        <button onClick={runNow} disabled={running} className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">
-          {running ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Run now
-        </button>
+        {tab !== 'about' && tab !== 'mentor' && (
+          <button onClick={runNow} disabled={running} className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">
+            {running ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Run now
+          </button>
+        )}
       </div>
 
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto">
-        {(['map', 'mood', 'heatmaps', 'findings', 'review', 'about'] as const).map((t) => (
+        {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={'shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ' + (tab === t ? 'border-violet-500 text-violet-600 dark:text-violet-400' : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
             {t === 'about' ? 'About Me' : t}
           </button>
@@ -103,6 +112,8 @@ export function Lab() {
 
       {tab === 'review' ? (
         <MindReview />
+      ) : tab === 'mentor' ? (
+        <Mentor />
       ) : tab === 'about' ? (
         <AboutMe />
       ) : tab === 'mood' ? (
