@@ -518,10 +518,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const told = await this.prisma.story.findFirst({ where: { day: y } });
     if (told) {
       await this.closeDay(y, true).catch(() => undefined); // summary + story + Mentor + Lab + rollover + seal
+      await this.prisma.mindRun.create({ data: { kind: 'wrap', day: y, detail: `Wrapped up ${y} — your story was in` } }).catch(() => undefined);
       return { wrapped: true, reminded: false };
     }
     // No story yet at the checkpoint — one nudge, then wait for tomorrow's 10:00 (the Telegram loop delivers it).
     await this.setSetting('telegram.pushStoryReminder', y).catch(() => undefined);
+    await this.prisma.mindRun.create({ data: { kind: 'wrap', day: y, detail: `${y}: story not in by 10:00 — reminded you` } }).catch(() => undefined);
     return { wrapped: false, reminded: true };
   }
 

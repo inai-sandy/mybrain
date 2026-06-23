@@ -49,6 +49,7 @@ function harness(opts: { llmJson: string; existing?: any[]; closed?: string[] })
       },
     },
     mindEvidence: { createMany: async ({ data }: any) => { evidence.push(...data); return { count: data.length }; }, findMany: async () => [] },
+    mindRun: { create: async () => ({}) },
   };
   const llm: any = { completeWith: jest.fn(async () => opts.llmJson) };
   const ingestion: any = { gatherDaySignals: jest.fn(async () => SIGNALS) };

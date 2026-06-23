@@ -6,7 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import { MindReview } from '../mind/MindReview';
 import { Mentor } from './Mentor';
 import { FindingSheet, type FindingView } from '../mind/FindingSheet';
-import { mindApi, valenceClass, sureWord, type Finding, type Stats } from '../mind/client';
+import { mindApi, valenceClass, sureWord, fmtRelative, fmtWhen, type Finding, type Stats } from '../mind/client';
 
 // One-line plain-English explainer shown under each tab. (BEA-462)
 const TAB_HELP: Record<Tab, string> = {
@@ -39,6 +39,9 @@ export function Lab() {
   const [stats, setStats] = useState<Stats | null>(null); // null = not loaded yet
   const statsReq = useRef(false);
   const [info, setInfo] = useState<FindingView | null>(null); // tap-to-read popup (BEA-462)
+  const [lastLearn, setLastLearn] = useState<{ at: string; detail: string } | null>(null); // run-log (BEA-468)
+  const loadRuns = () => mindApi.runs().then((s) => setLastLearn(s.lastLearn ? { at: s.lastLearn.at, detail: s.lastLearn.detail } : null)).catch(() => undefined);
+  useEffect(() => { loadRuns(); }, []);
 
   async function load() {
     try {
@@ -65,6 +68,7 @@ export function Lab() {
       await mindApi.run();
       toast('success', 'Ran a pass over your recent days');
       await load();
+      await loadRuns();
     } catch {
       toast('error', 'Could not run');
     } finally {
@@ -92,6 +96,7 @@ export function Lab() {
             <FlaskConical size={22} className="text-violet-500" /> The Lab
           </h1>
           <p className="text-zinc-500 text-sm">The science of you — what your brain has learned from your days.</p>
+          {lastLearn && <p className="text-xs text-zinc-400 mt-0.5" title={fmtWhen(lastLearn.at)}>Last learned {fmtRelative(lastLearn.at)} · {lastLearn.detail}</p>}
         </div>
         {tab !== 'about' && tab !== 'mentor' && (
           <button onClick={runNow} disabled={running} className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">

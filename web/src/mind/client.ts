@@ -28,6 +28,10 @@ export type Stats = {
   categories: { category: string; done: number; deferred: number; total: number; avoidance: number }[];
 };
 
+// The run-log: when the Lab learned / the morning wrap-up ran. (BEA-468)
+export type MindRun = { id: string; at: string; kind: string; day: string | null; detail: string };
+export type RunStatus = { runs: MindRun[]; lastLearn: MindRun | null; lastWrap: MindRun | null; wrapAt: string };
+
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error(String(r.status));
   return r.json();
@@ -47,6 +51,7 @@ export const mindApi = {
   note: (id: string, text: string) => post(`/api/mind/findings/${id}/note`, { text }),
   remove: (id: string) => fetch(`/api/mind/findings/${id}`, { method: 'DELETE' }).then((r) => j(r)),
   run: (day?: string) => post('/api/mind/run', day ? { day } : {}),
+  runs: () => fetch('/api/mind/runs').then((r) => j<RunStatus>(r)),
   getAbout: () => fetch('/api/mind/about').then((r) => j<{ text: string }>(r)),
   setAbout: (text: string) => fetch('/api/mind/about', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then((r) => j<{ text: string }>(r)),
 };
@@ -67,6 +72,20 @@ export function sureWord(confidence: number): string {
   if (p < 80) return 'Confident';
   return 'Very sure';
 }
+// Shared date/time formatting for the run-log. (BEA-468)
+export function fmtWhen(iso: string): string {
+  return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+}
+export function fmtRelative(iso: string): string {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.round(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
 export function valenceClass(v: string): string {
   return v === 'energizing'
     ? 'text-emerald-600 dark:text-emerald-400'

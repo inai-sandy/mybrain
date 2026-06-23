@@ -49,6 +49,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
       if (r.ok) {
         const j = await r.json();
         toast('success', j.rolled ? `Day sealed ✓ · ${j.rolled} unfinished moved forward` : 'Day sealed ✓');
+        toast('success', 'The Lab is now learning from this day (takes about a minute). See Settings → Activity.');
         onClosed();
         close();
       } else toast('error', 'Could not close the day');
