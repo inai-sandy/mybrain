@@ -929,6 +929,18 @@ export class TelegramService implements OnModuleInit {
         await this.send(owner, `🌙 <b>Story of the Day</b>${ds.moodScore != null ? ` · mood ${ds.moodScore}/100` : ''}\n\n${body}`);
       }
     }
+    const rDay = await this.getSetting('telegram.pushStoryReminder');
+    if (rDay) {
+      await this.setSetting('telegram.pushStoryReminder', '');
+      // Only nudge if the day is still open (the user may have told the story between 10:00 and now).
+      const closed = await this.prisma.dayClose.findUnique({ where: { day: rDay } });
+      const told = await this.prisma.story.findFirst({ where: { day: rDay } });
+      if (!closed && !told) {
+        await this.send(owner, `📖 <b>Yesterday's story?</b>\nTell me how ${rDay} went and I'll wrap it up — your Mentor and the Lab update once it's in.`, {
+          reply_markup: { inline_keyboard: [[{ text: '📖 Tell the story', url: `${PUBLIC_URL}/today` }]] },
+        });
+      }
+    }
     const mDay = await this.getSetting('telegram.pushMentor');
     if (mDay) {
       await this.setSetting('telegram.pushMentor', '');

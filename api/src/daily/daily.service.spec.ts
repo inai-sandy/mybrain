@@ -233,7 +233,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
   const mindCalls: any[] = [];
   const mindSvc: any = { learnDay: async (day: string) => { mindCalls.push(day); return { proposed: 0, reinforced: 0 }; } };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc, mindSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls, mindCalls };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc, mindSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls, mindCalls, settings };
 }
 
 describe('DailyService', () => {
@@ -627,5 +627,34 @@ describe('DailyService', () => {
     expect(t.total).toBe(2);
     expect(t.dumped).toBe(true);
     expect(t.story).toBe(true);
+  });
+
+  describe('morning auto-wrap-up (BEA-467)', () => {
+    it('wraps yesterday up when its story is in — closes it + triggers the Lab', async () => {
+      const { svc, stories, dayCloses, mentorCalls, mindCalls } = makeService({ llmText: '{"story":"A wrapped day.","mood":"settled","moodScore":70}' });
+      stories.push({ id: 's1', day: '2026-06-09', rawText: 'Solid day.', createdAt: new Date(), updatedAt: new Date() });
+      const r = await svc.wrapYesterday('2026-06-10');
+      expect(r).toEqual({ wrapped: true, reminded: false });
+      expect(dayCloses.find((c) => c.day === '2026-06-09')).toBeTruthy();
+      expect(mentorCalls.some((m) => m.day === '2026-06-09')).toBe(true);
+      expect(mindCalls).toContain('2026-06-09'); // the Lab learns from the wrapped day
+    });
+
+    it('flags a single Telegram reminder when the story is NOT in', async () => {
+      const { svc, dayCloses, settings } = makeService();
+      const r = await svc.wrapYesterday('2026-06-10');
+      expect(r).toEqual({ wrapped: false, reminded: true });
+      expect(settings['telegram.pushStoryReminder']).toBe('2026-06-09');
+      expect(dayCloses.length).toBe(0); // nothing closed
+    });
+
+    it('does nothing if yesterday is already closed', async () => {
+      const { svc, stories, dayCloses, settings } = makeService();
+      stories.push({ id: 's2', day: '2026-06-09', rawText: 'x', createdAt: new Date(), updatedAt: new Date() });
+      dayCloses.push({ day: '2026-06-09', auto: false });
+      const r = await svc.wrapYesterday('2026-06-10');
+      expect(r).toEqual({ wrapped: false, reminded: false });
+      expect(settings['telegram.pushStoryReminder']).toBeUndefined();
+    });
   });
 });

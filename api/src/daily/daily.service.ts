@@ -10,6 +10,7 @@ import { MentalModelService } from '../mind/mentalmodel.service';
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
 const STORY_AT = '23:58'; // local time the nightly Story of the Day fires
+const MORNING_WRAP_AT = '10:00'; // local time the morning auto-wrap-up runs (BEA-467)
 const DEFAULT_STORY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 const DONE_EXTRACT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }; // tiny job: pull finished tasks from the story
 
@@ -33,6 +34,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     this.tick = setInterval(() => {
       this.summaryTick().catch(() => undefined);
       this.storyTick().catch(() => undefined);
+      this.morningWrapTick().catch(() => undefined);
       this.lifecycleTick().catch(() => undefined);
       this.monthTick().catch(() => undefined);
       this.yearTick().catch(() => undefined);
@@ -495,6 +497,32 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // 4. The Lab reflects on the day NOW that it's complete — not on a blind nightly clock. Fire-and-forget. (BEA-458)
     void this.mind.learnDay(day).catch(() => undefined);
     return { day, closed: true, auto, rolled };
+  }
+
+  /** The morning checkpoint (BEA-467): once a day at 10:00 local, wrap up yesterday if its story is in.
+   *  Strict — it runs ONCE per day; if the story isn't in yet, it nudges and waits for tomorrow's 10:00. */
+  async morningWrapTick(): Promise<void> {
+    const tz = await this.tz();
+    if (this.localHM(tz) < MORNING_WRAP_AT) return; // only at/after 10:00 local
+    const today = this.dayKey(tz);
+    const seen = await this.prisma.setting.findUnique({ where: { key: 'daily.lastMorningWrap' } });
+    if (seen?.value === today) return; // once per day
+    await this.setSetting('daily.lastMorningWrap', today);
+    await this.wrapYesterday(today);
+  }
+
+  /** Close yesterday if its story is in; otherwise flag a single Telegram reminder. Clock-independent. (BEA-467) */
+  async wrapYesterday(today: string): Promise<{ wrapped: boolean; reminded: boolean }> {
+    const y = this.dayAdd(today, -1);
+    if (await this.isClosed(y)) return { wrapped: false, reminded: false }; // already wrapped (e.g. closed by hand)
+    const told = await this.prisma.story.findFirst({ where: { day: y } });
+    if (told) {
+      await this.closeDay(y, true).catch(() => undefined); // summary + story + Mentor + Lab + rollover + seal
+      return { wrapped: true, reminded: false };
+    }
+    // No story yet at the checkpoint — one nudge, then wait for tomorrow's 10:00 (the Telegram loop delivers it).
+    await this.setSetting('telegram.pushStoryReminder', y).catch(() => undefined);
+    return { wrapped: false, reminded: true };
   }
 
   /** Auto-seal abandoned days once per local day: any day older than the grace window that still has
