@@ -75,6 +75,7 @@ export function Lab() {
   const onPin = (id: string, pinned: boolean) => { mindApi.pin(id, pinned).catch(() => undefined); patch(id, (f) => ({ ...f, pinned })); };
   const onRemove = (id: string) => { mindApi.remove(id).catch(() => undefined); patch(id, () => null); toast('success', 'Removed'); };
   const onAmend = (id: string, statement: string) => { mindApi.amend(id, { statement }).catch(() => undefined); patch(id, (f) => ({ ...f, statement, validated: 'confirmed' })); };
+  const onNote = async (id: string, text: string) => { try { await mindApi.note(id, text); await load(); toast('success', 'Saved — thanks for telling me'); } catch { toast('error', 'Could not save your note'); } };
 
   return (
     <div className="space-y-5">
@@ -116,7 +117,7 @@ export function Lab() {
         <FindingsFeed findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onRemove={onRemove} onAmend={onAmend} onOpen={setInfo} />
       )}
 
-      {info && <FindingSheet item={info} onClose={() => setInfo(null)} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} />}
+      {info && <FindingSheet item={info} onClose={() => setInfo(null)} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onNote={onNote} />}
     </div>
   );
 }

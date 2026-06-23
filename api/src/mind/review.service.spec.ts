@@ -2,7 +2,9 @@ import { MindReviewService } from './review.service';
 
 function makePrisma(findings: any[]) {
   const updates: any[] = [];
+  const evidence: any[] = [];
   const prisma: any = {
+    mindEvidence: { create: async ({ data }: any) => { evidence.push(data); return data; } },
     mindFinding: {
       findUnique: async ({ where }: any) => findings.find((f) => f.id === where.id) || null,
       findMany: async ({ where }: any) => {
@@ -20,7 +22,7 @@ function makePrisma(findings: any[]) {
       delete: async ({ where }: any) => ({ id: where.id }),
     },
   };
-  return { prisma, updates };
+  return { prisma, updates, evidence };
 }
 
 const base = { evidenceCount: 1, pinned: false, trend: 'steady', status: 'emerging', valence: 'neutral', confidence: 0.4, validated: null as string | null, firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
@@ -55,5 +57,25 @@ describe('MindReviewService (BEA-449)', () => {
     expect(f.subject).toBe('money & admin tasks');
     expect(f.validated).toBe('confirmed');
     expect(f.confidence).toBeGreaterThan(0.4);
+  });
+
+  it('note stores the user\'s words as feedback evidence and softly confirms (BEA-464)', async () => {
+    const f = { ...base, id: 'n', subject: 's', relation: 'r', object: 'o', confidence: 0.4, evidenceCount: 2, status: 'proposed' };
+    const { prisma, evidence } = makePrisma([f]);
+    const r = await new MindReviewService(prisma).note('n', "It's only Beakn tasks I avoid, not all work.");
+    expect(r.ok).toBe(true);
+    expect(evidence[0]).toMatchObject({ findingId: 'n', signal: 'feedback', snippet: "It's only Beakn tasks I avoid, not all work." });
+    expect(f.validated).toBe('confirmed');
+    expect(f.evidenceCount).toBe(3);
+    expect(f.confidence).toBeGreaterThan(0.4);
+    expect(f.status).toBe('emerging'); // proposed → emerging
+  });
+
+  it('note ignores an empty body', async () => {
+    const f = { ...base, id: 'e', subject: 's', relation: 'r', object: 'o' };
+    const { prisma, evidence } = makePrisma([f]);
+    const r = await new MindReviewService(prisma).note('e', '   ');
+    expect(r.ok).toBe(false);
+    expect(evidence.length).toBe(0);
   });
 });

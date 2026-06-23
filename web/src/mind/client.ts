@@ -44,6 +44,7 @@ export const mindApi = {
   amend: (id: string, patch: Partial<Pick<Finding, 'statement' | 'subject' | 'relation' | 'object' | 'valence'>>) =>
     fetch(`/api/mind/findings/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then((r) => j(r)),
   pin: (id: string, pinned: boolean) => post(`/api/mind/findings/${id}/pin`, { pinned }),
+  note: (id: string, text: string) => post(`/api/mind/findings/${id}/note`, { text }),
   remove: (id: string) => fetch(`/api/mind/findings/${id}`, { method: 'DELETE' }).then((r) => j(r)),
   run: (day?: string) => post('/api/mind/run', day ? { day } : {}),
   getAbout: () => fetch('/api/mind/about').then((r) => j<{ text: string }>(r)),
