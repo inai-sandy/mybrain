@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
-import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type RunStatus } from '../mind/client';
+import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { forceUpdate } from '../ui/forceUpdate';
 
@@ -2039,22 +2039,35 @@ function ConnectModal({
   );
 }
 
-// ---------------- Activity: when the Lab + morning wrap-up actually ran (BEA-468) ----------------
+// ---------------- Activity: a holistic per-day calendar of every automatic run (BEA-471) ----------------
+const STEPS: { key: keyof DayRun; label: string; short: string }[] = [
+  { key: 'story', label: 'Story told', short: 'Story' },
+  { key: 'wrapped', label: 'Day wrapped', short: 'Wrap' },
+  { key: 'learned', label: 'Lab learned', short: 'Lab' },
+  { key: 'mentor', label: 'Mentor', short: 'Mentor' },
+  { key: 'summary', label: 'Summary', short: 'Summary' },
+];
+
+function prettyDay(day: string): string {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
 function LabActivitySection() {
-  const [data, setData] = useState<RunStatus | null>(null);
+  const [data, setData] = useState<Activity | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    mindApi.runs().then(setData).catch(() => setData({ runs: [], lastLearn: null, lastClose: null, lastStory: null, wrapAt: '10:00' })).finally(() => setLoading(false));
+    mindApi.activity(30).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, []);
 
-  const Stat = ({ label, run, empty }: { label: string; run: RunStatus['lastLearn']; empty: string }) => (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+  const StatCard = ({ label, stat, empty }: { label: string; stat: RunStat; empty: string }) => (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3">
       <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">{label}</div>
-      {run ? (
+      {stat?.at ? (
         <>
-          <div className="text-sm font-medium">{fmtWhen(run.at)} <span className="text-zinc-400 font-normal">· {fmtRelative(run.at)}</span></div>
-          <div className="text-xs text-zinc-500 mt-0.5">{run.detail}</div>
+          <div className="text-sm font-medium">{fmtWhen(stat.at)}</div>
+          <div className="text-[11px] text-zinc-400">{fmtRelative(stat.at)}{stat.detail ? ` · ${stat.detail}` : ''}</div>
         </>
       ) : (
         <div className="text-sm text-zinc-400">{empty}</div>
@@ -2062,50 +2075,85 @@ function LabActivitySection() {
     </div>
   );
 
+  if (loading) return <div className="text-sm text-zinc-400">Loading…</div>;
+  if (!data) return <div className="text-sm text-zinc-400">Couldn't load activity.</div>;
+
   return (
-    <section className="space-y-4 max-w-2xl">
+    <section className="space-y-5 max-w-3xl">
       <div>
-        <h2 className="flex items-center gap-2 font-semibold mb-1"><FlaskConical size={18} className="text-violet-500" /> The Lab — activity</h2>
-        <p className="text-sm text-zinc-500">Exactly when the automatic work ran, so you always know it's happening. Times are your time (IST).</p>
+        <h2 className="flex items-center gap-2 font-semibold mb-1"><FlaskConical size={18} className="text-violet-500" /> Activity — did it run, and when?</h2>
+        <p className="text-sm text-zinc-500">A day-by-day view of everything that runs automatically. All times are your time (IST). A ✓ means that step ran for that day.</p>
       </div>
 
-      {loading ? (
-        <div className="text-sm text-zinc-400">Loading…</div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Stat label="The Lab last learned" run={data!.lastLearn} empty="Hasn't learned yet — close a day to start it." />
-            <Stat label="Day last wrapped up" run={data!.lastClose} empty="No day wrapped up yet." />
-            <Stat label="Story last written" run={data!.lastStory} empty="No Story of the Day written yet." />
-          </div>
+      {/* Status board — when each thing last ran */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <StatCard label="Story last told" stat={data.status.story} empty="Not yet" />
+        <StatCard label="Day last wrapped" stat={data.status.wrapped} empty="Not yet" />
+        <StatCard label="Lab last learned" stat={data.status.learned} empty="Not yet" />
+        <StatCard label="Mentor last ran" stat={data.status.mentor} empty="Not yet" />
+        <StatCard label="Summary last ran" stat={data.status.summary} empty="Not yet" />
+      </div>
 
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300">
-            Next automatic wrap-up: <b>every day at {data!.wrapAt} AM</b>. It closes yesterday once your story is in — which runs your Mentor and the Lab. The Lab's thinking takes about a minute.
-          </div>
+      <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300">
+        Next automatic wrap-up: <b>every day at {data.wrapAt} AM</b>. Telling a past day's story wraps it up right away; otherwise the 10:00 check does it (and nudges you if the story isn't in).
+      </div>
 
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recent runs</div>
-            {data!.runs.length === 0 ? (
-              <div className="text-sm text-zinc-400">Nothing yet. Close a day (or wait for the 10:00 AM wrap-up) and it'll show here.</div>
-            ) : (
-              <div className="space-y-1.5">
-                {data!.runs.map((r) => {
-                  const k = RUN_KIND[r.kind] ?? { label: r.kind, tone: 'text-zinc-500' };
-                  return (
-                    <div key={r.id} className="flex items-start gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
-                      <span className={'mt-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0 w-16 ' + k.tone}>{k.label}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm">{r.detail}</div>
-                        <div className="text-[11px] text-zinc-400">{fmtWhen(r.at)} · {fmtRelative(r.at)}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+      {/* The run calendar — per day, which steps happened */}
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Run calendar (last 30 days)</div>
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="bg-zinc-50 dark:bg-zinc-900/60 text-[11px] uppercase tracking-wide text-zinc-400">
+                <th className="text-left font-semibold px-3 py-2 sticky left-0 bg-zinc-50 dark:bg-zinc-900/60">Day</th>
+                {STEPS.map((s) => <th key={s.key} className="px-2 py-2 font-semibold text-center whitespace-nowrap">{s.short}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {data.days.map((d, i) => {
+                const done = STEPS.filter((s) => d[s.key]).length;
+                return (
+                  <tr key={d.day} className={'border-t border-zinc-100 dark:border-zinc-800 ' + (i === 0 ? 'bg-violet-500/5' : '')}>
+                    <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">
+                      <span className="font-medium">{prettyDay(d.day)}</span>
+                      {i === 0 && <span className="ml-1.5 text-[10px] text-violet-500">today</span>}
+                    </td>
+                    {STEPS.map((s) => (
+                      <td key={s.key} className="px-2 py-1.5 text-center">
+                        {d[s.key] ? <span className="text-emerald-500" title={`${s.label} ✓`}>✓</span> : <span className="text-zinc-300 dark:text-zinc-700" title={`${s.label} — not run`}>–</span>}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[11px] text-zinc-400 mt-1.5">Today's row often shows gaps — those steps run after you tell the story / at 10:00 AM. Older days with gaps are days you didn't log.</p>
+      </div>
+
+      {/* The detailed event log */}
+      <div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recent runs (detailed)</div>
+        {data.runs.length === 0 ? (
+          <div className="text-sm text-zinc-400">Nothing logged yet.</div>
+        ) : (
+          <div className="space-y-1.5">
+            {data.runs.map((r) => {
+              const k = RUN_KIND[r.kind] ?? { label: r.kind, tone: 'text-zinc-500' };
+              return (
+                <div key={r.id} className="flex items-start gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
+                  <span className={'mt-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0 w-16 ' + k.tone}>{k.label}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm">{r.detail}</div>
+                    <div className="text-[11px] text-zinc-400">{fmtWhen(r.at)} · {fmtRelative(r.at)}</div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </>
-      )}
+        )}
+      </div>
     </section>
   );
 }

@@ -31,6 +31,16 @@ export type Stats = {
 // The run-log: when the Lab learned / the morning wrap-up ran. (BEA-468)
 export type MindRun = { id: string; at: string; kind: string; day: string | null; detail: string };
 export type RunStatus = { runs: MindRun[]; lastLearn: MindRun | null; lastClose: MindRun | null; lastStory: MindRun | null; wrapAt: string };
+// Holistic activity view — a per-day calendar + last-of-each status. (BEA-471)
+export type DayRun = { day: string; story: boolean; wrapped: boolean; learned: boolean; mentor: boolean; summary: boolean };
+export type RunStat = { at: string | null; detail: string | null };
+export type Activity = {
+  today: string;
+  wrapAt: string;
+  days: DayRun[];
+  status: { story: RunStat; wrapped: RunStat; learned: RunStat; mentor: RunStat; summary: RunStat };
+  runs: MindRun[];
+};
 // kind → plain label + accent, for the Activity log. (BEA-470)
 export const RUN_KIND: Record<string, { label: string; tone: string }> = {
   learn: { label: 'Lab', tone: 'text-violet-500' },
@@ -60,6 +70,7 @@ export const mindApi = {
   remove: (id: string) => fetch(`/api/mind/findings/${id}`, { method: 'DELETE' }).then((r) => j(r)),
   run: (day?: string) => post('/api/mind/run', day ? { day } : {}),
   runs: () => fetch('/api/mind/runs').then((r) => j<RunStatus>(r)),
+  activity: (days = 30) => fetch(`/api/mind/activity?days=${days}`).then((r) => j<Activity>(r)),
   getAbout: () => fetch('/api/mind/about').then((r) => j<{ text: string }>(r)),
   setAbout: (text: string) => fetch('/api/mind/about', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then((r) => j<{ text: string }>(r)),
 };
