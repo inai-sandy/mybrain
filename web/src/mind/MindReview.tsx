@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, X, Pencil, Pin, Loader2, FlaskConical, HelpCircle } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { mindApi, KIND_GROUP, valenceClass, type Finding } from './client';
+import { mindApi, KIND_GROUP, valenceClass, sureWord, type Finding } from './client';
 
 /** The nightly "what I understood about you" review — your ✓/✗/almost taps teach the model. (BEA-449) */
 export function MindReview({ onChange }: { onChange?: (remaining: number) => void }) {
@@ -83,7 +83,7 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
         </p>
       )}
       <div className="flex items-center gap-2 mt-2">
-        <span className="text-[10px] text-zinc-400 tabular-nums">{Math.round(f.confidence * 100)}% · {f.evidenceCount}×{f.cadence ? ` · ${f.cadence}` : ''}</span>
+        <span className="text-[10px] text-zinc-400 tabular-nums">{sureWord(f.confidence)} · {f.evidenceCount}×{f.cadence ? ` · ${f.cadence}` : ''}</span>
         <div className="flex-1" />
         {editing === f.id ? (
           <>
@@ -104,6 +104,7 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
 
   return (
     <div className="space-y-4">
+      <p className="text-xs text-zinc-500 leading-relaxed">These are things I think I've noticed about you. Is each one really you? Tap ✓ if it's true (I'll trust it more), ✗ if it's wrong (I'll drop it), or ✎ to fix the wording.</p>
       {Object.entries(groups).map(([label, items]) => (
         <div key={label}>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{KIND_GROUP[Object.keys(KIND_GROUP).find((k) => KIND_GROUP[k].label === label) || '']?.emoji} {label}</div>

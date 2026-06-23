@@ -29,9 +29,9 @@ export class MindStatsService {
       where: { status: { in: ['established', 'emerging'] }, NOT: { validated: 'refuted' } },
       orderBy: { confidence: 'desc' },
       take: 50,
-      select: { subject: true, statement: true, valence: true, confidence: true, evidenceCount: true },
+      select: { id: true, subject: true, statement: true, valence: true, confidence: true, evidenceCount: true },
     });
-    const mv = (f: (typeof findings)[number]) => ({ label: f.subject, statement: f.statement, strength: Math.round(f.confidence * 100), n: f.evidenceCount });
+    const mv = (f: (typeof findings)[number]) => ({ id: f.id, label: f.subject, statement: f.statement, valence: f.valence, strength: Math.round(f.confidence * 100), n: f.evidenceCount });
     const energizers = findings.filter((f) => f.valence === 'energizing').map(mv).slice(0, 10);
     const drainers = findings.filter((f) => f.valence === 'draining').map(mv).slice(0, 10);
 

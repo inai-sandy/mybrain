@@ -23,8 +23,8 @@ export type Finding = {
 export type Stats = {
   moodSeries: { day: string; mood: number }[]; // mood 0–100, oldest→newest
   dowMood: { dow: number; avg: number | null; n: number }[]; // dow 0=Sun..6=Sat
-  energizers: { label: string; statement: string; strength: number; n: number }[];
-  drainers: { label: string; statement: string; strength: number; n: number }[];
+  energizers: { id: string; label: string; statement: string; valence: string; strength: number; n: number }[];
+  drainers: { id: string; label: string; statement: string; valence: string; strength: number; n: number }[];
   categories: { category: string; done: number; deferred: number; total: number; avoidance: number }[];
 };
 
@@ -56,6 +56,14 @@ export const KIND_GROUP: Record<string, { label: string; emoji: string }> = {
   relational: { label: 'People', emoji: '🧑‍🤝‍🧑' },
   temporal: { label: 'Timing', emoji: '🕒' },
 };
+// How sure the Lab is, in plain words (BEA-462) — shown next to / instead of the raw %.
+export function sureWord(confidence: number): string {
+  const p = confidence <= 1 ? confidence * 100 : confidence; // accept 0–1 or 0–100
+  if (p < 35) return 'Just a hunch';
+  if (p < 60) return 'Fairly sure';
+  if (p < 80) return 'Confident';
+  return 'Very sure';
+}
 export function valenceClass(v: string): string {
   return v === 'energizing'
     ? 'text-emerald-600 dark:text-emerald-400'
