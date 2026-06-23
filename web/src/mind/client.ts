@@ -30,7 +30,15 @@ export type Stats = {
 
 // The run-log: when the Lab learned / the morning wrap-up ran. (BEA-468)
 export type MindRun = { id: string; at: string; kind: string; day: string | null; detail: string };
-export type RunStatus = { runs: MindRun[]; lastLearn: MindRun | null; lastWrap: MindRun | null; wrapAt: string };
+export type RunStatus = { runs: MindRun[]; lastLearn: MindRun | null; lastClose: MindRun | null; lastStory: MindRun | null; wrapAt: string };
+// kind → plain label + accent, for the Activity log. (BEA-470)
+export const RUN_KIND: Record<string, { label: string; tone: string }> = {
+  learn: { label: 'Lab', tone: 'text-violet-500' },
+  close: { label: 'Wrapped', tone: 'text-emerald-600 dark:text-emerald-400' },
+  story: { label: 'Story', tone: 'text-indigo-500' },
+  reminder: { label: 'Reminder', tone: 'text-amber-500' },
+  wrap: { label: 'Wrapped', tone: 'text-emerald-600 dark:text-emerald-400' },
+};
 
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error(String(r.status));

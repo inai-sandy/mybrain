@@ -32,7 +32,7 @@ export class DailyController {
   @Post('close')
   async close(@Body() body: { day?: string }) {
     const day = body?.day && /^\d{4}-\d{2}-\d{2}$/.test(body.day) ? body.day : (await this.daily.activity()).day;
-    const r = await this.daily.closeDay(day, false);
+    const r = await this.daily.closeDay(day, false, 'you closed it');
     if (!r) throw new BadRequestException('Could not close that day');
     return r;
   }
