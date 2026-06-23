@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
-import { mindApi, fmtWhen, fmtRelative, type RunStatus } from '../mind/client';
+import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type RunStatus } from '../mind/client';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { forceUpdate } from '../ui/forceUpdate';
 
@@ -2045,7 +2045,7 @@ function LabActivitySection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    mindApi.runs().then(setData).catch(() => setData({ runs: [], lastLearn: null, lastWrap: null, wrapAt: '10:00' })).finally(() => setLoading(false));
+    mindApi.runs().then(setData).catch(() => setData({ runs: [], lastLearn: null, lastClose: null, lastStory: null, wrapAt: '10:00' })).finally(() => setLoading(false));
   }, []);
 
   const Stat = ({ label, run, empty }: { label: string; run: RunStatus['lastLearn']; empty: string }) => (
@@ -2073,9 +2073,10 @@ function LabActivitySection() {
         <div className="text-sm text-zinc-400">Loading…</div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Stat label="The Lab last learned" run={data!.lastLearn} empty="Hasn't learned yet — close a day to start it." />
-            <Stat label="Last morning wrap-up" run={data!.lastWrap} empty="The 10:00 AM wrap-up hasn't run yet." />
+            <Stat label="Day last wrapped up" run={data!.lastClose} empty="No day wrapped up yet." />
+            <Stat label="Story last written" run={data!.lastStory} empty="No Story of the Day written yet." />
           </div>
 
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300">
@@ -2088,15 +2089,18 @@ function LabActivitySection() {
               <div className="text-sm text-zinc-400">Nothing yet. Close a day (or wait for the 10:00 AM wrap-up) and it'll show here.</div>
             ) : (
               <div className="space-y-1.5">
-                {data!.runs.map((r) => (
-                  <div key={r.id} className="flex items-start gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
-                    <span className={'mt-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0 w-12 ' + (r.kind === 'wrap' ? 'text-amber-500' : 'text-violet-500')}>{r.kind === 'wrap' ? 'Wrap' : 'Lab'}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm">{r.detail}</div>
-                      <div className="text-[11px] text-zinc-400">{fmtWhen(r.at)} · {fmtRelative(r.at)}</div>
+                {data!.runs.map((r) => {
+                  const k = RUN_KIND[r.kind] ?? { label: r.kind, tone: 'text-zinc-500' };
+                  return (
+                    <div key={r.id} className="flex items-start gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
+                      <span className={'mt-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0 w-16 ' + k.tone}>{k.label}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm">{r.detail}</div>
+                        <div className="text-[11px] text-zinc-400">{fmtWhen(r.at)} · {fmtRelative(r.at)}</div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

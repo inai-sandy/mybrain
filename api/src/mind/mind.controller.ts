@@ -86,7 +86,8 @@ export class MindController {
     return {
       runs,
       lastLearn: lastOf('learn'),
-      lastWrap: lastOf('wrap'),
+      lastClose: lastOf('close'),
+      lastStory: lastOf('story'),
       wrapAt: '10:00', // local IST — the daily morning wrap-up time (BEA-467)
     };
   }

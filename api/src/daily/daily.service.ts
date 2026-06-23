@@ -122,8 +122,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   /** Wrap up a specific past day right now (its story is in) — closeDay = summary + story + Mentor + Lab + rollover + seal. (BEA-469) */
   async wrapDayNow(day: string): Promise<boolean> {
     if (await this.isClosed(day)) return false;
-    await this.closeDay(day, true).catch(() => undefined);
-    await this.prisma.mindRun.create({ data: { kind: 'wrap', day, detail: `Wrapped up ${day} — you told the story` } }).catch(() => undefined);
+    await this.closeDay(day, true, 'you told the story').catch(() => undefined);
     return true;
   }
 
@@ -491,7 +490,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
   /** Close (finalize/seal) a day: regenerate its summary → story → mentor read → next-day suggestions
    *  IN ORDER, then roll its still-open tasks forward to today, then mark it sealed. One unified act. */
-  async closeDay(day: string, auto = false) {
+  async closeDay(day: string, auto = false, reason?: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
     const tz = await this.tz();
     const today = this.dayKey(tz);
@@ -505,6 +504,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const rolled = (await this.tasks.rollDayForward(day, target)).rolled;
     // 3. seal it — its artifacts are now "final" (provisional is derived from this row's absence)
     await this.prisma.dayClose.upsert({ where: { day }, create: { day, auto }, update: { auto } });
+    // 3b. run-log so the user sees every wrap with its time + why it happened. (BEA-470)
+    await this.prisma.mindRun.create({ data: { kind: 'close', day, detail: `Wrapped up ${day}${reason ? ` — ${reason}` : auto ? ' (automatic)' : ''}` } }).catch(() => undefined);
     // 4. The Lab reflects on the day NOW that it's complete — not on a blind nightly clock. Fire-and-forget. (BEA-458)
     void this.mind.learnDay(day).catch(() => undefined);
     return { day, closed: true, auto, rolled };
@@ -528,13 +529,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (await this.isClosed(y)) return { wrapped: false, reminded: false }; // already wrapped (e.g. closed by hand)
     const told = await this.prisma.story.findFirst({ where: { day: y } });
     if (told) {
-      await this.closeDay(y, true).catch(() => undefined); // summary + story + Mentor + Lab + rollover + seal
-      await this.prisma.mindRun.create({ data: { kind: 'wrap', day: y, detail: `Wrapped up ${y} — your story was in` } }).catch(() => undefined);
+      await this.closeDay(y, true, '10:00 check — your story was in').catch(() => undefined); // summary + story + Mentor + Lab + rollover + seal
       return { wrapped: true, reminded: false };
     }
     // No story yet at the checkpoint — one nudge, then wait for tomorrow's 10:00 (the Telegram loop delivers it).
     await this.setSetting('telegram.pushStoryReminder', y).catch(() => undefined);
-    await this.prisma.mindRun.create({ data: { kind: 'wrap', day: y, detail: `${y}: story not in by 10:00 — reminded you` } }).catch(() => undefined);
+    await this.prisma.mindRun.create({ data: { kind: 'reminder', day: y, detail: `${y}: story not in by 10:00 — reminded you on Telegram` } }).catch(() => undefined);
     return { wrapped: false, reminded: true };
   }
 
@@ -556,7 +556,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const days = [...new Set([...storyDays, ...taskDays].map((r) => r.day).filter((d): d is string => !!d))]
       .filter((d) => !closed.has(d))
       .sort();
-    for (const d of days) await this.closeDay(d, true).catch(() => undefined);
+    for (const d of days) await this.closeDay(d, true, 'auto-sealed (was left open)').catch(() => undefined);
   }
 
   /** Past days that are still open and have something to finalize — drives the "finish yesterday" prompt. */
@@ -646,6 +646,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       create: { day, text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: storyModelLabel },
       update: { text, personalText, mood, moodScore, proMoodScore, personalMoodScore, model: storyModelLabel },
     });
+    await this.prisma.mindRun.create({ data: { kind: 'story', day, detail: `Wrote your Story of the Day for ${day}` } }).catch(() => undefined); // run-log (BEA-470)
 
     // Store the Story of the Day, REPLACING any prior version (re-weaves when the user's story changes). (BEA-342)
     this.memory
