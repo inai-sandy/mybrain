@@ -21,6 +21,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   let seq = 0;
   const enqueued: any[] = [];
   const prisma: any = {
+    mindRun: { create: async () => ({}) },
     setting: {
       findUnique: async ({ where }: any) => (settings[where.key] !== undefined ? { key: where.key, value: settings[where.key] } : null),
       upsert: async ({ where, create, update }: any) => {

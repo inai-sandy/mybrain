@@ -78,6 +78,19 @@ export class MindController {
     return { merged: await this.lifecycle.dedupe() };
   }
 
+  /** The run-log — WHEN the Lab learned + the morning wrap-up ran, with date/time. (BEA-468) */
+  @Get('runs')
+  async runs() {
+    const runs = await this.prisma.mindRun.findMany({ orderBy: { at: 'desc' }, take: 50 });
+    const lastOf = (kind: string) => runs.find((r) => r.kind === kind) ?? null;
+    return {
+      runs,
+      lastLearn: lastOf('learn'),
+      lastWrap: lastOf('wrap'),
+      wrapAt: '10:00', // local IST — the daily morning wrap-up time (BEA-467)
+    };
+  }
+
   /** About Me — the user's own words, used to ground the engine + Mentor. (BEA-463) */
   @Get('about')
   async getAbout() {

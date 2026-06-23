@@ -616,3 +616,14 @@ model MindEvidence {
 
   @@index([findingId])
 }
+
+// A plain run-log so the user can see WHEN automatic work ran (date + time). (BEA-468)
+model MindRun {
+  id     String   @id @default(uuid())
+  at     DateTime @default(now())
+  kind   String // learn | wrap
+  day    String? // the day it concerns (YYYY-MM-DD)
+  detail String
+
+  @@index([at])
+}

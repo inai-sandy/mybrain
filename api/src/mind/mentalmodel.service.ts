@@ -95,10 +95,17 @@ export class MentalModelService implements OnModuleInit {
     return rows.map((r) => r.day);
   }
 
+  /** Record a run so the user can see WHEN the Lab worked (Settings → Activity). (BEA-468) */
+  private async logRun(day: string, r: { proposed: number; reinforced: number } | null): Promise<void> {
+    const detail = r ? `${r.proposed} new, ${r.reinforced} reinforced` : "couldn't read that day";
+    await this.prisma.mindRun.create({ data: { kind: 'learn', day, detail } }).catch(() => undefined);
+  }
+
   /** Reflect on ONE day and remember it — called the moment a day is CLOSED (morning or night). (BEA-458) */
   async learnDay(day: string): Promise<{ proposed: number; reinforced: number }> {
     const r = await this.run(day);
     await this.markLearned(day);
+    await this.logRun(day, r);
     if (r.proposed || r.reinforced) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
     await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
     return r;
@@ -115,6 +122,7 @@ export class MentalModelService implements OnModuleInit {
         return null;
       });
       await this.markLearned(day); // mark even on an empty/failed pass so we don't reprocess it forever
+      await this.logRun(day, r);
       if (r && (r.proposed || r.reinforced)) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
     }
     await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
@@ -131,6 +139,7 @@ export class MentalModelService implements OnModuleInit {
     for (const day of targets) {
       const r = await this.run(day).catch(() => null);
       await this.markLearned(day);
+      await this.logRun(day, r);
       if (r) {
         proposed += r.proposed;
         reinforced += r.reinforced;

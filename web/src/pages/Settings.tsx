@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
+import { mindApi, fmtWhen, fmtRelative, type RunStatus } from '../mind/client';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { forceUpdate } from '../ui/forceUpdate';
 
@@ -37,7 +38,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance';
+type Tab = 'account' | 'integrations' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
@@ -51,6 +52,7 @@ export function Settings({ email }: { email?: string }) {
     { id: 'index', label: 'Index', icon: Database },
     { id: 'prompts', label: 'Prompts', icon: MessageSquare },
     { id: 'sync', label: 'Sync', icon: RefreshCw },
+    { id: 'activity', label: 'Activity', icon: FlaskConical },
     { id: 'appearance', label: 'Appearance', icon: Palette },
   ];
 
@@ -87,6 +89,7 @@ export function Settings({ email }: { email?: string }) {
       {tab === 'index' && <IndexSection />}
       {tab === 'prompts' && <PromptsSection />}
       {tab === 'sync' && <SyncSection />}
+      {tab === 'activity' && <LabActivitySection />}
       {tab === 'appearance' && <AppearanceSection />}
     </div>
   );
@@ -2033,5 +2036,72 @@ function ConnectModal({
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------- Activity: when the Lab + morning wrap-up actually ran (BEA-468) ----------------
+function LabActivitySection() {
+  const [data, setData] = useState<RunStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    mindApi.runs().then(setData).catch(() => setData({ runs: [], lastLearn: null, lastWrap: null, wrapAt: '10:00' })).finally(() => setLoading(false));
+  }, []);
+
+  const Stat = ({ label, run, empty }: { label: string; run: RunStatus['lastLearn']; empty: string }) => (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">{label}</div>
+      {run ? (
+        <>
+          <div className="text-sm font-medium">{fmtWhen(run.at)} <span className="text-zinc-400 font-normal">· {fmtRelative(run.at)}</span></div>
+          <div className="text-xs text-zinc-500 mt-0.5">{run.detail}</div>
+        </>
+      ) : (
+        <div className="text-sm text-zinc-400">{empty}</div>
+      )}
+    </div>
+  );
+
+  return (
+    <section className="space-y-4 max-w-2xl">
+      <div>
+        <h2 className="flex items-center gap-2 font-semibold mb-1"><FlaskConical size={18} className="text-violet-500" /> The Lab — activity</h2>
+        <p className="text-sm text-zinc-500">Exactly when the automatic work ran, so you always know it's happening. Times are your time (IST).</p>
+      </div>
+
+      {loading ? (
+        <div className="text-sm text-zinc-400">Loading…</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Stat label="The Lab last learned" run={data!.lastLearn} empty="Hasn't learned yet — close a day to start it." />
+            <Stat label="Last morning wrap-up" run={data!.lastWrap} empty="The 10:00 AM wrap-up hasn't run yet." />
+          </div>
+
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300">
+            Next automatic wrap-up: <b>every day at {data!.wrapAt} AM</b>. It closes yesterday once your story is in — which runs your Mentor and the Lab. The Lab's thinking takes about a minute.
+          </div>
+
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Recent runs</div>
+            {data!.runs.length === 0 ? (
+              <div className="text-sm text-zinc-400">Nothing yet. Close a day (or wait for the 10:00 AM wrap-up) and it'll show here.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {data!.runs.map((r) => (
+                  <div key={r.id} className="flex items-start gap-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
+                    <span className={'mt-0.5 text-[10px] font-semibold uppercase tracking-wide shrink-0 w-12 ' + (r.kind === 'wrap' ? 'text-amber-500' : 'text-violet-500')}>{r.kind === 'wrap' ? 'Wrap' : 'Lab'}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm">{r.detail}</div>
+                      <div className="text-[11px] text-zinc-400">{fmtWhen(r.at)} · {fmtRelative(r.at)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
