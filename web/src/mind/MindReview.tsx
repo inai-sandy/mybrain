@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, X, Pencil, Pin, Loader2, FlaskConical, HelpCircle } from 'lucide-react';
+import { Check, X, Pencil, Pin, Loader2, FlaskConical, HelpCircle, MessageSquarePlus } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { mindApi, KIND_GROUP, valenceClass, sureWord, type Finding } from './client';
 
@@ -10,6 +10,8 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [noting, setNoting] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
 
   async function load() {
     try {
@@ -53,6 +55,21 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
       setBusy((b) => ({ ...b, [f.id]: false }));
     }
   }
+  async function saveNote(f: Finding) {
+    if (!noteDraft.trim()) return setNoting(null);
+    setBusy((b) => ({ ...b, [f.id]: true }));
+    try {
+      await mindApi.note(f.id, noteDraft.trim());
+      drop(f.id); // a note is a soft "yes" — clear it from the review queue
+      toast('success', 'Saved — thanks for telling me');
+    } catch {
+      toast('error', 'Could not save your note');
+    } finally {
+      setNoting(null);
+      setNoteDraft('');
+      setBusy((b) => ({ ...b, [f.id]: false }));
+    }
+  }
 
   const groups = useMemo(() => {
     const g: Record<string, Finding[]> = {};
@@ -82,6 +99,9 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
           <span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span>
         </p>
       )}
+      {noting === f.id && (
+        <textarea autoFocus rows={2} value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Tell me in your own words — what's right, what's off, what I'm missing…" className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-violet-500 mt-2" />
+      )}
       <div className="flex items-center gap-2 mt-2">
         <span className="text-[10px] text-zinc-400 tabular-nums">{sureWord(f.confidence)} · {f.evidenceCount}×{f.cadence ? ` · ${f.cadence}` : ''}</span>
         <div className="flex-1" />
@@ -90,10 +110,16 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
             <button onClick={() => saveEdit(f)} disabled={busy[f.id]} className="rounded-lg bg-emerald-600 text-white px-2.5 py-1 text-xs hover:bg-emerald-500">Save</button>
             <button onClick={() => setEditing(null)} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs">Cancel</button>
           </>
+        ) : noting === f.id ? (
+          <>
+            <button onClick={() => saveNote(f)} disabled={busy[f.id] || !noteDraft.trim()} className="rounded-lg bg-violet-600 text-white px-2.5 py-1 text-xs hover:bg-violet-500 disabled:opacity-50">Save note</button>
+            <button onClick={() => { setNoting(null); setNoteDraft(''); }} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs">Cancel</button>
+          </>
         ) : (
           <>
             <button title="Yes, that's me" onClick={() => act(f.id, () => mindApi.confirm(f.id), 'Confirmed')} disabled={busy[f.id]} className="grid place-items-center h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"><Check size={15} /></button>
             <button title="No, not me" onClick={() => act(f.id, () => mindApi.refute(f.id), "Got it — I won't think that")} disabled={busy[f.id]} className="grid place-items-center h-7 w-7 rounded-lg bg-rose-500/15 text-rose-600 hover:bg-rose-500/25"><X size={15} /></button>
+            <button title="Add a note in your own words" onClick={() => { setNoting(f.id); setNoteDraft(''); }} disabled={busy[f.id]} className="grid place-items-center h-7 w-7 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><MessageSquarePlus size={14} /></button>
             <button title="Almost — fix it" onClick={() => { setEditing(f.id); setDraft(f.statement); }} disabled={busy[f.id]} className="grid place-items-center h-7 w-7 rounded-lg text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={14} /></button>
             <button title={f.pinned ? 'Pinned' : 'Pin (never forget)'} onClick={() => mindApi.pin(f.id, !f.pinned).then(() => toast('success', f.pinned ? 'Unpinned' : 'Pinned'))} className={'grid place-items-center h-7 w-7 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (f.pinned ? 'text-amber-500' : 'text-zinc-400 hover:text-amber-500')}><Pin size={14} className={f.pinned ? 'fill-amber-400' : ''} /></button>
           </>

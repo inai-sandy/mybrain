@@ -49,6 +49,21 @@ export class MindReviewService {
     return { ok: true };
   }
 
+  /** 📝 — the user's own words on a finding: stored as feedback evidence + counts as a soft confirm. (BEA-464) */
+  async note(id: string, text: string) {
+    const body = (text || '').trim().slice(0, 600);
+    if (!body) return { ok: false };
+    const f = await this.prisma.mindFinding.findUnique({ where: { id } });
+    if (!f) return { ok: false };
+    await this.prisma.mindEvidence.create({ data: { findingId: id, sourceType: 'feedback', sourceId: null, day: this.today(), signal: 'feedback', snippet: body } });
+    const conf = Math.min(0.99, f.confidence + (1 - f.confidence) * 0.2); // a note is a softer "yes" than ✓
+    await this.prisma.mindFinding.update({
+      where: { id },
+      data: { validated: 'confirmed', confidence: conf, evidenceCount: f.evidenceCount + 1, lastSeenDay: this.today(), status: f.status === 'proposed' ? 'emerging' : f.status === 'fading' ? 'emerging' : f.status },
+    });
+    return { ok: true };
+  }
+
   /** "almost" — amend the wording/nodes and treat it as a confirmation. */
   async amend(id: string, patch: { statement?: string; subject?: string; relation?: string; object?: string; valence?: string }) {
     const f = await this.prisma.mindFinding.findUnique({ where: { id } });

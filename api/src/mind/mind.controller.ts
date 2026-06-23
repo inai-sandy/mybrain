@@ -48,6 +48,12 @@ export class MindController {
     return this.review_.pin(id, !!body?.pinned);
   }
 
+  /** The user's own words on a finding — stored as feedback + soft confirm. (BEA-464) */
+  @Post('findings/:id/note')
+  note(@Param('id') id: string, @Body() body: { text?: string }) {
+    return this.review_.note(id, String(body?.text ?? ''));
+  }
+
   @Delete('findings/:id')
   remove(@Param('id') id: string) {
     return this.review_.remove(id);

@@ -207,13 +207,19 @@ export class MentalModelService implements OnModuleInit {
     });
     const refuted = await this.prisma.mindFinding.findMany({ where: { validated: 'refuted' }, select: { statement: true }, take: 40 });
     const about = await this.aboutMe();
+    // The user's own notes on existing findings — their words override your guesses. (BEA-464)
+    const notes = existing.length
+      ? await this.prisma.mindEvidence.findMany({ where: { signal: 'feedback', findingId: { in: existing.map((e) => e.id) } }, select: { findingId: true, snippet: true }, orderBy: { createdAt: 'desc' }, take: 40 })
+      : [];
+    const noteBy = new Map<string, string[]>();
+    for (const n of notes) (noteBy.get(n.findingId) ?? noteBy.set(n.findingId, []).get(n.findingId)!).push(n.snippet || '');
 
     const prompt =
       `${SYSTEM}\n\n` +
       (about ? `=== WHAT THIS PERSON SAYS ABOUT THEMSELVES (their own words — weigh this heavily) ===\n${about}\n\n` : '') +
       `=== THE DAY (${day}) ===\n${this.formatSignals(signals)}\n\n` +
       `=== HYPOTHESES YOU ALREADY HOLD (reinforce by id, don't duplicate) ===\n` +
-      (existing.length ? existing.map((e) => `${e.id}: ${e.statement}`).join('\n') : '(none yet)') +
+      (existing.length ? existing.map((e) => `${e.id}: ${e.statement}${noteBy.has(e.id) ? ` — the user told you in their own words: "${noteBy.get(e.id)!.join('; ')}"` : ''}`).join('\n') : '(none yet)') +
       (refuted.length ? `\n\n=== REFUTED (never re-propose) ===\n${refuted.map((r) => `- ${r.statement}`).join('\n')}` : '');
 
     const raw = (await this.llm.completeWith(await this.model(), prompt, 4000, 'mind-model'))?.trim() || '';

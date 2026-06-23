@@ -1,4 +1,5 @@
-import { Check, X, Pin } from 'lucide-react';
+import { useState } from 'react';
+import { Check, X, Pin, MessageSquarePlus } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { sureWord, valenceClass, type Evidence } from './client';
 
@@ -33,16 +34,21 @@ export function FindingSheet({
   onConfirm,
   onRefute,
   onPin,
+  onNote,
 }: {
   item: FindingView;
   onClose: () => void;
   onConfirm?: (id: string) => void;
   onRefute?: (id: string) => void;
   onPin?: (id: string, pinned: boolean) => void;
+  onNote?: (id: string, text: string) => void | Promise<void>;
 }) {
   const pct = Math.round(item.confidence <= 1 ? item.confidence * 100 : item.confidence);
   const ev = item.evidence ?? [];
   const canAct = !!item.id;
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
   return (
     <Sheet onClose={onClose} size="lg">
       {(close) => {
@@ -105,6 +111,28 @@ export function FindingSheet({
                   </button>
                 )}
               </div>
+            )}
+
+            {canAct && onNote && (
+              noteOpen ? (
+                <div className="space-y-2">
+                  <textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Tell me in your own words — what's right, what's off, what I'm missing…" className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 outline-none focus:border-violet-500" />
+                  <div className="flex gap-2">
+                    <button
+                      disabled={noteBusy || !note.trim()}
+                      onClick={async () => { if (!item.id || !note.trim()) return; setNoteBusy(true); await onNote(item.id, note.trim()); close(); }}
+                      className="rounded-lg bg-violet-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-violet-500 disabled:opacity-50"
+                    >
+                      Save note
+                    </button>
+                    <button onClick={() => setNoteOpen(false)} className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 text-sm text-zinc-500">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setNoteOpen(true)} className="inline-flex items-center gap-1.5 text-sm text-violet-600 dark:text-violet-400 hover:underline">
+                  <MessageSquarePlus size={15} /> Add a note in your own words
+                </button>
+              )
             )}
 
             <button onClick={close} className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Close</button>
