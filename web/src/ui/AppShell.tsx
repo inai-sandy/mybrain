@@ -42,36 +42,41 @@ function useVisualViewport(pin: boolean): boolean {
   return keyboardOpen;
 }
 
-// TEMPORARY iOS diagnostic — reads real device metrics so we can see why the bar sits ~30% up. (BEA-488)
+// TEMPORARY iOS diagnostic — reads real device metrics + probes CSS height units. (BEA-488)
 function ViewportDebug({ keyboardOpen }: { keyboardOpen: boolean }) {
-  const [, tick] = useState(0);
+  const [probe, setProbe] = useState<Record<string, number>>({});
   useEffect(() => {
-    const f = () => tick((x) => x + 1);
+    const measure = () => {
+      const p = (h: string) => {
+        const d = document.createElement('div');
+        d.style.cssText = `position:fixed;top:0;left:-9999px;width:1px;height:${h}`;
+        document.body.appendChild(d);
+        const v = Math.round(d.getBoundingClientRect().height);
+        d.remove();
+        return v;
+      };
+      setProbe({ dvh: p('100dvh'), svh: p('100svh'), lvh: p('100lvh'), vh: p('100vh'), fill: p('-webkit-fill-available') });
+    };
+    measure();
+    const f = () => measure();
     window.visualViewport?.addEventListener('resize', f);
-    window.visualViewport?.addEventListener('scroll', f);
     window.addEventListener('resize', f);
     const id = window.setInterval(f, 1000);
     return () => {
       window.visualViewport?.removeEventListener('resize', f);
-      window.visualViewport?.removeEventListener('scroll', f);
       window.removeEventListener('resize', f);
       window.clearInterval(id);
     };
   }, []);
   const vv = window.visualViewport;
-  const shell = (document.querySelector('[data-shell]') as HTMLElement | null)?.getBoundingClientRect();
   const bar = (document.querySelector('[data-bar]') as HTMLElement | null)?.getBoundingClientRect();
-  const vvh = getComputedStyle(document.documentElement).getPropertyValue('--vvh').trim();
   const r = (n?: number) => (n == null ? '?' : Math.round(n));
-  const standalone = (window.navigator as unknown as { standalone?: boolean }).standalone || window.matchMedia?.('(display-mode: standalone)').matches || false;
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, zIndex: 99999, background: 'rgba(0,0,0,.88)', color: '#3f6', font: '11px/1.45 monospace', padding: '6px 8px', whiteSpace: 'pre', pointerEvents: 'none', borderBottomRightRadius: 8 }}>
+    <div style={{ position: 'fixed', top: 'env(safe-area-inset-top)', left: 0, zIndex: 99999, background: 'rgba(0,0,0,.9)', color: '#4f8', font: '12px/1.5 monospace', padding: '8px 10px', whiteSpace: 'pre', pointerEvents: 'none', borderBottomRightRadius: 10 }}>
       {`screen ${r(window.screen.height)}  inner ${r(window.innerHeight)}\n`}
-      {`vv.height ${r(vv?.height)}  vv.offTop ${r(vv?.offsetTop)}\n`}
-      {`--vvh ${vvh || '(unset)'}  kbd ${keyboardOpen ? 'OPEN' : 'closed'}\n`}
-      {`shell h ${r(shell?.height)}  (top ${r(shell?.top)})\n`}
-      {`BAR top ${r(bar?.top)}  bottom ${r(bar?.bottom)}\n`}
-      {`gap below bar ${r(window.innerHeight - (bar?.bottom ?? window.innerHeight))}  standalone ${standalone ? 'Y' : 'N'}`}
+      {`vv ${r(vv?.height)}  bar.bottom ${r(bar?.bottom)}\n`}
+      {`dvh ${probe.dvh}  svh ${probe.svh}  lvh ${probe.lvh}\n`}
+      {`vh ${probe.vh}  fill ${probe.fill}  kbd ${keyboardOpen ? 'OPEN' : 'closed'}`}
     </div>
   );
 }
