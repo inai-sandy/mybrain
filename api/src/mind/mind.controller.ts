@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { MentalModelService } from './mentalmodel.service';
 import { MindLifecycleService } from './lifecycle.service';
 import { MindReviewService } from './review.service';
@@ -90,6 +90,66 @@ export class MindController {
       lastStory: lastOf('story'),
       wrapAt: '10:00', // local IST — the daily morning wrap-up time (BEA-467)
     };
+  }
+
+  /** Holistic activity: a per-day calendar (did each step run?) + last-of-each status. (BEA-471) */
+  @Get('activity')
+  async activity(@Query('days') daysParam?: string) {
+    const N = Math.min(90, Math.max(7, Number(daysParam) || 30));
+    const istDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const addDays = (day: string, n: number) => {
+      const dt = new Date(day + 'T12:00:00Z');
+      dt.setUTCDate(dt.getUTCDate() + n);
+      return dt.toISOString().slice(0, 10);
+    };
+    const today = istDay(new Date());
+    const dayList: string[] = Array.from({ length: N }, (_, i) => addDays(today, -i)); // newest first
+    const oldest = dayList[dayList.length - 1];
+
+    const [stories, closes, mentors, summaries, learnedRow, recent] = await Promise.all([
+      this.prisma.story.findMany({ where: { day: { gte: oldest } }, select: { day: true } }),
+      this.prisma.dayClose.findMany({ where: { day: { gte: oldest } }, select: { day: true, closedAt: true } }),
+      this.prisma.mentorDay.findMany({ where: { day: { gte: oldest } }, select: { day: true, updatedAt: true } }),
+      this.prisma.daySummary.findMany({ where: { day: { gte: oldest } }, select: { day: true, updatedAt: true } }),
+      this.prisma.setting.findUnique({ where: { key: 'mind.learnedDays' } }),
+      this.prisma.mindRun.findMany({ orderBy: { at: 'desc' }, take: 50 }),
+    ]);
+    const learnedSet = new Set<string>((() => { try { return JSON.parse(learnedRow?.value || '[]'); } catch { return []; } })());
+    const storyDays = new Set(stories.map((s) => s.day));
+    const closeDays = new Set(closes.map((c) => c.day));
+    const mentorDays = new Set(mentors.map((m) => m.day));
+    const summaryDays = new Set(summaries.map((s) => s.day));
+
+    const days = dayList.map((day) => ({
+      day,
+      story: storyDays.has(day),
+      wrapped: closeDays.has(day),
+      learned: learnedSet.has(day),
+      mentor: mentorDays.has(day),
+      summary: summaryDays.has(day),
+    }));
+
+    // Last-of-each status, drawn from the truest source for each.
+    const maxAt = <T,>(rows: T[], pick: (r: T) => Date | string | null | undefined): string | null => {
+      let best: number | null = null;
+      for (const r of rows) {
+        const v = pick(r);
+        if (!v) continue;
+        const t = new Date(v).getTime();
+        if (best === null || t > best) best = t;
+      }
+      return best === null ? null : new Date(best).toISOString();
+    };
+    const lastRunOf = (kind: string) => recent.find((r) => r.kind === kind) ?? null;
+    const status = {
+      story: { at: lastRunOf('story')?.at ?? null, detail: lastRunOf('story')?.detail ?? null },
+      wrapped: { at: maxAt(closes, (c) => c.closedAt), detail: lastRunOf('close')?.detail ?? null },
+      learned: { at: lastRunOf('learn')?.at ?? null, detail: lastRunOf('learn')?.detail ?? null },
+      mentor: { at: maxAt(mentors, (m) => m.updatedAt), detail: 'Mentor guidance' },
+      summary: { at: maxAt(summaries, (s) => s.updatedAt), detail: 'Day summary' },
+    };
+
+    return { today, wrapAt: '10:00', days, status, runs: recent };
   }
 
   /** About Me — the user's own words, used to ground the engine + Mentor. (BEA-463) */
