@@ -224,15 +224,38 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           </div>
         </header>
 
-        <main id="app-scroll" className={'flex-1 min-h-0 ' + (isChat ? 'overflow-hidden ' + (keyboardOpen ? '' : 'pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0') : 'overflow-y-auto overscroll-contain')}>
+        <main id="app-scroll" className={'flex-1 min-h-0 ' + (isChat ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain')}>
           {isChat ? (
             <Outlet />
           ) : (
-            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className="p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto">
+            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className="p-4 sm:p-6 pb-6 md:pb-8 max-w-4xl mx-auto">
               <Outlet />
             </motion.div>
           )}
         </main>
+
+        {/* Bottom tab bar — mobile, IN-FLOW (the last row of the shell, NOT position:fixed) so it can
+            never drift or lift off the bottom. The shell already doesn't scroll. (BEA-484 → BEA-485) */}
+        <nav
+          className={'shrink-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ' + (isChat && keyboardOpen ? 'hidden' : 'md:hidden')}
+          style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          {BOTTOM_NAV.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end} className="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px]">
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.span layoutId="navpill" className="absolute inset-x-2.5 top-1 bottom-1 rounded-xl bg-emerald-500/10" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
+                  )}
+                  <span className={'relative z-10 ' + (isActive ? 'text-emerald-600' : 'text-zinc-500 dark:text-zinc-400')}>
+                    <n.icon size={20} />
+                  </span>
+                  <span className={'relative z-10 ' + (isActive ? 'text-emerald-600 font-medium' : 'text-zinc-500 dark:text-zinc-400')}>{n.label}</span>
+                </>
+              )}
+            </NavLink>
+          ))}
+        </nav>
       </div>
 
       {/* Global search overlay (find + ask) */}
@@ -256,30 +279,6 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </button>
       )}
 
-      {/* Bottom tab bar — mobile (5 primary tabs; the rest are in the drawer).
-          Hidden while typing in Chat so the keyboard + input own the bottom of the screen. */}
-      <nav
-        className={'fixed bottom-0 inset-x-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ' + (isChat && keyboardOpen ? 'hidden' : 'md:hidden')}
-        // Promote to its own compositor layer so iOS WebKit stops repainting/drifting the fixed bar
-        // against the scrolling body. (BEA-371)
-        style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)', transform: 'translateZ(0)', willChange: 'transform', backfaceVisibility: 'hidden' }}
-      >
-        {BOTTOM_NAV.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} className="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px]">
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <motion.span layoutId="navpill" className="absolute inset-x-2.5 top-1 bottom-1 rounded-xl bg-emerald-500/10" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
-                )}
-                <span className={'relative z-10 ' + (isActive ? 'text-emerald-600' : 'text-zinc-500 dark:text-zinc-400')}>
-                  <n.icon size={20} />
-                </span>
-                <span className={'relative z-10 ' + (isActive ? 'text-emerald-600 font-medium' : 'text-zinc-500 dark:text-zinc-400')}>{n.label}</span>
-              </>
-            )}
-          </NavLink>
-        ))}
-      </nav>
     </div>
   );
 }
