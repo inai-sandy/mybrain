@@ -88,10 +88,14 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
     (collapsed ? 'justify-center px-0 ' : 'px-3 ') +
     (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
 
-  // Shell height: pure-CSS 100dvh normally (robust — no JS measurement), shrink to the JS-measured
-  // visible height ONLY when the keyboard is up (so the chat input stays visible). (BEA-486)
+  // Shell sizing (BEA-487): stretch between the four viewport edges with position:fixed + inset-0 — NO
+  // height unit, so iOS standalone can't mis-compute it (100dvh/--vvh were unreliable there). Only when the
+  // keyboard is genuinely up do we switch to top:0 + height:var(--vvh) so the chat input stays visible.
   return (
-    <div className={'overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 ' + (keyboardOpen ? 'h-[var(--vvh)]' : 'h-[100dvh]')}>
+    <div
+      className={'fixed inset-x-0 top-0 overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 ' + (keyboardOpen ? '' : 'bottom-0')}
+      style={keyboardOpen ? { height: 'var(--vvh)' } : undefined}
+    >
       {/* Desktop sidebar (collapsible to an icon-only rail) */}
       <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
