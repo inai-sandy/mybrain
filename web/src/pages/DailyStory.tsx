@@ -56,6 +56,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
       if (r.ok) {
         const j = await r.json().catch(() => ({} as any));
         toast('success', j?.rewriting ? 'Story saved — rewriting that day’s Story of the Day ✨' : 'Story saved 🌙');
+        if (j?.wrapped) toast('success', 'Wrapping up that day now — your Mentor and the Lab are updating (about a minute).');
         onSaved();
         setStep('wrap'); // → wrap-up: finished tasks + working hours
       } else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
