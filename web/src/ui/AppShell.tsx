@@ -42,6 +42,40 @@ function useVisualViewport(pin: boolean): boolean {
   return keyboardOpen;
 }
 
+// TEMPORARY iOS diagnostic — reads real device metrics so we can see why the bar sits ~30% up. (BEA-488)
+function ViewportDebug({ keyboardOpen }: { keyboardOpen: boolean }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const f = () => tick((x) => x + 1);
+    window.visualViewport?.addEventListener('resize', f);
+    window.visualViewport?.addEventListener('scroll', f);
+    window.addEventListener('resize', f);
+    const id = window.setInterval(f, 1000);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', f);
+      window.visualViewport?.removeEventListener('scroll', f);
+      window.removeEventListener('resize', f);
+      window.clearInterval(id);
+    };
+  }, []);
+  const vv = window.visualViewport;
+  const shell = (document.querySelector('[data-shell]') as HTMLElement | null)?.getBoundingClientRect();
+  const bar = (document.querySelector('[data-bar]') as HTMLElement | null)?.getBoundingClientRect();
+  const vvh = getComputedStyle(document.documentElement).getPropertyValue('--vvh').trim();
+  const r = (n?: number) => (n == null ? '?' : Math.round(n));
+  const standalone = (window.navigator as unknown as { standalone?: boolean }).standalone || window.matchMedia?.('(display-mode: standalone)').matches || false;
+  return (
+    <div style={{ position: 'fixed', top: 0, left: 0, zIndex: 99999, background: 'rgba(0,0,0,.88)', color: '#3f6', font: '11px/1.45 monospace', padding: '6px 8px', whiteSpace: 'pre', pointerEvents: 'none', borderBottomRightRadius: 8 }}>
+      {`screen ${r(window.screen.height)}  inner ${r(window.innerHeight)}\n`}
+      {`vv.height ${r(vv?.height)}  vv.offTop ${r(vv?.offsetTop)}\n`}
+      {`--vvh ${vvh || '(unset)'}  kbd ${keyboardOpen ? 'OPEN' : 'closed'}\n`}
+      {`shell h ${r(shell?.height)}  (top ${r(shell?.top)})\n`}
+      {`BAR top ${r(bar?.top)}  bottom ${r(bar?.bottom)}\n`}
+      {`gap below bar ${r(window.innerHeight - (bar?.bottom ?? window.innerHeight))}  standalone ${standalone ? 'Y' : 'N'}`}
+    </div>
+  );
+}
+
 export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () => void }) {
   const { theme, toggle } = useTheme();
   const [drawer, setDrawer] = useState(false);
@@ -93,9 +127,11 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   // keyboard is genuinely up do we switch to top:0 + height:var(--vvh) so the chat input stays visible.
   return (
     <div
+      data-shell
       className={'fixed inset-x-0 top-0 overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 ' + (keyboardOpen ? '' : 'bottom-0')}
       style={keyboardOpen ? { height: 'var(--vvh)' } : undefined}
     >
+      <ViewportDebug keyboardOpen={keyboardOpen} />
       {/* Desktop sidebar (collapsible to an icon-only rail) */}
       <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
@@ -247,6 +283,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         {/* Bottom tab bar — mobile, IN-FLOW (the last row of the shell, NOT position:fixed) so it can
             never drift or lift off the bottom. The shell already doesn't scroll. (BEA-484 → BEA-485) */}
         <nav
+          data-bar
           className={'shrink-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ' + (isChat && keyboardOpen ? 'hidden' : 'md:hidden')}
           style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
         >
