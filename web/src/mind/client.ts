@@ -46,6 +46,8 @@ export const mindApi = {
   pin: (id: string, pinned: boolean) => post(`/api/mind/findings/${id}/pin`, { pinned }),
   remove: (id: string) => fetch(`/api/mind/findings/${id}`, { method: 'DELETE' }).then((r) => j(r)),
   run: (day?: string) => post('/api/mind/run', day ? { day } : {}),
+  getAbout: () => fetch('/api/mind/about').then((r) => j<{ text: string }>(r)),
+  setAbout: (text: string) => fetch('/api/mind/about', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then((r) => j<{ text: string }>(r)),
 };
 
 // kind → human group + accent, for the grouped review.

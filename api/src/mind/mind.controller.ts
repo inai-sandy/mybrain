@@ -72,6 +72,17 @@ export class MindController {
     return { merged: await this.lifecycle.dedupe() };
   }
 
+  /** About Me — the user's own words, used to ground the engine + Mentor. (BEA-463) */
+  @Get('about')
+  async getAbout() {
+    return { text: await this.engine.aboutMe() };
+  }
+
+  @Put('about')
+  async setAbout(@Body() body: { text?: string }) {
+    return { text: await this.engine.setAboutMe(String(body?.text ?? '')) };
+  }
+
   // ---- engine picker (Settings → Models): which model reasons about you. (BEA-452) ----
   @Get('model')
   getModel() {
