@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search, RefreshCw, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { NAV, BOTTOM_NAV } from './nav';
+import { NAV } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
 import { DictationIndicator } from './DictationIndicator';
@@ -20,17 +20,13 @@ function useVisualViewport(pin: boolean): boolean {
     const vv = window.visualViewport;
     if (!vv) return;
     let lastH = -1;
-    let baseH = 0; // the LARGEST visible height seen = the true no-keyboard height
     const update = () => {
       const h = Math.round(vv.height);
       if (h !== lastH) {
         document.documentElement.style.setProperty('--vvh', `${h}px`); // only write when it actually changes
         lastH = h;
       }
-      baseH = Math.max(baseH, h);
-      // Compare like-to-like (vv.height now vs its own max) so iOS's innerHeight/safe-area offset can't
-      // falsely read "keyboard open" — the bug that made the iOS shell render ~30% short. (BEA-486)
-      const open = baseH - h > 150;
+      const open = window.innerHeight - vv.height > 120;
       setKeyboardOpen(open);
       if (pin && open) window.scrollTo(0, 0);
     };
@@ -42,45 +38,6 @@ function useVisualViewport(pin: boolean): boolean {
   return keyboardOpen;
 }
 
-// TEMPORARY iOS diagnostic — reads real device metrics + probes CSS height units. (BEA-488)
-function ViewportDebug({ keyboardOpen }: { keyboardOpen: boolean }) {
-  const [probe, setProbe] = useState<Record<string, number>>({});
-  useEffect(() => {
-    const measure = () => {
-      const p = (h: string) => {
-        const d = document.createElement('div');
-        d.style.cssText = `position:fixed;top:0;left:-9999px;width:1px;height:${h}`;
-        document.body.appendChild(d);
-        const v = Math.round(d.getBoundingClientRect().height);
-        d.remove();
-        return v;
-      };
-      setProbe({ dvh: p('100dvh'), svh: p('100svh'), lvh: p('100lvh'), vh: p('100vh'), fill: p('-webkit-fill-available') });
-    };
-    measure();
-    const f = () => measure();
-    window.visualViewport?.addEventListener('resize', f);
-    window.addEventListener('resize', f);
-    const id = window.setInterval(f, 1000);
-    return () => {
-      window.visualViewport?.removeEventListener('resize', f);
-      window.removeEventListener('resize', f);
-      window.clearInterval(id);
-    };
-  }, []);
-  const vv = window.visualViewport;
-  const bar = (document.querySelector('[data-bar]') as HTMLElement | null)?.getBoundingClientRect();
-  const r = (n?: number) => (n == null ? '?' : Math.round(n));
-  return (
-    <div style={{ position: 'fixed', top: 'env(safe-area-inset-top)', left: 0, zIndex: 99999, background: 'rgba(0,0,0,.9)', color: '#4f8', font: '12px/1.5 monospace', padding: '8px 10px', whiteSpace: 'pre', pointerEvents: 'none', borderBottomRightRadius: 10 }}>
-      {`screen ${r(window.screen.height)}  inner ${r(window.innerHeight)}\n`}
-      {`vv ${r(vv?.height)}  bar.bottom ${r(bar?.bottom)}\n`}
-      {`dvh ${probe.dvh}  svh ${probe.svh}  lvh ${probe.lvh}\n`}
-      {`vh ${probe.vh}  fill ${probe.fill}  kbd ${keyboardOpen ? 'OPEN' : 'closed'}`}
-    </div>
-  );
-}
-
 export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () => void }) {
   const { theme, toggle } = useTheme();
   const [drawer, setDrawer] = useState(false);
@@ -89,34 +46,10 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const navigate = useNavigate();
   const location = useLocation();
   const isChat = location.pathname === '/chat';
-  const keyboardOpen = useVisualViewport(isChat);
+  useVisualViewport(isChat); // keeps --vvh synced (used by the chat height calc) + pins iOS on focus
   // Desktop sidebar collapse (icon-only rail), remembered per device. (BEA-440)
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar.collapsed') === '1');
   useEffect(() => { localStorage.setItem('sidebar.collapsed', collapsed ? '1' : '0'); }, [collapsed]);
-
-  // App-shell scroll model (BEA-484): while the app is mounted, the DOCUMENT never scrolls — an inner
-  // container (#app-scroll) does. This stops the mobile address bar from collapsing, which is what made
-  // the fixed bottom tab bar drift. Restored on unmount so public viewer pages scroll normally.
-  useEffect(() => {
-    const de = document.documentElement.style;
-    const b = document.body.style;
-    const prev = { deH: de.height, deO: de.overflow, bH: b.height, bO: b.overflow, bOver: b.overscrollBehavior };
-    de.height = '100%';
-    de.overflow = 'hidden';
-    b.height = '100%';
-    b.overflow = 'hidden';
-    b.overscrollBehavior = 'none';
-    return () => {
-      de.height = prev.deH;
-      de.overflow = prev.deO;
-      b.height = prev.bH;
-      b.overflow = prev.bO;
-      b.overscrollBehavior = prev.bOver;
-    };
-  }, []);
-
-  // New pages open at the top (the inner scroller persists across route changes). (BEA-484)
-  useEffect(() => { document.getElementById('app-scroll')?.scrollTo?.(0, 0); }, [location.pathname]);
 
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
@@ -127,16 +60,8 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
     (collapsed ? 'justify-center px-0 ' : 'px-3 ') +
     (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
 
-  // Shell sizing (BEA-487): stretch between the four viewport edges with position:fixed + inset-0 — NO
-  // height unit, so iOS standalone can't mis-compute it (100dvh/--vvh were unreliable there). Only when the
-  // keyboard is genuinely up do we switch to top:0 + height:var(--vvh) so the chat input stays visible.
   return (
-    <div
-      data-shell
-      className={'fixed inset-x-0 top-0 overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 ' + (keyboardOpen ? '' : 'bottom-0')}
-      style={keyboardOpen ? { height: 'var(--vvh)' } : undefined}
-    >
-      <ViewportDebug keyboardOpen={keyboardOpen} />
+    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Desktop sidebar (collapsible to an icon-only rail) */}
       <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
@@ -194,9 +119,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </div>
       )}
 
-      {/* Main column — a full-height flex column: fixed header + scrolling main (BEA-484) */}
-      <div className={'h-full flex flex-col min-h-0 transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
-        <header className="shrink-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+      {/* Main column */}
+      <div className={'transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
+        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
             <button onClick={() => setDrawer(true)} aria-label="Menu" className="md:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -275,39 +200,21 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           </div>
         </header>
 
-        <main id="app-scroll" className={'flex-1 min-h-0 ' + (isChat ? 'overflow-hidden' : 'overflow-y-auto overscroll-contain')}>
+        <main
+          className={
+            isChat
+              ? 'h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] md:h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] overflow-hidden'
+              : 'p-4 sm:p-6 pb-20 md:pb-8 max-w-4xl mx-auto'
+          }
+        >
           {isChat ? (
             <Outlet />
           ) : (
-            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className="p-4 sm:p-6 pb-6 md:pb-8 max-w-4xl mx-auto">
+            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }}>
               <Outlet />
             </motion.div>
           )}
         </main>
-
-        {/* Bottom tab bar — mobile, IN-FLOW (the last row of the shell, NOT position:fixed) so it can
-            never drift or lift off the bottom. The shell already doesn't scroll. (BEA-484 → BEA-485) */}
-        <nav
-          data-bar
-          className={'shrink-0 z-30 grid border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ' + (isChat && keyboardOpen ? 'hidden' : 'md:hidden')}
-          style={{ gridTemplateColumns: `repeat(${BOTTOM_NAV.length}, minmax(0, 1fr))`, paddingBottom: 'env(safe-area-inset-bottom)' }}
-        >
-          {BOTTOM_NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className="relative flex flex-col items-center justify-center gap-0.5 py-2 text-[11px]">
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <motion.span layoutId="navpill" className="absolute inset-x-2.5 top-1 bottom-1 rounded-xl bg-emerald-500/10" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />
-                  )}
-                  <span className={'relative z-10 ' + (isActive ? 'text-emerald-600' : 'text-zinc-500 dark:text-zinc-400')}>
-                    <n.icon size={20} />
-                  </span>
-                  <span className={'relative z-10 ' + (isActive ? 'text-emerald-600 font-medium' : 'text-zinc-500 dark:text-zinc-400')}>{n.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
       </div>
 
       {/* Global search overlay (find + ask) */}
@@ -319,18 +226,18 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       {/* Live voice-dictation banner — shows what's being heard + a Stop button, globally */}
       <DictationIndicator />
 
-      {/* Floating "chat with your brain" button — every page except the chat itself */}
+      {/* Floating "chat with your brain" button — every page except the chat itself. No bottom tab bar
+          anymore (BEA-489), so it sits just above the bottom safe area. */}
       {!isChat && (
         <button
           onClick={() => navigate('/chat')}
           title="Chat with your brain"
           aria-label="Chat with your brain"
-          className="fixed right-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
+          className="fixed right-4 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 inline-flex items-center justify-center rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 h-12 w-12"
         >
           <MessageCircle size={22} />
         </button>
       )}
-
     </div>
   );
 }

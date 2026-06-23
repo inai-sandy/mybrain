@@ -5,7 +5,7 @@
 /* Visible viewport height — JS keeps this in sync with window.visualViewport.height so the chat
    area shrinks above the on-screen keyboard instead of being pushed behind it (iOS). */
 :root {
-  --vvh: 100dvh; /* dynamic viewport height fallback; JS keeps it synced to visualViewport (BEA-484) */
+  --vvh: 100vh;
 }
 
 /* Prevent stray horizontal scroll at the viewport edge only —
