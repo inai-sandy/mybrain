@@ -8,6 +8,7 @@ import { DaySignals } from './mind.types';
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
 const MODEL_KEY = 'mind.llm';
 const LEARNED_KEY = 'mind.learnedDays'; // closed days the Lab has already reflected on (BEA-458)
+const ABOUT_KEY = 'mind.aboutMe'; // the user's own words about who they are (BEA-463)
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 const SYSTEM = `You are a rigorous behavioural scientist building a model of ONE person from their own day.
@@ -166,16 +167,31 @@ export class MentalModelService implements OnModuleInit {
     return this.llm.listOpenRouterModels(['openai/', 'anthropic/']);
   }
 
+  /** The user's own words about who they are — grounds the engine + the Mentor. (BEA-463) */
+  async aboutMe(): Promise<string> {
+    const row = await this.prisma.setting.findUnique({ where: { key: ABOUT_KEY } }).catch(() => null);
+    return (row?.value || '').trim();
+  }
+
+  async setAboutMe(text: string): Promise<string> {
+    const value = (text || '').slice(0, 6000);
+    await this.prisma.setting.upsert({ where: { key: ABOUT_KEY }, create: { key: ABOUT_KEY, value }, update: { value } });
+    return value.trim();
+  }
+
   /** A compact, plain-English digest of the strongest findings — for grounding the Mentor. (BEA-454) */
   async summaryForMentor(limit = 12): Promise<string> {
+    const about = await this.aboutMe();
     const rows = await this.prisma.mindFinding.findMany({
       where: { status: { in: ['established', 'emerging'] }, NOT: { validated: 'refuted' } },
       orderBy: [{ confidence: 'desc' }],
       take: limit,
       select: { statement: true, valence: true, confidence: true },
     });
-    if (!rows.length) return '';
-    return rows.map((r) => `- ${r.statement} (${r.valence}, ${Math.round(r.confidence * 100)}% sure)`).join('\n');
+    const findingLines = rows.map((r) => `- ${r.statement} (${r.valence}, ${Math.round(r.confidence * 100)}% sure)`).join('\n');
+    const aboutBlock = about ? `In their own words, about who they are:\n${about}` : '';
+    if (!aboutBlock && !findingLines) return '';
+    return [aboutBlock, findingLines && `What the Lab has learned about them:\n${findingLines}`].filter(Boolean).join('\n\n');
   }
 
   /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
@@ -190,9 +206,12 @@ export class MentalModelService implements OnModuleInit {
       take: 60,
     });
     const refuted = await this.prisma.mindFinding.findMany({ where: { validated: 'refuted' }, select: { statement: true }, take: 40 });
+    const about = await this.aboutMe();
 
     const prompt =
-      `${SYSTEM}\n\n=== THE DAY (${day}) ===\n${this.formatSignals(signals)}\n\n` +
+      `${SYSTEM}\n\n` +
+      (about ? `=== WHAT THIS PERSON SAYS ABOUT THEMSELVES (their own words — weigh this heavily) ===\n${about}\n\n` : '') +
+      `=== THE DAY (${day}) ===\n${this.formatSignals(signals)}\n\n` +
       `=== HYPOTHESES YOU ALREADY HOLD (reinforce by id, don't duplicate) ===\n` +
       (existing.length ? existing.map((e) => `${e.id}: ${e.statement}`).join('\n') : '(none yet)') +
       (refuted.length ? `\n\n=== REFUTED (never re-propose) ===\n${refuted.map((r) => `- ${r.statement}`).join('\n')}` : '');

@@ -13,6 +13,7 @@ const TAB_HELP: Record<Tab, string> = {
   heatmaps: 'Your week at a glance — which days lift you, and which kinds of tasks you keep putting off.',
   findings: "Things My Brain has noticed about you from your days. A guess, not a fact — until you say. Tap one to read it and tell me if it's right.",
   review: "Is this really you? Tap ✓ if it's true (I'll trust it more), or ✗ if it's wrong (I'll drop it).",
+  about: 'Tell me who you are in your own words. I use this to understand you from day one — it shapes what I notice and the guidance you get.',
 };
 
 const YOU = '__you__';
@@ -21,7 +22,7 @@ const edgeColor = (v: string) => (v === 'energizing' ? '#34d399' : v === 'draini
 const trendArrow = (t: string) => (t === 'rising' ? '▲' : t === 'fading' ? '▼' : '–');
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Tab = 'map' | 'mood' | 'heatmaps' | 'findings' | 'review';
+type Tab = 'map' | 'mood' | 'heatmaps' | 'findings' | 'review' | 'about';
 
 export function Lab() {
   const toast = useToast();
@@ -90,9 +91,9 @@ export function Lab() {
       </div>
 
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto">
-        {(['map', 'mood', 'heatmaps', 'findings', 'review'] as const).map((t) => (
+        {(['map', 'mood', 'heatmaps', 'findings', 'review', 'about'] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} className={'shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ' + (tab === t ? 'border-violet-500 text-violet-600 dark:text-violet-400' : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
-            {t}
+            {t === 'about' ? 'About Me' : t}
           </button>
         ))}
       </div>
@@ -101,6 +102,8 @@ export function Lab() {
 
       {tab === 'review' ? (
         <MindReview />
+      ) : tab === 'about' ? (
+        <AboutMe />
       ) : tab === 'mood' ? (
         <MoodView stats={stats} onOpen={setInfo} />
       ) : tab === 'heatmaps' ? (
@@ -114,6 +117,62 @@ export function Lab() {
       )}
 
       {info && <FindingSheet item={info} onClose={() => setInfo(null)} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} />}
+    </div>
+  );
+}
+
+// ---------------- About Me: the user's own words, grounds the engine + Mentor (BEA-463) ----------------
+const ABOUT_PLACEHOLDER = `Who are you? Write it however you like. A few things that help me:
+• What matters most to you right now (work, family, health…)
+• What recharges you, and what drains you
+• What you tend to avoid or put off
+• What a really good day looks like
+• Your goals for the next few months`;
+
+function AboutMe() {
+  const toast = useToast();
+  const [text, setText] = useState('');
+  const [saved, setSaved] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    mindApi.getAbout().then((r) => { setText(r.text); setSaved(r.text); }).catch(() => undefined).finally(() => setLoading(false));
+  }, []);
+
+  const dirty = text.trim() !== saved.trim();
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await mindApi.setAbout(text);
+      setSaved(r.text);
+      setText(r.text);
+      toast('success', 'Saved — thanks for telling me');
+    } catch {
+      toast('error', 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
+
+  return (
+    <div className="space-y-3">
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => dirty && save()}
+        rows={14}
+        placeholder={ABOUT_PLACEHOLDER}
+        className="w-full rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3.5 py-3 text-sm leading-relaxed outline-none focus:border-violet-500 resize-y"
+      />
+      <div className="flex items-center gap-3">
+        <button onClick={save} disabled={busy || !dirty} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 text-white px-4 py-2 text-sm font-medium hover:bg-violet-500 disabled:opacity-50">
+          {busy ? <Loader2 size={15} className="animate-spin" /> : null} {dirty ? 'Save' : 'Saved'}
+        </button>
+        <span className="text-xs text-zinc-400">Your words are private. I use them to understand you and to ground your findings and daily guidance.</span>
+      </div>
     </div>
   );
 }
