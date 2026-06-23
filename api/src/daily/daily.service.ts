@@ -110,10 +110,21 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
         prevRagId: (existing as any)?.ragId,
       })
       .catch(() => undefined);
-    // If that day's Story of the Day was already written, rewrite it around the user's own words.
+    // If you tell a PAST day's story (the morning after), wrap that day up NOW — don't wait for the 10:00 job. (BEA-469)
+    const wrapping = day < today && !(await this.isClosed(day));
+    if (wrapping) void this.wrapDayNow(day).catch(() => undefined); // fire-and-forget: closeDay runs Mentor + Lab (~a minute)
+    // If that day's Story of the Day was already written, rewrite it around the user's own words (skip if wrapping — closeDay re-weaves).
     const woven = await this.prisma.dayStory.findUnique({ where: { day } });
-    if (woven) this.generateDayStory(day, true).catch(() => undefined);
-    return { ...this.shapeStory(row), rewriting: !!woven };
+    if (woven && !wrapping) this.generateDayStory(day, true).catch(() => undefined);
+    return { ...this.shapeStory(row), rewriting: !!woven, wrapped: wrapping };
+  }
+
+  /** Wrap up a specific past day right now (its story is in) — closeDay = summary + story + Mentor + Lab + rollover + seal. (BEA-469) */
+  async wrapDayNow(day: string): Promise<boolean> {
+    if (await this.isClosed(day)) return false;
+    await this.closeDay(day, true).catch(() => undefined);
+    await this.prisma.mindRun.create({ data: { kind: 'wrap', day, detail: `Wrapped up ${day} — you told the story` } }).catch(() => undefined);
+    return true;
   }
 
   /** (Re)index stories not yet linked into the brain (or all). Idempotent — indexEntity deletes

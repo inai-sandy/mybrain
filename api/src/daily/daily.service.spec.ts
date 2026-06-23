@@ -658,4 +658,34 @@ describe('DailyService', () => {
       expect(settings['telegram.pushStoryReminder']).toBeUndefined();
     });
   });
+
+  describe('tell-the-story wraps the day immediately (BEA-469)', () => {
+    const today = istToday();
+    const y = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })();
+
+    it('submitStory flags wrapped=true for a past day, false for today', async () => {
+      const a = makeService({ llmText: '{"story":"x","moodScore":60}' });
+      const ry = await a.svc.submitStory('Yesterday was good.', 'app', 'good', y);
+      expect((ry as any).wrapped).toBe(true);
+
+      const b = makeService({ llmText: '{"story":"x"}' });
+      const rt = await b.svc.submitStory('Today is fine.', 'app', 'ok', today);
+      expect((rt as any).wrapped).toBe(false);
+      expect(b.dayCloses.length).toBe(0); // today is never sealed early
+    });
+
+    it('wrapDayNow closes the day and triggers Mentor + Lab', async () => {
+      const { svc, dayCloses, mentorCalls, mindCalls } = makeService({ llmText: '{"story":"x","moodScore":60}' });
+      expect(await svc.wrapDayNow(y)).toBe(true);
+      expect(dayCloses.find((c) => c.day === y)).toBeTruthy();
+      expect(mentorCalls.some((m) => m.day === y)).toBe(true);
+      expect(mindCalls).toContain(y);
+    });
+
+    it('wrapDayNow is a no-op if the day is already closed', async () => {
+      const { svc, dayCloses } = makeService();
+      dayCloses.push({ day: y, auto: false });
+      expect(await svc.wrapDayNow(y)).toBe(false);
+    });
+  });
 });
