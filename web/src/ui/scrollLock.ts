@@ -1,48 +1,38 @@
-// Reference-counted body scroll lock.
+// Reference-counted scroll lock for the app's scroll container.
 //
-// Modals/sheets pin the page with position:fixed so iOS doesn't jump to the top
-// while one is open. The trap: when two sheets briefly overlap (e.g. the dump
-// modal animating out while the review sheet mounts), a per-instance lock makes
-// the second sheet capture the ALREADY-LOCKED body as its "previous" style — so
-// closing it RE-LOCKS the page and scrolling dies. That's the recurring Tasks
-// "stopped scrolling" bug.
+// Since BEA-484 the document body no longer scrolls — the app is a fixed-height
+// shell and the element `#app-scroll` (the <main>) is the real scroller. So a
+// modal/sheet locks THAT element, not the body.
 //
-// The fix: one shared lock. Only the FIRST lock captures the real (unlocked)
-// style + scroll position; only the LAST unlock restores them. Any number of
-// stacked sheets is safe.
-
-type Saved = { position: string; top: string; left: string; right: string; width: string; overflow: string };
+// The recurring trap (the Tasks "stopped scrolling" bug): when two sheets briefly
+// overlap, a per-instance lock can capture the ALREADY-LOCKED state as its
+// "previous" and re-lock on close. The fix is one shared, ref-counted lock —
+// only the FIRST lock captures the real style; only the LAST unlock restores it.
 
 let count = 0;
-let savedY = 0;
-let saved: Saved | null = null;
+let savedOverflow: string | null = null;
+let el: HTMLElement | null = null;
+
+function scroller(): HTMLElement | null {
+  return document.getElementById('app-scroll');
+}
 
 export function lockBodyScroll(): void {
   if (count === 0) {
-    savedY = window.scrollY;
-    const b = document.body.style;
-    saved = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width, overflow: b.overflow };
-    b.position = 'fixed';
-    b.top = `-${savedY}px`;
-    b.left = '0';
-    b.right = '0';
-    b.width = '100%';
-    b.overflow = 'hidden';
+    el = scroller();
+    if (el) {
+      savedOverflow = el.style.overflow;
+      el.style.overflow = 'hidden';
+    }
   }
   count++;
 }
 
 export function unlockBodyScroll(): void {
   count = Math.max(0, count - 1);
-  if (count === 0 && saved) {
-    const b = document.body.style;
-    b.position = saved.position;
-    b.top = saved.top;
-    b.left = saved.left;
-    b.right = saved.right;
-    b.width = saved.width;
-    b.overflow = saved.overflow;
-    saved = null;
-    window.scrollTo(0, savedY);
+  if (count === 0) {
+    if (el && savedOverflow !== null) el.style.overflow = savedOverflow;
+    savedOverflow = null;
+    el = null;
   }
 }

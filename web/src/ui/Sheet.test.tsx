@@ -1,41 +1,40 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { Sheet } from './Sheet';
 
+// Since BEA-484 the scroll lock targets the app's inner scroller (#app-scroll), not the body —
+// the document no longer scrolls in the app shell. These tests reflect that model.
 describe('Sheet scroll lock', () => {
-  it('pins the body at the current scroll position and restores it on close (iOS jump-to-top regression)', () => {
-    Object.defineProperty(window, 'scrollY', { value: 350, configurable: true });
-    const scrollTo = vi.fn();
-    window.scrollTo = scrollTo as any;
-
-    const { unmount } = render(<Sheet onClose={() => {}}>{() => <div>content</div>}</Sheet>);
-    // while open: body is pinned exactly where the user was, not just overflow-hidden
-    expect(document.body.style.position).toBe('fixed');
-    expect(document.body.style.top).toBe('-350px');
-
-    unmount();
-    // on close: styles restored and the page is put back where it was
-    expect(document.body.style.position).toBe('');
-    expect(scrollTo).toHaveBeenCalledWith(0, 350);
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app-scroll"></div>';
   });
 
-  it('stays unlocked after STACKED sheets close (the recurring Tasks "stopped scrolling" bug)', () => {
-    Object.defineProperty(window, 'scrollY', { value: 200, configurable: true });
-    window.scrollTo = vi.fn() as any;
+  it('locks the inner scroller while open and restores it on close', () => {
+    const scroller = () => document.getElementById('app-scroll')!;
+    expect(scroller().style.overflow).toBe('');
 
-    // Sheet A opens and locks the page.
+    const { unmount } = render(<Sheet onClose={() => {}}>{() => <div>content</div>}</Sheet>);
+    expect(scroller().style.overflow).toBe('hidden');
+
+    unmount();
+    expect(scroller().style.overflow).toBe('');
+  });
+
+  it('stays locked through STACKED sheets, releases only on the last close (the Tasks "stopped scrolling" bug)', () => {
+    const scroller = () => document.getElementById('app-scroll')!;
+
+    // Sheet A opens and locks the scroller.
     const a = render(<Sheet onClose={() => {}}>{() => <div>A</div>}</Sheet>);
-    // Sheet B mounts while A is still on screen — this is the dump→review overlap.
+    // Sheet B mounts while A is still on screen — the dump→review overlap.
     const b = render(<Sheet onClose={() => {}}>{() => <div>B</div>}</Sheet>);
-    expect(document.body.style.position).toBe('fixed');
+    expect(scroller().style.overflow).toBe('hidden');
 
-    // A unmounts first (its exit animation finishes). B is still open, so the page MUST stay locked.
+    // A unmounts first; B is still open, so the scroller MUST stay locked.
     a.unmount();
-    expect(document.body.style.position).toBe('fixed');
+    expect(scroller().style.overflow).toBe('hidden');
 
-    // B closes — only now is the page fully released. (A per-instance lock would re-lock here.)
+    // B closes — only now is it released. (A per-instance lock would re-lock here.)
     b.unmount();
-    expect(document.body.style.position).toBe('');
-    expect(document.body.style.overflow).toBe('');
+    expect(scroller().style.overflow).toBe('');
   });
 });
