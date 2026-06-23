@@ -51,6 +51,30 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar.collapsed') === '1');
   useEffect(() => { localStorage.setItem('sidebar.collapsed', collapsed ? '1' : '0'); }, [collapsed]);
 
+  // App-shell scroll model (BEA-484): while the app is mounted, the DOCUMENT never scrolls — an inner
+  // container (#app-scroll) does. This stops the mobile address bar from collapsing, which is what made
+  // the fixed bottom tab bar drift. Restored on unmount so public viewer pages scroll normally.
+  useEffect(() => {
+    const de = document.documentElement.style;
+    const b = document.body.style;
+    const prev = { deH: de.height, deO: de.overflow, bH: b.height, bO: b.overflow, bOver: b.overscrollBehavior };
+    de.height = '100%';
+    de.overflow = 'hidden';
+    b.height = '100%';
+    b.overflow = 'hidden';
+    b.overscrollBehavior = 'none';
+    return () => {
+      de.height = prev.deH;
+      de.overflow = prev.deO;
+      b.height = prev.bH;
+      b.overflow = prev.bO;
+      b.overscrollBehavior = prev.bOver;
+    };
+  }, []);
+
+  // New pages open at the top (the inner scroller persists across route changes). (BEA-484)
+  useEffect(() => { document.getElementById('app-scroll')?.scrollTo?.(0, 0); }, [location.pathname]);
+
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
     (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
@@ -61,7 +85,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
     (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <div className="h-[var(--vvh)] overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Desktop sidebar (collapsible to an icon-only rail) */}
       <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
@@ -119,9 +143,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         </div>
       )}
 
-      {/* Main column */}
-      <div className={'transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
-        <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+      {/* Main column — a full-height flex column: fixed header + scrolling main (BEA-484) */}
+      <div className={'h-full flex flex-col min-h-0 transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
+        <header className="shrink-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
             <button onClick={() => setDrawer(true)} aria-label="Menu" className="md:hidden p-2 -ml-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -200,19 +224,11 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           </div>
         </header>
 
-        <main
-          className={
-            isChat
-              ? (keyboardOpen
-                  ? 'h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))]'
-                  : 'h-[calc(var(--vvh)-7rem-env(safe-area-inset-top))]') + ' md:h-[calc(var(--vvh)-3.5rem-env(safe-area-inset-top))] overflow-hidden'
-              : 'p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto'
-          }
-        >
+        <main id="app-scroll" className={'flex-1 min-h-0 ' + (isChat ? 'overflow-hidden ' + (keyboardOpen ? '' : 'pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0') : 'overflow-y-auto overscroll-contain')}>
           {isChat ? (
             <Outlet />
           ) : (
-            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }}>
+            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }} className="p-4 sm:p-6 pb-24 md:pb-8 max-w-4xl mx-auto">
               <Outlet />
             </motion.div>
           )}
