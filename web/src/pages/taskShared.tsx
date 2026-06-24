@@ -4,6 +4,7 @@ import { useToast } from '../ui/Toast';
 import { isDictating } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
+import { loadDraft, clearDraft, useDraftPersist } from '../ui/useDraft';
 import { motion } from 'framer-motion';
 
 export type Task = {
@@ -138,10 +139,12 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
 
 // ---- brain-dump modal (type or speak) ----
 export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onClose: () => void; onDone: () => void; onCreated?: (tasks: Task[]) => void; initialQuestion: string | null }) {
-  const [text, setText] = useState('');
+  const draftKey = 'mybrain.draft.dump';
+  const [text, setText] = useState(() => loadDraft(draftKey));
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState<string | null>(initialQuestion);
   const toast = useToast();
+  useDraftPersist(draftKey, text); // never lose a brain-dump to an accidental close (BEA-512)
   const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
   async function submit() {
@@ -160,6 +163,7 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onC
         return;
       }
       toast('success', `${d.tasks?.length || 0} task${d.tasks?.length === 1 ? '' : 's'} created`);
+      clearDraft(draftKey);
       onDone();
       onClose();
       if (d.tasks?.length) onCreated?.(d.tasks);
@@ -171,7 +175,7 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onC
   }
 
   return (
-    <Sheet onClose={onClose} canClose={() => !isDictating()}>
+    <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => text.trim().length > 0}>
       {(close) => (
         <>
           <div className="flex items-center justify-between mb-3">
