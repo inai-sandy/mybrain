@@ -1045,25 +1045,30 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async generateSuggestions(targetDay: string) {
     const sourceDay = this.dayAdd(targetDay, -1);
     const forDay = targetDay;
-    const [dayStory, told, dayTasks] = await Promise.all([
+    const [dayStory, told, dayTasks, labDigest, focus] = await Promise.all([
       this.prisma.dayStory.findUnique({ where: { day: sourceDay } }),
       this.prisma.story.findFirst({ where: { day: sourceDay }, orderBy: { createdAt: 'desc' } }),
       this.prisma.task.findMany({ where: { day: sourceDay } }),
+      this.mind.summaryForMentor().catch(() => ''), // About Me + findings + the Situation LEVERS (BEA-517)
+      this.mentor.listFocusAreas().catch(() => ({ active: [] as { title: string; description?: string | null }[], proposed: [] })),
     ]);
 
     const openTasks = dayTasks.filter((t) => t.status !== 'done');
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}`);
     const openList = openTasks.map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}% done)` : ''}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
     const narrative = dayStory?.text || told?.rawText || '';
+    const focusLines = (focus?.active || []).map((f) => `- ${f.title}${f.description ? `: ${f.description}` : ''}`);
 
     const tmpl = await this.prompts.get('tasks.predict');
     const prompt =
       `${tmpl}\n\n` +
+      (labDigest ? `=== WHAT I KNOW ABOUT HIM (use this — ESPECIALLY THE LEVERS) ===\n${labDigest}\n\n` : '') +
+      (focusLines.length ? `=== HIS CURRENT FOCUS AREAS ===\n${focusLines.join('\n')}\n\n` : '') +
       `=== TODAY (${sourceDay}) ===\n` +
       `Story of the day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
       `Finished today:\n${doneList.join('\n') || '(none)'}\n\n` +
       `ALREADY ON HIS LIST (do NOT suggest these — they roll over automatically):\n${openList.join('\n') || '(none)'}\n\n` +
-      `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}).`;
+      `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}). PREFER concrete next-actions that move a LEVER (the thing that unblocks a stuck goal) or advance a focus area — not the blocked goals themselves. Give each a short plain reason.`;
 
     const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900, 'suggested-tasks'))?.trim() || '';
     let suggestions: { title: string; category?: string; reason?: string }[] = [];

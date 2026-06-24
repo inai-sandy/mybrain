@@ -230,10 +230,10 @@ function makeService(opts: { llmText?: string | null } = {}) {
     },
   };
   const mentorCalls: any[] = [];
-  const mentorSvc: any = { runMentorDay: async (day: string, force: boolean) => { mentorCalls.push({ day, force }); return { day }; } };
+  const mentorSvc: any = { runMentorDay: async (day: string, force: boolean) => { mentorCalls.push({ day, force }); return { day }; }, listFocusAreas: async () => ({ active: [], proposed: [] }) };
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
   const mindCalls: any[] = [];
-  const mindSvc: any = { learnDay: async (day: string) => { mindCalls.push(day); return { proposed: 0, reinforced: 0 }; } };
+  const mindSvc: any = { learnDay: async (day: string) => { mindCalls.push(day); return { proposed: 0, reinforced: 0 }; }, summaryForMentor: async () => '' };
   return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc, mindSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls, mindCalls, settings };
 }
 

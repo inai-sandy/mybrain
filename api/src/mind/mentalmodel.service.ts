@@ -201,9 +201,15 @@ export class MentalModelService implements OnModuleInit {
       select: { statement: true, valence: true, confidence: true },
     });
     const findingLines = rows.map((r) => `- ${r.statement} (${r.valence}, ${Math.round(r.confidence * 100)}% sure)`).join('\n');
+    const chainLines = await this.chains.summaryForMentor(6); // the Situation levers (BEA-517)
     const aboutBlock = about ? `In their own words, about who they are:\n${about}` : '';
-    if (!aboutBlock && !findingLines) return '';
-    return [aboutBlock, findingLines && `What the Lab has learned about them:\n${findingLines}`].filter(Boolean).join('\n\n');
+    return [
+      aboutBlock,
+      findingLines && `What the Lab has learned about them:\n${findingLines}`,
+      chainLines && `Their real situation — what's blocked and the LEVER that unblocks it (plan around the levers; don't nag them about the blocked goals until the lever moves):\n${chainLines}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
