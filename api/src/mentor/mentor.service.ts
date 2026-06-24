@@ -360,12 +360,14 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
         ? `\n=== PEOPLE IN HIS STORIES ===\nThis week: ${[...inWeek.keys()].join(', ') || '(no one mentioned)'}\nFading (2+ weeks unmentioned): ${fading.join('; ') || '(none)'}\n`
         : '';
 
+    const labDigest = await this.mind.summaryForMentor().catch(() => ''); // what the Lab has learned about him — feed one fresh insight into the review (BEA-528)
     const tmpl = await this.prompts.get('mentor.weekly');
     const prompt =
       `${tmpl}\n\n` +
       `=== THE WEEK (${weekStart} .. ${days[6]}) ===\nToday is ${today}.\n${dayLines.join('\n')}\n${peopleBlock}\n` +
       `=== NUMBERS ===\nThis week: ${JSON.stringify(stats)}\nLast week: ${JSON.stringify(prevStats)}\n\n` +
       `=== HIS FOCUS AREAS ===\n${focus.map((f) => `- ${f.title}`).join('\n') || '(none set)'}\n\n` +
+      (labDigest ? `=== WHAT THE LAB IS LEARNING ABOUT HIM (pick ONE fresh, specific insight to surface) ===\n${labDigest}\n\n` : '') +
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
 
     const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 1400, 'weekly-review'))?.trim() || '';

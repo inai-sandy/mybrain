@@ -235,6 +235,7 @@ const REGISTRY: PromptDef[] = [
       `4. THE PATTERN — exactly ONE pattern you can see across multiple days of data (not a platitude; a real, checkable observation like "every day that started without a dump ended below 50"). If last week's review named a pattern, say whether it held.\n` +
       `5a. BALANCE — if the work/personal mood numbers diverge or one sphere got all the attention, say it in one honest sentence.\n` +
       `5. THE EXPERIMENT — exactly ONE small, concrete experiment for next week, testable by the data ("dump before 8 AM all 7 days"). If he had an experiment last week, FIRST report its result honestly.\n` +
+      `6. WHAT I'M LEARNING ABOUT YOU — if a "WHAT THE LAB IS LEARNING" section is given, surface exactly ONE genuine, specific thing it shows about how he works or what drains/energises him, in plain words he'd recognise as true. Make it feel like you're getting to know him, not a generic horoscope. If it's a new realisation this week, say so. Skip this point only if nothing real is there.\n` +
       `Plain prose, short paragraphs, warm but unflinching, ALWAYS in clear natural English (never switch to or mix in another language). No headers in the text itself.\n\n` +
       `Respond with ONLY JSON: {"review":"<the full review prose>","pattern":"<the one pattern, one sentence>","experiment":"<the one experiment, one sentence>"}`,
   },
