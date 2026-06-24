@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My Brain — your story stays yours</title>
+<meta name="description" content="My Brain is self-hosted and private by design. Your story is never sold, never used to train AI models, and your secrets are encrypted so even the server can't read them. Designed by Sandeep Karnati." />
+<link rel="icon" href="/favicon-32.png" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="My Brain" />
+<meta property="og:title" content="My Brain — your story stays yours" />
+<meta property="og:description" content="Private by design: self-hosted, never used to train AI, zero-knowledge secrets. Your story stays yours. Designed by Sandeep Karnati." />
+<meta property="og:url" content="https://1site.ai/privacy.html" />
+<meta property="og:image" content="https://1site.ai/og.png" />
+<meta property="og:image:secure_url" content="https://1site.ai/og.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="My Brain — your story stays yours" />
+<meta name="twitter:description" content="Private by design: self-hosted, never used to train AI, zero-knowledge secrets. Designed by Sandeep Karnati." />
+<meta name="twitter:image" content="https://1site.ai/og.png" />
+<meta name="theme-color" content="#07090f" />
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#07090f; color:#e4e4e7; font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow-x:hidden; }
+  .orb { position:absolute; border-radius:9999px; filter:blur(70px); opacity:.45; animation:drift 16s ease-in-out infinite alternate; pointer-events:none; }
+  @keyframes drift { from{transform:translate(0,0) scale(1)} to{transform:translate(60px,-40px) scale(1.15)} }
+  .reveal { opacity:0; transform:translateY(26px); transition:opacity .7s ease, transform .7s ease; }
+  .reveal.shown { opacity:1; transform:none; }
+  @keyframes pulse-ring { 0%{transform:scale(.85);opacity:.8} 100%{transform:scale(1.6);opacity:0} }
+  .pulse-ring { animation:pulse-ring 2.6s cubic-bezier(.2,.6,.4,1) infinite; }
+  .pulse-ring.d2 { animation-delay:1.3s; }
+  .gtext { background:linear-gradient(100deg,#34d399,#818cf8 55%,#f472b6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .card { transition:transform .25s ease, box-shadow .25s ease, border-color .25s; }
+  .card:hover { transform:translateY(-4px); border-color:rgba(129,140,248,.5); box-shadow:0 24px 50px -28px rgba(129,140,248,.5); }
+  a { -webkit-tap-highlight-color:transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    .orb,.pulse-ring { animation:none !important; }
+    .reveal { opacity:1 !important; transform:none !important; }
+  }
+</style>
+</head>
+<body class="antialiased">
+
+<!-- HERO -->
+<header class="relative min-h-[86vh] flex flex-col items-center justify-center text-center px-6 overflow-hidden">
+  <div class="orb" style="width:340px;height:340px;background:#34d399;top:-60px;left:-40px"></div>
+  <div class="orb" style="width:300px;height:300px;background:#818cf8;bottom:0;right:-30px;animation-delay:-6s"></div>
+  <div class="orb" style="width:240px;height:240px;background:#f472b6;top:40%;left:55%;animation-delay:-3s"></div>
+
+  <div class="relative mb-8">
+    <span class="pulse-ring absolute inset-0 rounded-full border border-emerald-400/40"></span>
+    <span class="pulse-ring d2 absolute inset-0 rounded-full border border-indigo-400/40"></span>
+    <div class="relative w-16 h-16 rounded-full grid place-items-center text-3xl" style="background:linear-gradient(135deg,#34d399,#818cf8 60%,#f472b6)">🔒</div>
+  </div>
+
+  <span class="relative text-xs uppercase tracking-[0.3em] text-zinc-500 mb-5">My Brain · Privacy</span>
+  <h1 class="relative text-5xl sm:text-7xl font-black leading-[1.02] max-w-3xl">Your story <span class="gtext">stays yours</span>.</h1>
+  <p class="relative mt-6 max-w-xl text-lg text-zinc-400">A second brain only works if you're honest in it. So it's built private from the ground up — <span class="text-zinc-200">never sold, never used to train AI, never readable by anyone but you</span>.</p>
+  <p class="relative mt-6 text-sm uppercase tracking-[0.25em] text-zinc-500">Designed by <span class="text-zinc-300">Sandeep Karnati</span></p>
+  <a href="#promises" class="relative mt-10 text-zinc-500 hover:text-zinc-300 transition-colors animate-bounce">↓</a>
+</header>
+
+<!-- PROMISES -->
+<main id="promises" class="max-w-5xl mx-auto px-6 py-20 sm:py-28 space-y-24">
+
+  <section class="reveal">
+    <div class="text-center max-w-2xl mx-auto mb-12">
+      <span class="text-xs uppercase tracking-[0.3em] text-emerald-400">The promises</span>
+      <h2 class="text-3xl sm:text-4xl font-extrabold mt-3">Six plain commitments.</h2>
+      <p class="text-zinc-400 mt-3">No fine print games. Here's exactly how your data is treated.</p>
+    </div>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div class="text-3xl mb-3">🚫🤖</div>
+        <h3 class="font-bold text-lg mb-1.5">Never used to train AI</h3>
+        <p class="text-sm text-zinc-400">Your days, stories and notes are never training data — not for us, and not for the AI providers we use (their API terms forbid training on it).</p>
+      </div>
+      <div class="card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div class="text-3xl mb-3">🏠</div>
+        <h3 class="font-bold text-lg mb-1.5">Self-hosted</h3>
+        <p class="text-sm text-zinc-400">My Brain runs on your own server — not packaged up inside a big company's cloud where you're the product. Your data lives where you control it.</p>
+      </div>
+      <div class="card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div class="text-3xl mb-3">🗝️</div>
+        <h3 class="font-bold text-lg mb-1.5">Zero-knowledge Vault</h3>
+        <p class="text-sm text-zinc-400">Your secrets are locked with your own passphrase before they ever leave your device. Even the server can't read them — and they're never sent to the AI.</p>
+      </div>
+      <div class="card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div class="text-3xl mb-3">🧠</div>
+        <h3 class="font-bold text-lg mb-1.5">AI reads only to help you</h3>
+        <p class="text-sm text-zinc-400">When a feature needs AI, your words go to the model to write that one answer for you — and nothing more. They're not kept, profiled, or reused.</p>
+      </div>
+      <div class="card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div class="text-3xl mb-3">🗑️</div>
+        <h3 class="font-bold text-lg mb-1.5">Yours to delete</h3>
+        <p class="text-sm text-zinc-400">Delete anything, anytime — and it's actually gone. You're never locked in, and nothing is held hostage behind a paywall.</p>
+      </div>
+      <div class="card rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <div class="text-3xl mb-3">🙅</div>
+        <h3 class="font-bold text-lg mb-1.5">No ads, no selling</h3>
+        <p class="text-sm text-zinc-400">There are no ads and no data brokers. Your life isn't a profile to be sold. The only thing your data does is help you.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- HONEST NOTE -->
+  <section class="reveal">
+    <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-7 sm:p-9 max-w-3xl mx-auto">
+      <span class="text-xs uppercase tracking-[0.3em] text-indigo-300">The honest part</span>
+      <h2 class="text-2xl font-extrabold mt-3 mb-3">Where AI fits in — said plainly.</h2>
+      <p class="text-zinc-300 leading-relaxed">My Brain uses AI to write your story, mentor you, and find things for you. To do that, the relevant words for that one task are sent to a language model, which writes the answer and is done. That's the same kind of trip your email or maps app makes — used to serve <em>you</em> in the moment, under API terms that forbid using it to train models.</p>
+      <p class="text-zinc-300 leading-relaxed mt-3">What never makes that trip: anything in your <span class="text-zinc-100 font-medium">Vault</span>. Secrets are encrypted with your passphrase and stay unreadable to the server and the AI alike.</p>
+    </div>
+  </section>
+
+  <!-- CLOSING -->
+  <section class="reveal text-center">
+    <h2 class="text-4xl sm:text-5xl font-black leading-tight">Most apps want <span class="text-zinc-500">your data</span>.<br />This one just wants to <span class="gtext">help you</span>.</h2>
+    <p class="text-zinc-400 mt-5 max-w-xl mx-auto">Private by design isn't a feature we bolted on. It's the only way a second brain earns the honesty that makes it worth having.</p>
+    <a href="/" class="inline-block mt-9 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors">← Back to My Brain</a>
+  </section>
+
+</main>
+
+<footer class="border-t border-zinc-900 py-10 text-center">
+  <p class="text-xs text-zinc-600">My Brain · Private by design · Designed by <span class="text-zinc-400">Sandeep Karnati</span></p>
+</footer>
+
+<script>
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('shown'); io.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+</script>
+</body>
+</html>
