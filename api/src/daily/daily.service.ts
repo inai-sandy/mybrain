@@ -1040,6 +1040,22 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { id: s.id, forDay: s.forDay, title: s.title, category: s.category, reason: s.reason, status: s.status, createdAt: s.createdAt };
   }
 
+  /** The Home "Today" card (BEA-518): one focus, the top suggested action, and the key lever. */
+  async todayCard() {
+    const tz = await this.tz();
+    const day = this.dayKey(tz);
+    const [focusList, sug, chain, latestMentor] = await Promise.all([
+      this.mentor.listFocusAreas().catch(() => ({ active: [] as { title: string }[], proposed: [] })),
+      this.prisma.suggestedTask.findFirst({ where: { forDay: { gte: day }, status: 'pending' }, orderBy: [{ forDay: 'asc' }, { createdAt: 'asc' }] }),
+      this.prisma.mindChain.findFirst({ where: { status: 'active', NOT: { validated: 'refuted' } }, orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }] }),
+      this.prisma.mentorDay.findFirst({ orderBy: { day: 'desc' }, select: { guidance: true } }),
+    ]);
+    const focus = focusList.active?.[0]?.title || (latestMentor?.guidance ? latestMentor.guidance.split(/[.\n]/)[0].trim().slice(0, 160) : null);
+    const suggestion = sug ? { id: sug.id, title: sug.title, reason: sug.reason } : null;
+    const lever = chain ? { goal: chain.goal, lever: chain.lever } : null;
+    return { focus, suggestion, lever };
+  }
+
   /** Predict tasks FOR `targetDay`, reading the PREVIOUS day's story + tasks. Replaces prior pending picks.
    *  (Suggestions for the 9th come from the 8th's Story of the Day.) */
   async generateSuggestions(targetDay: string) {

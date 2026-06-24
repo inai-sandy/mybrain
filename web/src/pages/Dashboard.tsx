@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Brain, MessageCircle, Upload, Sun, Flame, FileText, Bookmark, Lightbulb, Wand2, ArrowRight, Fingerprint, Star, BookOpen, Sparkles, Coins, Timer, Target, type LucideIcon } from 'lucide-react';
 import { openSearch } from '../ui/SearchOverlay';
 import { Skeleton } from '../ui/Skeleton';
-import { ConnectionsCard } from '../ui/ConnectionsCard';
+import { TodayCard } from '../ui/TodayCard';
 
 type Home = {
   today: { dumped: boolean; storyDone: boolean; counts: { total: number; done: number; open: number }; mustDos: { id: string; title: string; pinned: boolean; priority: string }[] };
@@ -92,7 +92,7 @@ export function Dashboard() {
       </div>
 
       {/* Proactive connections the brain surfaced (hidden when none) */}
-      <ConnectionsCard />
+      <TodayCard />
 
       {/* Work area — Today (hero) + Day summary / Portrait */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

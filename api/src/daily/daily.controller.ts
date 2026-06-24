@@ -206,6 +206,12 @@ export class DailyController {
     return { models: await this.daily.listModels() };
   }
 
+  /** Home "Today" card — focus + top suggested action + key lever. (BEA-518) */
+  @Get('today')
+  async todayCard() {
+    return this.daily.todayCard();
+  }
+
   // ---- predictive (suggested) tasks for tomorrow ----
   @Get('suggestions')
   async suggestions(@Query('day') day?: string) {
