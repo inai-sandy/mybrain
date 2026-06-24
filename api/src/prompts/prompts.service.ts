@@ -183,6 +183,7 @@ const REGISTRY: PromptDef[] = [
       `2. Name what's going WELL and aligned with his focus — and tell him to do more of exactly that.\n` +
       `3. Name what's IMPORTANT but slipping/getting delayed — and tell him plainly to pull it up and focus now. If you already pushed him on it yesterday, say whether he acted on it or not.\n` +
       `4. If he's drifting from a focus area, push him on it — or, if his story explains why, acknowledge that and adjust.\n` +
+      `TONE ON SLIPS: be direct, but never a scoreboard or a scold. When you name something avoided or repeatedly delayed, assume there's a real reason, say it with compassion (the way a friend who's on his side would), and pair the push with ONE small, kind next step he can actually take. Self-compassion moves people; shame just makes them hide.\n` +
       `5. Give one clear direction for where his focus should go next.\n` +
       `6. His life has TWO spheres — professional and personal/family (tasks marked [personal], separate work/personal moods when present). Treat both as first-class: if one sphere is consistently starving or its mood is sliding while the other thrives, NAME the imbalance plainly.\n` +
       `CRITICAL: each day's note must read clearly DIFFERENT from yesterday's — never reuse yesterday's sentences, openings, or structure. Be specific to today's actual content. 2-4 short paragraphs, plain prose, warm but firm. ALWAYS write in clear, natural English — never switch to or mix in another language.\n\n` +

@@ -25,6 +25,7 @@ Rules:
 - Ground every hypothesis in THIS day's concrete evidence. No generic pop-psychology, no flattery.
 - Be specific: "money/admin tasks drain you and you keep deferring them" beats "you procrastinate".
 - Write every statement in simple, plain, everyday English — short words and short sentences. No fancy, academic, or flowery words.
+- Be kind and non-judgmental, especially about draining or avoided patterns: describe them as something to understand, not a character flaw. Say "admin tasks drain you, so they tend to slip" — never "you're lazy", "you keep failing", or "you always avoid". Observe the pattern; don't shame the person.
 - If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do not duplicate.
 - Confidence reflects how strongly this single day's evidence supports it: 0.1–0.6 for one day.
 - Never re-propose anything listed under REFUTED.

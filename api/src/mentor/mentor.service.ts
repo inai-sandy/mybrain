@@ -230,7 +230,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     const patterns = await this.mind.summaryForMentor().catch(() => ''); // what the brain has learned about him (BEA-454)
     const prompt =
       `${tmpl}\n\n` +
-      (patterns ? `=== WHAT I'VE LEARNED ABOUT HIM (validated patterns — use these; nudge on the draining/avoided ones) ===\n${patterns}\n\n` : '') +
+      (patterns ? `=== WHAT I'VE LEARNED ABOUT HIM (validated patterns — use these; when you raise a draining or avoided one, do it with compassion: assume there's a real reason, name it kindly, and pair it with ONE small, doable next step — never shame him or pile on) ===\n${patterns}\n\n` : '') +
       `=== HIS FOCUS AREAS ===\n${focusLines.join('\n') || '(none set yet — give general direction and infer what matters)'}\n\n` +
       `=== TODAY (${day}) ===\n` +
       `Story of the Day (professional):\n${narrative.slice(0, 2200) || '(none)'}\n\n` +
