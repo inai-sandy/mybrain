@@ -50,6 +50,22 @@ export const RUN_KIND: Record<string, { label: string; tone: string }> = {
   wrap: { label: 'Wrapped', tone: 'text-emerald-600 dark:text-emerald-400' },
 };
 
+// The Situation model — Goal → Blocker → Lever chains. (BEA-515)
+export type MindChain = {
+  id: string;
+  goal: string;
+  blocker: string;
+  lever: string;
+  note: string | null;
+  source: string; // user | engine
+  status: string; // active | resolved | retired
+  confidence: number;
+  validated: string | null;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 const j = async <T>(r: Response): Promise<T> => {
   if (!r.ok) throw new Error(String(r.status));
   return r.json();
@@ -73,6 +89,20 @@ export const mindApi = {
   activity: (days = 30) => fetch(`/api/mind/activity?days=${days}`).then((r) => j<Activity>(r)),
   getAbout: () => fetch('/api/mind/about').then((r) => j<{ text: string }>(r)),
   setAbout: (text: string) => fetch('/api/mind/about', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then((r) => j<{ text: string }>(r)),
+};
+
+// Situation chains API (BEA-515)
+export const chainApi = {
+  list: () => fetch('/api/mind/chains').then((r) => j<MindChain[]>(r)),
+  create: (c: { goal: string; blocker: string; lever: string; note?: string }) => post('/api/mind/chains', c) as Promise<MindChain>,
+  update: (id: string, patch: Partial<Pick<MindChain, 'goal' | 'blocker' | 'lever' | 'note' | 'status'>>) =>
+    fetch(`/api/mind/chains/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then((r) => j(r)),
+  confirm: (id: string) => post(`/api/mind/chains/${id}/confirm`),
+  refute: (id: string) => post(`/api/mind/chains/${id}/refute`),
+  resolve: (id: string) => post(`/api/mind/chains/${id}/resolve`),
+  pin: (id: string, pinned: boolean) => post(`/api/mind/chains/${id}/pin`, { pinned }),
+  remove: (id: string) => fetch(`/api/mind/chains/${id}`, { method: 'DELETE' }).then((r) => j(r)),
+  parse: (text: string) => post('/api/mind/chains/parse', { text }) as Promise<{ goal: string; blocker: string; lever: string }>,
 };
 
 // kind → human group + accent, for the grouped review.
