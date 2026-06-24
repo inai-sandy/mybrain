@@ -944,7 +944,9 @@ export class TelegramService implements OnModuleInit {
     const mDay = await this.getSetting('telegram.pushMentor');
     if (mDay) {
       await this.setSetting('telegram.pushMentor', '');
-      const md = await this.prisma.mentorDay.findUnique({ where: { day: mDay } });
+      // "Insights pull, not push" (BEA-527): the note is always in the app; only push it if the user wants the ping.
+      const mentorPush = (await this.getSetting('insights.mentorPush')) !== 'off';
+      const md = mentorPush ? await this.prisma.mentorDay.findUnique({ where: { day: mDay } }) : null;
       if (md?.guidance) {
         await this.send(owner, `🧭 <b>Mentor</b> · on-track ${md.adherenceScore}/100\n\n${this.esc(md.guidance).slice(0, 3500)}`, {
           reply_markup: { inline_keyboard: [[{ text: '🧭 Open Mentor', url: `${PUBLIC_URL}/mentor` }]] },

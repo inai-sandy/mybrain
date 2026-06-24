@@ -10,6 +10,17 @@ export class DailyController {
     return this.daily.today();
   }
 
+  /** Proactive-nudge preferences — "insights pull, not push" (BEA-527). */
+  @Get('nudges')
+  async getNudges() {
+    return this.daily.getNudgePrefs();
+  }
+
+  @Put('nudges')
+  async setNudges(@Body() body: { mentorPush?: boolean; storyReminder?: boolean }) {
+    return this.daily.setNudgePrefs(body || {});
+  }
+
   /** Activity screen for a given day (defaults to today). */
   @Get('activity')
   async activity(@Query('day') day?: string) {
