@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, X, Pencil, Pin, Loader2, FlaskConical, HelpCircle, MessageSquarePlus } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { mindApi, KIND_GROUP, valenceClass, sureWord, type Finding } from './client';
+import { mindApi, KIND_GROUP, valenceClass, type Finding } from './client';
+import { TrustLadder } from './TrustLadder';
 
 /** The nightly "what I understood about you" review — your ✓/✗/almost taps teach the model. (BEA-449) */
 export function MindReview({ onChange }: { onChange?: (remaining: number) => void }) {
@@ -103,7 +104,7 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
         <textarea autoFocus rows={2} value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Tell me in your own words — what's right, what's off, what I'm missing…" className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-violet-500 mt-2" />
       )}
       <div className="flex items-center gap-2 mt-2">
-        <span className="text-[10px] text-zinc-400 tabular-nums">{sureWord(f.confidence)} · {f.evidenceCount}×{f.cadence ? ` · ${f.cadence}` : ''}</span>
+        <span className="text-[10px] text-zinc-400 tabular-nums flex items-center gap-1.5"><TrustLadder confidence={f.confidence} validated={f.validated} /> · {f.evidenceCount}×{f.cadence ? ` · ${f.cadence}` : ''}</span>
         <div className="flex-1" />
         {editing === f.id ? (
           <>

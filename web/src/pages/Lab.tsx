@@ -6,7 +6,8 @@ import { useSearchParams } from 'react-router-dom';
 import { MindReview } from '../mind/MindReview';
 import { Mentor } from './Mentor';
 import { FindingSheet, type FindingView } from '../mind/FindingSheet';
-import { mindApi, valenceClass, sureWord, fmtRelative, fmtWhen, type Finding, type Stats } from '../mind/client';
+import { mindApi, valenceClass, sureWord, trustRung, fmtRelative, fmtWhen, type Finding, type Stats } from '../mind/client';
+import { TrustLadder } from '../mind/TrustLadder';
 
 // One-line plain-English explainer shown under each tab. (BEA-462)
 const TAB_HELP: Record<Tab, string> = {
@@ -493,7 +494,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
           <div className="space-y-2">
             {selFindings.map((f) => (
               <div key={f.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 flex items-center gap-2">
-                <button onClick={() => onOpen(f)} className="flex-1 text-left min-w-0"><span className={'text-sm font-medium ' + valenceClass(f.valence)}>{f.statement}</span> <span className="text-[10px] text-zinc-400 tabular-nums">· {sureWord(f.confidence)} · {f.evidenceCount}× {trendArrow(f.trend)}</span></button>
+                <button onClick={() => onOpen(f)} className="flex-1 text-left min-w-0"><span className={'text-sm font-medium ' + valenceClass(f.valence)}>{f.statement}</span> <span className="text-[10px] text-zinc-400 tabular-nums">· {trustRung(f.confidence, f.validated).label} · {f.evidenceCount}× {trendArrow(f.trend)}</span></button>
                 <button title="Yes" onClick={() => onConfirm(f.id)} className="grid place-items-center h-7 w-7 rounded-lg bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"><Check size={14} /></button>
                 <button title="No" onClick={() => onRefute(f.id)} className="grid place-items-center h-7 w-7 rounded-lg bg-rose-500/15 text-rose-600 hover:bg-rose-500/25"><X size={14} /></button>
                 <button title="Pin" onClick={() => onPin(f.id, !f.pinned)} className={'grid place-items-center h-7 w-7 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (f.pinned ? 'text-amber-500' : 'text-zinc-400')}><Pin size={13} className={f.pinned ? 'fill-amber-400' : ''} /></button>
@@ -543,8 +544,7 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
                       </button>
                     )}
                     <div className="text-[10px] text-zinc-400 tabular-nums mt-1 flex items-center gap-2">
-                      <span className="not-italic">{sureWord(f.confidence)}</span>
-                      <span className="inline-block h-1 w-16 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden align-middle"><span className="block h-full bg-emerald-500" style={{ width: `${Math.round(f.confidence * 100)}%` }} /></span>
+                      <TrustLadder confidence={f.confidence} validated={f.validated} />
                       <span>{f.evidenceCount}× {trendArrow(f.trend)}</span>
                       {f.cadence && <span className="px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{f.cadence}</span>}
                       {f.pinned && <Pin size={10} className="text-amber-500 fill-amber-400" />}

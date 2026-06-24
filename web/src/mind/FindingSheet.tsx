@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Check, X, Pin, MessageSquarePlus } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
-import { sureWord, valenceClass, type Evidence } from './client';
+import { valenceClass, type Evidence } from './client';
+import { TrustLadder } from './TrustLadder';
 
 // What a tapped finding / mood-bar needs to show in the read-in-full popup. (BEA-462)
 export type FindingView = {
@@ -10,6 +11,7 @@ export type FindingView = {
   statement: string;
   valence: string;
   confidence: number; // 0–1 or 0–100, sureWord handles both
+  validated?: string | null;
   evidenceCount?: number;
   evidence?: Evidence[];
   pinned?: boolean;
@@ -43,7 +45,6 @@ export function FindingSheet({
   onPin?: (id: string, pinned: boolean) => void;
   onNote?: (id: string, text: string) => void | Promise<void>;
 }) {
-  const pct = Math.round(item.confidence <= 1 ? item.confidence * 100 : item.confidence);
   const ev = item.evidence ?? [];
   const canAct = !!item.id;
   const [noteOpen, setNoteOpen] = useState(false);
@@ -63,8 +64,7 @@ export function FindingSheet({
             <p className={'text-base font-semibold leading-snug ' + valenceClass(item.valence)}>{item.statement}</p>
 
             <div className="flex items-center gap-2 text-xs text-zinc-500">
-              <span className="px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 font-medium">{sureWord(item.confidence)}</span>
-              <span className="tabular-nums">{pct}% sure</span>
+              <TrustLadder confidence={item.confidence} validated={item.validated} />
               {typeof item.evidenceCount === 'number' && <span>· seen {item.evidenceCount}×</span>}
               <span className={'ml-auto ' + valenceClass(item.valence)}>{item.valence === 'energizing' ? 'lifts you up' : item.valence === 'draining' ? 'wears you down' : 'neutral'}</span>
             </div>
