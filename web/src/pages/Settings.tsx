@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
@@ -1194,6 +1194,36 @@ function TelegramCard() {
   );
 }
 
+/** Insights pull, not push (BEA-527): the notes are always in the app — these only control proactive pings. */
+function NudgesCard() {
+  const [prefs, setPrefs] = useState<{ mentorPush: boolean; storyReminder: boolean } | null>(null);
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/daily/nudges').then((r) => r.json()).then(setPrefs).catch(() => setPrefs(null));
+  }, []);
+  async function set(patch: { mentorPush?: boolean; storyReminder?: boolean }) {
+    const next = { ...(prefs || { mentorPush: true, storyReminder: true }), ...patch };
+    setPrefs(next);
+    const r = await fetch('/api/daily/nudges', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => null);
+    if (r?.ok) toast('success', 'Saved'); else toast('error', 'Could not save');
+  }
+  if (!prefs) return null;
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1"><BellRing size={18} className="text-amber-500" /> Nudges</h2>
+      <p className="text-sm text-zinc-500 mb-4">Your Mentor note and story are <b>always waiting for you in the app</b> — these just decide what gets pushed to Telegram. Turn them off for a quieter, pull-when-you-want experience. We never nag about a missed day.</p>
+      <label className="flex items-start gap-2.5 text-sm cursor-pointer py-1.5">
+        <input type="checkbox" checked={prefs.mentorPush} onChange={(e) => set({ mentorPush: e.target.checked })} className="mt-0.5 h-4 w-4 accent-emerald-600" />
+        <span><span className="font-medium">Send my nightly Mentor note on Telegram</span><br /><span className="text-xs text-zinc-500">Off = the note is still written each day and ready under Mentor — it just won't ping you.</span></span>
+      </label>
+      <label className="flex items-start gap-2.5 text-sm cursor-pointer py-1.5">
+        <input type="checkbox" checked={prefs.storyReminder} onChange={(e) => set({ storyReminder: e.target.checked })} className="mt-0.5 h-4 w-4 accent-emerald-600" />
+        <span><span className="font-medium">Morning nudge if yesterday's story isn't in</span><br /><span className="text-xs text-zinc-500">Off = no morning ping. At most one gentle reminder a day either way — never a guilt-trip.</span></span>
+      </label>
+    </section>
+  );
+}
+
 function ChatRetentionCard() {
   const [months, setMonths] = useState(2);
   const [loaded, setLoaded] = useState(false);
@@ -1235,6 +1265,7 @@ function SyncSection() {
   return (
     <div className="space-y-4">
       <TelegramCard />
+      <NudgesCard />
       <ChatRetentionCard />
       <RaindropSyncCard />
       <SkillsSyncCard />

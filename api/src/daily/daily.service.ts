@@ -587,7 +587,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       await this.closeDay(y, true, '10:00 check — your story was in').catch(() => undefined); // summary + story + Mentor + Lab + rollover + seal
       return { wrapped: true, reminded: false };
     }
-    // No story yet at the checkpoint — one nudge, then wait for tomorrow's 10:00 (the Telegram loop delivers it).
+    // No story yet at the checkpoint — at most one gentle nudge (and only if the user wants it). (BEA-527)
+    const prefs = await this.getNudgePrefs().catch(() => ({ mentorPush: true, storyReminder: true }));
+    if (!prefs.storyReminder) return { wrapped: false, reminded: false }; // pull-only — they'll tell the story when they're ready
     await this.setSetting('telegram.pushStoryReminder', y).catch(() => undefined);
     await this.prisma.mindRun.create({ data: { kind: 'reminder', day: y, detail: `${y}: story not in by 10:00 — reminded you on Telegram` } }).catch(() => undefined);
     return { wrapped: false, reminded: true };
@@ -1181,6 +1183,27 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
   private async setSetting(key: string, value: string) {
     await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  }
+
+  private async getSetting(key: string): Promise<string | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key } });
+    return row?.value ?? null;
+  }
+
+  /**
+   * Proactive-nudge preferences (BEA-527) — "insights pull, not push". The notes themselves are always
+   * generated and available in the app; these only control the proactive Telegram pings. Default ON so
+   * nothing changes silently for existing users; 'off' makes that surface pull-only.
+   */
+  async getNudgePrefs(): Promise<{ mentorPush: boolean; storyReminder: boolean }> {
+    const [m, s] = await Promise.all([this.getSetting('insights.mentorPush'), this.getSetting('insights.storyReminder')]);
+    return { mentorPush: m !== 'off', storyReminder: s !== 'off' };
+  }
+
+  async setNudgePrefs(p: { mentorPush?: boolean; storyReminder?: boolean }): Promise<{ mentorPush: boolean; storyReminder: boolean }> {
+    if (typeof p.mentorPush === 'boolean') await this.setSetting('insights.mentorPush', p.mentorPush ? 'on' : 'off');
+    if (typeof p.storyReminder === 'boolean') await this.setSetting('insights.storyReminder', p.storyReminder ? 'on' : 'off');
+    return this.getNudgePrefs();
   }
 
   /** The agentic read: gather evidence (DB + memory), respect prior validations, ask the Honest-coach model. */
