@@ -321,7 +321,7 @@ function ChainForm({ chain, onSaved, onCancel }: { chain: MindChain | null; onSa
       )}
       <ChainField label="🎯 Goal — what you're trying to achieve" v={goal} set={setGoal} ph="Get Beakn products out" />
       <ChainField label="⛔ Blocked by — what's stopping it" v={blocker} set={setBlocker} ph="Production isn't aligned" />
-      <ChainField label="🔧 Lever — the one thing that unblocks it" v={lever} set={setLever} ph="Fix the production line first" />
+      <ChainField label="🔧 Lever — the next action that unblocks it" v={lever} set={setLever} ph="When I get to my desk, I'll call the production lead" />
       <ChainField label="Note (optional)" v={note} set={setNote} ph="Any context…" />
       <div className="flex gap-2">
         <button onClick={save} disabled={busy} className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50">{chain ? 'Save changes' : 'Add it'}</button>

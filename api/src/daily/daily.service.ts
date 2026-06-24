@@ -1084,7 +1084,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Story of the day:\n${narrative.slice(0, 2500) || '(none)'}\n\n` +
       `Finished today:\n${doneList.join('\n') || '(none)'}\n\n` +
       `ALREADY ON HIS LIST (do NOT suggest these — they roll over automatically):\n${openList.join('\n') || '(none)'}\n\n` +
-      `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}). PREFER concrete next-actions that move a LEVER (the thing that unblocks a stuck goal) or advance a focus area — not the blocked goals themselves. Give each a short plain reason.`;
+      `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}). PREFER concrete next-actions that move a LEVER (the thing that unblocks a stuck goal) or advance a focus area — not the blocked goals themselves. ` +
+      `Where it fits, phrase the task as a tiny if-then plan anchored to an everyday cue — "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>" — this makes it far likelier to actually happen. One action each, plain English. Give each a short plain reason.`;
 
     const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900, 'suggested-tasks'))?.trim() || '';
     let suggestions: { title: string; category?: string; reason?: string }[] = [];

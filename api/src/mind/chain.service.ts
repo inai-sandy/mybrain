@@ -75,8 +75,9 @@ export class MindChainService {
     if (!t) return { goal: '', blocker: '', lever: '' };
     const prompt =
       `The user describes, in their own words, something that's blocking them. Turn it into a simple chain.\n` +
-      `Return ONLY JSON: {"goal":"what they're trying to achieve","blocker":"what's stopping it","lever":"the ONE thing that would unblock it"}.\n` +
-      `Keep each a short plain phrase. If a part isn't stated, make a concise best guess or use "".\n\nUSER:\n${t.slice(0, 800)}`;
+      `Return ONLY JSON: {"goal":"what they're trying to achieve","blocker":"what's stopping it","lever":"the ONE next-action that would unblock it"}.\n` +
+      `Keep goal and blocker short plain phrases. Write the LEVER as a tiny if-then plan anchored to an everyday cue: "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>." Pick a cue that fits; keep it one action, not a plan.\n` +
+      `If a part isn't stated, make a concise best guess or use "".\n\nUSER:\n${t.slice(0, 800)}`;
     const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 300, 'chain-parse'))?.trim() || '';
     try {
       const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -118,7 +119,8 @@ export class MindChainService {
 
     const prompt =
       `You build a map of someone's SITUATION as chains: a GOAL, what's BLOCKING it, and the one LEVER that would unblock it.\n` +
-      `Only propose a chain when the evidence genuinely points to an underlying blocker (e.g. a kind of task is repeatedly deferred AND there's a reason for it). Be conservative — 0–2 chains. Plain words.\n\n` +
+      `Only propose a chain when the evidence genuinely points to an underlying blocker (e.g. a kind of task is repeatedly deferred AND there's a reason for it). Be conservative — 0–2 chains. Plain words.\n` +
+      `Write each LEVER as a tiny if-then plan anchored to an everyday cue: "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>." One action, not a plan.\n\n` +
       (aboutRow?.value ? `WHO THEY ARE (their words):\n${aboutRow.value.slice(0, 800)}\n\n` : '') +
       (deferred.length ? `REPEATEDLY DEFERRED TASKS:\n${deferred.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''} (deferred ${t.rolloverCount}×)`).join('\n')}\n\n` : '') +
       (drains.length ? `DRAINING PATTERNS:\n${drains.map((d) => `- ${d.statement}`).join('\n')}\n\n` : '') +
