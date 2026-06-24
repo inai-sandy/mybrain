@@ -29,6 +29,9 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
   const [step, setStep] = useState<'story' | 'wrap'>('story');
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [openTasks, setOpenTasks] = useState<{ id: string; title: string }[]>([]);
+  const [todos, setTodos] = useState<{ title: string; category: string | null }[] | null>(null); // forward to-dos from the story (BEA-513)
+  const [todoSel, setTodoSel] = useState<Record<number, boolean>>({});
+  const [todosAdded, setTodosAdded] = useState(false);
   const [carry, setCarry] = useState<Record<string, 'roll' | 'drop' | undefined>>({});
   const [hours, setHours] = useState('');
   const [wrapBusy, setWrapBusy] = useState(false);
@@ -45,6 +48,9 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
       .then((d) => {
         setCandidates(d.candidates || []);
         setOpenTasks(d.openTasks || []);
+        const td = d.todos || [];
+        setTodos(td);
+        setTodoSel(Object.fromEntries(td.map((_: unknown, i: number) => [i, true])));
         if (d.suggestedMinutes && !hours) setHours((d.suggestedMinutes / 60).toFixed(1).replace(/\.0$/, ''));
       })
       .catch(() => setCandidates([]));
@@ -68,6 +74,20 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
       toast('error', 'Could not save');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function addTodos() {
+    const picked = (todos || []).filter((_, i) => todoSel[i]);
+    if (!picked.length) { setTodosAdded(true); return; }
+    try {
+      const r = await fetch('/api/daily/add-todos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ todos: picked }) });
+      const d = await r.json().catch(() => ({ created: 0 }));
+      toast('success', `Added ${d.created} to your tasks ✓`);
+      setTodosAdded(true);
+      onSaved();
+    } catch {
+      toast('error', 'Could not add those');
     }
   }
 
@@ -122,6 +142,28 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
                 <p className="text-sm text-zinc-400">No extra finished tasks found — nice and tidy.</p>
               )}
             </div>
+
+            {/* To-dos spotted in the story → add to the tasks sheet here (BEA-513) */}
+            {todos && todos.length > 0 && !todosAdded && (
+              <div className="mb-4">
+                <p className="text-xs text-zinc-500 mb-2">To-dos I spotted in your story — add to your tasks so you don’t have to dump again:</p>
+                <ul className="space-y-1.5">
+                  {todos.map((t, i) => (
+                    <li key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-2">
+                      <button onClick={() => setTodoSel((s) => ({ ...s, [i]: !s[i] }))} aria-label="Toggle" className={'shrink-0 grid place-items-center h-5 w-5 rounded border ' + (todoSel[i] ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-zinc-300 dark:border-zinc-600')}>{todoSel[i] && <Check size={13} />}</button>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium truncate">{t.title}</div>
+                        {t.category && <div className="text-[11px] text-zinc-400">{t.category}</div>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <button onClick={addTodos} className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50" disabled={Object.values(todoSel).filter(Boolean).length === 0}>
+                  <Plus size={15} /> Add {Object.values(todoSel).filter(Boolean).length} to my tasks
+                </button>
+              </div>
+            )}
+            {todosAdded && <div className="mb-4 text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><Check size={15} /> Added to your tasks.</div>}
 
             {/* Carry-forward — unfinished tasks */}
             {openTasks.length > 0 && (

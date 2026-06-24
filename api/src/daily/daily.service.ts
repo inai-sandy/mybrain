@@ -198,6 +198,60 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { day, candidates };
   }
 
+  /** Forward to-dos the user mentioned in their story (things still TO DO), to add to the tasks sheet in the flow. (BEA-513) */
+  async todoCandidates(dayInput?: string): Promise<{ day: string; todos: { title: string; category: string | null }[] }> {
+    const tz = await this.tz();
+    const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
+    const today = this.dayKey(tz);
+    const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
+    const text = (story?.rawText || '').trim();
+    if (text.length < 15) return { day, todos: [] };
+
+    const existing = await this.prisma.task.findMany({ where: { OR: [{ day }, { day: today }], status: { not: 'done' } }, select: { title: true } });
+    const existingTitles = existing.map((e) => e.title);
+    const prompt =
+      `From the user's diary entry below, extract the concrete things they still NEED or PLAN to do — open to-dos, follow-ups and next actions they mention for the days ahead.\n` +
+      `Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket"}]}.\n` +
+      `Rules: only real forward actions (things to do next) — NOT things they already finished, NOT feelings/reflections; short imperative titles; {"tasks":[]} if none.\n` +
+      `Do NOT include anything already in this open list:\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
+      `DIARY:\n${text.slice(0, 4000)}`;
+    const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 500, 'todo-extract'))?.trim() || '';
+    let list: { title?: string; category?: string }[] = [];
+    try {
+      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      if (Array.isArray(json?.tasks)) list = json.tasks;
+    } catch {
+      list = [];
+    }
+    const sig = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w.length > 3));
+    const existSets = existingTitles.map((t) => sig(t)).filter((set) => set.size);
+    const isDup = (title: string) => {
+      const n = sig(title);
+      if (!n.size) return false;
+      return existSets.some((o) => {
+        const inter = [...n].filter((w) => o.has(w)).length;
+        const minSize = Math.min(n.size, o.size);
+        return minSize >= 2 ? inter / minSize >= 0.6 : inter >= 1;
+      });
+    };
+    const seen = new Set<string>();
+    const todos = list
+      .map((t) => ({ title: String(t?.title || '').trim().slice(0, 160), category: t?.category ? String(t.category).trim().slice(0, 40) : null }))
+      .filter((t) => t.title && !isDup(t.title) && !seen.has(t.title.toLowerCase()) && seen.add(t.title.toLowerCase()))
+      .slice(0, 12);
+    return { day, todos };
+  }
+
+  /** Add the user-approved story to-dos as OPEN tasks (default to today). (BEA-513) */
+  async addStoryTodos(todos: { title?: string; category?: string | null }[]): Promise<{ created: number }> {
+    let created = 0;
+    for (const t of (todos || []).slice(0, 20)) {
+      const r = await this.tasks.create({ title: t.title, category: t.category || undefined, priority: 'medium' });
+      if (r) created++;
+    }
+    return { created };
+  }
+
   /** AI split of the stated working minutes across 3–6 topics, from the story + that day's finished tasks. */
   private async computeWorkedBreakdown(day: string, wm: number): Promise<{ category: string; minutes: number }[] | null> {
     const [story, doneTasks] = await Promise.all([
@@ -231,8 +285,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async wrapUpData(dayInput?: string) {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
-    const [{ candidates }, feed, open] = await Promise.all([
+    const [{ candidates }, { todos }, feed, open] = await Promise.all([
       this.doneCandidates(day),
+      this.todoCandidates(day),
       this.feed(day, tz),
       this.prisma.task.findMany({ where: { day, status: { not: 'done' } }, orderBy: { createdAt: 'asc' }, select: { id: true, title: true } }),
     ]);
@@ -246,7 +301,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       const span = Math.round((times[times.length - 1] - times[0]) / 60000);
       suggestedMinutes = Math.max(30, Math.min(16 * 60, span));
     }
-    return { day, candidates, suggestedMinutes, openTasks: open };
+    return { day, candidates, todos, suggestedMinutes, openTasks: open };
   }
 
   /** Wrap up the day: log the approved finished tasks as DONE, save the stated working minutes,

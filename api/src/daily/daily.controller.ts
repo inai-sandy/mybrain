@@ -78,6 +78,12 @@ export class DailyController {
     return this.daily.wrapUp(body?.day, body?.tasks || [], body?.workedMinutes, body?.roll || [], body?.drop || []);
   }
 
+  /** Add the to-dos spotted in the story as open tasks (today). (BEA-513) */
+  @Post('add-todos')
+  async addTodos(@Body() body: { todos?: { title?: string; category?: string | null }[] }) {
+    return this.daily.addStoryTodos(body?.todos || []);
+  }
+
   // ---- Story of the Day (nightly woven narrative) ----
   @Post('day-story')
   async dayStory(@Body() body: { day?: string; force?: boolean }) {
