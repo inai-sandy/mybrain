@@ -46,7 +46,7 @@ export class MindChainService {
   }
 
   async update(id: string, patch: { goal?: string; blocker?: string; lever?: string; note?: string; status?: string }) {
-    const data: Record<string, unknown> = { lastSeenDay: this.today() };
+    const data: Record<string, unknown> = { lastSeenDay: this.today(), shifted: false }; // the user touched it → no longer needs a "did it shift?" look
     for (const k of ['goal', 'blocker', 'lever'] as const) if (typeof patch[k] === 'string') data[k] = patch[k]!.trim().slice(0, 200);
     if (typeof patch.note === 'string') data.note = patch.note.trim().slice(0, 400) || null;
     if (patch.status && ['active', 'resolved', 'retired'].includes(patch.status)) data.status = patch.status;
@@ -54,7 +54,7 @@ export class MindChainService {
   }
 
   confirm(id: string) {
-    return this.prisma.mindChain.update({ where: { id }, data: { validated: 'confirmed', confidence: 0.95, lastSeenDay: this.today() } }).catch(() => null);
+    return this.prisma.mindChain.update({ where: { id }, data: { validated: 'confirmed', confidence: 0.95, shifted: false, lastSeenDay: this.today() } }).catch(() => null);
   }
   refute(id: string) {
     return this.prisma.mindChain.update({ where: { id }, data: { validated: 'refuted', status: 'retired' } }).catch(() => null);
@@ -148,6 +148,77 @@ export class MindChainService {
       created++;
     }
     return created;
+  }
+
+  /**
+   * Re-check active chains against a freshly-closed day — Theory of Constraints' "repeat" step (BEA-526).
+   * Once a lever moves the blocker shifts, so a set-once Situation goes stale. For each active chain we ask
+   * (cheaply) whether today's progress means the blocker HELD, SHIFTED, or is RESOLVED, and update it:
+   *   resolved → mark resolved (it drops out of the Mentor/Coach grounding);
+   *   shifted  → update the blocker + lever and flag `shifted` so the UI can gently ask "does this still fit?".
+   * Conservative: only acts on a clear signal; caps the work at the few most relevant chains.
+   */
+  async reviewActiveChains(day: string): Promise<{ resolved: number; shifted: number }> {
+    const [chains, doneTasks, story] = await Promise.all([
+      this.prisma.mindChain.findMany({
+        where: { status: 'active', NOT: { validated: 'refuted' } },
+        orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
+        take: 6,
+      }),
+      this.prisma.task.findMany({ where: { day, status: 'done' }, select: { title: true, category: true } }),
+      this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { rawText: true } }),
+    ]);
+    if (!chains.length) return { resolved: 0, shifted: 0 };
+    const doneList = doneTasks.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''}`).join('\n');
+    const storyText = (story?.rawText || '').slice(0, 1500);
+    if (!doneList && !storyText.trim()) return { resolved: 0, shifted: 0 }; // nothing happened today to change anything
+
+    let resolved = 0;
+    let shifted = 0;
+    for (const c of chains) {
+      const prompt =
+        `Someone is working through a stuck situation, framed as a chain: a GOAL, what's BLOCKING it, and the LEVER (next action that unblocks it).\n` +
+        `Given ONLY what they did and wrote TODAY, decide if that blocker has changed. Be conservative — if today gives no clear signal about THIS blocker, answer "held".\n\n` +
+        `GOAL: ${c.goal}\nBLOCKED BY: ${c.blocker}\nLEVER: ${c.lever}\n\n` +
+        `WHAT THEY FINISHED TODAY:\n${doneList || '(nothing logged)'}\n\n` +
+        `TODAY'S STORY:\n${storyText || '(none)'}\n\n` +
+        `Return ONLY JSON: {"verdict":"held|shifted|resolved","blocker":"the NEW blocker if shifted","lever":"the NEW next-action if shifted, as an if-then plan: When <a daily cue>, I'll <one action>","why":"one short plain sentence"}.\n` +
+        `"resolved" = the blocker is clearly gone. "shifted" = the original blocker eased but a DIFFERENT thing now blocks the goal. "held" = no clear change (the default).`;
+      const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 300, 'chain-review'))?.trim() || '';
+      let j: { verdict?: string; blocker?: string; lever?: string; why?: string } = {};
+      try {
+        j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      } catch {
+        continue; // unparseable → leave the chain untouched
+      }
+      const verdict = String(j?.verdict || 'held').toLowerCase();
+      if (verdict === 'resolved') {
+        await this.prisma.mindChain.update({ where: { id: c.id }, data: { status: 'resolved', lastSeenDay: day } }).catch(() => null);
+        await this.prisma.mindRun.create({ data: { kind: 'learn', day, detail: `situation resolved: ${c.goal.slice(0, 80)}` } }).catch(() => undefined);
+        resolved++;
+      } else if (verdict === 'shifted') {
+        const newBlocker = String(j?.blocker || '').trim().slice(0, 200);
+        const newLever = String(j?.lever || '').trim().slice(0, 200);
+        if (!newBlocker || this.overlap(newBlocker, c.blocker)) continue; // not actually different → skip
+        const why = String(j?.why || '').trim().slice(0, 200);
+        await this.prisma.mindChain
+          .update({
+            where: { id: c.id },
+            data: {
+              blocker: newBlocker,
+              lever: newLever || c.lever,
+              shifted: true,
+              validated: null, // it's an engine guess again → wants a fresh look
+              note: why ? `Blocker may have shifted: ${why}` : c.note,
+              lastSeenDay: day,
+            },
+          })
+          .catch(() => null);
+        await this.prisma.mindRun.create({ data: { kind: 'learn', day, detail: `situation shifted: ${c.goal.slice(0, 80)}` } }).catch(() => undefined);
+        shifted++;
+      }
+    }
+    return { resolved, shifted };
   }
 
   /** Compact digest of active chains, for grounding the Mentor + Coach. (BEA-517) */

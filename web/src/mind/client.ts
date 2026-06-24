@@ -62,6 +62,7 @@ export type MindChain = {
   confidence: number;
   validated: string | null;
   pinned: boolean;
+  shifted?: boolean; // engine re-derived the blocker on day-close (BEA-526) — UI asks "does this still fit?"
   createdAt: string;
   updatedAt: string;
 };

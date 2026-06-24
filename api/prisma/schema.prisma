@@ -641,6 +641,7 @@ model MindChain {
   confidence   Float    @default(0.7)
   validated    String? // confirmed | refuted
   pinned       Boolean  @default(false)
+  shifted      Boolean  @default(false) // engine re-derived this chain on day-close (ToC "repeat"); cleared when the user confirms/edits (BEA-526)
   firstSeenDay String?
   lastSeenDay  String?
   createdAt    DateTime @default(now())

@@ -235,7 +235,12 @@ function ChainCard({ c, onEdit, onChange }: { c: MindChain; onEdit: () => void; 
   const resolved = c.status === 'resolved';
   const act = async (fn: () => Promise<unknown>, msg: string) => { try { await fn(); toast('success', msg); onChange(); } catch { toast('error', 'Could not save'); } };
   return (
-    <div className={'rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 ' + (resolved ? 'opacity-60' : 'bg-white dark:bg-zinc-900')}>
+    <div className={'rounded-xl border p-4 ' + (resolved ? 'opacity-60 border-zinc-200 dark:border-zinc-800' : c.shifted ? 'border-amber-400/50 dark:border-amber-500/40 bg-amber-50/40 dark:bg-amber-500/5' : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900')}>
+      {!resolved && c.shifted && (
+        <div className="mb-2.5 text-[12px] text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded-lg px-2.5 py-1.5">
+          I think your blocker may have shifted — does this still fit? Tap ✓ to keep it, or edit it.
+        </div>
+      )}
       <div className="space-y-1.5">
         <div className="flex items-start gap-2"><Target size={15} className="text-violet-500 shrink-0 mt-0.5" /><div className="min-w-0"><div className="text-[10px] uppercase tracking-wide text-zinc-400">Goal{resolved ? ' · resolved ✓' : ''}</div><div className={'text-sm font-semibold ' + (resolved ? 'line-through' : '')}>{c.goal || '—'}</div></div></div>
         <div className="pl-1.5 text-[11px] text-zinc-300 dark:text-zinc-600">↓ blocked by</div>

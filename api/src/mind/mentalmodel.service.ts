@@ -112,6 +112,7 @@ export class MentalModelService implements OnModuleInit {
     if (r.proposed || r.reinforced) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
     await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
     await this.chains.inferFromDay(day).catch((e) => this.log.warn(`mind chains: ${e?.message ?? e}`)); // propose blocker/lever chains (BEA-516)
+    await this.chains.reviewActiveChains(day).catch((e) => this.log.warn(`mind chains review: ${e?.message ?? e}`)); // re-derive shifted/resolved blockers — ToC "repeat" (BEA-526)
     return r;
   }
 
