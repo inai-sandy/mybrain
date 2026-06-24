@@ -91,6 +91,16 @@ export function sureWord(confidence: number): string {
   if (p < 80) return 'Confident';
   return 'Very sure';
 }
+
+// The trust ladder (BEA-514): a clear rung instead of a bare %. Tapping ✓ (validated='confirmed') jumps it
+// to the top rung so the user SEES it land. step 1..4.
+export function trustRung(confidence: number, validated?: string | null): { label: string; step: number } {
+  if (validated === 'confirmed') return { label: 'Confirmed by you', step: 4 };
+  const p = confidence <= 1 ? confidence * 100 : confidence;
+  if (p < 35) return { label: 'Just noticed', step: 1 };
+  if (p < 60) return { label: 'Fairly sure', step: 2 };
+  return { label: 'Confident', step: 3 };
+}
 // Shared date/time formatting for the run-log. (BEA-468)
 export function fmtWhen(iso: string): string {
   return new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
