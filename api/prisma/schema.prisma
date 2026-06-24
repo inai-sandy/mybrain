@@ -627,3 +627,24 @@ model MindRun {
 
   @@index([at])
 }
+
+// The Situation model (BEA-515): your real chains — a GOAL, what's BLOCKING it, and the LEVER that unblocks it.
+// e.g. goal "Get Beakn products out" / blocker "production not aligned" / lever "fix the production line first".
+model MindChain {
+  id           String   @id @default(uuid())
+  goal         String
+  blocker      String
+  lever        String
+  note         String?
+  source       String // user | engine
+  status       String   @default("active") // active | resolved | retired
+  confidence   Float    @default(0.7)
+  validated    String? // confirmed | refuted
+  pinned       Boolean  @default(false)
+  firstSeenDay String?
+  lastSeenDay  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status])
+}

@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, ChevronDown, Search } from 'lucide-react';
+import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, ChevronDown, Search, Target, Ban, Wrench, Plus, Sparkles } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useSearchParams } from 'react-router-dom';
 import { MindReview } from '../mind/MindReview';
 import { Mentor } from './Mentor';
 import { FindingSheet, type FindingView } from '../mind/FindingSheet';
-import { mindApi, valenceClass, sureWord, trustRung, fmtRelative, fmtWhen, type Finding, type Stats } from '../mind/client';
+import { mindApi, chainApi, valenceClass, sureWord, trustRung, fmtRelative, fmtWhen, type Finding, type Stats, type MindChain } from '../mind/client';
 import { TrustLadder } from '../mind/TrustLadder';
 
 // One-line plain-English explainer shown under each tab. (BEA-462)
 const TAB_HELP: Record<Tab, string> = {
+  situation: "Your real situation: each card is a Goal, what's Blocking it, and the Lever that unblocks it. Add what's blocking you — in a sentence or the guided form.",
   map: 'A map of what affects you. Dots are things and people; lines are patterns. Green lifts you, red drains you. "You" is in the middle — tap a dot to read it.',
   mood: 'How you feel over time, and what gives you energy vs. what takes it. Tap any bar to read the full thing.',
   heatmaps: 'Your week at a glance — which days lift you, and which kinds of tasks you keep putting off.',
@@ -26,13 +27,13 @@ const edgeColor = (v: string) => (v === 'energizing' ? '#34d399' : v === 'draini
 const trendArrow = (t: string) => (t === 'rising' ? '▲' : t === 'fading' ? '▼' : '–');
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-type Tab = 'map' | 'mood' | 'heatmaps' | 'findings' | 'review' | 'about' | 'mentor';
-const TABS: Tab[] = ['map', 'mood', 'heatmaps', 'findings', 'review', 'about', 'mentor'];
+type Tab = 'situation' | 'map' | 'mood' | 'heatmaps' | 'findings' | 'review' | 'about' | 'mentor';
+const TABS: Tab[] = ['situation', 'map', 'mood', 'heatmaps', 'findings', 'review', 'about', 'mentor'];
 
 export function Lab() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const initialTab = (TABS as string[]).includes(params.get('tab') || '') ? (params.get('tab') as Tab) : 'map';
+  const initialTab = (TABS as string[]).includes(params.get('tab') || '') ? (params.get('tab') as Tab) : 'situation';
   const [tab, setTabState] = useState<Tab>(initialTab);
   const setTab = (t: Tab) => { setTabState(t); setParams(t === 'map' ? {} : { tab: t }, { replace: true }); };
   const [findings, setFindings] = useState<Finding[] | null>(null);
@@ -116,7 +117,9 @@ export function Lab() {
 
       <p className="text-xs text-zinc-500 leading-relaxed -mt-1">{TAB_HELP[tab]}</p>
 
-      {tab === 'review' ? (
+      {tab === 'situation' ? (
+        <SituationView />
+      ) : tab === 'review' ? (
         <MindReview />
       ) : tab === 'mentor' ? (
         <Mentor />
@@ -190,6 +193,138 @@ function AboutMe() {
           {busy ? <Loader2 size={15} className="animate-spin" /> : null} {dirty ? 'Save' : 'Saved'}
         </button>
         <span className="text-xs text-zinc-400">Your words are private. I use them to understand you and to ground your findings and daily guidance.</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Situation: Goals → Blockers → Levers (BEA-515) ----------------
+function SituationView() {
+  const [chains, setChains] = useState<MindChain[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<MindChain | null>(null);
+  const load = () => chainApi.list().then(setChains).catch(() => setChains([]));
+  useEffect(() => { load(); }, []);
+  const onSaved = () => { setAdding(false); setEditing(null); load(); };
+
+  if (chains === null) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
+
+  return (
+    <div className="space-y-4">
+      {!adding && !editing && (
+        <button onClick={() => setAdding(true)} className="w-full rounded-xl border border-dashed border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 px-4 py-3 text-sm font-medium hover:bg-violet-500/5 inline-flex items-center justify-center gap-1.5">
+          <Plus size={16} /> Add what's blocking you
+        </button>
+      )}
+      {(adding || editing) && <ChainForm chain={editing} onSaved={onSaved} onCancel={() => { setAdding(false); setEditing(null); }} />}
+
+      {chains.length === 0 && !adding ? (
+        <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-8 text-center text-sm text-zinc-500">
+          Nothing here yet. Tell me one thing you're stuck on — your goal, what's blocking it, and the one lever that would unblock it. I'll use it to guide your day.
+        </div>
+      ) : (
+        <div className="space-y-3">{chains.map((c) => <ChainCard key={c.id} c={c} onEdit={() => setEditing(c)} onChange={load} />)}</div>
+      )}
+    </div>
+  );
+}
+
+function ChainCard({ c, onEdit, onChange }: { c: MindChain; onEdit: () => void; onChange: () => void }) {
+  const toast = useToast();
+  const [del, setDel] = useState(false);
+  const resolved = c.status === 'resolved';
+  const act = async (fn: () => Promise<unknown>, msg: string) => { try { await fn(); toast('success', msg); onChange(); } catch { toast('error', 'Could not save'); } };
+  return (
+    <div className={'rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 ' + (resolved ? 'opacity-60' : 'bg-white dark:bg-zinc-900')}>
+      <div className="space-y-1.5">
+        <div className="flex items-start gap-2"><Target size={15} className="text-violet-500 shrink-0 mt-0.5" /><div className="min-w-0"><div className="text-[10px] uppercase tracking-wide text-zinc-400">Goal{resolved ? ' · resolved ✓' : ''}</div><div className={'text-sm font-semibold ' + (resolved ? 'line-through' : '')}>{c.goal || '—'}</div></div></div>
+        <div className="pl-1.5 text-[11px] text-zinc-300 dark:text-zinc-600">↓ blocked by</div>
+        <div className="flex items-start gap-2"><Ban size={15} className="text-rose-500 shrink-0 mt-0.5" /><div className="min-w-0"><div className="text-sm">{c.blocker || '—'}</div></div></div>
+        <div className="pl-1.5 text-[11px] text-zinc-300 dark:text-zinc-600">↓ the lever</div>
+        <div className="flex items-start gap-2"><Wrench size={15} className="text-emerald-500 shrink-0 mt-0.5" /><div className="min-w-0"><div className="text-sm font-medium text-emerald-700 dark:text-emerald-300">{c.lever || '—'}</div></div></div>
+        {c.note && <p className="text-xs text-zinc-500 pl-6 pt-0.5">{c.note}</p>}
+      </div>
+      <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800">
+        <TrustLadder confidence={c.confidence} validated={c.validated} />
+        {c.source === 'engine' && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-400">I noticed this</span>}
+        <div className="flex-1" />
+        {!resolved && <button title="Still true" onClick={() => act(() => chainApi.confirm(c.id), 'Confirmed')} className="h-7 w-7 grid place-items-center rounded-lg bg-emerald-500/15 text-emerald-600 hover:bg-emerald-500/25"><Check size={14} /></button>}
+        <button title="Edit" onClick={onEdit} className="h-7 w-7 grid place-items-center rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={13} /></button>
+        {!resolved && <button title="Mark resolved" onClick={() => act(() => chainApi.resolve(c.id), 'Resolved ✓')} className="text-[11px] px-2 py-1 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-emerald-500">Resolved</button>}
+        <button title={c.pinned ? 'Unpin' : 'Pin'} onClick={() => act(() => chainApi.pin(c.id, !c.pinned), c.pinned ? 'Unpinned' : 'Pinned')} className={'h-7 w-7 grid place-items-center rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (c.pinned ? 'text-amber-500' : 'text-zinc-400')}><Pin size={13} className={c.pinned ? 'fill-amber-400' : ''} /></button>
+        <button title="Remove" onClick={() => setDel(true)} className="h-7 w-7 grid place-items-center rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-500/10"><Trash2 size={13} /></button>
+      </div>
+      <ConfirmDialog open={del} title="Remove this?" message="This situation card will be deleted." confirmLabel="Remove" onCancel={() => setDel(false)} onConfirm={() => { chainApi.remove(c.id).then(onChange); setDel(false); }} />
+    </div>
+  );
+}
+
+function ChainField({ label, v, set, ph }: { label: string; v: string; set: (s: string) => void; ph: string }) {
+  return (
+    <div>
+      <label className="text-xs text-zinc-500">{label}</label>
+      <input value={v} onChange={(e) => set(e.target.value)} placeholder={ph} className="mt-1 w-full rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+    </div>
+  );
+}
+
+function ChainForm({ chain, onSaved, onCancel }: { chain: MindChain | null; onSaved: () => void; onCancel: () => void }) {
+  const toast = useToast();
+  const [goal, setGoal] = useState(chain?.goal || '');
+  const [blocker, setBlocker] = useState(chain?.blocker || '');
+  const [lever, setLever] = useState(chain?.lever || '');
+  const [note, setNote] = useState(chain?.note || '');
+  const [sentence, setSentence] = useState('');
+  const [parsing, setParsing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function parse() {
+    if (!sentence.trim()) return;
+    setParsing(true);
+    try {
+      const r = await chainApi.parse(sentence.trim());
+      if (r.goal) setGoal(r.goal);
+      if (r.blocker) setBlocker(r.blocker);
+      if (r.lever) setLever(r.lever);
+      toast('success', 'Filled it in — tweak anything, then add it');
+    } catch {
+      toast('error', 'Could not read that');
+    } finally {
+      setParsing(false);
+    }
+  }
+  async function save() {
+    if (!goal.trim() && !blocker.trim() && !lever.trim()) return;
+    setBusy(true);
+    try {
+      if (chain) await chainApi.update(chain.id, { goal, blocker, lever, note });
+      else await chainApi.create({ goal, blocker, lever, note });
+      onSaved();
+    } catch {
+      toast('error', 'Could not save');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="rounded-xl border border-violet-300/50 dark:border-violet-700/50 bg-violet-500/5 p-4 space-y-3">
+      {!chain && (
+        <div>
+          <label className="text-xs text-zinc-500">Say it in your own words</label>
+          <div className="flex gap-2 mt-1">
+            <input value={sentence} onChange={(e) => setSentence(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && parse()} placeholder="e.g. I can't do Beakn tasks until production is sorted" className="flex-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-violet-500" />
+            <button onClick={parse} disabled={parsing || !sentence.trim()} className="shrink-0 rounded-lg bg-violet-600 text-white px-3 py-2 text-sm font-medium hover:bg-violet-500 disabled:opacity-50 inline-flex items-center gap-1.5">{parsing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Turn into a chain</button>
+          </div>
+          <div className="text-[11px] text-zinc-400 mt-1.5">…or fill it in yourself below.</div>
+        </div>
+      )}
+      <ChainField label="🎯 Goal — what you're trying to achieve" v={goal} set={setGoal} ph="Get Beakn products out" />
+      <ChainField label="⛔ Blocked by — what's stopping it" v={blocker} set={setBlocker} ph="Production isn't aligned" />
+      <ChainField label="🔧 Lever — the one thing that unblocks it" v={lever} set={setLever} ph="Fix the production line first" />
+      <ChainField label="Note (optional)" v={note} set={setNote} ph="Any context…" />
+      <div className="flex gap-2">
+        <button onClick={save} disabled={busy} className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50">{chain ? 'Save changes' : 'Add it'}</button>
+        <button onClick={onCancel} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-4 py-2 text-sm">Cancel</button>
       </div>
     </div>
   );

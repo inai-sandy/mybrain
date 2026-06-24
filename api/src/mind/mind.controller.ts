@@ -3,6 +3,7 @@ import { MentalModelService } from './mentalmodel.service';
 import { MindLifecycleService } from './lifecycle.service';
 import { MindReviewService } from './review.service';
 import { MindStatsService } from './stats.service';
+import { MindChainService } from './chain.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 // "The Lab" API. Run the engine + lifecycle, inspect findings, and review them with ✓/✗/almost. (BEA-447/448/449)
@@ -13,8 +14,55 @@ export class MindController {
     private readonly lifecycle: MindLifecycleService,
     private readonly review_: MindReviewService,
     private readonly stats_: MindStatsService,
+    private readonly chains_: MindChainService,
     private readonly prisma: PrismaService,
   ) {}
+
+  // ---- Situation chains: Goals → Blockers → Levers (BEA-515) ----
+  @Get('chains')
+  chains() {
+    return this.chains_.list();
+  }
+
+  @Post('chains')
+  createChain(@Body() body: { goal?: string; blocker?: string; lever?: string; note?: string }) {
+    return this.chains_.create({ ...body, source: 'user' });
+  }
+
+  @Patch('chains/:id')
+  updateChain(@Param('id') id: string, @Body() body: { goal?: string; blocker?: string; lever?: string; note?: string; status?: string }) {
+    return this.chains_.update(id, body || {});
+  }
+
+  @Post('chains/:id/confirm')
+  confirmChain(@Param('id') id: string) {
+    return this.chains_.confirm(id);
+  }
+
+  @Post('chains/:id/refute')
+  refuteChain(@Param('id') id: string) {
+    return this.chains_.refute(id);
+  }
+
+  @Post('chains/:id/resolve')
+  resolveChain(@Param('id') id: string) {
+    return this.chains_.resolve(id);
+  }
+
+  @Post('chains/:id/pin')
+  pinChain(@Param('id') id: string, @Body() body: { pinned?: boolean }) {
+    return this.chains_.pin(id, !!body?.pinned);
+  }
+
+  @Delete('chains/:id')
+  removeChain(@Param('id') id: string) {
+    return this.chains_.remove(id);
+  }
+
+  @Post('chains/parse')
+  parseChain(@Body() body: { text?: string }) {
+    return this.chains_.parse(String(body?.text ?? ''));
+  }
 
   /** Scientist dashboard analytics — mood trend, what-moves-your-mood, heatmaps. (BEA-455) */
   @Get('stats')

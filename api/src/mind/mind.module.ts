@@ -5,13 +5,14 @@ import { MentalModelService } from './mentalmodel.service';
 import { MindLifecycleService } from './lifecycle.service';
 import { MindReviewService } from './review.service';
 import { MindStatsService } from './stats.service';
+import { MindChainService } from './chain.service';
 import { MindController } from './mind.controller';
 
-// "The Lab" — the mini mental model. Ingestion + engine + lifecycle + review + stats (446–455).
+// "The Lab" — the mini mental model. Ingestion + engine + lifecycle + review + stats + situation chains.
 @Module({
   imports: [LlmModule],
-  providers: [MindIngestionService, MentalModelService, MindLifecycleService, MindReviewService, MindStatsService],
+  providers: [MindIngestionService, MentalModelService, MindLifecycleService, MindReviewService, MindStatsService, MindChainService],
   controllers: [MindController],
-  exports: [MindIngestionService, MentalModelService, MindLifecycleService, MindReviewService, MindStatsService],
+  exports: [MindIngestionService, MentalModelService, MindLifecycleService, MindReviewService, MindStatsService, MindChainService],
 })
 export class MindModule {}
