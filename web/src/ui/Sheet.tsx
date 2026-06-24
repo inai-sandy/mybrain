@@ -12,11 +12,15 @@ export function Sheet({
   onClose,
   children,
   canClose,
+  blockBackdropClose,
   size = 'lg',
 }: {
   onClose: () => void;
   children: (close: () => void) => ReactNode;
   canClose?: () => boolean;
+  // When this returns true, an accidental backdrop tap / drag-down is IGNORED (the user must use a button).
+  // The explicit close passed to children still works — so Save/Cancel are never blocked. (BEA-512)
+  blockBackdropClose?: () => boolean;
   size?: 'sm' | 'lg';
 }) {
   const [show, setShow] = useState(true);
@@ -29,6 +33,11 @@ export function Sheet({
   const requestClose = () => {
     if (Date.now() - openedAt.current < 300) return;
     if (allow()) setShow(false);
+  };
+  // Backdrop tap / drag-down dismiss — skipped entirely when the modal asks to block accidental close. (BEA-512)
+  const dismissByGesture = () => {
+    if (blockBackdropClose?.()) return;
+    requestClose();
   };
 
   useEffect(() => {
@@ -54,7 +63,7 @@ export function Sheet({
     <AnimatePresence onExitComplete={onClose}>
       {show && (
         <div className="fixed inset-x-0 top-0 z-50 flex items-end sm:items-center justify-center" style={{ height: 'var(--vvh, 100vh)' }}>
-          <motion.div className="absolute inset-0 bg-black/50" onClick={requestClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />
+          <motion.div className="absolute inset-0 bg-black/50" onClick={dismissByGesture} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />
           <motion.div
             {...panelMotion}
             drag="y"
@@ -63,7 +72,7 @@ export function Sheet({
             dragConstraints={{ top: 0, bottom: 0 }}
             dragElastic={{ top: 0, bottom: 0.5 }}
             onDragEnd={(_e, info) => {
-              if (info.offset.y > 110 || info.velocity.y > 700) requestClose();
+              if (info.offset.y > 110 || info.velocity.y > 700) dismissByGesture();
             }}
             className={'relative w-full rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[calc(var(--vvh,100vh)-1.25rem)] overflow-y-auto ' + (size === 'sm' ? 'sm:max-w-sm' : 'sm:max-w-lg')}
           >

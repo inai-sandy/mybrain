@@ -5,6 +5,7 @@ import { isDictating } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { Sheet } from '../ui/Sheet';
+import { loadDraft, clearDraft, useDraftPersist } from '../ui/useDraft';
 
 type Story = { id: string; text: string; mood?: string | null; createdAt: string; updatedAt?: string };
 type Note = { id: string; text: string; source: string; createdAt: string };
@@ -21,7 +22,8 @@ function timeOf(iso: string): string {
 type Candidate = { title: string; category: string | null };
 
 export function StoryModal({ initial, day, title, onClose, onSaved }: { initial: { text?: string; mood?: string | null } | null; day?: string; title?: string; onClose: () => void; onSaved: () => void }) {
-  const [text, setText] = useState(initial?.text || '');
+  const draftKey = `mybrain.draft.story.${day || 'today'}`;
+  const [text, setText] = useState(initial?.text || loadDraft(draftKey));
   const [mood, setMood] = useState(initial?.mood || '');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState<'story' | 'wrap'>('story');
@@ -31,6 +33,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
   const [hours, setHours] = useState('');
   const [wrapBusy, setWrapBusy] = useState(false);
   const toast = useToast();
+  useDraftPersist(draftKey, step === 'story' ? text : ''); // keep the story draft safe until it's saved (BEA-512)
   const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
   // When we reach the wrap-up step, load everything it needs: found tasks, a suggested hours figure,
@@ -57,6 +60,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
         const j = await r.json().catch(() => ({} as any));
         toast('success', j?.rewriting ? 'Story saved — rewriting that day’s Story of the Day ✨' : 'Story saved 🌙');
         if (j?.wrapped) toast('success', 'Wrapping up that day now — your Mentor and the Lab are updating (about a minute).');
+        clearDraft(draftKey); // saved server-side — the local backup is no longer needed (BEA-512)
         onSaved();
         setStep('wrap'); // → wrap-up: finished tasks + working hours
       } else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
@@ -87,7 +91,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
   }
 
   return (
-    <Sheet onClose={onClose} canClose={() => !isDictating()}>
+    <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => text.trim().length > 0 || step === 'wrap'}>
       {(close) =>
         step === 'wrap' ? (
           <>
