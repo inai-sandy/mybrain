@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MindIngestionService } from './ingestion.service';
 import { MindLifecycleService } from './lifecycle.service';
+import { MindChainService } from './chain.service';
 import { DaySignals } from './mind.types';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
@@ -59,6 +60,7 @@ export class MentalModelService implements OnModuleInit {
     private readonly llm: LlmService,
     private readonly ingestion: MindIngestionService,
     private readonly lifecycle: MindLifecycleService,
+    private readonly chains: MindChainService,
   ) {}
 
   onModuleInit() {
@@ -108,6 +110,7 @@ export class MentalModelService implements OnModuleInit {
     await this.logRun(day, r);
     if (r.proposed || r.reinforced) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
     await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
+    await this.chains.inferFromDay(day).catch((e) => this.log.warn(`mind chains: ${e?.message ?? e}`)); // propose blocker/lever chains (BEA-516)
     return r;
   }
 
