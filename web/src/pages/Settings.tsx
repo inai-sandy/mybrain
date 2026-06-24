@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, type LucideIcon } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
@@ -520,10 +520,7 @@ function AiModelCard() {
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
 
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1">
-        <Sparkles size={18} className="text-emerald-600" /> Default AI model
-      </h2>
+    <AccordionCard title="Default AI model" icon={Sparkles}>
       <p className="text-sm text-zinc-500 mb-4">Used for tagging &amp; summaries (and the chat assistant later). Connect the provider's key below first.</p>
       <div className="grid sm:grid-cols-2 gap-3">
         <label className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -577,7 +574,7 @@ function AiModelCard() {
           Save
         </button>
       </div>
-    </section>
+    </AccordionCard>
   );
 }
 
@@ -782,6 +779,24 @@ function RequestLog() {
   );
 }
 
+/** Collapsible card — header (icon + title + optional badge + chevron) with the body hidden until tapped. (BEA-531) */
+function AccordionCard({ title, icon: Icon, badge, defaultOpen, children }: { title: string; icon?: LucideIcon; badge?: ReactNode; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center justify-between gap-3 p-5 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+        <span className="flex items-center gap-2 font-semibold min-w-0">
+          {Icon && <Icon size={18} className="text-emerald-600 shrink-0" />}
+          <span className="truncate">{title}</span>
+          {badge}
+        </span>
+        <ChevronDown size={18} className={'shrink-0 text-zinc-400 transition-transform ' + (open ? 'rotate-180' : '')} />
+      </button>
+      {open && <div className="px-5 pb-5">{children}</div>}
+    </section>
+  );
+}
+
 function ModelsSection() {
   return (
     <div className="space-y-4">
@@ -864,8 +879,7 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
   }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1"><Icon size={18} className="text-emerald-600" /> {title}</h2>
+    <AccordionCard title={title} icon={Icon}>
       <p className="text-sm text-zinc-500 mb-4">{desc}</p>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
         Model
@@ -880,7 +894,7 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
       <div className="mt-4 text-right">
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
       </div>
-    </section>
+    </AccordionCard>
   );
 }
 
@@ -919,8 +933,7 @@ function MeetingsEngineCard() {
   }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1"><Mic size={18} className="text-emerald-600" /> Meeting transcription engine</h2>
+    <AccordionCard title="Meeting transcription engine" icon={Mic}>
       <p className="text-sm text-zinc-500 mb-4">Which engine turns meeting recordings into text. Deepgram is the cheapest for long meetings; others need their API key in Integrations. (You can also pick per-meeting when you hit Transcribe.)</p>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
         Engine
@@ -946,7 +959,7 @@ function MeetingsEngineCard() {
       <div className="mt-4 text-right">
         <button onClick={save} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">Save</button>
       </div>
-    </section>
+    </AccordionCard>
   );
 }
 
@@ -986,10 +999,7 @@ function ChatModelCard() {
   }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1">
-        <MessageSquare size={18} className="text-emerald-600" /> Chat AI model
-      </h2>
+    <AccordionCard title="Chat AI model" icon={MessageSquare}>
       <p className="text-sm text-zinc-500 mb-4">Runs “talk to my brain”. Pick a <b>fast</b> model — a slow one makes replies take ages. Defaults to Claude Haiku. Uses your OpenRouter key.</p>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
         Model
@@ -1003,7 +1013,7 @@ function ChatModelCard() {
       <div className="mt-4 text-right">
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
       </div>
-    </section>
+    </AccordionCard>
   );
 }
 
@@ -1032,10 +1042,7 @@ function VoiceModelCard() {
   }
 
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1">
-        <Mic size={18} className="text-emerald-600" /> Voice input
-      </h2>
+    <AccordionCard title="Voice input" icon={Mic}>
       <p className="text-sm text-zinc-500 mb-4">
         Powers the mic everywhere (chat, brain-dump, story, notes) and your Telegram voice notes. Records your audio and transcribes it with a high-accuracy engine — far better than the old browser mic.
       </p>
@@ -1067,7 +1074,7 @@ function VoiceModelCard() {
           className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
       </label>
-    </section>
+    </AccordionCard>
   );
 }
 
@@ -1118,11 +1125,12 @@ function PromptsSection() {
       {items.map((p) => {
         const dirty = drafts[p.key] !== p.value;
         return (
-          <section key={p.key} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <h3 className="font-semibold text-sm">{p.label} {p.customized && <span className="ml-1 text-[10px] uppercase tracking-wide text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">customized</span>}</h3>
-              <button onClick={() => reset(p.key)} title="Reset to default" className="text-xs text-zinc-400 hover:text-rose-600 inline-flex items-center gap-1"><RotateCcw size={12} /> reset</button>
-            </div>
+          <AccordionCard
+            key={p.key}
+            title={p.label}
+            icon={MessageSquare}
+            badge={p.customized ? <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">customized</span> : undefined}
+          >
             <p className="text-xs text-zinc-500 mb-2">{p.description}</p>
             <textarea
               value={drafts[p.key] ?? ''}
@@ -1130,10 +1138,11 @@ function PromptsSection() {
               rows={Math.min(16, Math.max(5, (drafts[p.key] || '').split('\n').length + 1))}
               className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-mono leading-relaxed outline-none focus:border-emerald-500"
             />
-            <div className="mt-2 flex justify-end">
+            <div className="mt-2 flex items-center justify-between">
+              <button onClick={() => reset(p.key)} title="Reset to default" className="text-xs text-zinc-400 hover:text-rose-600 inline-flex items-center gap-1"><RotateCcw size={12} /> reset</button>
               <button onClick={() => save(p.key)} disabled={!dirty} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
             </div>
-          </section>
+          </AccordionCard>
         );
       })}
     </div>
@@ -1444,10 +1453,7 @@ function BookmarksModelCard() {
 
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1">
-        <Bookmark size={18} className="text-emerald-600" /> Bookmarks AI model
-      </h2>
+    <AccordionCard title="Bookmarks AI model" icon={Bookmark}>
       <p className="text-sm text-zinc-500 mb-4">
         Used only to summarize your bookmarks (separate from the default model above). YouTube links are watched &amp; summarized natively — pick a Gemini model. Uses your OpenRouter key.
       </p>
@@ -1486,7 +1492,7 @@ function BookmarksModelCard() {
           Save
         </button>
       </div>
-    </section>
+    </AccordionCard>
   );
 }
 
@@ -1530,10 +1536,7 @@ function TasksModelCard() {
 
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-      <h2 className="flex items-center gap-2 font-semibold mb-1">
-        <CheckSquare size={18} className="text-emerald-600" /> Tasks AI model
-      </h2>
+    <AccordionCard title="Tasks AI model" icon={CheckSquare}>
       <p className="text-sm text-zinc-500 mb-4">
         Runs the whole Tasks engine — turning your brain-dump into tasks and (later) understanding you. Only OpenAI &amp; Anthropic models are shown. Defaults to Claude Sonnet. Uses your OpenRouter key.
       </p>
@@ -1572,7 +1575,7 @@ function TasksModelCard() {
           Save
         </button>
       </div>
-    </section>
+    </AccordionCard>
   );
 }
 
