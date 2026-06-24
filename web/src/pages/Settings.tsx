@@ -151,6 +151,15 @@ function AccountSection({ email }: { email?: string }) {
       </form>
     </section>
 
+    {/* Privacy promise — the public, plain-English page (BEA-529) */}
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 max-w-xl">
+      <h2 className="flex items-center gap-2 font-semibold mb-1"><ShieldCheck size={18} className="text-emerald-600" /> Privacy</h2>
+      <p className="text-sm text-zinc-500 mb-3">Your story stays yours — self-hosted, never used to train AI, and your Vault secrets are unreadable to anyone but you. Here's the plain promise.</p>
+      <a href="/privacy.html" target="_blank" rel="noopener" className="inline-flex items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+        <ShieldCheck size={15} /> Read the privacy promise
+      </a>
+    </section>
+
     {/* Update app — moved here from the always-on bottom pill (BEA-441) */}
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 max-w-xl">
       <h2 className="font-semibold mb-1">App</h2>
