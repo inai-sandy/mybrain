@@ -29,6 +29,12 @@ export class MindController {
     return this.chains_.create({ ...body, source: 'user' });
   }
 
+  /** Merge near-duplicate Situation cards into one. (BEA-542) */
+  @Post('chains/dedupe')
+  dedupeChains() {
+    return this.chains_.dedupeChains();
+  }
+
   @Patch('chains/:id')
   updateChain(@Param('id') id: string, @Body() body: { goal?: string; blocker?: string; lever?: string; note?: string; status?: string }) {
     return this.chains_.update(id, body || {});

@@ -203,18 +203,37 @@ function SituationView() {
   const [chains, setChains] = useState<MindChain[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<MindChain | null>(null);
+  const [tidying, setTidying] = useState(false);
+  const toast = useToast();
   const load = () => chainApi.list().then(setChains).catch(() => setChains([]));
   useEffect(() => { load(); }, []);
   const onSaved = () => { setAdding(false); setEditing(null); load(); };
+  async function tidy() {
+    setTidying(true);
+    try {
+      const r = await chainApi.dedupe();
+      toast('success', r.merged ? `Merged ${r.merged} duplicate${r.merged === 1 ? '' : 's'}` : 'No duplicates found');
+      load();
+    } catch {
+      toast('error', 'Could not tidy');
+    } finally {
+      setTidying(false);
+    }
+  }
 
   if (chains === null) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
 
   return (
     <div className="space-y-4">
       {!adding && !editing && (
-        <button onClick={() => setAdding(true)} className="w-full rounded-xl border border-dashed border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 px-4 py-3 text-sm font-medium hover:bg-violet-500/5 inline-flex items-center justify-center gap-1.5">
-          <Plus size={16} /> Add what's blocking you
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setAdding(true)} className="flex-1 rounded-xl border border-dashed border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 px-4 py-3 text-sm font-medium hover:bg-violet-500/5 inline-flex items-center justify-center gap-1.5">
+            <Plus size={16} /> Add what's blocking you
+          </button>
+          {(chains?.length || 0) >= 2 && (
+            <button onClick={tidy} disabled={tidying} title="Merge near-duplicate situations" className="shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 px-3 py-3 text-sm hover:border-violet-400 hover:text-violet-600 disabled:opacity-50">{tidying ? '…' : 'Tidy duplicates'}</button>
+          )}
+        </div>
       )}
       {(adding || editing) && <ChainForm chain={editing} onSaved={onSaved} onCancel={() => { setAdding(false); setEditing(null); }} />}
 
@@ -303,8 +322,12 @@ function ChainForm({ chain, onSaved, onCancel }: { chain: MindChain | null; onSa
     if (!goal.trim() && !blocker.trim() && !lever.trim()) return;
     setBusy(true);
     try {
-      if (chain) await chainApi.update(chain.id, { goal, blocker, lever, note });
-      else await chainApi.create({ goal, blocker, lever, note });
+      if (chain) {
+        await chainApi.update(chain.id, { goal, blocker, lever, note });
+      } else {
+        const r = await chainApi.create({ goal, blocker, lever, note });
+        toast('success', r?.reinforced ? 'You already had a similar one — I strengthened it instead of adding a duplicate' : 'Added');
+      }
       onSaved();
     } catch {
       toast('error', 'Could not save');

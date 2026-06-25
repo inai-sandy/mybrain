@@ -95,7 +95,8 @@ export const mindApi = {
 // Situation chains API (BEA-515)
 export const chainApi = {
   list: () => fetch('/api/mind/chains').then((r) => j<MindChain[]>(r)),
-  create: (c: { goal: string; blocker: string; lever: string; note?: string }) => post('/api/mind/chains', c) as Promise<MindChain>,
+  create: (c: { goal: string; blocker: string; lever: string; note?: string }) => post('/api/mind/chains', c) as Promise<MindChain & { reinforced?: boolean }>,
+  dedupe: () => post('/api/mind/chains/dedupe') as Promise<{ merged: number }>,
   update: (id: string, patch: Partial<Pick<MindChain, 'goal' | 'blocker' | 'lever' | 'note' | 'status'>>) =>
     fetch(`/api/mind/chains/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).then((r) => j(r)),
   confirm: (id: string) => post(`/api/mind/chains/${id}/confirm`),
