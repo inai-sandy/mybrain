@@ -133,6 +133,12 @@ export class MindController {
   }
 
   /** The run-log — WHEN the Lab learned + the morning wrap-up ran, with date/time. (BEA-468) */
+  /** "What the Lab connected" on the last closed day, for the Lab recap banner. (BEA-544) */
+  @Get('recap')
+  recap() {
+    return this.engine.recap();
+  }
+
   @Get('runs')
   async runs() {
     const runs = await this.prisma.mindRun.findMany({ orderBy: { at: 'desc' }, take: 50 });

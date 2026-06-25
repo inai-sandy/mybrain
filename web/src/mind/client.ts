@@ -75,6 +75,13 @@ const j = async <T>(r: Response): Promise<T> => {
 const post = (url: string, body?: unknown) =>
   fetch(url, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }).then((r) => j(r));
 
+export type Recap = {
+  day: string | null;
+  findings: { statement: string; valence: string }[];
+  situationsAdded: { goal: string; lever: string; provenance: string | null }[];
+  situationsUpdated: { goal: string; blocker: string }[];
+};
+
 export const mindApi = {
   review: () => fetch('/api/mind/review').then((r) => j<{ pending: Finding[]; fading: Finding[] }>(r)),
   findings: () => fetch('/api/mind/findings').then((r) => j<Finding[]>(r)),
@@ -88,6 +95,7 @@ export const mindApi = {
   remove: (id: string) => fetch(`/api/mind/findings/${id}`, { method: 'DELETE' }).then((r) => j(r)),
   run: (day?: string) => post('/api/mind/run', day ? { day } : {}),
   runs: () => fetch('/api/mind/runs').then((r) => j<RunStatus>(r)),
+  recap: () => fetch('/api/mind/recap').then((r) => j<Recap>(r)),
   activity: (days = 30) => fetch(`/api/mind/activity?days=${days}`).then((r) => j<Activity>(r)),
   getAbout: () => fetch('/api/mind/about').then((r) => j<{ text: string }>(r)),
   setAbout: (text: string) => fetch('/api/mind/about', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }).then((r) => j<{ text: string }>(r)),
