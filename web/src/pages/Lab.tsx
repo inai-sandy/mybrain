@@ -6,7 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import { MindReview } from '../mind/MindReview';
 import { Mentor } from './Mentor';
 import { FindingSheet, type FindingView } from '../mind/FindingSheet';
-import { mindApi, chainApi, valenceClass, sureWord, trustRung, fmtRelative, fmtWhen, type Finding, type Stats, type MindChain } from '../mind/client';
+import { mindApi, chainApi, valenceClass, sureWord, trustRung, fmtRelative, fmtWhen, type Finding, type Stats, type MindChain, type Recap } from '../mind/client';
 import { TrustLadder } from '../mind/TrustLadder';
 
 // One-line plain-English explainer shown under each tab. (BEA-462)
@@ -107,6 +107,8 @@ export function Lab() {
         )}
       </div>
 
+      <LabRecap onGoSituation={() => setTab('situation')} />
+
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={'shrink-0 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors capitalize ' + (tab === t ? 'border-violet-500 text-violet-600 dark:text-violet-400' : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}>
@@ -199,6 +201,42 @@ function AboutMe() {
 }
 
 // ---------------- Situation: Goals → Blockers → Levers (BEA-515) ----------------
+/** "What the Lab connected" from your last closed day — dismissible per day. (BEA-544) */
+function LabRecap({ onGoSituation }: { onGoSituation: () => void }) {
+  const [recap, setRecap] = useState<Recap | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { mindApi.recap().then(setRecap).catch(() => setRecap(null)); }, []);
+  if (!recap || !recap.day) return null;
+  const total = recap.findings.length + recap.situationsAdded.length + recap.situationsUpdated.length;
+  if (total === 0) return null;
+  if (localStorage.getItem('lab.recap.dismissed') === recap.day) return null;
+  const dismiss = () => { localStorage.setItem('lab.recap.dismissed', recap.day!); setRecap(null); };
+  const pretty = (() => { const d = new Date(recap.day + 'T12:00:00'); return Number.isNaN(d.getTime()) ? recap.day : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); })();
+  return (
+    <section className="rounded-xl border border-violet-300/50 dark:border-violet-500/30 bg-gradient-to-br from-violet-500/5 to-transparent p-3.5">
+      <div className="flex items-start gap-2">
+        <Sparkles size={16} className="text-violet-500 shrink-0 mt-0.5" />
+        <div className="min-w-0 flex-1">
+          <button onClick={() => setOpen((o) => !o)} className="text-sm font-medium text-left flex items-center gap-1.5">
+            From your {pretty}: I connected{' '}
+            {[recap.findings.length && `${recap.findings.length} finding${recap.findings.length === 1 ? '' : 's'}`, recap.situationsAdded.length && `${recap.situationsAdded.length} new situation${recap.situationsAdded.length === 1 ? '' : 's'}`, recap.situationsUpdated.length && `${recap.situationsUpdated.length} updated`].filter(Boolean).join(' · ')}
+            <ChevronDown size={14} className={'text-zinc-400 transition-transform ' + (open ? 'rotate-180' : '')} />
+          </button>
+          {open && (
+            <div className="mt-2 space-y-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+              {recap.findings.map((f, i) => <div key={'f' + i} className="flex items-start gap-1.5"><span className="text-violet-400">•</span> {f.statement}</div>)}
+              {recap.situationsAdded.map((s, i) => <div key={'s' + i} className="flex items-start gap-1.5"><Target size={12} className="text-violet-500 mt-0.5 shrink-0" /> {s.goal}{s.lever ? <span className="text-emerald-600 dark:text-emerald-400"> → {s.lever}</span> : null}</div>)}
+              {recap.situationsUpdated.map((s, i) => <div key={'u' + i} className="flex items-start gap-1.5"><Wrench size={12} className="text-amber-500 mt-0.5 shrink-0" /> blocker shifted on “{s.goal}”</div>)}
+              <button onClick={onGoSituation} className="text-violet-600 dark:text-violet-400 hover:underline pt-0.5">Open Situation →</button>
+            </div>
+          )}
+        </div>
+        <button onClick={dismiss} aria-label="Dismiss" className="shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"><X size={15} /></button>
+      </div>
+    </section>
+  );
+}
+
 function SituationView() {
   const [chains, setChains] = useState<MindChain[] | null>(null);
   const [adding, setAdding] = useState(false);

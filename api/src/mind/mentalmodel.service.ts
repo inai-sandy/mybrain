@@ -116,6 +116,19 @@ export class MentalModelService implements OnModuleInit {
     return r;
   }
 
+  /** "What I connected" — what the Lab learned on the most recently closed day, for the Lab recap banner. (BEA-544) */
+  async recap() {
+    const lastClose = await this.prisma.dayClose.findFirst({ orderBy: { day: 'desc' } }).catch(() => null);
+    if (!lastClose) return { day: null as string | null, findings: [], situationsAdded: [], situationsUpdated: [] };
+    const day = lastClose.day;
+    const [findings, added, updated] = await Promise.all([
+      this.prisma.mindFinding.findMany({ where: { firstSeenDay: day, status: { not: 'retired' }, NOT: { validated: 'refuted' } }, orderBy: { confidence: 'desc' }, take: 6, select: { statement: true, valence: true } }),
+      this.prisma.mindChain.findMany({ where: { firstSeenDay: day, status: { not: 'retired' } }, select: { goal: true, lever: true, provenance: true } }),
+      this.prisma.mindChain.findMany({ where: { lastSeenDay: day, shifted: true, status: { not: 'retired' }, NOT: { firstSeenDay: day } }, select: { goal: true, blocker: true } }),
+    ]);
+    return { day, findings, situationsAdded: added, situationsUpdated: updated };
+  }
+
   /** Hourly catch-up: reflect on any CLOSED day we haven't learned yet (e.g. closed while the app was down). */
   private async catchUp(): Promise<void> {
     const learned = await this.learnedSet();
