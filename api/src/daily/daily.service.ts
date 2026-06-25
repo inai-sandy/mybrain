@@ -549,20 +549,25 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
     const tz = await this.tz();
     const today = this.dayKey(tz);
-    // 1. finalize the day's narrative + verdict, in dependency order
-    await this.generateSummary(day, true).catch(() => undefined);
-    await this.generateDayStory(day, true).catch(() => undefined);
-    await this.mentor.runMentorDay(day, true).catch(() => undefined);
-    await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
-    // 2. roll the day's genuine leftovers forward: a past day → today; closing today → tomorrow.
+    // 1. SEAL FIRST — the fast, essential work, so the request returns immediately and the day actually closes
+    //    even if the LLM artifacts below are slow. (BEA-541: the 4 LLM calls used to run first and time out
+    //    the request before the seal, leaving the day un-closed.)
+    // Roll the day's genuine leftovers forward: a past day → today; closing today → tomorrow.
     const target = day < today ? today : this.dayAdd(day, 1);
     const rolled = (await this.tasks.rollDayForward(day, target)).rolled;
-    // 3. seal it — its artifacts are now "final" (provisional is derived from this row's absence)
+    // Seal it — its artifacts are now "final" (provisional is derived from this row's absence).
     await this.prisma.dayClose.upsert({ where: { day }, create: { day, auto }, update: { auto } });
-    // 3b. run-log so the user sees every wrap with its time + why it happened. (BEA-470)
+    // Run-log so the user sees every wrap with its time + why it happened. (BEA-470)
     await this.prisma.mindRun.create({ data: { kind: 'close', day, detail: `Wrapped up ${day}${reason ? ` — ${reason}` : auto ? ' (automatic)' : ''}` } }).catch(() => undefined);
-    // 4. The Lab reflects on the day NOW that it's complete — not on a blind nightly clock. Fire-and-forget. (BEA-458)
-    void this.mind.learnDay(day).catch(() => undefined);
+    // 2. Generate the heavy narrative + verdict in the BACKGROUND, in dependency order, then let the Lab
+    //    reflect. The UI already tells the user this takes about a minute. Fire-and-forget.
+    void (async () => {
+      await this.generateSummary(day, true).catch(() => undefined);
+      await this.generateDayStory(day, true).catch(() => undefined);
+      await this.mentor.runMentorDay(day, true).catch(() => undefined);
+      await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
+      await this.mind.learnDay(day).catch(() => undefined); // the Lab reflects once the day is complete (BEA-458)
+    })().catch(() => undefined);
     return { day, closed: true, auto, rolled };
   }
 
