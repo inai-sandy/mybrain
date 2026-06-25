@@ -3,8 +3,16 @@ import { DocumentsService } from './documents.service';
 // Minimal in-memory fake of the Prisma `document` model.
 function fakePrisma() {
   const rows: any[] = [];
+  const settings: Record<string, string> = {};
   return {
     _rows: rows,
+    setting: {
+      findUnique: async ({ where }: any) => (where.key in settings ? { key: where.key, value: settings[where.key] } : null),
+      upsert: async ({ where, create, update }: any) => {
+        settings[where.key] = update?.value ?? create?.value;
+        return { key: where.key, value: settings[where.key] };
+      },
+    },
     document: {
       create: async ({ data }: any) => {
         const row = { id: 'id-' + (rows.length + 1), createdAt: new Date(), updatedAt: new Date(), shared: false, ...data };
@@ -78,6 +86,20 @@ describe('DocumentsService', () => {
 
     await svc.setShared(doc.id, false);
     expect(await svc.getShared(doc.slug)).toBeNull();
+  });
+
+  it('manages the ingest token (create, verify constant-time, regenerate)', async () => {
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any);
+    const t = await svc.ingestToken();
+    expect(t).toHaveLength(64);
+    expect(await svc.ingestToken()).toBe(t); // stable across reads
+    expect(await svc.verifyIngestToken(t)).toBe(true);
+    expect(await svc.verifyIngestToken('wrong')).toBe(false);
+    expect(await svc.verifyIngestToken('')).toBe(false);
+    const t2 = await svc.regenerateIngestToken();
+    expect(t2).not.toBe(t);
+    expect(await svc.verifyIngestToken(t)).toBe(false);
+    expect(await svc.verifyIngestToken(t2)).toBe(true);
   });
 
   it('produces a download payload with a safe filename', async () => {
