@@ -18,6 +18,12 @@ export class TasksController {
     return this.tasks.backfillIndex({ all: all === '1' || all === 'true' });
   }
 
+  /** Remove every open-task entry from memory (deletion only — no AI). (BEA-546) */
+  @Post('purge-open-memory')
+  async purgeOpenMemory() {
+    return this.tasks.purgeOpenTaskMemory();
+  }
+
   @Get('today')
   async today() {
     return this.tasks.today();

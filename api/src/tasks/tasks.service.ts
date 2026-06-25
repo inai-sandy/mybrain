@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -21,6 +21,7 @@ type CraftedTask = {
 @Injectable()
 export class TasksService implements OnModuleInit, OnModuleDestroy {
   private tick: NodeJS.Timeout | null = null;
+  private readonly log = new Logger('TasksService');
 
   constructor(
     private readonly prisma: PrismaService,
@@ -30,9 +31,19 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   /** Build the searchable text for a task and (re-)index it into the brain. Fire-and-forget:
-   *  indexing must never block or fail a task operation. (BEA-331) */
+   *  indexing must never block or fail a task operation. (BEA-331)
+   *  ONLY finished tasks belong in memory — open tasks are working state and re-indexing them on every
+   *  rollover/progress update was creating endless duplicates. So for a non-done task we instead REMOVE
+   *  any memory docs it has and clear the stored ids. (BEA-546) */
   private indexTask(t: any): void {
     if (!t?.id) return;
+    if (t.status !== 'done') {
+      if (t.supermemoryId || t.ragId) {
+        this.memory.deleteDoc(t.supermemoryId, t.ragId).catch(() => undefined);
+        this.prisma.task.update({ where: { id: t.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+      }
+      return;
+    }
     const tags = JSON.parse((t.tags as string) || '[]');
     const parts = [
       t.title,
@@ -64,6 +75,31 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     // No automatic midnight rollover anymore: a day's open tasks stay on that day until the day is
     // CLOSED (DailyService.closeDay), which then rolls the leftovers forward via rollDayForward().
     // This keeps task credit truthful to the day the work actually belonged to.
+    // One-time cleanup: clear the open-task duplicates that earlier builds wrote to memory. (BEA-546)
+    setTimeout(() => this.runOnceMemoryCleanup().catch((e) => this.log.warn(`open-task purge: ${e?.message ?? e}`)), 20000);
+  }
+
+  /** Delete the memory docs of every non-done task that still has them (deletion only — no AI). (BEA-546) */
+  async purgeOpenTaskMemory(): Promise<{ purged: number }> {
+    const open = await this.prisma.task.findMany({
+      where: { status: { not: 'done' }, OR: [{ NOT: { supermemoryId: null } }, { NOT: { ragId: null } }] },
+      select: { id: true, supermemoryId: true, ragId: true },
+    });
+    for (const t of open) {
+      await this.memory.deleteDoc(t.supermemoryId, t.ragId).catch(() => undefined);
+      await this.prisma.task.update({ where: { id: t.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+    }
+    return { purged: open.length };
+  }
+
+  /** Run the open-task memory purge ONCE (guarded by a Setting flag). */
+  private async runOnceMemoryCleanup(): Promise<void> {
+    const key = 'tasks.purgedOpenMemoryV1';
+    const seen = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    if (seen?.value) return;
+    const r = await this.purgeOpenTaskMemory();
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value: String(r.purged) }, update: { value: String(r.purged) } }).catch(() => undefined);
+    this.log.log(`memory cleanup: removed ${r.purged} open-task docs (open tasks are no longer indexed)`);
   }
   onModuleDestroy() {
     if (this.tick) clearInterval(this.tick);
