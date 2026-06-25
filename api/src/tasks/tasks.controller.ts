@@ -30,6 +30,12 @@ export class TasksController {
     return this.tasks.purgeOrphanTaskDocs();
   }
 
+  /** Wipe all task docs from memory and re-index only the done tasks (clears all dups). (BEA-549) */
+  @Post('rebuild-task-memory')
+  async rebuildTaskMemory() {
+    return this.tasks.rebuildTaskMemory();
+  }
+
   @Get('today')
   async today() {
     return this.tasks.today();

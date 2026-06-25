@@ -79,6 +79,26 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     setTimeout(() => this.runOnceMemoryCleanup().catch((e) => this.log.warn(`open-task purge: ${e?.message ?? e}`)), 20000);
     // One-time deep sweep: remove ORPHAN task docs left in the stores by past churn. (BEA-548)
     setTimeout(() => this.runOnceOrphanSweep().catch((e) => this.log.warn(`orphan sweep: ${e?.message ?? e}`)), 45000);
+    // One-time REBUILD: wipe every task doc and re-index only the done tasks (clears all dups). (BEA-549)
+    setTimeout(() => this.runOnceRebuild().catch((e) => this.log.warn(`task memory rebuild: ${e?.message ?? e}`)), 70000);
+  }
+
+  /** Wipe every task doc from both stores, then re-index only the done tasks → one clean doc each. (BEA-549) */
+  async rebuildTaskMemory(): Promise<{ deleted: { sm: number; rag: number }; reindexed: number }> {
+    const deleted = await this.memory.deleteAllTaskDocs();
+    await this.prisma.task.updateMany({ where: { status: 'done' }, data: { supermemoryId: null, ragId: null } });
+    const done = await this.prisma.task.findMany({ where: { status: 'done' } });
+    for (const t of done) this.indexTask(t); // done-only; enqueues a fresh doc, drained async
+    return { deleted, reindexed: done.length };
+  }
+
+  private async runOnceRebuild(): Promise<void> {
+    const key = 'tasks.rebuiltTaskMemoryV1';
+    const seen = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    if (seen?.value) return;
+    const r = await this.rebuildTaskMemory();
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value: JSON.stringify(r) }, update: { value: JSON.stringify(r) } }).catch(() => undefined);
+    this.log.log(`task memory rebuild: wiped sm=${r.deleted.sm} rag=${r.deleted.rag} task docs, re-indexing ${r.reindexed} done tasks`);
   }
 
   /** Passthrough: delete orphan task docs from the stores (deletion only). (BEA-548) */
