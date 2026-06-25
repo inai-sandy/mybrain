@@ -162,6 +162,17 @@ export class DocumentsController {
     return d;
   }
 
+  /** Public binary stream for a shared pdf/image doc. (BEA-553) */
+  @Public()
+  @Get('public/:slug/file')
+  async publicFile(@Param('slug') slug: string, @Res() res: Response) {
+    const f = await this.docs.sharedFile(slug);
+    if (!f) throw new NotFoundException('Not shared.');
+    res.setHeader('Content-Type', f.mime);
+    res.setHeader('Content-Disposition', `inline; filename="${f.filename}"`);
+    res.sendFile(f.filePath);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const d = await this.docs.get(id);
