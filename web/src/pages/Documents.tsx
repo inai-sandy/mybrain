@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
@@ -6,6 +6,9 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
 import { MarkdownEditor } from '../ui/MarkdownEditor';
 import { useToast } from '../ui/Toast';
+
+// TipTap is heavy — load the WYSIWYG editor on demand so it stays out of the main bundle. (BEA-556)
+const RichTextEditor = lazy(() => import('../ui/RichTextEditor').then((m) => ({ default: m.RichTextEditor })));
 
 export type DocItem = {
   id: string;
@@ -405,6 +408,7 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
   const [description, setDescription] = useState(doc?.description || '');
   const [tags, setTags] = useState((doc?.tags || []).join(', '));
   const [collectionId, setCollectionId] = useState<string>(doc?.collectionId || defaultCollectionId || '');
+  const [richMode, setRichMode] = useState(true); // Notion-style WYSIWYG by default (BEA-556)
   const [cols, setCols] = useState<Collection[]>(collections);
   const [busy, setBusy] = useState(false);
   const [filling, setFilling] = useState(false);
@@ -494,7 +498,19 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
           ) : isBinary ? (
             <p className="text-sm text-zinc-500 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2">This is a {doc?.kind?.toUpperCase()} file — you can edit its title, description and tags here.</p>
           ) : (
-            <MarkdownEditor value={content} onChange={setContent} />
+            <div className="space-y-2">
+              <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 p-0.5 text-xs">
+                <button type="button" onClick={() => setRichMode(true)} className={'px-2.5 py-1 rounded-md transition-colors ' + (richMode ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>Rich</button>
+                <button type="button" onClick={() => setRichMode(false)} className={'px-2.5 py-1 rounded-md transition-colors ' + (!richMode ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>Markdown</button>
+              </div>
+              {richMode ? (
+                <Suspense fallback={<div className="min-h-[360px] grid place-items-center text-sm text-zinc-400 rounded-lg border border-zinc-300 dark:border-zinc-700">Loading editor…</div>}>
+                  <RichTextEditor value={content} onChange={setContent} />
+                </Suspense>
+              ) : (
+                <MarkdownEditor value={content} onChange={setContent} />
+              )}
+            </div>
           )}
           <div className="flex items-center justify-between gap-2 pt-1">
             <label className="text-xs font-medium text-zinc-500">Description &amp; tags</label>
