@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Query, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
+import archiver from 'archiver';
 import { DocumentsService, DocInput } from './documents.service';
 import { Public } from '../auth/public.decorator';
 
@@ -19,6 +20,45 @@ export class DocumentsController {
   @Get('search')
   search(@Query('q') q?: string) {
     return this.docs.search(q || '');
+  }
+
+  // ---- Bulk actions + export (BEA-539). Declared before ':id' routes. ----
+
+  @Post('bulk/delete')
+  bulkDelete(@Body() body: { ids?: string[] }) {
+    return this.docs.bulkDelete(body?.ids || []);
+  }
+
+  @Post('bulk/tag')
+  bulkTag(@Body() body: { ids?: string[]; tags?: string[] }) {
+    return this.docs.bulkAddTags(body?.ids || [], body?.tags || []);
+  }
+
+  @Post('bulk/collection')
+  bulkCollection(@Body() body: { ids?: string[]; collectionId?: string | null }) {
+    return this.docs.bulkSetCollection(body?.ids || [], body?.collectionId ?? null);
+  }
+
+  @Post('bulk/share')
+  bulkShare(@Body() body: { ids?: string[]; shared?: boolean }) {
+    return this.docs.bulkSetShared(body?.ids || [], !!body?.shared);
+  }
+
+  /** Stream a zip of the chosen documents (or all when ids is empty). */
+  @Post('export')
+  async export(@Body() body: { ids?: string[] }, @Res() res: Response) {
+    const rows = await this.docs.forExport(body?.ids);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="documents-${rows.length}.zip"`);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.on('error', () => res.end());
+    archive.pipe(res);
+    for (const r of rows) {
+      const name = this.docs.exportName(r);
+      if (r.filePath) archive.file(r.filePath, { name });
+      else archive.append(r.contentText || '', { name });
+    }
+    await archive.finalize();
   }
 
   @Post()
