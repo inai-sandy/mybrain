@@ -497,13 +497,12 @@ describe('DailyService', () => {
     expect(st.minutesSpent).toBe(75);
   });
 
-  it('generates a day summary and indexes it to memory stamped "activity"', async () => {
+  it('generates a day summary but does NOT index it to memory (the Story of the Day covers it) (BEA-551)', async () => {
     const { svc, summaries, enqueued } = makeService({ llmText: 'You finished the proposal and felt good.' });
     const out = await svc.generateSummary('2026-06-07');
     expect(out.text).toContain('proposal');
     expect(summaries).toHaveLength(1);
-    expect(enqueued).toHaveLength(1);
-    expect(enqueued[0].o.tags).toEqual(['activity']);
+    expect(enqueued).toHaveLength(0); // day summaries are no longer redundant noise in the brain
   });
 
   it('falls back to a deterministic summary if the LLM is unavailable', async () => {

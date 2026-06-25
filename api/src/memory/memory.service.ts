@@ -23,7 +23,9 @@ const SOURCE_META: Record<string, SourceMeta> = {
   note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true, cadence: 'live' },
   // Vault — LABELS ONLY (BEA-368). Index the searchable metadata so items are findable from the brain;
   // the encrypted secret is NEVER indexed (see buildVaultIndexText). User-toggleable; default on.
-  vault: { label: 'Vault (labels only)', model: 'vaultItem', pk: 'id', cadence: 'live' },
+  // Vault is a secrets manager — its 900+ label docs overload the brain with low-value metadata and add
+  // nothing to retrieval (the Vault has its own search). Off by default now. (BEA-551)
+  vault: { label: 'Vault (labels only)', model: 'vaultItem', pk: 'id', defaultDisabled: true, cadence: 'live' },
   gmailbrief: { label: 'Daily Email Brief', model: 'gmailBrief', pk: 'day', mandatory: true, cadence: 'nightly' },
   gmailrequest: { label: 'Email Requests', model: 'gmailRequest', pk: 'id', mandatory: true, cadence: 'live' },
   // Each important email stored in memory, full body (BEA-439). User-toggleable; default on.
@@ -321,6 +323,48 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   async deleteDoc(supermemoryId?: string | null, ragId?: string | null): Promise<void> {
     if (supermemoryId) await this.sm.delete(supermemoryId).catch(() => undefined);
     if (ragId) await this.rag.delete(ragId).catch(() => undefined);
+  }
+
+  /** Stop indexing low-value sources (Vault, Day summaries, Personality portrait) and purge what's there. (BEA-551) */
+  async purgeLowValueSources(): Promise<{ vault: number; daysummary: number; portrait: number }> {
+    // Turn the Vault source off going forward.
+    await this.prisma.indexSource.update({ where: { type: 'vault' }, data: { enabled: false } }).catch(() => undefined);
+    this.enabled.set('vault', false);
+
+    // Vault: delete each item's label doc + clear its ids (vault DATA is untouched).
+    let vault = 0;
+    const vaults = await this.prisma.vaultItem.findMany({ where: { OR: [{ NOT: { supermemoryId: null } }, { NOT: { ragId: null } }] }, select: { id: true, supermemoryId: true, ragId: true } });
+    for (const v of vaults) {
+      await this.deleteDoc(v.supermemoryId, v.ragId);
+      await this.prisma.vaultItem.update({ where: { id: v.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+      vault++;
+    }
+
+    // Day summaries: redundant with the Story of the Day.
+    let daysummary = 0;
+    const sums = await this.prisma.daySummary.findMany({ where: { OR: [{ NOT: { supermemoryId: null } }, { NOT: { ragId: null } }] }, select: { id: true, supermemoryId: true, ragId: true } });
+    for (const s of sums) {
+      await this.deleteDoc(s.supermemoryId, s.ragId);
+      await this.prisma.daySummary.update({ where: { id: s.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+      daysummary++;
+    }
+
+    // Personality portrait: no DB row tracks its doc ids — find the (often duplicated) docs by title.
+    let portrait = 0;
+    const isPortrait = (d: { title?: string }) => String(d.title || '').startsWith('Personality portrait');
+    for (let page = 1; page <= 500; page++) {
+      const { docs, total } = await this.sm.list(200, page).catch(() => ({ docs: [] as any[], total: 0 }));
+      if (!docs.length) break;
+      for (const d of docs) if (isPortrait(d)) { await this.sm.delete(d.id).catch(() => undefined); portrait++; }
+      if (page * 200 >= (total || 0)) break;
+    }
+    for (let pass = 0; pass < 50; pass++) {
+      const docs = await this.rag.list(100, 'activity').catch(() => [] as { id: string; title: string; tags: string[] }[]);
+      const ps = docs.filter(isPortrait);
+      if (!ps.length) break;
+      for (const d of ps) { await this.rag.delete(d.id).catch(() => undefined); portrait++; }
+    }
+    return { vault, daysummary, portrait };
   }
 
   /** Delete EVERY task-type doc from both stores (so the caller can re-index a clean set). Deletion only. (BEA-549) */
