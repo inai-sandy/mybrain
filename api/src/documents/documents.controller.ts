@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Query, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { DocumentsService, DocInput } from './documents.service';
@@ -13,6 +13,12 @@ export class DocumentsController {
   @Get()
   list() {
     return this.docs.list();
+  }
+
+  /** Full-text-ish search across title, description, tags and content. (BEA-538) */
+  @Get('search')
+  search(@Query('q') q?: string) {
+    return this.docs.search(q || '');
   }
 
   @Post()

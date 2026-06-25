@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2 } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -17,6 +17,7 @@ export type DocItem = {
   collectionId: string | null;
   shared: boolean;
   bytes: number | null;
+  snippet?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,6 +51,9 @@ export function Documents() {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCol, setActiveCol] = useState<string | 'all'>('all');
   const [managing, setManaging] = useState(false);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<DocItem[]>([]);
+  const searching = q.trim().length >= 2;
   const fileInput = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const navigate = useNavigate();
@@ -66,6 +70,20 @@ export function Documents() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (!searching) {
+      setResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      fetch(`/api/documents/search?q=${encodeURIComponent(q.trim())}`)
+        .then((r) => r.json())
+        .then((d) => setResults(d.documents || []))
+        .catch(() => setResults([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, searching]);
 
   async function upload(files: FileList | null) {
     if (!files?.length) return;
@@ -119,6 +137,7 @@ export function Documents() {
           </button>
         </div>
         {r.description && <p className="mt-2 text-xs text-zinc-500 line-clamp-2">{r.description}</p>}
+        {r.snippet && <p className="mt-1.5 text-xs text-zinc-400 italic line-clamp-2 border-l-2 border-emerald-500/40 pl-2">{r.snippet}</p>}
         {r.tags?.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
             {r.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
@@ -151,7 +170,13 @@ export function Documents() {
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search documents — including inside their content…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 pl-9 pr-9 py-2 text-sm outline-none focus:border-emerald-500" />
+        {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"><X size={15} /></button>}
+      </div>
+
+      <div className={'flex items-center gap-1.5 flex-wrap ' + (searching ? 'opacity-40 pointer-events-none' : '')}>
         {[{ id: 'all', name: 'All', count: items.length } as { id: string; name: string; count: number }, ...collections].map((c) => (
           <button
             key={c.id}
@@ -166,14 +191,15 @@ export function Documents() {
 
       <DataTable<DocItem>
         columns={cols}
-        rows={activeCol === 'all' ? items : items.filter((i) => i.collectionId === activeCol)}
+        rows={searching ? results : activeCol === 'all' ? items : items.filter((i) => i.collectionId === activeCol)}
         loading={loading}
-        filters={filters}
-        sortOptions={sortOptions}
+        filters={searching ? [] : filters}
+        sortOptions={searching ? [] : sortOptions}
+        searchable={false}
         renderCard={card}
         cardsOnly
         pageSize={12}
-        emptyText="No documents yet — hit New Document to write your first one."
+        emptyText={searching ? `No documents match "${q.trim()}".` : 'No documents yet — hit New Document to write your first one.'}
       />
 
       {(creating || editing) && (

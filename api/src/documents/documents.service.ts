@@ -100,6 +100,37 @@ export class DocumentsService {
     return { documents: rows.map((r) => this.shape(r)) };
   }
 
+  /** A short snippet around the first occurrence of the query in the text. */
+  private snippet(text: string, q: string): string | null {
+    if (!text) return null;
+    const i = text.toLowerCase().indexOf(q.toLowerCase());
+    if (i < 0) return null;
+    const start = Math.max(0, i - 60);
+    const raw = text.slice(start, i + q.length + 80).replace(/\s+/g, ' ').trim();
+    return (start > 0 ? '…' : '') + raw + '…';
+  }
+
+  /** Full-text-ish search across title, description, tags AND content. (BEA-538) */
+  async search(q: string) {
+    const term = (q || '').trim();
+    if (term.length < 2) return { documents: [] as ReturnType<DocumentsService['shape']>[] };
+    const rows = await this.prisma.document.findMany({
+      where: {
+        OR: [
+          { title: { contains: term } },
+          { description: { contains: term } },
+          { tags: { contains: term } },
+          { contentText: { contains: term } },
+        ],
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 100,
+    });
+    return {
+      documents: rows.map((r) => ({ ...this.shape(r), snippet: this.snippet(r.contentText || '', term) })),
+    };
+  }
+
   // ---- Collections / folders (BEA-537) ----
 
   async listCollections() {
@@ -201,10 +232,11 @@ export class DocumentsService {
 
     let description = '';
     let tags: string[] = [];
+    let pdfText = '';
     if (kind === 'pdf') {
-      const text = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
-      if (text.trim()) {
-        const ai = await this.summarize(text).catch(() => ({ description: '', tags: [] as string[] }));
+      pdfText = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
+      if (pdfText.trim()) {
+        const ai = await this.summarize(pdfText).catch(() => ({ description: '', tags: [] as string[] }));
         description = ai.description;
         tags = ai.tags;
       }
@@ -216,6 +248,8 @@ export class DocumentsService {
       description: description.slice(0, 200),
       kind,
       tags,
+      // Keep the extracted PDF text so the doc is searchable; the viewer still renders the file, not this. (BEA-538)
+      contentText: kind === 'pdf' && pdfText.trim() ? pdfText : null,
       filePath,
       mime: file.mimetype || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
       filename: name,
