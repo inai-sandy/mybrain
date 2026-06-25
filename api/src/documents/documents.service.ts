@@ -232,6 +232,46 @@ export class DocumentsService {
     return doc;
   }
 
+  /** Reject obviously-internal hosts before fetching a user-supplied URL (light SSRF guard). */
+  private isBlockedHost(host: string): boolean {
+    const h = host.toLowerCase();
+    if (h === 'localhost' || h.endsWith('.localhost') || h === '0.0.0.0') return true;
+    if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+    return false;
+  }
+
+  /** Import a document from a URL — fetch it, detect type, store + summarise. (BEA-536) */
+  async importFromUrl(rawUrl: string) {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new Error('That doesn’t look like a valid link.');
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Only http and https links are supported.');
+    if (this.isBlockedHost(url.hostname)) throw new Error('That address isn’t allowed.');
+
+    const res = await fetch(url.toString(), { redirect: 'follow', headers: { 'User-Agent': 'MyBrain-Documents/1.0' } }).catch(() => null);
+    if (!res || !res.ok) throw new Error(`Could not fetch that link${res ? ` (HTTP ${res.status})` : ''}.`);
+    const mime = (res.headers.get('content-type') || '').split(';')[0].trim();
+    const buf = Buffer.from(await res.arrayBuffer());
+    const nameFromPath = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || url.hostname);
+    const kind = this.kindOf(nameFromPath, mime);
+
+    let doc;
+    if (kind === 'md' || kind === 'html') {
+      const content = buf.toString('utf8');
+      let title = nameFromPath.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+      if (kind === 'html') title = (content.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] || title || url.hostname).trim();
+      doc = await this.create({ title: title || url.hostname, contentText: content, kind });
+    } else {
+      doc = await this.createFromUpload({ originalname: nameFromPath, mimetype: mime, buffer: buf, size: buf.length });
+    }
+    await this.prisma.document.update({ where: { id: doc.id }, data: { sourceUrl: url.toString().slice(0, 500) } }).catch(() => undefined);
+    return doc;
+  }
+
   /** Locate a stored binary file for streaming (open/preview/download). */
   async file(id: string) {
     const row = await this.prisma.document.findUnique({ where: { id } });

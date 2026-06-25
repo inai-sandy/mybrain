@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { DocumentsService, DocInput } from './documents.service';
@@ -18,6 +18,17 @@ export class DocumentsController {
   @Post()
   create(@Body() body: DocInput) {
     return this.docs.create(body || {});
+  }
+
+  /** Import a document from a URL (fetch + store + summarize). (BEA-536) */
+  @Post('import-url')
+  async importUrl(@Body() body: { url?: string }) {
+    if (!body?.url?.trim()) throw new BadRequestException('Give me a link to import.');
+    try {
+      return await this.docs.importFromUrl(body.url.trim());
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Could not import that link.');
+    }
   }
 
   /** AI: suggest a description + tags for the editor's "Auto-fill" button. */
