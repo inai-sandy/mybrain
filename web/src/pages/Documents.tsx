@@ -14,11 +14,14 @@ export type DocItem = {
   description: string | null;
   kind: string;
   tags: string[];
+  collectionId: string | null;
   shared: boolean;
   bytes: number | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export type Collection = { id: string; name: string; color: string | null; count: number };
 
 function shortDate(iso: string): string {
   const d = new Date(iso);
@@ -44,13 +47,20 @@ export function Documents() {
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [activeCol, setActiveCol] = useState<string | 'all'>('all');
+  const [managing, setManaging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const navigate = useNavigate();
 
   async function load() {
-    const r = await fetch('/api/documents');
-    if (r.ok) setItems((await r.json()).documents || []);
+    const [d, c] = await Promise.all([
+      fetch('/api/documents').then((r) => (r.ok ? r.json() : { documents: [] })),
+      fetch('/api/documents/collections').then((r) => (r.ok ? r.json() : { collections: [] })),
+    ]);
+    setItems(d.documents || []);
+    setCollections(c.collections || []);
     setLoading(false);
   }
   useEffect(() => {
@@ -141,9 +151,22 @@ export function Documents() {
         </div>
       </div>
 
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {[{ id: 'all', name: 'All', count: items.length } as { id: string; name: string; count: number }, ...collections].map((c) => (
+          <button
+            key={c.id}
+            onClick={() => setActiveCol(c.id as string)}
+            className={'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-colors ' + (activeCol === c.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700')}
+          >
+            {c.name} <span className="text-zinc-400">{c.count}</span>
+          </button>
+        ))}
+        <button onClick={() => setManaging(true)} className="text-xs text-zinc-400 hover:text-emerald-600 px-2 py-1">＋ Manage</button>
+      </div>
+
       <DataTable<DocItem>
         columns={cols}
-        rows={items}
+        rows={activeCol === 'all' ? items : items.filter((i) => i.collectionId === activeCol)}
         loading={loading}
         filters={filters}
         sortOptions={sortOptions}
@@ -156,6 +179,8 @@ export function Documents() {
       {(creating || editing) && (
         <DocEditor
           doc={editing}
+          collections={collections}
+          defaultCollectionId={activeCol !== 'all' ? activeCol : null}
           onClose={() => {
             setCreating(false);
             setEditing(null);
@@ -167,9 +192,69 @@ export function Documents() {
           }}
         />
       )}
+      {managing && <ManageCollections collections={collections} onClose={() => setManaging(false)} onChanged={load} />}
       {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
       {sharing && <ShareDialog id={sharing.id} title={sharing.title} initialShared={sharing.shared} shareEndpoint={`/api/documents/${sharing.id}/share`} publicLink={`${location.origin}/d/${sharing.slug}`} onClose={() => setSharing(null)} onChanged={() => load()} />}
+    </div>
+  );
+}
+
+/** Create / rename / delete collections. (BEA-537) */
+function ManageCollections({ collections, onClose, onChanged }: { collections: Collection[]; onClose: () => void; onChanged: () => void }) {
+  const [list, setList] = useState<Collection[]>(collections);
+  const [newName, setNewName] = useState('');
+  const [del, setDel] = useState<Collection | null>(null);
+  const toast = useToast();
+
+  async function reload() {
+    const r = await fetch('/api/documents/collections');
+    if (r.ok) setList((await r.json()).collections || []);
+    onChanged();
+  }
+  async function create() {
+    if (!newName.trim()) return;
+    const r = await fetch('/api/documents/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName.trim() }) });
+    if (r.ok) {
+      setNewName('');
+      reload();
+    } else toast('error', 'Could not create');
+  }
+  async function rename(c: Collection, name: string) {
+    if (!name.trim() || name === c.name) return;
+    await fetch(`/api/documents/collections/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    reload();
+  }
+  async function remove(c: Collection) {
+    setDel(null);
+    await fetch(`/api/documents/collections/${c.id}`, { method: 'DELETE' });
+    toast('success', 'Collection removed (documents kept)');
+    reload();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold">Collections</h3>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+        </div>
+        <div className="flex gap-2 mb-4">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} placeholder="New collection name" className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <button onClick={create} disabled={!newName.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 text-sm disabled:opacity-50">Add</button>
+        </div>
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {list.length === 0 && <p className="text-sm text-zinc-400 text-center py-4">No collections yet.</p>}
+          {list.map((c) => (
+            <div key={c.id} className="flex items-center gap-2">
+              <input defaultValue={c.name} onBlur={(e) => rename(c, e.target.value)} className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-emerald-500" />
+              <span className="text-xs text-zinc-400 w-8 text-right">{c.count}</span>
+              <button onClick={() => setDel(c)} title="Delete" className="p-1.5 rounded-md text-zinc-400 hover:text-rose-500"><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+        <ConfirmDialog open={!!del} title="Delete this collection?" message={del ? `"${del.name}" will be removed. Its ${del.count} document${del.count === 1 ? '' : 's'} stay — they just leave the collection.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
+      </div>
     </div>
   );
 }
@@ -214,16 +299,35 @@ function ImportUrlModal({ onClose, onDone }: { onClose: () => void; onDone: (id?
 }
 
 /** Simple create/edit modal (title + markdown + tags). The CodeMirror editor + AI summary arrive next issue. */
-export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onClose: () => void; onSaved: () => void }) {
+export function DocEditor({ doc, collections = [], defaultCollectionId = null, onClose, onSaved }: { doc: DocItem | null; collections?: Collection[]; defaultCollectionId?: string | null; onClose: () => void; onSaved: () => void }) {
   const [title, setTitle] = useState(doc?.title || '');
   const [content, setContent] = useState('');
   const [description, setDescription] = useState(doc?.description || '');
   const [tags, setTags] = useState((doc?.tags || []).join(', '));
+  const [collectionId, setCollectionId] = useState<string>(doc?.collectionId || defaultCollectionId || '');
+  const [cols, setCols] = useState<Collection[]>(collections);
   const [busy, setBusy] = useState(false);
   const [filling, setFilling] = useState(false);
   const [loaded, setLoaded] = useState(!doc);
   const toast = useToast();
   const isBinary = doc?.kind === 'pdf' || doc?.kind === 'image';
+
+  useEffect(() => {
+    if (collections.length === 0) {
+      fetch('/api/documents/collections').then((r) => r.json()).then((d) => setCols(d.collections || [])).catch(() => undefined);
+    }
+  }, [collections.length]);
+
+  async function newCollection() {
+    const name = window.prompt('New collection name');
+    if (!name?.trim()) return;
+    const r = await fetch('/api/documents/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    if (r.ok) {
+      const c = await r.json();
+      setCols((prev) => [...prev, { id: c.id, name: c.name, color: c.color || null, count: 0 }]);
+      setCollectionId(c.id);
+    }
+  }
 
   useEffect(() => {
     if (doc) {
@@ -264,7 +368,7 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
     }
     setBusy(true);
     const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean);
-    const body: Record<string, unknown> = { title: title.trim(), description: description.trim(), tags: tagList };
+    const body: Record<string, unknown> = { title: title.trim(), description: description.trim(), tags: tagList, collectionId: collectionId || null };
     if (!isBinary) body.contentText = content;
     const r = doc
       ? await fetch(`/api/documents/${doc.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -302,6 +406,13 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
           </div>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short description (≤200 chars — AI fills this if you leave it blank)" maxLength={200} rows={2} className="w-full resize-none rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
           <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags (comma separated)" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <div className="flex items-center gap-2">
+            <select value={collectionId} onChange={(e) => (e.target.value === '__new__' ? newCollection() : setCollectionId(e.target.value))} className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500">
+              <option value="">No collection</option>
+              {cols.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="__new__">＋ New collection…</option>
+            </select>
+          </div>
         </div>
         <div className="flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 p-4">
           <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
