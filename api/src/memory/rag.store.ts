@@ -107,10 +107,11 @@ export class RagStore implements OnModuleDestroy {
     }).catch(() => undefined);
   }
 
-  /** List stored docs (id + title + tags) for maintenance sweeps. No-op ([]) if the store can't list. (BEA-548) */
-  async list(limit = 5000): Promise<{ id: string; title: string; tags: string[] }[]> {
+  /** List stored docs (id + title + tags) for maintenance sweeps. `list_docs` is capped at 100, so callers
+   *  that need everything should delete-and-relist. No-op ([]) if the store can't list. (BEA-548/549) */
+  async list(limit = 100, tag?: string): Promise<{ id: string; title: string; tags: string[] }[]> {
     return this.call(async (c) => {
-      const r: any = await c.callTool({ name: 'list_docs', arguments: { limit } }).catch(() => null);
+      const r: any = await c.callTool({ name: 'list_docs', arguments: { limit: Math.min(100, limit), ...(tag ? { tag } : {}) } }).catch(() => null);
       const p = r ? this.parse(r) : null;
       const rows = p?.results ?? p?.docs ?? p?.documents ?? (Array.isArray(p) ? p : []);
       return (rows || [])

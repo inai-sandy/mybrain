@@ -323,6 +323,33 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     if (ragId) await this.rag.delete(ragId).catch(() => undefined);
   }
 
+  /** Delete EVERY task-type doc from both stores (so the caller can re-index a clean set). Deletion only. (BEA-549) */
+  async deleteAllTaskDocs(): Promise<{ sm: number; rag: number }> {
+    const isTaskDoc = (d: { title?: string; tags?: string[] }) =>
+      (d.tags || []).map((t) => String(t).toLowerCase()).includes('task') || String(d.title || '').startsWith('Task:');
+    // SuperMemory: collect all task ids across pages first (deletion shifts pages), then delete.
+    const smIds: string[] = [];
+    for (let page = 1; page <= 500; page++) {
+      const { docs, total } = await this.sm.list(200, page).catch(() => ({ docs: [] as any[], total: 0 }));
+      if (!docs.length) break;
+      for (const d of docs) if (isTaskDoc(d)) smIds.push(d.id);
+      if (page * 200 >= (total || 0)) break;
+    }
+    for (const id of smIds) await this.sm.delete(id).catch(() => undefined);
+    // RAG: list_docs is capped at 100 with no offset — but since we delete every task doc each pass,
+    // repeated list+delete drains them all.
+    let rag = 0;
+    for (let pass = 0; pass < 500; pass++) {
+      const docs = await this.rag.list(100, 'task').catch(() => [] as { id: string; title: string; tags: string[] }[]);
+      if (!docs.length) break;
+      for (const d of docs) {
+        await this.rag.delete(d.id).catch(() => undefined);
+        rag++;
+      }
+    }
+    return { sm: smIds.length, rag };
+  }
+
   /**
    * Delete ORPHAN task docs from the stores — task-type docs not linked to any live task. These pile up
    * from past re-index churn. Deletion only (no embeddings). (BEA-548)
