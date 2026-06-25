@@ -405,6 +405,13 @@ export class DocumentsService {
     return { filePath: row.filePath, mime: row.mime || 'application/octet-stream', filename: row.filename || `${row.slug}${extname(row.filePath)}` };
   }
 
+  /** Public file stream for a SHARED binary doc, by slug. Returns null unless shared + has a file. (BEA-553) */
+  async sharedFile(slug: string) {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || !row.shared || !row.filePath) return null;
+    return { filePath: row.filePath, mime: row.mime || 'application/octet-stream', filename: row.filename || `${row.slug}${extname(row.filePath)}` };
+  }
+
   /** Full document incl. content, for the in-app viewer/editor. */
   private full(d: any) {
     return { ...this.shape(d), contentText: d.contentText || '' };
