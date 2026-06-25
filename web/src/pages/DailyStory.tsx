@@ -124,7 +124,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
             <div className="mb-4">
               <p className="text-xs text-zinc-500 mb-2">Finished tasks I spotted in your story (delete any that aren’t real, the rest get logged as done today):</p>
               {candidates === null ? (
-                <div className="py-4 text-center text-sm text-zinc-400"><Loader2 size={16} className="animate-spin inline mr-2" /> Reading your story…</div>
+                <div className="py-4 text-center text-sm text-zinc-400"><Loader2 size={16} className="animate-spin inline mr-2" /> Reading your story for finished tasks &amp; to-dos…</div>
               ) : candidates.length ? (
                 <ul className="space-y-1.5">
                   {candidates.map((c, i) => (

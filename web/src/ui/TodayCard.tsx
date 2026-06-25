@@ -16,14 +16,31 @@ export function TodayCard() {
   const [added, setAdded] = useState(false);
   const toast = useToast();
 
+  const [waiting, setWaiting] = useState(false);
   useEffect(() => {
-    fetch('/api/daily/today')
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setD)
-      .catch(() => setD(null));
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const load = () =>
+      fetch('/api/daily/today')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          setD(data);
+          // The Coach's pick is generated in the background after a close — keep checking for ~75s so it
+          // appears without a manual refresh. (BEA-550)
+          if (data && !data.suggestion && tries < 5) {
+            tries++;
+            setWaiting(true);
+            timer = setTimeout(load, 15000);
+          } else {
+            setWaiting(false);
+          }
+        })
+        .catch(() => setD(null));
+    load();
+    return () => clearTimeout(timer);
   }, []);
 
-  if (!d || (!d.focus && !d.suggestion && !d.lever)) return null;
+  if (!d || (!d.focus && !d.suggestion && !d.lever && !waiting)) return null;
 
   async function add() {
     if (!d?.suggestion) return;
@@ -45,6 +62,13 @@ export function TodayCard() {
           <Compass size={15} className="text-emerald-500 shrink-0 mt-0.5" />
           <span><span className="text-zinc-400">Focus — </span>{d.focus}</span>
         </Link>
+      )}
+
+      {!d.suggestion && waiting && (
+        <div className="flex items-center gap-2 text-sm text-zinc-400">
+          <Target size={15} className="text-violet-400 shrink-0 animate-pulse" />
+          <span>Working out your suggestions for today…</span>
+        </div>
       )}
 
       {d.suggestion && (
