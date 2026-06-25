@@ -81,6 +81,22 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     setTimeout(() => this.runOnceOrphanSweep().catch((e) => this.log.warn(`orphan sweep: ${e?.message ?? e}`)), 45000);
     // One-time REBUILD: wipe every task doc and re-index only the done tasks (clears all dups). (BEA-549)
     setTimeout(() => this.runOnceRebuild().catch((e) => this.log.warn(`task memory rebuild: ${e?.message ?? e}`)), 70000);
+    // One-time DISCIPLINE: stop indexing junk (Vault, day summaries, portrait) + purge it. (BEA-551)
+    setTimeout(() => this.runOnceMemoryDiscipline().catch((e) => this.log.warn(`memory discipline: ${e?.message ?? e}`)), 95000);
+  }
+
+  /** Passthrough: stop indexing low-value sources + purge them. (BEA-551) */
+  purgeLowValueSources() {
+    return this.memory.purgeLowValueSources();
+  }
+
+  private async runOnceMemoryDiscipline(): Promise<void> {
+    const key = 'tasks.memoryDisciplineV1';
+    const seen = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    if (seen?.value) return;
+    const r = await this.memory.purgeLowValueSources();
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value: JSON.stringify(r) }, update: { value: JSON.stringify(r) } }).catch(() => undefined);
+    this.log.log(`memory discipline: purged vault=${r.vault} daysummary=${r.daysummary} portrait=${r.portrait} docs (no longer indexed)`);
   }
 
   /** Wipe every task doc from both stores, then re-index only the done tasks → one clean doc each. (BEA-549) */

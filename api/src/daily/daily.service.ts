@@ -454,10 +454,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       update: { text, stats },
     });
 
-    // Index the day, REPLACING any prior version (re-generates when the story changes). (BEA-342)
-    this.memory
-      .indexEntity({ refType: 'daysummary', refId: row.id, title: `Day summary ${day}`, content: `Day summary — ${day}\n\n${text}`, tags: ['activity'], prevSupermemoryId: (row as any).supermemoryId, prevRagId: (row as any).ragId })
-      .catch(() => undefined);
+    // Day summaries are NO LONGER indexed into memory — the Story of the Day already captures the day,
+    // richer, so a separate summary doc was redundant noise. (BEA-551)
     return this.shapeSummary(row);
   }
 
@@ -1272,8 +1270,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       });
     }
     await this.setSetting('personality.summary', JSON.stringify({ text: parsed.summary || '', daysCovered: covered, generation, generatedAt: new Date().toISOString() }));
-    // Index the portrait so it deepens over time (stamped "activity" → never re-imported by SuperMemory sync).
-    await this.memory.enqueue(`Personality portrait of Sandeep\n\n${parsed.summary || ''}\n\n${parsed.insights.map((i) => `${i.dimension}: ${i.claim}`).join('\n')}`, { title: 'Personality portrait', tags: ['activity'] }).catch(() => undefined);
+    // The portrait is NO LONGER indexed into memory — it regenerated without replacing, piling up copies,
+    // and the Lab/findings already hold this self-knowledge. Kept in Settings, just not in the brain. (BEA-551)
     return this.getPersonality();
   }
 

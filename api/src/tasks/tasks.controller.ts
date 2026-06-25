@@ -36,6 +36,12 @@ export class TasksController {
     return this.tasks.rebuildTaskMemory();
   }
 
+  /** Stop indexing low-value sources (Vault, day summaries, portrait) + purge them. (BEA-551) */
+  @Post('purge-low-value-memory')
+  async purgeLowValueMemory() {
+    return this.tasks.purgeLowValueSources();
+  }
+
   @Get('today')
   async today() {
     return this.tasks.today();
