@@ -46,6 +46,26 @@ export class DocumentsService {
     return { ok: true, itemId: res.item.id, deduped: !!res.deduped };
   }
 
+  /** The model that writes doc title/description/tags — user-choosable (default Haiku). (BEA-554) */
+  async documentsModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'documents.llm' } });
+    if (!row) return SUMMARY_MODEL;
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : SUMMARY_MODEL;
+    } catch {
+      return SUMMARY_MODEL;
+    }
+  }
+  async setDocumentsModel(provider: string, model: string) {
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.prisma.setting.upsert({ where: { key: 'documents.llm' }, create: { key: 'documents.llm', value: JSON.stringify(cfg) }, update: { value: JSON.stringify(cfg) } });
+    return cfg;
+  }
+  documentsModels() {
+    return this.llm.listOpenRouterModels(['anthropic/', 'openai/', 'google/']);
+  }
+
   /** AI read: a ≤200-char description + a few topic tags for a document's content. (BEA-533) */
   async summarize(content: string): Promise<{ description: string; tags: string[] }> {
     const text = (content || '').trim();
@@ -53,7 +73,7 @@ export class DocumentsService {
     const prompt =
       `Read this document and describe it for a library card, in simple plain English.\n` +
       `Return ONLY JSON: {"description":"a clear summary of what this document is, at most 200 characters","tags":["3-6 short lowercase topic tags"]}.\n\nDOCUMENT:\n${text.slice(0, 6000)}`;
-    const raw = (await this.llm.completeWith(SUMMARY_MODEL, prompt, 300, 'document-summary'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.documentsModel(), prompt, 300, 'document-summary'))?.trim() || '';
     try {
       const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
       return { description: String(j?.description || '').trim().slice(0, 200), tags: this.parseTags(j?.tags) };
