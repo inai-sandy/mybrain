@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain } from 'lucide-react';
-import { mdComponents } from '../ui/markdown';
+import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
@@ -87,9 +87,11 @@ export function DocumentView() {
           ) : doc.kind === 'html' ? (
             <iframe title={doc.title} srcDoc={doc.contentText} className="w-full min-h-[60vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" sandbox="allow-popups allow-popups-to-escape-sandbox" />
           ) : (
-            <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{doc.contentText || '*(empty document)*'}</ReactMarkdown>
-            </article>
+            <OutlineLayout headings={extractHeadings(doc.contentText || '')}>
+              <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{doc.contentText || '*(empty document)*'}</ReactMarkdown>
+              </article>
+            </OutlineLayout>
           )}
         </>
       )}
