@@ -366,6 +366,7 @@ describe('DailyService', () => {
       tasks.push({ id: 'a', day: past, status: 'open', title: 'leftover' }, { id: 'b', day: past, status: 'done', title: 'did it' });
 
       const r = await svc.closeDay(past, false);
+      await new Promise((res) => setImmediate(res)); // let the background generate/mentor/learn finish (BEA-541: seal is sync, artifacts are async)
       expect(r!.closed).toBe(true);
       expect(dayCloses.find((c) => c.day === past)).toBeTruthy();
       expect(mentorCalls.some((m) => m.day === past && m.force)).toBe(true); // mentor re-ran for that day
@@ -635,6 +636,7 @@ describe('DailyService', () => {
       const { svc, stories, dayCloses, mentorCalls, mindCalls } = makeService({ llmText: '{"story":"A wrapped day.","mood":"settled","moodScore":70}' });
       stories.push({ id: 's1', day: '2026-06-09', rawText: 'Solid day.', createdAt: new Date(), updatedAt: new Date() });
       const r = await svc.wrapYesterday('2026-06-10');
+      await new Promise((res) => setImmediate(res)); // background artifacts/learn finish (BEA-541)
       expect(r).toEqual({ wrapped: true, reminded: false });
       expect(dayCloses.find((c) => c.day === '2026-06-09')).toBeTruthy();
       expect(mentorCalls.some((m) => m.day === '2026-06-09')).toBe(true);
@@ -677,6 +679,7 @@ describe('DailyService', () => {
     it('wrapDayNow closes the day and triggers Mentor + Lab', async () => {
       const { svc, dayCloses, mentorCalls, mindCalls } = makeService({ llmText: '{"story":"x","moodScore":60}' });
       expect(await svc.wrapDayNow(y)).toBe(true);
+      await new Promise((res) => setImmediate(res)); // background artifacts/learn finish (BEA-541)
       expect(dayCloses.find((c) => c.day === y)).toBeTruthy();
       expect(mentorCalls.some((m) => m.day === y)).toBe(true);
       expect(mindCalls).toContain(y);
