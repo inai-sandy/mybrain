@@ -66,6 +66,22 @@ export class DocumentsService {
     return this.llm.listOpenRouterModels(['anthropic/', 'openai/', 'google/']);
   }
 
+  /** AI vision: describe an uploaded image → {description, tags}. Falls back to {} on large/unsupported. (BEA-555) */
+  async summarizeImage(buffer: Buffer, mime: string): Promise<{ description: string; tags: string[] }> {
+    if (!buffer?.length || buffer.length > 5 * 1024 * 1024) return { description: '', tags: [] }; // skip very large images
+    const base64 = buffer.toString('base64');
+    const prompt =
+      `Look at this image and describe it for a library card, in simple plain English.\n` +
+      `Return ONLY JSON: {"description":"a clear ≤200-character description of what the image shows","tags":["3-6 short lowercase tags"]}.`;
+    const raw = (await this.llm.completeImage(await this.documentsModel(), prompt, { dataUrl: `data:${mime};base64,${base64}`, mediaType: mime, base64 }, 300, 'document-image-summary'))?.trim() || '';
+    try {
+      const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      return { description: String(j?.description || '').trim().slice(0, 200), tags: this.parseTags(j?.tags) };
+    } catch {
+      return { description: '', tags: [] };
+    }
+  }
+
   /** AI read: a ≤200-char description + a few topic tags for a document's content. (BEA-533) */
   async summarize(content: string): Promise<{ description: string; tags: string[] }> {
     const text = (content || '').trim();
@@ -273,6 +289,10 @@ export class DocumentsService {
         description = ai.description;
         tags = ai.tags;
       }
+    } else if (kind === 'image') {
+      const ai = await this.summarizeImage(file.buffer, file.mimetype || 'image/png').catch(() => ({ description: '', tags: [] as string[] }));
+      description = ai.description;
+      tags = ai.tags;
     }
     if (!description) description = kind === 'pdf' ? `PDF · ${name}` : `Image · ${name}`;
 

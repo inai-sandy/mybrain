@@ -165,6 +165,44 @@ export class LlmService {
     return null;
   }
 
+  /** Vision completion — sends an image with the prompt. OpenRouter (image_url) + Anthropic (base64);
+   *  subscription agents / unknown providers fall back to a text-only completion. (BEA-555) */
+  async completeImage(cfg: LlmConfig | null, prompt: string, image: { dataUrl: string; mediaType: string; base64: string }, maxTokens = 400, label = 'vision'): Promise<string | null> {
+    if (!cfg?.provider || !cfg?.model) return null;
+    try {
+      if (cfg.provider === 'openrouter') {
+        const c = await this.connectors.get<{ apiKey: string }>('openrouter');
+        if (!c?.apiKey) return null;
+        const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, usage: { include: true }, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: image.dataUrl } }] }] }),
+        });
+        if (!r.ok) return null;
+        const d: any = await r.json();
+        await this.logUsage(label, cfg.model, d?.usage);
+        return d?.choices?.[0]?.message?.content ?? null;
+      }
+      if (cfg.provider === 'anthropic') {
+        const c = await this.connectors.get<{ apiKey: string }>('anthropic');
+        if (!c?.apiKey) return null;
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } }] }] }),
+        });
+        if (!r.ok) return null;
+        const d: any = await r.json();
+        await this.logUsage(label, cfg.model, d?.usage);
+        return d?.content?.[0]?.text ?? null;
+      }
+      // codex/gemini agents or unknown → text-only (no vision); the caller's prompt should still be useful.
+      return this.completeWith(cfg, prompt, maxTokens, label);
+    } catch {
+      return null;
+    }
+  }
+
   /** Streaming completion — calls onToken as text arrives, returns the full text. Falls back to non-streaming for Anthropic. */
   async completeStream(cfg: LlmConfig | null, prompt: string, maxTokens: number, onToken: (t: string) => void, label = 'chat'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
