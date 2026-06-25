@@ -300,6 +300,51 @@ export class DocumentsService {
     return doc;
   }
 
+  // ---- Bulk actions (BEA-539) ----
+
+  async bulkDelete(ids: string[]) {
+    let n = 0;
+    for (const id of ids || []) {
+      await this.remove(id);
+      n++;
+    }
+    return { ok: true, count: n };
+  }
+
+  async bulkAddTags(ids: string[], add: string[]) {
+    const tagsToAdd = this.parseTags(add);
+    if (!tagsToAdd.length) return { ok: true, count: 0 };
+    const rows = await this.prisma.document.findMany({ where: { id: { in: ids || [] } }, select: { id: true, tags: true } });
+    for (const r of rows) {
+      const merged = Array.from(new Set([...this.parseTags(r.tags), ...tagsToAdd]));
+      await this.prisma.document.update({ where: { id: r.id }, data: { tags: JSON.stringify(merged) } }).catch(() => null);
+    }
+    return { ok: true, count: rows.length };
+  }
+
+  async bulkSetCollection(ids: string[], collectionId: string | null) {
+    const r = await this.prisma.document.updateMany({ where: { id: { in: ids || [] } }, data: { collectionId: collectionId || null } });
+    return { ok: true, count: r.count };
+  }
+
+  async bulkSetShared(ids: string[], shared: boolean) {
+    const r = await this.prisma.document.updateMany({ where: { id: { in: ids || [] } }, data: { shared } });
+    return { ok: true, count: r.count };
+  }
+
+  /** Documents to put in an export zip (selected ids, or everything when empty). */
+  async forExport(ids?: string[]) {
+    const where = ids?.length ? { id: { in: ids } } : {};
+    return this.prisma.document.findMany({ where, orderBy: { updatedAt: 'desc' } });
+  }
+
+  /** A safe, unique-ish zip entry name for a document. */
+  exportName(d: { title: string; slug: string; kind: string; filePath?: string | null; filename?: string | null }): string {
+    const base = (d.title || d.slug || 'document').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'document';
+    const ext = d.filePath ? extname(d.filename || d.filePath) || '' : d.kind === 'html' ? '.html' : '.md';
+    return `${base}-${d.slug.slice(-6)}${ext}`;
+  }
+
   /** Reject obviously-internal hosts before fetching a user-supplied URL (light SSRF guard). */
   private isBlockedHost(host: string): boolean {
     const h = host.toLowerCase();

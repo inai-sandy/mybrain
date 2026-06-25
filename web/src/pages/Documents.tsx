@@ -53,8 +53,51 @@ export function Documents() {
   const [managing, setManaging] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<DocItem[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDel, setBulkDel] = useState(false);
   const searching = q.trim().length >= 2;
   const fileInput = useRef<HTMLInputElement>(null);
+
+  function toggleSel(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+  function clearSel() {
+    setSelected(new Set());
+  }
+  async function bulk(path: string, extra: Record<string, unknown> = {}) {
+    const ids = [...selected];
+    if (!ids.length) return;
+    const r = await fetch(`/api/documents/bulk/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, ...extra }) });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      toast('success', `${d.count ?? ids.length} updated`);
+      clearSel();
+      load();
+    } else toast('error', 'Could not update');
+  }
+  async function exportZip() {
+    const ids = [...selected];
+    const r = await fetch('/api/documents/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+    if (!r.ok) {
+      toast('error', 'Export failed');
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `documents-${ids.length}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  async function bulkRemove() {
+    setBulkDel(false);
+    await bulk('delete');
+  }
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -128,8 +171,9 @@ export function Documents() {
 
   function card(r: DocItem) {
     return (
-      <div className="group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
+      <div className={'group h-full rounded-xl border bg-white dark:bg-zinc-900 p-4 hover:shadow-md transition-all flex flex-col ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40')}>
         <div className="flex items-start gap-3">
+          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'mt-2 h-4 w-4 accent-emerald-600 shrink-0 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
           <div className="shrink-0 rounded-lg p-2 text-emerald-500 bg-emerald-500/10"><FileText size={18} /></div>
           <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left">
             <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{r.title}</h3>
@@ -189,6 +233,23 @@ export function Documents() {
         <button onClick={() => setManaging(true)} className="text-xs text-zinc-400 hover:text-emerald-600 px-2 py-1">＋ Manage</button>
       </div>
 
+      {selected.size > 0 && (
+        <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2 text-sm shadow-sm">
+          <span className="font-medium text-emerald-700 dark:text-emerald-300">{selected.size} selected</span>
+          <div className="flex-1" />
+          <select onChange={(e) => { if (e.target.value) bulk('collection', { collectionId: e.target.value === '__none__' ? null : e.target.value }); e.target.value = ''; }} className="rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs">
+            <option value="">Move to…</option>
+            <option value="__none__">No collection</option>
+            {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button onClick={() => { const t = window.prompt('Add tag(s), comma separated'); if (t?.trim()) bulk('tag', { tags: t.split(',').map((x) => x.trim()).filter(Boolean) }); }} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900">Add tag</button>
+          <button onClick={() => bulk('share', { shared: true })} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900">Share</button>
+          <button onClick={exportZip} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900"><Download size={13} /> Zip</button>
+          <button onClick={() => setBulkDel(true)} className="inline-flex items-center gap-1 rounded-lg border border-rose-300 dark:border-rose-700 text-rose-600 px-2.5 py-1 text-xs hover:bg-rose-50 dark:hover:bg-rose-500/10"><Trash2 size={13} /> Delete</button>
+          <button onClick={clearSel} className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 px-1">Clear</button>
+        </div>
+      )}
+
       <DataTable<DocItem>
         columns={cols}
         rows={searching ? results : activeCol === 'all' ? items : items.filter((i) => i.collectionId === activeCol)}
@@ -219,6 +280,7 @@ export function Documents() {
         />
       )}
       {managing && <ManageCollections collections={collections} onClose={() => setManaging(false)} onChanged={load} />}
+      <ConfirmDialog open={bulkDel} title={`Delete ${selected.size} document${selected.size === 1 ? '' : 's'}?`} message="These will be permanently removed." confirmLabel="Delete" onCancel={() => setBulkDel(false)} onConfirm={bulkRemove} />
       {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
       {sharing && <ShareDialog id={sharing.id} title={sharing.title} initialShared={sharing.shared} shareEndpoint={`/api/documents/${sharing.id}/share`} publicLink={`${location.origin}/d/${sharing.slug}`} onClose={() => setSharing(null)} onChanged={() => load()} />}
