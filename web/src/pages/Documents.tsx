@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
+import { MarkdownEditor } from '../ui/MarkdownEditor';
 import { useToast } from '../ui/Toast';
 
 export type DocItem = {
@@ -152,8 +153,10 @@ export function Documents() {
 export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onClose: () => void; onSaved: () => void }) {
   const [title, setTitle] = useState(doc?.title || '');
   const [content, setContent] = useState('');
+  const [description, setDescription] = useState(doc?.description || '');
   const [tags, setTags] = useState((doc?.tags || []).join(', '));
   const [busy, setBusy] = useState(false);
+  const [filling, setFilling] = useState(false);
   const [loaded, setLoaded] = useState(!doc);
   const toast = useToast();
 
@@ -163,11 +166,31 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
         .then((r) => r.json())
         .then((d) => {
           setContent(d.contentText || '');
+          setDescription(d.description || '');
           setLoaded(true);
         })
         .catch(() => setLoaded(true));
     }
   }, [doc]);
+
+  async function autoFill() {
+    if (!content.trim()) {
+      toast('error', 'Write something first');
+      return;
+    }
+    setFilling(true);
+    try {
+      const r = await fetch('/api/documents/summarize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentText: content }) });
+      const d = await r.json();
+      if (d.description) setDescription(d.description);
+      if (Array.isArray(d.tags) && d.tags.length) setTags(d.tags.join(', '));
+      toast('success', 'Filled in with AI');
+    } catch {
+      toast('error', 'Could not auto-fill');
+    } finally {
+      setFilling(false);
+    }
+  }
 
   async function save() {
     if (!title.trim()) {
@@ -176,7 +199,7 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
     }
     setBusy(true);
     const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean);
-    const body = { title: title.trim(), contentText: content, tags: tagList };
+    const body = { title: title.trim(), contentText: content, description: description.trim(), tags: tagList };
     const r = doc
       ? await fetch(`/api/documents/${doc.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       : await fetch('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -189,7 +212,7 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-      <div className="flex w-full max-w-2xl max-h-[90vh] flex-col rounded-xl bg-white dark:bg-zinc-900 shadow-xl">
+      <div className="flex w-full max-w-3xl max-h-[92vh] flex-col rounded-xl bg-white dark:bg-zinc-900 shadow-xl">
         <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 p-4">
           <h3 className="font-bold">{doc ? 'Edit document' : 'New document'}</h3>
           <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
@@ -199,8 +222,15 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
           {!loaded ? (
             <p className="text-sm text-zinc-400 py-8 text-center">Loading…</p>
           ) : (
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="Write in markdown…" rows={14} className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-mono leading-relaxed outline-none focus:border-emerald-500" />
+            <MarkdownEditor value={content} onChange={setContent} />
           )}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <label className="text-xs font-medium text-zinc-500">Description &amp; tags</label>
+            <button type="button" onClick={autoFill} disabled={filling} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs hover:bg-emerald-500/10 disabled:opacity-50">
+              <Sparkles size={13} /> {filling ? 'Thinking…' : 'Auto-fill with AI'}
+            </button>
+          </div>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short description (≤200 chars — AI fills this if you leave it blank)" maxLength={200} rows={2} className="w-full resize-none rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
           <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags (comma separated)" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
         </div>
         <div className="flex justify-end gap-2 border-t border-zinc-200 dark:border-zinc-800 p-4">

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { LlmService, LlmConfig } from '../llm/llm.service';
 
 export type DocInput = {
   title?: string;
@@ -10,10 +11,32 @@ export type DocInput = {
   tags?: string[];
 };
 
+// A cheap, fast model is plenty for a one-line summary + tags. (BEA-533)
+const SUMMARY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
+
 /** The Documents library (BEA-532): the user's own md/html files to share & re-use — NOT in memory. */
 @Injectable()
 export class DocumentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly llm: LlmService,
+  ) {}
+
+  /** AI read: a ≤200-char description + a few topic tags for a document's content. (BEA-533) */
+  async summarize(content: string): Promise<{ description: string; tags: string[] }> {
+    const text = (content || '').trim();
+    if (!text) return { description: '', tags: [] };
+    const prompt =
+      `Read this document and describe it for a library card, in simple plain English.\n` +
+      `Return ONLY JSON: {"description":"a clear summary of what this document is, at most 200 characters","tags":["3-6 short lowercase topic tags"]}.\n\nDOCUMENT:\n${text.slice(0, 6000)}`;
+    const raw = (await this.llm.completeWith(SUMMARY_MODEL, prompt, 300, 'document-summary'))?.trim() || '';
+    try {
+      const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
+      return { description: String(j?.description || '').trim().slice(0, 200), tags: this.parseTags(j?.tags) };
+    } catch {
+      return { description: this.autoDescription(text), tags: [] };
+    }
+  }
 
   private slugify(title: string): string {
     const base = (title || 'document')
@@ -68,16 +91,24 @@ export class DocumentsService {
   async create(input: DocInput) {
     const title = (input.title || 'Untitled').trim().slice(0, 200) || 'Untitled';
     const content = input.contentText || '';
-    const description = (input.description?.trim() || this.autoDescription(content)).slice(0, 200) || null;
+    let description = input.description?.trim() || '';
+    let tags = this.parseTags(input.tags);
+    // Auto-fill what the user left blank with a cheap AI pass (editable afterwards). (BEA-533)
+    if ((!description || tags.length === 0) && content.trim()) {
+      const ai = await this.summarize(content).catch(() => ({ description: '', tags: [] as string[] }));
+      if (!description) description = ai.description;
+      if (tags.length === 0) tags = ai.tags;
+    }
+    const finalDesc = (description || this.autoDescription(content)).slice(0, 200) || null;
     const row = await this.prisma.document.create({
       data: {
         slug: this.slugify(title),
         title,
-        description,
+        description: finalDesc,
         kind: input.kind || 'md',
         contentText: content,
         bytes: Buffer.byteLength(content, 'utf8'),
-        tags: JSON.stringify(this.parseTags(input.tags)),
+        tags: JSON.stringify(tags),
       },
     });
     return this.full(row);

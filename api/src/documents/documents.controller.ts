@@ -17,6 +17,12 @@ export class DocumentsController {
     return this.docs.create(body || {});
   }
 
+  /** AI: suggest a description + tags for the editor's "Auto-fill" button. */
+  @Post('summarize')
+  summarize(@Body() body: { contentText?: string }) {
+    return this.docs.summarize(body?.contentText || '');
+  }
+
   /** Public read of a shared document by slug (no login). Must be declared before ':id'. */
   @Public()
   @Get('public/:slug')
