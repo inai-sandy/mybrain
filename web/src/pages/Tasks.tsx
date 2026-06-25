@@ -14,7 +14,7 @@ export function Tasks() {
   const [delFor, setDelFor] = useState<Task | null>(null);
   const [review, setReview] = useState<Task[] | null>(null);
 
-  const [showDone, setShowDone] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [history, setHistory] = useState(false);
   const [dedup, setDedup] = useState(false);
@@ -77,8 +77,7 @@ export function Tasks() {
 
   // filter
   const filtered = useMemo(() => {
-    let list = tasks;
-    if (!showDone) list = list.filter((t) => t.status === 'open');
+    let list = tasks.filter((t) => t.status === 'open'); // the main board is open work; finished tasks live in their own window
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((t) => [t.title, t.category, ...(t.tags || [])].join(' ').toLowerCase().includes(s));
@@ -87,7 +86,7 @@ export function Tasks() {
     if (fCategory) list = list.filter((t) => t.category === fCategory);
     if (fSphere) list = list.filter((t) => (t.sphere || 'work') === fSphere);
     return list;
-  }, [tasks, showDone, q, fPriority, fCategory, fSphere]);
+  }, [tasks, q, fPriority, fCategory, fSphere]);
 
   // group: priority view = must-dos → High → Medium → Low; date views = one flat list. Done at the bottom either way.
   const groups = useMemo(() => {
@@ -101,12 +100,8 @@ export function Tasks() {
             { key: 'low', label: 'Low', items: open.filter((t) => !t.pinned && t.priority === 'low') },
           ]
         : [{ key: 'open', label: sort === 'oldest' ? 'Oldest first' : 'Newest first', items: sortTasksBy(open, sort) }];
-    if (showDone) {
-      const done = filtered.filter((t) => t.status === 'done');
-      g.push({ key: 'done', label: 'Done', items: sort === 'priority' ? done : sortTasksBy(done, sort) });
-    }
     return g.filter((x) => x.items.length);
-  }, [filtered, showDone, sort]);
+  }, [filtered, sort]);
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
   const hasFilters = !!(q || fPriority || fCategory || fSphere || fPerson);
@@ -129,8 +124,8 @@ export function Tasks() {
               <button onClick={() => setShowSearch((v) => !v)} aria-label="Search" className={'p-2 rounded-lg border ' + (showSearch || q ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
                 <Search size={16} />
               </button>
-              <button onClick={() => setShowDone((v) => !v)} className={'rounded-lg px-2.5 py-1.5 text-xs border ' + (showDone ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
-                {showDone ? 'Hide done' : 'Show done'}
+              <button onClick={() => setFinished(true)} className="rounded-lg px-2.5 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600">
+                Show done
               </button>
               <button onClick={() => setDedup(true)} title="Find & remove duplicate tasks with AI" className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600">
                 <Copy size={13} /> <span className="hidden sm:inline">Remove duplicates</span>
@@ -235,6 +230,7 @@ export function Tasks() {
       {doneFor && <DoneModal task={doneFor} onClose={() => setDoneFor(null)} onSaved={load} />}
       {delFor && <ConfirmDialog title="Delete task?" message={`“${delFor.title}” will be removed.`} confirmLabel="Delete" onConfirm={() => remove(delFor)} onCancel={() => setDelFor(null)} />}
       {dedup && <DedupeSheet onClose={() => setDedup(false)} onDone={refresh} />}
+      {finished && <FinishedTasksModal onClose={() => setFinished(false)} />}
     </div>
   );
 }
@@ -366,6 +362,66 @@ function addDays(day: string, n: number): string {
 function prettyDay(day: string): string {
   const [y, m, d] = day.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+/** A window listing ALL finished tasks (across every day), searchable. (BEA-547) */
+function FinishedTasksModal({ onClose }: { onClose: () => void }) {
+  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    fetch('/api/tasks')
+      .then((r) => r.json())
+      .then((d) => setTasks((d.tasks || []).filter((t: Task) => t.status === 'done')))
+      .catch(() => setTasks([]));
+  }, []);
+  const filtered = (tasks || []).filter((t) => !q.trim() || [t.title, t.category, ...(t.tags || [])].join(' ').toLowerCase().includes(q.toLowerCase()));
+  const byDay = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    for (const t of [...filtered].sort((a, b) => (b.completedAt || b.day).localeCompare(a.completedAt || a.day))) (m.get(t.day) ?? m.set(t.day, []).get(t.day)!).push(t);
+    return [...m.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+  }, [filtered]);
+  const pretty = (d: string) => {
+    const [y, mo, dd] = d.split('-').map(Number);
+    if (!y) return d;
+    return new Date(y, mo - 1, dd).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="flex w-full max-w-lg max-h-[88vh] flex-col rounded-xl bg-white dark:bg-zinc-900 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 p-4">
+          <h3 className="font-bold flex items-center gap-2"><CheckCircle2 size={18} className="text-emerald-500" /> Finished tasks {tasks && <span className="text-xs font-normal text-zinc-400">· {filtered.length}</span>}</h3>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+        </div>
+        <div className="p-3 border-b border-zinc-100 dark:border-zinc-800">
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search finished tasks…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 pl-9 pr-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          {tasks === null ? (
+            <div className="flex justify-center py-8 text-zinc-400"><Loader2 className="animate-spin" size={18} /></div>
+          ) : byDay.length === 0 ? (
+            <p className="text-sm text-zinc-400 text-center py-8">{q ? 'No finished tasks match.' : 'No finished tasks yet.'}</p>
+          ) : (
+            byDay.map(([day, items]) => (
+              <div key={day}>
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{pretty(day)}</div>
+                <ul className="space-y-0.5">
+                  {items.map((t) => (
+                    <li key={t.id} className="flex items-start gap-2 text-sm rounded-lg px-2 py-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+                      <CheckCircle2 size={15} className="text-emerald-500 mt-0.5 shrink-0" />
+                      <span className="flex-1 min-w-0"><span className="text-zinc-600 dark:text-zinc-300">{t.title}</span>{t.category && <span className="ml-1.5 text-[11px] text-zinc-400">{t.category}</span>}{t.sphere === 'personal' && <span className="ml-1 text-[11px] text-violet-500">🏠</span>}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TaskHistory() {
