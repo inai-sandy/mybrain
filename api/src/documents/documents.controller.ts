@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Query, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Put, Query, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import archiver from 'archiver';
@@ -75,6 +75,21 @@ export class DocumentsController {
     } catch (e: any) {
       throw new BadRequestException(e?.message || 'Could not import that link.');
     }
+  }
+
+  // ---- Model picker (BEA-554). Declared before ':id'. ----
+  @Get('model')
+  getModel() {
+    return this.docs.documentsModel();
+  }
+  @Put('model')
+  setModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.docs.setDocumentsModel(body.provider || 'openrouter', body.model);
+  }
+  @Get('models')
+  models() {
+    return this.docs.documentsModels();
   }
 
   /** AI: suggest a description + tags for the editor's "Auto-fill" button. */

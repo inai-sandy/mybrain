@@ -829,6 +829,8 @@ function ModelsSection() {
         desc="Scans your day for promises you made and decisions you took (Commitments & Decisions). A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="The Lab — how it reasons about you" icon={FlaskConical} base="/api/mind/model" agents
         desc="The mini mental model that learns your patterns from your tasks + stories each night. Sonnet (default) does the deep reasoning, or run it FREE on your Codex/Gemini subscription with Sonnet auto-fallback." />
+      <EngineModelCard title="Documents summary model" icon={FileText} base="/api/documents/model" agents
+        desc="Writes the title, description and tags for documents you upload or create. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <VoiceModelCard />
     </div>
   );
