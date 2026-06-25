@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -97,6 +97,17 @@ export function Documents() {
   async function bulkRemove() {
     setBulkDel(false);
     await bulk('delete');
+  }
+  async function bulkToMemory() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    let ok = 0;
+    for (const id of ids) {
+      const r = await fetch(`/api/documents/${id}/convert`, { method: 'POST' }).catch(() => null);
+      if (r?.ok) ok++;
+    }
+    toast(ok ? 'success' : 'error', ok ? `${ok} added to memory` : 'Could not add (images have no text)');
+    clearSel();
   }
   const toast = useToast();
   const navigate = useNavigate();
@@ -245,6 +256,7 @@ export function Documents() {
           <button onClick={() => { const t = window.prompt('Add tag(s), comma separated'); if (t?.trim()) bulk('tag', { tags: t.split(',').map((x) => x.trim()).filter(Boolean) }); }} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900">Add tag</button>
           <button onClick={() => bulk('share', { shared: true })} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900">Share</button>
           <button onClick={exportZip} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900"><Download size={13} /> Zip</button>
+          <button onClick={bulkToMemory} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs hover:bg-white dark:hover:bg-zinc-900"><Brain size={13} /> To Memory</button>
           <button onClick={() => setBulkDel(true)} className="inline-flex items-center gap-1 rounded-lg border border-rose-300 dark:border-rose-700 text-rose-600 px-2.5 py-1 text-xs hover:bg-rose-50 dark:hover:bg-rose-500/10"><Trash2 size={13} /> Delete</button>
           <button onClick={clearSel} className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 px-1">Clear</button>
         </div>

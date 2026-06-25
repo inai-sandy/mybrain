@@ -195,6 +195,16 @@ export class DocumentsController {
     return this.docs.setShared(id, !!body?.shared);
   }
 
+  /** Copy this document into Capture/memory (RAG + SuperMemory). (BEA-540) */
+  @Post(':id/convert')
+  async convert(@Param('id') id: string) {
+    try {
+      return await this.docs.convertToCapture(id);
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Could not add to memory.');
+    }
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.docs.remove(id);

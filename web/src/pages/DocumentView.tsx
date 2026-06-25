@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Download, Share2, Trash2, Pencil } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain } from 'lucide-react';
 import { mdComponents } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -44,6 +44,13 @@ export function DocumentView() {
     } else toast('error', 'Could not delete');
   }
 
+  async function toMemory() {
+    const r = await fetch(`/api/documents/${id}/convert`, { method: 'POST' });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) toast('success', d.deduped ? 'Already in your memory' : 'Added to your memory (Capture)');
+    else toast('error', d.message || 'Could not add to memory');
+  }
+
   const btn = 'inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800';
 
   return (
@@ -68,6 +75,7 @@ export function DocumentView() {
               <button onClick={() => setEditing(true)} className={btn}><Pencil size={15} /> Edit</button>
               <a href={`/api/documents/${doc.id}/download`} className={btn}><Download size={15} /> Download</a>
               <button onClick={() => setSharing(true)} className={btn}><Share2 size={15} /> Share</button>
+              {doc.kind !== 'image' && <button onClick={toMemory} className={btn} title="Copy into Capture / memory"><Brain size={15} /> To Memory</button>}
               <button onClick={() => setDel(true)} className={btn + ' hover:text-red-500'}><Trash2 size={15} /> Delete</button>
             </div>
           </div>
