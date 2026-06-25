@@ -42,8 +42,9 @@ export function Lab() {
   const statsReq = useRef(false);
   const [info, setInfo] = useState<FindingView | null>(null); // tap-to-read popup (BEA-462)
   const [lastLearn, setLastLearn] = useState<{ at: string; detail: string } | null>(null); // run-log (BEA-468)
+  const [chains, setChains] = useState<MindChain[]>([]); // for the Map (BEA-545)
   const loadRuns = () => mindApi.runs().then((s) => setLastLearn(s.lastLearn ? { at: s.lastLearn.at, detail: s.lastLearn.detail } : null)).catch(() => undefined);
-  useEffect(() => { loadRuns(); }, []);
+  useEffect(() => { loadRuns(); chainApi.list().then(setChains).catch(() => setChains([])); }, []);
 
   async function load() {
     try {
@@ -134,7 +135,7 @@ export function Lab() {
       ) : findings === null ? (
         <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>
       ) : tab === 'map' ? (
-        <MindGraph findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onOpen={setInfo} />
+        <MindGraph findings={findings} chains={chains} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onOpen={setInfo} />
       ) : (
         <FindingsFeed findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onRemove={onRemove} onAmend={onAmend} onOpen={setInfo} />
       )}
@@ -399,8 +400,8 @@ function ChainForm({ chain, onSaved, onCancel }: { chain: MindChain | null; onSa
 }
 
 // ---------------- Map: Obsidian-style force graph ----------------
-type GNode = { id: string; label: string; x: number; y: number; vx: number; vy: number; deg: number; fixed: boolean; fx: number | null; fy: number | null };
-type GEdge = { from: string; to: string; f: Finding };
+type GNode = { id: string; label: string; x: number; y: number; vx: number; vy: number; deg: number; fixed: boolean; fx: number | null; fy: number | null; kind?: 'goal' | 'blocker' | 'lever' };
+type GEdge = { from: string; to: string; f?: Finding; chain?: boolean };
 
 // One physics step: charge repulsion + edge springs (rest ~110) + centering, with velocity damping. Mutates nodes.
 function stepSim(nodes: GNode[], edges: GEdge[], W: number, H: number, alpha = 1) {
@@ -444,7 +445,7 @@ function stepSim(nodes: GNode[], edges: GEdge[], W: number, H: number, alpha = 1
   }
 }
 
-function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onOpen: (v: FindingView) => void }) {
+function MindGraph({ findings, chains = [], onConfirm, onRefute, onPin, onOpen }: { findings: Finding[]; chains?: MindChain[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onOpen: (v: FindingView) => void }) {
   const W = 720;
   const H = 520;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -460,7 +461,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
   // Graph topology (nodes meta + edges + adjacency) — rebuilt only when findings change.
   const { metaList, edges, adj } = useMemo(() => {
     const top = [...findings].sort((a, b) => b.confidence - a.confidence).slice(0, 40);
-    const meta = new Map<string, { id: string; label: string; deg: number }>();
+    const meta = new Map<string, { id: string; label: string; deg: number; kind?: 'goal' | 'blocker' | 'lever' }>();
     meta.set(YOU, { id: YOU, label: 'You', deg: 0 });
     const edges: GEdge[] = [];
     const adj = new Map<string, Set<string>>();
@@ -481,8 +482,20 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
         link(ok, sk);
       }
     }
+    // Situations: each active chain becomes a small Goal → Blocker → Lever cluster, anchored to You. (BEA-545)
+    const node = (id: string, label: string, kind: 'goal' | 'blocker' | 'lever') => { if (!meta.has(id)) meta.set(id, { id, label, deg: 0, kind }); };
+    const edge = (a: string, b: string) => { if (a === b) return; edges.push({ from: a, to: b, chain: true }); meta.get(a)!.deg++; meta.get(b)!.deg++; link(a, b); link(b, a); };
+    for (const c of chains.filter((c) => c.status === 'active')) {
+      const g = `cg:${c.id}`, b = `cb:${c.id}`, l = `cl:${c.id}`;
+      if (c.goal) node(g, c.goal, 'goal');
+      if (c.blocker) node(b, c.blocker, 'blocker');
+      if (c.lever) node(l, c.lever, 'lever');
+      if (c.goal) edge(YOU, g);
+      if (c.goal && c.blocker) edge(g, b);
+      if (c.blocker && c.lever) edge(b, l);
+    }
     return { metaList: [...meta.values()], edges, adj };
-  }, [findings]);
+  }, [findings, chains]);
 
   const nodesRef = useRef<GNode[]>([]);
   const alphaRef = useRef(1);
@@ -503,6 +516,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
         id: m.id,
         label: m.label,
         deg: m.deg,
+        kind: m.kind,
         fixed,
         x: fixed ? W / 2 : p ? p.x : seedX,
         y: fixed ? H / 2 : p ? p.y : seedY,
@@ -633,7 +647,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
     return () => svg.removeEventListener('wheel', onWheel);
   }, []);
 
-  if (!findings.length) return <Empty />;
+  if (!findings.length && !chains.length) return <Empty />;
 
   const nodes = nodesRef.current;
   const pos = new Map(nodes.map((n) => [n.id, n]));
@@ -643,7 +657,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
   const edgeLit = (e: GEdge) => !active || e.from === active || e.to === active;
   const showLabel = (n: GNode) => n.id === YOU || (!!active && nodeLit(n.id)) || view.k > 1.4 || n.deg >= 2;
 
-  const selFindings = sel ? edges.filter((e) => e.from === sel || e.to === sel).map((e) => e.f) : [];
+  const selFindings = sel ? (edges.filter((e) => (e.from === sel || e.to === sel) && e.f).map((e) => e.f) as Finding[]) : [];
   const selLabel = nodes.find((n) => n.id === sel)?.label;
 
   return (
@@ -664,6 +678,10 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
               const a = pos.get(e.from);
               const b = pos.get(e.to);
               if (!a || !b) return null;
+              if (e.chain || !e.f) {
+                // Situation edge (Goal → Blocker → Lever) — violet, dashed, no finding behind it.
+                return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#8b5cf6" strokeWidth={2} strokeDasharray="4 4" strokeOpacity={edgeLit(e) ? 0.6 : 0.14} />;
+              }
               return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={edgeColor(e.f.valence)} strokeWidth={1 + e.f.confidence * 4} strokeOpacity={(edgeLit(e) ? 0.55 : 0.12) * (e.f.status === 'fading' ? 0.5 : 1)} />;
             })}
             {nodes.map((nd) => {
@@ -671,7 +689,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
               const lit = nodeLit(nd.id);
               return (
                 <g key={nd.id} opacity={lit ? 1 : 0.16} style={{ cursor: 'pointer' }} onPointerDown={(ev) => onNodeDown(ev, nd.id)} onPointerEnter={() => setHover(nd.id)} onPointerLeave={() => setHover((h) => (h === nd.id ? null : h))}>
-                  <circle cx={nd.x} cy={nd.y} r={r} fill={nd.id === YOU ? '#8b5cf6' : sel === nd.id ? '#34d399' : '#3f3f46'} stroke={sel === nd.id ? '#34d399' : 'transparent'} strokeWidth={2} />
+                  <circle cx={nd.x} cy={nd.y} r={r} fill={nd.id === YOU ? '#8b5cf6' : sel === nd.id ? '#34d399' : nd.kind === 'goal' ? '#7c3aed' : nd.kind === 'blocker' ? '#f43f5e' : nd.kind === 'lever' ? '#10b981' : '#3f3f46'} stroke={sel === nd.id ? '#34d399' : 'transparent'} strokeWidth={2} />
                   {showLabel(nd) && (
                     <text x={nd.x} y={nd.y + r + 11} textAnchor="middle" className="fill-zinc-500 dark:fill-zinc-400" style={{ fontSize: 10, pointerEvents: 'none' }}>
                       {nd.label.length > 18 ? nd.label.slice(0, 17) + '…' : nd.label}
@@ -685,6 +703,7 @@ function MindGraph({ findings, onConfirm, onRefute, onPin, onOpen }: { findings:
         <div className="flex items-center gap-3 px-3 py-2 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500">
           <span className="inline-flex items-center gap-1"><span className="h-2 w-3 rounded-full" style={{ background: '#34d399' }} /> energizing</span>
           <span className="inline-flex items-center gap-1"><span className="h-2 w-3 rounded-full" style={{ background: '#f43f5e' }} /> draining</span>
+          <span className="inline-flex items-center gap-1"><span className="h-2 w-3 rounded-full" style={{ background: '#8b5cf6' }} /> situation</span>
           <button onClick={() => setView({ k: 1, tx: 0, ty: 0 })} className="ml-2 px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">Reset view</button>
           <span className="ml-auto">{nodes.length - 1} things · {edges.length} links</span>
         </div>
