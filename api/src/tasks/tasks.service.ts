@@ -77,6 +77,22 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     // This keeps task credit truthful to the day the work actually belonged to.
     // One-time cleanup: clear the open-task duplicates that earlier builds wrote to memory. (BEA-546)
     setTimeout(() => this.runOnceMemoryCleanup().catch((e) => this.log.warn(`open-task purge: ${e?.message ?? e}`)), 20000);
+    // One-time deep sweep: remove ORPHAN task docs left in the stores by past churn. (BEA-548)
+    setTimeout(() => this.runOnceOrphanSweep().catch((e) => this.log.warn(`orphan sweep: ${e?.message ?? e}`)), 45000);
+  }
+
+  /** Passthrough: delete orphan task docs from the stores (deletion only). (BEA-548) */
+  purgeOrphanTaskDocs() {
+    return this.memory.purgeOrphanTaskDocs();
+  }
+
+  private async runOnceOrphanSweep(): Promise<void> {
+    const key = 'tasks.purgedOrphanDocsV1';
+    const seen = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    if (seen?.value) return;
+    const r = await this.memory.purgeOrphanTaskDocs();
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value: JSON.stringify(r) }, update: { value: JSON.stringify(r) } }).catch(() => undefined);
+    this.log.log(`orphan sweep: removed ${r.smDeleted} SuperMemory + ${r.ragDeleted} RAG stray task docs (scanned sm=${r.smScanned} rag=${r.ragScanned})`);
   }
 
   /** Delete the memory docs of every non-done task that still has them (deletion only — no AI). (BEA-546) */

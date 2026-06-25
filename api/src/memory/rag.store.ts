@@ -107,6 +107,18 @@ export class RagStore implements OnModuleDestroy {
     }).catch(() => undefined);
   }
 
+  /** List stored docs (id + title + tags) for maintenance sweeps. No-op ([]) if the store can't list. (BEA-548) */
+  async list(limit = 5000): Promise<{ id: string; title: string; tags: string[] }[]> {
+    return this.call(async (c) => {
+      const r: any = await c.callTool({ name: 'list_docs', arguments: { limit } }).catch(() => null);
+      const p = r ? this.parse(r) : null;
+      const rows = p?.results ?? p?.docs ?? p?.documents ?? (Array.isArray(p) ? p : []);
+      return (rows || [])
+        .map((d: any) => ({ id: d.id ?? d.doc_id ?? d.docId, title: d.title ?? '', tags: d.tags ?? d.metadata?.tags ?? [] }))
+        .filter((d: any) => d.id);
+    }).catch(() => []);
+  }
+
   /**
    * Search whole-docs AND chunks in parallel, merge into one list, de-dup by source doc
    * (keeping the highest-scoring hit per doc), and sort by score. This is what lets a fact
