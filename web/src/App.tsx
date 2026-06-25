@@ -30,6 +30,9 @@ import { Find as Explore } from './pages/Find';
 import { Commitments } from './pages/Commitments';
 import { Vault } from './pages/Vault';
 import { Lab } from './pages/Lab';
+import { Documents } from './pages/Documents';
+import { DocumentView } from './pages/DocumentView';
+import { DocumentPublic } from './pages/DocumentPublic';
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -46,6 +49,7 @@ export default function App() {
           <Route path="/skill/:id" element={<SkillViewer />} />
           <Route path="/meeting-view/:id" element={<MeetingViewer />} />
           <Route path="/request-view/:shareId" element={<RequestViewer />} />
+          <Route path="/d/:slug" element={<DocumentPublic />} />
           {/* Everything else is behind auth. */}
           <Route path="/*" element={<AuthedApp />} />
         </Routes>
@@ -119,6 +123,8 @@ function AuthedApp() {
         {/* Mentor now lives inside the Lab — keep the old URL working (BEA-465) */}
         <Route path="mentor" element={<Navigate to="/lab?tab=mentor" replace />} />
         <Route path="notes" element={<Notes />} />
+        <Route path="documents" element={<Documents />} />
+        <Route path="documents/:id" element={<DocumentView />} />
         <Route path="vault" element={<Vault />} />
         <Route path="lab" element={<Lab />} />
         <Route path="settings" element={<Settings email={email} />} />

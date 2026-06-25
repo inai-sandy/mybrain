@@ -242,6 +242,31 @@ model MentorDay {
   updatedAt      DateTime @updatedAt
 }
 
+/// A document in the Documents library — md/html files the user creates to share & re-use.
+/// Separate from Item/Capture: NOT indexed into memory unless the user explicitly converts it. (BEA-532)
+model Document {
+  id           String   @id @default(uuid())
+  slug         String   @unique // stable public/url key
+  title        String
+  description  String? // <=200 char summary (manual now; AI-filled later)
+  kind         String   @default("md") // md | html | pdf | image | other
+  mime         String?
+  filename     String?
+  contentText  String? // md/html text content (binary files use filePath later)
+  filePath     String? // for pdf/images on the volume (later step)
+  bytes        Int?
+  sourceUrl    String? // when imported from the internet (later step)
+  originServer String? // when landed from another server (later step)
+  collectionId String? // folder/collection (later step)
+  tags         String   @default("[]") // JSON string array
+  shared       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([kind])
+  @@index([collectionId])
+}
+
 /// The Mentor's Sunday weekly review: the week's wins, drift, one pattern, one experiment.
 model WeeklyReview {
   id         String   @id @default(uuid())
