@@ -30,6 +30,27 @@ export class MindChainService {
     const lever = (data.lever || '').trim().slice(0, 200);
     if (!goal && !blocker && !lever) return null;
     const engine = data.source === 'engine';
+
+    // De-dupe the USER path: if a near-duplicate situation already exists, reinforce it instead of stacking
+    // another card. (The engine path already de-dupes before calling create.) (BEA-542)
+    if (!engine) {
+      const active = await this.prisma.mindChain.findMany({ where: { status: { not: 'retired' } } });
+      const dup = active.find((e) => this.isDup({ goal, blocker }, e));
+      if (dup) {
+        const reinforced = await this.prisma.mindChain.update({
+          where: { id: dup.id },
+          data: {
+            validated: 'confirmed',
+            confidence: Math.min(0.95, (dup.confidence || 0.7) + 0.1),
+            lever: dup.lever || lever, // keep the user's lever if the old one was blank
+            lastSeenDay: this.today(),
+            shifted: false,
+          },
+        });
+        return { ...reinforced, reinforced: true };
+      }
+    }
+
     return this.prisma.mindChain.create({
       data: {
         goal,
@@ -43,6 +64,26 @@ export class MindChainService {
         lastSeenDay: this.today(),
       },
     });
+  }
+
+  /** Two chains are "the same situation" if their blockers overlap, or both goal AND blocker overlap. */
+  private isDup(a: { goal: string; blocker: string }, b: { goal: string; blocker: string }): boolean {
+    return this.overlap(a.blocker, b.blocker) || (this.overlap(a.goal, b.goal) && this.overlap(a.blocker, b.blocker));
+  }
+
+  /** Merge near-duplicate active chains into the strongest one (keep best, retire the rest). (BEA-542) */
+  async dedupeChains(): Promise<{ merged: number }> {
+    const rows = await this.prisma.mindChain.findMany({ where: { status: { not: 'retired' } } });
+    const score = (c: any) => (c.validated === 'confirmed' ? 2000 : c.validated === 'refuted' ? -1000 : 0) + (c.pinned ? 500 : 0) + (c.confidence || 0) * 100;
+    const sorted = [...rows].sort((a, b) => score(b) - score(a));
+    const kept: typeof rows = [];
+    const retire: string[] = [];
+    for (const c of sorted) {
+      if (kept.find((k) => this.isDup(c, k))) retire.push(c.id);
+      else kept.push(c);
+    }
+    if (retire.length) await this.prisma.mindChain.updateMany({ where: { id: { in: retire } }, data: { status: 'retired' } });
+    return { merged: retire.length };
   }
 
   async update(id: string, patch: { goal?: string; blocker?: string; lever?: string; note?: string; status?: string }) {
@@ -141,7 +182,7 @@ export class MindChainService {
       const blocker = String(c?.blocker || '').trim();
       const lever = String(c?.lever || '').trim();
       if (!goal || !blocker) continue;
-      const dup = existing.some((e) => this.overlap(e.blocker, blocker) || (this.overlap(e.goal, goal) && this.overlap(e.blocker, blocker)));
+      const dup = existing.some((e) => this.isDup({ goal, blocker }, e));
       if (dup) continue;
       await this.create({ goal, blocker, lever, source: 'engine' });
       existing.push({ goal, blocker }); // so two proposals this run don't duplicate each other
