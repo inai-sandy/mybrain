@@ -323,6 +323,43 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     if (ragId) await this.rag.delete(ragId).catch(() => undefined);
   }
 
+  /**
+   * Delete ORPHAN task docs from the stores — task-type docs not linked to any live task. These pile up
+   * from past re-index churn. Deletion only (no embeddings). (BEA-548)
+   */
+  async purgeOrphanTaskDocs(): Promise<{ smDeleted: number; ragDeleted: number; smScanned: number; ragScanned: number }> {
+    const tasks = await this.prisma.task.findMany({ select: { supermemoryId: true, ragId: true } });
+    const liveSm = new Set(tasks.map((t) => t.supermemoryId).filter(Boolean) as string[]);
+    const liveRag = new Set(tasks.map((t) => t.ragId).filter(Boolean) as string[]);
+    const isTaskDoc = (d: { title?: string; tags?: string[] }) =>
+      (d.tags || []).map((t) => String(t).toLowerCase()).includes('task') || String(d.title || '').startsWith('Task:');
+
+    let smDeleted = 0;
+    let smScanned = 0;
+    for (let page = 1; page <= 500; page++) {
+      const { docs, total } = await this.sm.list(200, page).catch(() => ({ docs: [] as any[], total: 0 }));
+      if (!docs.length) break;
+      smScanned += docs.length;
+      for (const d of docs) {
+        if (isTaskDoc(d) && !liveSm.has(d.id)) {
+          await this.sm.delete(d.id).catch(() => undefined);
+          smDeleted++;
+        }
+      }
+      if (page * 200 >= (total || 0)) break;
+    }
+
+    let ragDeleted = 0;
+    const ragDocs = await this.rag.list(8000).catch(() => [] as { id: string; title: string; tags: string[] }[]);
+    for (const d of ragDocs) {
+      if (isTaskDoc(d) && !liveRag.has(d.id)) {
+        await this.rag.delete(d.id).catch(() => undefined);
+        ragDeleted++;
+      }
+    }
+    return { smDeleted, ragDeleted, smScanned, ragScanned: ragDocs.length };
+  }
+
   async status() {
     const grouped = await this.prisma.memoryOutbox.groupBy({ by: ['status'], _count: { _all: true } });
     return grouped.map((g) => ({ status: g.status, count: g._count._all }));

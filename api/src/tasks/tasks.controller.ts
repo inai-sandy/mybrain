@@ -24,6 +24,12 @@ export class TasksController {
     return this.tasks.purgeOpenTaskMemory();
   }
 
+  /** Deep sweep: delete orphan task docs left in the stores (deletion only). (BEA-548) */
+  @Post('purge-orphan-task-docs')
+  async purgeOrphanTaskDocs() {
+    return this.tasks.purgeOrphanTaskDocs();
+  }
+
   @Get('today')
   async today() {
     return this.tasks.today();
