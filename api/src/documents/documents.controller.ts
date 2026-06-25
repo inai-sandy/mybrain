@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { DocumentsService, DocInput } from './documents.service';
 import { Public } from '../auth/public.decorator';
@@ -23,6 +24,24 @@ export class DocumentsController {
     return this.docs.summarize(body?.contentText || '');
   }
 
+  /** Upload a file (md/html/pdf/image) into the library. (BEA-534) */
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async upload(@UploadedFile() file: any) {
+    if (!file) throw new NotFoundException('No file uploaded');
+    return this.docs.createFromUpload(file);
+  }
+
+  /** Stream a stored binary file (pdf/image) inline — used by the viewer preview and binary download. */
+  @Get(':id/file')
+  async file(@Param('id') id: string, @Res() res: Response) {
+    const f = await this.docs.file(id);
+    if (!f) throw new NotFoundException('File not found');
+    res.setHeader('Content-Type', f.mime);
+    res.setHeader('Content-Disposition', `inline; filename="${f.filename}"`);
+    res.sendFile(f.filePath);
+  }
+
   /** Public read of a shared document by slug (no login). Must be declared before ':id'. */
   @Public()
   @Get('public/:slug')
@@ -41,6 +60,13 @@ export class DocumentsController {
 
   @Get(':id/download')
   async download(@Param('id') id: string, @Res() res: Response) {
+    const f = await this.docs.file(id);
+    if (f) {
+      res.setHeader('Content-Type', f.mime);
+      res.setHeader('Content-Disposition', `attachment; filename="${f.filename}"`);
+      res.sendFile(f.filePath);
+      return;
+    }
     const raw = await this.docs.raw(id);
     if (!raw) throw new NotFoundException('Document not found');
     res.setHeader('Content-Type', raw.mime + '; charset=utf-8');

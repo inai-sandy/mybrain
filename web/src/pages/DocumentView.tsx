@@ -72,7 +72,11 @@ export function DocumentView() {
             </div>
           </div>
 
-          {doc.kind === 'html' ? (
+          {doc.kind === 'pdf' ? (
+            <iframe title={doc.title} src={`/api/documents/${doc.id}/file`} className="w-full min-h-[80vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
+          ) : doc.kind === 'image' ? (
+            <img src={`/api/documents/${doc.id}/file`} alt={doc.title} className="max-w-full rounded-xl border border-zinc-200 dark:border-zinc-800" />
+          ) : doc.kind === 'html' ? (
             <iframe title={doc.title} srcDoc={doc.contentText} className="w-full min-h-[60vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" sandbox="allow-popups allow-popups-to-escape-sandbox" />
           ) : (
             <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">
