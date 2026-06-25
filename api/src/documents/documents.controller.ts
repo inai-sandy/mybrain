@@ -85,6 +85,28 @@ export class DocumentsController {
     return this.docs.ingest({ file, title: body?.title, contentText: body?.contentText, kind: body?.kind, tags, sourceUrl: body?.sourceUrl, originServer: body?.originServer });
   }
 
+  // ---- Collections (BEA-537). Declared before ':id' routes. ----
+
+  @Get('collections')
+  listCollections() {
+    return this.docs.listCollections();
+  }
+
+  @Post('collections')
+  createCollection(@Body() body: { name?: string; color?: string }) {
+    return this.docs.createCollection(body?.name || '', body?.color);
+  }
+
+  @Patch('collections/:id')
+  renameCollection(@Param('id') id: string, @Body() body: { name?: string; color?: string }) {
+    return this.docs.renameCollection(id, body?.name || '', body?.color);
+  }
+
+  @Delete('collections/:id')
+  removeCollection(@Param('id') id: string) {
+    return this.docs.removeCollection(id);
+  }
+
   /** Public read of a shared document by slug (no login). Must be declared before ':id'. */
   @Public()
   @Get('public/:slug')

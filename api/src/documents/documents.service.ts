@@ -19,6 +19,7 @@ export type DocInput = {
   description?: string;
   kind?: string;
   tags?: string[];
+  collectionId?: string | null;
 };
 
 // A cheap, fast model is plenty for a one-line summary + tags. (BEA-533)
@@ -85,6 +86,7 @@ export class DocumentsService {
       description: d.description || null,
       kind: d.kind,
       tags: this.parseTags(d.tags),
+      collectionId: d.collectionId || null,
       shared: !!d.shared,
       bytes: d.bytes ?? (d.contentText ? Buffer.byteLength(d.contentText, 'utf8') : null),
       createdAt: d.createdAt,
@@ -96,6 +98,38 @@ export class DocumentsService {
   async list() {
     const rows = await this.prisma.document.findMany({ orderBy: { updatedAt: 'desc' } });
     return { documents: rows.map((r) => this.shape(r)) };
+  }
+
+  // ---- Collections / folders (BEA-537) ----
+
+  async listCollections() {
+    const [rows, docs] = await Promise.all([
+      this.prisma.documentCollection.findMany({ orderBy: { name: 'asc' } }),
+      this.prisma.document.findMany({ select: { collectionId: true } }),
+    ]);
+    const counts: Record<string, number> = {};
+    for (const d of docs) if (d.collectionId) counts[d.collectionId] = (counts[d.collectionId] || 0) + 1;
+    return { collections: rows.map((c) => ({ id: c.id, name: c.name, color: c.color || null, count: counts[c.id] || 0 })) };
+  }
+
+  createCollection(name: string, color?: string) {
+    const n = (name || '').trim().slice(0, 80);
+    if (!n) return null;
+    return this.prisma.documentCollection.create({ data: { name: n, color: color?.trim().slice(0, 20) || null } });
+  }
+
+  renameCollection(id: string, name: string, color?: string) {
+    const data: Record<string, unknown> = {};
+    if (typeof name === 'string' && name.trim()) data.name = name.trim().slice(0, 80);
+    if (typeof color === 'string') data.color = color.trim().slice(0, 20) || null;
+    return this.prisma.documentCollection.update({ where: { id }, data }).catch(() => null);
+  }
+
+  /** Delete a collection but keep its documents (detach them). */
+  async removeCollection(id: string) {
+    await this.prisma.document.updateMany({ where: { collectionId: id }, data: { collectionId: null } });
+    await this.prisma.documentCollection.delete({ where: { id } }).catch(() => null);
+    return { ok: true };
   }
 
   async create(input: DocInput) {
@@ -298,6 +332,7 @@ export class DocumentsService {
     }
     if (typeof patch.description === 'string') data.description = patch.description.trim().slice(0, 200) || null;
     if (patch.tags) data.tags = JSON.stringify(this.parseTags(patch.tags));
+    if (patch.collectionId !== undefined) data.collectionId = patch.collectionId || null;
     const row = await this.prisma.document.update({ where: { id }, data }).catch(() => null);
     return row ? this.full(row) : null;
   }
