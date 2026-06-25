@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2 } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -42,6 +42,7 @@ export function Documents() {
   const [sharing, setSharing] = useState<DocItem | null>(null);
   const [editing, setEditing] = useState<DocItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const toast = useToast();
@@ -134,6 +135,7 @@ export function Documents() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,image/*" className="hidden" onChange={(e) => upload(e.target.files)} />
+          <button onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Link2 size={16} /> Import URL</button>
           <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"><Upload size={16} /> {uploading ? 'Uploading…' : 'Upload'}</button>
           <button onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm font-medium"><Plus size={16} /> New Document</button>
         </div>
@@ -165,8 +167,48 @@ export function Documents() {
           }}
         />
       )}
+      {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
       {sharing && <ShareDialog id={sharing.id} title={sharing.title} initialShared={sharing.shared} shareEndpoint={`/api/documents/${sharing.id}/share`} publicLink={`${location.origin}/d/${sharing.slug}`} onClose={() => setSharing(null)} onChanged={() => load()} />}
+    </div>
+  );
+}
+
+/** Import a document from a URL. (BEA-536) */
+function ImportUrlModal({ onClose, onDone }: { onClose: () => void; onDone: (id?: string) => void }) {
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  async function go() {
+    if (!url.trim()) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/documents/import-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast('success', 'Imported');
+        onDone(d.id);
+      } else toast('error', d.message || 'Could not import that link');
+    } catch {
+      toast('error', 'Could not import that link');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold flex items-center gap-2"><Link2 size={18} className="text-emerald-600" /> Import from a URL</h3>
+          <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">Paste a link to a page or file (md, html, pdf, image). I'll fetch it, save it, and write a description + tags.</p>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} placeholder="https://…" autoFocus className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
+          <button onClick={go} disabled={busy || !url.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">{busy ? 'Importing…' : 'Import'}</button>
+        </div>
+      </div>
     </div>
   );
 }
