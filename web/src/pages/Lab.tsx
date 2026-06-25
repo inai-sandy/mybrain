@@ -267,6 +267,7 @@ function ChainCard({ c, onEdit, onChange }: { c: MindChain; onEdit: () => void; 
         <div className="pl-1.5 text-[11px] text-zinc-300 dark:text-zinc-600">↓ the lever</div>
         <div className="flex items-start gap-2"><Wrench size={15} className="text-emerald-500 shrink-0 mt-0.5" /><div className="min-w-0"><div className="text-sm font-medium text-emerald-700 dark:text-emerald-300">{c.lever || '—'}</div></div></div>
         {c.note && <p className="text-xs text-zinc-500 pl-6 pt-0.5">{c.note}</p>}
+        {c.provenance && <p className="text-[11px] text-zinc-400 dark:text-zinc-500 pl-6 pt-1 italic flex items-start gap-1"><Sparkles size={11} className="mt-0.5 shrink-0 text-violet-400" />{c.provenance}</p>}
       </div>
       <div className="flex items-center gap-1.5 mt-3 pt-2.5 border-t border-zinc-100 dark:border-zinc-800">
         <TrustLadder confidence={c.confidence} validated={c.validated} />

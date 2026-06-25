@@ -24,7 +24,7 @@ export class MindChainService {
     });
   }
 
-  async create(data: { goal?: string; blocker?: string; lever?: string; note?: string; source?: string }) {
+  async create(data: { goal?: string; blocker?: string; lever?: string; note?: string; source?: string; provenance?: string }) {
     const goal = (data.goal || '').trim().slice(0, 200);
     const blocker = (data.blocker || '').trim().slice(0, 200);
     const lever = (data.lever || '').trim().slice(0, 200);
@@ -57,6 +57,7 @@ export class MindChainService {
         blocker,
         lever,
         note: data.note?.trim().slice(0, 400) || null,
+        provenance: (data.provenance || (engine ? null : `You added this · ${this.today()}`))?.slice(0, 300) || null,
         source: engine ? 'engine' : 'user',
         validated: engine ? null : 'confirmed', // a chain the user typed is theirs — already confirmed
         confidence: engine ? 0.6 : 0.85,
@@ -167,24 +168,27 @@ export class MindChainService {
       (drains.length ? `DRAINING PATTERNS:\n${drains.map((d) => `- ${d.statement}`).join('\n')}\n\n` : '') +
       (notes.length ? `THEIR OWN NOTES:\n${notes.map((n) => `- ${n.snippet}`).join('\n')}\n\n` : '') +
       (story?.rawText ? `TODAY'S STORY:\n${story.rawText.slice(0, 1500)}\n\n` : '') +
-      `Return ONLY JSON: {"chains":[{"goal":"...","blocker":"...","lever":"..."}]} (empty array if nothing well-grounded).`;
+      `Return ONLY JSON: {"chains":[{"goal":"...","blocker":"...","lever":"...","why":"one short plain sentence on what in today's signals made you see this"}]} (empty array if nothing well-grounded).`;
     const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 600, 'chain-infer'))?.trim() || '';
-    let list: { goal?: string; blocker?: string; lever?: string }[] = [];
+    let list: { goal?: string; blocker?: string; lever?: string; why?: string }[] = [];
     try {
       const jjson = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
       if (Array.isArray(jjson?.chains)) list = jjson.chains;
     } catch {
       list = [];
     }
+    const deferredNames = deferred.slice(0, 3).map((t) => t.title).join(', ');
     let created = 0;
     for (const c of list.slice(0, 2)) {
       const goal = String(c?.goal || '').trim();
       const blocker = String(c?.blocker || '').trim();
       const lever = String(c?.lever || '').trim();
+      const why = String(c?.why || '').trim();
       if (!goal || !blocker) continue;
       const dup = existing.some((e) => this.isDup({ goal, blocker }, e));
       if (dup) continue;
-      await this.create({ goal, blocker, lever, source: 'engine' });
+      const provenance = `Noticed on ${day}${deferredNames ? ` · deferred: ${deferredNames}` : ''}${why ? ` — ${why}` : ''}`;
+      await this.create({ goal, blocker, lever, source: 'engine', provenance });
       existing.push({ goal, blocker }); // so two proposals this run don't duplicate each other
       created++;
     }
@@ -251,6 +255,7 @@ export class MindChainService {
               shifted: true,
               validated: null, // it's an engine guess again → wants a fresh look
               note: why ? `Blocker may have shifted: ${why}` : c.note,
+              provenance: `Updated ${day}${why ? ` — ${why}` : ' — your day suggested the blocker moved'}`.slice(0, 300),
               lastSeenDay: day,
             },
           })
