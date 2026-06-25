@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -42,6 +42,8 @@ export function Documents() {
   const [sharing, setSharing] = useState<DocItem | null>(null);
   const [editing, setEditing] = useState<DocItem | null>(null);
   const [creating, setCreating] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -53,6 +55,22 @@ export function Documents() {
   useEffect(() => {
     load();
   }, []);
+
+  async function upload(files: FileList | null) {
+    if (!files?.length) return;
+    setUploading(true);
+    let ok = 0;
+    for (const f of Array.from(files)) {
+      const fd = new FormData();
+      fd.append('file', f);
+      const r = await fetch('/api/documents/upload', { method: 'POST', body: fd }).catch(() => null);
+      if (r?.ok) ok++;
+    }
+    setUploading(false);
+    if (fileInput.current) fileInput.current.value = '';
+    toast(ok ? 'success' : 'error', ok ? `Uploaded ${ok} file${ok > 1 ? 's' : ''}` : 'Upload failed');
+    load();
+  }
 
   async function remove(it: DocItem) {
     setDel(null);
@@ -114,7 +132,11 @@ export function Documents() {
           <h1 className="text-xl font-bold flex items-center gap-2"><FileText size={20} className="text-emerald-600" /> Documents</h1>
           <p className="text-sm text-zinc-500">Your own files to write, share and re-use — kept out of memory unless you convert one to Capture.</p>
         </div>
-        <button onClick={() => setCreating(true)} className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm font-medium"><Plus size={16} /> New Document</button>
+        <div className="flex shrink-0 items-center gap-2">
+          <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,image/*" className="hidden" onChange={(e) => upload(e.target.files)} />
+          <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"><Upload size={16} /> {uploading ? 'Uploading…' : 'Upload'}</button>
+          <button onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm font-medium"><Plus size={16} /> New Document</button>
+        </div>
       </div>
 
       <DataTable<DocItem>
@@ -159,6 +181,7 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
   const [filling, setFilling] = useState(false);
   const [loaded, setLoaded] = useState(!doc);
   const toast = useToast();
+  const isBinary = doc?.kind === 'pdf' || doc?.kind === 'image';
 
   useEffect(() => {
     if (doc) {
@@ -199,7 +222,8 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
     }
     setBusy(true);
     const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean);
-    const body = { title: title.trim(), contentText: content, description: description.trim(), tags: tagList };
+    const body: Record<string, unknown> = { title: title.trim(), description: description.trim(), tags: tagList };
+    if (!isBinary) body.contentText = content;
     const r = doc
       ? await fetch(`/api/documents/${doc.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       : await fetch('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -221,14 +245,18 @@ export function DocEditor({ doc, onClose, onSaved }: { doc: DocItem | null; onCl
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-medium outline-none focus:border-emerald-500" />
           {!loaded ? (
             <p className="text-sm text-zinc-400 py-8 text-center">Loading…</p>
+          ) : isBinary ? (
+            <p className="text-sm text-zinc-500 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2">This is a {doc?.kind?.toUpperCase()} file — you can edit its title, description and tags here.</p>
           ) : (
             <MarkdownEditor value={content} onChange={setContent} />
           )}
           <div className="flex items-center justify-between gap-2 pt-1">
             <label className="text-xs font-medium text-zinc-500">Description &amp; tags</label>
-            <button type="button" onClick={autoFill} disabled={filling} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs hover:bg-emerald-500/10 disabled:opacity-50">
-              <Sparkles size={13} /> {filling ? 'Thinking…' : 'Auto-fill with AI'}
-            </button>
+            {!isBinary && (
+              <button type="button" onClick={autoFill} disabled={filling} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs hover:bg-emerald-500/10 disabled:opacity-50">
+                <Sparkles size={13} /> {filling ? 'Thinking…' : 'Auto-fill with AI'}
+              </button>
+            )}
           </div>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Short description (≤200 chars — AI fills this if you leave it blank)" maxLength={200} rows={2} className="w-full resize-none rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
           <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="Tags (comma separated)" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />

@@ -1,7 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import { join, extname } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
+
+// pdf-parse v1 has no types; the /lib import avoids its debug-mode file read on require.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfParse: (b: Buffer) => Promise<{ text: string }> = require('pdf-parse/lib/pdf-parse.js');
+
+const docsDir = () => join(process.env.DATA_DIR || '/app/data', 'documents');
+
+export type UploadFile = { originalname: string; mimetype?: string; buffer: Buffer; size?: number };
 
 export type DocInput = {
   title?: string;
@@ -100,18 +110,90 @@ export class DocumentsService {
       if (tags.length === 0) tags = ai.tags;
     }
     const finalDesc = (description || this.autoDescription(content)).slice(0, 200) || null;
+    return this.insert({
+      title,
+      description: finalDesc,
+      kind: input.kind || 'md',
+      contentText: content,
+      bytes: Buffer.byteLength(content, 'utf8'),
+      tags,
+    });
+  }
+
+  /** Shared insert — text docs and uploaded files both land here. */
+  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null }) {
     const row = await this.prisma.document.create({
       data: {
-        slug: this.slugify(title),
-        title,
-        description: finalDesc,
-        kind: input.kind || 'md',
-        contentText: content,
-        bytes: Buffer.byteLength(content, 'utf8'),
-        tags: JSON.stringify(tags),
+        slug: this.slugify(data.title),
+        title: data.title,
+        description: data.description,
+        kind: data.kind,
+        contentText: data.contentText ?? null,
+        filePath: data.filePath ?? null,
+        mime: data.mime ?? null,
+        filename: data.filename ?? null,
+        bytes: data.bytes ?? null,
+        tags: JSON.stringify(data.tags),
       },
     });
     return this.full(row);
+  }
+
+  /** Detect the document kind from a filename/mime. */
+  private kindOf(name: string, mime?: string): 'md' | 'html' | 'pdf' | 'image' {
+    const ext = extname(name || '').toLowerCase().replace('.', '');
+    if ((mime || '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) return 'image';
+    if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
+    if (mime === 'text/html' || ['html', 'htm'].includes(ext)) return 'html';
+    return 'md';
+  }
+
+  /** Create a document from an uploaded file (md/html/pdf/image). (BEA-534) */
+  async createFromUpload(file: UploadFile) {
+    const name = file.originalname || 'upload';
+    const kind = this.kindOf(name, file.mimetype);
+    const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Untitled';
+
+    if (kind === 'md' || kind === 'html') {
+      const content = file.buffer.toString('utf8');
+      return this.create({ title, contentText: content, kind });
+    }
+
+    // Binary: store on the volume, then summarise from extracted text (pdf) or just the name (image).
+    await fs.mkdir(docsDir(), { recursive: true });
+    const id = randomUUID();
+    const filePath = join(docsDir(), `${id}${extname(name) || ''}`);
+    await fs.writeFile(filePath, file.buffer);
+
+    let description = '';
+    let tags: string[] = [];
+    if (kind === 'pdf') {
+      const text = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
+      if (text.trim()) {
+        const ai = await this.summarize(text).catch(() => ({ description: '', tags: [] as string[] }));
+        description = ai.description;
+        tags = ai.tags;
+      }
+    }
+    if (!description) description = kind === 'pdf' ? `PDF · ${name}` : `Image · ${name}`;
+
+    return this.insert({
+      title,
+      description: description.slice(0, 200),
+      kind,
+      tags,
+      filePath,
+      mime: file.mimetype || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
+      filename: name,
+      bytes: file.size ?? file.buffer.length,
+    });
+  }
+
+  /** Locate a stored binary file for streaming (open/preview/download). */
+  async file(id: string) {
+    const row = await this.prisma.document.findUnique({ where: { id } });
+    if (!row || !row.filePath) return null;
+    return { filePath: row.filePath, mime: row.mime || 'application/octet-stream', filename: row.filename || `${row.slug}${extname(row.filePath)}` };
   }
 
   /** Full document incl. content, for the in-app viewer/editor. */
@@ -138,6 +220,8 @@ export class DocumentsService {
   }
 
   async remove(id: string) {
+    const row = await this.prisma.document.findUnique({ where: { id } }).catch(() => null);
+    if (row?.filePath) await fs.unlink(row.filePath).catch(() => undefined);
     await this.prisma.document.delete({ where: { id } }).catch(() => null);
     return { ok: true };
   }
