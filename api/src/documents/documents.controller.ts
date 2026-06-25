@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { DocumentsService, DocInput } from './documents.service';
 import { Public } from '../auth/public.decorator';
+
+const PUBLIC_BASE = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
 @Controller('documents')
 export class DocumentsController {
@@ -40,6 +42,36 @@ export class DocumentsController {
     res.setHeader('Content-Type', f.mime);
     res.setHeader('Content-Disposition', `inline; filename="${f.filename}"`);
     res.sendFile(f.filePath);
+  }
+
+  // ---- Server-to-server ingest (BEA-535). Declared before ':id' routes. ----
+
+  /** The token + endpoint for the Settings card. */
+  @Get('ingest-token')
+  async getIngestToken() {
+    return { token: await this.docs.ingestToken(), url: `${PUBLIC_BASE}/api/documents/ingest` };
+  }
+
+  @Post('ingest-token/regenerate')
+  async regenerateIngestToken() {
+    return { token: await this.docs.regenerateIngestToken(), url: `${PUBLIC_BASE}/api/documents/ingest` };
+  }
+
+  /** Token-protected entry point another server posts to (a file, or JSON). */
+  @Public()
+  @Post('ingest')
+  @UseInterceptors(FileInterceptor('file'))
+  async ingest(
+    @UploadedFile() file: any,
+    @Body() body: { title?: string; contentText?: string; kind?: string; tags?: string[] | string; sourceUrl?: string; originServer?: string },
+    @Headers('x-ingest-token') headerToken: string,
+    @Headers('authorization') auth: string,
+  ) {
+    const token = headerToken || (auth?.toLowerCase().startsWith('bearer ') ? auth.slice(7) : '');
+    if (!(await this.docs.verifyIngestToken(token))) throw new UnauthorizedException('Invalid or missing ingest token');
+    const tags = Array.isArray(body?.tags) ? body.tags : typeof body?.tags === 'string' ? body.tags.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+    if (!file && !body?.contentText) throw new NotFoundException('Provide a file or contentText');
+    return this.docs.ingest({ file, title: body?.title, contentText: body?.contentText, kind: body?.kind, tags, sourceUrl: body?.sourceUrl, originServer: body?.originServer });
   }
 
   /** Public read of a shared document by slug (no login). Must be declared before ':id'. */

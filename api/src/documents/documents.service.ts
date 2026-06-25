@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
 import { promises as fs } from 'fs';
 import { join, extname } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
@@ -187,6 +187,49 @@ export class DocumentsService {
       filename: name,
       bytes: file.size ?? file.buffer.length,
     });
+  }
+
+  // ---- Server-to-server ingest (BEA-535) ----
+
+  private async getSetting(key: string): Promise<string | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key } });
+    return row?.value ?? null;
+  }
+  private async setSetting(key: string, value: string) {
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  }
+
+  /** The current ingest token, creating one on first read so the Settings card always has something to show. */
+  async ingestToken(): Promise<string> {
+    const existing = await this.getSetting('documents.ingestToken');
+    if (existing) return existing;
+    const token = randomBytes(32).toString('hex');
+    await this.setSetting('documents.ingestToken', token);
+    return token;
+  }
+  async regenerateIngestToken(): Promise<string> {
+    const token = randomBytes(32).toString('hex');
+    await this.setSetting('documents.ingestToken', token);
+    return token;
+  }
+  /** Constant-time token check. Ingest stays disabled until a token exists. */
+  async verifyIngestToken(provided: string | undefined | null): Promise<boolean> {
+    const stored = await this.getSetting('documents.ingestToken');
+    if (!stored || !provided) return false;
+    const a = Buffer.from(stored);
+    const b = Buffer.from(provided);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+
+  /** Create a document from another server — a file or a JSON body — stamping originServer. */
+  async ingest(args: { file?: UploadFile; title?: string; contentText?: string; kind?: string; tags?: string[]; sourceUrl?: string; originServer?: string }) {
+    const doc = args.file ? await this.createFromUpload(args.file) : await this.create({ title: args.title, contentText: args.contentText, kind: args.kind, tags: args.tags });
+    if (args.originServer || args.sourceUrl) {
+      await this.prisma.document
+        .update({ where: { id: doc.id }, data: { originServer: args.originServer?.slice(0, 120) || undefined, sourceUrl: args.sourceUrl?.slice(0, 500) || undefined } })
+        .catch(() => undefined);
+    }
+    return doc;
   }
 
   /** Locate a stored binary file for streaming (open/preview/download). */

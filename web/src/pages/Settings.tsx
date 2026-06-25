@@ -1279,11 +1279,62 @@ function ChatRetentionCard() {
   );
 }
 
+/** Server-to-server document ingest token + curl example (BEA-535). */
+function DocumentIngestCard() {
+  const [cfg, setCfg] = useState<{ token: string; url: string } | null>(null);
+  const [show, setShow] = useState(false);
+  const [regen, setRegen] = useState(false);
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/documents/ingest-token').then((r) => r.json()).then(setCfg).catch(() => setCfg(null));
+  }, []);
+  async function regenerate() {
+    setRegen(false);
+    const r = await fetch('/api/documents/ingest-token/regenerate', { method: 'POST' });
+    if (r.ok) {
+      setCfg(await r.json());
+      toast('success', 'New token — update your other servers');
+    } else toast('error', 'Could not regenerate');
+  }
+  function copy(text: string, label: string) {
+    navigator.clipboard.writeText(text).then(() => toast('success', `${label} copied`)).catch(() => toast('error', 'Could not copy'));
+  }
+  if (!cfg) return null;
+  const masked = show ? cfg.token : cfg.token.slice(0, 6) + '••••••••••••••••' + cfg.token.slice(-4);
+  const curl = `curl -X POST ${cfg.url} \\\n  -H "X-Ingest-Token: ${cfg.token}" \\\n  -F "file=@/path/to/document.md" \\\n  -F "originServer=$(hostname)"`;
+  const inp = 'w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-mono';
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <h2 className="flex items-center gap-2 font-semibold mb-1"><FileText size={18} className="text-emerald-600" /> Documents — server upload</h2>
+      <p className="text-sm text-zinc-500 mb-4">Let your other servers drop files straight into Documents. Keep this token secret — anyone with it can upload. Send it as an <code>X-Ingest-Token</code> header (or <code>Authorization: Bearer</code>).</p>
+      <label className="block text-xs text-zinc-500 mb-1">Endpoint</label>
+      <div className="flex gap-2 mb-3">
+        <input readOnly value={cfg.url} className={inp} />
+        <button onClick={() => copy(cfg.url, 'URL')} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 text-sm">Copy</button>
+      </div>
+      <label className="block text-xs text-zinc-500 mb-1">Token</label>
+      <div className="flex gap-2 mb-3">
+        <input readOnly value={masked} className={inp} />
+        <button onClick={() => setShow((s) => !s)} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 text-sm">{show ? 'Hide' : 'Show'}</button>
+        <button onClick={() => copy(cfg.token, 'Token')} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 text-sm">Copy</button>
+      </div>
+      <label className="block text-xs text-zinc-500 mb-1">Example (upload a file from another server)</label>
+      <pre className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-mono overflow-x-auto whitespace-pre">{curl}</pre>
+      <div className="mt-4 flex justify-between">
+        <button onClick={() => copy(curl, 'Command')} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Copy command</button>
+        <button onClick={() => setRegen(true)} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm text-rose-500 hover:border-rose-400">Regenerate token</button>
+      </div>
+      <ConfirmDialog open={regen} title="Regenerate the token?" message="The old token stops working immediately — any server still using it will be rejected until you update it." confirmLabel="Regenerate" onCancel={() => setRegen(false)} onConfirm={regenerate} />
+    </section>
+  );
+}
+
 function SyncSection() {
   return (
     <div className="space-y-4">
       <TelegramCard />
       <NudgesCard />
+      <DocumentIngestCard />
       <ChatRetentionCard />
       <RaindropSyncCard />
       <SkillsSyncCard />
