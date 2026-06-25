@@ -670,6 +670,7 @@ model MindChain {
   blocker      String
   lever        String
   note         String?
+  provenance   String? // where this came from: "From your 25 Jun story · deferred: X" (BEA-543)
   source       String // user | engine
   status       String   @default("active") // active | resolved | retired
   confidence   Float    @default(0.7)
