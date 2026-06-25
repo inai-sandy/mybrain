@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import { join, extname } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
+import { ItemsService } from '../items/items.service';
 
 // pdf-parse v1 has no types; the /lib import avoids its debug-mode file read on require.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -31,7 +32,19 @@ export class DocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
+    private readonly items: ItemsService,
   ) {}
+
+  /** Copy a document into Capture/memory (RAG + SuperMemory) on demand. (BEA-540) */
+  async convertToCapture(id: string) {
+    const row = await this.prisma.document.findUnique({ where: { id } });
+    if (!row) throw new Error('Document not found.');
+    const content = (row.contentText || '').trim();
+    if (!content) throw new Error('This document has no text to remember (images can’t be sent to memory).');
+    const tags = Array.from(new Set([...this.parseTags(row.tags), 'document']));
+    const res = await this.items.store(content, 'document', row.title, row.sourceUrl || undefined, tags);
+    return { ok: true, itemId: res.item.id, deduped: !!res.deduped };
+  }
 
   /** AI read: a ≤200-char description + a few topic tags for a document's content. (BEA-533) */
   async summarize(content: string): Promise<{ description: string; tags: string[] }> {

@@ -40,11 +40,15 @@ function fakePrisma() {
 function fakeLlm() {
   return { completeWith: async () => '{"description":"A note about important research.","tags":["ai-tag"]}' };
 }
+// Fake ItemsService for convert-to-Capture.
+function fakeItems() {
+  return { store: async () => ({ item: { id: 'item-1' }, deduped: false }) };
+}
 
 describe('DocumentsService', () => {
   it('creates a markdown doc with a slug, tags, and an auto description', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
     const doc = await svc.create({ title: 'My Research Notes', contentText: '# Heading\n\nSome **important** body text here.', tags: ['research', 'notes'] });
     expect(doc.title).toBe('My Research Notes');
     expect(doc.slug).toMatch(/^my-research-notes-[a-z0-9]{6}$/);
@@ -56,7 +60,7 @@ describe('DocumentsService', () => {
 
   it('lists newest-first without content, gets full content, updates, and deletes', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
     const a = await svc.create({ title: 'First', contentText: 'a' });
     await svc.create({ title: 'Second', contentText: 'b' });
     const listed = await svc.list();
@@ -75,7 +79,7 @@ describe('DocumentsService', () => {
 
   it('shares a doc and only returns it publicly once shared', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
     const doc = await svc.create({ title: 'Shareable', contentText: 'hello world' });
     expect(await svc.getShared(doc.slug)).toBeNull(); // not shared yet
 
@@ -89,7 +93,7 @@ describe('DocumentsService', () => {
   });
 
   it('manages the ingest token (create, verify constant-time, regenerate)', async () => {
-    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any);
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any);
     const t = await svc.ingestToken();
     expect(t).toHaveLength(64);
     expect(await svc.ingestToken()).toBe(t); // stable across reads
@@ -102,9 +106,17 @@ describe('DocumentsService', () => {
     expect(await svc.verifyIngestToken(t2)).toBe(true);
   });
 
+  it('converts a text document into Capture (memory)', async () => {
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Memo', contentText: 'remember this content' });
+    const res = await svc.convertToCapture(doc.id);
+    expect(res.ok).toBe(true);
+    expect(res.itemId).toBe('item-1');
+  });
+
   it('produces a download payload with a safe filename', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
     const doc = await svc.create({ title: 'Hello / World!', contentText: '# Hi' });
     const raw = await svc.raw(doc.id);
     expect(raw?.filename).toBe('hello-world.md');
