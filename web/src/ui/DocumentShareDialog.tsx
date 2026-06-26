@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, Check, Share2, X, Globe, Lock, Pencil, KeyRound, Clock } from 'lucide-react';
+import { Copy, Check, Share2, X, Globe, Lock, Pencil, KeyRound, Clock, Eye, Download } from 'lucide-react';
 import { useToast } from './Toast';
 
 function toLocalInput(iso: string): string {
@@ -22,6 +22,7 @@ export function DocumentShareDialog({
   initialShared,
   hasPassword: initialHasPassword,
   expiresAt: initialExpiresAt,
+  viewCount,
   onClose,
   onChanged,
 }: {
@@ -32,6 +33,7 @@ export function DocumentShareDialog({
   initialShared: boolean;
   hasPassword?: boolean;
   expiresAt?: string | null;
+  viewCount?: number;
   onClose: () => void;
   onChanged?: (shared: boolean) => void;
 }) {
@@ -47,10 +49,26 @@ export function DocumentShareDialog({
   const [pwInput, setPwInput] = useState('');
   const [expiry, setExpiry] = useState(initialExpiresAt ? toLocalInput(initialExpiresAt) : '');
   const [savingProt, setSavingProt] = useState(false);
+  const [qr, setQr] = useState('');
   const toast = useToast();
 
   const prettyUrl = `${location.origin}/d/${slug}`;
   const shortUrl = shortCode ? `${location.origin}/s/${shortCode}` : '';
+
+  // Generate the QR code client-side (qrcode is loaded on demand to stay out of the main bundle). (BEA-586)
+  useEffect(() => {
+    if (!shared) return;
+    const link = shortUrl || prettyUrl;
+    let alive = true;
+    import('qrcode')
+      .then((mod) => {
+        const toDataURL = (mod as any).toDataURL || (mod as any).default?.toDataURL;
+        return toDataURL(link, { width: 240, margin: 1 });
+      })
+      .then((u: string) => { if (alive) setQr(u); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [shared, shortUrl, prettyUrl]);
 
   async function setSharedState(next: boolean) {
     setBusy(true);
@@ -200,6 +218,18 @@ export function DocumentShareDialog({
                 {linkRow(shortUrl, 'short')}
               </div>
             )}
+
+            <div className="flex items-center gap-4 border-t border-zinc-100 dark:border-zinc-800 pt-3">
+              {qr ? (
+                <img src={qr} alt="QR code" className="h-24 w-24 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white p-1" />
+              ) : (
+                <div className="h-24 w-24 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 grid place-items-center text-[10px] text-zinc-400">QR…</div>
+              )}
+              <div className="space-y-2">
+                <p className="flex items-center gap-1.5 text-sm text-zinc-500"><Eye size={15} /> {viewCount ?? 0} {(viewCount ?? 0) === 1 ? 'view' : 'views'}</p>
+                {qr && <a href={qr} download={`qr-${slug}.png`} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800"><Download size={13} /> Save QR</a>}
+              </div>
+            </div>
 
             <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-3">
               <div>

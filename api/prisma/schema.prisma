@@ -250,6 +250,7 @@ model Document {
   shortCode    String?  @unique // short share code -> /s/:code (BEA-584)
   sharePassword String? // bcrypt hash; when set, the public link asks for a password (BEA-585)
   expiresAt    DateTime? // when set + passed, the public link is treated as un-shared (BEA-585)
+  viewCount    Int      @default(0) // public opens of the shared link (BEA-586)
   title        String
   description  String? // <=200 char summary (manual now; AI-filled later)
   kind         String   @default("md") // md | html | pdf | image | other
