@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { ShareDialog } from '../ui/ShareDialog';
+import { DocumentShareDialog } from '../ui/DocumentShareDialog';
 import { MarkdownEditor } from '../ui/MarkdownEditor';
 import { useToast } from '../ui/Toast';
 
@@ -13,6 +13,7 @@ const RichTextEditor = lazy(() => import('../ui/RichTextEditor').then((m) => ({ 
 export type DocItem = {
   id: string;
   slug: string;
+  shortCode?: string | null;
   title: string;
   description: string | null;
   kind: string;
@@ -341,7 +342,7 @@ export function Documents() {
       <ConfirmDialog open={bulkDel} title={`Delete ${selected.size} document${selected.size === 1 ? '' : 's'}?`} message="These will be permanently removed." confirmLabel="Delete" onCancel={() => setBulkDel(false)} onConfirm={bulkRemove} />
       {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
-      {sharing && <ShareDialog id={sharing.id} title={sharing.title} initialShared={sharing.shared} shareEndpoint={`/api/documents/${sharing.id}/share`} publicLink={`${location.origin}/d/${sharing.slug}`} onClose={() => setSharing(null)} onChanged={() => load()} />}
+      {sharing && <DocumentShareDialog id={sharing.id} title={sharing.title} slug={sharing.slug} shortCode={sharing.shortCode} initialShared={sharing.shared} onClose={() => setSharing(null)} onChanged={() => load()} />}
     </div>
   );
 }

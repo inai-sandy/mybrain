@@ -34,6 +34,7 @@ import { Documents } from './pages/Documents';
 import { DocumentView } from './pages/DocumentView';
 import { DocumentPublic } from './pages/DocumentPublic';
 import { DocumentFull } from './pages/DocumentFull';
+import { ShortLink } from './pages/ShortLink';
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/meeting-view/:id" element={<MeetingViewer />} />
           <Route path="/request-view/:shareId" element={<RequestViewer />} />
           <Route path="/d/:slug" element={<DocumentPublic />} />
+          <Route path="/s/:code" element={<ShortLink />} />
           {/* Everything else is behind auth. */}
           <Route path="/*" element={<AuthedApp />} />
         </Routes>

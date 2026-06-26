@@ -168,6 +168,15 @@ export class DocumentsController {
     return this.docs.removeCollection(id);
   }
 
+  /** Resolve a short share code to its slug, for the /s/:code route. Declared before ':id'. (BEA-584) */
+  @Public()
+  @Get('public/code/:code')
+  async resolveCode(@Param('code') code: string) {
+    const d = await this.docs.resolveShortCode(code);
+    if (!d) throw new NotFoundException('This short link is not active.');
+    return d;
+  }
+
   /** Public read of a shared document by slug (no login). Must be declared before ':id'. */
   @Public()
   @Get('public/:slug')
@@ -219,6 +228,16 @@ export class DocumentsController {
   @Post(':id/share')
   share(@Param('id') id: string, @Body() body: { shared?: boolean }) {
     return this.docs.setShared(id, !!body?.shared);
+  }
+
+  /** Rename the public link (slug). (BEA-584) */
+  @Post(':id/slug')
+  async slug(@Param('id') id: string, @Body() body: { slug?: string }) {
+    try {
+      return await this.docs.setSlug(id, body?.slug || '');
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Could not rename the link.');
+    }
   }
 
   /** Copy this document into Capture/memory (RAG + SuperMemory). (BEA-540) */
