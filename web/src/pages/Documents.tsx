@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -58,7 +58,13 @@ export function Documents() {
   const [results, setResults] = useState<DocItem[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDel, setBulkDel] = useState(false);
+  const [view, setView] = useState<'cards' | 'list'>(() => (localStorage.getItem('docsView') === 'list' ? 'list' : 'cards'));
   const searching = q.trim().length >= 2;
+
+  function changeView(v: 'cards' | 'list') {
+    setView(v);
+    localStorage.setItem('docsView', v);
+  }
   const fileInput = useRef<HTMLInputElement>(null);
 
   function toggleSel(id: string) {
@@ -213,6 +219,35 @@ export function Documents() {
     );
   }
 
+  /** Compact bookmarks-style row (List view). (BEA-583) */
+  function row(r: DocItem) {
+    return (
+      <div className={'group flex items-center gap-2.5 rounded-xl border bg-white dark:bg-zinc-900 px-3 py-2.5 transition-all ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm')}>
+        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'h-4 w-4 accent-emerald-600 shrink-0 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
+        <div className="shrink-0 rounded-lg p-1.5 text-emerald-500 bg-emerald-500/10"><FileText size={16} /></div>
+        <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold leading-tight truncate group-hover:text-emerald-600">{r.title}</h3>
+            {r.shared && <span className="shrink-0 text-[10px] text-emerald-600">shared</span>}
+          </div>
+          <p className="text-xs text-zinc-400 truncate">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.description ? ` · ${r.description}` : ''}</p>
+        </button>
+        {r.tags?.length > 0 && (
+          <div className="hidden lg:flex items-center gap-1.5 shrink-0 max-w-[30%] overflow-hidden">
+            {r.tags.slice(0, 3).map((t) => <Chip key={t} t={t} />)}
+          </div>
+        )}
+        <div className="shrink-0 flex items-center gap-0.5">
+          <button onClick={() => navigate(`/documents/${r.id}`)} title="Open" className={iconBtn + ' hover:text-emerald-600'}><Eye size={16} /></button>
+          <a href={`/api/documents/${r.id}/download`} title="Download" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Download size={16} /></a>
+          <button onClick={() => setEditing(r)} title="Edit" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Pencil size={16} /></button>
+          <button onClick={() => setSharing(r)} title="Share" className={iconBtn + ' hover:text-emerald-600'}><Share2 size={16} /></button>
+          <button onClick={() => setDel(r)} title="Delete" className={iconBtn + ' hover:text-red-500'}><Trash2 size={16} /></button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -265,6 +300,13 @@ export function Documents() {
         </div>
       )}
 
+      <div className="flex justify-end">
+        <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 p-0.5">
+          <button onClick={() => changeView('cards')} title="Card view" aria-label="Card view" className={'p-1.5 rounded-md transition-colors ' + (view === 'cards' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}><LayoutGrid size={15} /></button>
+          <button onClick={() => changeView('list')} title="List view" aria-label="List view" className={'p-1.5 rounded-md transition-colors ' + (view === 'list' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}><List size={15} /></button>
+        </div>
+      </div>
+
       <DataTable<DocItem>
         columns={cols}
         rows={searching ? results : activeCol === 'all' ? items : items.filter((i) => i.collectionId === activeCol)}
@@ -272,8 +314,9 @@ export function Documents() {
         filters={searching ? [] : filters}
         sortOptions={searching ? [] : sortOptions}
         searchable={false}
-        renderCard={card}
+        renderCard={view === 'list' ? row : card}
         cardsOnly
+        gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}
         pageSize={12}
         emptyText={searching ? `No documents match "${q.trim()}".` : 'No documents yet — hit New Document to write your first one.'}
       />
