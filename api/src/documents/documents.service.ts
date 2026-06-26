@@ -141,6 +141,7 @@ export class DocumentsService {
       shared: !!d.shared,
       hasPassword: !!d.sharePassword,
       expiresAt: d.expiresAt || null,
+      viewCount: d.viewCount ?? 0,
       bytes: d.bytes ?? (d.contentText ? Buffer.byteLength(d.contentText, 'utf8') : null),
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
@@ -560,6 +561,8 @@ export class DocumentsService {
     const row = await this.prisma.document.findUnique({ where: { slug } });
     if (!row || !row.shared) return null;
     if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return { expired: true, title: row.title };
+    // Count the open (best-effort, fire-and-forget). A locked page still counts as a visit. (BEA-586)
+    void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
     if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind };
     return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', updatedAt: row.updatedAt };
   }

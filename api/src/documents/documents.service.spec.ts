@@ -27,7 +27,11 @@ function fakePrisma() {
       update: async ({ where, data }: any) => {
         const r = rows.find((x) => x.id === where.id);
         if (!r) throw new Error('not found');
-        Object.assign(r, data, { updatedAt: new Date() });
+        const resolved: any = { ...data };
+        for (const [k, v] of Object.entries(data)) {
+          if (v && typeof v === 'object' && 'increment' in (v as any)) resolved[k] = (r[k] || 0) + (v as any).increment;
+        }
+        Object.assign(r, resolved, { updatedAt: new Date() });
         return r;
       },
       delete: async ({ where }: any) => {
@@ -109,6 +113,23 @@ describe('DocumentsService', () => {
     await svc.setShared(doc.id, false);
     expect(await svc.resolveShortCode(code)).toBeNull(); // not shared anymore
     expect(await svc.resolveShortCode('nope')).toBeNull();
+  });
+
+  it('counts public opens of a shared doc (BEA-586)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Popular', contentText: 'hi' });
+    await svc.setShared(doc.id, true);
+
+    await svc.getShared(doc.slug);
+    await svc.getShared(doc.slug);
+    const full = await svc.get(doc.id);
+    expect(full?.viewCount).toBe(2);
+
+    // A private (unshared) doc is not counted.
+    await svc.setShared(doc.id, false);
+    await svc.getShared(doc.slug);
+    expect((await svc.get(doc.id))?.viewCount).toBe(2);
   });
 
   it('password-protects a share: locked until the right password unlocks it (BEA-585)', async () => {

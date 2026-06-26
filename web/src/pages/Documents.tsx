@@ -22,6 +22,7 @@ export type DocItem = {
   shared: boolean;
   hasPassword?: boolean;
   expiresAt?: string | null;
+  viewCount?: number;
   bytes: number | null;
   snippet?: string | null;
   createdAt: string;
@@ -200,7 +201,7 @@ export function Documents() {
           <div className="shrink-0 rounded-lg p-2 text-emerald-500 bg-emerald-500/10"><FileText size={18} /></div>
           <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left">
             <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{r.title}</h3>
-            <p className="mt-0.5 text-xs text-zinc-400">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.shared && <> · <span className="text-emerald-600">shared</span></>}</p>
+            <p className="mt-0.5 text-xs text-zinc-400">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.shared && <> · <span className="text-emerald-600">shared</span></>}{r.shared && (r.viewCount ?? 0) > 0 && <> · {r.viewCount} views</>}</p>
           </button>
         </div>
         {r.description && <p className="mt-2 text-xs text-zinc-500 line-clamp-2">{r.description}</p>}
@@ -233,7 +234,7 @@ export function Documents() {
             <h3 className="font-semibold leading-tight truncate group-hover:text-emerald-600">{r.title}</h3>
             {r.shared && <span className="shrink-0 text-[10px] text-emerald-600">shared</span>}
           </div>
-          <p className="text-xs text-zinc-400 truncate">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.description ? ` · ${r.description}` : ''}</p>
+          <p className="text-xs text-zinc-400 truncate">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}{r.description ? ` · ${r.description}` : ''}</p>
         </button>
         {r.tags?.length > 0 && (
           <div className="hidden lg:flex items-center gap-1.5 shrink-0 max-w-[30%] overflow-hidden">
@@ -344,7 +345,7 @@ export function Documents() {
       <ConfirmDialog open={bulkDel} title={`Delete ${selected.size} document${selected.size === 1 ? '' : 's'}?`} message="These will be permanently removed." confirmLabel="Delete" onCancel={() => setBulkDel(false)} onConfirm={bulkRemove} />
       {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
-      {sharing && <DocumentShareDialog id={sharing.id} title={sharing.title} slug={sharing.slug} shortCode={sharing.shortCode} initialShared={sharing.shared} hasPassword={sharing.hasPassword} expiresAt={sharing.expiresAt} onClose={() => setSharing(null)} onChanged={() => load()} />}
+      {sharing && <DocumentShareDialog id={sharing.id} title={sharing.title} slug={sharing.slug} shortCode={sharing.shortCode} initialShared={sharing.shared} hasPassword={sharing.hasPassword} expiresAt={sharing.expiresAt} viewCount={sharing.viewCount} onClose={() => setSharing(null)} onChanged={() => load()} />}
     </div>
   );
 }
