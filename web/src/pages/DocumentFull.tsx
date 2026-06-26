@@ -5,8 +5,7 @@ import { FullScreenHtml } from '../ui/FullScreenHtml';
 /** Owner's chrome-free, full-screen live view of an HTML document. (BEA-582) */
 export function DocumentFull() {
   const { id } = useParams();
-  const [html, setHtml] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
+  const [doc, setDoc] = useState<{ title: string; kind: string; contentText: string; siteEntry?: string | null } | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -15,14 +14,12 @@ export function DocumentFull() {
         if (!r.ok) throw new Error();
         return r.json();
       })
-      .then((d) => {
-        setTitle(d.title || '');
-        setHtml(d.contentText || '');
-      })
+      .then((d) => setDoc({ title: d.title || '', kind: d.kind, contentText: d.contentText || '', siteEntry: d.siteEntry }))
       .catch(() => setError('Document not found.'));
   }, [id]);
 
   if (error) return <div className="min-h-screen grid place-items-center text-amber-500">{error}</div>;
-  if (html === null) return <div className="min-h-screen grid place-items-center text-zinc-400">Loading…</div>;
-  return <FullScreenHtml html={html} title={title} backTo={`/documents/${id}`} />;
+  if (!doc) return <div className="min-h-screen grid place-items-center text-zinc-400">Loading…</div>;
+  if (doc.kind === 'site') return <FullScreenHtml src={`/api/documents/${id}/site/${encodeURI(doc.siteEntry || 'index.html')}`} title={doc.title} backTo={`/documents/${id}`} />;
+  return <FullScreenHtml html={doc.contentText} title={doc.title} backTo={`/documents/${id}`} />;
 }

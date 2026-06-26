@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcryptjs';
+import AdmZip from 'adm-zip';
 import { promises as fs } from 'fs';
-import { join, extname } from 'path';
+import { join, extname, resolve, sep } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
@@ -12,6 +13,17 @@ import { ItemsService } from '../items/items.service';
 const pdfParse: (b: Buffer) => Promise<{ text: string }> = require('pdf-parse/lib/pdf-parse.js');
 
 const docsDir = () => join(process.env.DATA_DIR || '/app/data', 'documents');
+const sitesDir = () => join(docsDir(), 'sites');
+
+// Content types for serving extracted site assets. (BEA-587)
+const SITE_MIME: Record<string, string> = {
+  html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', mjs: 'text/javascript',
+  json: 'application/json', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', ico: 'image/x-icon', txt: 'text/plain',
+  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', map: 'application/json',
+  xml: 'application/xml', webmanifest: 'application/manifest+json', wasm: 'application/wasm',
+};
+const siteMime = (name: string) => SITE_MIME[extname(name).toLowerCase().replace('.', '')] || 'application/octet-stream';
 
 export type UploadFile = { originalname: string; mimetype?: string; buffer: Buffer; size?: number };
 
@@ -310,7 +322,7 @@ export class DocumentsService {
   }
 
   /** Shared insert — text docs and uploaded files both land here. */
-  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null }) {
+  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null; siteEntry?: string | null }) {
     const row = await this.prisma.document.create({
       data: {
         slug: this.slugify(data.title),
@@ -322,6 +334,7 @@ export class DocumentsService {
         mime: data.mime ?? null,
         filename: data.filename ?? null,
         bytes: data.bytes ?? null,
+        siteEntry: data.siteEntry ?? null,
         tags: JSON.stringify(data.tags),
       },
     });
@@ -340,6 +353,10 @@ export class DocumentsService {
   /** Create a document from an uploaded file (md/html/pdf/image). (BEA-534) */
   async createFromUpload(file: UploadFile) {
     const name = file.originalname || 'upload';
+    const ext = extname(name).toLowerCase();
+    if (ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed') {
+      return this.createFromZip(file);
+    }
     const kind = this.kindOf(name, file.mimetype);
     const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Untitled';
 
@@ -383,6 +400,96 @@ export class DocumentsService {
       filename: name,
       bytes: file.size ?? file.buffer.length,
     });
+  }
+
+  /** Unzip a multi-file site into its own folder; keep the original zip for download. (BEA-587) */
+  async createFromZip(file: UploadFile) {
+    const name = file.originalname || 'site.zip';
+    const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Site';
+    const id = randomUUID();
+    const dir = join(sitesDir(), id);
+
+    let zip: AdmZip;
+    try {
+      zip = new AdmZip(file.buffer);
+    } catch {
+      throw new Error('That file is not a valid ZIP.');
+    }
+    const entries = zip.getEntries().filter((e) => !e.isDirectory);
+    if (entries.length === 0) throw new Error('The ZIP is empty.');
+    if (entries.length > 2000) throw new Error('That ZIP has too many files (max 2000).');
+    const totalBytes = entries.reduce((n, e) => n + (e.header?.size || 0), 0);
+    if (totalBytes > 80 * 1024 * 1024) throw new Error('That site is too big (max 80 MB unzipped).');
+
+    await fs.mkdir(dir, { recursive: true });
+    const htmlFiles: string[] = [];
+    for (const e of entries) {
+      // Normalise + guard against path traversal / absolute paths.
+      const rel = e.entryName.replace(/\\/g, '/').replace(/^\/+/, '');
+      const dest = resolve(dir, rel);
+      if (dest !== dir && !dest.startsWith(dir + sep)) continue; // skip anything that escapes the folder
+      await fs.mkdir(join(dest, '..'), { recursive: true });
+      await fs.writeFile(dest, e.getData());
+      if (/\.html?$/i.test(rel)) htmlFiles.push(rel);
+    }
+    if (htmlFiles.length === 0) {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      throw new Error('No HTML page found in that ZIP.');
+    }
+    // Entry = root index.html if present, else the shallowest .html, else the first.
+    const entry =
+      htmlFiles.find((f) => f.toLowerCase() === 'index.html') ||
+      [...htmlFiles].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b))[0];
+
+    // Keep the original zip for download.
+    await fs.mkdir(docsDir(), { recursive: true });
+    const zipPath = join(docsDir(), `${id}.zip`);
+    await fs.writeFile(zipPath, file.buffer);
+
+    const row = await this.prisma.document.create({
+      data: {
+        id,
+        slug: this.slugify(title),
+        title,
+        description: `Site · ${entries.length} files`,
+        kind: 'site',
+        filePath: zipPath,
+        mime: 'application/zip',
+        filename: name,
+        bytes: file.size ?? file.buffer.length,
+        siteEntry: entry,
+        tags: JSON.stringify([]),
+      },
+    });
+    return this.full(row);
+  }
+
+  private resolveSitePath(id: string, entry: string | null, rel?: string) {
+    const dir = join(sitesDir(), id);
+    const wanted = rel && rel.trim() ? rel.replace(/\\/g, '/').replace(/^\/+/, '') : entry || 'index.html';
+    const dest = resolve(dir, wanted);
+    if (dest !== dir && !dest.startsWith(dir + sep)) return null; // traversal guard
+    return { filePath: dest, mime: siteMime(dest) };
+  }
+
+  /** Owner: stream a file from an extracted site folder. (BEA-587) */
+  async siteFile(id: string, rel?: string) {
+    const row = await this.prisma.document.findUnique({ where: { id } });
+    if (!row || row.kind !== 'site') return null;
+    const p = this.resolveSitePath(id, row.siteEntry, rel);
+    if (!p) return null;
+    if (!(await fs.stat(p.filePath).then((s) => s.isFile()).catch(() => false))) return null;
+    return p;
+  }
+
+  /** Public: stream a file from a SHARED site folder (honours expiry; password-protected sites stay closed for now). (BEA-587) */
+  async sharedSiteFile(slug: string, rel?: string) {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || row.kind !== 'site' || !this.isLive(row) || row.sharePassword) return null;
+    const p = this.resolveSitePath(row.id, row.siteEntry, rel);
+    if (!p) return null;
+    if (!(await fs.stat(p.filePath).then((s) => s.isFile()).catch(() => false))) return null;
+    return p;
   }
 
   // ---- Server-to-server ingest (BEA-535) ----
@@ -550,7 +657,7 @@ export class DocumentsService {
 
   /** Full document incl. content, for the in-app viewer/editor. */
   private full(d: any) {
-    return { ...this.shape(d), contentText: d.contentText || '' };
+    return { ...this.shape(d), contentText: d.contentText || '', siteEntry: d.siteEntry || null };
   }
 
   async get(id: string) {
@@ -575,6 +682,7 @@ export class DocumentsService {
   async remove(id: string) {
     const row = await this.prisma.document.findUnique({ where: { id } }).catch(() => null);
     if (row?.filePath) await fs.unlink(row.filePath).catch(() => undefined);
+    if (row?.kind === 'site') await fs.rm(join(sitesDir(), id), { recursive: true, force: true }).catch(() => undefined);
     await this.prisma.document.delete({ where: { id } }).catch(() => null);
     return { ok: true };
   }
@@ -634,7 +742,7 @@ export class DocumentsService {
     // Count the open (best-effort, fire-and-forget). A locked page still counts as a visit. (BEA-586)
     void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
     if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind };
-    return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', updatedAt: row.updatedAt };
+    return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', siteEntry: row.siteEntry || null, updatedAt: row.updatedAt };
   }
 
   /** Verify a share password; on success return the content + a file-unlock token. (BEA-585) */

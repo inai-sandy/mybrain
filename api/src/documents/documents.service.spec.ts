@@ -140,6 +140,50 @@ describe('DocumentsService', () => {
     expect((await svc.search('quarterly zzzzz')).documents.length).toBe(0); // 2 tokens, both required
   });
 
+  it('unzips a multi-file site, picks index.html, serves assets, blocks traversal (BEA-587)', async () => {
+    const os = require('os');
+    const fsx = require('fs');
+    const path = require('path');
+    const AdmZip = require('adm-zip');
+    process.env.DATA_DIR = fsx.mkdtempSync(path.join(os.tmpdir(), 'mybrain-docs-'));
+
+    const zip = new AdmZip();
+    zip.addFile('index.html', Buffer.from('<h1>Hi</h1><link rel="stylesheet" href="style.css">'));
+    zip.addFile('style.css', Buffer.from('body{color:red}'));
+    zip.addFile('assets/app.js', Buffer.from('console.log(1)'));
+    const buf = zip.toBuffer();
+
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.createFromUpload({ originalname: 'My Site.zip', mimetype: 'application/zip', buffer: buf, size: buf.length });
+    expect(doc.kind).toBe('site');
+    expect(doc.siteEntry).toBe('index.html');
+
+    const entry = await svc.siteFile(doc.id, '');
+    expect(entry?.mime).toBe('text/html');
+    expect(fsx.readFileSync(entry!.filePath, 'utf8')).toContain('Hi');
+
+    expect((await svc.siteFile(doc.id, 'style.css'))?.mime).toBe('text/css');
+    expect((await svc.siteFile(doc.id, 'assets/app.js'))?.mime).toBe('text/javascript');
+
+    // Path traversal is blocked, and missing files return null.
+    expect(await svc.siteFile(doc.id, '../../etc/passwd')).toBeNull();
+    expect(await svc.siteFile(doc.id, 'nope.css')).toBeNull();
+  });
+
+  it('rejects a ZIP with no HTML page (BEA-587)', async () => {
+    const os = require('os');
+    const fsx = require('fs');
+    const path = require('path');
+    const AdmZip = require('adm-zip');
+    process.env.DATA_DIR = fsx.mkdtempSync(path.join(os.tmpdir(), 'mybrain-docs-'));
+    const zip = new AdmZip();
+    zip.addFile('readme.txt', Buffer.from('no html here'));
+    const buf = zip.toBuffer();
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any);
+    await expect(svc.createFromUpload({ originalname: 'x.zip', mimetype: 'application/zip', buffer: buf, size: buf.length })).rejects.toThrow(/No HTML/i);
+  });
+
   it('counts public opens of a shared doc (BEA-586)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);

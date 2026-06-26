@@ -7,12 +7,12 @@ import { Link } from 'react-router-dom';
  * but NOT `allow-same-origin`, so the page lives in an isolated origin that cannot reach
  * the app, its cookies, or the user's login.
  */
-export function FullScreenHtml({ html, title, backTo }: { html: string; title: string; backTo?: string }) {
+export function FullScreenHtml({ html, src, title, backTo }: { html?: string; src?: string; title: string; backTo?: string }) {
   return (
     <div className="fixed inset-0 bg-white">
       <iframe
         title={title}
-        srcDoc={html}
+        {...(src ? { src } : { srcDoc: html || '' })}
         className="h-full w-full border-0"
         sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
       />
