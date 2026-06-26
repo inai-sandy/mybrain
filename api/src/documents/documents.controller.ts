@@ -1,6 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Put, Query, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Headers, NotFoundException, Param, Patch, Post, Put, Query, Req, Res, UnauthorizedException, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import archiver from 'archiver';
 import { DocumentsService, DocInput } from './documents.service';
 import { Public } from '../auth/public.decorator';
@@ -103,7 +103,22 @@ export class DocumentsController {
   @UseInterceptors(FileInterceptor('file'))
   async upload(@UploadedFile() file: any) {
     if (!file) throw new NotFoundException('No file uploaded');
-    return this.docs.createFromUpload(file);
+    try {
+      return await this.docs.createFromUpload(file);
+    } catch (e: any) {
+      throw new BadRequestException(e?.message || 'Could not process that file.');
+    }
+  }
+
+  /** Owner: stream a file from an extracted ZIP site (entry when no path). (BEA-587) */
+  @Get(':id/site')
+  @Get(':id/site/*')
+  async siteFile(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const rest = (req.params as any)[0] || '';
+    const f = await this.docs.siteFile(id, rest);
+    if (!f) throw new NotFoundException('Not found');
+    res.setHeader('Content-Type', f.mime);
+    res.sendFile(f.filePath);
   }
 
   /** Stream a stored binary file (pdf/image) inline — used by the viewer preview and binary download. */
@@ -191,6 +206,18 @@ export class DocumentsController {
   @Post('public/:slug/unlock')
   async unlock(@Param('slug') slug: string, @Body() body: { password?: string }) {
     return this.docs.unlockShared(slug, body?.password || '');
+  }
+
+  /** Public: stream a file from a SHARED ZIP site (entry when no path). (BEA-587) */
+  @Public()
+  @Get('public/:slug/site')
+  @Get('public/:slug/site/*')
+  async publicSiteFile(@Param('slug') slug: string, @Req() req: Request, @Res() res: Response) {
+    const rest = (req.params as any)[0] || '';
+    const f = await this.docs.sharedSiteFile(slug, rest);
+    if (!f) throw new NotFoundException('Not shared.');
+    res.setHeader('Content-Type', f.mime);
+    res.sendFile(f.filePath);
   }
 
   /** Public binary stream for a shared pdf/image doc. Honours expiry + password token. (BEA-553/585) */

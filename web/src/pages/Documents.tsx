@@ -25,6 +25,7 @@ export type DocItem = {
   hasPassword?: boolean;
   expiresAt?: string | null;
   viewCount?: number;
+  siteEntry?: string | null;
   bytes: number | null;
   snippet?: string | null;
   createdAt: string;
@@ -350,7 +351,7 @@ export function Documents() {
           <h1 className="text-xl font-bold flex items-center gap-2"><FileText size={20} className="text-emerald-600" /> Documents</h1>
           <p className="text-sm text-zinc-500">Your own files to write, share and re-use — kept out of memory unless you convert one to Capture.</p>
         </div>
-        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,image/*" className="hidden" onChange={(e) => upload(e.target.files)} />
+        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.zip,image/*,application/zip" className="hidden" onChange={(e) => upload(e.target.files)} />
         <div className="hidden sm:flex shrink-0 items-center gap-2 ml-auto">
           <button onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Link2 size={16} /> Import URL</button>
           <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"><Upload size={16} /> {uploading ? 'Uploading…' : 'Upload'}</button>

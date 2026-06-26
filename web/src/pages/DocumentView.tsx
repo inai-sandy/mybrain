@@ -84,12 +84,17 @@ export function DocumentView() {
             <iframe title={doc.title} src={`/api/documents/${doc.id}/file`} className="w-full min-h-[80vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
           ) : doc.kind === 'image' ? (
             <img src={`/api/documents/${doc.id}/file`} alt={doc.title} className="max-w-full rounded-xl border border-zinc-200 dark:border-zinc-800" />
-          ) : doc.kind === 'html' ? (
+          ) : doc.kind === 'html' || doc.kind === 'site' ? (
             <div className="space-y-2">
               <div className="flex justify-end">
                 <button onClick={() => navigate(`/documents/${doc.id}/full`)} className={btn}><Maximize2 size={15} /> Open full page</button>
               </div>
-              <iframe title={doc.title} srcDoc={doc.contentText} className="w-full min-h-[70vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms" />
+              <iframe
+                title={doc.title}
+                {...(doc.kind === 'site' ? { src: `/api/documents/${doc.id}/site/${encodeURI(doc.siteEntry || 'index.html')}` } : { srcDoc: doc.contentText })}
+                className="w-full min-h-[70vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white"
+                sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
+              />
             </div>
           ) : (
             <OutlineLayout headings={extractHeadings(doc.contentText || '')}>

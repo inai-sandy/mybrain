@@ -7,7 +7,7 @@ import { Logo } from '../ui/Logo';
 import { mdComponents } from '../ui/markdown';
 import { FullScreenHtml } from '../ui/FullScreenHtml';
 
-type PublicDoc = { title: string; description: string | null; kind: string; contentText: string; updatedAt: string };
+type PublicDoc = { title: string; description: string | null; kind: string; contentText: string; siteEntry?: string | null; updatedAt: string };
 type Gate = 'loading' | 'open' | 'locked' | 'expired' | 'error';
 
 /** Public, no-login view of a shared document at /d/:slug. (locked/expiry: BEA-585) */
@@ -68,8 +68,9 @@ export function DocumentPublic() {
     }
   }
 
-  // An HTML doc gets the chrome-free, full-screen live page — exactly like a tiiny.host link. (BEA-582)
+  // HTML + ZIP sites get the chrome-free, full-screen live page — exactly like a tiiny.host link. (BEA-582/587)
   if (gate === 'open' && doc && doc.kind === 'html') return <FullScreenHtml html={doc.contentText || ''} title={doc.title} />;
+  if (gate === 'open' && doc && doc.kind === 'site') return <FullScreenHtml src={`/api/documents/public/${slug}/site/${encodeURI(doc.siteEntry || 'index.html')}`} title={doc.title} />;
 
   const fileSrc = `/api/documents/public/${slug}/file${token ? `?t=${encodeURIComponent(token)}` : ''}`;
 
