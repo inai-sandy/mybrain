@@ -111,6 +111,46 @@ describe('DocumentsService', () => {
     expect(await svc.resolveShortCode('nope')).toBeNull();
   });
 
+  it('password-protects a share: locked until the right password unlocks it (BEA-585)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Secret', contentText: 'classified' });
+    await svc.setShared(doc.id, true);
+
+    const shaped = await svc.setProtection(doc.id, { password: 'hunter2' });
+    expect(shaped?.hasPassword).toBe(true);
+
+    const pub = (await svc.getShared(doc.slug)) as any;
+    expect(pub.locked).toBe(true);
+    expect(pub.contentText).toBeUndefined();
+
+    expect((await svc.unlockShared(doc.slug, 'wrong')).ok).toBe(false);
+    const good = (await svc.unlockShared(doc.slug, 'hunter2')) as any;
+    expect(good.ok).toBe(true);
+    expect(good.contentText).toBe('classified');
+    expect(good.token).toBeTruthy();
+
+    // Removing the password opens it back up.
+    await svc.setProtection(doc.id, { password: null });
+    expect((await svc.getShared(doc.slug) as any).contentText).toBe('classified');
+  });
+
+  it('expiry hides a shared doc and its short code (BEA-585)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Timed', contentText: 'tick' });
+    const { shortCode } = await svc.setShared(doc.id, true) as any;
+
+    await svc.setProtection(doc.id, { expiresAt: '2000-01-01T00:00:00.000Z' }); // in the past
+    expect((await svc.getShared(doc.slug) as any).expired).toBe(true);
+    expect(await svc.resolveShortCode(shortCode)).toBeNull();
+    expect(await svc.sharedFile(doc.slug)).toBeNull();
+
+    // Clearing expiry brings it back.
+    await svc.setProtection(doc.id, { expiresAt: null });
+    expect((await svc.getShared(doc.slug) as any).contentText).toBe('tick');
+  });
+
   it('renames the public link and rejects a duplicate / too-short name (BEA-584)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);

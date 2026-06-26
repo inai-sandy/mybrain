@@ -102,7 +102,7 @@ export function DocumentView() {
       )}
 
       {editing && doc && <DocEditor doc={doc} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load(); }} />}
-      {sharing && doc && <DocumentShareDialog id={doc.id} title={doc.title} slug={doc.slug} shortCode={doc.shortCode} initialShared={doc.shared} onClose={() => setSharing(false)} onChanged={() => load()} />}
+      {sharing && doc && <DocumentShareDialog id={doc.id} title={doc.title} slug={doc.slug} shortCode={doc.shortCode} initialShared={doc.shared} hasPassword={doc.hasPassword} expiresAt={doc.expiresAt} onClose={() => setSharing(false)} onChanged={() => load()} />}
       <ConfirmDialog open={del} title="Delete this document?" message={doc ? `"${doc.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(false)} onConfirm={remove} />
     </div>
   );
