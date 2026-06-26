@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List, ArrowLeft, FolderPlus, Folder } from 'lucide-react';
+import { FOLDER_ICON_NAMES, DEFAULT_FOLDER_ICON, FOLDER_ICONS, FolderGlyph } from '../ui/folderIcons';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DocumentShareDialog } from '../ui/DocumentShareDialog';
@@ -29,7 +30,7 @@ export type DocItem = {
   updatedAt: string;
 };
 
-export type Collection = { id: string; name: string; color: string | null; count: number };
+export type Collection = { id: string; name: string; color: string | null; icon?: string | null; count: number };
 
 function shortDate(iso: string): string {
   const d = new Date(iso);
@@ -56,7 +57,7 @@ export function Documents() {
   const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [activeCol, setActiveCol] = useState<string | 'all'>('all');
+  const [openFolder, setOpenFolder] = useState<string | null>(null); // null = folder grid; 'others' = uncategorised; else collection id
   const [managing, setManaging] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState<DocItem[]>([]);
@@ -252,6 +253,76 @@ export function Documents() {
     );
   }
 
+  const currentFolder = collections.find((c) => c.id === openFolder) || null;
+  const othersCount = items.filter((i) => !i.collectionId).length;
+  const folderRows = openFolder === 'others' ? items.filter((i) => !i.collectionId) : items.filter((i) => i.collectionId === openFolder);
+
+  const viewToggle = (
+    <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 p-0.5">
+      <button onClick={() => changeView('cards')} title="Card view" aria-label="Card view" className={'p-1.5 rounded-md transition-colors ' + (view === 'cards' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}><LayoutGrid size={15} /></button>
+      <button onClick={() => changeView('list')} title="List view" aria-label="List view" className={'p-1.5 rounded-md transition-colors ' + (view === 'list' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}><List size={15} /></button>
+    </div>
+  );
+
+  function filesView(rows: DocItem[], mode: 'search' | 'folder') {
+    return (
+      <>
+        <div className="flex justify-end">{viewToggle}</div>
+        <DataTable<DocItem>
+          columns={cols}
+          rows={rows}
+          loading={loading}
+          filters={mode === 'search' ? [] : filters}
+          sortOptions={mode === 'search' ? [] : sortOptions}
+          searchable={false}
+          renderCard={view === 'list' ? row : card}
+          cardsOnly
+          gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}
+          pageSize={12}
+          emptyText={mode === 'search' ? `No documents match "${q.trim()}".` : 'No documents in this folder yet — hit New Document to add one.'}
+        />
+      </>
+    );
+  }
+
+  function folderTile(key: string, glyph: ReactNode, name: string, count: number, onClick: () => void) {
+    return (
+      <button key={key} onClick={onClick} className="group rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 text-left hover:border-emerald-500/50 hover:shadow-md transition-all">
+        <div className="flex items-center justify-between">
+          {glyph}
+          <span className="text-xs text-zinc-400">{count}</span>
+        </div>
+        <p className="mt-3 font-semibold leading-tight truncate group-hover:text-emerald-600">{name}</p>
+      </button>
+    );
+  }
+
+  function foldersGrid() {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {collections.map((c) =>
+          folderTile(
+            c.id,
+            <div className="rounded-lg p-2 bg-emerald-500/10 text-emerald-600" style={c.color ? { color: c.color } : undefined}><FolderGlyph name={c.icon} /></div>,
+            c.name,
+            c.count,
+            () => setOpenFolder(c.id),
+          ),
+        )}
+        {folderTile(
+          '__others__',
+          <div className="rounded-lg p-2 bg-zinc-500/10 text-zinc-500"><Folder size={22} /></div>,
+          'Others',
+          othersCount,
+          () => setOpenFolder('others'),
+        )}
+        <button onClick={() => setManaging(true)} className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 grid place-items-center text-zinc-400 hover:text-emerald-600 hover:border-emerald-500/50 transition-colors min-h-[112px]">
+          <span className="flex flex-col items-center gap-1 text-sm"><FolderPlus size={20} /> New folder</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -273,19 +344,6 @@ export function Documents() {
         {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"><X size={15} /></button>}
       </div>
 
-      <div className={'flex items-center gap-1.5 flex-wrap ' + (searching ? 'opacity-40 pointer-events-none' : '')}>
-        {[{ id: 'all', name: 'All', count: items.length } as { id: string; name: string; count: number }, ...collections].map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setActiveCol(c.id as string)}
-            className={'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border transition-colors ' + (activeCol === c.id ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700')}
-          >
-            {c.name} <span className="text-zinc-400">{c.count}</span>
-          </button>
-        ))}
-        <button onClick={() => setManaging(true)} className="text-xs text-zinc-400 hover:text-emerald-600 px-2 py-1">＋ Manage</button>
-      </div>
-
       {selected.size > 0 && (
         <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2 text-sm shadow-sm">
           <span className="font-medium text-emerald-700 dark:text-emerald-300">{selected.size} selected</span>
@@ -304,32 +362,29 @@ export function Documents() {
         </div>
       )}
 
-      <div className="flex justify-end">
-        <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 p-0.5">
-          <button onClick={() => changeView('cards')} title="Card view" aria-label="Card view" className={'p-1.5 rounded-md transition-colors ' + (view === 'cards' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}><LayoutGrid size={15} /></button>
-          <button onClick={() => changeView('list')} title="List view" aria-label="List view" className={'p-1.5 rounded-md transition-colors ' + (view === 'list' ? 'bg-emerald-600 text-white' : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200')}><List size={15} /></button>
-        </div>
-      </div>
-
-      <DataTable<DocItem>
-        columns={cols}
-        rows={searching ? results : activeCol === 'all' ? items : items.filter((i) => i.collectionId === activeCol)}
-        loading={loading}
-        filters={searching ? [] : filters}
-        sortOptions={searching ? [] : sortOptions}
-        searchable={false}
-        renderCard={view === 'list' ? row : card}
-        cardsOnly
-        gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}
-        pageSize={12}
-        emptyText={searching ? `No documents match "${q.trim()}".` : 'No documents yet — hit New Document to write your first one.'}
-      />
+      {searching ? (
+        filesView(results, 'search')
+      ) : openFolder === null ? (
+        foldersGrid()
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setOpenFolder(null); clearSel(); }} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft size={15} /> Folders</button>
+            <span className="text-zinc-300 dark:text-zinc-700">/</span>
+            <h2 className="font-semibold flex items-center gap-1.5">
+              <FolderGlyph name={openFolder === 'others' ? 'Folder' : currentFolder?.icon} size={16} className="text-emerald-600" />
+              {openFolder === 'others' ? 'Others' : currentFolder?.name || 'Folder'}
+            </h2>
+          </div>
+          {filesView(folderRows, 'folder')}
+        </>
+      )}
 
       {(creating || editing) && (
         <DocEditor
           doc={editing}
           collections={collections}
-          defaultCollectionId={activeCol !== 'all' ? activeCol : null}
+          defaultCollectionId={openFolder && openFolder !== 'others' ? openFolder : null}
           onClose={() => {
             setCreating(false);
             setEditing(null);
@@ -351,9 +406,33 @@ export function Documents() {
 }
 
 /** Create / rename / delete collections. (BEA-537) */
+/** Small popover to pick a folder icon. (BEA-588) */
+function IconMenu({ value, onPick }: { value?: string | null; onPick: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative shrink-0">
+      <button type="button" onClick={() => setOpen((o) => !o)} title="Choose icon" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><FolderGlyph name={value} size={18} /></button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-20 mt-1 grid w-56 max-h-56 grid-cols-6 gap-1 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow-xl">
+            {FOLDER_ICON_NAMES.map((n) => {
+              const Ic = FOLDER_ICONS[n];
+              return (
+                <button key={n} type="button" onClick={() => { onPick(n); setOpen(false); }} className={'grid place-items-center p-1.5 rounded-md hover:bg-emerald-500/10 ' + (value === n ? 'bg-emerald-500/15 text-emerald-600' : 'text-zinc-500')}><Ic size={18} /></button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ManageCollections({ collections, onClose, onChanged }: { collections: Collection[]; onClose: () => void; onChanged: () => void }) {
   const [list, setList] = useState<Collection[]>(collections);
   const [newName, setNewName] = useState('');
+  const [newIcon, setNewIcon] = useState<string>(DEFAULT_FOLDER_ICON);
   const [del, setDel] = useState<Collection | null>(null);
   const toast = useToast();
 
@@ -364,15 +443,20 @@ function ManageCollections({ collections, onClose, onChanged }: { collections: C
   }
   async function create() {
     if (!newName.trim()) return;
-    const r = await fetch('/api/documents/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName.trim() }) });
+    const r = await fetch('/api/documents/collections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName.trim(), icon: newIcon }) });
     if (r.ok) {
       setNewName('');
+      setNewIcon(DEFAULT_FOLDER_ICON);
       reload();
     } else toast('error', 'Could not create');
   }
   async function rename(c: Collection, name: string) {
     if (!name.trim() || name === c.name) return;
     await fetch(`/api/documents/collections/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) });
+    reload();
+  }
+  async function changeIcon(c: Collection, icon: string) {
+    await fetch(`/api/documents/collections/${c.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ icon }) });
     reload();
   }
   async function remove(c: Collection) {
@@ -390,14 +474,16 @@ function ManageCollections({ collections, onClose, onChanged }: { collections: C
           <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
         </div>
         <div className="flex gap-2 mb-4">
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} placeholder="New collection name" className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <IconMenu value={newIcon} onPick={setNewIcon} />
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} placeholder="New folder name" className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
           <button onClick={create} disabled={!newName.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 text-sm disabled:opacity-50">Add</button>
         </div>
         <div className="space-y-2 max-h-72 overflow-y-auto">
-          {list.length === 0 && <p className="text-sm text-zinc-400 text-center py-4">No collections yet.</p>}
+          {list.length === 0 && <p className="text-sm text-zinc-400 text-center py-4">No folders yet.</p>}
           {list.map((c) => (
             <div key={c.id} className="flex items-center gap-2">
-              <input defaultValue={c.name} onBlur={(e) => rename(c, e.target.value)} className="flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-emerald-500" />
+              <IconMenu value={c.icon} onPick={(icon) => changeIcon(c, icon)} />
+              <input defaultValue={c.name} onBlur={(e) => rename(c, e.target.value)} className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-emerald-500" />
               <span className="text-xs text-zinc-400 w-8 text-right">{c.count}</span>
               <button onClick={() => setDel(c)} title="Delete" className="p-1.5 rounded-md text-zinc-400 hover:text-rose-500"><Trash2 size={15} /></button>
             </div>

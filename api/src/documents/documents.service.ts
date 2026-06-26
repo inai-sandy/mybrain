@@ -194,19 +194,20 @@ export class DocumentsService {
     ]);
     const counts: Record<string, number> = {};
     for (const d of docs) if (d.collectionId) counts[d.collectionId] = (counts[d.collectionId] || 0) + 1;
-    return { collections: rows.map((c) => ({ id: c.id, name: c.name, color: c.color || null, count: counts[c.id] || 0 })) };
+    return { collections: rows.map((c) => ({ id: c.id, name: c.name, color: c.color || null, icon: (c as any).icon || null, count: counts[c.id] || 0 })) };
   }
 
-  createCollection(name: string, color?: string) {
+  createCollection(name: string, color?: string, icon?: string) {
     const n = (name || '').trim().slice(0, 80);
     if (!n) return null;
-    return this.prisma.documentCollection.create({ data: { name: n, color: color?.trim().slice(0, 20) || null } });
+    return this.prisma.documentCollection.create({ data: { name: n, color: color?.trim().slice(0, 20) || null, icon: icon?.trim().slice(0, 40) || null } });
   }
 
-  renameCollection(id: string, name: string, color?: string) {
+  renameCollection(id: string, name: string, color?: string, icon?: string) {
     const data: Record<string, unknown> = {};
     if (typeof name === 'string' && name.trim()) data.name = name.trim().slice(0, 80);
     if (typeof color === 'string') data.color = color.trim().slice(0, 20) || null;
+    if (typeof icon === 'string') data.icon = icon.trim().slice(0, 40) || null;
     return this.prisma.documentCollection.update({ where: { id }, data }).catch(() => null);
   }
 
