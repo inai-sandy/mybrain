@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'rea
 import { useNavigate } from 'react-router-dom';
 import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List, ArrowLeft, FolderPlus, Folder } from 'lucide-react';
 import { FOLDER_ICON_NAMES, DEFAULT_FOLDER_ICON, FOLDER_ICONS, FolderGlyph } from '../ui/folderIcons';
-import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
+import { KindBadge } from '../ui/kindBadge';
+import { DataTable, Column } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DocumentShareDialog } from '../ui/DocumentShareDialog';
 import { MarkdownEditor } from '../ui/MarkdownEditor';
@@ -64,6 +65,9 @@ export function Documents() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDel, setBulkDel] = useState(false);
   const [view, setView] = useState<'cards' | 'list'>(() => (localStorage.getItem('docsView') === 'list' ? 'list' : 'cards'));
+  const [tagFilter, setTagFilter] = useState('');
+  const [sortKey, setSortKey] = useState('updatedAt:-1');
+  const [addOpen, setAddOpen] = useState(false);
   const searching = q.trim().length >= 2;
 
   function changeView(v: 'cards' | 'list') {
@@ -183,26 +187,20 @@ export function Documents() {
     { key: 'title', label: 'Title' },
     { key: 'description', label: 'Description' },
   ];
-  const filters: Filter[] = allTags.length
-    ? [{ key: 'tags', label: 'Tag', options: allTags.map((t) => ({ value: t, label: t })), match: (row: DocItem, val: string) => (row.tags || []).includes(val) } as Filter]
-    : [];
-  const sortOptions: SortOption[] = [
-    { label: 'Newest', key: 'updatedAt', dir: -1 },
-    { label: 'Oldest', key: 'updatedAt', dir: 1 },
-    { label: 'Title A–Z', key: 'title', dir: 1 },
-  ];
-
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors';
 
   function card(r: DocItem) {
     return (
-      <div className={'group h-full rounded-xl border bg-white dark:bg-zinc-900 p-4 hover:shadow-md transition-all flex flex-col ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40')}>
+      <div className={'group relative h-full rounded-xl border bg-white dark:bg-zinc-900 p-4 hover:shadow-md transition-all flex flex-col ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40')}>
+        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'absolute top-3 right-3 z-10 h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
         <div className="flex items-start gap-3">
-          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'mt-2 h-4 w-4 accent-emerald-600 shrink-0 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
           <div className="shrink-0 rounded-lg p-2 text-emerald-500 bg-emerald-500/10"><FileText size={18} /></div>
-          <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left">
+          <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left pr-6">
             <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{r.title}</h3>
-            <p className="mt-0.5 text-xs text-zinc-400">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.shared && <> · <span className="text-emerald-600">shared</span></>}{r.shared && (r.viewCount ?? 0) > 0 && <> · {r.viewCount} views</>}</p>
+            <p className="mt-1 flex items-center gap-1.5 text-xs text-zinc-400">
+              <KindBadge kind={r.kind} />
+              <span className="truncate">{shortDate(r.updatedAt)}{r.shared && ' · shared'}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}</span>
+            </p>
           </button>
         </div>
         {r.description && <p className="mt-2 text-xs text-zinc-500 line-clamp-2">{r.description}</p>}
@@ -224,30 +222,40 @@ export function Documents() {
     );
   }
 
-  /** Compact bookmarks-style row (List view). (BEA-583) */
+  /** 3-line bookmarks-style row (List view): title / meta / tags, tick on the right. (BEA-583/589) */
   function row(r: DocItem) {
     return (
-      <div className={'group flex items-center gap-2.5 rounded-xl border bg-white dark:bg-zinc-900 px-3 py-2.5 transition-all ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm')}>
-        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'h-4 w-4 accent-emerald-600 shrink-0 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
-        <div className="shrink-0 rounded-lg p-1.5 text-emerald-500 bg-emerald-500/10"><FileText size={16} /></div>
+      <div className={'group flex items-start gap-2.5 rounded-xl border bg-white dark:bg-zinc-900 px-3 py-2.5 transition-all ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm')}>
+        <div className="shrink-0 mt-0.5 rounded-lg p-1.5 text-emerald-500 bg-emerald-500/10"><FileText size={16} /></div>
         <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold leading-tight truncate group-hover:text-emerald-600">{r.title}</h3>
             {r.shared && <span className="shrink-0 text-[10px] text-emerald-600">shared</span>}
           </div>
-          <p className="text-xs text-zinc-400 truncate">{r.kind.toUpperCase()} · {shortDate(r.updatedAt)}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}{r.description ? ` · ${r.description}` : ''}</p>
-        </button>
-        {r.tags?.length > 0 && (
-          <div className="hidden lg:flex items-center gap-1.5 shrink-0 max-w-[30%] overflow-hidden">
-            {r.tags.slice(0, 3).map((t) => <Chip key={t} t={t} />)}
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-400">
+            <KindBadge kind={r.kind} />
+            <span className="truncate">{shortDate(r.updatedAt)}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}{r.description ? ` · ${r.description}` : ''}</span>
+          </p>
+          <div className="mt-1 flex items-center gap-1.5 h-[18px] overflow-hidden">
+            {r.tags?.length ? (
+              <>
+                {r.tags.slice(0, 6).map((t) => <Chip key={t} t={t} />)}
+                {r.tags.length > 6 && <Chip t={`+${r.tags.length - 6}`} />}
+              </>
+            ) : (
+              <span className="text-[10px] text-zinc-300 dark:text-zinc-600">no tags</span>
+            )}
           </div>
-        )}
-        <div className="shrink-0 flex items-center gap-0.5">
-          <button onClick={() => navigate(`/documents/${r.id}`)} title="Open" className={iconBtn + ' hover:text-emerald-600'}><Eye size={16} /></button>
-          <a href={`/api/documents/${r.id}/download`} title="Download" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Download size={16} /></a>
-          <button onClick={() => setEditing(r)} title="Edit" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Pencil size={16} /></button>
-          <button onClick={() => setSharing(r)} title="Share" className={iconBtn + ' hover:text-emerald-600'}><Share2 size={16} /></button>
-          <button onClick={() => setDel(r)} title="Delete" className={iconBtn + ' hover:text-red-500'}><Trash2 size={16} /></button>
+        </button>
+        <div className="shrink-0 flex flex-col items-end gap-1.5">
+          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => navigate(`/documents/${r.id}`)} title="Open" className={iconBtn + ' hover:text-emerald-600'}><Eye size={16} /></button>
+            <a href={`/api/documents/${r.id}/download`} title="Download" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Download size={16} /></a>
+            <button onClick={() => setEditing(r)} title="Edit" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Pencil size={16} /></button>
+            <button onClick={() => setSharing(r)} title="Share" className={iconBtn + ' hover:text-emerald-600'}><Share2 size={16} /></button>
+            <button onClick={() => setDel(r)} title="Delete" className={iconBtn + ' hover:text-red-500'}><Trash2 size={16} /></button>
+          </div>
         </div>
       </div>
     );
@@ -264,24 +272,35 @@ export function Documents() {
     </div>
   );
 
+  // Tag filter + sort are owned by the unified controls row (so they share one line). (BEA-589)
+  function applyControls(rows: DocItem[]): DocItem[] {
+    let r = rows;
+    if (tagFilter) r = r.filter((d) => (d.tags || []).includes(tagFilter));
+    const [key, dir] = sortKey.split(':');
+    const d = Number(dir) as 1 | -1;
+    r = [...r].sort((a, b) => {
+      const av = key === 'title' ? a.title.toLowerCase() : a.updatedAt;
+      const bv = key === 'title' ? b.title.toLowerCase() : b.updatedAt;
+      return (av > bv ? 1 : av < bv ? -1 : 0) * d;
+    });
+    return r;
+  }
+
   function filesView(rows: DocItem[], mode: 'search' | 'folder') {
     return (
-      <>
-        <div className="flex justify-end">{viewToggle}</div>
-        <DataTable<DocItem>
-          columns={cols}
-          rows={rows}
-          loading={loading}
-          filters={mode === 'search' ? [] : filters}
-          sortOptions={mode === 'search' ? [] : sortOptions}
-          searchable={false}
-          renderCard={view === 'list' ? row : card}
-          cardsOnly
-          gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}
-          pageSize={12}
-          emptyText={mode === 'search' ? `No documents match "${q.trim()}".` : 'No documents in this folder yet — hit New Document to add one.'}
-        />
-      </>
+      <DataTable<DocItem>
+        columns={cols}
+        rows={applyControls(rows)}
+        loading={loading}
+        filters={[]}
+        sortOptions={[]}
+        searchable={false}
+        renderCard={view === 'list' ? row : card}
+        cardsOnly
+        gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}
+        pageSize={12}
+        emptyText={mode === 'search' ? `No documents match "${q.trim()}".` : 'No documents in this folder yet — hit New Document to add one.'}
+      />
     );
   }
 
@@ -325,23 +344,57 @@ export function Documents() {
 
   return (
     <div className="space-y-4">
+      {/* Header — title/subtitle hidden on phones (BEA-589); actions collapse to a + menu on phones. */}
       <div className="flex items-center justify-between gap-3">
-        <div>
+        <div className="hidden sm:block">
           <h1 className="text-xl font-bold flex items-center gap-2"><FileText size={20} className="text-emerald-600" /> Documents</h1>
           <p className="text-sm text-zinc-500">Your own files to write, share and re-use — kept out of memory unless you convert one to Capture.</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,image/*" className="hidden" onChange={(e) => upload(e.target.files)} />
+        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,image/*" className="hidden" onChange={(e) => upload(e.target.files)} />
+        <div className="hidden sm:flex shrink-0 items-center gap-2 ml-auto">
           <button onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Link2 size={16} /> Import URL</button>
           <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"><Upload size={16} /> {uploading ? 'Uploading…' : 'Upload'}</button>
           <button onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm font-medium"><Plus size={16} /> New Document</button>
         </div>
+        {/* Mobile + menu */}
+        <div className="relative sm:hidden ml-auto">
+          <button onClick={() => setAddOpen((o) => !o)} aria-label="Add" className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm font-medium"><Plus size={18} /></button>
+          {addOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setAddOpen(false)} />
+              <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1 shadow-xl">
+                <button onClick={() => { setAddOpen(false); setCreating(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Plus size={15} /> New document</button>
+                <button onClick={() => { setAddOpen(false); fileInput.current?.click(); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Upload size={15} /> Upload</button>
+                <button onClick={() => { setAddOpen(false); setImporting(true); }} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Link2 size={15} /> Import URL</button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search documents — including inside their content…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 pl-9 pr-9 py-2 text-sm outline-none focus:border-emerald-500" />
-        {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"><X size={15} /></button>}
+      {/* Unified controls row: Search · Tags · Sort · View (BEA-589) */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search documents…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 pl-9 pr-9 py-2 text-sm outline-none focus:border-emerald-500" />
+          {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"><X size={15} /></button>}
+        </div>
+        {(searching || openFolder !== null) && (
+          <>
+            {allTags.length > 0 && (
+              <select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className="shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-2 py-2 text-sm outline-none focus:border-emerald-500 max-w-[7rem]">
+                <option value="">All tags</option>
+                {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            )}
+            <select aria-label="Sort" value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-2 py-2 text-sm outline-none focus:border-emerald-500">
+              <option value="updatedAt:-1">Newest</option>
+              <option value="updatedAt:1">Oldest</option>
+              <option value="title:1">Title A–Z</option>
+            </select>
+            {viewToggle}
+          </>
+        )}
       </div>
 
       {selected.size > 0 && (
