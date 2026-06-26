@@ -154,13 +154,13 @@ export class DocumentsController {
   }
 
   @Post('collections')
-  createCollection(@Body() body: { name?: string; color?: string }) {
-    return this.docs.createCollection(body?.name || '', body?.color);
+  createCollection(@Body() body: { name?: string; color?: string; icon?: string }) {
+    return this.docs.createCollection(body?.name || '', body?.color, body?.icon);
   }
 
   @Patch('collections/:id')
-  renameCollection(@Param('id') id: string, @Body() body: { name?: string; color?: string }) {
-    return this.docs.renameCollection(id, body?.name || '', body?.color);
+  renameCollection(@Param('id') id: string, @Body() body: { name?: string; color?: string; icon?: string }) {
+    return this.docs.renameCollection(id, body?.name || '', body?.color, body?.icon);
   }
 
   @Delete('collections/:id')
