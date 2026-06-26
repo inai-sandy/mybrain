@@ -20,7 +20,10 @@ function fakePrisma() {
         return row;
       },
       findMany: async () => [...rows].reverse(),
-      findUnique: async ({ where }: any) => rows.find((r) => (where.id ? r.id === where.id : r.slug === where.slug)) || null,
+      findUnique: async ({ where }: any) =>
+        rows.find((r) => (where.id ? r.id === where.id : where.shortCode ? r.shortCode === where.shortCode : r.slug === where.slug)) || null,
+      findFirst: async ({ where }: any) =>
+        rows.find((r) => r.slug === where.slug && (!where.NOT || r.id !== where.NOT.id)) || null,
       update: async ({ where, data }: any) => {
         const r = rows.find((x) => x.id === where.id);
         if (!r) throw new Error('not found');
@@ -90,6 +93,35 @@ describe('DocumentsService', () => {
 
     await svc.setShared(doc.id, false);
     expect(await svc.getShared(doc.slug)).toBeNull();
+  });
+
+  it('mints a short code on first share and resolves it (only while shared) (BEA-584)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Linkable', contentText: 'hi' });
+
+    const shared = await svc.setShared(doc.id, true);
+    expect(shared?.shortCode).toBeTruthy();
+    const code = shared!.shortCode as string;
+
+    expect(await svc.resolveShortCode(code)).toEqual({ slug: doc.slug });
+
+    await svc.setShared(doc.id, false);
+    expect(await svc.resolveShortCode(code)).toBeNull(); // not shared anymore
+    expect(await svc.resolveShortCode('nope')).toBeNull();
+  });
+
+  it('renames the public link and rejects a duplicate / too-short name (BEA-584)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const a = await svc.create({ title: 'Alpha', contentText: 'a' });
+    const b = await svc.create({ title: 'Beta', contentText: 'b' });
+
+    const renamed = await svc.setSlug(a.id, 'My Cool Page!');
+    expect(renamed.slug).toBe('my-cool-page'); // normalised
+
+    await expect(svc.setSlug(b.id, 'my-cool-page')).rejects.toThrow(/already taken/i);
+    await expect(svc.setSlug(b.id, 'x')).rejects.toThrow(/at least 2/i);
   });
 
   it('manages the ingest token (create, verify constant-time, regenerate)', async () => {

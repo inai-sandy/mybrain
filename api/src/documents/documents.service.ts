@@ -131,6 +131,7 @@ export class DocumentsService {
     return {
       id: d.id,
       slug: d.slug,
+      shortCode: d.shortCode || null,
       title: d.title,
       description: d.description || null,
       kind: d.kind,
@@ -485,7 +486,49 @@ export class DocumentsService {
 
   async setShared(id: string, shared: boolean) {
     const row = await this.prisma.document.update({ where: { id }, data: { shared } }).catch(() => null);
-    return row ? this.shape(row) : null;
+    if (!row) return null;
+    // Mint a short code the first time a doc is shared. (BEA-584)
+    if (shared && !row.shortCode) {
+      const code = await this.mintShortCode(id);
+      return this.shape({ ...row, shortCode: code });
+    }
+    return this.shape(row);
+  }
+
+  /** A short, URL-safe code; retried for uniqueness. (BEA-584) */
+  private genShortCode(): string {
+    const c = randomBytes(8).toString('base64').replace(/[^a-zA-Z0-9]/g, '');
+    return (c || randomUUID().replace(/-/g, '')).slice(0, 7);
+  }
+
+  private async mintShortCode(id: string): Promise<string> {
+    for (let i = 0; i < 6; i++) {
+      const code = this.genShortCode();
+      const clash = await this.prisma.document.findUnique({ where: { shortCode: code } });
+      if (!clash) {
+        await this.prisma.document.update({ where: { id }, data: { shortCode: code } }).catch(() => null);
+        return code;
+      }
+    }
+    const fallback = randomUUID().replace(/-/g, '').slice(0, 10);
+    await this.prisma.document.update({ where: { id }, data: { shortCode: fallback } }).catch(() => null);
+    return fallback;
+  }
+
+  /** Rename the public link (slug). Validates format + uniqueness. (BEA-584) */
+  async setSlug(id: string, raw: string) {
+    const slug = (raw || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+    if (slug.length < 2) throw new Error('A link name needs at least 2 letters or numbers.');
+    const clash = await this.prisma.document.findFirst({ where: { slug, NOT: { id } } });
+    if (clash) throw new Error('That link name is already taken — try another.');
+    const row = await this.prisma.document.update({ where: { id }, data: { slug } }).catch(() => null);
+    if (!row) throw new Error('Document not found.');
+    return this.shape(row);
   }
 
   /** Public read by slug — only returns the doc if the owner has shared it. */
@@ -493,6 +536,13 @@ export class DocumentsService {
     const row = await this.prisma.document.findUnique({ where: { slug } });
     if (!row || !row.shared) return null;
     return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', updatedAt: row.updatedAt };
+  }
+
+  /** Resolve a short code to its public slug (only if still shared). (BEA-584) */
+  async resolveShortCode(code: string): Promise<{ slug: string } | null> {
+    const row = await this.prisma.document.findUnique({ where: { shortCode: code } });
+    if (!row || !row.shared) return null;
+    return { slug: row.slug };
   }
 
   /** Raw content + a download filename, for the download button. */

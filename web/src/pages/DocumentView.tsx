@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2 } from 'lucide-react';
 import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { ShareDialog } from '../ui/ShareDialog';
+import { DocumentShareDialog } from '../ui/DocumentShareDialog';
 import { useToast } from '../ui/Toast';
 import { DocEditor, type DocItem } from './Documents';
 
@@ -102,7 +102,7 @@ export function DocumentView() {
       )}
 
       {editing && doc && <DocEditor doc={doc} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); load(); }} />}
-      {sharing && doc && <ShareDialog id={doc.id} title={doc.title} initialShared={doc.shared} shareEndpoint={`/api/documents/${doc.id}/share`} publicLink={`${location.origin}/d/${doc.slug}`} onClose={() => setSharing(false)} onChanged={() => load()} />}
+      {sharing && doc && <DocumentShareDialog id={doc.id} title={doc.title} slug={doc.slug} shortCode={doc.shortCode} initialShared={doc.shared} onClose={() => setSharing(false)} onChanged={() => load()} />}
       <ConfirmDialog open={del} title="Delete this document?" message={doc ? `"${doc.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(false)} onConfirm={remove} />
     </div>
   );

@@ -246,7 +246,8 @@ model MentorDay {
 /// Separate from Item/Capture: NOT indexed into memory unless the user explicitly converts it. (BEA-532)
 model Document {
   id           String   @id @default(uuid())
-  slug         String   @unique // stable public/url key
+  slug         String   @unique // stable public/url key (editable link name)
+  shortCode    String?  @unique // short share code -> /s/:code (BEA-584)
   title        String
   description  String? // <=200 char summary (manual now; AI-filled later)
   kind         String   @default("md") // md | html | pdf | image | other
