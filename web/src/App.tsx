@@ -33,6 +33,7 @@ import { Lab } from './pages/Lab';
 import { Documents } from './pages/Documents';
 import { DocumentView } from './pages/DocumentView';
 import { DocumentPublic } from './pages/DocumentPublic';
+import { DocumentFull } from './pages/DocumentFull';
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -100,6 +101,8 @@ function AuthedApp() {
   return (
     <VaultProvider>
       <Routes>
+        {/* Chrome-free, full-screen live HTML view (still behind auth, but no app shell). (BEA-582) */}
+        <Route path="documents/:id/full" element={<DocumentFull />} />
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
         <Route path="explore" element={<Explore />} />

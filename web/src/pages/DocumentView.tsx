@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2 } from 'lucide-react';
 import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -85,7 +85,12 @@ export function DocumentView() {
           ) : doc.kind === 'image' ? (
             <img src={`/api/documents/${doc.id}/file`} alt={doc.title} className="max-w-full rounded-xl border border-zinc-200 dark:border-zinc-800" />
           ) : doc.kind === 'html' ? (
-            <iframe title={doc.title} srcDoc={doc.contentText} className="w-full min-h-[60vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" sandbox="allow-popups allow-popups-to-escape-sandbox" />
+            <div className="space-y-2">
+              <div className="flex justify-end">
+                <button onClick={() => navigate(`/documents/${doc.id}/full`)} className={btn}><Maximize2 size={15} /> Open full page</button>
+              </div>
+              <iframe title={doc.title} srcDoc={doc.contentText} className="w-full min-h-[70vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms" />
+            </div>
           ) : (
             <OutlineLayout headings={extractHeadings(doc.contentText || '')}>
               <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">

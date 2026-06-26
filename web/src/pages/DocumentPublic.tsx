@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Logo } from '../ui/Logo';
 import { mdComponents } from '../ui/markdown';
+import { FullScreenHtml } from '../ui/FullScreenHtml';
 
 type PublicDoc = { title: string; description: string | null; kind: string; contentText: string; updatedAt: string };
 
@@ -23,6 +24,9 @@ export function DocumentPublic() {
       .catch(() => setError('This document is private or no longer shared.'));
   }, [slug]);
 
+  // An HTML doc gets the chrome-free, full-screen live page — exactly like a tiiny.host link. (BEA-582)
+  if (doc && doc.kind === 'html') return <FullScreenHtml html={doc.contentText || ''} title={doc.title} />;
+
   return (
     <div className="min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <header className="sticky top-0 z-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur">
@@ -37,8 +41,6 @@ export function DocumentPublic() {
               <iframe title={doc.title} src={`/api/documents/public/${slug}/file`} className="mt-5 w-full min-h-[80vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
             ) : doc.kind === 'image' ? (
               <img src={`/api/documents/public/${slug}/file`} alt={doc.title} className="mt-5 max-w-full rounded-xl border border-zinc-200 dark:border-zinc-800" />
-            ) : doc.kind === 'html' ? (
-              <iframe title={doc.title} srcDoc={doc.contentText} className="mt-5 w-full min-h-[70vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" sandbox="allow-popups allow-popups-to-escape-sandbox" />
             ) : (
               <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5 mt-5">
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{doc.contentText || ''}</ReactMarkdown>
