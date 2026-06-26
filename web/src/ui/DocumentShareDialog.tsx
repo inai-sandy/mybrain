@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Copy, Check, Share2, X, Globe, Lock, Pencil } from 'lucide-react';
+import { Copy, Check, Share2, X, Globe, Lock, Pencil, KeyRound, Clock } from 'lucide-react';
 import { useToast } from './Toast';
+
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
 
 /**
  * Share dialog for Documents — publishes the doc and offers a tiiny.host-style
@@ -13,6 +20,8 @@ export function DocumentShareDialog({
   slug: initialSlug,
   shortCode: initialShortCode,
   initialShared,
+  hasPassword: initialHasPassword,
+  expiresAt: initialExpiresAt,
   onClose,
   onChanged,
 }: {
@@ -21,6 +30,8 @@ export function DocumentShareDialog({
   slug: string;
   shortCode?: string | null;
   initialShared: boolean;
+  hasPassword?: boolean;
+  expiresAt?: string | null;
   onClose: () => void;
   onChanged?: (shared: boolean) => void;
 }) {
@@ -32,6 +43,10 @@ export function DocumentShareDialog({
   const [slugDraft, setSlugDraft] = useState(initialSlug);
   const [savingSlug, setSavingSlug] = useState(false);
   const [copied, setCopied] = useState<'pretty' | 'short' | null>(null);
+  const [hasPassword, setHasPassword] = useState(!!initialHasPassword);
+  const [pwInput, setPwInput] = useState('');
+  const [expiry, setExpiry] = useState(initialExpiresAt ? toLocalInput(initialExpiresAt) : '');
+  const [savingProt, setSavingProt] = useState(false);
   const toast = useToast();
 
   const prettyUrl = `${location.origin}/d/${slug}`;
@@ -90,6 +105,25 @@ export function DocumentShareDialog({
       toast('error', 'Could not rename the link');
     } finally {
       setSavingSlug(false);
+    }
+  }
+
+  async function protect(payload: { password?: string | null; expiresAt?: string | null }, okMsg: string) {
+    setSavingProt(true);
+    try {
+      const r = await fetch(`/api/documents/${id}/protect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) {
+        if ('hasPassword' in d) setHasPassword(!!d.hasPassword);
+        if (payload.expiresAt !== undefined) setExpiry(d.expiresAt ? toLocalInput(d.expiresAt) : '');
+        if (payload.password === null) setPwInput('');
+        onChanged?.(shared);
+        toast('success', okMsg);
+      } else toast('error', 'Could not update protection');
+    } catch {
+      toast('error', 'Could not update protection');
+    } finally {
+      setSavingProt(false);
     }
   }
 
@@ -166,6 +200,31 @@ export function DocumentShareDialog({
                 {linkRow(shortUrl, 'short')}
               </div>
             )}
+
+            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-3">
+              <div>
+                <p className="text-xs font-medium text-zinc-500 mb-1 flex items-center gap-1.5"><KeyRound size={13} /> Password</p>
+                {hasPassword ? (
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1 text-sm text-emerald-600">Protected — readers must enter a password.</span>
+                    <button onClick={() => protect({ password: null }, 'Password removed')} disabled={savingProt} className="text-xs text-red-500 hover:underline disabled:opacity-50">Remove</button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input type="password" value={pwInput} onChange={(e) => setPwInput(e.target.value)} placeholder="Set a password (optional)" className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+                    <button onClick={() => pwInput.trim() && protect({ password: pwInput.trim() }, 'Password set')} disabled={savingProt || !pwInput.trim()} className="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm disabled:opacity-50">Set</button>
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-zinc-500 mb-1 flex items-center gap-1.5"><Clock size={13} /> Expires</p>
+                <div className="flex gap-2">
+                  <input type="datetime-local" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+                  <button onClick={() => protect({ expiresAt: expiry ? new Date(expiry).toISOString() : null }, expiry ? 'Expiry set' : 'Expiry cleared')} disabled={savingProt} className="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm disabled:opacity-50">Save</button>
+                  {expiry && <button onClick={() => { setExpiry(''); protect({ expiresAt: null }, 'Expiry cleared'); }} disabled={savingProt} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-2 text-sm disabled:opacity-50">Clear</button>}
+                </div>
+              </div>
+            </div>
 
             <div className="flex items-center justify-between pt-1">
               <button onClick={nativeShare} className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 inline-flex items-center gap-1.5"><Share2 size={15} /> Share via…</button>

@@ -186,11 +186,18 @@ export class DocumentsController {
     return d;
   }
 
-  /** Public binary stream for a shared pdf/image doc. (BEA-553) */
+  /** Verify a share password (or just fetch content for an expiry-only share). (BEA-585) */
+  @Public()
+  @Post('public/:slug/unlock')
+  async unlock(@Param('slug') slug: string, @Body() body: { password?: string }) {
+    return this.docs.unlockShared(slug, body?.password || '');
+  }
+
+  /** Public binary stream for a shared pdf/image doc. Honours expiry + password token. (BEA-553/585) */
   @Public()
   @Get('public/:slug/file')
-  async publicFile(@Param('slug') slug: string, @Res() res: Response) {
-    const f = await this.docs.sharedFile(slug);
+  async publicFile(@Param('slug') slug: string, @Query('t') token: string, @Res() res: Response) {
+    const f = await this.docs.sharedFile(slug, token);
     if (!f) throw new NotFoundException('Not shared.');
     res.setHeader('Content-Type', f.mime);
     res.setHeader('Content-Disposition', `inline; filename="${f.filename}"`);
@@ -238,6 +245,12 @@ export class DocumentsController {
     } catch (e: any) {
       throw new BadRequestException(e?.message || 'Could not rename the link.');
     }
+  }
+
+  /** Set/clear the share password and/or expiry. (BEA-585) */
+  @Post(':id/protect')
+  protect(@Param('id') id: string, @Body() body: { password?: string | null; expiresAt?: string | null }) {
+    return this.docs.setProtection(id, { password: body?.password, expiresAt: body?.expiresAt });
   }
 
   /** Copy this document into Capture/memory (RAG + SuperMemory). (BEA-540) */

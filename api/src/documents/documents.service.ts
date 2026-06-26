@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
+import * as bcrypt from 'bcryptjs';
 import { promises as fs } from 'fs';
 import { join, extname } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
@@ -138,6 +139,8 @@ export class DocumentsService {
       tags: this.parseTags(d.tags),
       collectionId: d.collectionId || null,
       shared: !!d.shared,
+      hasPassword: !!d.sharePassword,
+      expiresAt: d.expiresAt || null,
       bytes: d.bytes ?? (d.contentText ? Buffer.byteLength(d.contentText, 'utf8') : null),
       createdAt: d.createdAt,
       updatedAt: d.updatedAt,
@@ -446,10 +449,31 @@ export class DocumentsService {
     return { filePath: row.filePath, mime: row.mime || 'application/octet-stream', filename: row.filename || `${row.slug}${extname(row.filePath)}` };
   }
 
-  /** Public file stream for a SHARED binary doc, by slug. Returns null unless shared + has a file. (BEA-553) */
-  async sharedFile(slug: string) {
+  /** A shared doc is "live" when shared and not past its expiry. (BEA-585) */
+  private isLive(row: { shared: boolean; expiresAt?: Date | null }): boolean {
+    if (!row.shared) return false;
+    if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return false;
+    return true;
+  }
+
+  // Short-lived unlock tokens for password-protected shares (in-memory; single instance). (BEA-585)
+  private unlockTokens = new Map<string, { slug: string; exp: number }>();
+  private mintUnlockToken(slug: string): string {
+    const t = randomBytes(18).toString('base64url');
+    this.unlockTokens.set(t, { slug, exp: Date.now() + 2 * 3600 * 1000 });
+    return t;
+  }
+  private tokenValid(slug: string, token?: string): boolean {
+    if (!token) return false;
+    const e = this.unlockTokens.get(token);
+    return !!e && e.slug === slug && e.exp > Date.now();
+  }
+
+  /** Public file stream for a SHARED binary doc, by slug. Honours expiry + password (via token). (BEA-553/585) */
+  async sharedFile(slug: string, token?: string) {
     const row = await this.prisma.document.findUnique({ where: { slug } });
-    if (!row || !row.shared || !row.filePath) return null;
+    if (!row || !this.isLive(row) || !row.filePath) return null;
+    if (row.sharePassword && !this.tokenValid(slug, token)) return null;
     return { filePath: row.filePath, mime: row.mime || 'application/octet-stream', filename: row.filename || `${row.slug}${extname(row.filePath)}` };
   }
 
@@ -531,17 +555,47 @@ export class DocumentsService {
     return this.shape(row);
   }
 
-  /** Public read by slug — only returns the doc if the owner has shared it. */
+  /** Public read by slug — returns the content, or an {expired}/{locked} marker, or null if not shared. (BEA-585) */
   async getShared(slug: string) {
     const row = await this.prisma.document.findUnique({ where: { slug } });
     if (!row || !row.shared) return null;
+    if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return { expired: true, title: row.title };
+    if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind };
     return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', updatedAt: row.updatedAt };
   }
 
-  /** Resolve a short code to its public slug (only if still shared). (BEA-584) */
+  /** Verify a share password; on success return the content + a file-unlock token. (BEA-585) */
+  async unlockShared(slug: string, password: string) {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || !this.isLive(row)) return { ok: false as const, reason: 'gone' };
+    if (row.sharePassword) {
+      const ok = await bcrypt.compare(password || '', row.sharePassword);
+      if (!ok) return { ok: false as const, reason: 'bad' };
+    }
+    return {
+      ok: true as const,
+      token: this.mintUnlockToken(slug),
+      title: row.title,
+      description: row.description || null,
+      kind: row.kind,
+      contentText: row.contentText || '',
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  /** Set/clear a share password and/or expiry. (BEA-585) */
+  async setProtection(id: string, opts: { password?: string | null; expiresAt?: string | null }) {
+    const data: Record<string, unknown> = {};
+    if (opts.password !== undefined) data.sharePassword = opts.password ? await bcrypt.hash(opts.password, 10) : null;
+    if (opts.expiresAt !== undefined) data.expiresAt = opts.expiresAt ? new Date(opts.expiresAt) : null;
+    const row = await this.prisma.document.update({ where: { id }, data }).catch(() => null);
+    return row ? this.shape(row) : null;
+  }
+
+  /** Resolve a short code to its public slug (only while live). (BEA-584/585) */
   async resolveShortCode(code: string): Promise<{ slug: string } | null> {
     const row = await this.prisma.document.findUnique({ where: { shortCode: code } });
-    if (!row || !row.shared) return null;
+    if (!row || !this.isLive(row)) return null;
     return { slug: row.slug };
   }
 
