@@ -115,6 +115,31 @@ describe('DocumentsService', () => {
     expect(await svc.resolveShortCode('nope')).toBeNull();
   });
 
+  it('ranks title matches above body matches, and tolerates typos (BEA-590)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    await svc.create({ title: 'Pricing Strategy', contentText: 'how we set prices' }); // title match
+    await svc.create({ title: 'Random Notes', contentText: 'a note that mentions pricing once' }); // body match
+    await svc.create({ title: 'Unrelated', contentText: 'nothing here' });
+
+    const exact = await svc.search('pricing');
+    expect(exact.documents.length).toBe(2);
+    expect(exact.documents[0].title).toBe('Pricing Strategy'); // title outranks body
+
+    // Typo tolerance: "pricng" still finds the titled doc.
+    const typo = await svc.search('pricng');
+    expect(typo.documents.some((d) => d.title === 'Pricing Strategy')).toBe(true);
+  });
+
+  it('requires all tokens for short queries (BEA-590)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    await svc.create({ title: 'Quarterly Budget Report', contentText: 'numbers' });
+
+    expect((await svc.search('quarterly budget')).documents.length).toBe(1);
+    expect((await svc.search('quarterly zzzzz')).documents.length).toBe(0); // 2 tokens, both required
+  });
+
   it('counts public opens of a shared doc (BEA-586)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);

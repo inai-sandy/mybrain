@@ -155,33 +155,102 @@ export class DocumentsService {
   }
 
   /** A short snippet around the first occurrence of the query in the text. */
-  private snippet(text: string, q: string): string | null {
-    if (!text) return null;
-    const i = text.toLowerCase().indexOf(q.toLowerCase());
-    if (i < 0) return null;
-    const start = Math.max(0, i - 60);
-    const raw = text.slice(start, i + q.length + 80).replace(/\s+/g, ' ').trim();
-    return (start > 0 ? '…' : '') + raw + '…';
+  // ---- Smart keyword search: ranked + typo-tolerant, fully in-process (no AI). (BEA-590) ----
+
+  private tokenize(s: string): string[] {
+    return (s.toLowerCase().match(/[a-z0-9]+/g) || []).filter((t) => t.length >= 1);
   }
 
-  /** Full-text-ish search across title, description, tags AND content. (BEA-538) */
+  /** True if edit distance(a, b) <= max. Banded DP with an early-out. */
+  private editDistanceLE(a: string, b: string, max: number): boolean {
+    if (Math.abs(a.length - b.length) > max) return false;
+    let prevRow = Array.from({ length: a.length + 1 }, (_, i) => i);
+    for (let j = 1; j <= b.length; j++) {
+      const curRow = [j];
+      let rowMin = j;
+      for (let i = 1; i <= a.length; i++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        const v = Math.min(prevRow[i] + 1, curRow[i - 1] + 1, prevRow[i - 1] + cost);
+        curRow[i] = v;
+        if (v < rowMin) rowMin = v;
+      }
+      if (rowMin > max) return false;
+      prevRow = curRow;
+    }
+    return prevRow[a.length] <= max;
+  }
+
+  /** A query token "fuzzily" appears in text if some word is within a small edit distance. */
+  private fuzzyHit(text: string, token: string): boolean {
+    const max = token.length >= 6 ? 2 : 1;
+    const words = text.match(/[a-z0-9]+/g) || [];
+    for (const w of words) {
+      if (Math.abs(w.length - token.length) > max) continue;
+      if (this.editDistanceLE(w, token, max)) return true;
+    }
+    return false;
+  }
+
+  private bestSnippet(text: string, tokens: string[]): string | null {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    for (const tk of tokens) {
+      const i = lower.indexOf(tk);
+      if (i >= 0) {
+        const start = Math.max(0, i - 60);
+        const raw = text.slice(start, i + tk.length + 80).replace(/\s+/g, ' ').trim();
+        return (start > 0 ? '…' : '') + raw + '…';
+      }
+    }
+    return null;
+  }
+
+  /** Score one document against the query tokens. Returns 0 to exclude. */
+  private scoreDoc(r: any, tokens: string[], required: number): number {
+    const title = (r.title || '').toLowerCase();
+    const tags = this.parseTags(r.tags).join(' ').toLowerCase();
+    const desc = (r.description || '').toLowerCase();
+    const content = (r.contentText || '').toLowerCase();
+    let total = 0;
+    let matched = 0;
+    for (const tk of tokens) {
+      let best = 0;
+      if (title.includes(tk)) best = Math.max(best, title.startsWith(tk) ? 7.2 : 6);
+      if (tags.includes(tk)) best = Math.max(best, 4);
+      if (desc.includes(tk)) best = Math.max(best, 2);
+      if (content.includes(tk)) best = Math.max(best, 1);
+      // typo tolerance on the short, important fields only (keeps it fast)
+      if (best === 0 && tk.length >= 4) {
+        if (this.fuzzyHit(title, tk)) best = 3;
+        else if (this.fuzzyHit(tags, tk)) best = 2.5;
+        else if (this.fuzzyHit(desc, tk)) best = 1.5;
+      }
+      if (best > 0) {
+        matched++;
+        total += best;
+      }
+    }
+    if (matched < required) return 0;
+    return total + matched * 0.1;
+  }
+
+  /** Ranked, typo-tolerant search across title, tags, description and content. (BEA-538/590) */
   async search(q: string) {
     const term = (q || '').trim();
-    if (term.length < 2) return { documents: [] as ReturnType<DocumentsService['shape']>[] };
-    const rows = await this.prisma.document.findMany({
-      where: {
-        OR: [
-          { title: { contains: term } },
-          { description: { contains: term } },
-          { tags: { contains: term } },
-          { contentText: { contains: term } },
-        ],
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: 100,
-    });
+    if (term.length < 2) return { documents: [] as (ReturnType<DocumentsService['shape']> & { snippet: string | null })[] };
+    const tokens = this.tokenize(term);
+    if (!tokens.length) return { documents: [] };
+    // Require all tokens for 1-2 word queries; allow one miss for longer queries.
+    const required = tokens.length <= 2 ? tokens.length : tokens.length - 1;
+    const rows = await this.prisma.document.findMany();
+    const scored: { r: any; score: number }[] = [];
+    for (const r of rows) {
+      const score = this.scoreDoc(r, tokens, required);
+      if (score > 0) scored.push({ r, score });
+    }
+    scored.sort((a, b) => b.score - a.score || (a.r.updatedAt < b.r.updatedAt ? 1 : -1));
     return {
-      documents: rows.map((r) => ({ ...this.shape(r), snippet: this.snippet(r.contentText || '', term) })),
+      documents: scored.slice(0, 100).map(({ r }) => ({ ...this.shape(r), snippet: this.bestSnippet(r.contentText || '', tokens) })),
     };
   }
 
