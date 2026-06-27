@@ -825,8 +825,6 @@ function ModelsSection() {
         desc="Writes the short end-of-day summary (tasks done, what's pending, the gist). Until you pick one it follows the Tasks engine. Can run FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="Email Daily Brief model" icon={Send} base="/api/google/gmail-brief-model" agents
         desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
-      <EngineModelCard title="Commitments scan model" icon={CheckSquare} base="/api/accountability/model" agents
-        desc="Scans your day for promises you made and decisions you took (Commitments & Decisions). A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="The Lab — how it reasons about you" icon={FlaskConical} base="/api/mind/model" agents
         desc="The mini mental model that learns your patterns from your tasks + stories each night. Sonnet (default) does the deep reasoning, or run it FREE on your Codex/Gemini subscription with Sonnet auto-fallback." />
       <EngineModelCard title="Documents summary model" icon={FileText} base="/api/documents/model" agents
