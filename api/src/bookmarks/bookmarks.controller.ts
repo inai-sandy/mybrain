@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { BookmarksService } from './bookmarks.service';
 import { SummarizerService } from './summarizer.service';
 
@@ -8,6 +9,16 @@ export class BookmarksController {
     private readonly bookmarks: BookmarksService,
     private readonly summarizer: SummarizerService,
   ) {}
+
+  /** Serve a bookmark's cached image (downloaded so Instagram URLs can't expire). (BEA-609) */
+  @Get(':id/image')
+  async image(@Param('id') id: string, @Res() res: Response) {
+    const f = await this.bookmarks.imageFile(id);
+    if (!f) throw new NotFoundException('No cached image');
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(f);
+  }
 
   /** Start a background sync of the last 3 months of Raindrop bookmarks. Returns immediately. */
   @Post('sync')

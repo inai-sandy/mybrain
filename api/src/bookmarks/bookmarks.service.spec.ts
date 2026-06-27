@@ -43,7 +43,8 @@ function makeService(over: any = {}) {
     hasKey: async () => over.hasRaindrop ?? true,
     recent: async () => over.recent ?? [],
   };
-  const svc = new BookmarksService(prisma, memory, summarizer, raindrop);
+  const instagram: any = { isInstagram: () => false, enrich: async () => null, configured: async () => false };
+  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram);
   return { svc, created, updated, enqueued };
 }
 
