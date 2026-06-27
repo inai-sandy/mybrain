@@ -106,7 +106,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
           )}
           {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
           {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
-          {t.party && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5">→ {t.party}</span>}
+          {t.party && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 font-medium">🤝 Promise → {t.party}</span>}
           {t.dueDate && (() => {
             const due = new Date(t.dueDate);
             const overdue = !done && due < new Date(new Date().toDateString());
