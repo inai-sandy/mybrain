@@ -46,7 +46,7 @@ function shortDate(iso: string): string {
 }
 
 function Chip({ t }: { t: string }) {
-  return <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">{t}</span>;
+  return <span className="shrink-0 whitespace-nowrap text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">{t}</span>;
 }
 
 export function Documents() {
@@ -207,7 +207,7 @@ export function Documents() {
         {r.description && <p className="mt-2 text-xs text-zinc-500 line-clamp-2">{r.description}</p>}
         {r.snippet && <p className="mt-1.5 text-xs text-zinc-400 italic line-clamp-2 border-l-2 border-emerald-500/40 pl-2">{r.snippet}</p>}
         {r.tags?.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-nowrap items-center gap-1.5 overflow-hidden">
             {r.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
             {r.tags.length > 4 && <Chip t={`+${r.tags.length - 4}`} />}
           </div>
@@ -237,11 +237,11 @@ export function Documents() {
             <KindBadge kind={r.kind} />
             <span className="truncate">{shortDate(r.updatedAt)}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}{r.description ? ` · ${r.description}` : ''}</span>
           </p>
-          <div className="mt-1 flex items-center gap-1.5 h-[18px] overflow-hidden">
+          <div className="mt-1 flex flex-nowrap items-center gap-1.5 h-[18px] overflow-hidden">
             {r.tags?.length ? (
               <>
-                {r.tags.slice(0, 6).map((t) => <Chip key={t} t={t} />)}
-                {r.tags.length > 6 && <Chip t={`+${r.tags.length - 6}`} />}
+                {r.tags.slice(0, 4).map((t) => <Chip key={t} t={t} />)}
+                {r.tags.length > 4 && <Chip t={`+${r.tags.length - 4}`} />}
               </>
             ) : (
               <span className="text-[10px] text-zinc-300 dark:text-zinc-600">no tags</span>
