@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { SummarizerService } from './summarizer.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
+import { InstagramEnricher } from './instagram.service';
 
 /** Bookmarks live alongside other items on disk so the existing view/delete endpoints work. */
 function itemsDir() {
@@ -41,7 +42,33 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     private readonly memory: MemoryService,
     private readonly summarizer: SummarizerService,
     private readonly raindrop: RaindropClient,
+    private readonly instagram: InstagramEnricher,
   ) {}
+
+  private bookmarksDir() {
+    return join(process.env.DATA_DIR || '/app/data', 'bookmarks');
+  }
+
+  /** Download an image to our volume so it never expires; returns the served path. (BEA-609) */
+  private async cacheImage(itemId: string, url: string): Promise<string | null> {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      if (!buf.length) return null;
+      await fs.mkdir(this.bookmarksDir(), { recursive: true });
+      await fs.writeFile(join(this.bookmarksDir(), `${itemId}.jpg`), buf);
+      return `/api/bookmarks/${itemId}/image`;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The cached image file path for a bookmark, if we have one. */
+  async imageFile(itemId: string): Promise<string | null> {
+    const p = join(this.bookmarksDir(), `${itemId}.jpg`);
+    return (await fs.stat(p).then((s) => s.isFile()).catch(() => false)) ? p : null;
+  }
 
   onModuleInit() {
     // Check once a minute whether an auto-sync is due (cheap; the real work only fires when due).
@@ -315,7 +342,13 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
 
   /** Import (or re-summarize) one bookmark. Returns the outcome for progress counting. */
   private async importOne(b: RaindropItem, dir: string, existing: Map<string, ExistingRow>): Promise<'imported' | 'flagged' | 'skip'> {
-    const { summary, readFailed } = await this.makeSummary(b);
+    let { summary, readFailed } = await this.makeSummary(b);
+    // Instagram: replace the login-walled page summary with the REAL caption, and remember the media image. (BEA-609)
+    const ig = this.instagram.isInstagram(b.link) ? await this.instagram.enrich(b.link).catch(() => null) : null;
+    if (ig?.caption) {
+      summary = ig.caption;
+      readFailed = false;
+    }
     const md = this.buildMarkdown(b, summary, readFailed);
     const tags = cleanTags(b.tags);
     const ex = existing.get(b.link);
@@ -326,9 +359,10 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       await fs.writeFile(filePath, md, 'utf8');
       await this.memory.deleteDoc(ex.supermemoryId, ex.ragId);
       await this.prisma.memoryOutbox.deleteMany({ where: { itemId: ex.id } }).catch(() => undefined);
+      const thumbnail = (ig?.imageUrl && (await this.cacheImage(ex.id, ig.imageUrl).catch(() => null))) || this.thumbFor(b.link, b.cover);
       await this.prisma.item.update({
         where: { id: ex.id },
-        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, thumbnail: this.thumbFor(b.link, b.cover), supermemoryId: null, ragId: null },
+        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, thumbnail, supermemoryId: null, ragId: null },
       });
       await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags, b.link), { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
       return readFailed ? 'flagged' : 'imported';
@@ -355,7 +389,12 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
 
     const filePath = join(dir, `${item.id}.md`);
     await fs.writeFile(filePath, md, 'utf8');
-    await this.prisma.item.update({ where: { id: item.id }, data: { filePath } });
+    const data: { filePath: string; thumbnail?: string } = { filePath };
+    if (ig?.imageUrl) {
+      const cached = await this.cacheImage(item.id, ig.imageUrl).catch(() => null);
+      if (cached) data.thumbnail = cached;
+    }
+    await this.prisma.item.update({ where: { id: item.id }, data });
     await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags, b.link), { itemId: item.id, title: b.title, tags: [...tags, 'bookmark'] });
     return readFailed ? 'flagged' : 'imported';
   }

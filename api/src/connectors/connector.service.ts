@@ -2,9 +2,9 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
-export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram';
+export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify';
 
-export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram'];
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify'];
 
 export function isKnownConnector(n: string): n is ConnectorName {
   return (KNOWN_CONNECTORS as string[]).includes(n);

@@ -22,6 +22,7 @@ const INTEGRATIONS: Integration[] = [
   { name: 'openai_admin', label: 'OpenAI Admin (usage)', desc: 'Optional — unlocks your OpenAI spend in the API-usage card. Create an Admin key with the usage-read scope at platform.openai.com → Settings → API keys.', icon: Sparkles, fields: [{ key: 'apiKey', label: 'Admin key', type: 'password' }] },
   { name: 'elevenlabs', label: 'ElevenLabs', desc: 'Optional voice engine — Scribe (most accurate on English)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'deepgram', label: 'Deepgram', desc: 'Optional voice engine — Nova-3 (fast)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'apify', label: 'Apify (Instagram)', desc: 'Fetches the real caption + a permanent image for Instagram bookmarks (so images stop expiring and descriptions match the reel). Create a free token at apify.com → Settings → Integrations.', icon: Globe, fields: [{ key: 'apiKey', label: 'API token', type: 'password' }] },
 ];
 
 const MODELS: Record<string, { value: string; label: string }[]> = {
