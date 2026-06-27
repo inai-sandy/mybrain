@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List, ArrowLeft, FolderPlus, Folder } from 'lucide-react';
 import { FOLDER_ICON_NAMES, DEFAULT_FOLDER_ICON, FOLDER_ICONS, FolderGlyph } from '../ui/folderIcons';
 import { KindBadge } from '../ui/kindBadge';
@@ -59,9 +59,7 @@ export function Documents() {
   const [importing, setImporting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [collections, setCollections] = useState<Collection[]>([]);
-  const [openFolder, setOpenFolder] = useState<string | null>(null); // null = folder grid; 'others' = uncategorised; else collection id
   const [managing, setManaging] = useState(false);
-  const [q, setQ] = useState('');
   const [results, setResults] = useState<DocItem[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDel, setBulkDel] = useState(false);
@@ -69,7 +67,37 @@ export function Documents() {
   const [tagFilter, setTagFilter] = useState('');
   const [sortKey, setSortKey] = useState('updatedAt:-1');
   const [addOpen, setAddOpen] = useState(false);
+
+  // Folder + search live in the URL so Back / refresh / deep-link restore where you were. (BEA-592)
+  const [params, setParams] = useSearchParams();
+  const openFolder = params.get('folder'); // null = folder grid; 'others' = uncategorised; else collection id
+  const q = params.get('q') ?? '';
   const searching = q.trim().length >= 2;
+
+  function setQ(v: string) {
+    // Search updates with replace so typing doesn't pile up history entries.
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set('q', v);
+        else n.delete('q');
+        return n;
+      },
+      { replace: true },
+    );
+  }
+  function setOpenFolder(v: string | null, replace = false) {
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        if (v) n.set('folder', v);
+        else n.delete('folder');
+        n.delete('q'); // entering/leaving a folder clears any active search
+        return n;
+      },
+      { replace },
+    );
+  }
 
   function changeView(v: 'cards' | 'list') {
     setView(v);
@@ -423,7 +451,7 @@ export function Documents() {
       ) : (
         <>
           <div className="flex items-center gap-2">
-            <button onClick={() => { setOpenFolder(null); clearSel(); }} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft size={15} /> Folders</button>
+            <button onClick={() => { setOpenFolder(null, true); clearSel(); }} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft size={15} /> Folders</button>
             <span className="text-zinc-300 dark:text-zinc-700">/</span>
             <h2 className="font-semibold flex items-center gap-1.5">
               <FolderGlyph name={openFolder === 'others' ? 'Folder' : currentFolder?.icon} size={16} className="text-emerald-600" />
