@@ -228,7 +228,7 @@ export function Documents() {
             <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{r.title}</h3>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-zinc-400">
               <KindBadge kind={r.kind} />
-              <span className="truncate">{shortDate(r.updatedAt)}{r.shared && ' · shared'}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}</span>
+              <span className="min-w-0 truncate">{shortDate(r.updatedAt)}{r.shared && ' · shared'}{r.shared && (r.viewCount ?? 0) > 0 ? ` · ${r.viewCount} views` : ''}</span>
             </p>
           </button>
         </div>
@@ -326,7 +326,7 @@ export function Documents() {
         searchable={false}
         renderCard={view === 'list' ? row : card}
         cardsOnly
-        gridClassName={view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}
+        gridClassName={view === 'list' ? 'space-y-2' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}
         pageSize={12}
         emptyText={mode === 'search' ? `No documents match "${q.trim()}".` : 'No documents in this folder yet — hit New Document to add one.'}
       />
