@@ -9,6 +9,7 @@ import { InstallPrompt } from './InstallPrompt';
 import { DictationIndicator } from './DictationIndicator';
 import { forceUpdate } from './forceUpdate';
 import { SearchOverlay, openSearch } from './SearchOverlay';
+import { useEdgeSwipeBack } from './useSwipeBack';
 import { useTheme } from './theme';
 
 /** Keep --vvh synced to the visible viewport height (shrinks when the keyboard opens) and report
@@ -47,6 +48,8 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const location = useLocation();
   const isChat = location.pathname === '/chat';
   useVisualViewport(isChat); // keeps --vvh synced (used by the chat height calc) + pins iOS on focus
+  // Left-edge swipe-back for the installed app (disabled while the mobile drawer is open). (BEA-593)
+  useEdgeSwipeBack(!drawer);
   // Desktop sidebar collapse (icon-only rail), remembered per device. (BEA-440)
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar.collapsed') === '1');
   useEffect(() => { localStorage.setItem('sidebar.collapsed', collapsed ? '1' : '0'); }, [collapsed]);
