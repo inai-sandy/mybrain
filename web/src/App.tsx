@@ -27,7 +27,6 @@ import { GoogleHome } from './pages/google/GoogleHome';
 import { GoogleService } from './pages/google/GoogleService';
 import { RequestViewer } from './pages/RequestViewer';
 import { Find as Explore } from './pages/Find';
-import { Commitments } from './pages/Commitments';
 import { Vault } from './pages/Vault';
 import { Lab } from './pages/Lab';
 import { Documents } from './pages/Documents';
@@ -108,7 +107,6 @@ function AuthedApp() {
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
         <Route path="explore" element={<Explore />} />
-        <Route path="commitments" element={<Commitments />} />
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />
         <Route path="ideas" element={<Ideas />} />
