@@ -97,6 +97,20 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(updated);
   }
 
+  /** Link a saved Document to the run (the agent's output). */
+  async attachOutput(runId: string, docId: string) {
+    const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
+    if (!run) throw new NotFoundException('Run not found');
+    const updated = await this.prisma.agentRun.update({ where: { id: runId }, data: { outputDocId: docId } });
+    return this.shapeRun(updated);
+  }
+
+  /** Read a waitpoint by its one-time token (so a polling agent can fetch the answer once given). */
+  async getWaitpoint(token: string) {
+    const wp = await this.prisma.waitpoint.findUnique({ where: { resumeToken: token } });
+    return wp ? this.shapeWaitpoint(wp) : null;
+  }
+
   /** Cancel a run and any of its still-pending questions. */
   async cancelRun(id: string) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
