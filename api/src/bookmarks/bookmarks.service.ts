@@ -74,7 +74,8 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
   async backfillInstagram(limit?: number): Promise<{ scanned: number; enriched: number; failed: number; samples: { url: string; caption: string; image: boolean }[] }> {
     if (!(await this.instagram.configured())) return { scanned: 0, enriched: 0, failed: 0, samples: [{ url: '', caption: 'Apify token not configured', image: false }] };
     const all = await this.prisma.item.findMany({ where: { source: 'raindrop' } });
-    const ig = all.filter((i) => this.instagram.isInstagram(i.sourceUrl || ''));
+    // Only IG bookmarks that aren't already on a cached image — so retries are cheap and idempotent. (BEA-610)
+    const ig = all.filter((i) => this.instagram.isInstagram(i.sourceUrl || '') && !(i.thumbnail || '').startsWith('/api/bookmarks/'));
     const slice = typeof limit === 'number' && limit > 0 ? ig.slice(0, limit) : ig;
     let enriched = 0;
     let failed = 0;
