@@ -393,11 +393,12 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       ranked = [];
     }
 
-    const terms = query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+    const tokens = this.tokenize(query);
     const scored = all
       .map((it) => {
         const url = (it.sourceUrl || '').toLowerCase();
         const title = (it.title || '').toLowerCase();
+        // Semantic boost: keep the existing "found by meaning" ranking from the memory stores.
         let semIdx = -1;
         for (let i = 0; i < ranked.length; i++) {
           if ((url && ranked[i].includes(url)) || (title.length > 6 && ranked[i].includes(title))) {
@@ -406,14 +407,71 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
           }
         }
         const semScore = semIdx >= 0 ? 1000 - semIdx : 0;
-        const hay = (title + ' ' + (it.summary || '') + ' ' + it.tags.join(' ')).toLowerCase();
-        const kwScore = terms.reduce((n, t) => n + (hay.includes(t) ? 1 : 0), 0);
+        // Ranked + typo-tolerant keyword score (like Documents, BEA-590/613).
+        const kwScore = this.keywordScore(it, tokens);
         return { it, score: semScore * 10 + kwScore };
       })
       .filter((s) => s.score > 0)
       .sort((a, b) => b.score - a.score);
 
     return scored.slice(0, limit).map((s) => s.it);
+  }
+
+  // ---- Ranked + typo-tolerant keyword search, in-process (no AI). (BEA-613) ----
+  private tokenize(s: string): string[] {
+    return (s.toLowerCase().match(/[a-z0-9]+/g) || []).filter((t) => t.length >= 1);
+  }
+  private editDistanceLE(a: string, b: string, max: number): boolean {
+    if (Math.abs(a.length - b.length) > max) return false;
+    let prev = Array.from({ length: a.length + 1 }, (_, i) => i);
+    for (let j = 1; j <= b.length; j++) {
+      const cur = [j];
+      let rowMin = j;
+      for (let i = 1; i <= a.length; i++) {
+        const v = Math.min(prev[i] + 1, cur[i - 1] + 1, prev[i - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        cur[i] = v;
+        if (v < rowMin) rowMin = v;
+      }
+      if (rowMin > max) return false;
+      prev = cur;
+    }
+    return prev[a.length] <= max;
+  }
+  private fuzzyHit(text: string, token: string): boolean {
+    const max = token.length >= 6 ? 2 : 1;
+    for (const w of text.match(/[a-z0-9]+/g) || []) {
+      if (Math.abs(w.length - token.length) <= max && this.editDistanceLE(w, token, max)) return true;
+    }
+    return false;
+  }
+  /** Weighted, typo-tolerant keyword score for one bookmark. (title/tags > summary > url) */
+  private keywordScore(it: { title?: string | null; summary?: string | null; sourceUrl?: string | null; tags: string[] }, tokens: string[]): number {
+    if (!tokens.length) return 0;
+    const title = (it.title || '').toLowerCase();
+    const tags = (it.tags || []).join(' ').toLowerCase();
+    const summary = (it.summary || '').toLowerCase();
+    const url = (it.sourceUrl || '').toLowerCase();
+    let total = 0;
+    let matched = 0;
+    for (const tk of tokens) {
+      let best = 0;
+      if (title.includes(tk)) best = Math.max(best, title.startsWith(tk) ? 7.2 : 6);
+      if (tags.includes(tk)) best = Math.max(best, 4);
+      if (summary.includes(tk)) best = Math.max(best, 2);
+      if (url.includes(tk)) best = Math.max(best, 1);
+      if (best === 0 && tk.length >= 4) {
+        if (this.fuzzyHit(title, tk)) best = 3;
+        else if (this.fuzzyHit(tags, tk)) best = 2.5;
+      }
+      if (best > 0) {
+        matched++;
+        total += best;
+      }
+    }
+    // Require all tokens for short queries, allow one miss for longer ones.
+    const required = tokens.length <= 2 ? tokens.length : tokens.length - 1;
+    if (matched < required) return 0;
+    return total + matched * 0.1;
   }
 
   // ---- the sync job --------------------------------------------------------
