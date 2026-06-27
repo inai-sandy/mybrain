@@ -151,6 +151,7 @@ export class DocumentsService {
       tags: this.parseTags(d.tags),
       collectionId: d.collectionId || null,
       shared: !!d.shared,
+      starred: !!d.starred,
       hasPassword: !!d.sharePassword,
       expiresAt: d.expiresAt || null,
       viewCount: d.viewCount ?? 0,
@@ -685,6 +686,12 @@ export class DocumentsService {
     if (row?.kind === 'site') await fs.rm(join(sitesDir(), id), { recursive: true, force: true }).catch(() => undefined);
     await this.prisma.document.delete({ where: { id } }).catch(() => null);
     return { ok: true };
+  }
+
+  /** Star / unstar a document. (BEA-596) */
+  async setStarred(id: string, starred: boolean) {
+    const row = await this.prisma.document.update({ where: { id }, data: { starred } }).catch(() => null);
+    return row ? this.shape(row) : null;
   }
 
   async setShared(id: string, shared: boolean) {
