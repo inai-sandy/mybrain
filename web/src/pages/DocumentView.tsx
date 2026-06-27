@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2 } from 'lucide-react';
@@ -14,7 +14,14 @@ type FullDoc = DocItem & { contentText: string };
 export function DocumentView() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
+
+  // True "back": return to wherever you came from (the folder/search). Deep-links fall back to the library. (BEA-592)
+  function goBack() {
+    if (location.key && location.key !== 'default') navigate(-1);
+    else navigate('/documents');
+  }
   const [doc, setDoc] = useState<FullDoc | null>(null);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
@@ -55,7 +62,7 @@ export function DocumentView() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
-      <button onClick={() => navigate('/documents')} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft size={15} /> Documents</button>
+      <button onClick={goBack} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft size={15} /> Back</button>
 
       {error && <p className="text-amber-500">{error}</p>}
 
