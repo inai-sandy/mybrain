@@ -46,9 +46,21 @@ model Item {
   shared        Boolean  @default(false) // publicly viewable via /view/:id when true
   thumbnail     String? // cover image / YouTube thumbnail for bookmark cards
   ideaId        String? // links an uploaded research doc to an Idea
+  folderId      String? // bookmark folder (My-Brain-owned, independent of Raindrop) (BEA-611)
   createdAt     DateTime @default(now())
 
   @@unique([contentHash, source])
+  @@index([folderId])
+}
+
+/// A My-Brain-owned folder for organising bookmarks (independent of Raindrop). (BEA-611)
+model BookmarkFolder {
+  id        String   @id @default(uuid())
+  name      String
+  color     String?
+  icon      String? // lucide icon name
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /// A captured idea: a brain-dump cleaned up by the LLM, with a /deep-research prompt.

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Put, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { BookmarksService } from './bookmarks.service';
 import { SummarizerService } from './summarizer.service';
@@ -14,6 +14,29 @@ export class BookmarksController {
   @Post('instagram/backfill')
   async backfillInstagram(@Query('limit') limit?: string) {
     return this.bookmarks.backfillInstagram(limit ? Number(limit) : undefined);
+  }
+
+  // ---- Bookmark folders (BEA-611). Declared before ':id/...' routes. ----
+  @Get('folders')
+  listFolders() {
+    return this.bookmarks.listFolders();
+  }
+  @Post('folders')
+  createFolder(@Body() body: { name?: string; color?: string; icon?: string }) {
+    return this.bookmarks.createFolder(body?.name || '', body?.color, body?.icon);
+  }
+  @Patch('folders/:id')
+  renameFolder(@Param('id') id: string, @Body() body: { name?: string; color?: string; icon?: string }) {
+    return this.bookmarks.renameFolder(id, body?.name, body?.color, body?.icon);
+  }
+  @Delete('folders/:id')
+  removeFolder(@Param('id') id: string) {
+    return this.bookmarks.removeFolder(id);
+  }
+  /** Move bookmark(s) into a folder (folderId null = unfile). */
+  @Post('folder')
+  setFolder(@Body() body: { ids?: string[]; folderId?: string | null }) {
+    return this.bookmarks.setFolder(body?.ids || [], body?.folderId ?? null);
   }
 
   /** Serve a bookmark's cached image (downloaded so Instagram URLs can't expire). (BEA-609) */
