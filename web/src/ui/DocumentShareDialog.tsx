@@ -22,6 +22,7 @@ export function DocumentShareDialog({
   initialShared,
   hasPassword: initialHasPassword,
   expiresAt: initialExpiresAt,
+  allowDownload: initialAllowDownload,
   viewCount,
   onClose,
   onChanged,
@@ -33,6 +34,7 @@ export function DocumentShareDialog({
   initialShared: boolean;
   hasPassword?: boolean;
   expiresAt?: string | null;
+  allowDownload?: boolean;
   viewCount?: number;
   onClose: () => void;
   onChanged?: (shared: boolean) => void;
@@ -48,6 +50,7 @@ export function DocumentShareDialog({
   const [hasPassword, setHasPassword] = useState(!!initialHasPassword);
   const [pwInput, setPwInput] = useState('');
   const [expiry, setExpiry] = useState(initialExpiresAt ? toLocalInput(initialExpiresAt) : '');
+  const [allowDownload, setAllowDownload] = useState(!!initialAllowDownload);
   const [savingProt, setSavingProt] = useState(false);
   const [qr, setQr] = useState('');
   const toast = useToast();
@@ -126,13 +129,14 @@ export function DocumentShareDialog({
     }
   }
 
-  async function protect(payload: { password?: string | null; expiresAt?: string | null }, okMsg: string) {
+  async function protect(payload: { password?: string | null; expiresAt?: string | null; allowDownload?: boolean }, okMsg: string) {
     setSavingProt(true);
     try {
       const r = await fetch(`/api/documents/${id}/protect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const d = await r.json().catch(() => ({}));
       if (r.ok) {
         if ('hasPassword' in d) setHasPassword(!!d.hasPassword);
+        if ('allowDownload' in d) setAllowDownload(!!d.allowDownload);
         if (payload.expiresAt !== undefined) setExpiry(d.expiresAt ? toLocalInput(d.expiresAt) : '');
         if (payload.password === null) setPwInput('');
         onChanged?.(shared);
@@ -253,6 +257,21 @@ export function DocumentShareDialog({
                   <button onClick={() => protect({ expiresAt: expiry ? new Date(expiry).toISOString() : null }, expiry ? 'Expiry set' : 'Expiry cleared')} disabled={savingProt} className="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm disabled:opacity-50">Save</button>
                   {expiry && <button onClick={() => { setExpiry(''); protect({ expiresAt: null }, 'Expiry cleared'); }} disabled={savingProt} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-2 text-sm disabled:opacity-50">Clear</button>}
                 </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-zinc-500 flex items-center gap-1.5"><Download size={13} /> Allow downloads</span>
+                  <button
+                    role="switch"
+                    aria-checked={allowDownload}
+                    onClick={() => protect({ allowDownload: !allowDownload }, allowDownload ? 'Downloads turned off' : 'Downloads turned on')}
+                    disabled={savingProt}
+                    className={'relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ' + (allowDownload ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}
+                  >
+                    <span className={'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ' + (allowDownload ? 'translate-x-4' : 'translate-x-0.5')} />
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-zinc-400">When on, the shared page shows a download button.</p>
               </div>
             </div>
 

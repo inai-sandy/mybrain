@@ -23,6 +23,7 @@ export type DocItem = {
   collectionId: string | null;
   shared: boolean;
   starred?: boolean;
+  allowDownload?: boolean;
   hasPassword?: boolean;
   expiresAt?: string | null;
   viewCount?: number;
@@ -529,7 +530,7 @@ export function Documents() {
       <ConfirmDialog open={bulkDel} title={`Delete ${selected.size} document${selected.size === 1 ? '' : 's'}?`} message="These will be permanently removed." confirmLabel="Delete" onCancel={() => setBulkDel(false)} onConfirm={bulkRemove} />
       {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
-      {sharing && <DocumentShareDialog id={sharing.id} title={sharing.title} slug={sharing.slug} shortCode={sharing.shortCode} initialShared={sharing.shared} hasPassword={sharing.hasPassword} expiresAt={sharing.expiresAt} viewCount={sharing.viewCount} onClose={() => setSharing(null)} onChanged={() => load()} />}
+      {sharing && <DocumentShareDialog id={sharing.id} title={sharing.title} slug={sharing.slug} shortCode={sharing.shortCode} initialShared={sharing.shared} hasPassword={sharing.hasPassword} expiresAt={sharing.expiresAt} allowDownload={sharing.allowDownload} viewCount={sharing.viewCount} onClose={() => setSharing(null)} onChanged={() => load()} />}
     </div>
   );
 }

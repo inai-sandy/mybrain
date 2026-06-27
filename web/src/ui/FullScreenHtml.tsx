@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 /**
@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
  * but NOT `allow-same-origin`, so the page lives in an isolated origin that cannot reach
  * the app, its cookies, or the user's login.
  */
-export function FullScreenHtml({ html, src, title, backTo }: { html?: string; src?: string; title: string; backTo?: string }) {
+export function FullScreenHtml({ html, src, title, backTo, downloadHref }: { html?: string; src?: string; title: string; backTo?: string; downloadHref?: string }) {
   return (
     <div className="fixed inset-0 bg-white">
       <iframe
@@ -24,6 +24,16 @@ export function FullScreenHtml({ html, src, title, backTo }: { html?: string; sr
         >
           <ArrowLeft size={14} /> Back
         </Link>
+      )}
+      {downloadHref && (
+        <a
+          href={downloadHref}
+          download
+          title="Download"
+          className="fixed right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-xs font-medium text-white backdrop-blur hover:bg-black/85"
+        >
+          <Download size={14} /> Download
+        </a>
       )}
       <a
         href="https://mybrain.1site.ai"

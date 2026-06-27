@@ -220,6 +220,22 @@ export class DocumentsController {
     res.sendFile(f.filePath);
   }
 
+  /** Public download of a shared doc (when downloads are allowed). (BEA-597) */
+  @Public()
+  @Get('public/:slug/download')
+  async publicDownload(@Param('slug') slug: string, @Query('t') token: string, @Res() res: Response) {
+    const f = await this.docs.sharedDownload(slug, token);
+    if (!f) throw new NotFoundException('Not available for download.');
+    res.setHeader('Content-Disposition', `attachment; filename="${f.filename}"`);
+    if ('filePath' in f && f.filePath) {
+      res.setHeader('Content-Type', f.mime);
+      res.sendFile(f.filePath);
+      return;
+    }
+    res.setHeader('Content-Type', f.mime + '; charset=utf-8');
+    res.send((f as { content: string }).content);
+  }
+
   /** Public binary stream for a shared pdf/image doc. Honours expiry + password token. (BEA-553/585) */
   @Public()
   @Get('public/:slug/file')
@@ -280,10 +296,10 @@ export class DocumentsController {
     }
   }
 
-  /** Set/clear the share password and/or expiry. (BEA-585) */
+  /** Set/clear the share password, expiry and/or download permission. (BEA-585/597) */
   @Post(':id/protect')
-  protect(@Param('id') id: string, @Body() body: { password?: string | null; expiresAt?: string | null }) {
-    return this.docs.setProtection(id, { password: body?.password, expiresAt: body?.expiresAt });
+  protect(@Param('id') id: string, @Body() body: { password?: string | null; expiresAt?: string | null; allowDownload?: boolean }) {
+    return this.docs.setProtection(id, { password: body?.password, expiresAt: body?.expiresAt, allowDownload: body?.allowDownload });
   }
 
   /** Copy this document into Capture/memory (RAG + SuperMemory). (BEA-540) */
