@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, Folder, FolderPlus, X, Trash2 } from 'lucide-react';
 import { DataTable, Column, Filter } from '../ui/DataTable';
+import { FOLDER_ICON_NAMES, FOLDER_ICONS, DEFAULT_FOLDER_ICON, FolderGlyph } from '../ui/folderIcons';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
 import { ShareDialog } from '../ui/ShareDialog';
@@ -19,7 +20,10 @@ type BM = {
   rag: boolean;
   chunked: boolean;
   shared: boolean;
+  folderId?: string | null;
 };
+
+type Folder = { id: string; name: string; color: string | null; icon?: string | null; count: number };
 
 const isYouTube = (u: string | null) => !!u && /youtube\.com|youtu\.be/.test(u);
 
@@ -42,7 +46,36 @@ function Chip({ t }: { t: string }) {
   );
 }
 
-function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void }) {
+/** Per-bookmark folder picker. (BEA-612) */
+function FolderMenu({ b, folders, onAssign }: { b: BM; folders: Folder[]; onAssign: (id: string, folderId: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const cur = folders.find((f) => f.id === b.folderId) || null;
+  const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors';
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} title={cur ? `Folder: ${cur.name}` : 'Add to folder'} className={iconBtn + (cur ? ' text-emerald-600' : ' hover:text-emerald-600')}>
+        <FolderGlyph name={cur?.icon || 'Folder'} size={15} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 w-48 max-h-64 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-1 shadow-xl">
+            <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-400">Move to folder</div>
+            {folders.length === 0 && <div className="px-2 py-1.5 text-xs text-zinc-400">No folders yet — use “Manage folders”.</div>}
+            {folders.map((f) => (
+              <button key={f.id} onClick={() => { onAssign(b.id, f.id); setOpen(false); }} className={'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (b.folderId === f.id ? 'text-emerald-600' : '')}>
+                <FolderGlyph name={f.icon} size={14} /> <span className="truncate">{f.name}</span>
+              </button>
+            ))}
+            {b.folderId && <button onClick={() => { onAssign(b.id, null); setOpen(false); }} className="mt-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10"><X size={13} /> Remove from folder</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Card({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void; folders: Folder[]; onAssign: (id: string, folderId: string | null) => void }) {
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
   const yt = isYouTube(b.sourceUrl);
   const Icon = yt ? Youtube : Link2;
@@ -98,6 +131,7 @@ function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onS
       <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-y-2 gap-x-2">
         <StoreBadges supermemory={b.supermemory} rag={b.rag} chunked={b.chunked} />
         <div className="flex items-center gap-0.5 shrink-0">
+          <FolderMenu b={b} folders={folders} onAssign={onAssign} />
           <button onClick={() => onShare(b)} title="Share" className={iconBtn + (b.shared ? ' text-emerald-600' : '')}>
             <Share2 size={16} />
           </button>
@@ -113,7 +147,7 @@ function Card({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onS
   );
 }
 
-function Row({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void }) {
+function Row({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void; folders: Folder[]; onAssign: (id: string, folderId: string | null) => void }) {
   const yt = isYouTube(b.sourceUrl);
   const Icon = yt ? Youtube : Link2;
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
@@ -137,6 +171,7 @@ function Row({ b, onOpen, onShare }: { b: BM; onOpen: (id: string) => void; onSh
             <h3 className="font-semibold text-sm leading-snug line-clamp-1 group-hover:text-emerald-600">{b.title}</h3>
           </button>
           <div className="flex items-center gap-0.5 shrink-0">
+            <FolderMenu b={b} folders={folders} onAssign={onAssign} />
             <button onClick={() => onShare(b)} title="Share" className={iconBtn + (b.shared ? ' text-emerald-600' : '')}><Share2 size={15} /></button>
             <button onClick={() => onOpen(b.id)} title="Open in app" className={iconBtn}><Eye size={15} /></button>
             <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" title="Open original" className={iconBtn}><ExternalLink size={15} /></a>
@@ -169,7 +204,10 @@ export function Bookmarks() {
   const onOpen = (id: string) => navigate(`/doc/${id}`);
   const [sharing, setSharing] = useState<BM | null>(null);
   const onShare = (b: BM) => setSharing(b);
-  const [view, setView] = useState<'grid' | 'list'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('bm.view') === 'list' ? 'list' : 'grid'));
+  const [view, setView] = useState<'grid' | 'list'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('bm.view') === 'grid' ? 'grid' : 'list'));
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [activeFolder, setActiveFolder] = useState<string>('all'); // all | others | <folderId>
+  const [managing, setManaging] = useState(false);
   function changeView(v: 'grid' | 'list') {
     setView(v);
     try {
@@ -178,18 +216,28 @@ export function Bookmarks() {
       /* ignore */
     }
   }
-  const renderItem = (b: BM) => (view === 'list' ? <Row b={b} onOpen={onOpen} onShare={onShare} /> : <Card b={b} onOpen={onOpen} onShare={onShare} />);
+  const renderItem = (b: BM) => (view === 'list' ? <Row b={b} onOpen={onOpen} onShare={onShare} folders={folders} onAssign={assignFolder} /> : <Card b={b} onOpen={onOpen} onShare={onShare} folders={folders} onAssign={assignFolder} />);
   const gridCls = view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2';
 
   async function load() {
     // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
     try {
-      const [r1, r2] = await Promise.all([fetch('/api/bookmarks'), fetch('/api/bookmarks/status')]);
+      const [r1, r2, r3] = await Promise.all([fetch('/api/bookmarks'), fetch('/api/bookmarks/status'), fetch('/api/bookmarks/folders')]);
       if (r1.ok) setItems((await r1.json()).items || []);
       if (r2.ok) setStatus(await r2.json());
+      if (r3.ok) setFolders((await r3.json()).folders || []);
     } finally {
       setLoading(false);
     }
+  }
+  async function reloadFolders() {
+    const r = await fetch('/api/bookmarks/folders');
+    if (r.ok) setFolders((await r.json()).folders || []);
+  }
+  async function assignFolder(id: string, folderId: string | null) {
+    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, folderId } : x))); // optimistic
+    await fetch('/api/bookmarks/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id], folderId }) }).catch(() => undefined);
+    reloadFolders();
   }
   useEffect(() => {
     load();
@@ -284,6 +332,9 @@ export function Bookmarks() {
     ? [{ key: 'tags', label: 'Tag', options: allTags.map((t) => ({ value: t, label: t })), match: (row: BM, val: string) => (row.tags || []).includes(val) }]
     : [];
 
+  const othersCount = items.filter((i) => !i.folderId).length;
+  const shown = activeFolder === 'all' ? items : activeFolder === 'others' ? items.filter((i) => !i.folderId) : items.filter((i) => i.folderId === activeFolder);
+
   const btn = 'inline-flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm disabled:opacity-50';
 
   return (
@@ -344,6 +395,17 @@ export function Bookmarks() {
         )}
       </form>
 
+      {/* Folders — accessible at the top; default shows everything. (BEA-612) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-zinc-400 inline-flex items-center gap-1"><Folder size={14} /> Folder</span>
+        <select value={activeFolder} onChange={(e) => setActiveFolder(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-2 py-1.5 text-sm outline-none focus:border-emerald-500 max-w-[14rem]">
+          <option value="all">All ({items.length})</option>
+          {folders.map((f) => <option key={f.id} value={f.id}>{f.name} ({f.count})</option>)}
+          <option value="others">Others / unfiled ({othersCount})</option>
+        </select>
+        <button onClick={() => setManaging(true)} className="text-xs text-zinc-400 hover:text-emerald-600 px-2 py-1">＋ Manage folders</button>
+      </div>
+
       {results !== null ? (
         <div>
           <div className="text-sm text-zinc-500 mb-2">
@@ -360,7 +422,7 @@ export function Bookmarks() {
       ) : (
         <DataTable<BM>
           columns={cols}
-          rows={items}
+          rows={shown}
           loading={loading}
           filters={filters}
           renderCard={(b) => renderItem(b)}
@@ -384,6 +446,80 @@ export function Bookmarks() {
           onChanged={() => load()}
         />
       )}
+      {managing && <ManageBookmarkFolders folders={folders} onClose={() => setManaging(false)} onChanged={reloadFolders} />}
+    </div>
+  );
+}
+
+/** Pick a folder icon — a small centered modal (can't be clipped). */
+function IconPicker({ value, onPick }: { value?: string | null; onPick: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="Choose icon" className="shrink-0 p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><FolderGlyph name={value} size={18} /></button>
+      {open && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-xs rounded-xl bg-white dark:bg-zinc-900 p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3"><h4 className="text-sm font-semibold">Choose an icon</h4><button onClick={() => setOpen(false)} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={16} /></button></div>
+            <div className="grid grid-cols-6 gap-1.5 max-h-64 overflow-y-auto">
+              {FOLDER_ICON_NAMES.map((n) => {
+                const Ic = FOLDER_ICONS[n];
+                return <button key={n} type="button" onClick={() => { onPick(n); setOpen(false); }} className={'grid aspect-square place-items-center rounded-md hover:bg-emerald-500/10 ' + (value === n ? 'bg-emerald-500/15 text-emerald-600' : 'text-zinc-500')}><Ic size={18} /></button>;
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Create / rename / delete bookmark folders. (BEA-612) */
+function ManageBookmarkFolders({ folders, onClose, onChanged }: { folders: Folder[]; onClose: () => void; onChanged: () => void }) {
+  const [list, setList] = useState<Folder[]>(folders);
+  const [newName, setNewName] = useState('');
+  const [newIcon, setNewIcon] = useState<string>(DEFAULT_FOLDER_ICON);
+  const toast = useToast();
+  async function reload() {
+    const r = await fetch('/api/bookmarks/folders');
+    if (r.ok) setList((await r.json()).folders || []);
+    onChanged();
+  }
+  async function create() {
+    if (!newName.trim()) return;
+    const r = await fetch('/api/bookmarks/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newName.trim(), icon: newIcon }) });
+    if (r.ok) { setNewName(''); setNewIcon(DEFAULT_FOLDER_ICON); reload(); } else toast('error', 'Could not create');
+  }
+  async function patch(id: string, body: Record<string, unknown>) {
+    await fetch(`/api/bookmarks/folders/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    reload();
+  }
+  async function remove(id: string) {
+    await fetch(`/api/bookmarks/folders/${id}`, { method: 'DELETE' });
+    toast('success', 'Folder removed (bookmarks kept)');
+    reload();
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3"><h3 className="font-bold">Bookmark folders</h3><button onClick={onClose} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button></div>
+        <div className="flex gap-2 mb-4">
+          <IconPicker value={newIcon} onPick={setNewIcon} />
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} placeholder="New folder name" className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <button onClick={create} disabled={!newName.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 text-sm disabled:opacity-50">Add</button>
+        </div>
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {list.length === 0 && <p className="text-sm text-zinc-400 text-center py-4">No folders yet.</p>}
+          {list.map((f) => (
+            <div key={f.id} className="flex items-center gap-2">
+              <IconPicker value={f.icon} onPick={(icon) => patch(f.id, { icon })} />
+              <input defaultValue={f.name} onBlur={(e) => e.target.value.trim() && e.target.value !== f.name && patch(f.id, { name: e.target.value.trim() })} className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-sm outline-none focus:border-emerald-500" />
+              <span className="text-xs text-zinc-400 w-8 text-right">{f.count}</span>
+              <button onClick={() => remove(f.id)} title="Delete" className="p-1.5 rounded-md text-zinc-400 hover:text-rose-500"><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
