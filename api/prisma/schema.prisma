@@ -364,6 +364,7 @@ model Task {
   reminders     String? // JSON array of ISO datetimes (AI-scheduled)
   day           String? // local day key YYYY-MM-DD this task is planned for
   dumpId        String? // the BrainDump this task was extracted from
+  party         String? // who this task is a promise TO / with — folded in from Commitments (BEA-604)
   dueDate       DateTime?
   status        String    @default("open") // open | done
   progress      Int       @default(0) // 0 | 30 | 60 | 100 — how far along (100 = done)

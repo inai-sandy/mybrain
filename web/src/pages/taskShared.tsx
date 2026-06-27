@@ -21,6 +21,8 @@ export type Task = {
   reminderCount?: number;
   reminders?: string[];
   day?: string | null;
+  party?: string | null; // who this task is a promise TO (folded in from Commitments)
+  dueDate?: string | null; // ISO due date
   status: 'open' | 'done';
   progress?: number; // 0 | 30 | 60 | 100
   followUp?: boolean;
@@ -104,6 +106,13 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
           )}
           {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
           {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
+          {t.party && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5">→ {t.party}</span>}
+          {t.dueDate && (() => {
+            const due = new Date(t.dueDate);
+            const overdue = !done && due < new Date(new Date().toDateString());
+            const label = due.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+            return <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + (overdue ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}><Clock size={10} /> {overdue ? `overdue · ${label}` : `due ${label}`}</span>;
+          })()}
           {!!t.reminderCount && t.reminderCount > 0 && (
             <span title={(t.reminders || []).join(', ')} className="inline-flex items-center gap-0.5 text-zinc-400"><Bell size={10} /> {t.reminderCount}</span>
           )}
@@ -300,6 +309,8 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
   const [pinned, setPinned] = useState(!!task?.pinned);
   const [sphere, setSphere] = useState<'work' | 'personal'>(task?.sphere === 'personal' ? 'personal' : 'work');
   const [reminders, setReminders] = useState(task?.reminderCount ?? 0);
+  const [party, setParty] = useState(task?.party || '');
+  const [due, setDue] = useState(task?.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : '');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
 
@@ -316,6 +327,8 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
       pinned,
       sphere,
       reminderCount: reminders,
+      party: party.trim() || null,
+      dueDate: due || null,
     };
     try {
       const r = editing
@@ -370,6 +383,14 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
             </label>
           </div>
           <p className="text-[11px] text-zinc-400 mt-1">The AI picks smart times based on priority. Reminders are delivered via Telegram.</p>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Promise to (who)
+              <input value={party} onChange={(e) => setParty(e.target.value)} className={inp} placeholder="e.g. Rakesh — optional" />
+            </label>
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Due date
+              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={inp} />
+            </label>
+          </div>
           <div className="mt-3">
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">Which life is this for?</p>
             <div className="flex gap-1.5">
