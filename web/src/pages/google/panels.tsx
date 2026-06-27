@@ -235,19 +235,29 @@ function DailyBriefCard() {
   const [day, setDay] = useState<string | null>(null);
   const [brief, setBrief] = useState<Brief | null>(null);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [generatingDay, setGeneratingDay] = useState<string | null>(null); // which day is being built (BEA-616)
   const [emailsOpen, setEmailsOpen] = useState(false);
   const [viewThread, setViewThread] = useState<string | null>(null);
   const toast = useToast();
+  // The day the user is currently viewing — so an async build that finishes after they've navigated
+  // away can't clobber the day on screen. (BEA-616)
+  const viewingRef = useRef<string | null>(null);
+  function goTo(d: string | null) {
+    viewingRef.current = d;
+    setDay(d);
+  }
 
   async function loadDay(target?: string) {
     setLoading(true);
     setBrief(null);
+    if (target) viewingRef.current = target;
     try {
       const r = await fetch('/api/google/gmail/brief' + (target ? `?day=${target}` : ''));
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || 'Could not load your brief');
-      setDay(d.day);
+      // If the user already navigated elsewhere while this was in flight, drop the result.
+      if (target && viewingRef.current !== target) return;
+      goTo(d.day);
       if (!target) setToday(d.day); // first load with no arg → server's "today"
       setBrief(d);
       // On "today" with no brief yet, build it now (first-open backfill). Past days stay on-demand.
@@ -261,18 +271,21 @@ function DailyBriefCard() {
   }
 
   async function generate(target: string, auto = false) {
-    setGenerating(true);
+    setGeneratingDay(target);
     try {
       const r = await fetch('/api/google/gmail/brief/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day: target }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d.message || 'Could not build your brief');
-      setBrief(d);
-      setDay(d.day);
+      // Only apply if the user is still on the day we built — otherwise it would clobber where they navigated.
+      if (viewingRef.current === target) {
+        setBrief(d);
+        goTo(d.day);
+      }
       if (!auto) toast('success', 'Brief updated');
     } catch (e: any) {
-      toast('error', e.message || 'Could not build your brief');
+      if (!auto || viewingRef.current === target) toast('error', e.message || 'Could not build your brief');
     } finally {
-      setGenerating(false);
+      setGeneratingDay((g) => (g === target ? null : g));
     }
   }
 
@@ -303,7 +316,7 @@ function DailyBriefCard() {
       {/* Brief body */}
       {loading ? (
         <div className="py-8 text-center text-sm text-zinc-400"><Loader2 size={18} className="animate-spin inline mr-2" /> Loading…</div>
-      ) : generating ? (
+      ) : generatingDay === day ? (
         <div className="py-8 text-center text-sm text-zinc-500"><Sparkles size={18} className="inline mr-2 text-emerald-500" /> Writing your brief… this takes a moment.</div>
       ) : brief?.summary ? (
         <>
@@ -361,7 +374,7 @@ function DailyBriefCard() {
 
           <div className="mt-4 flex items-center justify-between">
             {brief.generatedAt && <span className="text-[11px] text-zinc-400">Updated {new Date(brief.generatedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>}
-            <button onClick={() => day && generate(day)} disabled={generating} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
+            <button onClick={() => day && generate(day)} disabled={generatingDay === day} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-emerald-500 disabled:opacity-50">
               <RefreshCw size={13} /> Refresh
             </button>
           </div>
@@ -369,7 +382,7 @@ function DailyBriefCard() {
       ) : (
         <div className="py-6 text-center">
           <p className="text-sm text-zinc-400 mb-3">No brief was written for this day.</p>
-          <button onClick={() => day && generate(day)} disabled={generating} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
+          <button onClick={() => day && generate(day)} disabled={generatingDay === day} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
             <Sparkles size={14} /> Write the brief
           </button>
         </div>
