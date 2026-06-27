@@ -29,8 +29,9 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    // Self-triggering: once a day's story exists, extract that day's commitments/decisions (once). (BEA-355)
-    this.tick = setInterval(() => this.autoTick().catch(() => undefined), 60_000);
+    // Commitments folded into Tasks (BEA-605): the auto-extraction is OFF — promises now live as tasks
+    // (with `party` + due) and the duplicate-prone commitment/decision extraction is retired. The methods
+    // remain so the one-time migration (BEA-607) can still read existing rows.
   }
   onModuleDestroy() {
     if (this.tick) clearInterval(this.tick);
