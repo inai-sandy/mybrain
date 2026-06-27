@@ -23,6 +23,7 @@ export function Tasks() {
   const [fCategory, setFCategory] = useState('');
   const [fSphere, setFSphere] = useState('');
   const [fPerson, setFPerson] = useState('');
+  const [promisesOnly, setPromisesOnly] = useState(false);
   const [people, setPeople] = useState<string[]>([]);
   const [personTasks, setPersonTasks] = useState<Task[] | null>(null); // all tasks involving the picked person
   const [sort, setSortRaw] = useState<string>(() => localStorage.getItem('tasks-sort') || 'newest');
@@ -85,12 +86,17 @@ export function Tasks() {
     if (fPriority) list = list.filter((t) => t.priority === fPriority);
     if (fCategory) list = list.filter((t) => t.category === fCategory);
     if (fSphere) list = list.filter((t) => (t.sphere || 'work') === fSphere);
+    if (promisesOnly) {
+      const dueVal = (t: Task) => (t.dueDate ? new Date(t.dueDate).getTime() : Infinity); // overdue/soonest first, undated last
+      list = list.filter((t) => !!t.party).sort((a, b) => dueVal(a) - dueVal(b));
+    }
     return list;
-  }, [tasks, q, fPriority, fCategory, fSphere]);
+  }, [tasks, q, fPriority, fCategory, fSphere, promisesOnly]);
 
   // group: priority view = must-dos → High → Medium → Low; date views = one flat list. Done at the bottom either way.
   const groups = useMemo(() => {
     const open = filtered.filter((t) => t.status === 'open');
+    if (promisesOnly) return [{ key: 'promises', label: '🤝 Promises · overdue first', items: open }].filter((x) => x.items.length); // filtered is already due-sorted
     const g: { key: string; label: string; items: Task[] }[] =
       sort === 'priority'
         ? [
@@ -101,10 +107,10 @@ export function Tasks() {
           ]
         : [{ key: 'open', label: sort === 'oldest' ? 'Oldest first' : 'Newest first', items: sortTasksBy(open, sort) }];
     return g.filter((x) => x.items.length);
-  }, [filtered, sort]);
+  }, [filtered, sort, promisesOnly]);
 
   const openCount = tasks.filter((t) => t.status === 'open').length;
-  const hasFilters = !!(q || fPriority || fCategory || fSphere || fPerson);
+  const hasFilters = !!(q || fPriority || fCategory || fSphere || fPerson || promisesOnly);
   const sel = 'rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1.5 text-xs sm:text-sm outline-none focus:border-emerald-500 w-full sm:w-auto truncate';
 
   return (
@@ -174,8 +180,9 @@ export function Tasks() {
           <option value="oldest">Oldest</option>
           <option value="priority">By priority</option>
         </select>
+        <button onClick={() => setPromisesOnly((v) => !v)} aria-pressed={promisesOnly} className={'inline-flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs ' + (promisesOnly ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>🤝 Promises</button>
         {hasFilters && (
-          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setFPerson(''); setShowSearch(false); }} className="inline-flex items-center justify-center gap-1 text-xs text-zinc-500 hover:text-rose-600 rounded-lg border border-zinc-200 dark:border-zinc-800 px-2 py-1.5 w-full sm:w-auto sm:border-0"><X size={12} /> Clear</button>
+          <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setFPerson(''); setPromisesOnly(false); setShowSearch(false); }} className="inline-flex items-center justify-center gap-1 text-xs text-zinc-500 hover:text-rose-600 rounded-lg border border-zinc-200 dark:border-zinc-800 px-2 py-1.5 w-full sm:w-auto sm:border-0"><X size={12} /> Clear</button>
         )}
       </div>
       )}

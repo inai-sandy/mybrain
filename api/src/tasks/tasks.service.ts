@@ -311,6 +311,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       reminderCount: t.reminderCount,
       reminders: t.reminders ? (() => { try { return JSON.parse(t.reminders); } catch { return []; } })() : [],
       day: t.day,
+      party: t.party || null,
+      dueDate: t.dueDate || null,
       status: t.status,
       progress: t.progress ?? 0,
       followUp: !!t.followUp,
@@ -373,12 +375,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const res = spellings.map((s) => new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
     const hit = (txt?: string | null) => !!txt && res.some((re) => re.test(txt));
     const rows = await this.prisma.task.findMany({ take: 5000 });
-    const matched = rows.filter((t) => hit(t.title) || hit(t.note));
+    const matched = rows.filter((t) => hit(t.title) || hit(t.note) || hit(t.party));
     return this.sortTasks(matched).map((t) => this.shape(t));
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
@@ -398,6 +400,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         pinned: !!data.pinned,
         reminderCount,
         reminders: reminders.length ? JSON.stringify(reminders) : null,
+        party: data.party ? String(data.party).trim().slice(0, 80) : null,
+        dueDate: data.dueDate ? new Date(data.dueDate) : null,
         day: this.dayKey(tz),
       },
     });
@@ -416,7 +420,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(row);
   }
 
-  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number }) {
+  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number; party?: string | null; dueDate?: string | null }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
     const priority = data.priority !== undefined ? this.normPriority(data.priority) : t.priority;
@@ -448,6 +452,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         pinned: data.pinned !== undefined ? !!data.pinned : t.pinned,
         reminderCount,
         reminders: reminders.length ? JSON.stringify(reminders) : null,
+        party: data.party !== undefined ? (data.party ? String(data.party).trim().slice(0, 80) : null) : t.party,
+        dueDate: data.dueDate !== undefined ? (data.dueDate ? new Date(data.dueDate) : null) : t.dueDate,
         progress,
         ...statusFromProgress,
       },
