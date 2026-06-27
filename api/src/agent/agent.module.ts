@@ -1,16 +1,22 @@
 import { Module } from '@nestjs/common';
 import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
+import { AgentToolsController } from './agent-tools.controller';
+import { AgentToolsService } from './agent-tools.service';
+import { DocumentsModule } from '../documents/documents.module';
+import { MemoryModule } from '../memory/memory.module';
 
 /**
  * Agent feature — the My Brain "shell" around the Hermes engine.
- * BEA-619 ships the durable HITL engine (runs + waitpoints). Later issues add the
- * Hermes bridge (618), the MCP server (622), the live run screen (621) and more.
- * AgentService is exported so those modules can inject it.
+ * BEA-619: durable HITL engine (runs + waitpoints).
+ * BEA-622: the tool capabilities the agent calls (save_document, search_brain, ask_user),
+ *          exposed over REST here and over MCP (agent-mcp) for Hermes.
+ * Later: the Hermes bridge (618), live run screen (621), schedule/history (623), etc.
  */
 @Module({
-  controllers: [AgentController],
-  providers: [AgentService],
-  exports: [AgentService],
+  imports: [DocumentsModule, MemoryModule],
+  controllers: [AgentController, AgentToolsController],
+  providers: [AgentService, AgentToolsService],
+  exports: [AgentService, AgentToolsService],
 })
 export class AgentModule {}

@@ -212,4 +212,19 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(fresh.stepLog).toHaveLength(1);
     expect(fresh.stepLog[0].label).toBe('Read sources');
   });
+
+  it('attachOutput links a saved document to the run', async () => {
+    const run = await svc.createRun();
+    const updated = await svc.attachOutput(run.id, 'doc-42');
+    expect(updated.outputDocId).toBe('doc-42');
+  });
+
+  it('getWaitpoint reads a question back by its token (for polling agents)', async () => {
+    const run = await svc.createRun();
+    const wp = await svc.ask(run.id, { question: 'pick', options: ['a', 'b'] });
+    const read = await svc.getWaitpoint(wp.resumeToken);
+    expect(read?.id).toBe(wp.id);
+    expect(read?.status).toBe('pending');
+    expect(await svc.getWaitpoint('missing')).toBeNull();
+  });
 });
