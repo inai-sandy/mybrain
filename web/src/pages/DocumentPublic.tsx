@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { KeyRound, Clock, Download } from 'lucide-react';
 import { Logo } from '../ui/Logo';
-import { mdComponents } from '../ui/markdown';
+import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { FullScreenHtml } from '../ui/FullScreenHtml';
 
 type PublicDoc = { title: string; description: string | null; kind: string; contentText: string; siteEntry?: string | null; allowDownload?: boolean; updatedAt: string };
@@ -128,9 +128,11 @@ export function DocumentPublic() {
             ) : doc.kind === 'image' ? (
               <img src={fileSrc} alt={doc.title} className="mt-5 max-w-full rounded-xl border border-zinc-200 dark:border-zinc-800" />
             ) : (
-              <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5 mt-5">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{doc.contentText || ''}</ReactMarkdown>
-              </article>
+              <OutlineLayout headings={extractHeadings(doc.contentText || '')}>
+                <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5 mt-5">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{doc.contentText || ''}</ReactMarkdown>
+                </article>
+              </OutlineLayout>
             )}
           </>
         )}
