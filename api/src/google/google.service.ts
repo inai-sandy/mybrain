@@ -184,10 +184,11 @@ export class GoogleService {
   async gmailDayUnread(day: string): Promise<number | null> {
     const next = dayAdd(day, 1);
     const q = `is:unread after:${day.replace(/-/g, '/')} before:${next.replace(/-/g, '/')}`;
-    const params = JSON.stringify({ userId: 'me', q, maxResults: 1 });
+    // Gmail's `resultSizeEstimate` is unreliable with a small maxResults — it returned a bogus ~201 for
+    // EVERY day. Fetch the real message ids with a high cap and count them instead. (BEA-615)
+    const params = JSON.stringify({ userId: 'me', q, maxResults: 500 });
     const r = await this.run(['gmail', 'users', 'messages', 'list', '--params', params, '--format', 'json']);
-    const n = Number(r?.resultSizeEstimate);
-    return Number.isFinite(n) ? n : null;
+    return Array.isArray(r?.messages) ? r.messages.length : null;
   }
 
   /** The "important" emails received on a local day — Promotions/Social/Updates + Chats excluded. */
