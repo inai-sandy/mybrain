@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { KeyRound, Clock } from 'lucide-react';
+import { KeyRound, Clock, Download } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { mdComponents } from '../ui/markdown';
 import { FullScreenHtml } from '../ui/FullScreenHtml';
 
-type PublicDoc = { title: string; description: string | null; kind: string; contentText: string; siteEntry?: string | null; updatedAt: string };
+type PublicDoc = { title: string; description: string | null; kind: string; contentText: string; siteEntry?: string | null; allowDownload?: boolean; updatedAt: string };
 type Gate = 'loading' | 'open' | 'locked' | 'expired' | 'error';
 
 /** Public, no-login view of a shared document at /d/:slug. (locked/expiry: BEA-585) */
@@ -54,7 +54,7 @@ export function DocumentPublic() {
       const d = await r.json().catch(() => ({}));
       if (d?.ok) {
         setToken(d.token || null);
-        setDoc({ title: d.title, description: d.description, kind: d.kind, contentText: d.contentText, updatedAt: d.updatedAt });
+        setDoc({ title: d.title, description: d.description, kind: d.kind, contentText: d.contentText, siteEntry: d.siteEntry, allowDownload: d.allowDownload, updatedAt: d.updatedAt });
         setGate('open');
       } else if (d?.reason === 'gone') {
         setGate('expired');
@@ -68,16 +68,24 @@ export function DocumentPublic() {
     }
   }
 
-  // HTML + ZIP sites get the chrome-free, full-screen live page — exactly like a tiiny.host link. (BEA-582/587)
-  if (gate === 'open' && doc && doc.kind === 'html') return <FullScreenHtml html={doc.contentText || ''} title={doc.title} />;
-  if (gate === 'open' && doc && doc.kind === 'site') return <FullScreenHtml src={`/api/documents/public/${slug}/site/${encodeURI(doc.siteEntry || 'index.html')}`} title={doc.title} />;
-
+  const downloadUrl = `/api/documents/public/${slug}/download${token ? `?t=${encodeURIComponent(token)}` : ''}`;
   const fileSrc = `/api/documents/public/${slug}/file${token ? `?t=${encodeURIComponent(token)}` : ''}`;
+
+  // HTML + ZIP sites get the chrome-free, full-screen live page — exactly like a tiiny.host link. (BEA-582/587)
+  if (gate === 'open' && doc && doc.kind === 'html') return <FullScreenHtml html={doc.contentText || ''} title={doc.title} downloadHref={doc.allowDownload ? downloadUrl : undefined} />;
+  if (gate === 'open' && doc && doc.kind === 'site') return <FullScreenHtml src={`/api/documents/public/${slug}/site/${encodeURI(doc.siteEntry || 'index.html')}`} title={doc.title} downloadHref={doc.allowDownload ? downloadUrl : undefined} />;
 
   return (
     <div className="min-h-screen bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <header className="sticky top-0 z-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur">
-        <div className="max-w-3xl mx-auto px-5 h-12 flex items-center gap-2 font-bold"><Logo size={28} /> My Brain</div>
+        <div className="max-w-3xl mx-auto px-5 h-12 flex items-center gap-2 font-bold">
+          <Logo size={28} /> My Brain
+          {gate === 'open' && doc?.allowDownload && (
+            <a href={downloadUrl} download title="Download" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <Download size={15} /> Download
+            </a>
+          )}
+        </div>
       </header>
       <div className="max-w-3xl mx-auto px-5 py-8">
         {gate === 'loading' && <p className="text-zinc-400">Loading…</p>}

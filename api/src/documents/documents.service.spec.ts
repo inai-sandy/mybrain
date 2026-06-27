@@ -184,6 +184,27 @@ describe('DocumentsService', () => {
     await expect(svc.createFromUpload({ originalname: 'x.zip', mimetype: 'application/zip', buffer: buf, size: buf.length })).rejects.toThrow(/No HTML/i);
   });
 
+  it('only allows public download when the owner opts in (BEA-597)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Downloadable', contentText: '# Hi\n\nbody' });
+    await svc.setShared(doc.id, true);
+
+    // Shared but downloads off → nothing.
+    expect(await svc.sharedDownload(doc.slug)).toBeNull();
+    expect((await svc.getShared(doc.slug) as any).allowDownload).toBe(false);
+
+    await svc.setProtection(doc.id, { allowDownload: true });
+    const dl = (await svc.sharedDownload(doc.slug)) as any;
+    expect(dl.filename).toMatch(/\.md$/);
+    expect(dl.content).toContain('body');
+    expect((await svc.getShared(doc.slug) as any).allowDownload).toBe(true);
+
+    // Turning it back off closes the download again.
+    await svc.setProtection(doc.id, { allowDownload: false });
+    expect(await svc.sharedDownload(doc.slug)).toBeNull();
+  });
+
   it('stars and unstars a document (BEA-596)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);

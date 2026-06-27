@@ -152,6 +152,7 @@ export class DocumentsService {
       collectionId: d.collectionId || null,
       shared: !!d.shared,
       starred: !!d.starred,
+      allowDownload: !!d.allowDownload,
       hasPassword: !!d.sharePassword,
       expiresAt: d.expiresAt || null,
       viewCount: d.viewCount ?? 0,
@@ -748,8 +749,8 @@ export class DocumentsService {
     if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return { expired: true, title: row.title };
     // Count the open (best-effort, fire-and-forget). A locked page still counts as a visit. (BEA-586)
     void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
-    if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind };
-    return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', siteEntry: row.siteEntry || null, updatedAt: row.updatedAt };
+    if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind, allowDownload: !!row.allowDownload };
+    return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', siteEntry: row.siteEntry || null, allowDownload: !!row.allowDownload, updatedAt: row.updatedAt };
   }
 
   /** Verify a share password; on success return the content + a file-unlock token. (BEA-585) */
@@ -767,15 +768,31 @@ export class DocumentsService {
       description: row.description || null,
       kind: row.kind,
       contentText: row.contentText || '',
+      siteEntry: row.siteEntry || null,
+      allowDownload: !!row.allowDownload,
       updatedAt: row.updatedAt,
     };
   }
 
-  /** Set/clear a share password and/or expiry. (BEA-585) */
-  async setProtection(id: string, opts: { password?: string | null; expiresAt?: string | null }) {
+  /** Public download of a shared doc — only when live, password-cleared, AND downloads are allowed. (BEA-597) */
+  async sharedDownload(slug: string, token?: string) {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || !this.isLive(row) || !row.allowDownload) return null;
+    if (row.sharePassword && !this.tokenValid(slug, token)) return null;
+    const base = (row.title || 'document').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'document';
+    if (row.filePath) {
+      return { filePath: row.filePath, mime: row.mime || 'application/octet-stream', filename: row.filename || `${base}${extname(row.filePath)}` };
+    }
+    const ext = row.kind === 'html' ? 'html' : 'md';
+    return { content: row.contentText || '', mime: row.kind === 'html' ? 'text/html' : 'text/markdown', filename: `${base}.${ext}` };
+  }
+
+  /** Set/clear a share password, expiry and/or download permission. (BEA-585/597) */
+  async setProtection(id: string, opts: { password?: string | null; expiresAt?: string | null; allowDownload?: boolean }) {
     const data: Record<string, unknown> = {};
     if (opts.password !== undefined) data.sharePassword = opts.password ? await bcrypt.hash(opts.password, 10) : null;
     if (opts.expiresAt !== undefined) data.expiresAt = opts.expiresAt ? new Date(opts.expiresAt) : null;
+    if (opts.allowDownload !== undefined) data.allowDownload = !!opts.allowDownload;
     const row = await this.prisma.document.update({ where: { id }, data }).catch(() => null);
     return row ? this.shape(row) : null;
   }

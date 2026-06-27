@@ -252,6 +252,7 @@ model Document {
   expiresAt    DateTime? // when set + passed, the public link is treated as un-shared (BEA-585)
   viewCount    Int      @default(0) // public opens of the shared link (BEA-586)
   starred      Boolean  @default(false) // favourited by the owner (BEA-596)
+  allowDownload Boolean @default(false) // let recipients of a shared link download it (BEA-597)
   siteEntry    String? // for kind 'site': entry html path inside the extracted folder (BEA-587)
   title        String
   description  String? // <=200 char summary (manual now; AI-filled later)
