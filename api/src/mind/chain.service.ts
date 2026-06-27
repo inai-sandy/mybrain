@@ -119,7 +119,7 @@ export class MindChainService {
       `The user describes, in their own words, something that's blocking them. Turn it into a simple chain.\n` +
       `Return ONLY JSON: {"goal":"what they're trying to achieve","blocker":"what's stopping it","lever":"the ONE next-action that would unblock it"}.\n` +
       `Keep goal and blocker short plain phrases. Write the LEVER as a tiny if-then plan anchored to an everyday cue: "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>." Pick a cue that fits; keep it one action, not a plan.\n` +
-      `If a part isn't stated, make a concise best guess or use "".\n\nUSER:\n${t.slice(0, 800)}`;
+      `If a part isn't stated, leave it as "" — do NOT invent names, quotes, or details that aren't in their words.\n\nUSER:\n${t.slice(0, 800)}`;
     const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 300, 'chain-parse'))?.trim() || '';
     try {
       const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -146,48 +146,93 @@ export class MindChainService {
     return inter / Math.min(wa.size, wb.size) >= 0.5;
   }
 
-  /** Propose Goal→Blocker→Lever chains from a day's signals + the user's own words. Saved as source='engine'. (BEA-516) */
+  // --- Grounding guards so the engine can't confabulate the user's history. (BEA-602) ---
+  private flatten(s: string): string {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  private lev(a: string, b: string): number {
+    if (Math.abs(a.length - b.length) > 2) return 3;
+    const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = dp[0];
+      dp[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const tmp = dp[j];
+        dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    return dp[b.length];
+  }
+  // Capitalised words that are NOT person-names — sentence starters, cue words, common terms.
+  private static NAME_STOP = new Set(
+    "when i today tomorrow yesterday monday tuesday wednesday thursday friday saturday sunday after before the a an and or but his her he she they them their this that these those my me you we us move end start finish focus work working production beakn beacon morning afternoon lunch coffee dinner evening night day days week weeks month task tasks meeting meetings"
+      .split(' '),
+  );
+  /** A proposed chain is GROUNDED only if its evidence quote really sits in the day's words AND it names no one absent from them. */
+  private isGrounded(text: string, evidence: string, corpusFlat: string, corpusWords: Set<string>): boolean {
+    const ev = this.flatten(evidence);
+    if (ev.length < 12 || !corpusFlat.includes(ev)) return false; // the quote must be verbatim from the day's words
+    const names = (text.match(/\b[A-Z][a-z]{2,}\b/g) || []).filter((w) => !MindChainService.NAME_STOP.has(w.toLowerCase()));
+    for (const nm of names) {
+      const low = nm.toLowerCase();
+      if (corpusWords.has(low)) continue;
+      let near = false;
+      for (const w of corpusWords) {
+        if (w.length >= 3 && this.lev(low, w) <= 2) {
+          near = true;
+          break;
+        }
+      }
+      if (!near) return false; // a name the day's own words never mention → confabulation, drop it
+    }
+    return true;
+  }
+
+  /** Propose Goal→Blocker→Lever chains grounded ONLY in the day's own story. Saved as source='engine'. (BEA-516/602) */
   async inferFromDay(day: string): Promise<number> {
-    const [tasks, story, drains, aboutRow, existing, notes] = await Promise.all([
+    const [tasks, story, existing] = await Promise.all([
       this.prisma.task.findMany({ where: { day }, select: { title: true, status: true, category: true, rolloverCount: true } }),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { rawText: true } }),
-      this.prisma.mindFinding.findMany({ where: { status: { in: ['emerging', 'established'] }, valence: 'draining', NOT: { validated: 'refuted' } }, orderBy: { confidence: 'desc' }, take: 8, select: { statement: true } }),
-      this.prisma.setting.findUnique({ where: { key: 'mind.aboutMe' } }),
       this.prisma.mindChain.findMany({ where: { status: { not: 'retired' } }, select: { goal: true, blocker: true } }),
-      this.prisma.mindEvidence.findMany({ where: { signal: 'feedback' }, orderBy: { createdAt: 'desc' }, take: 12, select: { snippet: true } }),
     ]);
     const deferred = tasks.filter((t) => (t.rolloverCount || 0) > 0 && t.status !== 'done');
-    if (!deferred.length && !(story?.rawText || '').trim()) return 0; // nothing to reason from
+    const storyText = (story?.rawText || '').trim();
+    if (!storyText) return 0; // a Situation must be grounded in the day's OWN story; no story → infer nothing
 
     const prompt =
-      `You build a map of someone's SITUATION as chains: a GOAL, what's BLOCKING it, and the one LEVER that would unblock it.\n` +
-      `Only propose a chain when the evidence genuinely points to an underlying blocker (e.g. a kind of task is repeatedly deferred AND there's a reason for it). Be conservative — 0–2 chains. Plain words.\n` +
-      `Write each LEVER as a tiny if-then plan anchored to an everyday cue: "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>." One action, not a plan.\n\n` +
-      (aboutRow?.value ? `WHO THEY ARE (their words):\n${aboutRow.value.slice(0, 800)}\n\n` : '') +
+      `You map someone's SITUATION from THEIR OWN words as chains: a GOAL, what's BLOCKING it, and the one LEVER that would unblock it.\n` +
+      `This is the user's private record — accuracy matters far more than insight. STRICT RULES:\n` +
+      `- Use ONLY what is literally written in TODAY'S STORY below. Do NOT invent or infer names of people, quotes, events, feelings, or "what he said". No third-person psychoanalysis.\n` +
+      `- Every chain MUST include "evidence": a short VERBATIM quote (≤120 chars) copied EXACTLY from TODAY'S STORY that the chain rests on. If you cannot copy a real supporting quote, do NOT propose the chain.\n` +
+      `- Be conservative: 0–2 chains. Plain words. Return an empty array if nothing is clearly grounded in today's story.\n` +
+      `Write each LEVER as a tiny if-then plan anchored to an everyday cue ("When <a daily cue>, I'll <one concrete action>"). One action, not a plan.\n\n` +
       (deferred.length ? `REPEATEDLY DEFERRED TASKS:\n${deferred.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''} (deferred ${t.rolloverCount}×)`).join('\n')}\n\n` : '') +
-      (drains.length ? `DRAINING PATTERNS:\n${drains.map((d) => `- ${d.statement}`).join('\n')}\n\n` : '') +
-      (notes.length ? `THEIR OWN NOTES:\n${notes.map((n) => `- ${n.snippet}`).join('\n')}\n\n` : '') +
-      (story?.rawText ? `TODAY'S STORY:\n${story.rawText.slice(0, 1500)}\n\n` : '') +
-      `Return ONLY JSON: {"chains":[{"goal":"...","blocker":"...","lever":"...","why":"one short plain sentence on what in today's signals made you see this"}]} (empty array if nothing well-grounded).`;
+      `TODAY'S STORY:\n${storyText.slice(0, 1500)}\n\n` +
+      `Return ONLY JSON: {"chains":[{"goal":"...","blocker":"...","lever":"...","evidence":"verbatim quote copied from TODAY'S STORY"}]} (empty array if nothing well-grounded).`;
     const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 600, 'chain-infer'))?.trim() || '';
-    let list: { goal?: string; blocker?: string; lever?: string; why?: string }[] = [];
+    let list: { goal?: string; blocker?: string; lever?: string; evidence?: string }[] = [];
     try {
       const jjson = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
       if (Array.isArray(jjson?.chains)) list = jjson.chains;
     } catch {
       list = [];
     }
+
+    const corpusFlat = this.flatten(`${storyText} ${deferred.map((t) => t.title).join(' ')}`);
+    const corpusWords = new Set(corpusFlat.split(' ').filter(Boolean));
     const deferredNames = deferred.slice(0, 3).map((t) => t.title).join(', ');
     let created = 0;
     for (const c of list.slice(0, 2)) {
       const goal = String(c?.goal || '').trim();
       const blocker = String(c?.blocker || '').trim();
       const lever = String(c?.lever || '').trim();
-      const why = String(c?.why || '').trim();
+      const evidence = String(c?.evidence || '').trim();
       if (!goal || !blocker) continue;
-      const dup = existing.some((e) => this.isDup({ goal, blocker }, e));
-      if (dup) continue;
-      const provenance = `Noticed on ${day}${deferredNames ? ` · deferred: ${deferredNames}` : ''}${why ? ` — ${why}` : ''}`;
+      if (!this.isGrounded(`${goal} ${blocker} ${lever}`, evidence, corpusFlat, corpusWords)) continue; // drop confabulations
+      if (existing.some((e) => this.isDup({ goal, blocker }, e))) continue;
+      const quote = evidence.replace(/\s+/g, ' ').slice(0, 140);
+      const provenance = `Noticed on ${day} · from your words: "${quote}"${deferredNames ? ` · deferred: ${deferredNames}` : ''}`;
       await this.create({ goal, blocker, lever, source: 'engine', provenance });
       existing.push({ goal, blocker }); // so two proposals this run don't duplicate each other
       created++;
