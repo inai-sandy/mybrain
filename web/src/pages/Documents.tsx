@@ -238,7 +238,7 @@ export function Documents() {
   function card(r: DocItem) {
     return (
       <div className={'group relative h-full rounded-xl border bg-white dark:bg-zinc-900 p-4 hover:shadow-md transition-all flex flex-col ' + (selected.has(r.id) ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40')}>
-        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'absolute top-3 right-3 z-10 h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
+        <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'absolute top-3 right-3 z-10 h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity')} />
         <div className="flex items-start gap-3">
           <div className="shrink-0 rounded-lg p-2 text-emerald-500 bg-emerald-500/10"><FileText size={18} /></div>
           <button onClick={() => navigate(`/documents/${r.id}`)} className="min-w-0 flex-1 text-left pr-6">
@@ -296,7 +296,7 @@ export function Documents() {
           </div>
         </button>
         <div className="shrink-0 flex flex-col items-end gap-1.5">
-          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
+          <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity')} />
           <div className="flex items-center gap-0.5">
             <button onClick={() => toggleStar(r)} title={r.starred ? 'Unstar' : 'Star'} className={iconBtn + (r.starred ? ' text-amber-500' : ' hover:text-amber-500')}><Star size={16} fill={r.starred ? 'currentColor' : 'none'} /></button>
             <button onClick={() => navigate(`/documents/${r.id}`)} title="Open" className={iconBtn + ' hover:text-emerald-600'}><Eye size={16} /></button>
@@ -536,26 +536,31 @@ export function Documents() {
 }
 
 /** Create / rename / delete collections. (BEA-537) */
-/** Small popover to pick a folder icon. (BEA-588) */
+/** Folder icon picker — a small centered modal so it can't be clipped by a scroll container. (BEA-588/601) */
 function IconMenu({ value, onPick }: { value?: string | null; onPick: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative shrink-0">
-      <button type="button" onClick={() => setOpen((o) => !o)} title="Choose icon" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><FolderGlyph name={value} size={18} /></button>
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="Choose icon" className="shrink-0 p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><FolderGlyph name={value} size={18} /></button>
       {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 grid w-56 max-h-56 grid-cols-6 gap-1 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow-xl">
-            {FOLDER_ICON_NAMES.map((n) => {
-              const Ic = FOLDER_ICONS[n];
-              return (
-                <button key={n} type="button" onClick={() => { onPick(n); setOpen(false); }} className={'grid place-items-center p-1.5 rounded-md hover:bg-emerald-500/10 ' + (value === n ? 'bg-emerald-500/15 text-emerald-600' : 'text-zinc-500')}><Ic size={18} /></button>
-              );
-            })}
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-xs rounded-xl bg-white dark:bg-zinc-900 p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold">Choose an icon</h4>
+              <button onClick={() => setOpen(false)} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={16} /></button>
+            </div>
+            <div className="grid grid-cols-6 gap-1.5 max-h-64 overflow-y-auto">
+              {FOLDER_ICON_NAMES.map((n) => {
+                const Ic = FOLDER_ICONS[n];
+                return (
+                  <button key={n} type="button" onClick={() => { onPick(n); setOpen(false); }} className={'grid aspect-square place-items-center rounded-md hover:bg-emerald-500/10 ' + (value === n ? 'bg-emerald-500/15 text-emerald-600' : 'text-zinc-500')}><Ic size={18} /></button>
+                );
+              })}
+            </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -600,7 +605,7 @@ function ManageCollections({ collections, onClose, onChanged }: { collections: C
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-bold">Collections</h3>
+          <h3 className="font-bold">Folders</h3>
           <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
         </div>
         <div className="flex gap-2 mb-4">
