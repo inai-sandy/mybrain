@@ -459,6 +459,65 @@ model AgentActionLog {
   createdAt DateTime @default(now())
 }
 
+/// A configured agent the user can run (flagship Agent feature). Runs on Hermes; My Brain is the shell.
+model Agent {
+  id           String     @id @default(uuid())
+  name         String
+  icon         String? // emoji
+  description  String?
+  autonomy     String     @default("cautious") // cautious | balanced | autopilot
+  skills       String     @default("[]") // JSON string array of skill ids/names
+  schedule     String? // cron expression; null = manual only
+  scheduleText String? // human sentence ("every weekday 7am")
+  outputDest   String     @default("document") // document | telegram | task
+  collectionId String? // Documents collection for saved outputs
+  enabled      Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  runs         AgentRun[]
+}
+
+/// One execution of an agent. Mirrors a Hermes session and carries our durable HITL state.
+model AgentRun {
+  id          String      @id @default(uuid())
+  agentId     String?
+  agent       Agent?      @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  title       String?
+  status      String      @default("running") // running | awaiting_input | scheduled | done | failed | cancelled
+  input       String? // the prompt/topic (JSON or text)
+  sessionId   String? // Hermes session id (the bridge fills this in BEA-618)
+  stepLog     String      @default("[]") // JSON array of step records (mirror of Hermes events)
+  outputDocId String? // saved Document id
+  error       String?
+  startedAt   DateTime    @default(now())
+  endedAt     DateTime?
+  waitpoints  Waitpoint[]
+
+  @@index([agentId])
+  @@index([status])
+}
+
+/// A DURABLE human-in-the-loop pause: the run asks a question and waits — survives an API/host restart. The piece Hermes lacks.
+model Waitpoint {
+  id           String    @id @default(uuid())
+  runId        String
+  run          AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  question     String
+  kind         String    @default("choice") // choice | free_text | approve_edit_reject | form
+  options      String    @default("[]") // JSON: choices, or form fields, or the draft for approve_edit_reject
+  defaultValue String? // smart default applied on timeout
+  status       String    @default("pending") // pending | answered | expired | cancelled
+  answer       String? // JSON of the user's answer
+  resumeToken  String    @unique
+  answeredVia  String? // telegram | web
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  answeredAt   DateTime?
+
+  @@index([runId])
+  @@index([status])
+}
+
 /// One day's Gmail "Daily Brief": unread count + an AI summary of that day's important emails.
 /// Generated nightly (11:58 PM local) and on first open; keyed by local day so history is instant.
 model GmailBrief {

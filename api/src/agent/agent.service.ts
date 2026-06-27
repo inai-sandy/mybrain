@@ -1,0 +1,221 @@
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { randomBytes } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
+
+/** The shape of a mid-task question the agent can ask. */
+export type WaitKind = 'choice' | 'free_text' | 'approve_edit_reject' | 'form';
+
+export type AskInput = {
+  question: string;
+  kind?: WaitKind;
+  options?: unknown; // choices array, form fields, or the draft for approve_edit_reject
+  defaultValue?: string; // smart default, auto-applied on timeout
+  expiresInMs?: number; // optional timeout; on expiry the default is applied (or the run parks)
+};
+
+const FINISHED = ['done', 'failed', 'cancelled'];
+
+/**
+ * AgentService — the DURABLE human-in-the-loop engine (BEA-619).
+ *
+ * This is the piece Hermes does NOT give us: a run can pause on a structured question,
+ * notify the user, and resume even days later / after an API restart, because the whole
+ * state lives in SQLite (no in-memory waiting). Hermes's own approvals time out in ~60s
+ * and don't survive a restart. The bridge (BEA-618) and MCP tools (BEA-622) call into this.
+ */
+@Injectable()
+export class AgentService implements OnModuleInit, OnModuleDestroy {
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  onModuleInit() {
+    // Per-minute sweeper that applies timeouts to overdue questions. Guarded so a bad tick
+    // can never crash the app (matches the gmail-brief.service.ts pattern).
+    this.sweepTimer = setInterval(() => {
+      this.sweepExpired().catch(() => undefined);
+    }, 60_000);
+    if (typeof this.sweepTimer.unref === 'function') this.sweepTimer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+  }
+
+  // ---------- runs ----------
+
+  async createRun(input: { agentId?: string | null; title?: string; input?: string } = {}) {
+    const run = await this.prisma.agentRun.create({
+      data: {
+        agentId: input.agentId ?? null,
+        title: input.title ?? null,
+        input: input.input ?? null,
+        status: 'running',
+      },
+    });
+    return this.shapeRun(run);
+  }
+
+  async listRuns(opts: { agentId?: string; limit?: number } = {}) {
+    const runs = await this.prisma.agentRun.findMany({
+      where: opts.agentId ? { agentId: opts.agentId } : undefined,
+      orderBy: { startedAt: 'desc' },
+      take: Math.min(opts.limit ?? 100, 500),
+      include: { waitpoints: true },
+    });
+    return runs.map((r: any) => this.shapeRun(r));
+  }
+
+  async getRun(id: string) {
+    const run = await this.prisma.agentRun.findUnique({ where: { id }, include: { waitpoints: true } });
+    if (!run) throw new NotFoundException('Run not found');
+    return this.shapeRun(run);
+  }
+
+  /** Append a step to the run's plain-English step log (mirror of Hermes events). */
+  async appendStep(runId: string, step: { label: string; status?: string; detail?: string }) {
+    const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
+    if (!run) throw new NotFoundException('Run not found');
+    const log = this.parse(run.stepLog, [] as any[]);
+    log.push({ ...step, at: new Date().toISOString() });
+    const updated = await this.prisma.agentRun.update({ where: { id: runId }, data: { stepLog: JSON.stringify(log) } });
+    return this.shapeRun(updated);
+  }
+
+  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string } = {}) {
+    const run = await this.prisma.agentRun.findUnique({ where: { id } });
+    if (!run) throw new NotFoundException('Run not found');
+    const updated = await this.prisma.agentRun.update({
+      where: { id },
+      data: {
+        status: patch.status ?? 'done',
+        outputDocId: patch.outputDocId ?? run.outputDocId,
+        error: patch.error ?? null,
+        endedAt: new Date(),
+      },
+    });
+    return this.shapeRun(updated);
+  }
+
+  /** Cancel a run and any of its still-pending questions. */
+  async cancelRun(id: string) {
+    const run = await this.prisma.agentRun.findUnique({ where: { id } });
+    if (!run) throw new NotFoundException('Run not found');
+    await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } });
+    const updated = await this.prisma.agentRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date() } });
+    return this.shapeRun(updated);
+  }
+
+  // ---------- the durable HITL primitive ----------
+
+  /**
+   * Pause a run on a question. Persists a Waitpoint (with a one-time resume token), flips the
+   * run to `awaiting_input`, and returns — there is NO in-memory wait, so the pause survives a
+   * restart. Whoever delivers the question (Telegram in BEA-620, the run screen in BEA-621)
+   * reads it back from the DB.
+   */
+  async ask(runId: string, q: AskInput) {
+    if (!q?.question?.trim()) throw new BadRequestException('A question is required');
+    const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
+    if (!run) throw new NotFoundException('Run not found');
+    if (FINISHED.includes(run.status)) throw new BadRequestException('Run is already finished');
+
+    const token = randomBytes(24).toString('hex');
+    const wp = await this.prisma.waitpoint.create({
+      data: {
+        runId,
+        question: q.question.trim(),
+        kind: q.kind ?? 'choice',
+        options: JSON.stringify(q.options ?? []),
+        defaultValue: q.defaultValue ?? null,
+        resumeToken: token,
+        expiresAt: q.expiresInMs && q.expiresInMs > 0 ? new Date(Date.now() + q.expiresInMs) : null,
+      },
+    });
+    await this.prisma.agentRun.update({ where: { id: runId }, data: { status: 'awaiting_input' } });
+    return this.shapeWaitpoint(wp);
+  }
+
+  /** Answer a question by its one-time token (used by the Telegram callback / resume link). */
+  async answerByToken(token: string, answer: unknown, via = 'web') {
+    const wp = await this.prisma.waitpoint.findUnique({ where: { resumeToken: token } });
+    if (!wp) throw new NotFoundException('That question was not found — the link may be old.');
+    return this.resolve(wp, answer, via);
+  }
+
+  /** Answer a question by its id (used by the in-app run screen). */
+  async answerById(id: string, answer: unknown, via = 'web') {
+    const wp = await this.prisma.waitpoint.findUnique({ where: { id } });
+    if (!wp) throw new NotFoundException('Question not found');
+    return this.resolve(wp, answer, via);
+  }
+
+  /**
+   * Resolve a waitpoint exactly once. The guard is an atomic `updateMany ... where status='pending'`,
+   * so two taps (e.g. phone + web at the same instant) can never both win — the first updates one
+   * row, the second updates zero and is reported as an idempotent no-op.
+   */
+  private async resolve(wp: any, answer: unknown, via: string) {
+    const res = await this.prisma.waitpoint.updateMany({
+      where: { id: wp.id, status: 'pending' },
+      data: { status: 'answered', answer: JSON.stringify(answer ?? null), answeredVia: via, answeredAt: new Date() },
+    });
+    if (res.count === 0) {
+      // Already answered/expired/cancelled — idempotent: report state, change nothing.
+      const fresh = await this.prisma.waitpoint.findUnique({ where: { id: wp.id } });
+      const run = fresh ? await this.prisma.agentRun.findUnique({ where: { id: fresh.runId } }) : null;
+      return { applied: false, alreadyResolved: true, status: fresh?.status, waitpoint: fresh && this.shapeWaitpoint(fresh), run: run && this.shapeRun(run) };
+    }
+    // Hand the run back to the engine (the bridge / MCP resumes the Hermes session from here).
+    const run = await this.prisma.agentRun.update({ where: { id: wp.runId }, data: { status: 'running' } });
+    const fresh = await this.prisma.waitpoint.findUnique({ where: { id: wp.id } });
+    return { applied: true, alreadyResolved: false, status: 'answered', waitpoint: this.shapeWaitpoint(fresh), run: this.shapeRun(run) };
+  }
+
+  /** Apply timeouts to overdue questions: use the smart default if there is one, else park the run. */
+  async sweepExpired(now: Date = new Date()) {
+    const due = await this.prisma.waitpoint.findMany({ where: { status: 'pending', expiresAt: { not: null, lte: now } } });
+    let handled = 0;
+    for (const wp of due) {
+      if (wp.defaultValue != null) {
+        const r = await this.resolve(wp, wp.defaultValue, 'timeout');
+        if (r.applied) handled++;
+      } else {
+        const res = await this.prisma.waitpoint.updateMany({ where: { id: wp.id, status: 'pending' }, data: { status: 'expired', answeredAt: new Date() } });
+        if (res.count > 0) {
+          handled++;
+          await this.prisma.agentRun.update({ where: { id: wp.runId }, data: { status: 'failed', error: 'No answer in time, so this run was parked.', endedAt: new Date() } });
+        }
+      }
+    }
+    return handled;
+  }
+
+  // ---------- shaping / json safety ----------
+
+  private parse<T>(raw: unknown, fallback: T): T {
+    if (typeof raw !== 'string') return (raw as T) ?? fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private shapeRun(run: any) {
+    return {
+      ...run,
+      stepLog: this.parse(run.stepLog, [] as any[]),
+      waitpoints: Array.isArray(run.waitpoints) ? run.waitpoints.map((w: any) => this.shapeWaitpoint(w)) : undefined,
+    };
+  }
+
+  private shapeWaitpoint(wp: any) {
+    if (!wp) return wp;
+    return {
+      ...wp,
+      options: this.parse(wp.options, [] as unknown),
+      answer: wp.answer == null ? null : this.parse(wp.answer, wp.answer),
+    };
+  }
+}
