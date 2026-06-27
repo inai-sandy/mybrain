@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, Folder, FolderPlus, X, Trash2 } from 'lucide-react';
-import { DataTable, Column, Filter } from '../ui/DataTable';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2 } from 'lucide-react';
+import { DataTable, Column } from '../ui/DataTable';
 import { FOLDER_ICON_NAMES, FOLDER_ICONS, DEFAULT_FOLDER_ICON, FolderGlyph } from '../ui/folderIcons';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
@@ -207,6 +207,7 @@ export function Bookmarks() {
   const [view, setView] = useState<'grid' | 'list'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('bm.view') === 'grid' ? 'grid' : 'list'));
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeFolder, setActiveFolder] = useState<string>('all'); // all | others | <folderId>
+  const [tagFilter, setTagFilter] = useState('');
   const [managing, setManaging] = useState(false);
   function changeView(v: 'grid' | 'list') {
     setView(v);
@@ -328,12 +329,8 @@ export function Bookmarks() {
     { key: 'title', label: 'Title' },
     { key: 'summary', label: 'Summary' },
   ];
-  const filters: Filter[] = allTags.length
-    ? [{ key: 'tags', label: 'Tag', options: allTags.map((t) => ({ value: t, label: t })), match: (row: BM, val: string) => (row.tags || []).includes(val) }]
-    : [];
-
   const othersCount = items.filter((i) => !i.folderId).length;
-  const shown = activeFolder === 'all' ? items : activeFolder === 'others' ? items.filter((i) => !i.folderId) : items.filter((i) => i.folderId === activeFolder);
+  const shown = (activeFolder === 'all' ? items : activeFolder === 'others' ? items.filter((i) => !i.folderId) : items.filter((i) => i.folderId === activeFolder)).filter((i) => !tagFilter || (i.tags || []).includes(tagFilter));
 
   const btn = 'inline-flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm disabled:opacity-50';
 
@@ -375,8 +372,9 @@ export function Bookmarks() {
         </div>
       </div>
 
-      <form onSubmit={ask} className="flex gap-2">
-        <div className="relative flex-1 min-w-0">
+      {/* One controls row: Search · Folder · Manage · Tag (BEA-614) */}
+      <form onSubmit={ask} className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px]">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             value={q}
@@ -385,26 +383,27 @@ export function Bookmarks() {
             className="w-full pl-9 pr-3 py-2 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-sm outline-none focus:border-emerald-500"
           />
         </div>
-        <button type="submit" disabled={asking} className={btn}>
+        <button type="submit" disabled={asking} className={btn + ' shrink-0'}>
           {asking ? 'Asking…' : 'Ask'}
         </button>
         {results !== null && (
-          <button type="button" onClick={() => { setResults(null); setQ(''); }} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm">
+          <button type="button" onClick={() => { setResults(null); setQ(''); }} className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm">
             Clear
           </button>
         )}
-      </form>
-
-      {/* Folders — accessible at the top; default shows everything. (BEA-612) */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-zinc-400 inline-flex items-center gap-1"><Folder size={14} /> Folder</span>
-        <select value={activeFolder} onChange={(e) => setActiveFolder(e.target.value)} className="rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-2 py-1.5 text-sm outline-none focus:border-emerald-500 max-w-[14rem]">
-          <option value="all">All ({items.length})</option>
+        <select aria-label="Folder" value={activeFolder} onChange={(e) => setActiveFolder(e.target.value)} className="shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-2 py-2 text-sm outline-none focus:border-emerald-500 max-w-[12rem]">
+          <option value="all">📁 All ({items.length})</option>
           {folders.map((f) => <option key={f.id} value={f.id}>{f.name} ({f.count})</option>)}
           <option value="others">Others / unfiled ({othersCount})</option>
         </select>
-        <button onClick={() => setManaging(true)} className="text-xs text-zinc-400 hover:text-emerald-600 px-2 py-1">＋ Manage folders</button>
-      </div>
+        <button type="button" onClick={() => setManaging(true)} title="Manage folders" className="shrink-0 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2.5 py-2 text-sm text-zinc-500 hover:text-emerald-600 inline-flex items-center gap-1"><FolderPlus size={15} /></button>
+        {allTags.length > 0 && (
+          <select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className="shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-2 py-2 text-sm outline-none focus:border-emerald-500 max-w-[9rem]">
+            <option value="">All tags</option>
+            {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+      </form>
 
       {results !== null ? (
         <div>
@@ -424,7 +423,7 @@ export function Bookmarks() {
           columns={cols}
           rows={shown}
           loading={loading}
-          filters={filters}
+          filters={[]}
           renderCard={(b) => renderItem(b)}
           gridClassName={gridCls}
           cardsOnly
