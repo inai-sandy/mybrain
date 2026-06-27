@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2 } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2, Star } from 'lucide-react';
 import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DocumentShareDialog } from '../ui/DocumentShareDialog';
@@ -58,6 +58,17 @@ export function DocumentView() {
     else toast('error', d.message || 'Could not add to memory');
   }
 
+  async function toggleStar() {
+    if (!doc) return;
+    const next = !doc.starred;
+    setDoc({ ...doc, starred: next }); // optimistic
+    const r = await fetch(`/api/documents/${id}/star`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ starred: next }) }).catch(() => null);
+    if (!r?.ok) {
+      setDoc((d) => (d ? { ...d, starred: !next } : d));
+      toast('error', 'Could not update star');
+    }
+  }
+
   const btn = 'inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800';
 
   return (
@@ -79,6 +90,7 @@ export function DocumentView() {
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={toggleStar} className={btn + (doc.starred ? ' text-amber-500 border-amber-300 dark:border-amber-500/40' : ' hover:text-amber-500')}><Star size={15} fill={doc.starred ? 'currentColor' : 'none'} /> {doc.starred ? 'Starred' : 'Star'}</button>
               <button onClick={() => setEditing(true)} className={btn}><Pencil size={15} /> Edit</button>
               <a href={`/api/documents/${doc.id}/download`} className={btn}><Download size={15} /> Download</a>
               <button onClick={() => setSharing(true)} className={btn}><Share2 size={15} /> Share</button>

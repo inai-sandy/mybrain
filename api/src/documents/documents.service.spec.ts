@@ -184,6 +184,20 @@ describe('DocumentsService', () => {
     await expect(svc.createFromUpload({ originalname: 'x.zip', mimetype: 'application/zip', buffer: buf, size: buf.length })).rejects.toThrow(/No HTML/i);
   });
 
+  it('stars and unstars a document (BEA-596)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const doc = await svc.create({ title: 'Fav', contentText: 'x' });
+    expect(doc.starred).toBe(false);
+
+    const starred = await svc.setStarred(doc.id, true);
+    expect(starred?.starred).toBe(true);
+    expect((await svc.get(doc.id))?.starred).toBe(true);
+
+    const unstarred = await svc.setStarred(doc.id, false);
+    expect(unstarred?.starred).toBe(false);
+  });
+
   it('counts public opens of a shared doc (BEA-586)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);

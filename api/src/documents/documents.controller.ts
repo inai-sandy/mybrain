@@ -264,6 +264,12 @@ export class DocumentsController {
     return this.docs.setShared(id, !!body?.shared);
   }
 
+  /** Star / unstar a document. (BEA-596) */
+  @Post(':id/star')
+  star(@Param('id') id: string, @Body() body: { starred?: boolean }) {
+    return this.docs.setStarred(id, !!body?.starred);
+  }
+
   /** Rename the public link (slug). (BEA-584) */
   @Post(':id/slug')
   async slug(@Param('id') id: string, @Body() body: { slug?: string }) {

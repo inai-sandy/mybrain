@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List, ArrowLeft, FolderPlus, Folder } from 'lucide-react';
+import { FileText, Plus, Eye, Download, Share2, Trash2, Pencil, X, Sparkles, Upload, Link2, Search, Brain, LayoutGrid, List, ArrowLeft, FolderPlus, Folder, Star } from 'lucide-react';
 import { FOLDER_ICON_NAMES, DEFAULT_FOLDER_ICON, FOLDER_ICONS, FolderGlyph } from '../ui/folderIcons';
 import { KindBadge } from '../ui/kindBadge';
 import { DataTable, Column } from '../ui/DataTable';
@@ -22,6 +22,7 @@ export type DocItem = {
   tags: string[];
   collectionId: string | null;
   shared: boolean;
+  starred?: boolean;
   hasPassword?: boolean;
   expiresAt?: string | null;
   viewCount?: number;
@@ -67,6 +68,21 @@ export function Documents() {
   const [tagFilter, setTagFilter] = useState('');
   const [sortKey, setSortKey] = useState('updatedAt:-1');
   const [addOpen, setAddOpen] = useState(false);
+  const [starredOnly, setStarredOnly] = useState(false);
+
+  async function toggleStar(r: DocItem) {
+    const next = !r.starred;
+    const apply = (list: DocItem[]) => list.map((d) => (d.id === r.id ? { ...d, starred: next } : d));
+    setItems(apply); // optimistic
+    setResults(apply);
+    const res = await fetch(`/api/documents/${r.id}/star`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ starred: next }) }).catch(() => null);
+    if (!res?.ok) {
+      const revert = (list: DocItem[]) => list.map((d) => (d.id === r.id ? { ...d, starred: !next } : d));
+      setItems(revert);
+      setResults(revert);
+      toast('error', 'Could not update star');
+    }
+  }
 
   // Folder + search live in the URL so Back / refresh / deep-link restore where you were. (BEA-592)
   const [params, setParams] = useSearchParams();
@@ -240,7 +256,9 @@ export function Documents() {
             {r.tags.length > 4 && <Chip t={`+${r.tags.length - 4}`} />}
           </div>
         )}
-        <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end gap-0.5">
+        <div className="mt-auto pt-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-0.5">
+          <button onClick={() => toggleStar(r)} title={r.starred ? 'Unstar' : 'Star'} className={iconBtn + (r.starred ? ' text-amber-500' : ' hover:text-amber-500')}><Star size={16} fill={r.starred ? 'currentColor' : 'none'} /></button>
+          <div className="flex-1" />
           <button onClick={() => navigate(`/documents/${r.id}`)} title="Open" className={iconBtn + ' hover:text-emerald-600'}><Eye size={16} /></button>
           <a href={`/api/documents/${r.id}/download`} title="Download" className={iconBtn + ' hover:text-emerald-600'}><Download size={16} /></a>
           <button onClick={() => setEditing(r)} title="Edit" className={iconBtn + ' hover:text-emerald-600'}><Pencil size={16} /></button>
@@ -279,6 +297,7 @@ export function Documents() {
         <div className="shrink-0 flex flex-col items-end gap-1.5">
           <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} onClick={(e) => e.stopPropagation()} title="Select" className={'h-4 w-4 accent-emerald-600 ' + (selected.size ? '' : 'opacity-0 group-hover:opacity-100 transition-opacity')} />
           <div className="flex items-center gap-0.5">
+            <button onClick={() => toggleStar(r)} title={r.starred ? 'Unstar' : 'Star'} className={iconBtn + (r.starred ? ' text-amber-500' : ' hover:text-amber-500')}><Star size={16} fill={r.starred ? 'currentColor' : 'none'} /></button>
             <button onClick={() => navigate(`/documents/${r.id}`)} title="Open" className={iconBtn + ' hover:text-emerald-600'}><Eye size={16} /></button>
             <a href={`/api/documents/${r.id}/download`} title="Download" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Download size={16} /></a>
             <button onClick={() => setEditing(r)} title="Edit" className={iconBtn + ' hidden sm:inline-flex hover:text-emerald-600'}><Pencil size={16} /></button>
@@ -292,7 +311,13 @@ export function Documents() {
 
   const currentFolder = collections.find((c) => c.id === openFolder) || null;
   const othersCount = items.filter((i) => !i.collectionId).length;
-  const folderRows = openFolder === 'others' ? items.filter((i) => !i.collectionId) : items.filter((i) => i.collectionId === openFolder);
+  const starredCount = items.filter((i) => i.starred).length;
+  const folderRows =
+    openFolder === 'starred'
+      ? items.filter((i) => i.starred)
+      : openFolder === 'others'
+        ? items.filter((i) => !i.collectionId)
+        : items.filter((i) => i.collectionId === openFolder);
 
   const viewToggle = (
     <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 p-0.5">
@@ -304,6 +329,7 @@ export function Documents() {
   // Tag filter + sort are owned by the unified controls row (so they share one line). (BEA-589)
   function applyControls(rows: DocItem[]): DocItem[] {
     let r = rows;
+    if (starredOnly) r = r.filter((d) => d.starred);
     if (tagFilter) r = r.filter((d) => (d.tags || []).includes(tagFilter));
     const [key, dir] = sortKey.split(':');
     const d = Number(dir) as 1 | -1;
@@ -364,6 +390,13 @@ export function Documents() {
           othersCount,
           () => setOpenFolder('others'),
         )}
+        {folderTile(
+          '__starred__',
+          <div className="rounded-lg p-2 bg-amber-400/15 text-amber-500"><Star size={22} fill="currentColor" /></div>,
+          'Starred',
+          starredCount,
+          () => setOpenFolder('starred'),
+        )}
         <button onClick={() => setManaging(true)} className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 grid place-items-center text-zinc-400 hover:text-emerald-600 hover:border-emerald-500/50 transition-colors min-h-[112px]">
           <span className="flex flex-col items-center gap-1 text-sm"><FolderPlus size={20} /> New folder</span>
         </button>
@@ -421,6 +454,14 @@ export function Documents() {
               <option value="updatedAt:1">Oldest</option>
               <option value="title:1">Title A–Z</option>
             </select>
+            <button
+              onClick={() => setStarredOnly((s) => !s)}
+              title={starredOnly ? 'Showing starred only' : 'Show starred only'}
+              aria-pressed={starredOnly}
+              className={'shrink-0 grid place-items-center rounded-lg border p-2 transition-colors ' + (starredOnly ? 'border-amber-400 bg-amber-400/10 text-amber-500' : 'border-zinc-200 dark:border-zinc-800 text-zinc-400 hover:text-amber-500')}
+            >
+              <Star size={16} fill={starredOnly ? 'currentColor' : 'none'} />
+            </button>
             {viewToggle}
           </>
         )}
@@ -454,8 +495,14 @@ export function Documents() {
             <button onClick={() => { setOpenFolder(null, true); clearSel(); }} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft size={15} /> Folders</button>
             <span className="text-zinc-300 dark:text-zinc-700">/</span>
             <h2 className="font-semibold flex items-center gap-1.5">
-              <FolderGlyph name={openFolder === 'others' ? 'Folder' : currentFolder?.icon} size={16} className="text-emerald-600" />
-              {openFolder === 'others' ? 'Others' : currentFolder?.name || 'Folder'}
+              {openFolder === 'starred' ? (
+                <><Star size={16} fill="currentColor" className="text-amber-500" /> Starred</>
+              ) : (
+                <>
+                  <FolderGlyph name={openFolder === 'others' ? 'Folder' : currentFolder?.icon} size={16} className="text-emerald-600" />
+                  {openFolder === 'others' ? 'Others' : currentFolder?.name || 'Folder'}
+                </>
+              )}
             </h2>
           </div>
           {filesView(folderRows, 'folder')}
@@ -466,7 +513,7 @@ export function Documents() {
         <DocEditor
           doc={editing}
           collections={collections}
-          defaultCollectionId={openFolder && openFolder !== 'others' ? openFolder : null}
+          defaultCollectionId={openFolder && openFolder !== 'others' && openFolder !== 'starred' ? openFolder : null}
           onClose={() => {
             setCreating(false);
             setEditing(null);
