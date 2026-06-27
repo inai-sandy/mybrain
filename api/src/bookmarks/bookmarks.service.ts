@@ -292,7 +292,47 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       rag: !!i.ragId,
       chunked: !!i.supermemoryId, // SuperMemory chunks server-side
       shared: i.shared,
+      folderId: i.folderId || null,
     }));
+  }
+
+  // ---- Bookmark folders (My-Brain-owned, independent of Raindrop). (BEA-611) ----
+
+  async listFolders() {
+    const [rows, items] = await Promise.all([
+      this.prisma.bookmarkFolder.findMany({ orderBy: { name: 'asc' } }),
+      this.prisma.item.findMany({ where: { source: { in: ['raindrop', 'bookmark'] } }, select: { folderId: true } }),
+    ]);
+    const counts: Record<string, number> = {};
+    for (const it of items) if (it.folderId) counts[it.folderId] = (counts[it.folderId] || 0) + 1;
+    return { folders: rows.map((f) => ({ id: f.id, name: f.name, color: f.color || null, icon: f.icon || null, count: counts[f.id] || 0 })) };
+  }
+
+  async createFolder(name: string, color?: string, icon?: string) {
+    const n = (name || '').trim().slice(0, 80);
+    if (!n) return null;
+    return this.prisma.bookmarkFolder.create({ data: { name: n, color: color?.trim().slice(0, 20) || null, icon: icon?.trim().slice(0, 40) || null } });
+  }
+
+  async renameFolder(id: string, name?: string, color?: string, icon?: string) {
+    const data: Record<string, unknown> = {};
+    if (typeof name === 'string' && name.trim()) data.name = name.trim().slice(0, 80);
+    if (typeof color === 'string') data.color = color.trim().slice(0, 20) || null;
+    if (typeof icon === 'string') data.icon = icon.trim().slice(0, 40) || null;
+    return this.prisma.bookmarkFolder.update({ where: { id }, data }).catch(() => null);
+  }
+
+  /** Delete a folder but keep its bookmarks (just unfile them). */
+  async removeFolder(id: string) {
+    await this.prisma.item.updateMany({ where: { folderId: id }, data: { folderId: null } });
+    await this.prisma.bookmarkFolder.delete({ where: { id } }).catch(() => null);
+    return { ok: true };
+  }
+
+  /** Move bookmark(s) into a folder (or null to unfile). */
+  async setFolder(ids: string[], folderId: string | null) {
+    const r = await this.prisma.item.updateMany({ where: { id: { in: ids || [] }, source: { in: ['raindrop', 'bookmark'] } }, data: { folderId: folderId || null } });
+    return { ok: true, count: r.count };
   }
 
   /** Backfill thumbnails for existing bookmarks (YouTube poster from the URL; Raindrop cover for the rest). */
