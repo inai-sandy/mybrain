@@ -10,6 +10,12 @@ export class BookmarksController {
     private readonly summarizer: SummarizerService,
   ) {}
 
+  /** Re-enrich existing Instagram bookmarks (real caption + cached image). Pass ?limit=N to do a few first. (BEA-610) */
+  @Post('instagram/backfill')
+  async backfillInstagram(@Query('limit') limit?: string) {
+    return this.bookmarks.backfillInstagram(limit ? Number(limit) : undefined);
+  }
+
   /** Serve a bookmark's cached image (downloaded so Instagram URLs can't expire). (BEA-609) */
   @Get(':id/image')
   async image(@Param('id') id: string, @Res() res: Response) {

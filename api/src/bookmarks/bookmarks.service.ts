@@ -70,9 +70,58 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     return (await fs.stat(p).then((s) => s.isFile()).catch(() => false)) ? p : null;
   }
 
+  /** Re-enrich already-imported Instagram bookmarks: real caption + permanent cached image. (BEA-610) */
+  async backfillInstagram(limit?: number): Promise<{ scanned: number; enriched: number; failed: number; samples: { url: string; caption: string; image: boolean }[] }> {
+    if (!(await this.instagram.configured())) return { scanned: 0, enriched: 0, failed: 0, samples: [{ url: '', caption: 'Apify token not configured', image: false }] };
+    const all = await this.prisma.item.findMany({ where: { source: 'raindrop' } });
+    const ig = all.filter((i) => this.instagram.isInstagram(i.sourceUrl || ''));
+    const slice = typeof limit === 'number' && limit > 0 ? ig.slice(0, limit) : ig;
+    let enriched = 0;
+    let failed = 0;
+    const samples: { url: string; caption: string; image: boolean }[] = [];
+    for (const it of slice) {
+      const res = await this.instagram.enrich(it.sourceUrl || '').catch(() => null);
+      if (!res || (!res.caption && !res.imageUrl)) {
+        failed++;
+        continue;
+      }
+      const tags = (() => { try { return JSON.parse(it.tags || '[]'); } catch { return []; } })();
+      const summary = (res.caption || it.summary || '').trim();
+      const thumbnail = (res.imageUrl && (await this.cacheImage(it.id, res.imageUrl).catch(() => null))) || it.thumbnail;
+      // refresh the stored markdown + memory so search + the detail view show the real caption
+      if (it.filePath) {
+        const md = this.buildMarkdown({ link: it.sourceUrl || '', title: it.title || '', tags, created: (it.createdAt as any)?.toISOString?.() || '' } as RaindropItem, summary, false);
+        await fs.writeFile(it.filePath, md, 'utf8').catch(() => undefined);
+      }
+      await this.memory.deleteDoc(it.supermemoryId, it.ragId).catch(() => undefined);
+      await this.prisma.memoryOutbox.deleteMany({ where: { itemId: it.id } }).catch(() => undefined);
+      await this.prisma.item.update({ where: { id: it.id }, data: { summary: this.shortDesc(summary), thumbnail, readFailed: false, supermemoryId: null, ragId: null } });
+      await this.memory.enqueue(this.buildMemoryText(it.title || '', summary, tags, it.sourceUrl || undefined), { itemId: it.id, title: it.title || undefined, tags: [...tags, 'bookmark'] });
+      enriched++;
+      if (samples.length < 5) samples.push({ url: it.sourceUrl || '', caption: this.shortDesc(summary).slice(0, 90), image: !!res.imageUrl });
+    }
+    return { scanned: slice.length, enriched, failed, samples };
+  }
+
   onModuleInit() {
     // Check once a minute whether an auto-sync is due (cheap; the real work only fires when due).
     this.tick = setInterval(() => this.autoTick().catch(() => undefined), 60_000);
+    // One-time backfill of existing Instagram bookmarks once an Apify token is present. (BEA-610)
+    setTimeout(() => this.runOnceIgBackfill().catch(() => undefined), 20_000);
+  }
+
+  /** Re-enrich existing Instagram bookmarks exactly once (gated by a Setting flag). (BEA-610) */
+  private async runOnceIgBackfill(): Promise<void> {
+    const flag = 'bookmarks.igBackfillV1';
+    const done = await this.prisma.setting.findUnique({ where: { key: flag } }).catch(() => null);
+    if (done?.value === 'done') return;
+    if (!(await this.instagram.configured())) return; // wait until the token is added
+    const res = await this.backfillInstagram().catch(() => null);
+    if (res) {
+      // eslint-disable-next-line no-console
+      console.log(`[ig-backfill] enriched ${res.enriched}/${res.scanned} (failed ${res.failed})`);
+      await this.prisma.setting.upsert({ where: { key: flag }, create: { key: flag, value: 'done' }, update: { value: 'done' } }).catch(() => undefined);
+    }
   }
   onModuleDestroy() {
     if (this.tick) clearInterval(this.tick);
