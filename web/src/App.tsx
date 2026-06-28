@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './ui/Toast';
 import { AppShell } from './ui/AppShell';
@@ -38,6 +38,9 @@ import { Agents } from './pages/Agents';
 import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
 import { AgentDetail } from './pages/AgentDetail';
+import { FlowsList } from './pages/FlowsList';
+// React Flow is heavy — lazy-load the editor so it splits into its own chunk (keeps the main bundle small).
+const FlowEditor = lazy(() => import('./pages/FlowEditor').then((m) => ({ default: m.FlowEditor })));
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -114,6 +117,8 @@ function AuthedApp() {
         <Route path="agent/history" element={<AgentHistory />} />
         <Route path="agent/agents/:id" element={<AgentDetail />} />
         <Route path="agent/runs/:id" element={<AgentRunView />} />
+        <Route path="flows" element={<FlowsList />} />
+        <Route path="flows/:id" element={<Suspense fallback={<div className="p-6 text-sm text-zinc-500">Loading editor…</div>}><FlowEditor /></Suspense>} />
         <Route path="explore" element={<Explore />} />
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />
