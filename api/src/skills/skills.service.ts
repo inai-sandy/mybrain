@@ -223,7 +223,7 @@ export class SkillsService {
     // its own folder in place. Otherwise pick the next free name (name-2, name-3…) so the existing
     // skill on disk is always preserved.
     const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
-    const deployments = this.parseJson(s.deployments);
+    const deployments = this.effectiveDeployments(s); // keep every target already deployed to
     let slug = baseSlug;
     let renamed = false;
     if (deployments[target] && (await exists(join(baseDir, deployments[target])))) {
@@ -263,6 +263,20 @@ export class SkillsService {
     try { return v ? JSON.parse(v) : {}; } catch { return {}; }
   }
 
+  /**
+   * The per-target deploy map, with any LEGACY single-target record (source/slug) folded in (BEA-636 fix).
+   * deploy() overwrites source/slug to the newest target, so without this a skill deployed to A then B
+   * would "forget" A. Always merge the legacy record so every target it lives on stays tracked.
+   */
+  private effectiveDeployments(s: any): Record<string, string> {
+    const dep = this.parseJson(s.deployments);
+    if (s.slug && s.source) {
+      const entry = Object.entries(this.deployTargets()).find(([, dir]) => dir === s.source);
+      if (entry && !dep[entry[0]]) dep[entry[0]] = s.slug;
+    }
+    return dep;
+  }
+
   /** Public wrapper so the GitHub importer can reuse the AI description (BEA-635). */
   describeContent(content: string, fallback?: string): Promise<string> {
     return this.aiDescribe(content || '', fallback);
@@ -292,15 +306,19 @@ export class SkillsService {
   async deployStatus(id: string): Promise<{ target: string; installed: boolean; slug: string | null }[]> {
     const s = await this.prisma.skill.findUnique({ where: { id } });
     if (!s) return [];
-    const deployments = this.parseJson(s.deployments);
+    const deployments = this.effectiveDeployments(s);
     const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
     const out: { target: string; installed: boolean; slug: string | null }[] = [];
+    let healed = false;
     for (const [name, dir] of Object.entries(this.deployTargets())) {
       let slug = deployments[name] || null;
-      if (!slug && s.slug && s.source === dir) slug = s.slug; // legacy fallback
+      // Heal skills broken by the old bug: if a target has no record but this skill's own folder
+      // (its known slug) is on disk there, adopt it.
+      if (!slug && s.slug && !s.slug.includes('..') && (await exists(join(dir, s.slug)))) { slug = s.slug; deployments[name] = slug; healed = true; }
       const installed = slug ? await exists(join(dir, slug)) : false;
       out.push({ target: name, installed, slug });
     }
+    if (healed) await this.prisma.skill.update({ where: { id }, data: { deployments: JSON.stringify(deployments) } }).catch(() => undefined);
     return out;
   }
 
@@ -310,8 +328,8 @@ export class SkillsService {
     if (!s) return { ok: false, message: 'Skill not found' };
     const baseDir = this.deployTargets()[target];
     if (!baseDir) return { ok: false, message: 'Unknown deploy target' };
-    const deployments = this.parseJson(s.deployments);
-    const slug = deployments[target] || (s.source === baseDir ? s.slug || '' : '');
+    const deployments = this.effectiveDeployments(s);
+    const slug = deployments[target] || '';
     if (!slug || slug.includes('..')) return { ok: false, message: 'Not installed on that target' };
     const destDir = join(baseDir, slug);
     if (!destDir.startsWith(baseDir + '/')) return { ok: false, message: 'Invalid path' };
@@ -328,8 +346,7 @@ export class SkillsService {
       // Also delete the deployed copies from every server folder this skill lives in (BEA-636).
       const targets = this.deployTargets();
       const folders = new Set<string>();
-      for (const [t, slug] of Object.entries(this.parseJson(s.deployments))) { const base = targets[t]; if (base && slug) folders.add(join(base, slug)); }
-      if (s.source && s.slug) folders.add(join(s.source, s.slug)); // legacy single-target record
+      for (const [t, slug] of Object.entries(this.effectiveDeployments(s))) { const base = targets[t]; if (base && slug) folders.add(join(base, slug)); }
       for (const dir of folders) {
         const safe = !dir.includes('..') && Object.values(targets).some((base) => dir.startsWith(base + '/'));
         if (safe) await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);

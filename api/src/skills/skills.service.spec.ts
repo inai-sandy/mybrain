@@ -79,6 +79,18 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     for (const d of dirs) await expect(fs.stat(join(d, 'deep-research'))).rejects.toBeTruthy(); // gone
   });
 
+  it('deploying to a new target keeps a legacy-tracked target installed (BEA-636 regression)', async () => {
+    // legacy state: skill was deployed to hermes via the old single source/slug record (empty map)
+    await fs.mkdir(join(dirs[1], 'deep-research'), { recursive: true });
+    await fs.writeFile(join(dirs[1], 'deep-research', 'SKILL.md'), 'x', 'utf8');
+    skill.slug = 'deep-research'; skill.source = dirs[1]; skill.deployments = '{}';
+
+    await svc.deploy('s1', 'sandy'); // deploy to the OTHER target
+    const by = Object.fromEntries((await svc.deployStatus('s1')).map((t) => [t.target, t.installed]));
+    expect(by.hermes).toBe(true); // the bug made this false (deselected the already-installed one)
+    expect(by.sandy).toBe(true);
+  });
+
   it('never clobbers a DIFFERENT skill already in the target (renames to -2)', async () => {
     await fs.mkdir(join(dirs[0], 'deep-research'), { recursive: true });
     await fs.writeFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'a pre-existing different skill', 'utf8');
