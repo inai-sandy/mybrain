@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { HermesClient } from './hermes.client';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { AgentScheduler } from './agent-scheduler.service';
+import { EngineWatchdog } from './engine-watchdog.service';
 import { HermesController } from './hermes.controller';
 import { AgentModule } from '../agent/agent.module';
 import { DocumentsModule } from '../documents/documents.module';
@@ -16,7 +17,7 @@ import { LlmModule } from '../llm/llm.module';
 @Module({
   imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule],
   controllers: [HermesController],
-  providers: [HermesClient, HermesBridgeService, AgentScheduler],
+  providers: [HermesClient, HermesBridgeService, AgentScheduler, EngineWatchdog],
   exports: [HermesClient, HermesBridgeService],
 })
 export class HermesModule {}

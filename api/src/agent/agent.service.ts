@@ -48,18 +48,43 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    * logged step. Idempotent: terminal runs (done/failed/cancelled) and paused ones are untouched.
    */
   async reconcileOrphans(): Promise<number> {
-    const orphans = await this.prisma.agentRun.findMany({ where: { status: 'running' }, select: { id: true, stepLog: true } });
+    // 'running' = mid-turn when the process died; 'awaiting_input' = paused on a question whose
+    // in-memory poll loop also died. Neither can resume after a restart, so fail both with a clear,
+    // tailored message + Re-run (BEA-629, BEA-632). Terminal/scheduled runs are untouched.
+    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] } }, select: { id: true, status: true, stepLog: true } });
     if (!orphans.length) return 0;
-    const msg = 'Interrupted by an engine restart — please run it again.';
     const now = new Date();
     for (const o of orphans) {
+      const msg = o.status === 'awaiting_input'
+        ? 'This run was waiting for your answer when the engine restarted — please run it again.'
+        : 'Interrupted by an engine restart — please run it again.';
       const log = this.parse(o.stepLog, [] as any[]);
       log.push({ label: 'Interrupted by a restart', status: 'failed', detail: msg, at: now.toISOString() });
+      await this.prisma.waitpoint.updateMany({ where: { runId: o.id, status: 'pending' }, data: { status: 'cancelled' } }).catch(() => undefined);
       await this.prisma.agentRun
         .update({ where: { id: o.id }, data: { status: 'failed', error: msg, endedAt: now, stepLog: JSON.stringify(log) } })
         .catch(() => undefined);
     }
     return orphans.length;
+  }
+
+  /** Watchdog health state (BEA-632) — read/written by the engine watchdog, shown in settings. */
+  async engineHealth() {
+    const [healthyAt, restartedAt, error] = await Promise.all([
+      this.getSetting('engine.lastHealthyAt'),
+      this.getSetting('engine.lastAutoRestartAt'),
+      this.getSetting('engine.lastError'),
+    ]);
+    return {
+      lastHealthyAt: healthyAt ? Number(healthyAt) : null,
+      lastAutoRestartAt: restartedAt ? Number(restartedAt) : null,
+      lastError: error || null,
+    };
+  }
+  async recordEngineHealth(patch: { healthyAt?: number; restartedAt?: number; error?: string | null }) {
+    if (patch.healthyAt !== undefined) await this.setSetting('engine.lastHealthyAt', String(patch.healthyAt));
+    if (patch.restartedAt !== undefined) await this.setSetting('engine.lastAutoRestartAt', String(patch.restartedAt));
+    if (patch.error !== undefined) await this.setSetting('engine.lastError', patch.error == null ? '' : patch.error);
   }
 
   onModuleDestroy() {
