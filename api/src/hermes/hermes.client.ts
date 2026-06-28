@@ -54,6 +54,30 @@ export class HermesClient {
     }
   }
 
+  /** Rich engine status for the settings panel: reachability, version, gateway, and the Codex/model wiring. */
+  async engineStatus(): Promise<{ ok: boolean; version?: string; gatewayRunning?: boolean; authRequired?: boolean; connectedToCodex?: boolean; model?: string; provider?: string; reason?: string }> {
+    let base: any = { ok: false };
+    try {
+      const s = await fetch(`${this.base}/api/status`, { signal: AbortSignal.timeout(5000) });
+      if (!s.ok) return { ok: false, reason: `status ${s.status}` };
+      const st: any = await s.json();
+      base = { ok: true, version: st.version, gatewayRunning: !!st.gateway_running, authRequired: !!st.auth_required };
+    } catch (e: any) {
+      return { ok: false, reason: e?.message || 'unreachable' };
+    }
+    try {
+      const c = await this.authed('/api/config');
+      if (c.ok) {
+        const cfg: any = await c.json();
+        const m = cfg.model;
+        base.model = typeof m === 'string' ? m : m?.default || m?.model;
+        base.provider = (typeof m === 'object' ? m?.provider : undefined) || (typeof cfg.provider === 'string' ? cfg.provider : undefined);
+        base.connectedToCodex = /openai-codex|codex_app_server|codex/i.test(JSON.stringify(m || '') + JSON.stringify(cfg.provider || ''));
+      }
+    } catch { /* config read is best-effort */ }
+    return base;
+  }
+
   private async login(): Promise<void> {
     const res = await fetch(`${this.base}/auth/password-login`, {
       method: 'POST',

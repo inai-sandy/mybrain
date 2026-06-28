@@ -66,12 +66,12 @@ export class HermesBridgeService {
   }
 
   /** Pause the run on a durable question, notify over Telegram, and wait for the answer (or the timeout default). */
-  private async askHuman(runId: string, runTitle: string | undefined, q: { question: string; kind: string; options?: unknown; defaultValue?: string }): Promise<string> {
-    const wp = await this.agent.ask(runId, { question: q.question, kind: q.kind as any, options: q.options ?? [], defaultValue: q.defaultValue, expiresInMs: HUMAN_WAIT_MS });
+  private async askHuman(runId: string, runTitle: string | undefined, q: { question: string; kind: string; options?: unknown; defaultValue?: string }, timeoutMs = HUMAN_WAIT_MS): Promise<string> {
+    const wp = await this.agent.ask(runId, { question: q.question, kind: q.kind as any, options: q.options ?? [], defaultValue: q.defaultValue, expiresInMs: timeoutMs });
     await this.agent.appendStep(runId, { label: 'Asked you', status: 'awaiting', detail: q.question }).catch(() => undefined);
     await this.telegram.pushAgentQuestion({ runTitle, waitpointId: wp.id, question: q.question, kind: wp.kind, options: wp.options }).catch(() => undefined);
     // poll the durable waitpoint until it's answered (here or on Telegram) or the timeout sweeper applies the default
-    for (let i = 0; i < HUMAN_WAIT_MS / 2000 + 60; i++) {
+    for (let i = 0; i < timeoutMs / 2000 + 60; i++) {
       await sleep(2000);
       const cur = await this.agent.getWaitpoint(wp.resumeToken).catch(() => null);
       if (!cur) continue;
@@ -92,34 +92,47 @@ export class HermesBridgeService {
   /** Synchronous variant (used by tests / callers that want to await the whole run). */
   async execute(runId: string, input: StartRunInput) {
     await this.agent.appendStep(runId, { label: 'Starting up', status: 'done' });
-    const prompt = await this.recall(runId, input.prompt);
+    const cfg = await this.agent.engineSettings();
+    const timeoutMs = cfg.askTimeoutMin * 60_000;
+    const prompt = cfg.recall ? await this.recall(runId, input.prompt) : input.prompt;
 
     const handlers: HermesRunHandlers = {
       onStep: (s) => void this.agent.appendStep(runId, s).catch(() => undefined),
-      // BEA-620: the agent pauses and asks YOU (durable waitpoint + Telegram), then resumes.
+      // BEA-620: the agent pauses and asks YOU (durable waitpoint + Telegram), then resumes —
+      // gated by the autonomy setting.
       onApproval: async (a) => {
+        if (cfg.autonomy === 'autopilot') {
+          await this.agent.appendStep(runId, { label: 'Skipped a risky action (autopilot)', status: 'info', detail: a.command }).catch(() => undefined);
+          return 'deny'; // never auto-run risky things, even on autopilot
+        }
         const ans = await this.askHuman(runId, input.title, {
           question: `Allow this action?\n${a.command || a.description || 'a tool action'}`,
           kind: 'approve_edit_reject',
           options: { command: a.command, description: a.description },
-          defaultValue: 'reject', // Cautious default: don't run risky things without an OK
-        });
+          defaultValue: 'reject',
+        }, timeoutMs);
         return ans === 'approve' ? 'once' : 'deny';
       },
       onClarify: async (q) => {
         const choices = q.choices && q.choices.length ? q.choices : undefined;
+        const fallback = choices ? choices[0] : 'Use your best judgment and proceed.';
+        if (cfg.autonomy !== 'cautious') {
+          // balanced + autopilot proceed with the best guess rather than stopping to ask
+          await this.agent.appendStep(runId, { label: 'Decided without asking', status: 'info', detail: q.question }).catch(() => undefined);
+          return fallback;
+        }
         return this.askHuman(runId, input.title, {
           question: q.question,
           kind: choices ? 'choice' : 'free_text',
           options: choices || [],
-          defaultValue: choices ? choices[0] : 'Use your best judgment and proceed.',
-        });
+          defaultValue: fallback,
+        }, timeoutMs);
       },
     };
 
     let result;
     try {
-      result = await this.hermes.runTurn(prompt, handlers, { title: input.title });
+      result = await this.hermes.runTurn(prompt, handlers, { title: input.title, model: cfg.model || undefined });
     } catch (e: any) {
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
       return;
@@ -131,14 +144,14 @@ export class HermesBridgeService {
     }
 
     const text = (result.finalText || '').trim();
-    if (text) await this.proposeLearnings(runId, text);
+    if (text && cfg.learn) await this.proposeLearnings(runId, text);
     if (input.save !== false && text) {
       try {
         const doc = await this.documents.create({
           title: input.title || 'Agent result',
           contentText: text,
           kind: 'md',
-          collectionId: input.saveCollectionId ?? null,
+          collectionId: input.saveCollectionId ?? cfg.outputCollectionId ?? null,
           tags: ['agent'],
         });
         await this.agent.attachOutput(runId, doc.id);

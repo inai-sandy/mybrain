@@ -1,6 +1,6 @@
 import { HermesBridgeService } from './hermes-bridge.service';
 
-function fakeAgent(opts: { answer?: string } = {}) {
+function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
   const steps: any[] = [];
   const runs: Record<string, any> = { 'run-1': { id: 'run-1', status: 'running' } };
   return {
@@ -8,6 +8,7 @@ function fakeAgent(opts: { answer?: string } = {}) {
     runs,
     learnings: null as any,
     asked: [] as any[],
+    engineSettings: jest.fn(async () => ({ model: '', autonomy: 'cautious', askTimeoutMin: 20, recall: true, learn: true, outputCollectionId: null, ...(opts.cfg || {}) })),
     createRun: jest.fn(async (i: any) => { runs['run-1'] = { id: 'run-1', status: 'running', ...i }; return runs['run-1']; }),
     appendStep: jest.fn(async (runId: string, s: any) => { steps.push({ runId, ...s }); return runs[runId]; }),
     attachOutput: jest.fn(async (runId: string, docId: string) => { runs[runId].outputDocId = docId; return runs[runId]; }),
@@ -59,6 +60,29 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
       { text: 'Ravi pays by Friday', status: 'proposed' },
       { text: 'The invoice is INV-204', status: 'proposed' },
     ]);
+  });
+
+  it('autopilot autonomy never asks: clarify proceeds with default, approval is denied without a Telegram ping', async () => {
+    const agent = fakeAgent({ cfg: { autonomy: 'autopilot' } });
+    const tg = fakeTg();
+    let clarifyAns: any, approveAns: any;
+    const hermes = fakeHermes(async (h) => {
+      clarifyAns = await h.onClarify?.({ question: 'Which?', choices: ['a', 'b'] });
+      approveAns = await h.onApproval?.({ command: 'rm' });
+      return { sessionId: 's', finalText: 'ok', status: 'complete' };
+    });
+    await build(hermes, agent, fakeMem(), fakeLlm(), fakeDocs(), tg).execute('run-1', { prompt: 'x' });
+    expect(clarifyAns).toBe('a'); // proceeded with the first choice, no waitpoint
+    expect(approveAns).toBe('deny'); // never auto-runs risky
+    expect(agent.ask).not.toHaveBeenCalled();
+    expect(tg.pushAgentQuestion).not.toHaveBeenCalled();
+  });
+
+  it('recall off (setting) skips the brain search', async () => {
+    const agent = fakeAgent({ cfg: { recall: false } });
+    const mem = fakeMem([{ title: 'x', content: 'y' }]);
+    await build(fakeHermes(async () => ({ sessionId: 's', finalText: 'ok', status: 'complete' })), agent, mem).execute('run-1', { prompt: 'x' });
+    expect(mem.searchBrain).not.toHaveBeenCalled();
   });
 
   it('BEA-620 relays a clarify question and returns the choice', async () => {

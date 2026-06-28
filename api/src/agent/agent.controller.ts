@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Delete, Post, Query, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
 
 type AgentInput = { name?: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean };
@@ -11,6 +11,29 @@ type AgentInput = { name?: string; prompt?: string; icon?: string; description?:
 @Controller('agent')
 export class AgentController {
   constructor(private readonly agent: AgentService) {}
+
+  // ---- engine settings ----
+
+  @Get('settings')
+  getSettings() {
+    return this.agent.engineSettings();
+  }
+
+  @Put('settings')
+  setSettings(@Body() body: Record<string, unknown>) {
+    return this.agent.setEngineSettings(body || {});
+  }
+
+  @Get('models')
+  models() {
+    return [
+      { value: '', label: 'Engine default' },
+      { value: 'gpt-5.5', label: 'GPT-5.5 (most capable)' },
+      { value: 'gpt-5.4', label: 'GPT-5.4' },
+      { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini (fast)' },
+      { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+    ];
+  }
 
   // ---- saved agents (BEA-623) ----
 
