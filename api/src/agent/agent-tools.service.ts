@@ -72,6 +72,14 @@ export class AgentToolsService {
     };
   }
 
+  /** remember — write a durable fact straight into the user's memory (RAG + SuperMemory). */
+  async remember(input: { text: string; tags?: string[] }) {
+    const text = (input?.text || '').trim();
+    if (!text) throw new BadRequestException('remember needs some text');
+    await this.memory.enqueue(text, { refType: 'agent-memory', title: 'Agent remembered', tags: ['agent', ...(Array.isArray(input.tags) ? input.tags : [])] });
+    return { ok: true, remembered: text.slice(0, 120) };
+  }
+
   /** get_answer — fetch the answer to an ask_user question once the user has replied. */
   async getAnswer(token: string) {
     if (!token) throw new BadRequestException('get_answer needs a token');
