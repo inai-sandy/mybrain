@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, BadRequestException } from '@nestjs
 import { HermesBridgeService } from './hermes-bridge.service';
 import { HermesClient } from './hermes.client';
 import { AgentService } from '../agent/agent.service';
+import { AgentToolsService } from '../agent/agent-tools.service';
 import { MemoryService } from '../memory/memory.service';
 
 /**
@@ -14,6 +15,7 @@ export class HermesController {
     private readonly bridge: HermesBridgeService,
     private readonly hermes: HermesClient,
     private readonly agent: AgentService,
+    private readonly tools: AgentToolsService,
     private readonly memory: MemoryService,
   ) {}
 
@@ -47,7 +49,9 @@ export class HermesController {
   @Get('engine')
   async engine() {
     const [status, counts] = await Promise.all([this.hermes.engineStatus(), this.agent.engineCounts()]);
-    return { ...status, counts };
+    // The agent's My Brain tools are mounted as a host MCP server in the Codex runtime — show them.
+    const tools = { ...this.tools.describe(), connected: !!status.connectedToCodex };
+    return { ...status, counts, tools };
   }
 
   /** Restart the engine via the locked-down host helper (it only runs `systemctl restart mybrain-agent`). */

@@ -20,6 +20,23 @@ export class AgentToolsService {
     private readonly agent: AgentService,
   ) {}
 
+  /**
+   * describe — the MCP server + tools the agent has, for the settings panel (BEA-627).
+   * Single source of truth: the host MCP server (mybrain-mcp) exposes exactly these, proxied here.
+   */
+  describe() {
+    return {
+      server: 'mybrain',
+      transport: 'stdio · node',
+      registeredWith: 'Codex',
+      items: [
+        { name: 'search_brain', desc: 'Read your whole second brain — notes, documents and saved memories' },
+        { name: 'save_document', desc: 'Write a markdown document into your Documents library' },
+        { name: 'remember', desc: 'Save a durable fact into your long-term memory' },
+      ],
+    };
+  }
+
   /** save_document — write the agent's output into the Documents library (versioned, shareable). */
   async saveDocument(input: SaveDocInput) {
     if (!input?.title?.trim() || !input?.content?.trim()) throw new BadRequestException('save_document needs a title and content');

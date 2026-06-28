@@ -44,7 +44,7 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     const hermes = fakeHermes(async (h) => { seenPrompt = h._text; return { sessionId: 's', finalText: 'ok', status: 'complete' }; });
     const mem = fakeMem([{ title: 'Ravi', content: 'prefers WhatsApp' }]);
     await build(hermes, agent, mem, fakeLlm()).execute('run-1', { prompt: 'draft a note to Ravi' });
-    expect(mem.searchBrain).toHaveBeenCalledWith('draft a note to Ravi', 6);
+    expect(mem.searchBrain).toHaveBeenCalledWith('draft a note to Ravi', 18);
     expect(seenPrompt).toContain('prefers WhatsApp'); // context injected
     expect(seenPrompt).toContain('Task: draft a note to Ravi');
     expect(agent.steps.some((s) => /Recalled 1 note/.test(s.label))).toBe(true);

@@ -190,6 +190,12 @@ function EngineField({ label, hint, children }: { label: string; hint?: string; 
   );
 }
 
+function toolIcon(name: string) {
+  if (name === 'search_brain') return <Brain size={15} />;
+  if (name === 'save_document') return <FileText size={15} />;
+  return <Sparkles size={15} />;
+}
+
 function EngineToggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <EngineField label={label} hint={hint}>
@@ -251,6 +257,32 @@ function AgentEngineSection() {
           <span className="text-xs text-zinc-400">Auto-restarts on crash + reboot — use only if it gets stuck.</span>
         </div>
       </section>
+
+      {engine?.tools && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <h2 className="flex items-center gap-2 font-semibold"><Boxes size={18} className="text-emerald-600" /> Agent tools</h2>
+            {engine.tools.connected
+              ? <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />Connected</span>
+              : <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">Not connected</span>}
+          </div>
+          <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
+            Your agent reads and writes your brain mid-task through the <b>{engine.tools.server}</b> tool server, mounted in {engine.tools.registeredWith}.
+          </p>
+          <ul className="space-y-2.5">
+            {engine.tools.items?.map((t: { name: string; desc: string }) => (
+              <li key={t.name} className="flex items-start gap-3 rounded-lg border border-zinc-100 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-800/30">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{toolIcon(t.name)}</span>
+                <div className="min-w-0">
+                  <div className="font-mono text-sm font-medium text-zinc-800 dark:text-zinc-100">{t.name}</div>
+                  <div className="text-sm text-zinc-500 dark:text-zinc-400">{t.desc}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-zinc-400">Transport: {engine.tools.transport}</p>
+        </section>
+      )}
 
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
         <div className="mb-4 flex items-center justify-between">
