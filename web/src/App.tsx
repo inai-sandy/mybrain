@@ -34,6 +34,8 @@ import { DocumentView } from './pages/DocumentView';
 import { DocumentPublic } from './pages/DocumentPublic';
 import { DocumentFull } from './pages/DocumentFull';
 import { ShortLink } from './pages/ShortLink';
+import { Agents } from './pages/Agents';
+import { AgentRunView } from './pages/AgentRunView';
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -106,6 +108,8 @@ function AuthedApp() {
         <Route path="documents/:id/full" element={<DocumentFull />} />
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
+        <Route path="agent" element={<Agents />} />
+        <Route path="agent/runs/:id" element={<AgentRunView />} />
         <Route path="explore" element={<Explore />} />
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />
