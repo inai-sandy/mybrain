@@ -196,13 +196,24 @@ function toolIcon(name: string) {
   return <Sparkles size={15} />;
 }
 
+/** A pill toggle whose knob rests flush on both ends (left-0.5 base + 0/5 travel) — shared so every switch matches. */
+function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button onClick={() => onChange(!checked)} disabled={disabled} aria-pressed={checked} className={'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ' + (checked ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
+      <span className={'absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ' + (checked ? 'translate-x-5' : 'translate-x-0')} />
+    </button>
+  );
+}
+
 function EngineToggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <EngineField label={label} hint={hint}>
-      <button onClick={() => onChange(!checked)} aria-pressed={checked} className={'relative h-6 w-11 rounded-full transition-colors ' + (checked ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
-        <span className={'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ' + (checked ? 'translate-x-5' : 'translate-x-0.5')} />
-      </button>
-    </EngineField>
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+      <div className="min-w-0">
+        <div className="text-sm font-medium">{label}</div>
+        {hint && <div className="text-xs text-zinc-500">{hint}</div>}
+      </div>
+      <Switch checked={checked} onChange={onChange} />
+    </div>
   );
 }
 
@@ -383,9 +394,7 @@ function PublicRagMcpCard() {
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
       <div className="mb-1 flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 font-semibold"><Boxes size={18} className="text-indigo-500" /> RAG server for other agents</h2>
-        <button onClick={() => setEnabled(!cfg.enabled)} disabled={busy} aria-pressed={cfg.enabled} className={'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ' + (cfg.enabled ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
-          <span className={'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ' + (cfg.enabled ? 'translate-x-5' : 'translate-x-0.5')} />
-        </button>
+        <Switch checked={cfg.enabled} onChange={setEnabled} disabled={busy} />
       </div>
       <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">Let outside agents (Claude Desktop, ChatGPT, n8n…) <b>search your brain</b> over HTTPS — read-only. Keep the token secret; anyone with it can search your memory. {cfg.enabled ? '' : 'Currently off — turn it on to allow connections.'}</p>
 
