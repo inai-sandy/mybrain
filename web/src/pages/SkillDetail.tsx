@@ -4,18 +4,6 @@ import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload, Rock
 import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
 
-function shortDate(iso: string | null): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 30) return `${days}d ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-}
-
 export function SkillDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -193,15 +181,6 @@ export function SkillDetail() {
             </div>
           ) : (
             <>
-              {(d.installed || d.usageCount > 0) && (
-                <p className="text-sm text-zinc-500">
-                  {d.usageCount > 0 ? (
-                    <>Used <span className="font-medium text-zinc-700 dark:text-zinc-300">{d.usageCount}×</span> · last used {shortDate(d.lastUsedAt)}</>
-                  ) : (
-                    <span className="text-amber-600">On your server · never used</span>
-                  )}
-                </p>
-              )}
 
               {d.description && <p className="border-l-4 border-violet-500 bg-violet-500/5 rounded-r-lg p-4 text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap">{d.description}</p>}
 

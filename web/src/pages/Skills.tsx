@@ -23,22 +23,6 @@ type Skill = {
   createdAt: string;
 };
 
-function shortDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 30) return `${days}d ago`;
-  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
-  return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-}
-
-function isStale(s: Skill): boolean {
-  if (!s.installed) return false;
-  if (!s.lastUsedAt) return true;
-  return Date.now() - Date.parse(s.lastUsedAt) > 30 * 86400000;
-}
 
 type Found = { token: string; repo: string; skills: { path: string; name: string; description: string; alreadyInLibrary: boolean }[] };
 
@@ -268,12 +252,6 @@ export function Skills() {
     { key: 'origin', label: 'Kind', options: [{ value: 'created', label: 'Created' }, { value: 'downloaded', label: 'Downloaded' }] },
     { key: 'platform', label: 'Platform', options: [{ value: 'code', label: 'Claude Code' }, { value: 'chat', label: 'Claude Chat' }] },
     {
-      key: '_usage',
-      label: 'Usage',
-      options: [{ value: 'stale', label: 'Stale / forgotten' }, { value: 'used', label: 'Recently used' }],
-      match: (row: Skill, val: string) => (val === 'stale' ? isStale(row) : !isStale(row)),
-    },
-    {
       key: '_server',
       label: 'Server',
       options: [{ value: 'hermes', label: 'On Hermes agent' }, { value: 'sandy', label: 'On Claude · sandy' }, { value: 'beakn', label: 'On Claude · beakn' }, { value: 'none', label: 'Not installed anywhere' }],
@@ -282,7 +260,6 @@ export function Skills() {
   ];
   const sortOptions: SortOption[] = [
     { label: 'Newest', key: 'createdAt', dir: -1 },
-    { label: 'Least used', key: 'usageCount', dir: 1 },
     { label: 'Title A–Z', key: 'title', dir: 1 },
   ];
 
@@ -326,13 +303,6 @@ export function Skills() {
             </a>
           ) : (
             <span className="text-zinc-400">No link</span>
-          )}
-          {s.installed ? (
-            <span className={isStale(s) ? 'text-amber-600 font-medium' : 'text-zinc-400'} title={`used ${s.usageCount}×`}>
-              {s.lastUsedAt ? `used ${shortDate(s.lastUsedAt)}` : 'never used'}
-            </span>
-          ) : (
-            <span className={s.inUse ? 'text-emerald-600' : 'text-zinc-400'}>{s.inUse ? 'In use' : 'Not marked'}</span>
           )}
           {!!s.installedOn?.length && (
             <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
