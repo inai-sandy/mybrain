@@ -119,6 +119,32 @@ export class HermesBridgeService {
     return q.defaultValue ?? 'proceed';
   }
 
+  /**
+   * Guided builder (BEA-643): turn a one-line idea into a draft agent config — name, task, Outcome
+   * (3-5 criteria), and a few starter eval cases — for the user to review and save.
+   */
+  async draftAgent(idea: string): Promise<{ name: string; prompt: string; rubric: string; evals: string[] }> {
+    const fallback = { name: 'New agent', prompt: idea.trim().slice(0, 2000), rubric: '', evals: [] as string[] };
+    try {
+      const out = await this.llm.complete(
+        `Turn this idea into a config for a small AI agent. The user said:\n"${idea.slice(0, 600)}"\n\nReply with ONLY JSON, no prose:\n{"name":"<short 2-4 word name>","task":"<one clear plain-English instruction the agent runs each time>","outcome":["<criterion>","<criterion>","<criterion>"],"evals":["<realistic example input>","<another>","<another>"]}\nThe "outcome" is 3-5 short, checkable criteria for what a good result looks like. The "evals" are 2-3 realistic example inputs to test it on. Keep everything concrete and in plain English.`,
+        700,
+        'agent-draft',
+      );
+      const m = (out || '').match(/\{[\s\S]*\}/);
+      if (!m) return fallback;
+      const g = JSON.parse(m[0]);
+      return {
+        name: String(g.name || 'New agent').slice(0, 80),
+        prompt: String(g.task || idea).trim().slice(0, 2000),
+        rubric: Array.isArray(g.outcome) ? g.outcome.map((s: any) => `- ${String(s).trim()}`).join('\n').slice(0, 1500) : String(g.outcome || '').slice(0, 1500),
+        evals: Array.isArray(g.evals) ? g.evals.slice(0, 5).map((s: any) => String(s).trim().slice(0, 200)).filter(Boolean) : [],
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
   /** Create the run row and kick off execution in the background; returns immediately. */
   async startRun(input: StartRunInput) {
     const run = await this.agent.createRun({ agentId: input.agentId ?? null, title: input.title || 'Agent run', input: input.prompt });
