@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
 
-type AgentInput = { name?: string; prompt?: string; rubric?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean };
+type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.

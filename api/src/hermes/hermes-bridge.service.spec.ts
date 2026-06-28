@@ -157,6 +157,27 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     expect((agent.finishRun as jest.Mock).mock.calls.every((c) => !c[1]?.grade)).toBe(true);
   });
 
+  it('BEA-642 runEvals grades each case against the Outcome and records verdicts', async () => {
+    const evals = [{ id: 'e1', input: 'case one' }, { id: 'e2', input: 'case two' }];
+    const runs: Record<string, any> = {};
+    let saved: any[] = [];
+    const agent: any = {
+      getAgent: jest.fn(async () => ({ id: 'a1', name: 'A', prompt: 'do it', rubric: 'must be good', evals })),
+      getRun: jest.fn(async (id: string) => ({ ...runs[id], grade: { verdict: 'pass', score: 88 } })),
+      createRun: jest.fn(async (i: any) => { const id = 'run-' + Object.keys(runs).length; runs[id] = { id, ...i, status: 'running' }; return runs[id]; }),
+      appendStep: jest.fn(async () => undefined),
+      finishRun: jest.fn(async (id: string, p: any) => { Object.assign(runs[id], p); return runs[id]; }),
+      setEvals: jest.fn(async (_id: string, e: any) => { saved = JSON.parse(JSON.stringify(e)); }),
+      engineSettings: jest.fn(async () => ({ model: '', autonomy: 'cautious', askTimeoutMin: 20, recall: false, learn: false, outputCollectionId: null })),
+    };
+    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'an answer', status: 'complete' }));
+    const llm = fakeLlm('{"verdict":"pass","score":88,"criteria":[],"notes":"ok"}');
+    await build(hermes, agent, fakeMem(), llm).runEvals('a1');
+    expect(agent.setEvals).toHaveBeenCalled();
+    expect(saved.length).toBe(2);
+    expect(saved.every((c: any) => c.lastVerdict === 'pass' && c.lastRunId)).toBe(true);
+  });
+
   it('BEA-630 normal mode still stores the answer text inline (resultText)', async () => {
     const agent = fakeAgent();
     const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'big result text', status: 'complete' }));
