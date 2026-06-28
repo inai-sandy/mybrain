@@ -35,7 +35,7 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     const hermes = fakeHermes(async (h) => { h.onStep?.({ label: 'Searching the web', status: 'done' }); return { sessionId: 's', finalText: '# Findings', status: 'complete' }; });
     await build(hermes, agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'research', title: 'Vendor research' });
     expect(docs.create).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vendor research', contentText: '# Findings' }));
-    expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', outputDocId: 'doc-1' });
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', outputDocId: 'doc-1', resultText: '# Findings' });
   });
 
   it('BEA-624 recall: prepends brain context to the task and logs a step', async () => {
@@ -123,5 +123,27 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     const agent = fakeAgent();
     const run = await build(fakeHermes(async () => ({ sessionId: 's', finalText: 'x', status: 'complete' })), agent).startRun({ prompt: 'go', title: 'T' });
     expect(run.id).toBe('run-1');
+  });
+
+  it('BEA-630 quick mode: keeps recall (grounded) but skips learn-after and saving; stores the answer inline', async () => {
+    const agent = fakeAgent();
+    const docs = fakeDocs();
+    const mem = fakeMem([{ title: 'X', content: 'context' }]);
+    const llm = fakeLlm('a durable fact');
+    let seenPrompt = '';
+    const hermes = fakeHermes(async (h) => { seenPrompt = h._text; return { sessionId: 's', finalText: 'the quick answer', status: 'complete' }; });
+    await build(hermes, agent, mem, llm, docs).execute('run-1', { prompt: 'what is X?', quick: true });
+    expect(mem.searchBrain).toHaveBeenCalled();         // recall stays (cheap + keeps it grounded)
+    expect(seenPrompt).toContain('context');            // brain context injected
+    expect(agent.setLearnings).not.toHaveBeenCalled();  // no learn-after
+    expect(docs.create).not.toHaveBeenCalled();         // no document save
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', resultText: 'the quick answer' });
+  });
+
+  it('BEA-630 normal mode still stores the answer text inline (resultText)', async () => {
+    const agent = fakeAgent();
+    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'big result text', status: 'complete' }));
+    await build(hermes, agent, fakeMem(), fakeLlm()).execute('run-1', { prompt: 'x', save: false });
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', resultText: 'big result text' });
   });
 });

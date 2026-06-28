@@ -220,7 +220,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */
-  async appendStep(runId: string, step: { label: string; status?: string; detail?: string }) {
+  async appendStep(runId: string, step: { label: string; status?: string; detail?: string; kind?: string }) {
     const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException('Run not found');
     const log = this.parse(run.stepLog, [] as any[]);
@@ -229,7 +229,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(updated);
   }
 
-  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string } = {}) {
+  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string; resultText?: string } = {}) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
     if (!run) throw new NotFoundException('Run not found');
     const updated = await this.prisma.agentRun.update({
@@ -237,6 +237,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       data: {
         status: patch.status ?? 'done',
         outputDocId: patch.outputDocId ?? run.outputDocId,
+        resultText: patch.resultText ?? run.resultText,
         error: patch.error ?? null,
         endedAt: new Date(),
       },
