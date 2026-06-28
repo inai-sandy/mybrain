@@ -140,6 +140,23 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', resultText: 'the quick answer' });
   });
 
+  it('BEA-641 grades the result against the Outcome rubric and stores it', async () => {
+    const agent = fakeAgent();
+    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'the answer', status: 'complete' }));
+    const llm = fakeLlm('{"verdict":"pass","score":90,"criteria":[{"text":"covers X","met":true}],"notes":"looks good"}');
+    await build(hermes, agent, fakeMem(), llm).execute('run-1', { prompt: 'x', save: false, rubric: 'Must cover X' });
+    const graded = (agent.finishRun as jest.Mock).mock.calls.find((c) => c[1]?.grade);
+    expect(graded).toBeTruthy();
+    expect(JSON.parse(graded[1].grade)).toMatchObject({ verdict: 'pass', score: 90 });
+  });
+
+  it('BEA-641 does not grade when no rubric is set', async () => {
+    const agent = fakeAgent();
+    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'the answer', status: 'complete' }));
+    await build(hermes, agent, fakeMem(), fakeLlm('{}')).execute('run-1', { prompt: 'x', save: false });
+    expect((agent.finishRun as jest.Mock).mock.calls.every((c) => !c[1]?.grade)).toBe(true);
+  });
+
   it('BEA-630 normal mode still stores the answer text inline (resultText)', async () => {
     const agent = fakeAgent();
     const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'big result text', status: 'complete' }));

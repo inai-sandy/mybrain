@@ -467,6 +467,7 @@ model Agent {
   icon         String? // emoji
   description  String?
   prompt       String? // the task template the agent runs (the scheduled/run-now instruction)
+  rubric       String? // the Outcome — the definition of done each run is graded against (BEA-641)
   autonomy     String     @default("cautious") // cautious | balanced | autopilot
   skills       String     @default("[]") // JSON string array of skill ids/names
   schedule     String? // JSON { every: day|weekday|week|hour, at?: "HH:MM", dow?: 0-6 }; null = manual only
@@ -493,6 +494,7 @@ model AgentRun {
   learnings   String      @default("[]") // JSON [{text,status:proposed|kept|forgotten,memId?}] — what the run learned (BEA-624)
   outputDocId String? // saved Document id
   resultText  String? // the agent's final answer text, shown inline on the run (BEA-630)
+  grade       String? // JSON grade vs the agent's Outcome rubric {verdict,score,criteria,notes} (BEA-641)
   error       String?
   startedAt   DateTime    @default(now())
   endedAt     DateTime?

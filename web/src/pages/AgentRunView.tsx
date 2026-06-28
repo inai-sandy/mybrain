@@ -21,10 +21,43 @@ type Run = {
   learnings?: { text: string; status: string }[];
   outputDocId?: string | null;
   resultText?: string | null;
+  grade?: Grade | null;
   error?: string | null;
   startedAt: string;
   endedAt?: string | null;
 };
+type Grade = { verdict: 'pass' | 'partial' | 'fail'; score: number; criteria?: { text: string; met: boolean }[]; notes?: string };
+
+const GRADE_STYLES: Record<string, { card: string; txt: string }> = {
+  pass: { card: 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10', txt: 'text-emerald-700 dark:text-emerald-300' },
+  partial: { card: 'border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10', txt: 'text-amber-700 dark:text-amber-300' },
+  fail: { card: 'border-rose-300 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10', txt: 'text-rose-700 dark:text-rose-300' },
+};
+function GradeCard({ grade }: { grade: Grade }) {
+  const s = GRADE_STYLES[grade.verdict] || GRADE_STYLES.partial;
+  const txt = s.txt;
+  return (
+    <div className={'rounded-2xl border p-4 ' + s.card}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className={'flex items-center gap-2 text-sm font-semibold ' + txt}>
+          <CheckCircle2 className="h-4 w-4" /> Outcome: {grade.verdict}
+        </div>
+        <span className={'rounded-full bg-white/70 px-2 py-0.5 text-xs font-bold dark:bg-black/20 ' + txt}>{grade.score}/100</span>
+      </div>
+      {!!grade.criteria?.length && (
+        <ul className="space-y-1">
+          {grade.criteria.map((c, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-zinc-700 dark:text-zinc-200">
+              {c.met ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />}
+              <span>{c.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {grade.notes && <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">{grade.notes}</p>}
+    </div>
+  );
+}
 
 function StepIcon({ status }: { status?: string }) {
   if (status === 'done') return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
@@ -223,6 +256,7 @@ export function AgentRunView() {
           )}
 
           {/* Result */}
+          {run.status === 'done' && run.grade && <GradeCard grade={run.grade} />}
           {run.status === 'done' && run.resultText && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Answer</div>
