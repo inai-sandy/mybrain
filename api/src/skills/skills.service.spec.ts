@@ -79,6 +79,13 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     for (const d of dirs) await expect(fs.stat(join(d, 'deep-research'))).rejects.toBeTruthy(); // gone
   });
 
+  it('installedTargets reports the on-disk targets for list badges (BEA-638)', async () => {
+    await svc.deploy('s1', 'sandy');
+    expect(await svc.installedTargets(skill)).toEqual(['sandy']);
+    await svc.deploy('s1', 'hermes');
+    expect((await svc.installedTargets(skill)).sort()).toEqual(['hermes', 'sandy']);
+  });
+
   it('deploying to a new target keeps a legacy-tracked target installed (BEA-636 regression)', async () => {
     // legacy state: skill was deployed to hermes via the old single source/slug record (empty map)
     await fs.mkdir(join(dirs[1], 'deep-research'), { recursive: true });

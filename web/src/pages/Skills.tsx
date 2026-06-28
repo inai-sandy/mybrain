@@ -16,6 +16,7 @@ type Skill = {
   inUse: boolean | null;
   installed: boolean;
   deployedTo?: string[];
+  installedOn?: string[];
   lastUsedAt: string | null;
   usageCount: number;
   shared: boolean;
@@ -268,6 +269,12 @@ export function Skills() {
       options: [{ value: 'stale', label: 'Stale / forgotten' }, { value: 'used', label: 'Recently used' }],
       match: (row: Skill, val: string) => (val === 'stale' ? isStale(row) : !isStale(row)),
     },
+    {
+      key: '_server',
+      label: 'Server',
+      options: [{ value: 'hermes', label: 'On Hermes agent' }, { value: 'sandy', label: 'On Claude · sandy' }, { value: 'beakn', label: 'On Claude · beakn' }, { value: 'none', label: 'Not installed anywhere' }],
+      match: (row: Skill, val: string) => (val === 'none' ? !(row.installedOn?.length) : !!row.installedOn?.includes(val)),
+    },
   ];
   const sortOptions: SortOption[] = [
     { label: 'Newest', key: 'createdAt', dir: -1 },
@@ -323,8 +330,12 @@ export function Skills() {
           ) : (
             <span className={s.inUse ? 'text-emerald-600' : 'text-zinc-400'}>{s.inUse ? 'In use' : 'Not marked'}</span>
           )}
-          {s.deployedTo?.includes('hermes') && (
-            <span className="ml-auto rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400" title="Installed in the Hermes agent">Hermes</span>
+          {!!s.installedOn?.length && (
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
+              {s.installedOn.includes('sandy') && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" title="Installed in Claude · sandy">sandy</span>}
+              {s.installedOn.includes('beakn') && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" title="Installed in Claude · beakn">beakn</span>}
+              {s.installedOn.includes('hermes') && <span className="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400" title="Installed in the Hermes agent">Hermes</span>}
+            </span>
           )}
         </div>
       </div>

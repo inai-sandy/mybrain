@@ -103,7 +103,20 @@ export class SkillsService {
 
   async list() {
     const rows = await this.prisma.skill.findMany({ orderBy: { createdAt: 'desc' }, take: 1000 });
-    return rows.map((s) => this.shape(s));
+    return Promise.all(rows.map(async (s) => ({ ...this.shape(s), installedOn: await this.installedTargets(s) })));
+  }
+
+  /** Target names where this skill's folder actually exists on disk right now — the truth for badges (BEA-638). */
+  async installedTargets(s: any): Promise<string[]> {
+    const dep = this.effectiveDeployments(s);
+    const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
+    const out: string[] = [];
+    for (const [name, dir] of Object.entries(this.deployTargets())) {
+      let slug = dep[name] || null;
+      if (!slug && s.slug && !s.slug.includes('..') && (await exists(join(dir, s.slug)))) slug = s.slug;
+      if (slug && !slug.includes('..') && (await exists(join(dir, slug)))) out.push(name);
+    }
+    return out;
   }
 
   async get(id: string) {
