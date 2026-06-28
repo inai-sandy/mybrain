@@ -127,6 +127,33 @@ export class HermesBridgeService {
     return run;
   }
 
+  /**
+   * Run-evals (BEA-642): run every saved eval case for an agent, grade each against the Outcome,
+   * and record the verdict on the case. Runs in the BACKGROUND, persisting after each so the UI streams.
+   */
+  async runEvals(agentId: string): Promise<void> {
+    const agent: any = await this.agent.getAgent(agentId).catch(() => null);
+    const evals: any[] = Array.isArray(agent?.evals) ? agent.evals : [];
+    if (!agent || !evals.length) return;
+    for (const c of evals) {
+      if (!c?.input) continue;
+      try {
+        const run = await this.agent.createRun({ agentId, title: `Eval — ${agent.name}`, input: c.input });
+        const prompt = agent.prompt ? `${agent.prompt}\n\n[Test input] ${c.input}` : c.input;
+        await this.execute(run.id, { prompt, title: `Eval — ${agent.name}`, agentId, rubric: agent.rubric, save: false });
+        const r: any = await this.agent.getRun(run.id).catch(() => null);
+        c.lastRunId = run.id;
+        c.lastVerdict = r?.grade?.verdict || (r?.status === 'failed' ? 'fail' : 'partial');
+        c.lastScore = r?.grade?.score ?? null;
+      } catch {
+        c.lastVerdict = 'fail';
+        c.lastScore = null;
+      }
+      c.lastRunAt = new Date().toISOString();
+      await this.agent.setEvals(agentId, evals); // persist as we go
+    }
+  }
+
   /** Synchronous variant (used by tests / callers that want to await the whole run). */
   async execute(runId: string, input: StartRunInput) {
     const quick = !!input.quick;

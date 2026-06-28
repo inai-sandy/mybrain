@@ -178,13 +178,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
         name: input.name.trim().slice(0, 120),
         prompt: input.prompt?.trim() || null,
         rubric: input.rubric?.trim() || null,
+        evals: Array.isArray(input.evals) ? JSON.stringify(input.evals) : '[]',
         icon: input.icon || null,
         description: input.description || null,
         autonomy: input.autonomy || 'cautious',
@@ -208,13 +209,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeAgent(a);
   }
 
-  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
     const data: any = {};
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
     if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
     if (patch.rubric !== undefined) data.rubric = patch.rubric?.trim() || null;
+    if (patch.evals !== undefined) data.evals = JSON.stringify(Array.isArray(patch.evals) ? patch.evals : []);
     if (patch.icon !== undefined) data.icon = patch.icon || null;
     if (patch.description !== undefined) data.description = patch.description || null;
     if (patch.autonomy !== undefined) data.autonomy = patch.autonomy;
@@ -242,8 +244,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.agent.update({ where: { id: agentId }, data: { lastFiredKey: key } }).catch(() => undefined);
   }
 
+  /** Persist eval cases + their latest verdicts (BEA-642). */
+  async setEvals(id: string, evals: unknown[]) {
+    await this.prisma.agent.update({ where: { id }, data: { evals: JSON.stringify(Array.isArray(evals) ? evals : []) } }).catch(() => undefined);
+  }
+
   private shapeAgent(a: any) {
-    return { ...a, skills: this.parse(a.skills, [] as unknown), schedule: a.schedule ? this.parse(a.schedule, null) : null };
+    return { ...a, skills: this.parse(a.skills, [] as unknown), schedule: a.schedule ? this.parse(a.schedule, null) : null, evals: this.parse(a.evals, [] as unknown) };
   }
 
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */

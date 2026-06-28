@@ -45,6 +45,17 @@ export class HermesController {
     return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric });
   }
 
+  /** Run every saved eval case for an agent and grade each against the Outcome (BEA-642). Background. */
+  @Post('agents/:id/run-evals')
+  async runEvals(@Param('id') id: string) {
+    const agent: any = await this.agent.getAgent(id);
+    const n = Array.isArray(agent.evals) ? agent.evals.length : 0;
+    if (!n) throw new BadRequestException('Add at least one eval case first.');
+    if (!agent.rubric) throw new BadRequestException('Set an Outcome first so the evals can be graded.');
+    void this.bridge.runEvals(id).catch(() => undefined);
+    return { started: n };
+  }
+
   /** Rich engine status for the settings panel + the Agents "engine online" pill. */
   @Get('engine')
   async engine() {

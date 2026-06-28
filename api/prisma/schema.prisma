@@ -468,6 +468,7 @@ model Agent {
   description  String?
   prompt       String? // the task template the agent runs (the scheduled/run-now instruction)
   rubric       String? // the Outcome — the definition of done each run is graded against (BEA-641)
+  evals        String     @default("[]") // JSON [{id,input,lastVerdict,lastScore,lastRunId,lastRunAt}] — regression cases (BEA-642)
   autonomy     String     @default("cautious") // cautious | balanced | autopilot
   skills       String     @default("[]") // JSON string array of skill ids/names
   schedule     String? // JSON { every: day|weekday|week|hour, at?: "HH:MM", dow?: 0-6 }; null = manual only

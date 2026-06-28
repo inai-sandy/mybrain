@@ -37,6 +37,7 @@ import { ShortLink } from './pages/ShortLink';
 import { Agents } from './pages/Agents';
 import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
+import { AgentDetail } from './pages/AgentDetail';
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -111,6 +112,7 @@ function AuthedApp() {
           <Route index element={<Dashboard />} />
         <Route path="agent" element={<Agents />} />
         <Route path="agent/history" element={<AgentHistory />} />
+        <Route path="agent/agents/:id" element={<AgentDetail />} />
         <Route path="agent/runs/:id" element={<AgentRunView />} />
         <Route path="explore" element={<Explore />} />
         <Route path="capture" element={<Capture />} />
