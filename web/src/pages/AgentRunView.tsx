@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles } from 'lucide-react';
 import { StatusBadge } from './Agents';
 
 type Step = { label: string; status?: string; detail?: string; kind?: string; at?: string };
@@ -12,6 +12,7 @@ type Run = {
   input?: string;
   stepLog?: Step[];
   waitpoints?: Waitpoint[];
+  learnings?: { text: string; status: string }[];
   outputDocId?: string | null;
   error?: string | null;
   startedAt: string;
@@ -64,7 +65,20 @@ export function AgentRunView() {
   }, [id]);
 
   const [submitting, setSubmitting] = useState(false);
+  const [keepSel, setKeepSel] = useState<Record<number, boolean>>({});
+  const [savingLearn, setSavingLearn] = useState(false);
   const steps = run?.stepLog || [];
+  const proposed = (run?.learnings || []).filter((l) => l.status === 'proposed');
+
+  async function saveLearnings() {
+    setSavingLearn(true);
+    try {
+      const items = proposed.map((l, i) => ({ text: l.text, keep: keepSel[i] !== false }));
+      await fetch(`/api/agent/runs/${id}/learnings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
+      const r = await fetch(`/api/agent/runs/${id}`);
+      if (r.ok) setRun(await r.json());
+    } catch { /* ignore */ } finally { setSavingLearn(false); }
+  }
   const active = !!run && (run.status === 'running' || run.status === 'awaiting_input');
   const pending = run?.status === 'awaiting_input' ? (run?.waitpoints || []).find((w) => w.status === 'pending') : undefined;
 
@@ -162,6 +176,27 @@ export function AgentRunView() {
             <div className="rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
               {run.error || 'The run failed.'}
             </div>
+          )}
+
+          {/* What I learned — keep / forget (BEA-624) */}
+          {proposed.length > 0 && (
+            <div className="rounded-2xl border border-indigo-300 bg-indigo-50 p-4 dark:border-indigo-500/30 dark:bg-indigo-500/10">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-indigo-900 dark:text-indigo-100"><Sparkles className="h-4 w-4" />What I learned — keep what's useful</div>
+              <ul className="space-y-1.5">
+                {proposed.map((l, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <input type="checkbox" checked={keepSel[i] !== false} onChange={(e) => setKeepSel((s) => ({ ...s, [i]: e.target.checked }))} className="mt-1 accent-indigo-600" />
+                    <span className="text-sm text-zinc-800 dark:text-zinc-200">{l.text}</span>
+                  </li>
+                ))}
+              </ul>
+              <button onClick={saveLearnings} disabled={savingLearn} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                {savingLearn && <Loader2 className="h-4 w-4 animate-spin" />}Save to memory
+              </button>
+            </div>
+          )}
+          {proposed.length === 0 && (run.learnings || []).some((l) => l.status === 'kept') && (
+            <p className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400"><Sparkles className="h-3.5 w-3.5" />Saved what you kept to memory.</p>
           )}
 
           {(run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') && (

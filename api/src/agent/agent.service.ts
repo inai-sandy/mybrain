@@ -290,10 +290,17 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Store the proposed/kept learnings for a run (BEA-624). */
+  async setLearnings(runId: string, items: Array<{ text: string; status?: string; memId?: string }>) {
+    const updated = await this.prisma.agentRun.update({ where: { id: runId }, data: { learnings: JSON.stringify(items) } });
+    return this.shapeRun(updated);
+  }
+
   private shapeRun(run: any) {
     return {
       ...run,
       stepLog: this.parse(run.stepLog, [] as any[]),
+      learnings: this.parse(run.learnings, [] as any[]),
       waitpoints: Array.isArray(run.waitpoints) ? run.waitpoints.map((w: any) => this.shapeWaitpoint(w)) : undefined,
     };
   }

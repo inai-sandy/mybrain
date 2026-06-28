@@ -3,6 +3,8 @@ import { HermesClient, HermesRunHandlers } from './hermes.client';
 import { AgentService } from '../agent/agent.service';
 import { DocumentsService } from '../documents/documents.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { MemoryService } from '../memory/memory.service';
+import { LlmService } from '../llm/llm.service';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +32,38 @@ export class HermesBridgeService {
     private readonly agent: AgentService,
     private readonly documents: DocumentsService,
     private readonly telegram: TelegramService,
+    private readonly memory: MemoryService,
+    private readonly llm: LlmService,
   ) {}
+
+  /** Recall-before: pull relevant context from the user's brain and prepend it to the task. */
+  private async recall(runId: string, task: string): Promise<string> {
+    try {
+      const hits = await this.memory.searchBrain(task, 6);
+      if (!hits?.length) return task;
+      const ctx = hits.map((h) => `- ${h.title || 'note'}: ${(h.content || '').replace(/\s+/g, ' ').slice(0, 220)}`).join('\n');
+      await this.agent.appendStep(runId, { label: `Recalled ${hits.length} note${hits.length > 1 ? 's' : ''} from your brain`, status: 'done' }).catch(() => undefined);
+      return `Relevant context from the user's own second brain (use where helpful, ignore if not):\n${ctx}\n\n---\nTask: ${task}`;
+    } catch {
+      return task;
+    }
+  }
+
+  /** Learn-after: propose a few durable facts from the result (the user keeps/forgets later). */
+  private async proposeLearnings(runId: string, result: string): Promise<void> {
+    try {
+      const out = await this.llm.complete(
+        `Read this agent result and list up to 3 SHORT durable facts worth remembering long-term — about the user, their projects, or useful knowledge they gathered. One per line, plain text, no bullets or numbering. If nothing is worth keeping, output nothing.\n\nResult:\n${result.slice(0, 2500)}`,
+        200,
+        'agent-learn',
+      );
+      const facts = (out || '').split('\n').map((s) => s.replace(/^[-*\d.\s]+/, '').trim()).filter((s) => s.length > 3).slice(0, 3);
+      if (facts.length) {
+        await this.agent.setLearnings(runId, facts.map((text) => ({ text, status: 'proposed' })));
+        await this.agent.appendStep(runId, { label: `Noted ${facts.length} thing${facts.length > 1 ? 's' : ''} I learned`, status: 'done' }).catch(() => undefined);
+      }
+    } catch { /* learnings are best-effort */ }
+  }
 
   /** Pause the run on a durable question, notify over Telegram, and wait for the answer (or the timeout default). */
   private async askHuman(runId: string, runTitle: string | undefined, q: { question: string; kind: string; options?: unknown; defaultValue?: string }): Promise<string> {
@@ -59,6 +92,7 @@ export class HermesBridgeService {
   /** Synchronous variant (used by tests / callers that want to await the whole run). */
   async execute(runId: string, input: StartRunInput) {
     await this.agent.appendStep(runId, { label: 'Starting up', status: 'done' });
+    const prompt = await this.recall(runId, input.prompt);
 
     const handlers: HermesRunHandlers = {
       onStep: (s) => void this.agent.appendStep(runId, s).catch(() => undefined),
@@ -85,7 +119,7 @@ export class HermesBridgeService {
 
     let result;
     try {
-      result = await this.hermes.runTurn(input.prompt, handlers, { title: input.title });
+      result = await this.hermes.runTurn(prompt, handlers, { title: input.title });
     } catch (e: any) {
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
       return;
@@ -97,6 +131,7 @@ export class HermesBridgeService {
     }
 
     const text = (result.finalText || '').trim();
+    if (text) await this.proposeLearnings(runId, text);
     if (input.save !== false && text) {
       await this.agent.appendStep(runId, { label: 'Saving the result', status: 'running' });
       try {
