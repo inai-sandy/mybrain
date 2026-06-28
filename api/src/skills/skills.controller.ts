@@ -2,10 +2,26 @@ import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, 
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { SkillsService } from './skills.service';
+import { SkillsImportService } from './skills-import.service';
 
 @Controller('skills')
 export class SkillsController {
-  constructor(private readonly skills: SkillsService) {}
+  constructor(
+    private readonly skills: SkillsService,
+    private readonly importer: SkillsImportService,
+  ) {}
+
+  /** Step 1: look at a GitHub URL and list every skill it contains (BEA-635). */
+  @Post('import/github/preview')
+  async importPreview(@Body() body: { url?: string }) {
+    return this.importer.preview(body?.url || '');
+  }
+
+  /** Step 2: import the chosen skills (and optionally deploy everywhere). */
+  @Post('import/github/confirm')
+  async importConfirm(@Body() body: { token?: string; paths?: string[]; deploy?: boolean; sourceUrl?: string }) {
+    return this.importer.confirm(body?.token || '', body?.paths || [], !!body?.deploy, body?.sourceUrl);
+  }
 
   @Post()
   async create(@Body() body: { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string }) {

@@ -1,7 +1,17 @@
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { SkillsService } from './skills.service';
+import { SkillsService, parseSkillMd } from './skills.service';
+
+describe('parseSkillMd (BEA-635 block-scalar fix)', () => {
+  it('reads a plain single-line description', () => {
+    expect(parseSkillMd('---\nname: foo\ndescription: does a thing\n---\nbody')).toEqual({ name: 'foo', description: 'does a thing' });
+  });
+  it('reads a YAML block-scalar (|-) description instead of the marker', () => {
+    const md = '---\nname: claude-api\ndescription: |-\n  Build apps on the Claude API.\n  Covers tool use and streaming.\n---\nbody';
+    expect(parseSkillMd(md)).toEqual({ name: 'claude-api', description: 'Build apps on the Claude API. Covers tool use and streaming.' });
+  });
+});
 
 function fakePrisma(skill: any) {
   return {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Wand2, Plus, X, Check, Circle, Download, Share2 } from 'lucide-react';
+import { Wand2, Plus, X, Check, Circle, Download, Share2, Github, Loader2, Rocket } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
@@ -39,7 +39,10 @@ function isStale(s: Skill): boolean {
   return Date.now() - Date.parse(s.lastUsedAt) > 30 * 86400000;
 }
 
+type Found = { token: string; repo: string; skills: { path: string; name: string; description: string; alreadyInLibrary: boolean }[] };
+
 function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [mode, setMode] = useState<'github' | 'paste'>('github');
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -47,7 +50,42 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [platform, setPlatform] = useState('code');
   const [downloadUrl, setDownloadUrl] = useState('');
   const [busy, setBusy] = useState(false);
+  // GitHub import (BEA-635)
+  const [url, setUrl] = useState('');
+  const [fetching, setFetching] = useState(false);
+  const [found, setFound] = useState<Found | null>(null);
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [deployAfter, setDeployAfter] = useState(true);
+  const [importing, setImporting] = useState(false);
   const toast = useToast();
+
+  async function fetchRepo() {
+    if (!url.trim()) { toast('error', 'Paste a GitHub URL'); return; }
+    setFetching(true); setFound(null);
+    try {
+      const r = await fetch('/api/skills/import/github/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast('error', d.message || 'Could not read that repo'); return; }
+      setFound(d);
+      const init: Record<string, boolean> = {};
+      for (const s of d.skills) init[s.path] = !s.alreadyInLibrary; // pre-pick the new ones
+      setSel(init);
+    } catch { toast('error', 'Could not read that repo'); } finally { setFetching(false); }
+  }
+  async function doImport() {
+    const paths = found ? found.skills.filter((s) => sel[s.path]).map((s) => s.path) : [];
+    if (!paths.length) { toast('error', 'Pick at least one skill'); return; }
+    setImporting(true);
+    try {
+      const r = await fetch('/api/skills/import/github/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: found!.token, paths, deploy: deployAfter, sourceUrl: url }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast('error', d.message || 'Import failed'); return; }
+      const ok = (d.imported || []).filter((x: any) => x.id).length;
+      const skipped = (d.imported || []).filter((x: any) => x.skipped).length;
+      toast('success', `Imported ${ok} skill${ok !== 1 ? 's' : ''}${deployAfter ? ' + deployed everywhere' : ''}${skipped ? ` · ${skipped} skipped` : ''}`);
+      onCreated(); onClose();
+    } catch { toast('error', 'Import failed'); } finally { setImporting(false); }
+  }
 
   async function submit() {
     if (!title.trim() && !content.trim()) {
@@ -85,6 +123,58 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
             <X size={18} />
           </button>
         </div>
+
+        <div className="mb-4 flex gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
+          {([['github', 'From GitHub'], ['paste', 'Paste SKILL.md']] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setMode(m)} className={'flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' + (mode === m ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'github' ? (
+          <div className="space-y-3">
+            <label className="block text-xs text-zinc-500">
+              GitHub URL (a repo, a sub-folder, or a SKILL.md)
+              <div className="mt-1 flex gap-2">
+                <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && fetchRepo()} placeholder="https://github.com/owner/repo" className={inp + ' font-mono'} />
+                <button onClick={fetchRepo} disabled={fetching} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-zinc-900 px-3 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900">
+                  {fetching ? <Loader2 size={15} className="animate-spin" /> : <Github size={15} />} Fetch
+                </button>
+              </div>
+            </label>
+            {found && (
+              <div>
+                <div className="mb-2 flex items-center justify-between text-xs text-zinc-500">
+                  <span>{found.skills.length} skill{found.skills.length !== 1 ? 's' : ''} in <b>{found.repo}</b></span>
+                  <button onClick={() => { const all = found.skills.every((s) => sel[s.path]); const n: Record<string, boolean> = {}; found.skills.forEach((s) => (n[s.path] = !all)); setSel(n); }} className="hover:text-zinc-700 dark:hover:text-zinc-300">
+                    {found.skills.every((s) => sel[s.path]) ? 'Clear all' : 'Select all'}
+                  </button>
+                </div>
+                <ul className="max-h-64 space-y-1.5 overflow-auto rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+                  {found.skills.map((s) => (
+                    <li key={s.path}>
+                      <label className="flex cursor-pointer items-start gap-2.5 rounded-md p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                        <input type="checkbox" checked={!!sel[s.path]} onChange={(e) => setSel((p) => ({ ...p, [s.path]: e.target.checked }))} className="mt-0.5 accent-emerald-600" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-sm font-medium">{s.name}</span>
+                            {s.alreadyInLibrary && <span className="shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">In library</span>}
+                          </div>
+                          <div className="line-clamp-2 text-xs text-zinc-500">{s.description}</div>
+                        </div>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <label className="mt-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+                  <input type="checkbox" checked={deployAfter} onChange={(e) => setDeployAfter(e.target.checked)} className="accent-emerald-600" />
+                  <Rocket size={13} className="text-emerald-600" /> Deploy everywhere after import (all Claude folders + Hermes)
+                </label>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <label className="text-xs text-zinc-500">
@@ -119,11 +209,18 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
             <input value={downloadUrl} onChange={(e) => setDownloadUrl(e.target.value)} placeholder="https://…" className={inp + ' mt-1'} />
           </label>
         </div>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
-          <button onClick={submit} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
-            {busy ? 'Saving…' : 'Add skill'}
-          </button>
+          {mode === 'github' ? (
+            <button onClick={doImport} disabled={importing || !found} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50">
+              {importing ? <><Loader2 size={15} className="animate-spin" /> Importing…</> : `Import${found ? ` ${found.skills.filter((s) => sel[s.path]).length}` : ''}`}
+            </button>
+          ) : (
+            <button onClick={submit} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+              {busy ? 'Saving…' : 'Add skill'}
+            </button>
+          )}
         </div>
       </div>
     </div>
