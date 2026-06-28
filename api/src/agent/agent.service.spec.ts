@@ -39,7 +39,7 @@ function fakePrisma() {
         return include?.waitpoints ? { ...r, waitpoints: wps.filter((w) => w.runId === r.id) } : r;
       },
       findMany: async ({ where, include, take }: any = {}) => {
-        let out = runs.filter((r) => (where?.agentId ? r.agentId === where.agentId : true));
+        let out = runs.filter((r) => (where?.agentId ? r.agentId === where.agentId : true) && (where?.status ? r.status === where.status : true));
         out = [...out].reverse();
         if (take) out = out.slice(0, take);
         return include?.waitpoints ? out.map((r) => ({ ...r, waitpoints: wps.filter((w) => w.runId === r.id) })) : out;
@@ -256,5 +256,29 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     const a = await svc.createAgent({ name: 'Temp', prompt: 'x' });
     await svc.deleteAgent(a.id);
     expect(await svc.listAgents()).toHaveLength(0);
+  });
+
+  it('reconcileOrphans fails runs left running by a restart, leaving terminal runs alone (BEA-629)', async () => {
+    const live = await svc.createRun({ input: 'check email related to V-Guard' }); // orphaned 'running'
+    const done = await svc.createRun({ input: 'a' });
+    await svc.finishRun(done.id, { status: 'done' });
+    const cancelled = await svc.createRun({ input: 'b' });
+    await svc.finishRun(cancelled.id, { status: 'cancelled' });
+
+    const n = await svc.reconcileOrphans();
+    expect(n).toBe(1);
+
+    const after = await svc.getRun(live.id);
+    expect(after.status).toBe('failed');
+    expect(after.error).toMatch(/restart/i);
+    expect(after.endedAt).toBeTruthy();
+    expect((after.stepLog as any[]).some((s) => /interrupted/i.test(s.label))).toBe(true);
+
+    // terminal runs are untouched
+    expect((await svc.getRun(done.id)).status).toBe('done');
+    expect((await svc.getRun(cancelled.id)).status).toBe('cancelled');
+
+    // idempotent — nothing left to fix
+    expect(await svc.reconcileOrphans()).toBe(0);
   });
 });

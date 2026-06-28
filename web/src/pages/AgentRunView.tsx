@@ -43,7 +43,20 @@ export function AgentRunView() {
   const [run, setRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [rerunning, setRerunning] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const reRun = async () => {
+    if (!run?.input || rerunning) return;
+    setRerunning(true);
+    try {
+      const r = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: run.input, title: run.title || undefined }) });
+      const d = await r.json();
+      if (d?.id) nav('/agent/runs/' + d.id);
+    } finally {
+      setRerunning(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -176,6 +189,13 @@ export function AgentRunView() {
             <div className="rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
               {run.error || 'The run failed.'}
             </div>
+          )}
+
+          {(run.status === 'failed' || run.status === 'cancelled') && run.input && (
+            <button onClick={reRun} disabled={rerunning} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200">
+              {rerunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+              {rerunning ? 'Starting…' : 'Re-run this task'}
+            </button>
           )}
 
           {/* What I learned — keep / forget (BEA-624) */}

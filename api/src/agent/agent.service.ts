@@ -30,12 +30,36 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly prisma: PrismaService) {}
 
   onModuleInit() {
+    // A run's driver lives in this process's memory. If the process restarts (deploy/crash/reboot)
+    // mid-run, the row is left status='running' with nothing to advance it — it would spin forever.
+    // Fail those orphans on boot so they never spin silently again (BEA-629).
+    this.reconcileOrphans().catch(() => undefined);
     // Per-minute sweeper that applies timeouts to overdue questions. Guarded so a bad tick
     // can never crash the app (matches the gmail-brief.service.ts pattern).
     this.sweepTimer = setInterval(() => {
       this.sweepExpired().catch(() => undefined);
     }, 60_000);
     if (typeof this.sweepTimer.unref === 'function') this.sweepTimer.unref();
+  }
+
+  /**
+   * Fail runs left mid-flight by a restart (BEA-629). A 'running' row has no live driver after a
+   * process restart, so it can never finish on its own — mark it failed with a clear message and a
+   * logged step. Idempotent: terminal runs (done/failed/cancelled) and paused ones are untouched.
+   */
+  async reconcileOrphans(): Promise<number> {
+    const orphans = await this.prisma.agentRun.findMany({ where: { status: 'running' }, select: { id: true, stepLog: true } });
+    if (!orphans.length) return 0;
+    const msg = 'Interrupted by an engine restart — please run it again.';
+    const now = new Date();
+    for (const o of orphans) {
+      const log = this.parse(o.stepLog, [] as any[]);
+      log.push({ label: 'Interrupted by a restart', status: 'failed', detail: msg, at: now.toISOString() });
+      await this.prisma.agentRun
+        .update({ where: { id: o.id }, data: { status: 'failed', error: msg, endedAt: now, stepLog: JSON.stringify(log) } })
+        .catch(() => undefined);
+    }
+    return orphans.length;
   }
 
   onModuleDestroy() {
