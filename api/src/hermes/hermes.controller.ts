@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, BadRequestException } from '@nestjs
 import { HermesBridgeService } from './hermes-bridge.service';
 import { HermesClient } from './hermes.client';
 import { AgentService } from '../agent/agent.service';
+import { MemoryService } from '../memory/memory.service';
 
 /**
  * Agent run endpoints backed by the Hermes engine (BEA-618). Behind the global auth guard.
@@ -13,7 +14,26 @@ export class HermesController {
     private readonly bridge: HermesBridgeService,
     private readonly hermes: HermesClient,
     private readonly agent: AgentService,
+    private readonly memory: MemoryService,
   ) {}
+
+  /** Keep / forget the learnings a run proposed (BEA-624). Kept ones are written to memory. */
+  @Post('runs/:id/learnings')
+  async resolveLearnings(@Param('id') id: string, @Body() body: { items?: Array<{ text: string; keep: boolean }> }) {
+    await this.agent.getRun(id); // 404 if the run is gone
+    const items = (body?.items || []).filter((i) => i?.text?.trim());
+    const out: Array<{ text: string; status: string }> = [];
+    for (const i of items) {
+      if (i.keep) {
+        await this.memory.enqueue(i.text.trim(), { refType: 'agent-learning', refId: id, title: 'Agent learned', tags: ['agent', 'learning'] }).catch(() => undefined);
+        out.push({ text: i.text.trim(), status: 'kept' });
+      } else {
+        out.push({ text: i.text.trim(), status: 'forgotten' });
+      }
+    }
+    await this.agent.setLearnings(id, out);
+    return { ok: true, kept: out.filter((o) => o.status === 'kept').length };
+  }
 
   /** Run a saved agent now (uses its stored prompt). */
   @Post('agents/:id/run')
