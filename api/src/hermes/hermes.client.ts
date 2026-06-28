@@ -71,8 +71,9 @@ export class HermesClient {
         const cfg: any = await c.json();
         const m = cfg.model;
         base.model = typeof m === 'string' ? m : m?.default || m?.model;
-        base.provider = (typeof m === 'object' ? m?.provider : undefined) || (typeof cfg.provider === 'string' ? cfg.provider : undefined);
-        base.connectedToCodex = /openai-codex|codex_app_server|codex/i.test(JSON.stringify(m || '') + JSON.stringify(cfg.provider || ''));
+        // the codex provider lives elsewhere in the config tree, so search the whole thing for the specific marker
+        base.connectedToCodex = /openai-codex|codex_app_server/i.test(JSON.stringify(cfg));
+        base.provider = base.connectedToCodex ? 'openai-codex' : (typeof m === 'object' ? m?.provider : undefined) || (typeof cfg.provider === 'string' ? cfg.provider : undefined);
       }
     } catch { /* config read is best-effort */ }
     return base;
