@@ -87,6 +87,7 @@ export function Agents() {
   const [title, setTitle] = useState('');
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [starting, setStarting] = useState(false);
+  const [saveResult, setSaveResult] = useState(true);
   const [agents, setAgents] = useState<any[] | null>(null);
   const [showNew, setShowNew] = useState(false);
 
@@ -120,7 +121,7 @@ export function Agents() {
     if (!text) { toast('error', 'Type a task for the agent first'); return; }
     setStarting(true);
     try {
-      const r = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, title: title.trim() || undefined }) });
+      const r = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, title: title.trim() || undefined, save: saveResult }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not start');
       const row = await r.json();
       nav(`/agent/runs/${row.id}`);
@@ -178,6 +179,10 @@ export function Agents() {
             Run
           </button>
         </div>
+        <label className="flex items-center gap-2 text-xs text-zinc-500">
+          <input type="checkbox" checked={saveResult} onChange={(e) => setSaveResult(e.target.checked)} className="accent-emerald-600" />
+          Save the result to Documents (in an “Agent outputs” collection)
+        </label>
         {engine && !engine.ok && <p className="text-xs text-amber-600">The agent engine isn’t reachable right now, so a run may not start.</p>}
       </div>
 
