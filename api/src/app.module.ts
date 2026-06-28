@@ -30,9 +30,10 @@ import { VaultModule } from './vault/vault.module';
 import { MindModule } from './mind/mind.module';
 import { DocumentsModule } from './documents/documents.module';
 import { AgentModule } from './agent/agent.module';
+import { HermesModule } from './hermes/hermes.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule],
   controllers: [HealthController],
 })
 export class AppModule {}
