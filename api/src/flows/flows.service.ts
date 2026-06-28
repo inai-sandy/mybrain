@@ -3,6 +3,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
 
+/** Generic building blocks (n8n-style utility nodes). `kind` drives the node's look/behaviour. */
+const GENERIC_PALETTE = [
+  { type: 'generic', kind: 'text', id: 'text', name: 'Text input', description: 'A fixed piece of text / value' },
+  { type: 'generic', kind: 'note', id: 'note', name: 'Note', description: 'A comment on the canvas' },
+  { type: 'generic', kind: 'if', id: 'if', name: 'If / condition', description: 'Branch on a condition' },
+  { type: 'generic', kind: 'filter', id: 'filter', name: 'Filter', description: 'Keep only what matches' },
+  { type: 'generic', kind: 'merge', id: 'merge_block', name: 'Merge', description: 'Combine outputs (AI / raw)' },
+  { type: 'generic', kind: 'wait', id: 'wait', name: 'Wait', description: 'Pause for a set time' },
+];
+
 /** The fixed tool/connector nodes (agent-powered hybrid — every connected tool works via the agent). */
 const TOOL_PALETTE = [
   { type: 'tool', id: 'search_brain', name: 'Search my brain', group: 'Brain', description: 'RAG + SuperMemory' },
@@ -67,7 +77,7 @@ export class FlowsService {
   /** The draggable node palette: your skills + the connected tools. */
   async palette() {
     const skills = (await this.skills.list()).map((s: any) => ({ type: 'skill', id: s.id, name: s.title, description: s.description }));
-    return { skills, tools: TOOL_PALETTE };
+    return { generics: GENERIC_PALETTE, tools: TOOL_PALETTE, skills };
   }
 
   /** Break a question into independent sub-questions for the branches (BEA-644). */
