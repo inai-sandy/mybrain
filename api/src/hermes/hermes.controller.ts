@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Post, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, BadRequestException } from '@nestjs/common';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { HermesClient } from './hermes.client';
+import { AgentService } from '../agent/agent.service';
 
 /**
  * Agent run endpoints backed by the Hermes engine (BEA-618). Behind the global auth guard.
@@ -11,7 +12,16 @@ export class HermesController {
   constructor(
     private readonly bridge: HermesBridgeService,
     private readonly hermes: HermesClient,
+    private readonly agent: AgentService,
   ) {}
+
+  /** Run a saved agent now (uses its stored prompt). */
+  @Post('agents/:id/run')
+  async runAgent(@Param('id') id: string) {
+    const agent = await this.agent.getAgent(id);
+    if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');
+    return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId });
+  }
 
   /** Is the engine reachable? (the Agents UI shows an "engine offline" banner otherwise). */
   @Get('engine')

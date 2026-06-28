@@ -21,6 +21,7 @@ function matchWp(row: any, where: any = {}): boolean {
 function fakePrisma() {
   const runs: any[] = [];
   const wps: any[] = [];
+  const ags: any[] = [];
   let n = 0;
   const id = (p: string) => `${p}-${++n}`;
   return {
@@ -69,6 +70,13 @@ function fakePrisma() {
         hit.forEach((w) => Object.assign(w, data));
         return { count: hit.length };
       },
+    },
+    agent: {
+      create: async ({ data }: any) => { const row = { id: id('ag'), prompt: null, icon: null, description: null, autonomy: 'cautious', skills: '[]', schedule: null, scheduleText: null, lastFiredKey: null, collectionId: null, enabled: true, createdAt: new Date(), updatedAt: new Date(), ...data }; ags.push(row); return row; },
+      findMany: async () => [...ags].reverse(),
+      findUnique: async ({ where }: any) => ags.find((a) => a.id === where.id) || null,
+      update: async ({ where, data }: any) => { const a = ags.find((x) => x.id === where.id); if (!a) throw new Error('not found'); Object.assign(a, data); return a; },
+      delete: async ({ where }: any) => { const i = ags.findIndex((x) => x.id === where.id); if (i < 0) throw new Error('not found'); return ags.splice(i, 1)[0]; },
     },
   };
 }
@@ -226,5 +234,27 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(read?.id).toBe(wp.id);
     expect(read?.status).toBe('pending');
     expect(await svc.getWaitpoint('missing')).toBeNull();
+  });
+
+  // ---- saved agents (BEA-623) ----
+  it('creates a saved agent with a parsed schedule', async () => {
+    const a = await svc.createAgent({ name: 'Morning Brief', prompt: 'summarise my day', schedule: { every: 'weekday', at: '07:00' }, scheduleText: 'every weekday 7am' });
+    expect(a.name).toBe('Morning Brief');
+    expect(a.schedule).toEqual({ every: 'weekday', at: '07:00' }); // round-trips through JSON
+    expect((await svc.listAgents())).toHaveLength(1);
+  });
+
+  it('updates an agent and resets the fired-marker when the schedule changes', async () => {
+    const a = await svc.createAgent({ name: 'A', prompt: 'x', schedule: { every: 'day', at: '08:00' } });
+    await svc.markFired(a.id, '2026-06-28:08:00');
+    const up = await svc.updateAgent(a.id, { schedule: { every: 'day', at: '09:00' } });
+    expect(up.schedule).toEqual({ every: 'day', at: '09:00' });
+    expect((await svc.getAgent(a.id)).lastFiredKey).toBeNull(); // reset so the new slot can fire
+  });
+
+  it('deletes an agent', async () => {
+    const a = await svc.createAgent({ name: 'Temp', prompt: 'x' });
+    await svc.deleteAgent(a.id);
+    expect(await svc.listAgents()).toHaveLength(0);
   });
 });

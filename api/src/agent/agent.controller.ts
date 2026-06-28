@@ -1,5 +1,7 @@
-import { Body, Controller, Get, Param, Post, Query, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
+
+type AgentInput = { name?: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.
@@ -9,6 +11,34 @@ import { AgentService, AskInput } from './agent.service';
 @Controller('agent')
 export class AgentController {
   constructor(private readonly agent: AgentService) {}
+
+  // ---- saved agents (BEA-623) ----
+
+  @Get('agents')
+  listAgents() {
+    return this.agent.listAgents();
+  }
+
+  @Post('agents')
+  createAgent(@Body() body: AgentInput) {
+    if (!body?.name) throw new BadRequestException('An agent needs a name');
+    return this.agent.createAgent(body as any);
+  }
+
+  @Get('agents/:id')
+  getAgent(@Param('id') id: string) {
+    return this.agent.getAgent(id);
+  }
+
+  @Patch('agents/:id')
+  updateAgent(@Param('id') id: string, @Body() body: AgentInput) {
+    return this.agent.updateAgent(id, body);
+  }
+
+  @Delete('agents/:id')
+  deleteAgent(@Param('id') id: string) {
+    return this.agent.deleteAgent(id);
+  }
 
   // ---- runs ----
 

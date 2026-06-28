@@ -72,6 +72,74 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(run);
   }
 
+  // ---------- saved agents (BEA-623) ----------
+
+  async createAgent(input: { name: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+    if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
+    const a = await this.prisma.agent.create({
+      data: {
+        name: input.name.trim().slice(0, 120),
+        prompt: input.prompt?.trim() || null,
+        icon: input.icon || null,
+        description: input.description || null,
+        autonomy: input.autonomy || 'cautious',
+        schedule: input.schedule ? JSON.stringify(input.schedule) : null,
+        scheduleText: input.scheduleText || null,
+        collectionId: input.collectionId ?? null,
+        enabled: input.enabled ?? true,
+      },
+    });
+    return this.shapeAgent(a);
+  }
+
+  async listAgents() {
+    const rows = await this.prisma.agent.findMany({ orderBy: { createdAt: 'desc' } });
+    return rows.map((a: any) => this.shapeAgent(a));
+  }
+
+  async getAgent(id: string) {
+    const a = await this.prisma.agent.findUnique({ where: { id } });
+    if (!a) throw new NotFoundException('Agent not found');
+    return this.shapeAgent(a);
+  }
+
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+    const a = await this.prisma.agent.findUnique({ where: { id } });
+    if (!a) throw new NotFoundException('Agent not found');
+    const data: any = {};
+    if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
+    if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
+    if (patch.icon !== undefined) data.icon = patch.icon || null;
+    if (patch.description !== undefined) data.description = patch.description || null;
+    if (patch.autonomy !== undefined) data.autonomy = patch.autonomy;
+    if (patch.schedule !== undefined) { data.schedule = patch.schedule ? JSON.stringify(patch.schedule) : null; data.lastFiredKey = null; }
+    if (patch.scheduleText !== undefined) data.scheduleText = patch.scheduleText || null;
+    if (patch.collectionId !== undefined) data.collectionId = patch.collectionId ?? null;
+    if (patch.enabled !== undefined) data.enabled = patch.enabled;
+    const updated = await this.prisma.agent.update({ where: { id }, data });
+    return this.shapeAgent(updated);
+  }
+
+  async deleteAgent(id: string) {
+    await this.prisma.agent.delete({ where: { id } }).catch(() => { throw new NotFoundException('Agent not found'); });
+    return { ok: true };
+  }
+
+  /** Enabled agents that have both a schedule and a prompt (candidates for the scheduler). */
+  async listSchedulable() {
+    const rows = await this.prisma.agent.findMany({ where: { enabled: true, NOT: [{ schedule: null }, { prompt: null }] } });
+    return rows.map((a: any) => this.shapeAgent(a));
+  }
+
+  /** Record that a scheduled agent fired for this minute-key, so it can't double-fire. */
+  async markFired(agentId: string, key: string) {
+    await this.prisma.agent.update({ where: { id: agentId }, data: { lastFiredKey: key } }).catch(() => undefined);
+  }
+
+  private shapeAgent(a: any) {
+    return { ...a, skills: this.parse(a.skills, [] as unknown), schedule: a.schedule ? this.parse(a.schedule, null) : null };
+  }
+
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */
   async appendStep(runId: string, step: { label: string; status?: string; detail?: string }) {
     const run = await this.prisma.agentRun.findUnique({ where: { id: runId } });
