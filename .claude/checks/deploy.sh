@@ -32,6 +32,9 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -e NODE_ENV=production -e PORT="$PORT" \
   -e IDEAS_MD_DIR="/var/www/ideas" \
   -e GWS_RUNNER_URL="http://172.18.0.1:8766" \
+  -e HERMES_URL="${HERMES_URL:-http://172.18.0.1:9119}" \
+  -e HERMES_USER="${HERMES_USER:-mybrain}" \
+  -e HERMES_PASSWORD="${HERMES_PASSWORD:-}" \
   -e DATABASE_URL="file:/app/data/mybrain.db" \
   -e ADMIN_EMAIL="${ADMIN_EMAIL:-}" \
   -e ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" \
