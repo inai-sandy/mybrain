@@ -43,10 +43,25 @@ export class HermesController {
     return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId });
   }
 
-  /** Is the engine reachable? (the Agents UI shows an "engine offline" banner otherwise). */
+  /** Rich engine status for the settings panel + the Agents "engine online" pill. */
   @Get('engine')
-  engine() {
-    return this.hermes.ping();
+  async engine() {
+    const [status, counts] = await Promise.all([this.hermes.engineStatus(), this.agent.engineCounts()]);
+    return { ...status, counts };
+  }
+
+  /** Restart the engine via the locked-down host helper (it only runs `systemctl restart mybrain-agent`). */
+  @Post('engine/restart')
+  async restart() {
+    const url = process.env.AGENT_HELPER_URL || 'http://172.18.0.1:8770';
+    const token = process.env.AGENT_HELPER_TOKEN || '';
+    try {
+      const r = await fetch(`${url}/restart`, { method: 'POST', headers: { 'x-token': token }, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error('helper returned ' + r.status);
+      return { ok: true };
+    } catch (e: any) {
+      throw new BadRequestException('Could not restart the engine — ' + (e?.message || 'helper unreachable'));
+    }
   }
 
   /** Start an agent run: kicks off Hermes in the background, returns the run row immediately. */

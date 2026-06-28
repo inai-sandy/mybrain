@@ -35,6 +35,8 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -e HERMES_URL="${HERMES_URL:-http://172.18.0.1:9119}" \
   -e HERMES_USER="${HERMES_USER:-mybrain}" \
   -e HERMES_PASSWORD="${HERMES_PASSWORD:-}" \
+  -e AGENT_HELPER_URL="${AGENT_HELPER_URL:-http://172.18.0.1:8770}" \
+  -e AGENT_HELPER_TOKEN="${AGENT_HELPER_TOKEN:-}" \
   -e DATABASE_URL="file:/app/data/mybrain.db" \
   -e ADMIN_EMAIL="${ADMIN_EMAIL:-}" \
   -e ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" \

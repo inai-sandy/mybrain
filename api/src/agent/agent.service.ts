@@ -72,6 +72,61 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(run);
   }
 
+  // ---------- engine settings (configurable knobs) ----------
+
+  private async getSetting(key: string): Promise<string | null> {
+    const r = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    return (r as any)?.value ?? null;
+  }
+  private async setSetting(key: string, value: string) {
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } });
+  }
+
+  /** The user-configurable agent engine knobs (with sane defaults). */
+  async engineSettings() {
+    const [model, autonomy, askTimeoutMin, recall, learn, outputCollectionId] = await Promise.all([
+      this.getSetting('agent.model'),
+      this.getSetting('agent.autonomy'),
+      this.getSetting('agent.askTimeoutMin'),
+      this.getSetting('agent.recall'),
+      this.getSetting('agent.learn'),
+      this.getSetting('agent.outputCollectionId'),
+    ]);
+    return {
+      model: model || '', // '' = use the engine's default model
+      autonomy: autonomy || 'cautious', // cautious | balanced | autopilot
+      askTimeoutMin: askTimeoutMin ? Math.max(1, Number(askTimeoutMin) || 20) : 20,
+      recall: recall == null ? true : recall === 'true',
+      learn: learn == null ? true : learn === 'true',
+      outputCollectionId: outputCollectionId || null,
+    };
+  }
+
+  async setEngineSettings(patch: Record<string, unknown>) {
+    const map: Record<string, string> = {
+      model: 'agent.model',
+      autonomy: 'agent.autonomy',
+      askTimeoutMin: 'agent.askTimeoutMin',
+      recall: 'agent.recall',
+      learn: 'agent.learn',
+      outputCollectionId: 'agent.outputCollectionId',
+    };
+    for (const [k, key] of Object.entries(map)) {
+      if (patch[k] !== undefined) await this.setSetting(key, patch[k] == null ? '' : String(patch[k]));
+    }
+    return this.engineSettings();
+  }
+
+  /** Counts for the status panel. */
+  async engineCounts() {
+    const [agents, scheduled, running] = await Promise.all([
+      this.prisma.agent.count(),
+      this.prisma.agent.count({ where: { enabled: true, NOT: { schedule: null } } }),
+      this.prisma.agentRun.count({ where: { status: { in: ['running', 'awaiting_input'] } } }),
+    ]);
+    return { agents, scheduled, running };
+  }
+
   // ---------- saved agents (BEA-623) ----------
 
   async createAgent(input: { name: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {

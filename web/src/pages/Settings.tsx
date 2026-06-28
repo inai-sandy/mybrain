@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
@@ -39,13 +39,14 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity';
+type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity';
 
 export function Settings({ email }: { email?: string }) {
   const [tab, setTab] = useState<Tab>('integrations');
   const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'integrations', label: 'Integrations', icon: Plug },
+    { id: 'agent', label: 'Agent Engine', icon: Bot },
     { id: 'cli', label: 'CLI', icon: Terminal },
     { id: 'google', label: 'Google', icon: Globe },
     { id: 'models', label: 'Models', icon: Cpu },
@@ -83,6 +84,7 @@ export function Settings({ email }: { email?: string }) {
 
       {tab === 'account' && <AccountSection email={email} />}
       {tab === 'integrations' && <IntegrationsSection />}
+      {tab === 'agent' && <AgentEngineSection />}
       {tab === 'cli' && <CliSection />}
       {tab === 'google' && <GoogleServicesSection />}
       {tab === 'models' && <ModelsSection />}
@@ -172,6 +174,118 @@ function AccountSection({ email }: { email?: string }) {
         <RefreshCw size={15} /> Update app
       </button>
     </section>
+    </div>
+  );
+}
+
+function EngineField({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <div className="min-w-0 sm:pt-1.5">
+        <div className="text-sm font-medium">{label}</div>
+        {hint && <div className="text-xs text-zinc-500">{hint}</div>}
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+function EngineToggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <EngineField label={label} hint={hint}>
+      <button onClick={() => onChange(!checked)} aria-pressed={checked} className={'relative h-6 w-11 rounded-full transition-colors ' + (checked ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
+        <span className={'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ' + (checked ? 'translate-x-5' : 'translate-x-0.5')} />
+      </button>
+    </EngineField>
+  );
+}
+
+function AgentEngineSection() {
+  const toast = useToast();
+  const [engine, setEngine] = useState<any>(null);
+  const [cfg, setCfg] = useState<any>(null);
+  const [models, setModels] = useState<{ value: string; label: string }[]>([]);
+  const [collections, setCollections] = useState<any[]>([]);
+  const [savedAt, setSavedAt] = useState(0);
+  const [restarting, setRestarting] = useState(false);
+
+  const loadEngine = () => fetch('/api/agent/engine').then((r) => r.json()).then(setEngine).catch(() => setEngine({ ok: false }));
+  useEffect(() => {
+    loadEngine();
+    fetch('/api/agent/settings').then((r) => r.json()).then(setCfg).catch(() => setCfg({ model: '', autonomy: 'cautious', askTimeoutMin: 20, recall: true, learn: true, outputCollectionId: null }));
+    fetch('/api/agent/models').then((r) => r.json()).then(setModels).catch(() => setModels([]));
+    fetch('/api/documents/collections').then((r) => r.json()).then((d) => setCollections(Array.isArray(d) ? d : d?.collections || [])).catch(() => setCollections([]));
+  }, []);
+
+  async function save(patch: any) {
+    setCfg((c: any) => ({ ...c, ...patch }));
+    try { const r = await fetch('/api/agent/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }); if (!r.ok) throw new Error(); setSavedAt(Date.now()); } catch { toast('error', 'Could not save'); }
+  }
+  async function restart() {
+    setRestarting(true);
+    try { const r = await fetch('/api/agent/engine/restart', { method: 'POST' }); if (!r.ok) throw new Error(); toast('success', 'Engine restarting…'); } catch { toast('error', 'Could not restart the engine'); }
+    setTimeout(() => { setRestarting(false); loadEngine(); }, 6000);
+  }
+
+  if (!cfg) return <div className="h-48 max-w-2xl animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />;
+  const justSaved = savedAt > 0 && Date.now() - savedAt < 2500;
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 font-semibold"><Bot size={18} className="text-emerald-600" /> Engine status</h2>
+          <button onClick={loadEngine} className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Refresh</button>
+        </div>
+        <dl className="space-y-2.5 text-sm">
+          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Engine</dt><dd className="text-right">{engine?.ok ? <span className="text-emerald-600 dark:text-emerald-400">● Online · Hermes {engine.version}</span> : <span className="text-amber-600">● Offline{engine?.reason ? ` (${engine.reason})` : ''}</span>}</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="shrink-0 text-zinc-500">Inference</dt><dd className="text-right">{engine?.connectedToCodex ? <><span>Connected to <b>Codex</b>{engine.model ? ` · ${engine.model}` : ''}</span><div className="text-xs text-zinc-400">ChatGPT subscription · no API key</div></> : <span className="text-zinc-500">{engine?.model || '—'}</span>}</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Messaging gateway</dt><dd>{engine?.gatewayRunning ? 'On' : <span className="text-zinc-500">Off · no second bot</span>}</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Access</dt><dd className="text-right text-zinc-600 dark:text-zinc-300">Password-protected · internal only</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Agents</dt><dd className="text-right">{engine?.counts ? `${engine.counts.agents} saved · ${engine.counts.scheduled} scheduled · ${engine.counts.running} running` : '—'}</dd></div>
+        </dl>
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <button onClick={restart} disabled={restarting} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            {restarting ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} {restarting ? 'Restarting…' : 'Restart engine'}
+          </button>
+          <span className="text-xs text-zinc-400">Auto-restarts on crash + reboot — use only if it gets stuck.</span>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-semibold">Settings</h2>
+          {justSaved && <span className="flex items-center gap-1 text-xs text-emerald-600"><Check size={14} />Saved</span>}
+        </div>
+        <div className="space-y-5">
+          <EngineField label="Model" hint="Which Codex model runs your agents">
+            <select value={cfg.model ?? ''} onChange={(e) => save({ model: e.target.value })} className="w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              {(models.length ? models : [{ value: '', label: 'Engine default' }]).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </EngineField>
+          <EngineField label="Autonomy" hint="How often it stops to ask you before acting">
+            <select value={cfg.autonomy} onChange={(e) => save({ autonomy: e.target.value })} className="w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="cautious">Cautious — ask before send/delete/share</option>
+              <option value="balanced">Balanced — ask only on the big ones</option>
+              <option value="autopilot">Autopilot — never ask, just notify</option>
+            </select>
+          </EngineField>
+          <EngineField label="Ask-me timeout" hint="How long a question waits before it uses the smart default">
+            <div className="flex items-center gap-2">
+              <input type="number" min={1} max={1440} value={cfg.askTimeoutMin} onChange={(e) => save({ askTimeoutMin: Math.max(1, Number(e.target.value) || 20) })} className="w-24 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+              <span className="text-sm text-zinc-500">minutes</span>
+            </div>
+          </EngineField>
+          <EngineToggle label="Recall my brain before each run" hint="Pulls relevant notes from your memory into the task" checked={!!cfg.recall} onChange={(v) => save({ recall: v })} />
+          <EngineToggle label="Propose what it learned after" hint="Suggests durable facts to keep — you confirm" checked={!!cfg.learn} onChange={(v) => save({ learn: v })} />
+          <EngineField label="Save results to" hint="Default Documents collection for agent outputs">
+            <select value={cfg.outputCollectionId ?? ''} onChange={(e) => save({ outputCollectionId: e.target.value || null })} className="w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="">Documents (no collection)</option>
+              {collections.map((c) => <option key={c.id} value={c.id}>{c.name || c.title}</option>)}
+            </select>
+          </EngineField>
+        </div>
+      </section>
     </div>
   );
 }
