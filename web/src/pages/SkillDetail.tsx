@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload, Rocket, Loader2 } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload, Rocket, Loader2, Trash2, X } from 'lucide-react';
 import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
 
@@ -18,6 +18,7 @@ function shortDate(iso: string | null): string {
 
 export function SkillDetail() {
   const { id } = useParams();
+  const nav = useNavigate();
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState('');
   const [editing, setEditing] = useState(false);
@@ -28,6 +29,9 @@ export function SkillDetail() {
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<{ target: string; installed: boolean; slug: string | null }[] | null>(null);
   const [deploying, setDeploying] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [alsoUninstall, setAlsoUninstall] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
@@ -77,6 +81,21 @@ export function SkillDetail() {
       const dd = await r.json().catch(() => ({ ok: false, message: 'Remove failed' }));
       toast(dd.ok ? 'success' : 'error', dd.message || 'Remove failed');
     } catch { toast('error', 'Remove failed'); } finally { setDeploying(false); load(); loadStatus(); }
+  }
+
+  const installedTargets = (status || []).filter((t) => t.installed);
+  function openDelete() {
+    setAlsoUninstall(installedTargets.length > 0);
+    setConfirmDel(true);
+  }
+  async function doDelete() {
+    setDeleting(true);
+    try {
+      const r = await fetch(`/api/skills/${id}?uninstall=${alsoUninstall}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error();
+      toast('success', alsoUninstall && installedTargets.length ? 'Skill deleted + uninstalled' : 'Skill deleted');
+      nav('/skills');
+    } catch { toast('error', 'Could not delete'); setDeleting(false); }
   }
 
   async function toggleUsing() {
@@ -151,6 +170,9 @@ export function SkillDetail() {
                   </button>
                   <button onClick={startEdit} title="Edit" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-emerald-600 hover:border-emerald-500">
                     <Pencil size={15} />
+                  </button>
+                  <button onClick={openDelete} title="Delete skill" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-rose-500 hover:border-rose-400">
+                    <Trash2 size={15} />
                   </button>
                 </>
               )}
@@ -252,6 +274,33 @@ export function SkillDetail() {
           onClose={() => setSharing(false)}
           onChanged={(s) => setD((prev: any) => (prev ? { ...prev, shared: s } : prev))}
         />
+      )}
+
+      {confirmDel && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" onClick={() => !deleting && setConfirmDel(false)}>
+          <div className="w-full rounded-t-2xl bg-white p-5 shadow-xl sm:max-w-md sm:rounded-xl dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 font-bold text-rose-600"><Trash2 size={18} /> Delete skill</h3>
+              <button onClick={() => setConfirmDel(false)} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-300">Delete <b>{d.title}</b> from your library? This can't be undone.</p>
+            {installedTargets.length > 0 && (
+              <>
+                <p className="mt-3 text-xs text-zinc-500">Installed on: {installedTargets.map((t) => labelFor(t.target)).join(', ')}</p>
+                <label className="mt-2 flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-200">
+                  <input type="checkbox" checked={alsoUninstall} onChange={(e) => setAlsoUninstall(e.target.checked)} className="accent-rose-600" />
+                  Also uninstall it from those servers
+                </label>
+              </>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setConfirmDel(false)} disabled={deleting} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-zinc-700">Cancel</button>
+              <button onClick={doDelete} disabled={deleting} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50">
+                {deleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />} Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

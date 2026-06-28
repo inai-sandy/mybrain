@@ -18,9 +18,11 @@ function fakePrisma(skill: any) {
     skill: {
       findUnique: async ({ where }: any) => (where.id === skill.id ? skill : null),
       update: async ({ data }: any) => { Object.assign(skill, data); return skill; },
+      delete: async () => { skill._deleted = true; return skill; },
     },
   };
 }
+const fakeMem = { deleteDoc: async () => undefined };
 
 describe('SkillsService — multi-target deploy (BEA-634)', () => {
   let dirs: string[];
@@ -33,7 +35,7 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     for (const d of dirs) await fs.mkdir(d, { recursive: true });
     process.env.DEPLOY_SKILLS_DIRS = `sandy:${dirs[0]},hermes:${dirs[1]}`;
     skill = { id: 's1', title: 'Deep Research', slug: null, source: null, content: '---\nname: deep-research\n---\nbody', filePath: null, deployments: '{}' };
-    svc = new SkillsService(fakePrisma(skill) as any, {} as any, {} as any, {} as any);
+    svc = new SkillsService(fakePrisma(skill) as any, fakeMem as any, {} as any, {} as any);
   });
 
   it('deployAll installs into every target and records the per-target map', async () => {
@@ -61,6 +63,20 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     await svc.deploy('s1', 'sandy');
     const entries = await fs.readdir(dirs[0]);
     expect(entries.filter((e) => e.startsWith('deep-research'))).toEqual(['deep-research']);
+  });
+
+  it('remove(uninstall=false) is library-only — deployed folders stay (BEA-636)', async () => {
+    await svc.deployAll('s1');
+    await svc.remove('s1', false);
+    expect(skill._deleted).toBe(true);
+    for (const d of dirs) await fs.stat(join(d, 'deep-research')); // still on disk (no throw)
+  });
+
+  it('remove(uninstall=true) deletes the deployed folders AND the skill (BEA-636)', async () => {
+    await svc.deployAll('s1');
+    await svc.remove('s1', true);
+    expect(skill._deleted).toBe(true);
+    for (const d of dirs) await expect(fs.stat(join(d, 'deep-research'))).rejects.toBeTruthy(); // gone
   });
 
   it('never clobbers a DIFFERENT skill already in the target (renames to -2)', async () => {

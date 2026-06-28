@@ -321,9 +321,20 @@ export class SkillsService {
     return { ok: true, message: `Removed from ${target}` };
   }
 
-  async remove(id: string) {
+  async remove(id: string, uninstall = false) {
     const s = await this.prisma.skill.findUnique({ where: { id } });
     if (!s) return;
+    if (uninstall) {
+      // Also delete the deployed copies from every server folder this skill lives in (BEA-636).
+      const targets = this.deployTargets();
+      const folders = new Set<string>();
+      for (const [t, slug] of Object.entries(this.parseJson(s.deployments))) { const base = targets[t]; if (base && slug) folders.add(join(base, slug)); }
+      if (s.source && s.slug) folders.add(join(s.source, s.slug)); // legacy single-target record
+      for (const dir of folders) {
+        const safe = !dir.includes('..') && Object.values(targets).some((base) => dir.startsWith(base + '/'));
+        if (safe) await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    }
     await this.memory.deleteDoc(s.supermemoryId, s.ragId);
     if (s.filePath) await fs.unlink(s.filePath).catch(() => undefined);
     await this.prisma.skill.delete({ where: { id } });

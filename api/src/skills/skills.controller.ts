@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { SkillsService } from './skills.service';
@@ -115,8 +115,8 @@ export class SkillsController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string) {
-    await this.skills.remove(id);
+  async remove(@Param('id') id: string, @Query('uninstall') uninstall?: string) {
+    await this.skills.remove(id, uninstall === 'true' || uninstall === '1');
     return { ok: true };
   }
 }
