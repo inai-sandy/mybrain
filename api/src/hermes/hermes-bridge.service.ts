@@ -16,6 +16,8 @@ export type StartRunInput = {
   saveCollectionId?: string | null;
   /** Save the final answer as a Document (default true). */
   save?: boolean;
+  /** Quick mode: skip recall + learn-after + document save, just reply concisely (BEA-630). */
+  quick?: boolean;
 };
 
 /**
@@ -105,10 +107,14 @@ export class HermesBridgeService {
 
   /** Synchronous variant (used by tests / callers that want to await the whole run). */
   async execute(runId: string, input: StartRunInput) {
-    await this.agent.appendStep(runId, { label: 'Starting up', status: 'done' });
+    const quick = !!input.quick;
+    await this.agent.appendStep(runId, { label: quick ? 'Starting up (quick answer)' : 'Starting up', status: 'done' });
     const cfg = await this.agent.engineSettings();
     const timeoutMs = cfg.askTimeoutMin * 60_000;
-    const prompt = cfg.recall ? await this.recall(runId, input.prompt) : input.prompt;
+    // Recall still runs in quick mode (it's ~1s and keeps answers grounded in the user's brain);
+    // quick mode only skips the expensive learn-after + document save, and asks for a short answer.
+    let prompt = cfg.recall ? await this.recall(runId, input.prompt) : input.prompt;
+    if (quick) prompt += '\n\nAnswer directly and concisely from the context above and what you know. Keep it short. Do not save anything.';
 
     const handlers: HermesRunHandlers = {
       onStep: (s) => void this.agent.appendStep(runId, s).catch(() => undefined),
@@ -144,13 +150,24 @@ export class HermesBridgeService {
       },
     };
 
+    // Terminal-style heartbeat: gpt-5.5 on Codex answers in one lump with no streaming, so without
+    // this the run looks frozen for a minute+. Log that we sent it, then a "still working" tick.
+    await this.agent.appendStep(runId, { label: `Sent to ${cfg.model || 'gpt-5.5'} · Codex`, status: 'running', kind: 'log' }).catch(() => undefined);
+    const startedAt = Date.now();
+    const heartbeat = setInterval(() => {
+      const s = Math.round((Date.now() - startedAt) / 1000);
+      void this.agent.appendStep(runId, { label: `Still working… ${fmtElapsed(s)}`, status: 'running', kind: 'log' }).catch(() => undefined);
+    }, 15_000);
+
     let result;
     try {
       result = await this.hermes.runTurn(prompt, handlers, { title: input.title, model: cfg.model || undefined });
     } catch (e: any) {
+      clearInterval(heartbeat);
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
       return;
     }
+    clearInterval(heartbeat);
 
     if (result.status === 'error') {
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(result.error) });
@@ -158,8 +175,10 @@ export class HermesBridgeService {
     }
 
     const text = (result.finalText || '').trim();
-    if (text && cfg.learn) await this.proposeLearnings(runId, text);
-    if (input.save !== false && text) {
+    await this.agent.appendStep(runId, { label: `Answer received · ${text.length.toLocaleString()} chars · ${fmtElapsed(Math.round((Date.now() - startedAt) / 1000))}`, status: 'done', kind: 'log' }).catch(() => undefined);
+    // Quick mode skips the extra learn-after AI call and the document save — just return the answer.
+    if (!quick && text && cfg.learn) await this.proposeLearnings(runId, text);
+    if (!quick && input.save !== false && text) {
       try {
         const doc = await this.documents.create({
           title: input.title || 'Agent result',
@@ -170,14 +189,21 @@ export class HermesBridgeService {
         });
         await this.agent.attachOutput(runId, doc.id);
         await this.agent.appendStep(runId, { label: 'Saved to Documents', status: 'done', detail: doc.title });
-        await this.agent.finishRun(runId, { status: 'done', outputDocId: doc.id });
+        await this.agent.finishRun(runId, { status: 'done', outputDocId: doc.id, resultText: text });
         return;
       } catch (e: any) {
         await this.agent.appendStep(runId, { label: 'Could not save the document', status: 'failed', detail: e?.message }).catch(() => undefined);
       }
     }
-    await this.agent.finishRun(runId, { status: 'done' });
+    await this.agent.finishRun(runId, { status: 'done', resultText: text });
   }
+}
+
+/** Format seconds as m:ss for the terminal heartbeat. */
+function fmtElapsed(s: number): string {
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
 }
 
 function friendlyError(msg?: string): string {

@@ -491,6 +491,7 @@ model AgentRun {
   stepLog     String      @default("[]") // JSON array of step records (mirror of Hermes events)
   learnings   String      @default("[]") // JSON [{text,status:proposed|kept|forgotten,memId?}] — what the run learned (BEA-624)
   outputDocId String? // saved Document id
+  resultText  String? // the agent's final answer text, shown inline on the run (BEA-630)
   error       String?
   startedAt   DateTime    @default(now())
   endedAt     DateTime?

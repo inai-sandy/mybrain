@@ -88,6 +88,7 @@ export function Agents() {
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [starting, setStarting] = useState(false);
   const [saveResult, setSaveResult] = useState(true);
+  const [quick, setQuick] = useState(false);
   const [agents, setAgents] = useState<any[] | null>(null);
   const [showNew, setShowNew] = useState(false);
 
@@ -121,7 +122,7 @@ export function Agents() {
     if (!text) { toast('error', 'Type a task for the agent first'); return; }
     setStarting(true);
     try {
-      const r = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, title: title.trim() || undefined, save: saveResult }) });
+      const r = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text, title: title.trim() || undefined, save: quick ? false : saveResult, quick }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not start');
       const row = await r.json();
       nav(`/agent/runs/${row.id}`);
@@ -179,10 +180,16 @@ export function Agents() {
             Run
           </button>
         </div>
-        <label className="flex items-center gap-2 text-xs text-zinc-500">
-          <input type="checkbox" checked={saveResult} onChange={(e) => setSaveResult(e.target.checked)} className="accent-emerald-600" />
-          Save the result to Documents (in an “Agent outputs” collection)
-        </label>
+        <div className="flex flex-col gap-2 text-xs text-zinc-500 sm:flex-row sm:items-center sm:gap-5">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={quick} onChange={(e) => setQuick(e.target.checked)} className="accent-emerald-600" />
+            <span><b className="font-medium text-zinc-700 dark:text-zinc-300">Quick answer</b> — reply fast, skip research &amp; saving</span>
+          </label>
+          <label className={'flex items-center gap-2 ' + (quick ? 'opacity-40' : '')}>
+            <input type="checkbox" checked={saveResult && !quick} disabled={quick} onChange={(e) => setSaveResult(e.target.checked)} className="accent-emerald-600" />
+            Save to Documents
+          </label>
+        </div>
         {engine && !engine.ok && <p className="text-xs text-amber-600">The agent engine isn’t reachable right now, so a run may not start.</p>}
       </div>
 

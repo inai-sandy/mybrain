@@ -70,14 +70,15 @@ export class HermesController {
 
   /** Start an agent run: kicks off Hermes in the background, returns the run row immediately. */
   @Post('run')
-  run(@Body() body: { prompt?: string; title?: string; agentId?: string; saveCollectionId?: string | null; save?: boolean }) {
+  run(@Body() body: { prompt?: string; title?: string; agentId?: string; saveCollectionId?: string | null; save?: boolean; quick?: boolean }) {
     if (!body?.prompt?.trim()) throw new BadRequestException('A prompt is required');
     return this.bridge.startRun({
       prompt: body.prompt.trim(),
       title: body.title?.trim() || undefined,
       agentId: body.agentId,
       saveCollectionId: body.saveCollectionId ?? null,
-      save: body.save,
+      save: body.quick ? false : body.save,
+      quick: body.quick,
     });
   }
 }

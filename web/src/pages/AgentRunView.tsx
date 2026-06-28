@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles, Terminal, ChevronDown } from 'lucide-react';
 import { StatusBadge } from './Agents';
+
+/** Seconds → m:ss for the live elapsed timer. */
+function mmss(sec: number): string {
+  const m = Math.floor(sec / 60);
+  return `${m}:${String(sec % 60).padStart(2, '0')}`;
+}
 
 type Step = { label: string; status?: string; detail?: string; kind?: string; at?: string };
 type Waitpoint = { id: string; question: string; kind: string; options: any; status: string; defaultValue?: string | null };
@@ -14,6 +20,7 @@ type Run = {
   waitpoints?: Waitpoint[];
   learnings?: { text: string; status: string }[];
   outputDocId?: string | null;
+  resultText?: string | null;
   error?: string | null;
   startedAt: string;
   endedAt?: string | null;
@@ -81,7 +88,22 @@ export function AgentRunView() {
   const [keepSel, setKeepSel] = useState<Record<number, boolean>>({});
   const [savingLearn, setSavingLearn] = useState(false);
   const steps = run?.stepLog || [];
+  const timeline = steps.filter((s) => s.kind !== 'log'); // curated steps; raw log lines live in the Terminal
   const proposed = (run?.learnings || []).filter((l) => l.status === 'proposed');
+
+  // Live elapsed clock — ticks each second while the run is active so it never looks frozen.
+  const [tickNow, setTickNow] = useState(Date.now());
+  useEffect(() => {
+    const isActive = run && (run.status === 'running' || run.status === 'awaiting_input');
+    if (!isActive) return;
+    const t = setInterval(() => setTickNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [run?.status]);
+  const elapsedSec = run ? Math.max(0, Math.round(((run.endedAt ? new Date(run.endedAt).getTime() : tickNow) - new Date(run.startedAt).getTime()) / 1000)) : 0;
+
+  // Auto-scroll the terminal to the newest line.
+  const termRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (termRef.current) termRef.current.scrollTop = termRef.current.scrollHeight; }, [steps.length]);
 
   async function saveLearnings() {
     setSavingLearn(true);
@@ -127,11 +149,11 @@ export function AgentRunView() {
 
           {/* Activity / plan */}
           <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            {steps.length === 0 ? (
+            {timeline.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Getting started…</div>
             ) : (
               <ol className="space-y-2.5">
-                {steps.map((s, i) => (
+                {timeline.map((s, i) => (
                   <li key={i} className="flex items-start gap-2.5">
                     <span className="mt-0.5 shrink-0"><StepIcon status={s.status} /></span>
                     <div className="min-w-0">
@@ -143,12 +165,38 @@ export function AgentRunView() {
                 {active && (
                   <li className="flex items-center gap-2.5 text-sm text-zinc-400">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Working…
+                    Working… {mmss(elapsedSec)}
                   </li>
                 )}
               </ol>
             )}
           </div>
+
+          {/* Terminal — the raw engine activity, expandable (auto-open while running) */}
+          {steps.length > 0 && (
+            <details className="group overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900" open={active}>
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm [&::-webkit-details-marker]:hidden">
+                <Terminal className="h-4 w-4 text-zinc-500" />
+                <span className="font-medium">Terminal</span>
+                {active ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />Working · {mmss(elapsedSec)}</span>
+                ) : (
+                  <span className="text-xs text-zinc-400">Finished in {mmss(elapsedSec)}</span>
+                )}
+                <ChevronDown className="ml-auto h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" />
+              </summary>
+              <div ref={termRef} className="max-h-72 overflow-auto border-t border-zinc-100 bg-zinc-950 px-4 py-3 font-mono text-xs leading-relaxed text-zinc-300 dark:border-zinc-800">
+                {steps.map((s, i) => (
+                  <div key={i} className="flex gap-2">
+                    <span className="shrink-0 text-zinc-600">{s.at ? new Date(s.at).toLocaleTimeString('en-GB', { hour12: false }) : '--:--:--'}</span>
+                    <span className={'shrink-0 ' + (s.status === 'failed' ? 'text-red-400' : s.status === 'running' ? 'text-amber-300' : 'text-emerald-400')}>{s.status === 'failed' ? '✗' : s.status === 'running' ? '·' : '✓'}</span>
+                    <span className="min-w-0 break-words">{s.label}{s.detail ? `  — ${s.detail}` : ''}</span>
+                  </div>
+                ))}
+                {active && <div className="mt-0.5 animate-pulse text-zinc-500">▌</div>}
+              </div>
+            </details>
+          )}
 
           {/* Pending question — answer here or on Telegram */}
           {pending && (
@@ -175,6 +223,12 @@ export function AgentRunView() {
           )}
 
           {/* Result */}
+          {run.status === 'done' && run.resultText && (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Answer</div>
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{run.resultText}</div>
+            </div>
+          )}
           {run.status === 'done' && run.outputDocId && (
             <div className="flex items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
               <FileText className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -182,7 +236,7 @@ export function AgentRunView() {
               <button onClick={() => nav(`/documents/${run.outputDocId}`)} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500">Open</button>
             </div>
           )}
-          {run.status === 'done' && !run.outputDocId && (
+          {run.status === 'done' && !run.outputDocId && !run.resultText && (
             <div className="rounded-2xl border border-zinc-200 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">The agent finished.</div>
           )}
           {run.status === 'failed' && (
