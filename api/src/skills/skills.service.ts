@@ -16,9 +16,25 @@ export function parseSkillMd(md: string): { name?: string; description?: string 
   const m = (md || '').match(/^\s*---\s*([\s\S]*?)\s*---/);
   if (!m) return {};
   const fm = m[1];
-  const name = (fm.match(/^name:\s*(.+)$/m)?.[1] || '').trim().replace(/^["']|["']$/g, '');
-  const description = (fm.match(/^description:\s*(.+)$/m)?.[1] || '').trim().replace(/^["']|["']$/g, '');
-  return { name: name || undefined, description: description || undefined };
+  const name = (fm.match(/^name:\s*(.+)$/m)?.[1] || '').trim().replace(/^["']|["']$/g, '') || undefined;
+  let description: string | undefined;
+  const dm = fm.match(/^description:\s*(.*)$/m);
+  if (dm) {
+    let val = dm[1].trim().replace(/^["']|["']$/g, '');
+    // YAML block scalar (description: |- / >) — gather the following indented lines.
+    if (/^[|>][+-]?$/.test(val)) {
+      const lines = fm.split('\n');
+      const idx = lines.findIndex((l) => /^description:/.test(l));
+      const collected: string[] = [];
+      for (let i = idx + 1; i < lines.length; i++) {
+        if (/^\s+\S/.test(lines[i]) || lines[i].trim() === '') collected.push(lines[i].trim());
+        else break;
+      }
+      val = collected.join(' ').trim();
+    }
+    description = val || undefined;
+  }
+  return { name, description };
 }
 
 function skillsDir() {
@@ -245,6 +261,23 @@ export class SkillsService {
 
   private parseJson(v?: string | null): Record<string, string> {
     try { return v ? JSON.parse(v) : {}; } catch { return {}; }
+  }
+
+  /** Public wrapper so the GitHub importer can reuse the AI description (BEA-635). */
+  describeContent(content: string, fallback?: string): Promise<string> {
+    return this.aiDescribe(content || '', fallback);
+  }
+
+  /** Attach a pre-built zip (a skill folder with its assets) to a skill so deploy() extracts the full folder (BEA-635). */
+  async attachZip(id: string, zipPath: string): Promise<void> {
+    await this.prisma.skill.update({ where: { id }, data: { filePath: zipPath } });
+  }
+
+  /** Is a skill with this title already in the library? (case-insensitive) */
+  async existsByTitle(title: string): Promise<boolean> {
+    const norm = title.trim().toLowerCase();
+    const rows = await this.prisma.skill.findMany({ select: { title: true } });
+    return rows.some((x) => x.title.trim().toLowerCase() === norm);
   }
 
   /** Deploy to ALL targets at once — one-click "install everywhere" incl. the Hermes agent (BEA-634). */
