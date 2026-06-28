@@ -18,6 +18,8 @@ export type StartRunInput = {
   save?: boolean;
   /** Quick mode: skip recall + learn-after + document save, just reply concisely (BEA-630). */
   quick?: boolean;
+  /** The Outcome (definition of done) to grade this run against (BEA-641). */
+  rubric?: string;
 };
 
 /**
@@ -79,6 +81,26 @@ export class HermesBridgeService {
         await this.agent.appendStep(runId, { label: `Noted ${facts.length} thing${facts.length > 1 ? 's' : ''} I learned`, status: 'done' }).catch(() => undefined);
       }
     } catch { /* learnings are best-effort */ }
+  }
+
+  /** Grade-and-iterate (BEA-641): score the result against the agent's Outcome (definition of done). */
+  private async gradeRun(rubric: string, result: string): Promise<any | null> {
+    try {
+      const out = await this.llm.complete(
+        `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
+        400,
+        'agent-grade',
+      );
+      const m = (out || '').match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      const g = JSON.parse(m[0]);
+      const verdict = ['pass', 'partial', 'fail'].includes(g.verdict) ? g.verdict : 'partial';
+      const score = Math.max(0, Math.min(100, Math.round(Number(g.score) || 0)));
+      const criteria = Array.isArray(g.criteria) ? g.criteria.slice(0, 8).map((c: any) => ({ text: String(c.text || '').slice(0, 160), met: !!c.met })) : [];
+      return { verdict, score, criteria, notes: String(g.notes || '').slice(0, 240) };
+    } catch {
+      return null;
+    }
   }
 
   /** Pause the run on a durable question, notify over Telegram, and wait for the answer (or the timeout default). */
@@ -178,6 +200,16 @@ export class HermesBridgeService {
     await this.agent.appendStep(runId, { label: `Answer received · ${text.length.toLocaleString()} chars · ${fmtElapsed(Math.round((Date.now() - startedAt) / 1000))}`, status: 'done', kind: 'log' }).catch(() => undefined);
     // Quick mode skips the extra learn-after AI call and the document save — just return the answer.
     if (!quick && text && cfg.learn) await this.proposeLearnings(runId, text);
+    // Grade-and-iterate (BEA-641): score the result against the agent's Outcome, if one is set.
+    let gradeJson: string | undefined;
+    if (!quick && input.rubric && text) {
+      await this.agent.appendStep(runId, { label: 'Checking against your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
+      const g = await this.gradeRun(input.rubric, text);
+      if (g) {
+        gradeJson = JSON.stringify(g);
+        await this.agent.appendStep(runId, { label: `Outcome: ${g.verdict} · ${g.score}/100`, status: g.verdict === 'fail' ? 'failed' : g.verdict === 'partial' ? 'info' : 'done' }).catch(() => undefined);
+      }
+    }
     if (!quick && input.save !== false && text) {
       try {
         const doc = await this.documents.create({
@@ -189,13 +221,13 @@ export class HermesBridgeService {
         });
         await this.agent.attachOutput(runId, doc.id);
         await this.agent.appendStep(runId, { label: 'Saved to Documents', status: 'done', detail: doc.title });
-        await this.agent.finishRun(runId, { status: 'done', outputDocId: doc.id, resultText: text });
+        await this.agent.finishRun(runId, { status: 'done', outputDocId: doc.id, resultText: text, grade: gradeJson });
         return;
       } catch (e: any) {
         await this.agent.appendStep(runId, { label: 'Could not save the document', status: 'failed', detail: e?.message }).catch(() => undefined);
       }
     }
-    await this.agent.finishRun(runId, { status: 'done', resultText: text });
+    await this.agent.finishRun(runId, { status: 'done', resultText: text, grade: gradeJson });
   }
 }
 

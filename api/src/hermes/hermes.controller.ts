@@ -42,7 +42,7 @@ export class HermesController {
   async runAgent(@Param('id') id: string) {
     const agent = await this.agent.getAgent(id);
     if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');
-    return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId });
+    return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric });
   }
 
   /** Rich engine status for the settings panel + the Agents "engine online" pill. */

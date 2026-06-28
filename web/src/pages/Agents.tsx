@@ -39,6 +39,7 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
   const toast = useToast();
   const [name, setName] = useState('');
   const [task, setTask] = useState('');
+  const [rubric, setRubric] = useState('');
   const [every, setEvery] = useState('manual');
   const [at, setAt] = useState('07:00');
   const [saving, setSaving] = useState(false);
@@ -52,7 +53,7 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
     else if (every === 'hour') { schedule = { every: 'hour', minute: Number(at.split(':')[1]) || 0 }; scheduleText = `Every hour at :${at.split(':')[1] || '00'}`; }
     setSaving(true);
     try {
-      const r = await fetch('/api/agent/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), prompt: task.trim(), schedule, scheduleText }) });
+      const r = await fetch('/api/agent/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, schedule, scheduleText }) });
       if (!r.ok) throw new Error('Could not save');
       onCreated();
     } catch (e: any) { toast('error', e?.message || 'Could not save'); } finally { setSaving(false); }
@@ -62,6 +63,7 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
     <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Agent name (e.g. Morning Brief)" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
       <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} placeholder="What should it do each time it runs?" className="w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
+      <textarea value={rubric} onChange={(e) => setRubric(e.target.value)} rows={2} placeholder="Outcome — what does a good result look like? (each run is graded against this; optional)" className="w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
       <div className="flex flex-wrap items-center gap-2">
         <select value={every} onChange={(e) => setEvery(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
           <option value="manual">Manual (run by hand)</option>

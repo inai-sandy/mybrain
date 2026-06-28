@@ -178,12 +178,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
         name: input.name.trim().slice(0, 120),
         prompt: input.prompt?.trim() || null,
+        rubric: input.rubric?.trim() || null,
         icon: input.icon || null,
         description: input.description || null,
         autonomy: input.autonomy || 'cautious',
@@ -207,12 +208,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeAgent(a);
   }
 
-  async updateAgent(id: string, patch: { name?: string; prompt?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
     const data: any = {};
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
     if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
+    if (patch.rubric !== undefined) data.rubric = patch.rubric?.trim() || null;
     if (patch.icon !== undefined) data.icon = patch.icon || null;
     if (patch.description !== undefined) data.description = patch.description || null;
     if (patch.autonomy !== undefined) data.autonomy = patch.autonomy;
@@ -254,7 +256,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(updated);
   }
 
-  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string; resultText?: string } = {}) {
+  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string; resultText?: string; grade?: string } = {}) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
     if (!run) throw new NotFoundException('Run not found');
     const updated = await this.prisma.agentRun.update({
@@ -263,6 +265,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         status: patch.status ?? 'done',
         outputDocId: patch.outputDocId ?? run.outputDocId,
         resultText: patch.resultText ?? run.resultText,
+        grade: patch.grade ?? run.grade,
         error: patch.error ?? null,
         endedAt: new Date(),
       },
@@ -406,6 +409,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       ...run,
       stepLog: this.parse(run.stepLog, [] as any[]),
       learnings: this.parse(run.learnings, [] as any[]),
+      grade: run.grade ? this.parse(run.grade, null) : null,
       waitpoints: Array.isArray(run.waitpoints) ? run.waitpoints.map((w: any) => this.shapeWaitpoint(w)) : undefined,
     };
   }
