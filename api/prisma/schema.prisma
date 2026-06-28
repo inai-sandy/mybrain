@@ -772,3 +772,13 @@ model MindChain {
 
   @@index([status])
 }
+
+/// A visual flow (Phase 2 / n8n-style canvas, BEA-644). graph = React Flow {nodes, edges} JSON.
+model Flow {
+  id        String   @id @default(uuid())
+  name      String   @default("Untitled flow")
+  question  String? // the entry question the flow answers
+  graph     String   @default("{\"nodes\":[],\"edges\":[]}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
