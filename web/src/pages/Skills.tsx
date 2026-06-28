@@ -81,9 +81,8 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       const r = await fetch('/api/skills/import/github/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: found!.token, paths, deploy: deployAfter, sourceUrl: url }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { toast('error', d.message || 'Import failed'); return; }
-      const ok = (d.imported || []).filter((x: any) => x.id).length;
-      const skipped = (d.imported || []).filter((x: any) => x.skipped).length;
-      toast('success', `Imported ${ok} skill${ok !== 1 ? 's' : ''}${deployAfter ? ' + deployed everywhere' : ''}${skipped ? ` · ${skipped} skipped` : ''}`);
+      const n = d.started ?? paths.length;
+      toast('success', `Importing ${n} skill${n !== 1 ? 's' : ''}${deployAfter ? ' + deploying' : ''} — they'll appear in a moment.`);
       onCreated(); onClose();
     } catch { toast('error', 'Import failed'); } finally { setImporting(false); }
   }
@@ -245,6 +244,11 @@ export function Skills() {
       setLoading(false);
     }
   }
+  // After a background GitHub import, refresh a few times so the new skills stream in (BEA-639).
+  function loadSoon() {
+    load();
+    [3000, 8000, 16000, 28000].forEach((ms) => setTimeout(load, ms));
+  }
   useEffect(() => {
     load();
   }, []);
@@ -372,7 +376,7 @@ export function Skills() {
         <span className="hidden sm:inline font-medium pr-1">Add skill</span>
       </button>
 
-      {adding && <AddSkillModal onClose={() => setAdding(false)} onCreated={load} />}
+      {adding && <AddSkillModal onClose={() => setAdding(false)} onCreated={loadSoon} />}
       {sharing && (
         <ShareDialog
           id={sharing.id}

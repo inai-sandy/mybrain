@@ -140,39 +140,49 @@ export class SkillsImportService {
     return { token, repo: `${owner}/${repo}`, skills: unique };
   }
 
-  /** Step 2: import the chosen skills (folder + SKILL.md), optionally deploy everywhere, then clean up. */
-  async confirm(token: string, paths: string[], deploy: boolean, sourceUrl?: string): Promise<{ imported: { name: string; id?: string; skipped?: string; deployed?: boolean }[] }> {
+  /**
+   * Step 2: import the chosen skills. Runs in the BACKGROUND and returns immediately so a big batch
+   * never hangs the request past the proxy timeout (BEA-639). The skills appear in the list as they
+   * finish; the frontend refreshes to show them.
+   */
+  async confirm(token: string, paths: string[], deploy: boolean, sourceUrl?: string): Promise<{ started: number }> {
     if (!token || /[^a-f0-9]/i.test(token)) throw new BadRequestException('Bad import token.');
     const tokenDir = join(importsDir(), token);
-    const top = await fs.readdir(tokenDir, { withFileTypes: true }).catch(() => { throw new BadRequestException('This import expired — fetch the URL again.'); });
-    const rootName = top.find((e) => e.isDirectory())?.name;
-    const root = rootName ? join(tokenDir, rootName) : tokenDir;
-    const results: { name: string; id?: string; skipped?: string; deployed?: boolean }[] = [];
-    for (const rel of paths || []) {
-      const safe = String(rel).replace(/\.\.+/g, '').replace(/^\/+/, '');
-      const folder = safe === '.' ? root : join(root, safe);
-      if (!folder.startsWith(root)) { results.push({ name: safe, skipped: 'bad path' }); continue; }
-      const mdPath = join(folder, 'SKILL.md');
-      const content = await fs.readFile(mdPath, 'utf8').catch(() => null);
-      if (content == null) { results.push({ name: safe, skipped: 'no SKILL.md' }); continue; }
-      const name = (parseSkillMd(content).name || basename(folder)).slice(0, 120);
-      try {
-        const skill = await this.skills.create({ title: name, content, origin: 'downloaded', platform: 'code', downloadUrl: sourceUrl });
-        // zip the whole folder (assets/references survive) and attach it as the deploy payload
-        const zipPath = join(skillsDir(), `import-${skill.id}.zip`);
-        await fs.mkdir(skillsDir(), { recursive: true });
-        const zip = new AdmZip();
-        zip.addLocalFolder(folder);
-        zip.writeZip(zipPath);
-        await this.skills.attachZip(skill.id, zipPath);
-        let deployed = false;
-        if (deploy) { const d = await this.skills.deployAll(skill.id); deployed = d.ok; }
-        results.push({ name, id: skill.id, deployed });
-      } catch (e: any) {
-        results.push({ name, skipped: e?.message?.includes('already exists') ? 'already in library' : (e?.message || 'failed') });
+    await fs.readdir(tokenDir).catch(() => { throw new BadRequestException('This import expired — fetch the URL again.'); });
+    const list = (paths || []).map(String).filter(Boolean);
+    void this.runImport(tokenDir, list, deploy, sourceUrl).catch((e) => this.log.error(`import run failed: ${e?.message || e}`));
+    return { started: list.length };
+  }
+
+  private async runImport(tokenDir: string, paths: string[], deploy: boolean, sourceUrl?: string): Promise<void> {
+    try {
+      const top = await fs.readdir(tokenDir, { withFileTypes: true });
+      const rootName = top.find((e) => e.isDirectory())?.name;
+      const root = rootName ? join(tokenDir, rootName) : tokenDir;
+      await fs.mkdir(skillsDir(), { recursive: true });
+      for (const rel of paths) {
+        const safe = rel.replace(/\.\.+/g, '').replace(/^\/+/, '');
+        const folder = safe === '.' ? root : join(root, safe);
+        if (!folder.startsWith(root)) continue;
+        const content = await fs.readFile(join(folder, 'SKILL.md'), 'utf8').catch(() => null);
+        if (content == null) continue;
+        const name = (parseSkillMd(content).name || basename(folder)).slice(0, 120);
+        try {
+          // aiDescribe:false → use the SKILL.md's own description; skipping the per-skill LLM call is what
+          // takes the import from ~30s/skill down to a couple seconds.
+          const skill = await this.skills.create({ title: name, content, origin: 'downloaded', platform: 'code', downloadUrl: sourceUrl, aiDescribe: false });
+          const zipPath = join(skillsDir(), `import-${skill.id}.zip`);
+          const zip = new AdmZip();
+          zip.addLocalFolder(folder);
+          zip.writeZip(zipPath);
+          await this.skills.attachZip(skill.id, zipPath);
+          if (deploy) await this.skills.deployAll(skill.id);
+        } catch (e: any) {
+          this.log.warn(`skipped "${name}": ${e?.message || e}`);
+        }
       }
+    } finally {
+      await fs.rm(tokenDir, { recursive: true, force: true }).catch(() => undefined);
     }
-    await fs.rm(tokenDir, { recursive: true, force: true }).catch(() => undefined);
-    return { imported: results };
   }
 }

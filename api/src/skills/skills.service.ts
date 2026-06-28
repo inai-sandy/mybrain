@@ -41,7 +41,7 @@ function skillsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'skills');
 }
 
-type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string };
+type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string; aiDescribe?: boolean };
 
 @Injectable()
 export class SkillsService {
@@ -91,7 +91,12 @@ export class SkillsService {
     const dup = (await this.prisma.skill.findMany({ select: { id: true, title: true } })).find((x) => x.title.trim().toLowerCase() === norm);
     if (dup) throw new BadRequestException(`A skill named “${title}” already exists — open it to update it instead.`);
     // AI-generated description (from the SKILL.md content); fall back to provided/frontmatter text.
-    const description = await this.aiDescribe(input.content || '', input.description?.trim() || parsed.description);
+    // GitHub import passes aiDescribe:false to skip the per-skill LLM call (the import bottleneck) and
+    // use the SKILL.md's own frontmatter description instead (BEA-639).
+    const fallbackDesc = (input.description?.trim() || parsed.description || '').trim();
+    const description = input.aiDescribe === false
+      ? (fallbackDesc || 'Imported skill.').slice(0, 600)
+      : await this.aiDescribe(input.content || '', fallbackDesc || undefined);
     const origin = input.origin === 'downloaded' ? 'downloaded' : 'created';
     const platform = input.platform === 'chat' ? 'chat' : 'code';
     const skill = await this.prisma.skill.create({
