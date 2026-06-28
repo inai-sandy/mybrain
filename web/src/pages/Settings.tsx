@@ -280,7 +280,24 @@ function AgentEngineSection() {
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-xs text-zinc-400">Transport: {engine.tools.transport}</p>
+          {engine.tools.connection ? (
+            <details className="group mt-3">
+              <summary className="flex cursor-pointer list-none items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700 [&::-webkit-details-marker]:hidden dark:hover:text-zinc-300">
+                <ChevronDown size={13} className="transition-transform group-open:rotate-180" />
+                Connection details
+              </summary>
+              <dl className="mt-2 space-y-1.5 rounded-lg border border-zinc-100 bg-zinc-50/60 p-3 text-xs dark:border-zinc-800 dark:bg-zinc-800/30">
+                {([['Command', 'command'], ['Config', 'config'], ['Endpoint', 'endpoint'], ['Transport', 'transport']] as const).map(([label, key]) => (
+                  <div key={key} className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
+                    <dt className="shrink-0 text-zinc-400 sm:w-20">{label}</dt>
+                    <dd className="break-all font-mono text-zinc-600 dark:text-zinc-300">{engine.tools.connection[key]}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          ) : (
+            <p className="mt-3 text-xs text-zinc-400">Transport: {engine.tools.transport}</p>
+          )}
         </section>
       )}
 

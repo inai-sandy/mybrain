@@ -34,6 +34,14 @@ export class AgentToolsService {
         { name: 'save_document', desc: 'Write a markdown document into your Documents library' },
         { name: 'remember', desc: 'Save a durable fact into your long-term memory' },
       ],
+      // Raw connection details for the settings disclosure (BEA-628). These describe the host
+      // MCP server the Codex runtime spawns; the app itself is just the endpoint it proxies to.
+      connection: {
+        command: '/usr/bin/node /home/sandy/mybrain-mcp/server.mjs',
+        config: '~/.codex/config.toml [mcp_servers.mybrain]',
+        endpoint: 'mybrain.1site.ai/api/agent/tools/*',
+        transport: 'stdio · node',
+      },
     };
   }
 
