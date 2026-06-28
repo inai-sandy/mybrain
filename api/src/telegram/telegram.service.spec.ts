@@ -46,7 +46,8 @@ function make() {
   const chat: any = { askOnce: jest.fn(async () => ({ answer: 'Here is what you saved.', sources: [] })) };
   const llm: any = { completeWith: jest.fn(async () => 'The proposal is still untouched — open it and write one paragraph now.') };
   const prompts: any = { get: async (k: string) => `[${k}]` };
-  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items, voice, llm, prompts), settings, prisma, tasks, daily, chat, items, voice, sent, llm };
+  const agent: any = { getWaitpointById: jest.fn(async () => null), answerById: jest.fn(async () => ({ applied: true })) };
+  return { svc: new TelegramService(prisma, connectors, tasks, daily, chat, items, voice, llm, prompts, agent), settings, prisma, tasks, daily, chat, items, voice, sent, llm };
 }
 
 describe('TelegramService', () => {

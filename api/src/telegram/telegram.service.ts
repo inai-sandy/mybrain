@@ -10,6 +10,7 @@ import { DailyService } from '../daily/daily.service';
 import { ChatService } from '../chat/chat.service';
 import { ItemsService } from '../items/items.service';
 import { VoiceService } from '../voice/voice.service';
+import { AgentService } from '../agent/agent.service';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -70,7 +71,32 @@ export class TelegramService implements OnModuleInit {
     private readonly voice: VoiceService,
     private readonly llm: LlmService,
     private readonly prompts: PromptsService,
+    private readonly agent: AgentService,
   ) {}
+
+  /** Ask the owner a mid-run agent question with tap buttons (BEA-620). */
+  async pushAgentQuestion(args: { runTitle?: string; waitpointId: string; question: string; kind: string; options: unknown }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    const title = this.esc(args.runTitle || 'Your agent');
+    let rows: any[][];
+    if (args.kind === 'approve_edit_reject') {
+      rows = [[{ text: '✅ Approve', callback_data: `agent:${args.waitpointId}:__approve` }, { text: '🚫 Reject', callback_data: `agent:${args.waitpointId}:__reject` }]];
+    } else {
+      const opts = Array.isArray(args.options) ? (args.options as any[]) : [];
+      rows = opts.slice(0, 6).map((o, i) => [{ text: this.agentBtnLabel(o), callback_data: `agent:${args.waitpointId}:${i}` }]);
+      if (rows.length === 0) rows = [[{ text: 'Proceed', callback_data: `agent:${args.waitpointId}:__default` }]];
+    }
+    await this.send(owner, `🤖 <b>${title} needs you</b>\n\n${this.esc(args.question)}`, { reply_markup: { inline_keyboard: rows } });
+  }
+
+  private agentBtnLabel(o: any): string {
+    const s = typeof o === 'string' ? o : o?.label || o?.text || o?.value || JSON.stringify(o);
+    return String(s).slice(0, 60);
+  }
+  private agentOptValue(o: any): string {
+    return typeof o === 'string' ? o : o?.value ?? o?.label ?? String(o);
+  }
 
   async onModuleInit() {
     // If a token is already configured, make sure the webhook + command menu are registered.
@@ -559,6 +585,26 @@ export class TelegramService implements OnModuleInit {
     const day = this.dayKey(tz);
 
     const ack = (text?: string) => this.api('answerCallbackQuery', { callback_query_id: cb.id, text });
+
+    // --- agent mid-run question (BEA-620) ---
+    if (data.startsWith('agent:')) {
+      const [, wpId, sel] = data.split(':');
+      const wp = await this.agent.getWaitpointById(wpId);
+      if (!wp) { await ack('That question expired'); if (msgId) await this.editMsg(chatId, msgId, '⌛ That agent question expired.'); return; }
+      if (wp.status !== 'pending') { await ack('Already answered'); return; }
+      let answer: string;
+      if (sel === '__approve') answer = 'approve';
+      else if (sel === '__reject') answer = 'reject';
+      else if (sel === '__default') answer = wp.defaultValue ?? 'proceed';
+      else {
+        const opts = Array.isArray(wp.options) ? wp.options : [];
+        answer = this.agentOptValue(opts[Number(sel)] ?? wp.defaultValue ?? 'proceed');
+      }
+      const res = await this.agent.answerById(wpId, answer, 'telegram');
+      await ack(res.applied ? 'Got it 👍' : 'Already answered');
+      if (msgId) await this.editMsg(chatId, msgId, `✅ You answered: <b>${this.esc(this.agentBtnLabel(answer))}</b>`);
+      return;
+    }
 
     // --- task reminder actions ---
     const taskAction = data.match(/^(td|tp30|tp60|ts30|ts120|tstm):(.+)$/);

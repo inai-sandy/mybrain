@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HermesClient, HermesRunHandlers } from './hermes.client';
 import { AgentService } from '../agent/agent.service';
 import { DocumentsService } from '../documents/documents.service';
+import { TelegramService } from '../telegram/telegram.service';
+
+const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export type StartRunInput = {
   prompt: string;
@@ -25,7 +29,24 @@ export class HermesBridgeService {
     private readonly hermes: HermesClient,
     private readonly agent: AgentService,
     private readonly documents: DocumentsService,
+    private readonly telegram: TelegramService,
   ) {}
+
+  /** Pause the run on a durable question, notify over Telegram, and wait for the answer (or the timeout default). */
+  private async askHuman(runId: string, runTitle: string | undefined, q: { question: string; kind: string; options?: unknown; defaultValue?: string }): Promise<string> {
+    const wp = await this.agent.ask(runId, { question: q.question, kind: q.kind as any, options: q.options ?? [], defaultValue: q.defaultValue, expiresInMs: HUMAN_WAIT_MS });
+    await this.agent.appendStep(runId, { label: 'Asked you', status: 'awaiting', detail: q.question }).catch(() => undefined);
+    await this.telegram.pushAgentQuestion({ runTitle, waitpointId: wp.id, question: q.question, kind: wp.kind, options: wp.options }).catch(() => undefined);
+    // poll the durable waitpoint until it's answered (here or on Telegram) or the timeout sweeper applies the default
+    for (let i = 0; i < HUMAN_WAIT_MS / 2000 + 60; i++) {
+      await sleep(2000);
+      const cur = await this.agent.getWaitpoint(wp.resumeToken).catch(() => null);
+      if (!cur) continue;
+      if (cur.status === 'answered') { await this.agent.appendStep(runId, { label: 'You answered', status: 'done', detail: String(cur.answer) }).catch(() => undefined); return String(cur.answer ?? q.defaultValue ?? 'proceed'); }
+      if (cur.status === 'expired' || cur.status === 'cancelled') break;
+    }
+    return q.defaultValue ?? 'proceed';
+  }
 
   /** Create the run row and kick off execution in the background; returns immediately. */
   async startRun(input: StartRunInput) {
@@ -41,15 +62,24 @@ export class HermesBridgeService {
 
     const handlers: HermesRunHandlers = {
       onStep: (s) => void this.agent.appendStep(runId, s).catch(() => undefined),
-      // v1: handle these so an unattended run completes. The durable "ask me / approve" relay
-      // to our Waitpoint + Telegram lands in BEA-620.
+      // BEA-620: the agent pauses and asks YOU (durable waitpoint + Telegram), then resumes.
       onApproval: async (a) => {
-        await this.agent.appendStep(runId, { label: 'Skipped a risky command (needs your OK)', status: 'info', detail: a.command }).catch(() => undefined);
-        return 'deny';
+        const ans = await this.askHuman(runId, input.title, {
+          question: `Allow this action?\n${a.command || a.description || 'a tool action'}`,
+          kind: 'approve_edit_reject',
+          options: { command: a.command, description: a.description },
+          defaultValue: 'reject', // Cautious default: don't run risky things without an OK
+        });
+        return ans === 'approve' ? 'once' : 'deny';
       },
       onClarify: async (q) => {
-        await this.agent.appendStep(runId, { label: 'Agent had a question', status: 'info', detail: q.question }).catch(() => undefined);
-        return 'Use your best judgment and proceed.';
+        const choices = q.choices && q.choices.length ? q.choices : undefined;
+        return this.askHuman(runId, input.title, {
+          question: q.question,
+          kind: choices ? 'choice' : 'free_text',
+          options: choices || [],
+          defaultValue: choices ? choices[0] : 'Use your best judgment and proceed.',
+        });
       },
     };
 

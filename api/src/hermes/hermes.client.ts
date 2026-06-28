@@ -105,18 +105,21 @@ export class HermesClient {
     const send = (method: string, params: any) => ws.send(JSON.stringify({ jsonrpc: '2.0', id: 'c' + ++idc, method, params }));
 
     return new Promise<HermesRunResult>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        try { ws.close(); } catch { /* noop */ }
-        reject(new Error('Hermes run timed out'));
-      }, opts.timeoutMs ?? 240_000);
+      // Re-armable inactivity timer — paused while we're waiting on a human (clarify/approval),
+      // since the bridge's handler bounds that wait itself.
+      const TURN_MS = opts.timeoutMs ?? 240_000;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const arm = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { try { ws.close(); } catch { /* noop */ } reject(new Error('Hermes run timed out')); }, TURN_MS); };
+      const disarm = () => { if (timer) clearTimeout(timer); timer = null; };
+      arm();
 
       const finish = (status: string, error?: string) => {
-        clearTimeout(timeout);
+        disarm();
         try { ws.close(); } catch { /* noop */ }
         resolve({ sessionId, finalText, status, error });
       };
 
-      ws.addEventListener('error', (e: any) => { clearTimeout(timeout); reject(new Error('Hermes ws error: ' + (e?.message || 'unknown'))); });
+      ws.addEventListener('error', (e: any) => { disarm(); reject(new Error('Hermes ws error: ' + (e?.message || 'unknown'))); });
 
       ws.addEventListener('message', async (ev: any) => {
         for (const line of String(ev.data).split('\n')) {
@@ -144,13 +147,17 @@ export class HermesClient {
                 if (p.text) handlers.onStep?.({ label: String(p.text).slice(0, 140), status: 'info', kind: p.kind });
                 break;
               case 'clarify.request': {
+                disarm(); // a human may take a while — don't time out the turn
                 const answer = handlers.onClarify ? await handlers.onClarify({ requestId: p.request_id, question: p.question, choices: p.choices }) : 'Use your best judgment.';
                 send('clarify.respond', { session_id: sessionId, request_id: p.request_id, answer });
+                arm();
                 break;
               }
               case 'approval.request': {
+                disarm();
                 const choice = handlers.onApproval ? await handlers.onApproval({ command: p.command, description: p.description }) : 'deny';
                 send('approval.respond', { session_id: sessionId, choice });
+                arm();
                 break;
               }
               case 'message.complete':

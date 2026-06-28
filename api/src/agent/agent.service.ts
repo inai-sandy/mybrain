@@ -111,6 +111,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return wp ? this.shapeWaitpoint(wp) : null;
   }
 
+  /** Read a waitpoint by id (the Telegram callback / run screen answer it by id). */
+  async getWaitpointById(id: string) {
+    const wp = await this.prisma.waitpoint.findUnique({ where: { id } });
+    return wp ? this.shapeWaitpoint(wp) : null;
+  }
+
   /** Cancel a run and any of its still-pending questions. */
   async cancelRun(id: string) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });

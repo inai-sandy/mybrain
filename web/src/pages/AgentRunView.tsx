@@ -4,12 +4,14 @@ import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, 
 import { StatusBadge } from './Agents';
 
 type Step = { label: string; status?: string; detail?: string; kind?: string; at?: string };
+type Waitpoint = { id: string; question: string; kind: string; options: any; status: string; defaultValue?: string | null };
 type Run = {
   id: string;
   title?: string;
   status: string;
   input?: string;
   stepLog?: Step[];
+  waitpoints?: Waitpoint[];
   outputDocId?: string | null;
   error?: string | null;
   startedAt: string;
@@ -22,6 +24,16 @@ function StepIcon({ status }: { status?: string }) {
   if (status === 'failed') return <AlertCircle className="h-4 w-4 text-red-500" />;
   if (status === 'info') return <Info className="h-4 w-4 text-zinc-400" />;
   return <Circle className="h-4 w-4 text-zinc-300 dark:text-zinc-600" />;
+}
+
+function FreeTextAnswer({ onSubmit, disabled }: { onSubmit: (v: string) => void; disabled?: boolean }) {
+  const [v, setV] = useState('');
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (v.trim()) onSubmit(v.trim()); }} className="flex w-full gap-2">
+      <input value={v} onChange={(e) => setV(e.target.value)} placeholder="Type your answer…" className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm outline-none dark:border-amber-500/30 dark:bg-zinc-800" />
+      <button type="submit" disabled={disabled || !v.trim()} className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">Send</button>
+    </form>
+  );
 }
 
 export function AgentRunView() {
@@ -51,8 +63,19 @@ export function AgentRunView() {
     return () => { alive = false; if (timer.current) clearTimeout(timer.current); };
   }, [id]);
 
+  const [submitting, setSubmitting] = useState(false);
   const steps = run?.stepLog || [];
   const active = !!run && (run.status === 'running' || run.status === 'awaiting_input');
+  const pending = run?.status === 'awaiting_input' ? (run?.waitpoints || []).find((w) => w.status === 'pending') : undefined;
+
+  async function answer(wpId: string, value: string) {
+    setSubmitting(true);
+    try {
+      await fetch(`/api/agent/waitpoints/${wpId}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: value, via: 'web' }) });
+      const r = await fetch(`/api/agent/runs/${id}`);
+      if (r.ok) setRun(await r.json());
+    } catch { /* the poll will catch up */ } finally { setSubmitting(false); }
+  }
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
@@ -99,6 +122,30 @@ export function AgentRunView() {
               </ol>
             )}
           </div>
+
+          {/* Pending question — answer here or on Telegram */}
+          {pending && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+              <div className="mb-3 whitespace-pre-wrap text-sm font-medium text-amber-900 dark:text-amber-100">{pending.question}</div>
+              <div className="flex flex-wrap gap-2">
+                {pending.kind === 'approve_edit_reject' ? (
+                  <>
+                    <button disabled={submitting} onClick={() => answer(pending.id, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">Approve</button>
+                    <button disabled={submitting} onClick={() => answer(pending.id, 'reject')} className="rounded-lg bg-zinc-200 px-3 py-1.5 text-sm font-medium hover:bg-zinc-300 disabled:opacity-50 dark:bg-zinc-700 dark:hover:bg-zinc-600">Reject</button>
+                  </>
+                ) : Array.isArray(pending.options) && pending.options.length ? (
+                  pending.options.map((o: any, i: number) => (
+                    <button key={i} disabled={submitting} onClick={() => answer(pending.id, typeof o === 'string' ? o : o?.value ?? o?.label ?? String(o))} className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium ring-1 ring-amber-300 hover:bg-amber-100 disabled:opacity-50 dark:bg-zinc-800 dark:ring-amber-500/30 dark:hover:bg-zinc-700">
+                      {typeof o === 'string' ? o : o?.label ?? o?.value ?? String(o)}
+                    </button>
+                  ))
+                ) : (
+                  <FreeTextAnswer disabled={submitting} onSubmit={(v) => answer(pending.id, v)} />
+                )}
+              </div>
+              <p className="mt-2 text-xs text-amber-700/70 dark:text-amber-300/60">You can also answer this on Telegram.</p>
+            </div>
+          )}
 
           {/* Result */}
           {run.status === 'done' && run.outputDocId && (
