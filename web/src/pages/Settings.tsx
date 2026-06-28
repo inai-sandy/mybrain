@@ -342,7 +342,80 @@ function AgentEngineSection() {
           </EngineField>
         </div>
       </section>
+
+      <PublicRagMcpCard />
     </div>
+  );
+}
+
+/** Public RAG MCP server (BEA-633) — let third-party agents search your brain over HTTPS. */
+function PublicRagMcpCard() {
+  const [cfg, setCfg] = useState<{ enabled: boolean; token: string; url: string; tools: { name: string; description: string }[] } | null>(null);
+  const [show, setShow] = useState(false);
+  const [regen, setRegen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  useEffect(() => { fetch('/api/mcp/config').then((r) => r.json()).then(setCfg).catch(() => setCfg(null)); }, []);
+  async function setEnabled(enabled: boolean) {
+    setBusy(true);
+    try { const r = await fetch('/api/mcp/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }); if (r.ok) { setCfg(await r.json()); toast('success', enabled ? 'RAG MCP server is on' : 'RAG MCP server turned off'); } else toast('error', 'Could not update'); } finally { setBusy(false); }
+  }
+  async function regenerate() {
+    setRegen(false);
+    const r = await fetch('/api/mcp/regenerate', { method: 'POST' });
+    if (r.ok) { setCfg(await r.json()); toast('success', 'New token — update your connected agents'); } else toast('error', 'Could not regenerate');
+  }
+  function copy(text: string, label: string) {
+    navigator.clipboard.writeText(text).then(() => toast('success', `${label} copied`)).catch(() => toast('error', 'Could not copy'));
+  }
+  if (!cfg) return null;
+  const masked = show ? cfg.token : cfg.token.slice(0, 6) + '••••••••••••' + cfg.token.slice(-4);
+  const inp = 'min-w-0 flex-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-mono';
+  const snippet = `{
+  "mcpServers": {
+    "my-brain-rag": {
+      "url": "${cfg.url}",
+      "headers": { "Authorization": "Bearer ${cfg.token}" }
+    }
+  }
+}`;
+  return (
+    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 font-semibold"><Boxes size={18} className="text-indigo-500" /> RAG server for other agents</h2>
+        <button onClick={() => setEnabled(!cfg.enabled)} disabled={busy} aria-pressed={cfg.enabled} className={'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ' + (cfg.enabled ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}>
+          <span className={'absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ' + (cfg.enabled ? 'translate-x-5' : 'translate-x-0.5')} />
+        </button>
+      </div>
+      <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">Let outside agents (Claude Desktop, ChatGPT, n8n…) <b>search your brain</b> over HTTPS — read-only. Keep the token secret; anyone with it can search your memory. {cfg.enabled ? '' : 'Currently off — turn it on to allow connections.'}</p>
+
+      <label className="mb-1 block text-xs text-zinc-500">Endpoint</label>
+      <div className="mb-3 flex gap-2">
+        <input readOnly value={cfg.url} className={inp} />
+        <button onClick={() => copy(cfg.url, 'URL')} className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm dark:border-zinc-700">Copy</button>
+      </div>
+      <label className="mb-1 block text-xs text-zinc-500">Token (Authorization: Bearer)</label>
+      <div className="mb-3 flex gap-2">
+        <input readOnly value={masked} className={inp} />
+        <button onClick={() => setShow((s) => !s)} className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm dark:border-zinc-700">{show ? 'Hide' : 'Show'}</button>
+        <button onClick={() => copy(cfg.token, 'Token')} className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm dark:border-zinc-700">Copy</button>
+      </div>
+
+      <label className="mb-1 block text-xs text-zinc-500">Tools exposed (read-only)</label>
+      <ul className="mb-3 space-y-1">
+        {cfg.tools.map((t) => (
+          <li key={t.name} className="flex items-start gap-2 text-sm"><span className="font-mono text-indigo-600 dark:text-indigo-400">{t.name}</span><span className="text-zinc-500 dark:text-zinc-400">— {t.description}</span></li>
+        ))}
+      </ul>
+
+      <label className="mb-1 block text-xs text-zinc-500">Connect (paste into the agent's MCP config)</label>
+      <pre className="overflow-x-auto whitespace-pre rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950">{snippet}</pre>
+      <div className="mt-4 flex justify-between">
+        <button onClick={() => copy(snippet, 'Config')} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Copy config</button>
+        <button onClick={() => setRegen(true)} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-rose-500 hover:border-rose-400 dark:border-zinc-700">Regenerate token</button>
+      </div>
+      <ConfirmDialog open={regen} title="Regenerate the token?" message="The old token stops working immediately — any agent still using it will be rejected until you update it." confirmLabel="Regenerate" onCancel={() => setRegen(false)} onConfirm={regenerate} />
+    </section>
   );
 }
 

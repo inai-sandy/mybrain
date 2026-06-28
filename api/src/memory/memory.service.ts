@@ -788,6 +788,15 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return this.rerank([...smHits, ...ragHits], limit);
   }
 
+  /** Raw RAG-only search (BEA-631) — exposed to the public RAG MCP server for third-party agents. */
+  async searchRag(q: string, limit = 8): Promise<MemHit[]> {
+    const query = (q || '').trim();
+    if (!query) return [];
+    const n = Math.min(Math.max(limit, 1), 30);
+    const hits = await this.rag.search(query, Math.max(n, 8)).catch(() => [] as any[]);
+    return hits.map((r) => this.normRag(r)).slice(0, n);
+  }
+
   /** Merge + de-dup + re-rank hits by relevance × recency × importance. */
   private rerank(hits: MemHit[], limit: number): MemHit[] {
     const now = Date.now();
