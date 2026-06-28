@@ -76,6 +76,21 @@ export class SkillsController {
     return this.skills.deploy(id, body?.target || '');
   }
 
+  @Post(':id/deploy-all')
+  async deployAll(@Param('id') id: string) {
+    return this.skills.deployAll(id);
+  }
+
+  @Get(':id/deploy-status')
+  async deployStatus(@Param('id') id: string) {
+    return { targets: await this.skills.deployStatus(id) };
+  }
+
+  @Post(':id/undeploy')
+  async undeploy(@Param('id') id: string, @Body() body: { target?: string }) {
+    return this.skills.undeploy(id, body?.target || '');
+  }
+
   @Get(':id/download')
   async download(@Param('id') id: string, @Res() res: Response) {
     const f = await this.skills.fileFor(id);

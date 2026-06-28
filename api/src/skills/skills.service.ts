@@ -58,6 +58,7 @@ export class SkillsService {
       hasFile: !!s.filePath || !!s.content,
       inUse: s.inUse,
       installed: s.installed,
+      deployedTo: Object.keys(this.parseJson(s.deployments)), // target names this skill is deployed to (BEA-634)
       lastUsedAt: s.lastUsedAt,
       usageCount: s.usageCount,
       shared: s.shared,
@@ -206,10 +207,13 @@ export class SkillsService {
     // its own folder in place. Otherwise pick the next free name (name-2, name-3…) so the existing
     // skill on disk is always preserved.
     const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
+    const deployments = this.parseJson(s.deployments);
     let slug = baseSlug;
     let renamed = false;
-    if (s.slug && s.source === baseDir) {
-      slug = s.slug; // this skill already lives here — update its own folder
+    if (deployments[target] && (await exists(join(baseDir, deployments[target])))) {
+      slug = deployments[target]; // this skill already lives here for this target — update it in place
+    } else if (s.slug && s.source === baseDir && (await exists(join(baseDir, s.slug)))) {
+      slug = s.slug; // legacy deploy (before the per-target map) — keep its folder
     } else {
       let n = 1;
       while (await exists(join(baseDir, slug))) {
@@ -230,12 +234,58 @@ export class SkillsService {
       } else {
         return { ok: false, message: 'Nothing to deploy — add the skill file or paste its content first.' };
       }
-      await this.prisma.skill.update({ where: { id }, data: { installed: true, slug, source: baseDir } });
-      const note = renamed ? ` (a skill named “${baseSlug}” already existed, so this was saved as “${slug}” — the old one is untouched)` : '';
-      return { ok: true, message: `Deployed to ${target} → ~/.claude/skills/${slug}${note}` };
+      deployments[target] = slug;
+      await this.prisma.skill.update({ where: { id }, data: { installed: true, slug, source: baseDir, deployments: JSON.stringify(deployments) } });
+      const note = renamed ? ` (a skill named “${baseSlug}” already existed there, so this was saved as “${slug}” — the old one is untouched)` : '';
+      return { ok: true, message: `Deployed to ${target} → ${slug}${note}` };
     } catch (e: any) {
       return { ok: false, message: 'Deploy failed: ' + (e?.message || 'error') };
     }
+  }
+
+  private parseJson(v?: string | null): Record<string, string> {
+    try { return v ? JSON.parse(v) : {}; } catch { return {}; }
+  }
+
+  /** Deploy to ALL targets at once — one-click "install everywhere" incl. the Hermes agent (BEA-634). */
+  async deployAll(id: string): Promise<{ ok: boolean; results: { target: string; ok: boolean; message: string }[] }> {
+    const targets = Object.keys(this.deployTargets());
+    const results: { target: string; ok: boolean; message: string }[] = [];
+    for (const t of targets) results.push({ target: t, ...(await this.deploy(id, t)) });
+    return { ok: results.length > 0 && results.every((r) => r.ok), results };
+  }
+
+  /** Per-target install status — checks the folder really exists on disk in each target (BEA-634). */
+  async deployStatus(id: string): Promise<{ target: string; installed: boolean; slug: string | null }[]> {
+    const s = await this.prisma.skill.findUnique({ where: { id } });
+    if (!s) return [];
+    const deployments = this.parseJson(s.deployments);
+    const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
+    const out: { target: string; installed: boolean; slug: string | null }[] = [];
+    for (const [name, dir] of Object.entries(this.deployTargets())) {
+      let slug = deployments[name] || null;
+      if (!slug && s.slug && s.source === dir) slug = s.slug; // legacy fallback
+      const installed = slug ? await exists(join(dir, slug)) : false;
+      out.push({ target: name, installed, slug });
+    }
+    return out;
+  }
+
+  /** Remove a skill from ONE target's folder (BEA-634). */
+  async undeploy(id: string, target: string): Promise<{ ok: boolean; message: string }> {
+    const s = await this.prisma.skill.findUnique({ where: { id } });
+    if (!s) return { ok: false, message: 'Skill not found' };
+    const baseDir = this.deployTargets()[target];
+    if (!baseDir) return { ok: false, message: 'Unknown deploy target' };
+    const deployments = this.parseJson(s.deployments);
+    const slug = deployments[target] || (s.source === baseDir ? s.slug || '' : '');
+    if (!slug || slug.includes('..')) return { ok: false, message: 'Not installed on that target' };
+    const destDir = join(baseDir, slug);
+    if (!destDir.startsWith(baseDir + '/')) return { ok: false, message: 'Invalid path' };
+    await fs.rm(destDir, { recursive: true, force: true }).catch(() => undefined);
+    delete deployments[target];
+    await this.prisma.skill.update({ where: { id }, data: { deployments: JSON.stringify(deployments), installed: Object.keys(deployments).length > 0 } });
+    return { ok: true, message: `Removed from ${target}` };
   }
 
   async remove(id: string) {
