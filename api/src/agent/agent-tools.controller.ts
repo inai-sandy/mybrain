@@ -24,6 +24,11 @@ export class AgentToolsController {
     return this.tools.askUser(body);
   }
 
+  @Post('remember')
+  remember(@Body() body: { text?: string; tags?: string[] }) {
+    return this.tools.remember(body as any);
+  }
+
   @Get('answer')
   getAnswer(@Query('token') token?: string) {
     if (!token) throw new BadRequestException('Missing token');
