@@ -22,6 +22,7 @@ function fakePrisma() {
   const runs: any[] = [];
   const wps: any[] = [];
   const ags: any[] = [];
+  const settings: any[] = [];
   let n = 0;
   const id = (p: string) => `${p}-${++n}`;
   return {
@@ -39,7 +40,12 @@ function fakePrisma() {
         return include?.waitpoints ? { ...r, waitpoints: wps.filter((w) => w.runId === r.id) } : r;
       },
       findMany: async ({ where, include, take }: any = {}) => {
-        let out = runs.filter((r) => (where?.agentId ? r.agentId === where.agentId : true) && (where?.status ? r.status === where.status : true));
+        const statusOk = (r: any) => {
+          if (!where?.status) return true;
+          if (typeof where.status === 'object' && Array.isArray(where.status.in)) return where.status.in.includes(r.status);
+          return r.status === where.status;
+        };
+        let out = runs.filter((r) => (where?.agentId ? r.agentId === where.agentId : true) && statusOk(r));
         out = [...out].reverse();
         if (take) out = out.slice(0, take);
         return include?.waitpoints ? out.map((r) => ({ ...r, waitpoints: wps.filter((w) => w.runId === r.id) })) : out;
@@ -69,6 +75,14 @@ function fakePrisma() {
         const hit = wps.filter((w) => matchWp(w, where));
         hit.forEach((w) => Object.assign(w, data));
         return { count: hit.length };
+      },
+    },
+    setting: {
+      findUnique: async ({ where }: any) => settings.find((s) => s.key === where.key) || null,
+      upsert: async ({ where, create, update }: any) => {
+        const s = settings.find((x) => x.key === where.key);
+        if (s) { Object.assign(s, update); return s; }
+        const row = { key: where.key, ...create }; settings.push(row); return row;
       },
     },
     agent: {
@@ -258,21 +272,29 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(await svc.listAgents()).toHaveLength(0);
   });
 
-  it('reconcileOrphans fails runs left running by a restart, leaving terminal runs alone (BEA-629)', async () => {
+  it('reconcileOrphans fails running AND paused runs left by a restart, leaving terminal runs alone (BEA-629, BEA-632)', async () => {
     const live = await svc.createRun({ input: 'check email related to V-Guard' }); // orphaned 'running'
+    const paused = await svc.createRun({ input: 'awaiting something' });
+    await svc.ask(paused.id, { question: 'Which one?', kind: 'choice', options: ['a', 'b'] }); // → status 'awaiting_input' + pending waitpoint
     const done = await svc.createRun({ input: 'a' });
     await svc.finishRun(done.id, { status: 'done' });
     const cancelled = await svc.createRun({ input: 'b' });
     await svc.finishRun(cancelled.id, { status: 'cancelled' });
 
     const n = await svc.reconcileOrphans();
-    expect(n).toBe(1);
+    expect(n).toBe(2); // running + awaiting_input
 
-    const after = await svc.getRun(live.id);
-    expect(after.status).toBe('failed');
-    expect(after.error).toMatch(/restart/i);
-    expect(after.endedAt).toBeTruthy();
-    expect((after.stepLog as any[]).some((s) => /interrupted/i.test(s.label))).toBe(true);
+    const afterLive = await svc.getRun(live.id);
+    expect(afterLive.status).toBe('failed');
+    expect(afterLive.error).toMatch(/restart/i);
+    expect(afterLive.endedAt).toBeTruthy();
+    expect((afterLive.stepLog as any[]).some((s) => /interrupted/i.test(s.label))).toBe(true);
+
+    const afterPaused = await svc.getRun(paused.id);
+    expect(afterPaused.status).toBe('failed');
+    expect(afterPaused.error).toMatch(/waiting for your answer/i);
+    // its pending question was cancelled, not left dangling
+    expect((prisma._wps as any[]).every((w) => w.status !== 'pending')).toBe(true);
 
     // terminal runs are untouched
     expect((await svc.getRun(done.id)).status).toBe('done');
@@ -280,5 +302,15 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
 
     // idempotent — nothing left to fix
     expect(await svc.reconcileOrphans()).toBe(0);
+  });
+
+  it('records and reads engine watchdog health (BEA-632)', async () => {
+    expect(await svc.engineHealth()).toEqual({ lastHealthyAt: null, lastAutoRestartAt: null, lastError: null });
+    await svc.recordEngineHealth({ healthyAt: 1234, error: null });
+    await svc.recordEngineHealth({ restartedAt: 5678, error: 'auto-restarted' });
+    const h = await svc.engineHealth();
+    expect(h.lastHealthyAt).toBe(1234);
+    expect(h.lastAutoRestartAt).toBe(5678);
+    expect(h.lastError).toBe('auto-restarted');
   });
 });

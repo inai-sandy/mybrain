@@ -48,10 +48,10 @@ export class HermesController {
   /** Rich engine status for the settings panel + the Agents "engine online" pill. */
   @Get('engine')
   async engine() {
-    const [status, counts] = await Promise.all([this.hermes.engineStatus(), this.agent.engineCounts()]);
+    const [status, counts, health] = await Promise.all([this.hermes.engineStatus(), this.agent.engineCounts(), this.agent.engineHealth()]);
     // The agent's My Brain tools are mounted as a host MCP server in the Codex runtime — show them.
     const tools = { ...this.tools.describe(), connected: !!status.connectedToCodex };
-    return { ...status, counts, tools };
+    return { ...status, counts, tools, health };
   }
 
   /** Restart the engine via the locked-down host helper (it only runs `systemctl restart mybrain-agent`). */

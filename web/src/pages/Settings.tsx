@@ -249,6 +249,13 @@ function AgentEngineSection() {
           <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Messaging gateway</dt><dd>{engine?.gatewayRunning ? 'On' : <span className="text-zinc-500">Off · no second bot</span>}</dd></div>
           <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Access</dt><dd className="text-right text-zinc-600 dark:text-zinc-300">Password-protected · internal only</dd></div>
           <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Agents</dt><dd className="text-right">{engine?.counts ? `${engine.counts.agents} saved · ${engine.counts.scheduled} scheduled · ${engine.counts.running} running` : '—'}</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="shrink-0 text-zinc-500">Watchdog</dt><dd className="text-right">
+            {engine?.health?.lastAutoRestartAt
+              ? <span className="text-amber-600 dark:text-amber-400">Auto-recovered {new Date(engine.health.lastAutoRestartAt).toLocaleString()}</span>
+              : engine?.health?.lastHealthyAt
+                ? <><span className="text-emerald-600 dark:text-emerald-400">● Monitoring</span><div className="text-xs text-zinc-400">last healthy {new Date(engine.health.lastHealthyAt).toLocaleTimeString()}</div></>
+                : <span className="text-zinc-500">Monitoring</span>}
+          </dd></div>
         </dl>
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
           <button onClick={restart} disabled={restarting} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
