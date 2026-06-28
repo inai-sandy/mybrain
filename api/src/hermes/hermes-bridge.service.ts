@@ -133,7 +133,6 @@ export class HermesBridgeService {
     const text = (result.finalText || '').trim();
     if (text) await this.proposeLearnings(runId, text);
     if (input.save !== false && text) {
-      await this.agent.appendStep(runId, { label: 'Saving the result', status: 'running' });
       try {
         const doc = await this.documents.create({
           title: input.title || 'Agent result',
