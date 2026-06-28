@@ -36,10 +36,24 @@ export class HermesBridgeService {
     private readonly llm: LlmService,
   ) {}
 
+  /** Where agent outputs go when nothing specific is set: a dedicated "Agent outputs" collection (kept separate from real Documents). */
+  private async defaultCollectionId(): Promise<string | null> {
+    try {
+      const res: any = await this.documents.listCollections();
+      const cols = res?.collections || res || [];
+      const existing = cols.find((c: any) => c.name === 'Agent outputs');
+      if (existing) return existing.id;
+      const created: any = await this.documents.createCollection('Agent outputs', '#6366f1', '🤖');
+      return created?.id || created?.collection?.id || null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Recall-before: pull relevant context from the user's brain and prepend it to the task. */
   private async recall(runId: string, task: string): Promise<string> {
     try {
-      const hits = await this.memory.searchBrain(task, 6);
+      const hits = await this.memory.searchBrain(task, 18);
       if (!hits?.length) return task;
       const ctx = hits.map((h) => `- ${h.title || 'note'}: ${(h.content || '').replace(/\s+/g, ' ').slice(0, 220)}`).join('\n');
       await this.agent.appendStep(runId, { label: `Recalled ${hits.length} note${hits.length > 1 ? 's' : ''} from your brain`, status: 'done' }).catch(() => undefined);
@@ -151,7 +165,7 @@ export class HermesBridgeService {
           title: input.title || 'Agent result',
           contentText: text,
           kind: 'md',
-          collectionId: input.saveCollectionId ?? cfg.outputCollectionId ?? null,
+          collectionId: input.saveCollectionId ?? cfg.outputCollectionId ?? (await this.defaultCollectionId()),
           tags: ['agent'],
         });
         await this.agent.attachOutput(runId, doc.id);
