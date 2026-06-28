@@ -143,9 +143,14 @@ export class HermesClient {
               case 'tool.complete':
                 handlers.onStep?.({ label: friendlyTool(p.name), status: 'done', kind: 'tool', detail: p.summary });
                 break;
-              case 'status.update':
-                if (p.text) handlers.onStep?.({ label: String(p.text).slice(0, 140), status: 'info', kind: p.kind });
+              case 'status.update': {
+                const txt = String(p.text || '').trim();
+                // Skip internal engine plumbing (context/compaction/token-budget chatter) — it's noise, not progress.
+                if (txt && !/caps context|auto-compaction|compaction|context window|token budget|summariz|rollout|reasoning effort/i.test(txt)) {
+                  handlers.onStep?.({ label: txt.slice(0, 140), status: 'info', kind: p.kind });
+                }
                 break;
+              }
               case 'clarify.request': {
                 disarm(); // a human may take a while — don't time out the turn
                 const answer = handlers.onClarify ? await handlers.onClarify({ requestId: p.request_id, question: p.question, choices: p.choices }) : 'Use your best judgment.';

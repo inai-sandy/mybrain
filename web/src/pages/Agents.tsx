@@ -151,25 +151,28 @@ export function Agents() {
 
       {/* Run box */}
       <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <GrowTextarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="What should the agent do?  e.g. “Summarise the pros and cons of three CRM tools and write it up.”"
-          className="w-full bg-transparent text-sm outline-none placeholder:text-zinc-400"
-          minHeight={64}
-          maxHeight={220}
-        />
+        <label className="block text-xs font-medium text-zinc-500">Task</label>
+        <div className="rounded-xl border border-zinc-300 bg-zinc-50 transition-colors focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-500/20 dark:border-zinc-700 dark:bg-zinc-950">
+          <GrowTextarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="What should the agent do?  e.g. “Research the best electric cars and write a short brief.”"
+            className="w-full bg-transparent px-3 py-2.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+            minHeight={76}
+            maxHeight={240}
+          />
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Title (optional)"
-            className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
+            placeholder="Name this run (optional)"
+            className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
           />
           <button
             onClick={run}
             disabled={starting || !prompt.trim()}
-            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             Run
