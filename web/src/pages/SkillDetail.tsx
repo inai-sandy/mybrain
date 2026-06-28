@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload, Rocket } from 'lucide-react';
+import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload, Rocket, Loader2 } from 'lucide-react';
 import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
 
@@ -26,12 +26,13 @@ export function SkillDetail() {
   const [eUrl, setEUrl] = useState('');
   const [sharing, setSharing] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [targets, setTargets] = useState<string[]>([]);
-  const [showTargets, setShowTargets] = useState(false);
+  const [status, setStatus] = useState<{ target: string; installed: boolean; slug: string | null }[] | null>(null);
   const [deploying, setDeploying] = useState(false);
-  const [deployStatus, setDeployStatus] = useState<{ ok: boolean; msg: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+
+  const TARGET_LABEL: Record<string, string> = { sandy: 'Claude · sandy', beakn: 'Claude · beakn', hermes: 'Hermes agent' };
+  const labelFor = (t: string) => TARGET_LABEL[t] || t;
 
   function load() {
     fetch(`/api/skills/${id}`)
@@ -42,33 +43,40 @@ export function SkillDetail() {
       .then(setD)
       .catch(() => setErr('Could not load this skill.'));
   }
+  function loadStatus() {
+    fetch(`/api/skills/${id}/deploy-status`).then((r) => r.json()).then((d) => setStatus(d.targets || [])).catch(() => setStatus([]));
+  }
   useEffect(() => {
     load();
-    fetch('/api/skills/deploy-targets')
-      .then((r) => r.json())
-      .then((d) => setTargets(d.targets || []))
-      .catch(() => undefined);
+    loadStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function doDeploy(target: string) {
     setDeploying(true);
-    setDeployStatus(null);
     try {
       const r = await fetch(`/api/skills/${id}/deploy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) });
       const dd = await r.json().catch(() => ({ ok: false, message: 'Deploy failed' }));
-      setDeployStatus({ ok: !!dd.ok, msg: dd.message || (dd.ok ? 'Deployed' : 'Failed') });
-      if (dd.ok) {
-        toast('success', dd.message);
-        setShowTargets(false);
-        load();
-      } else toast('error', dd.message || 'Deploy failed');
-    } catch {
-      setDeployStatus({ ok: false, msg: 'Deploy failed' });
-      toast('error', 'Deploy failed');
-    } finally {
-      setDeploying(false);
-    }
+      toast(dd.ok ? 'success' : 'error', dd.message || (dd.ok ? 'Deployed' : 'Deploy failed'));
+    } catch { toast('error', 'Deploy failed'); } finally { setDeploying(false); load(); loadStatus(); }
+  }
+
+  async function deployEverywhere() {
+    setDeploying(true);
+    try {
+      const r = await fetch(`/api/skills/${id}/deploy-all`, { method: 'POST' });
+      const dd = await r.json().catch(() => ({ ok: false }));
+      toast(dd.ok ? 'success' : 'error', dd.ok ? 'Deployed to all targets' : 'Some targets failed — see the matrix');
+    } catch { toast('error', 'Deploy failed'); } finally { setDeploying(false); load(); loadStatus(); }
+  }
+
+  async function undeploy(target: string) {
+    setDeploying(true);
+    try {
+      const r = await fetch(`/api/skills/${id}/undeploy`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }) });
+      const dd = await r.json().catch(() => ({ ok: false, message: 'Remove failed' }));
+      toast(dd.ok ? 'success' : 'error', dd.message || 'Remove failed');
+    } catch { toast('error', 'Remove failed'); } finally { setDeploying(false); load(); loadStatus(); }
   }
 
   async function toggleUsing() {
@@ -192,30 +200,33 @@ export function SkillDetail() {
                 <input ref={fileRef} type="file" accept=".zip,.md,.markdown,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); }} />
               </div>
 
-              {targets.length > 0 && (
+              {status && status.length > 0 && (
                 <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <h2 className="font-semibold text-sm flex items-center gap-2">
-                      <Rocket size={15} className="text-emerald-600" /> Deploy to server
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <h2 className="flex items-center gap-2 text-sm font-semibold">
+                      <Rocket size={15} className="text-emerald-600" /> Servers
                     </h2>
-                    {!showTargets ? (
-                      <button onClick={() => setShowTargets(true)} disabled={deploying} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-                        <Rocket size={14} /> Deploy
-                      </button>
-                    ) : (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-zinc-400">Install into:</span>
-                        {targets.map((t) => (
-                          <button key={t} onClick={() => doDeploy(t)} disabled={deploying} className="capitalize rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50">
-                            {t}
-                          </button>
-                        ))}
-                        <button onClick={() => setShowTargets(false)} className="text-xs text-zinc-400 hover:text-zinc-600">cancel</button>
-                      </div>
-                    )}
+                    <button onClick={deployEverywhere} disabled={deploying} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50">
+                      {deploying ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />} Deploy everywhere
+                    </button>
                   </div>
-                  <p className="text-xs text-zinc-400 mt-1">Installs this skill into your Claude Code skills folder so you can use it.</p>
-                  {deployStatus && <p className={'mt-2 text-sm ' + (deployStatus.ok ? 'text-emerald-600' : 'text-amber-600')}>{deployStatus.ok ? '✓ ' : '⚠ '}{deployStatus.msg}</p>}
+                  <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                    {status.map((t) => (
+                      <li key={t.target} className="flex items-center justify-between gap-3 py-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {t.installed ? <Check size={16} className="shrink-0 text-emerald-500" /> : <Circle size={16} className="shrink-0 text-zinc-300 dark:text-zinc-600" />}
+                          <span className="truncate text-sm font-medium">{labelFor(t.target)}</span>
+                          <span className={'shrink-0 text-xs ' + (t.installed ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400')}>{t.installed ? 'Installed' : 'Not installed'}</span>
+                        </div>
+                        {t.installed ? (
+                          <button onClick={() => undeploy(t.target)} disabled={deploying} className="shrink-0 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs text-rose-500 hover:border-rose-400 disabled:opacity-50 dark:border-zinc-700">Remove</button>
+                        ) : (
+                          <button onClick={() => doDeploy(t.target)} disabled={deploying} className="shrink-0 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50 dark:border-zinc-700">Deploy</button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-zinc-400">“Deploy everywhere” installs into all your Claude Code folders <b>and</b> the Hermes agent so your agents can use it.</p>
                 </div>
               )}
 

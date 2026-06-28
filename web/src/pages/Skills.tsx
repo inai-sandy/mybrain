@@ -15,6 +15,7 @@ type Skill = {
   hasFile: boolean;
   inUse: boolean | null;
   installed: boolean;
+  deployedTo?: string[];
   lastUsedAt: string | null;
   usageCount: number;
   shared: boolean;
@@ -224,6 +225,9 @@ export function Skills() {
             </span>
           ) : (
             <span className={s.inUse ? 'text-emerald-600' : 'text-zinc-400'}>{s.inUse ? 'In use' : 'Not marked'}</span>
+          )}
+          {s.deployedTo?.includes('hermes') && (
+            <span className="ml-auto rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400" title="Installed in the Hermes agent">Hermes</span>
           )}
         </div>
       </div>

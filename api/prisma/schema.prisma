@@ -101,6 +101,7 @@ model Skill {
   filePath      String? // app-hosted uploaded file (Skills ②)
   slug          String? // skill folder name (auto-scan match)
   source        String? // where it was found (auto-scan)
+  deployments   String?   @default("{}") // JSON {targetName: folderSlug} — per-target install tracking (BEA-634)
   inUse         Boolean? // manual using/not-using flag
   installed     Boolean   @default(false) // detected on the server (auto-scan)
   lastUsedAt    DateTime? // from transcripts (auto-scan)
