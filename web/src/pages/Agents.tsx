@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock } from 'lucide-react';
+import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { GrowTextarea } from '../ui/GrowTextarea';
 
@@ -37,12 +37,30 @@ export function timeAgo(iso?: string | null): string {
 
 function NewAgentForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
   const toast = useToast();
+  const [step, setStep] = useState<'describe' | 'form'>('describe');
+  const [idea, setIdea] = useState('');
+  const [drafting, setDrafting] = useState(false);
   const [name, setName] = useState('');
   const [task, setTask] = useState('');
   const [rubric, setRubric] = useState('');
+  const [evals, setEvals] = useState<string[]>([]);
+  const [newEval, setNewEval] = useState('');
   const [every, setEvery] = useState('manual');
   const [at, setAt] = useState('07:00');
   const [saving, setSaving] = useState(false);
+  const inp = 'w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
+
+  async function draft() {
+    if (!idea.trim()) { toast('error', 'Describe what you want it to do'); return; }
+    setDrafting(true);
+    try {
+      const r = await fetch('/api/agent/agents/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not draft');
+      setName(d.name || ''); setTask(d.prompt || ''); setRubric(d.rubric || ''); setEvals(Array.isArray(d.evals) ? d.evals : []);
+      setStep('form');
+    } catch (e: any) { toast('error', e?.message || 'Could not draft'); } finally { setDrafting(false); }
+  }
 
   async function save() {
     if (!name.trim() || !task.trim()) { toast('error', 'Give it a name and a task'); return; }
@@ -53,18 +71,49 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
     else if (every === 'hour') { schedule = { every: 'hour', minute: Number(at.split(':')[1]) || 0 }; scheduleText = `Every hour at :${at.split(':')[1] || '00'}`; }
     setSaving(true);
     try {
-      const r = await fetch('/api/agent/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, schedule, scheduleText }) });
+      const evalCases = evals.map((x) => x.trim()).filter(Boolean).map((input) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input }));
+      const r = await fetch('/api/agent/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, evals: evalCases, schedule, scheduleText }) });
       if (!r.ok) throw new Error('Could not save');
       onCreated();
     } catch (e: any) { toast('error', e?.message || 'Could not save'); } finally { setSaving(false); }
   }
 
+  if (step === 'describe') {
+    return (
+      <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex items-center gap-2 text-sm font-medium"><Sparkles className="h-4 w-4 text-emerald-600" />Describe your agent</div>
+        <textarea value={idea} onChange={(e) => setIdea(e.target.value)} rows={3} placeholder="In a sentence or two, what should this agent do?  e.g. “Every morning, summarise my unread emails and flag anything urgent.”" className={inp + ' resize-none'} />
+        <p className="text-xs text-zinc-400">I'll draft the task, a clear Outcome to grade it against, and a couple of test cases — you review and tweak before saving.</p>
+        <div className="flex items-center justify-between gap-2">
+          <button onClick={() => setStep('form')} className="text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Fill it in myself</button>
+          <div className="flex gap-2">
+            <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
+            <button onClick={draft} disabled={drafting} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{drafting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Draft it for me</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Agent name (e.g. Morning Brief)" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
-      <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} placeholder="What should it do each time it runs?" className="w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
-      <textarea value={rubric} onChange={(e) => setRubric(e.target.value)} rows={2} placeholder="Outcome — what does a good result look like? (each run is graded against this; optional)" className="w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
-      <div className="flex flex-wrap items-center gap-2">
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Agent name (e.g. Morning Brief)" className={inp} />
+      <label className="block text-xs text-zinc-500">Task<textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} placeholder="What should it do each time it runs?" className={inp + ' mt-1 resize-none'} /></label>
+      <label className="block text-xs text-zinc-500">Outcome — what does a good result look like? (graded each run)<textarea value={rubric} onChange={(e) => setRubric(e.target.value)} rows={3} placeholder="e.g. Has 3 bullets. Each is one short sentence. Flags anything urgent." className={inp + ' mt-1 resize-none'} /></label>
+      <div className="space-y-1.5">
+        <div className="text-xs text-zinc-500">Eval cases — example inputs to test it (optional)</div>
+        {evals.map((e, i) => (
+          <div key={i} className="flex gap-2">
+            <input value={e} onChange={(ev) => setEvals((p) => p.map((x, j) => (j === i ? ev.target.value : x)))} className={inp} />
+            <button onClick={() => setEvals((p) => p.filter((_, j) => j !== i))} className="shrink-0 px-1 text-zinc-400 hover:text-rose-500"><Trash2 className="h-4 w-4" /></button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <input value={newEval} onChange={(e) => setNewEval(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && newEval.trim()) { setEvals((p) => [...p, newEval.trim()]); setNewEval(''); } }} placeholder="Add a test input…" className={inp} />
+          <button onClick={() => { if (newEval.trim()) { setEvals((p) => [...p, newEval.trim()]); setNewEval(''); } }} className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" /></button>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 pt-1">
         <select value={every} onChange={(e) => setEvery(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
           <option value="manual">Manual (run by hand)</option>
           <option value="day">Every day</option>
@@ -74,7 +123,7 @@ function NewAgentForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
         {every !== 'manual' && <input type="time" value={at} onChange={(e) => setAt(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />}
         <div className="ml-auto flex gap-2">
           <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
-          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}Save</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}Save agent</button>
         </div>
       </div>
     </div>

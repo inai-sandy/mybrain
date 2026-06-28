@@ -157,6 +157,15 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     expect((agent.finishRun as jest.Mock).mock.calls.every((c) => !c[1]?.grade)).toBe(true);
   });
 
+  it('BEA-643 draftAgent turns an idea into a config (name, task, bulleted outcome, evals)', async () => {
+    const llm = fakeLlm('Sure! {"name":"Email Triage","task":"summarise unread emails","outcome":["one line each","flag urgent"],"evals":["3 emails","CEO request"]}');
+    const out = await build(fakeHermes(async () => ({ sessionId: 's', finalText: '', status: 'complete' })), fakeAgent(), fakeMem(), llm).draftAgent('summarise my emails');
+    expect(out.name).toBe('Email Triage');
+    expect(out.prompt).toContain('summarise');
+    expect(out.rubric).toBe('- one line each\n- flag urgent');
+    expect(out.evals).toEqual(['3 emails', 'CEO request']);
+  });
+
   it('BEA-642 runEvals grades each case against the Outcome and records verdicts', async () => {
     const evals = [{ id: 'e1', input: 'case one' }, { id: 'e2', input: 'case two' }];
     const runs: Record<string, any> = {};

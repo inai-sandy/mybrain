@@ -45,6 +45,13 @@ export class HermesController {
     return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric });
   }
 
+  /** Guided builder (BEA-643): draft an agent config from a one-line idea, for the user to review + save. */
+  @Post('agents/draft')
+  async draftAgent(@Body() body: { idea?: string }) {
+    if (!body?.idea?.trim()) throw new BadRequestException('Describe what you want the agent to do.');
+    return this.bridge.draftAgent(body.idea.trim());
+  }
+
   /** Run every saved eval case for an agent and grade each against the Outcome (BEA-642). Background. */
   @Post('agents/:id/run-evals')
   async runEvals(@Param('id') id: string) {
