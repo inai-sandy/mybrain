@@ -861,13 +861,15 @@ model ReminderSend {
 /// The WhatsApp conversation for a reminder: our outbound nudges + the contact's replies.
 /// C1 records these; the two-way agent (C2) reads/acts on them.
 model ReminderMessage {
-  id         String   @id @default(uuid())
-  reminderId String
-  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  contactId  String? // the conversation this belongs to (one per contact) — BEA-742
+  reminderId String? // the reminder that triggered it (a combined nudge covers several)
+  reminder   Reminder? @relation(fields: [reminderId], references: [id], onDelete: SetNull)
   direction  String // out | in
   body       String
   wamid      String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
+  @@index([contactId])
   @@index([reminderId])
 }

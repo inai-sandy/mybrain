@@ -102,7 +102,7 @@ export class RemindersService {
       );
     }
     const msg = await this.prisma.reminderMessage.create({
-      data: { reminderId: id, direction: 'out', body: text, wamid: res.wamid || null },
+      data: { contactId: r.contactId, reminderId: id, direction: 'out', body: text, wamid: res.wamid || null },
     });
     return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt };
   }
@@ -191,6 +191,20 @@ export class RemindersService {
       updated++;
     }
     return { scanned: tasks.length, updated };
+  }
+
+  /** A contact's whole conversation + all their reminder items (open + resolved outcomes). (BEA-742) */
+  async contactThread(contactId: string) {
+    const contact = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { name: true } });
+    const [messages, reminders] = await Promise.all([
+      this.prisma.reminderMessage.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } }),
+      this.prisma.reminder.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } }),
+    ]);
+    return {
+      contactName: contact?.name || null,
+      messages: messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.createdAt })),
+      items: reminders.map((r) => ({ id: r.id, subject: r.subject, status: r.status, feedback: r.feedback })),
+    };
   }
 
   /** Suggestions = every OPEN task that names a person (`party`), resolved to a contact (BEA-721). */

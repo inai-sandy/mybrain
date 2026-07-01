@@ -290,17 +290,18 @@ function RemindersTab() {
 }
 
 /** A full chat window for one reminder — the WhatsApp conversation + captured outcome. (BEA-733) */
+type ChatItem = { id: string; subject: string | null; status: string; feedback: string | null };
 function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () => void }) {
   const toast = useToast();
-  const [data, setData] = useState<{ messages: { id: string; direction: string; body: string; at: string }[]; feedback: string | null; status: string } | null>(null);
+  const [data, setData] = useState<{ contactName: string | null; messages: { id: string; direction: string; body: string; at: string }[]; items: ChatItem[] } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const st = REM_STATUS[reminder.status] || REM_STATUS.active;
-  const about = reminder.subject || reminder.task?.title;
+  const openItems = (data?.items || []).filter((i) => i.status === 'active');
+  const doneItems = (data?.items || []).filter((i) => i.status === 'done' && i.feedback);
   useEffect(() => {
-    fetch(`/api/reminders/${reminder.id}/thread`).then((r) => r.json()).then(setData).catch(() => setData({ messages: [], feedback: null, status: '' }));
-  }, [reminder.id]);
+    fetch(`/api/reminders/contact/${reminder.contactId}/thread`).then((r) => r.json()).then(setData).catch(() => setData({ contactName: null, messages: [], items: [] }));
+  }, [reminder.contactId]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [data]);
   const fmt = (s: string) => new Date(s).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
 
@@ -328,12 +329,10 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
         <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800">
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate font-semibold">{reminder.contact?.name || 'Contact'}</span>
-              <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{st.label}</span>
-            </div>
+            <div className="truncate font-semibold">{data?.contactName || reminder.contact?.name || 'Contact'}</div>
             <div className="truncate text-xs text-zinc-400">
-              {reminder.contact?.whatsappNumber ? '+' + reminder.contact.whatsappNumber : 'no number'}{about ? ` · re: ${about}` : ''}
+              {reminder.contact?.whatsappNumber ? '+' + reminder.contact.whatsappNumber : 'no number'}
+              {openItems.length > 0 && <> · chasing {openItems.map((i) => i.subject).filter(Boolean).join(', ')}</>}
             </div>
           </div>
         </div>
@@ -361,10 +360,14 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
           <div ref={endRef} />
         </div>
 
-        {/* Outcome footer */}
-        {data?.feedback && (
-          <div className="flex items-start gap-1.5 border-t border-zinc-100 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-800 dark:border-zinc-800 dark:bg-emerald-500/10 dark:text-emerald-300">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span><b>Outcome:</b> {data.feedback}</span>
+        {/* Outcome footer — one line per resolved item */}
+        {doneItems.length > 0 && (
+          <div className="space-y-1 border-t border-zinc-100 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-800 dark:border-zinc-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+            {doneItems.map((i) => (
+              <div key={i.id} className="flex items-start gap-1.5">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span><b>{i.subject || 'Done'}:</b> {i.feedback}</span>
+              </div>
+            ))}
           </div>
         )}
 

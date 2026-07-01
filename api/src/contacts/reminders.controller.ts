@@ -55,6 +55,12 @@ export class RemindersController {
     return this.reminders.update(id, body || {});
   }
 
+  /** A contact's shared conversation + all their reminder items (BEA-742). Static route — before :id. */
+  @Get('contact/:contactId/thread')
+  contactThread(@Param('contactId') contactId: string) {
+    return this.reminders.contactThread(contactId);
+  }
+
   /** The reminder's WhatsApp conversation + captured outcome (BEA-730). */
   @Get(':id/thread')
   thread(@Param('id') id: string) {

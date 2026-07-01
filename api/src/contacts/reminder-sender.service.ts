@@ -2,6 +2,15 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 
+/** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
+export function joinSubjects(subjects: string[]): string {
+  const s = subjects.map((x) => (x || '').trim()).filter(Boolean);
+  if (s.length === 0) return 'this';
+  if (s.length === 1) return s[0];
+  if (s.length === 2) return `${s[0]} and ${s[1]}`;
+  return `${s.slice(0, -1).join(', ')} and ${s[s.length - 1]}`;
+}
+
 /**
  * Fires due reminder sends through Postbox (BEA-729). Every minute it picks up
  * queued ReminderSend rows whose time has arrived, for ACTIVE reminders only,
@@ -40,42 +49,58 @@ export class ReminderSenderService implements OnModuleInit {
     if (!this.postbox.isConfigured()) return; // WhatsApp not wired yet — leave sends queued
     const due = await this.prisma.reminderSend.findMany({
       where: { status: 'queued', at: { lte: new Date() } },
-      include: { reminder: { include: { contact: true, messages: { where: { direction: 'in' }, take: 1 } } } },
+      include: { reminder: { include: { contact: true } } },
       orderBy: { at: 'asc' },
-      take: 25,
+      take: 50,
     });
+    if (!due.length) return;
+
+    // Group due sends by CONTACT — a contact with several reminders gets ONE combined nudge. (BEA-742)
+    const groups = new Map<string, { number: string; name: string; sends: any[]; reminders: Map<string, any> }>();
     for (const send of due) {
       const r: any = send.reminder;
       if (!r || r.status !== 'active') {
         await this.mark(send.id, 'failed', null, r ? `reminder is ${r.status}` : 'reminder gone');
         continue;
       }
-      // Once the contact has replied, the two-way agent handles it — stop firing the same template nudge. (BEA-735)
-      if (r.messages && r.messages.length > 0) {
-        await this.mark(send.id, 'skipped', null, 'contact replied — agent is handling the conversation');
-        continue;
-      }
       const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
-      if (!number) {
+      if (!number || !r.contactId) {
         await this.mark(send.id, 'failed', null, 'contact has no WhatsApp number');
         continue;
       }
-      const firstName = (r.contact?.name || 'there').trim().split(/\s+/)[0];
-      const subject = await this.subjectFor(r);
-      const res = await this.postbox.sendReminderTemplate(number, firstName, subject);
-      if (res.error) {
-        await this.mark(send.id, 'failed', res.wamid, res.error);
-        this.log.warn(`send ${send.id} failed: ${res.error}`);
-      } else {
-        await this.mark(send.id, 'sent', res.wamid, null);
-        // record the ACTUAL message the contact received (the rendered reminder_nudge template) on the thread
-        const rendered = `Hi ${firstName}, just a gentle reminder about ${subject}. Do let me know where it stands whenever you get a chance. Thanks!`;
-        await this.prisma.reminderMessage
-          .create({ data: { reminderId: r.id, direction: 'out', body: rendered, wamid: res.wamid || null } })
-          .catch(() => undefined);
+      let g = groups.get(r.contactId);
+      if (!g) {
+        g = { number, name: r.contact?.name || 'there', sends: [], reminders: new Map() };
+        groups.set(r.contactId, g);
       }
+      g.sends.push(send);
+      g.reminders.set(r.id, r);
     }
-    if (due.length) this.log.log(`processed ${due.length} due reminder send(s)`);
+
+    for (const [contactId, g] of groups) {
+      // Once the contact has replied, the two-way agent handles the conversation — stop firing template nudges. (BEA-735)
+      const replied = await this.prisma.reminderMessage.count({ where: { contactId, direction: 'in' } });
+      if (replied > 0) {
+        for (const s of g.sends) await this.mark(s.id, 'skipped', null, 'contact replied — agent is handling the conversation');
+        continue;
+      }
+      const firstName = g.name.trim().split(/\s+/)[0];
+      const subjects: string[] = [];
+      for (const r of g.reminders.values()) subjects.push(await this.subjectFor(r));
+      const combined = joinSubjects(subjects);
+      const res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
+      if (res.error) {
+        for (const s of g.sends) await this.mark(s.id, 'failed', res.wamid, res.error);
+        this.log.warn(`combined send to ${g.name} failed: ${res.error}`);
+        continue;
+      }
+      for (const s of g.sends) await this.mark(s.id, 'sent', res.wamid, null);
+      const rendered = `Hi ${firstName}, just a gentle reminder about ${combined}. Do let me know where it stands whenever you get a chance. Thanks!`;
+      await this.prisma.reminderMessage
+        .create({ data: { contactId, reminderId: [...g.reminders.keys()][0], direction: 'out', body: rendered, wamid: res.wamid || null } })
+        .catch(() => undefined);
+    }
+    this.log.log(`processed ${due.length} due send(s) across ${groups.size} contact(s)`);
   }
 
   private async mark(id: string, status: string, providerId: string | null, error: string | null) {

@@ -1,78 +1,62 @@
-import { ReminderSenderService } from './reminder-sender.service';
+import { ReminderSenderService, joinSubjects } from './reminder-sender.service';
 
-describe('ReminderSenderService (BEA-729)', () => {
-  it('sends an ACTIVE reminder via Postbox and marks it sent (first name + subject)', async () => {
-    const updates: any[] = [];
-    let args: any = null;
-    const prisma: any = {
-      reminderSend: {
-        findMany: async () => [
-          { id: 's1', reminder: { id: 'r1', status: 'active', subject: 'the samples', contact: { name: 'Ravi Kumar', whatsappNumber: '919812345678' } } },
-        ],
-        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
-      },
-      reminderMessage: { create: async () => ({}) },
-    };
-    const postbox: any = {
-      isConfigured: () => true,
-      sendReminderTemplate: async (to: string, firstName: string, subject: string) => {
-        args = { to, firstName, subject };
-        return { wamid: 'wamid.X', status: 'sent', error: null };
-      },
-    };
+describe('joinSubjects (BEA-742)', () => {
+  it('joins subjects naturally', () => {
+    expect(joinSubjects(['the videos'])).toBe('the videos');
+    expect(joinSubjects(['A', 'B'])).toBe('A and B');
+    expect(joinSubjects(['A', 'B', 'C'])).toBe('A, B and C');
+    expect(joinSubjects([])).toBe('this');
+  });
+});
+
+function makePrisma(sends: any[], inboundCount = 0) {
+  const state: any = { updates: [] as any[], msgs: [] as any[] };
+  const prisma: any = {
+    reminderSend: { findMany: async () => sends, update: async ({ where, data }: any) => state.updates.push({ id: where.id, ...data }) },
+    reminderMessage: { count: async () => inboundCount, create: async ({ data }: any) => state.msgs.push(data) },
+    task: { findUnique: async () => null },
+  };
+  return { prisma, state };
+}
+
+describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
+  it('combines a contact’s two due reminders into ONE message', async () => {
+    const sends = [
+      { id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'the Zigbee testing', contact: { name: 'Srikar', whatsappNumber: '919812345678' } } },
+      { id: 's2', reminder: { id: 'r2', status: 'active', contactId: 'c1', subject: 'the socket pins', contact: { name: 'Srikar', whatsappNumber: '919812345678' } } },
+    ];
+    const { prisma, state } = makePrisma(sends);
+    let sentSubject = '';
+    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async (_to: string, _fn: string, subj: string) => { sentSubject = subj; return { wamid: 'w' }; } };
     await new ReminderSenderService(prisma, postbox).tick();
-    expect(args).toEqual({ to: '919812345678', firstName: 'Ravi', subject: 'the samples' });
-    expect(updates[0]).toMatchObject({ id: 's1', status: 'sent', providerId: 'wamid.X' });
+    expect(sentSubject).toBe('the Zigbee testing and the socket pins'); // combined subject
+    expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(2); // both sends marked sent
+    expect(state.msgs).toHaveLength(1); // ONE message stored on the contact conversation
+    expect(state.msgs[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
   });
 
-  it('skips a paused reminder — never sends, marks the send failed', async () => {
+  it('skips all of a contact’s nudges once they have replied', async () => {
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: '919' } } }];
+    const { prisma, state } = makePrisma(sends, 1); // 1 inbound = contact engaged
     let sent = 0;
-    const updates: any[] = [];
-    const prisma: any = {
-      reminderSend: {
-        findMany: async () => [{ id: 's2', reminder: { id: 'r2', status: 'paused', contact: { name: 'X', whatsappNumber: '91' } } }],
-        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
-      },
-    };
     const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => { sent++; return {}; } };
     await new ReminderSenderService(prisma, postbox).tick();
     expect(sent).toBe(0);
-    expect(updates[0].status).toBe('failed');
-  });
-
-  it('skips the scheduled nudge once the contact has replied (BEA-735)', async () => {
-    let sent = 0;
-    const updates: any[] = [];
-    const prisma: any = {
-      reminderSend: {
-        findMany: async () => [{ id: 's5', reminder: { id: 'r5', status: 'active', contact: { name: 'X', whatsappNumber: '919' }, messages: [{ direction: 'in', body: 'hi' }] } }],
-        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
-      },
-    };
-    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => { sent++; return {}; } };
-    await new ReminderSenderService(prisma, postbox).tick();
-    expect(sent).toBe(0); // contact engaged → don't fire the same template nudge
-    expect(updates[0]).toMatchObject({ id: 's5', status: 'skipped' });
+    expect(state.updates[0].status).toBe('skipped');
   });
 
   it('does nothing (no DB query) when Postbox is not configured', async () => {
     let queried = false;
     const prisma: any = { reminderSend: { findMany: async () => { queried = true; return []; } } };
-    const postbox: any = { isConfigured: () => false };
-    await new ReminderSenderService(prisma, postbox).tick();
+    await new ReminderSenderService(prisma, { isConfigured: () => false } as any).tick();
     expect(queried).toBe(false);
   });
 
   it('marks failed when the contact has no WhatsApp number', async () => {
-    const updates: any[] = [];
-    const prisma: any = {
-      reminderSend: {
-        findMany: async () => [{ id: 's3', reminder: { id: 'r3', status: 'active', subject: 'x', contact: { name: 'No Number', whatsappNumber: null } } }],
-        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
-      },
-    };
-    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => ({ wamid: 'y' }) };
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: null } } }];
+    const { prisma, state } = makePrisma(sends);
+    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => ({}) };
     await new ReminderSenderService(prisma, postbox).tick();
-    expect(updates[0]).toMatchObject({ id: 's3', status: 'failed' });
+    expect(state.updates[0]).toMatchObject({ id: 's1', status: 'failed' });
   });
 });

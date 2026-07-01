@@ -40,17 +40,14 @@ export class PostboxCallbackController {
         // Dedupe: Postbox may retry a callback — never store/act on the same inbound twice.
         const dup = body.wamid ? await this.prisma.reminderMessage.findFirst({ where: { wamid: body.wamid, direction: 'in' } }) : null;
         if (dup) return { ok: true };
-        // Attach the reply to this contact's most recent active reminder.
-        const reminder = await this.prisma.reminder.findFirst({
-          where: { status: 'active', contact: { whatsappNumber: from } },
-          orderBy: { updatedAt: 'desc' },
-        });
-        if (reminder) {
+        // Store the reply on this CONTACT's conversation (shared across their reminders). (BEA-742)
+        const contact = await this.prisma.contact.findFirst({ where: { whatsappNumber: from } });
+        if (contact) {
           await this.prisma.reminderMessage
-            .create({ data: { reminderId: reminder.id, direction: 'in', body: text, wamid: body.wamid || null } })
+            .create({ data: { contactId: contact.id, direction: 'in', body: text, wamid: body.wamid || null } })
             .catch(() => undefined);
-          // Kick off the two-way agent (C2) — fire-and-forget so the callback returns fast.
-          void this.agent.onReply(reminder.id).catch((e) => this.log.warn(`agent onReply: ${e?.message}`));
+          // Kick off the two-way agent (C2) for the whole contact — fire-and-forget so the callback returns fast.
+          void this.agent.onContactReply(contact.id).catch((e) => this.log.warn(`agent onContactReply: ${e?.message}`));
         }
       }
     }
