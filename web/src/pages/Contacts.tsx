@@ -173,6 +173,7 @@ function RemindersTab() {
   const [editing, setEditing] = useState<Reminder | null>(null);
   const [prefill, setPrefill] = useState<{ contactId: string; contactName: string; message: string; taskId?: string; subject?: string } | null>(null);
   const [addNumberFor, setAddNumberFor] = useState<string | null>(null);
+  const [openThread, setOpenThread] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string | null>(null);
 
   function load() {
@@ -251,12 +252,14 @@ function RemindersTab() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center">
+                    <button onClick={() => setOpenThread(openThread === rm.id ? null : rm.id)} title="Conversation" className={'rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (openThread === rm.id ? 'text-emerald-600' : 'text-zinc-400')}><MessageCircle className="h-4 w-4" /></button>
                     {(rm.status === 'active' || rm.status === 'paused') && <button onClick={() => { setEditing(rm); setShowForm(true); }} title="Edit" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
                     {rm.status === 'active' && <button onClick={() => act(rm.id, 'pause')} title="Pause" className="rounded-lg p-1.5 text-zinc-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-500/10"><Pause className="h-4 w-4" /></button>}
                     {rm.status === 'paused' && <button onClick={() => act(rm.id, 'resume')} title="Resume" className="rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><Play className="h-4 w-4" /></button>}
                     <button onClick={() => act(rm.id, 'delete')} title="Delete" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
+                {openThread === rm.id && <ReminderThread reminderId={rm.id} />}
               </li>
             );
           })}
@@ -265,6 +268,33 @@ function RemindersTab() {
       <button onClick={() => { setEditing(null); setPrefill(null); setShowForm(true); }} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"><Plus className="h-4 w-4" />New reminder</button>
       {showForm && <NewReminderForm reminder={editing} prefill={prefill} onClose={() => { setShowForm(false); setPrefill(null); }} onSaved={() => { setShowForm(false); setPrefill(null); load(); }} />}
       {addNumberFor !== null && <ContactForm contact={null} initialName={addNumberFor} onClose={() => setAddNumberFor(null)} onSaved={() => { setAddNumberFor(null); load(); }} />}
+    </div>
+  );
+}
+
+/** The WhatsApp conversation for a reminder (our nudges + the contact's replies) + the captured outcome. (BEA-730) */
+function ReminderThread({ reminderId }: { reminderId: string }) {
+  const [data, setData] = useState<{ messages: { id: string; direction: string; body: string; at: string }[]; feedback: string | null; status: string } | null>(null);
+  useEffect(() => {
+    fetch(`/api/reminders/${reminderId}/thread`).then((r) => r.json()).then(setData).catch(() => setData({ messages: [], feedback: null, status: '' }));
+  }, [reminderId]);
+  if (!data) return <div className="mt-2 border-t border-zinc-100 pt-2 text-xs text-zinc-400 dark:border-zinc-800">Loading…</div>;
+  return (
+    <div className="mt-2 space-y-1.5 border-t border-zinc-100 pt-2 dark:border-zinc-800">
+      {data.messages.length === 0 ? (
+        <p className="text-xs text-zinc-400">No messages yet — the nudge sends at the scheduled time, and replies show up here.</p>
+      ) : (
+        data.messages.map((m) => (
+          <div key={m.id} className={'flex ' + (m.direction === 'out' ? 'justify-end' : 'justify-start')}>
+            <div className={'max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ' + (m.direction === 'out' ? 'bg-emerald-500/15 text-emerald-900 dark:text-emerald-100' : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200')}>{m.body}</div>
+          </div>
+        ))
+      )}
+      {data.feedback && (
+        <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span><b>Outcome:</b> {data.feedback}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
-import { Body, Controller, ForbiddenException, Headers, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Headers, Logger, Post } from '@nestjs/common';
 import { Public } from '../auth/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
+import { ReminderAgentService } from './reminder-agent.service';
 
 /**
  * Receives Postbox callbacks for My Brain's reminder conversations (BEA-729):
@@ -11,9 +12,12 @@ import { PostboxService } from './postbox.service';
  */
 @Controller('postbox')
 export class PostboxCallbackController {
+  private readonly log = new Logger('PostboxCallback');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
+    private readonly agent: ReminderAgentService,
   ) {}
 
   @Public()
@@ -33,6 +37,9 @@ export class PostboxCallbackController {
       const from = String(body.from || '').replace(/[^\d]/g, '');
       const text = (body.text || '').trim();
       if (from && text) {
+        // Dedupe: Postbox may retry a callback — never store/act on the same inbound twice.
+        const dup = body.wamid ? await this.prisma.reminderMessage.findFirst({ where: { wamid: body.wamid, direction: 'in' } }) : null;
+        if (dup) return { ok: true };
         // Attach the reply to this contact's most recent active reminder.
         const reminder = await this.prisma.reminder.findFirst({
           where: { status: 'active', contact: { whatsappNumber: from } },
@@ -42,6 +49,8 @@ export class PostboxCallbackController {
           await this.prisma.reminderMessage
             .create({ data: { reminderId: reminder.id, direction: 'in', body: text, wamid: body.wamid || null } })
             .catch(() => undefined);
+          // Kick off the two-way agent (C2) — fire-and-forget so the callback returns fast.
+          void this.agent.onReply(reminder.id).catch((e) => this.log.warn(`agent onReply: ${e?.message}`));
         }
       }
     }

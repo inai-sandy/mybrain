@@ -49,6 +49,12 @@ export class RemindersController {
     return this.reminders.update(id, body || {});
   }
 
+  /** The reminder's WhatsApp conversation + captured outcome (BEA-730). */
+  @Get(':id/thread')
+  thread(@Param('id') id: string) {
+    return this.reminders.thread(id);
+  }
+
   @Post(':id/pause')
   pause(@Param('id') id: string) {
     return this.reminders.pause(id);

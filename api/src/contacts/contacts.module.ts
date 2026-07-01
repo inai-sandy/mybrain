@@ -5,13 +5,14 @@ import { RemindersController } from './reminders.controller';
 import { RemindersService } from './reminders.service';
 import { PostboxService } from './postbox.service';
 import { ReminderSenderService } from './reminder-sender.service';
+import { ReminderAgentService } from './reminder-agent.service';
 import { PostboxCallbackController } from './postbox-callback.controller';
 import { LlmModule } from '../llm/llm.module';
 
 @Module({
   imports: [LlmModule],
   controllers: [ContactsController, RemindersController, PostboxCallbackController],
-  providers: [ContactsService, RemindersService, PostboxService, ReminderSenderService],
+  providers: [ContactsService, RemindersService, PostboxService, ReminderSenderService, ReminderAgentService],
   exports: [ContactsService, RemindersService, PostboxService],
 })
 export class ContactsModule {}

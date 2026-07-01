@@ -69,14 +69,29 @@ export class RemindersService {
     return this.llm.listOpenRouterModels(['anthropic/', 'openai/', 'google/']);
   }
 
-  /** Run the chosen engine with one auto-retry on an empty result — so Clean up rarely no-ops. */
-  private async formatComplete(prompt: string, label: string): Promise<string> {
+  /** Run the reminder engine (in the user's voice) with one auto-retry on an empty result. Public so the two-way agent (C2) reuses the same voice + engine. */
+  async voiceComplete(prompt: string, label: string, maxTokens = 200): Promise<string> {
     const cfg = await this.formatModel();
     for (let i = 0; i < 2; i++) {
-      const t = await this.llm.completeWith(cfg, prompt, 200, i === 0 ? label : `${label}-retry`).catch(() => null);
+      const t = await this.llm.completeWith(cfg, prompt, maxTokens, i === 0 ? label : `${label}-retry`).catch(() => null);
       if (t && t.trim()) return t.trim();
     }
     return '';
+  }
+
+  /** The WhatsApp conversation for a reminder (our nudges + replies) + its captured outcome. (BEA-730) */
+  async thread(id: string) {
+    const r = await this.prisma.reminder.findUnique({
+      where: { id },
+      include: { messages: { orderBy: { createdAt: 'asc' } }, contact: { select: { name: true } } },
+    });
+    if (!r) throw new NotFoundException('Reminder not found');
+    return {
+      status: r.status,
+      feedback: r.feedback,
+      contactName: r.contact?.name || null,
+      messages: r.messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.createdAt })),
+    };
   }
 
   /** Suggestions = every OPEN task that names a person (`party`), resolved to a contact (BEA-721). */
@@ -115,7 +130,7 @@ export class RemindersService {
     const raw = input.userInput?.trim();
     if (raw) {
       const prompt = `I want to send a WhatsApp reminder to ${who}. Here are my rough words for what to say:\n\n"${raw}"\n\nRewrite it as the actual message I'd send.\n\nRules:\n- Sound EXACTLY like a real person texting a colleague — warm, friendly, casual. NEVER like a bot or AI.\n- Plain, simple English. Short sentences. 1-2 sentences max.\n- Greet them by first name if it fits. Don't sign off with my name.\n- No emojis unless natural. No "Dear", no formal language.\n- Write in natural, warm Indian English — the everyday way an Indian professional texts a colleague or vendor on WhatsApp (not American-sounding, not stiff/formal, and NOT a caricature).\n- Naturally nudge them to reply with the status/update, woven right into the message the way a real person would (e.g. "…do let me know where it stands when you get a chance"). NEVER add it as a separate line or a robotic "Please reply with the status".\n- Keep my meaning — don't add unrelated points (adding the natural reply-nudge is fine).\nReturn ONLY the message text, nothing else.`;
-      const text = await this.formatComplete(prompt, 'reminder-format');
+      const text = await this.voiceComplete(prompt, 'reminder-format');
       const msg = (text || '').trim().replace(/^["']|["']$/g, '');
       return { message: msg || raw };
     }
@@ -128,7 +143,7 @@ export class RemindersService {
     }
     if (!title) throw new BadRequestException('Type what you want to say, or link a task, so I can draft the message');
     const prompt = `Write a short WhatsApp message I'd send to ${who} to gently chase this task: "${title}".\n\nRules:\n- Sound EXACTLY like a real person texting a colleague — warm, friendly, casual. NEVER like a bot or AI.\n- Plain, simple English. Short sentences. 1-2 sentences max.\n- Greet them by first name if a name is given. Don't sign off with my name.\n- No emojis unless natural. No "Dear", no formal language.\n- Write in natural, warm Indian English — the everyday way an Indian professional texts a colleague or vendor on WhatsApp (not American-sounding, not stiff/formal, and NOT a caricature).\n- Naturally nudge them to reply with the status/update, woven right into the message the way a real person would (e.g. "…do let me know where it stands when you get a chance"). NEVER add it as a separate line or a robotic "Please reply with the status".\nReturn ONLY the message text, nothing else.`;
-    const text = await this.formatComplete(prompt, 'reminder-draft');
+    const text = await this.voiceComplete(prompt, 'reminder-draft');
     const msg = (text || '').trim().replace(/^["']|["']$/g, '');
     return { message: msg || `Hi ${firstName}, just checking in on "${title}" — any update when you get a chance?` };
   }
