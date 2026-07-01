@@ -1,4 +1,18 @@
-import { spreadTimes, RemindersService } from './reminders.service';
+import { spreadTimes, localTimesToUtc, RemindersService } from './reminders.service';
+
+describe('localTimesToUtc — reminder times are in the user tz (BEA-734)', () => {
+  it('interprets HH:MM as IST and converts to the right UTC instant', () => {
+    const now = new Date('2026-07-01T00:00:00Z'); // 05:30 IST, same local day
+    const [d] = localTimesToUtc(['09:00'], now, 330);
+    expect(d.toISOString()).toBe('2026-07-01T03:30:00.000Z'); // 9 AM IST = 03:30 UTC
+  });
+  it('skips slots already >2 min in the past, keeps future ones', () => {
+    const now = new Date('2026-07-01T12:00:00Z'); // 17:30 IST
+    const out = localTimesToUtc(['09:00', '20:00'], now, 330);
+    expect(out).toHaveLength(1); // 9 AM IST already passed → skipped
+    expect(out[0].toISOString()).toBe('2026-07-01T14:30:00.000Z'); // 8 PM IST = 14:30 UTC
+  });
+});
 
 describe('RemindersService.suggestions (BEA-721)', () => {
   it('lists open tasks with a party, resolves contacts, flags no-number + active reminder', async () => {

@@ -54,6 +54,7 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -e POSTBOX_API_KEY="${POSTBOX_API_KEY:-}" \
   -e POSTBOX_REMINDER_TEMPLATE="${POSTBOX_REMINDER_TEMPLATE:-reminder_nudge}" \
   -e POSTBOX_REMINDER_LANG="${POSTBOX_REMINDER_LANG:-en}" \
+  -e REMINDER_TZ_OFFSET_MINUTES="${REMINDER_TZ_OFFSET_MINUTES:-330}" \
   "$IMAGE"
 
 echo "-> ensure Caddy route"

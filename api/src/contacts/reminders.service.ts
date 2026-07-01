@@ -22,15 +22,32 @@ export function spreadTimes(count: number): string[] {
   return out;
 }
 
-/** Concrete UTC datetimes for today at each HH:MM (used to seed queued sends; tz refined in P4). */
-function sendsForToday(times: string[]): Date[] {
-  const now = new Date();
-  return times.map((t) => {
+/** The user's timezone offset in minutes east of UTC (IST = +330). Configurable. (BEA-734) */
+export const REMINDER_TZ_OFFSET = Number(process.env.REMINDER_TZ_OFFSET_MINUTES) || 330;
+
+/**
+ * Turn "HH:MM" LOCAL times (in the user's tz) into concrete UTC datetimes for today.
+ * e.g. "09:00" IST → today 03:30 UTC. Slots already >2 min in the past are skipped
+ * (so a reminder made after a slot doesn't fire that missed nudge immediately). Pure/testable. (BEA-734)
+ */
+export function localTimesToUtc(times: string[], now: Date, offsetMin = REMINDER_TZ_OFFSET): Date[] {
+  const local = new Date(now.getTime() + offsetMin * 60000); // shift into the local calendar day
+  const y = local.getUTCFullYear();
+  const mo = local.getUTCMonth();
+  const da = local.getUTCDate();
+  const out: Date[] = [];
+  for (const t of times) {
     const [h, m] = t.split(':').map(Number);
-    const d = new Date(now);
-    d.setUTCHours(h, m, 0, 0);
-    return d;
-  });
+    const utc = new Date(Date.UTC(y, mo, da, h, m, 0, 0) - offsetMin * 60000);
+    if (utc.getTime() < now.getTime() - 120000) continue; // already >2 min past → skip
+    out.push(utc);
+  }
+  return out;
+}
+
+/** Concrete UTC datetimes for today at each local HH:MM (used to seed queued sends). */
+function sendsForToday(times: string[]): Date[] {
+  return localTimesToUtc(times, new Date());
 }
 
 @Injectable()
