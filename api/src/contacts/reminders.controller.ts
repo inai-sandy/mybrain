@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { RemindersService } from './reminders.service';
 
 @Controller('reminders')
@@ -8,6 +8,23 @@ export class RemindersController {
   @Get()
   list(@Query('status') status?: string) {
     return this.reminders.list(status || undefined);
+  }
+
+  // ---- "Clean up" engine picker (Settings). Static routes — keep above any :id route. (BEA-731) ----
+  @Get('format-model')
+  getFormatModel() {
+    return this.reminders.formatModel();
+  }
+
+  @Put('format-model')
+  setFormatModel(@Body() body: { provider?: string; model?: string }) {
+    if (!body?.model) throw new BadRequestException('Pick a model');
+    return this.reminders.setFormatModel(body.provider || 'openrouter', body.model);
+  }
+
+  @Get('format-models')
+  async formatModels() {
+    return { models: await this.reminders.listFormatModels() };
   }
 
   /** Open tasks with a person → suggested reminders (BEA-721). */

@@ -56,18 +56,24 @@ describe('RemindersService pause/resume (BEA-720)', () => {
   });
 });
 
-describe('RemindersService.draftMessage reformat (BEA-720)', () => {
-  it('reformats the user’s own rough words via the LLM', async () => {
-    const llm: any = { complete: async () => '  "Hi Ravi, any update on the samples?"  ' };
-    const svc = new RemindersService({} as any, llm, {} as any);
+describe('RemindersService.draftMessage clean up (BEA-720/731)', () => {
+  // No picker set → the default (reliable) engine; formatComplete calls llm.completeWith.
+  const prisma: any = { setting: { findUnique: async () => null } };
+
+  it('reformats the user’s own rough words via the chosen engine', async () => {
+    const llm: any = { completeWith: async () => '  "Hi Ravi, any update on the samples?"  ' };
+    const svc = new RemindersService(prisma, llm, {} as any);
     const { message } = await svc.draftMessage({ userInput: 'chase ravi re samples', contactName: 'Ravi' });
     expect(message).toBe('Hi Ravi, any update on the samples?'); // quotes + whitespace stripped
   });
-  it('falls back to the raw words if the LLM fails', async () => {
-    const llm: any = { complete: async () => { throw new Error('down'); } };
-    const svc = new RemindersService({} as any, llm, {} as any);
+
+  it('retries once, then falls back to the raw words if the engine keeps failing (BEA-731)', async () => {
+    let calls = 0;
+    const llm: any = { completeWith: async () => { calls++; return ''; } };
+    const svc = new RemindersService(prisma, llm, {} as any);
     const { message } = await svc.draftMessage({ userInput: 'call sunil tomorrow', contactName: 'Sunil' });
-    expect(message).toBe('call sunil tomorrow');
+    expect(message).toBe('call sunil tomorrow'); // raw preserved, never lost
+    expect(calls).toBe(2); // tried, then retried once
   });
 });
 

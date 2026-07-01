@@ -1202,6 +1202,8 @@ function ModelsSection() {
       <ChatModelCard />
       <EngineModelCard title="Explore answer model" icon={Sparkles} base="/api/explore/model"
         desc="Writes your Explore answers from your indexed brain. Sonnet (default) is the most capable; switch to Haiku to cut the cost per question by ~3–4× (each ask is mostly the model reading your retrieved notes)." />
+      <EngineModelCard title="Reminder Clean up model" icon={Sparkles} base="/api/reminders/format-model"
+        desc="Rewrites your rough words into a proper WhatsApp reminder (the ✨ Clean up button in a reminder). This is a quick, live action, so it uses a dependable API model — Sonnet (default) is reliable; Haiku is cheaper and still good. (Free Codex/Gemini engines aren't offered here because they're too slow/flaky for a live tap.)" />
       <BookmarksModelCard />
       <TasksModelCard />
       <MeetingsEngineCard />

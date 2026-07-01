@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmService } from '../llm/llm.service';
+import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ContactsService } from './contacts.service';
+
+/** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
+const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 /**
  * Spread `count` reminder times evenly across the working day (09:00–16:30 local), as "HH:MM" strings.
@@ -37,6 +40,44 @@ export class RemindersService {
     private readonly llm: LlmService,
     private readonly contacts: ContactsService,
   ) {}
+
+  // ---- "Clean up" engine picker (own Settings model; defaults to a reliable API model). (BEA-731) ----
+
+  /** The engine that rewrites reminder messages. Own picker; defaults to Sonnet so it's reliable out of the box. */
+  async formatModel(): Promise<LlmConfig> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'reminder.llm' } });
+    if (!row) return REMINDER_FORMAT_DEFAULT;
+    try {
+      const v = JSON.parse(row.value);
+      return v?.provider && v?.model ? v : REMINDER_FORMAT_DEFAULT;
+    } catch {
+      return REMINDER_FORMAT_DEFAULT;
+    }
+  }
+
+  async setFormatModel(provider: string, model: string) {
+    const cfg = this.llm.agentConfig(provider, model);
+    await this.prisma.setting.upsert({
+      where: { key: 'reminder.llm' },
+      create: { key: 'reminder.llm', value: JSON.stringify(cfg) },
+      update: { value: JSON.stringify(cfg) },
+    });
+    return cfg;
+  }
+
+  listFormatModels() {
+    return this.llm.listOpenRouterModels(['anthropic/', 'openai/', 'google/']);
+  }
+
+  /** Run the chosen engine with one auto-retry on an empty result — so Clean up rarely no-ops. */
+  private async formatComplete(prompt: string, label: string): Promise<string> {
+    const cfg = await this.formatModel();
+    for (let i = 0; i < 2; i++) {
+      const t = await this.llm.completeWith(cfg, prompt, 200, i === 0 ? label : `${label}-retry`).catch(() => null);
+      if (t && t.trim()) return t.trim();
+    }
+    return '';
+  }
 
   /** Suggestions = every OPEN task that names a person (`party`), resolved to a contact (BEA-721). */
   async suggestions() {
@@ -74,7 +115,7 @@ export class RemindersService {
     const raw = input.userInput?.trim();
     if (raw) {
       const prompt = `I want to send a WhatsApp reminder to ${who}. Here are my rough words for what to say:\n\n"${raw}"\n\nRewrite it as the actual message I'd send.\n\nRules:\n- Sound EXACTLY like a real person texting a colleague — warm, friendly, casual. NEVER like a bot or AI.\n- Plain, simple English. Short sentences. 1-2 sentences max.\n- Greet them by first name if it fits. Don't sign off with my name.\n- No emojis unless natural. No "Dear", no formal language.\n- Keep my meaning — don't add anything I didn't ask for.\nReturn ONLY the message text, nothing else.`;
-      const text = await this.llm.complete(prompt, 200, 'reminder-format').catch(() => '');
+      const text = await this.formatComplete(prompt, 'reminder-format');
       const msg = (text || '').trim().replace(/^["']|["']$/g, '');
       return { message: msg || raw };
     }
@@ -87,7 +128,7 @@ export class RemindersService {
     }
     if (!title) throw new BadRequestException('Type what you want to say, or link a task, so I can draft the message');
     const prompt = `Write a short WhatsApp message I'd send to ${who} to gently chase this task: "${title}".\n\nRules:\n- Sound EXACTLY like a real person texting a colleague — warm, friendly, casual. NEVER like a bot or AI.\n- Plain, simple English. Short sentences. 1-2 sentences max.\n- Greet them by first name if a name is given. Don't sign off with my name.\n- No emojis unless natural. No "Dear", no formal language.\nReturn ONLY the message text, nothing else.`;
-    const text = await this.llm.complete(prompt, 200, 'reminder-draft').catch(() => '');
+    const text = await this.formatComplete(prompt, 'reminder-draft');
     const msg = (text || '').trim().replace(/^["']|["']$/g, '');
     return { message: msg || `Hi ${firstName}, just checking in on "${title}" — any update when you get a chance?` };
   }
