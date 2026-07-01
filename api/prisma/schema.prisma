@@ -475,6 +475,7 @@ model Agent {
   scheduleText String? // human sentence ("every weekday 7am")
   lastFiredKey String? // "<dayKey>:<HH:MM>" of the last scheduled fire — dedup so a schedule fires once
   outputDest   String     @default("document") // document | telegram | task
+  defaultDepth String     @default("standard") // quick | standard | deep — default run depth (BEA-695)
   collectionId String? // Documents collection for saved outputs
   enabled      Boolean    @default(true)
   createdAt    DateTime   @default(now())
@@ -487,6 +488,7 @@ model AgentRun {
   id          String      @id @default(uuid())
   agentId     String?
   agent       Agent?      @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  depth       String? // quick | standard | deep — the depth this run used (BEA-695)
   title       String?
   status      String      @default("running") // running | awaiting_input | scheduled | done | failed | cancelled
   input       String? // the prompt/topic (JSON or text)
@@ -778,7 +780,77 @@ model Flow {
   id        String   @id @default(uuid())
   name      String   @default("Untitled flow")
   question  String? // the entry question the flow answers
+  agentId   String? // the agent this flow was generated from (Agent↔Flow merge)
   graph     String   @default("{\"nodes\":[],\"edges\":[]}")
+  schedule     String? // JSON Sched {every, at, dow} — when set, runs on a timer (Stage 3)
+  lastFiredKey String? // dedup key so a schedule fires once per slot
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// One execution of a Flow (BEA-646). results = JSON {nodeId: {status, output, kind, label}}.
+model FlowRun {
+  id          String    @id @default(uuid())
+  flowId      String?
+  status      String    @default("running") // running | done | failed
+  results     String    @default("{}")
+  finalOutput String?
+  documentIds String    @default("[]") // documents this run produced: JSON [{id, slug, title}]
+  terminal    String    @default("[]") // live play-by-play: JSON [{text, at}]
+  error       String?
+  waitNodeId   String? // Move B: the "Ask me" node the run is paused on
+  waitQuestion String? // the question shown to the user
+  waitKind     String? // free_text | choice
+  waitOptions  String    @default("[]") // JSON array of choices
+  waitToken    String? // opaque resume token
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+}
+
+/// A person you can send WhatsApp reminders to (BEA-719).
+model Contact {
+  id             String     @id @default(uuid())
+  name           String
+  whatsappNumber String? // E.164 digits incl. country code; null until you add one
+  notes          String?
+  tags           String     @default("[]") // JSON string array
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  reminders      Reminder[]
+
+  @@index([name])
+}
+
+/// A WhatsApp reminder to chase a contact about a task (BEA-720).
+model Reminder {
+  id           String         @id @default(uuid())
+  contactId    String
+  contact      Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  taskId       String? // the Task this chases (status stays the user's to close)
+  message      String // the text we send, in the user's voice
+  count        Int            @default(1) // how many times today (1-5)
+  times        String         @default("[]") // JSON array of ISO datetimes to send at
+  status       String         @default("active") // active | done | stopped
+  feedback     String? // captured result once the contact says it's done
+  lastFiredKey String? // dedup key for the daily scheduler
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  sends        ReminderSend[]
+
+  @@index([contactId])
+  @@index([status])
+}
+
+/// One scheduled send of a reminder (BEA-720). Fired by the outbound scheduler in P4.
+model ReminderSend {
+  id         String   @id @default(uuid())
+  reminderId String
+  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  at         DateTime
+  status     String   @default("queued") // queued | sent | failed
+  providerId String? // the BSP message id once sent
+  createdAt  DateTime @default(now())
+
+  @@index([reminderId])
+  @@index([status])
 }

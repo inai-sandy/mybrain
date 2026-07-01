@@ -6,6 +6,7 @@ import { Login } from './ui/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Capture } from './pages/Capture';
 import { Bookmarks } from './pages/Bookmarks';
+import { Contacts } from './pages/Contacts';
 import { Ideas } from './pages/Ideas';
 import { IdeaDetail } from './pages/IdeaDetail';
 import { Skills } from './pages/Skills';
@@ -37,8 +38,11 @@ import { ShortLink } from './pages/ShortLink';
 import { Agents } from './pages/Agents';
 import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
+import { SavedByAgents } from './pages/SavedByAgents';
 import { AgentDetail } from './pages/AgentDetail';
 import { FlowsList } from './pages/FlowsList';
+import { FlowRunView } from './pages/FlowRunView';
+import { FlowRunsList } from './pages/FlowRunsList';
 // React Flow is heavy — lazy-load the editor so it splits into its own chunk (keeps the main bundle small).
 const FlowEditor = lazy(() => import('./pages/FlowEditor').then((m) => ({ default: m.FlowEditor })));
 import { VaultProvider } from './vault/VaultContext';
@@ -115,13 +119,17 @@ function AuthedApp() {
           <Route index element={<Dashboard />} />
         <Route path="agent" element={<Agents />} />
         <Route path="agent/history" element={<AgentHistory />} />
+        <Route path="agent/saved" element={<SavedByAgents />} />
         <Route path="agent/agents/:id" element={<AgentDetail />} />
         <Route path="agent/runs/:id" element={<AgentRunView />} />
         <Route path="flows" element={<FlowsList />} />
+        <Route path="flows/runs/:id" element={<FlowRunView />} />
+        <Route path="flows/:id/runs" element={<FlowRunsList />} />
         <Route path="flows/:id" element={<Suspense fallback={<div className="p-6 text-sm text-zinc-500">Loading editor…</div>}><FlowEditor /></Suspense>} />
         <Route path="explore" element={<Explore />} />
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />
+        <Route path="contacts" element={<Contacts />} />
         <Route path="ideas" element={<Ideas />} />
         <Route path="ideas/:id" element={<IdeaDetail />} />
         <Route path="skills" element={<Skills />} />
@@ -144,6 +152,7 @@ function AuthedApp() {
         <Route path="vault" element={<Vault />} />
         <Route path="lab" element={<Lab />} />
         <Route path="settings" element={<Settings email={email} />} />
+        <Route path="settings/:category" element={<Settings email={email} />} />
         <Route path="*" element={<Dashboard />} />
       </Route>
       </Routes>
