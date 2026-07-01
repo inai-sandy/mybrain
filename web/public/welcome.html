@@ -44,12 +44,23 @@
   .caret::after { content:"▋"; animation:blink 1s steps(1) infinite; color:#34d399; }
   @keyframes blink { 50%{opacity:0} }
   .bar { transition:width 1.1s cubic-bezier(.2,.7,.3,1); }
-  /* chapters */
-  .chapter { display:none; animation:chIn .45s ease; }
-  .chapter.on { display:block; }
-  @keyframes chIn { from{opacity:0; transform:translateX(26px)} to{opacity:1; transform:none} }
-  .chtab { white-space:nowrap; transition:color .2s, border-color .2s; border-bottom:2px solid transparent; }
-  .chtab.on { color:#34d399; border-color:#34d399; }
+  /* ===== long-scroll shell (BEA-743) ===== */
+  .chapter { display:block; scroll-margin-top:78px; padding-bottom:1.5rem; }
+  .chapter + .chapter { border-top:1px solid rgba(63,63,70,.22); }
+  /* living aurora background */
+  #aurora { position:fixed; inset:0; z-index:-2; overflow:hidden; pointer-events:none; }
+  #aurora .au { position:absolute; border-radius:9999px; filter:blur(95px); opacity:.28; mix-blend-mode:screen; animation:au 26s ease-in-out infinite alternate; }
+  @keyframes au { from{transform:translate(0,0) scale(1)} to{transform:translate(7vw,-6vh) scale(1.28)} }
+  /* top reading progress */
+  #prog { position:fixed; top:0; left:0; height:2px; width:0; z-index:60; background:linear-gradient(90deg,#34d399,#818cf8,#f472b6); box-shadow:0 0 8px rgba(129,140,248,.5); }
+  /* side dot-rail */
+  #rail { position:fixed; top:50%; right:14px; transform:translateY(-50%); z-index:50; display:flex; flex-direction:column; gap:11px; }
+  #rail a { position:relative; display:block; height:9px; width:9px; border-radius:9999px; background:#3f3f46; transition:all .3s ease; }
+  #rail a:hover { background:#71717a; transform:scale(1.25); }
+  #rail a.on { background:#34d399; height:22px; box-shadow:0 0 12px rgba(52,211,153,.6); }
+  #rail a .lbl { position:absolute; right:20px; top:50%; transform:translateY(-50%); white-space:nowrap; font-size:11px; color:#d4d4d8; background:rgba(9,9,11,.92); border:1px solid #27272a; border-radius:9999px; padding:2px 9px; opacity:0; pointer-events:none; transition:opacity .2s; }
+  #rail a:hover .lbl, #rail a.on .lbl { opacity:1; }
+  @media (max-width:640px){ #rail{ right:6px; gap:8px } #rail a.on{ height:18px } #rail a .lbl{ display:none } }
   /* curious corner */
   details.curious { border:1px dashed rgba(129,140,248,.4); border-radius:1rem; }
   details.curious summary { cursor:pointer; list-style:none; padding:.7rem 1rem; color:#a5b4fc; font-size:.8rem; }
@@ -75,32 +86,31 @@
   .fpip { opacity:.35; transition:all .4s ease; }
   .fpip.on { opacity:1; }
   @media (prefers-reduced-motion: reduce) {
-    .orb,.pulse-ring,.flow-path,.caret::after { animation:none !important; }
+    .orb,.pulse-ring,.flow-path,.caret::after,#aurora .au { animation:none !important; }
     .reveal{transition:none;opacity:1;transform:none}
   }
 </style>
 </head>
 <body>
 
+<!-- ===== reading progress + living aurora + dot-rail (BEA-743) ===== -->
+<div id="prog"></div>
+<div id="aurora">
+  <div class="au" style="width:42rem;height:42rem;background:#34d399;top:-10rem;left:-8rem"></div>
+  <div class="au" style="width:38rem;height:38rem;background:#818cf8;bottom:-8rem;right:-6rem;animation-delay:8s"></div>
+  <div class="au" style="width:30rem;height:30rem;background:#f472b6;top:42%;left:44%;animation-delay:15s"></div>
+</div>
+
 <!-- ===== TOP BAR ===== -->
 <nav class="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-black/40 border-b border-zinc-800/80">
-  <div class="max-w-6xl mx-auto px-4 py-2.5 grid grid-cols-[auto_1fr_auto] items-center gap-3">
-    <button onclick="go(0)" class="font-extrabold shrink-0">🧠 My <span class="gtext">Brain</span></button>
-    <div class="hidden md:flex justify-center gap-5 text-sm text-zinc-500" id="chtabs"></div>
-    <button id="chBtn" onclick="toggleMenu(true)" class="md:hidden justify-self-center rounded-full border border-zinc-700 bg-zinc-900/70 px-3.5 py-1.5 text-xs text-zinc-300 max-w-[58vw] truncate"></button>
+  <div class="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
+    <button onclick="scrollTo({top:0,behavior:'smooth'})" class="font-extrabold shrink-0">🧠 My <span class="gtext">Brain</span></button>
     <a href="https://mybrain.1site.ai/?login=1" class="shrink-0 rounded-full border border-emerald-500/50 bg-emerald-500/10 hover:bg-emerald-500/20 px-4 py-1.5 text-sm font-medium text-emerald-300 transition-colors">Open app</a>
   </div>
 </nav>
 
-<!-- chapter menu (mobile) -->
-<div id="chMenu" class="fixed inset-0 z-[60] hidden">
-  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" onclick="toggleMenu(false)"></div>
-  <div class="absolute bottom-0 inset-x-0 rounded-t-3xl border-t border-zinc-700 bg-zinc-950 p-5 pb-8 max-h-[80vh] overflow-y-auto" style="animation:chIn .3s ease">
-    <div class="mx-auto mb-4 h-1.5 w-10 rounded-full bg-zinc-700"></div>
-    <p class="text-xs uppercase tracking-[0.3em] text-zinc-500 mb-3 text-center">Chapters</p>
-    <div id="chList" class="space-y-1.5"></div>
-  </div>
-</div>
+<!-- side dot-rail (built in JS) -->
+<div id="rail"></div>
 
 <div class="pt-14"></div>
 
@@ -127,7 +137,7 @@
       <div class="h-10 w-px bg-zinc-700 hidden sm:block"></div>
       <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="100">0</span><span class="text-3xl font-extrabold text-emerald-400">%</span><br/>yours — private by design</div>
     </div>
-    <p class="mt-10 text-zinc-600 text-sm animate-bounce">↓ scroll, or tap the chapters above</p>
+    <p class="mt-10 text-zinc-600 text-sm animate-bounce">↓ scroll — the whole story unfolds</p>
   </header>
 
   <div class="max-w-5xl mx-auto px-6 pb-10 space-y-24">
@@ -403,6 +413,55 @@
       <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">🎯</div><h3 class="font-bold text-sm">Scoped or whole-brain</h3><p class="mt-1 text-xs text-zinc-400">Ask inside one area — bookmarks, your life, a single document — or let it search absolutely everything at once.</p></div>
       <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-indigo-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">🔗</div><h3 class="font-bold text-sm">Answers you can open</h3><p class="mt-1 text-xs text-zinc-400">Every answer cites its sources — tap one to jump straight to the real task, story, email or doc it came from.</p></div>
       <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-pink-500/50 hover:-translate-y-1 transition-all"><div class="text-2xl mb-1">💬</div><h3 class="font-bold text-sm">It keeps the thread</h3><p class="mt-1 text-xs text-zinc-400">Suggested follow-ups, saved answers, and a private chat on any single document — plus ask by voice, or ⌘K from anywhere.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= AGENTS (new) ================= -->
+<section class="chapter" data-title="Agents">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-amber-400 mb-3">new · it doesn’t just answer</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">It gets things <span class="gtext">done</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Give it a goal, not a chore. A real multi-step agent researches, drafts and saves for you — pausing to check before anything that matters. You’re always in the loop.</p>
+    </div>
+
+    <div class="reveal">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-2xl mx-auto font-mono text-sm shadow-2xl shadow-amber-500/5">
+        <div class="flex items-center gap-1.5 mb-4"><span class="h-3 w-3 rounded-full bg-rose-500/70"></span><span class="h-3 w-3 rounded-full bg-amber-500/70"></span><span class="h-3 w-3 rounded-full bg-emerald-500/70"></span><span class="ml-2 text-xs text-zinc-500">agent · working</span></div>
+        <div id="agentLog" class="space-y-2 min-h-[220px]"></div>
+      </div>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🧭</div><h3 class="font-bold">Multi-step, on its own</h3><p class="mt-1 text-sm text-zinc-400">It plans the steps, searches, reads, compares and writes — chaining tools until the goal is actually met, not just answered.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">✋</div><h3 class="font-bold">It checks with you</h3><p class="mt-1 text-sm text-zinc-400">Before it saves, sends or spends, it pauses for your OK — even overnight. Cautious by default; you approve each new thing it learns to do.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-amber-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🔁</div><h3 class="font-bold">Turn it into a flow</h3><p class="mt-1 text-sm text-zinc-400">Any agent becomes a repeatable visual flow — branch it, add tools, and every run saves its results back into your brain.</p></div>
+    </div>
+    <p class="reveal text-center text-sm text-zinc-500">Runs on the AI engines <b class="text-zinc-300">you</b> already pay for — near-zero cost, with automatic fallback so nothing stalls.</p>
+  </div>
+</section>
+
+<!-- ================= AGENTIC MESSAGING (new) ================= -->
+<section class="chapter" data-title="Agentic Messaging">
+  <div class="max-w-5xl mx-auto px-6 pt-16 pb-10 space-y-12">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">new · it reaches out for you</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">It chases people — <span class="gtext">on WhatsApp</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The follow-ups you dread, done for you. Your brain messages people on WhatsApp in your own voice, handles the reply, and closes the loop — you just see the outcome.</p>
+    </div>
+
+    <div class="reveal">
+      <div class="max-w-sm mx-auto rounded-[1.6rem] border border-zinc-800 overflow-hidden shadow-2xl shadow-emerald-500/10">
+        <div class="flex items-center gap-3 bg-emerald-700/90 px-4 py-3"><div class="h-9 w-9 rounded-full bg-emerald-900/60 grid place-items-center text-lg">👤</div><div><div class="font-semibold text-sm text-white">Srikar</div><div class="text-[11px] text-emerald-100/80">via your brain · WhatsApp</div></div></div>
+        <div id="waChat" class="space-y-2 p-4 min-h-[300px]" style="background:#0b141a"></div>
+      </div>
+    </div>
+
+    <div class="reveal grid sm:grid-cols-3 gap-4">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🗣️</div><h3 class="font-bold">In your voice</h3><p class="mt-1 text-sm text-zinc-400">Warm, natural, human — never a robotic “this is an automated message”. It sounds exactly like you texting a colleague.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">🧩</div><h3 class="font-bold">One message, many nudges</h3><p class="mt-1 text-sm text-zinc-400">Several things to chase one person about? It clubs them into a single polite message — and closes each one as they reply.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 hover:border-emerald-500/50 hover:-translate-y-1 transition-all"><div class="text-3xl mb-2">✅</div><h3 class="font-bold">It closes the loop</h3><p class="mt-1 text-sm text-zinc-400">It nudges gently over days, stops the moment they reply, understands the answer, and marks the task done — on its own.</p></div>
     </div>
   </div>
 </section>
@@ -737,21 +796,12 @@
   </div>
 </section>
 
-<!-- ===== BOTTOM PAGER ===== -->
-<div class="sticky bottom-0 inset-x-0 z-40 backdrop-blur-xl bg-black/50 border-t border-zinc-800/80">
-  <div class="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between">
-    <button id="prevBtn" class="rounded-full border border-zinc-700 px-4 py-1.5 text-sm text-zinc-300 disabled:opacity-30" disabled>← Prev</button>
-    <div class="flex gap-1.5" id="dots"></div>
-    <button id="nextBtn" class="rounded-full bg-emerald-600 hover:bg-emerald-500 px-4 py-1.5 text-sm font-medium text-white">Next →</button>
-  </div>
-</div>
-
 <footer class="border-t border-zinc-800 py-7 text-center text-xs text-zinc-600">
   Designed by <span class="text-zinc-400 font-medium">Sandeep Karnati</span> · engineered with AI · private by design
 </footer>
 
 <script>
-  // ---------- shared: reveal + counters (MUST come before paging — go() re-observes .reveal) ----------
+  // ---------- shared: reveal + counters (all sections live in one long scroll) ----------
   const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('shown')), { threshold: 0.12 });
   document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
   const cio = new IntersectionObserver((es) => es.forEach((e) => {
@@ -762,64 +812,39 @@
   }));
   document.querySelectorAll('[data-count]').forEach((el) => cio.observe(el));
 
-  // ---------- chapter paging ----------
-  const chapters = [...document.querySelectorAll('.chapter')];
-  const SHORT = ['Story', 'Flow', 'Capture', 'Index', 'Memory', 'Chat', 'Loop', 'Lab', 'Vault', 'Connected', 'Workshop', 'Engine', 'Everything', 'Next', 'Built'];
-  const tabs = document.getElementById('chtabs');
-  const dots = document.getElementById('dots');
-  const chBtn = document.getElementById('chBtn');
-  const chMenu = document.getElementById('chMenu');
-  const chList = document.getElementById('chList');
-  chapters.forEach((c, i) => {
-    const t = document.createElement('button');
-    t.className = 'chtab py-1' + (i === 0 ? ' on' : '');
-    t.textContent = SHORT[i] || c.dataset.title;
-    t.onclick = () => go(i);
-    tabs.appendChild(t);
-    const d = document.createElement('span');
-    d.className = 'h-1.5 rounded-full transition-all ' + (i === 0 ? 'w-5 bg-emerald-500' : 'w-1.5 bg-zinc-700');
-    dots.appendChild(d);
-    const li = document.createElement('button');
-    li.className = 'chitem w-full flex items-center gap-3 rounded-xl border border-zinc-800 px-4 py-3 text-left';
-    li.innerHTML = '<span class="text-xs font-bold text-zinc-500 w-5">' + (i + 1) + '</span><span class="text-sm font-medium">' + c.dataset.title + '</span>';
-    li.onclick = () => { toggleMenu(false); go(i); };
-    chList.appendChild(li);
+  // ---------- long-scroll nav: dot-rail + scroll-spy + progress + parallax (BEA-743) ----------
+  const sections = [...document.querySelectorAll('.chapter')];
+  const rail = document.getElementById('rail');
+  const railDots = sections.map((s, i) => {
+    s.id = s.id || 's' + i;
+    const a = document.createElement('a');
+    a.href = '#' + s.id;
+    a.innerHTML = '<span class="lbl">' + s.dataset.title + '</span>';
+    a.onclick = (e) => { e.preventDefault(); s.scrollIntoView({ behavior: 'smooth' }); };
+    rail.appendChild(a);
+    return a;
   });
-  function toggleMenu(open) { chMenu.classList.toggle('hidden', !open); }
-  let cur = 0;
-  function paint() {
-    [...tabs.children].forEach((t, j) => t.classList.toggle('on', j === cur));
-    [...dots.children].forEach((d, j) => { d.className = 'h-1.5 rounded-full transition-all ' + (j === cur ? 'w-5 bg-emerald-500' : 'w-1.5 bg-zinc-700'); });
-    [...chList.children].forEach((l, j) => { l.className = 'chitem w-full flex items-center gap-3 rounded-xl border px-4 py-3 text-left ' + (j === cur ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-zinc-800'); });
-    chBtn.innerHTML = '<span class="text-zinc-500">' + (cur + 1) + '/' + chapters.length + '</span> · ' + chapters[cur].dataset.title + ' <span class="text-zinc-500">▾</span>';
-    document.getElementById('prevBtn').disabled = cur === 0;
-    document.getElementById('nextBtn').textContent = cur === chapters.length - 1 ? 'Start over ↺' : 'Next →';
+  if (railDots[0]) railDots[0].classList.add('on');
+  // highlight the section currently crossing the middle of the viewport
+  const spy = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    const i = sections.indexOf(e.target);
+    railDots.forEach((d, j) => d.classList.toggle('on', j === i));
+  }), { rootMargin: '-45% 0px -50% 0px' });
+  sections.forEach((s) => spy.observe(s));
+  // reading-progress bar
+  const prog = document.getElementById('prog');
+  const onScroll = () => {
+    const h = document.documentElement;
+    prog.style.width = (Math.min(1, h.scrollTop / ((h.scrollHeight - h.clientHeight) || 1)) * 100) + '%';
+  };
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+  // subtle hero parallax (skipped under reduced-motion)
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const orbs = [...document.querySelectorAll('header .orb')];
+    addEventListener('scroll', () => { const y = scrollY; orbs.forEach((o, i) => (o.style.transform = 'translateY(' + (y * (0.1 + i * 0.05)).toFixed(1) + 'px)')); }, { passive: true });
   }
-  function go(i) {
-    if (i < 0 || i >= chapters.length) return;
-    chapters[cur].classList.remove('on');
-    cur = i;
-    chapters[cur].classList.add('on');
-    paint();
-    window.scrollTo({ top: 0 });
-    history.replaceState(null, '', '#' + (i + 1));
-    chapters[cur].querySelectorAll('.reveal').forEach((el) => io.observe(el));
-  }
-  paint();
-  document.getElementById('prevBtn').onclick = () => go(cur - 1);
-  document.getElementById('nextBtn').onclick = () => go(cur === chapters.length - 1 ? 0 : cur + 1);
-  // swipe
-  let sx = null, sy = null;
-  addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
-  addEventListener('touchend', (e) => {
-    if (sx === null) return;
-    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-    if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) (dx < 0 ? go(cur + 1) : go(cur - 1));
-    sx = sy = null;
-  }, { passive: true });
-  // deep link
-  const h = parseInt((location.hash || '').slice(1));
-  if (h >= 1 && h <= chapters.length) go(h - 1);
 
 
   // ---------- ch8: the lab — teach it (✓/✗), tap-driven, reduced-motion safe ----------
@@ -1058,6 +1083,58 @@
     document.querySelectorAll('.tl-item').forEach((m, i) => setTimeout(() => m.classList.add('in'), i * 250));
   }), { threshold: 0.3 });
   if (document.getElementById('timeline')) tlio.observe(document.getElementById('timeline'));
+
+  // ---------- agents: play-by-play (BEA-743) ----------
+  (function () {
+    const log = document.getElementById('agentLog'); if (!log) return;
+    const LINES = [
+      ['▸', 'text-amber-300', 'Goal: research our top 3 competitors, save a brief'],
+      ['●', 'text-zinc-400', 'Searching the web… <span class="text-emerald-400">3 sources found</span>'],
+      ['●', 'text-zinc-400', 'Reading &amp; comparing pricing, features, reviews…'],
+      ['●', 'text-zinc-400', 'Drafting the brief in your voice…'],
+      ['⏸', 'text-amber-300', 'Save this to your brain? <span class="text-emerald-300">→ you tap Approve ✓</span>'],
+      ['✓', 'text-emerald-300', 'Saved · <b>“Competitor Brief”</b> — indexed &amp; searchable forever'],
+    ];
+    let played = false;
+    const aio = new IntersectionObserver((es) => es.forEach((e) => {
+      if (!e.isIntersecting || played) return; played = true; aio.disconnect();
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      LINES.forEach(([g, cls, txt], i) => setTimeout(() => {
+        const row = document.createElement('div');
+        row.className = 'flex gap-2 ' + cls; row.style.opacity = 0; row.style.transition = 'opacity .4s';
+        row.innerHTML = '<span class="shrink-0">' + g + '</span><span class="flex-1">' + txt + '</span>';
+        log.appendChild(row); requestAnimationFrame(() => (row.style.opacity = 1));
+      }, reduce ? 0 : i * 900));
+    }), { threshold: 0.4 });
+    aio.observe(log);
+  })();
+
+  // ---------- agentic messaging: WhatsApp replay (BEA-743) ----------
+  (function () {
+    const chat = document.getElementById('waChat'); if (!chat) return;
+    const MSGS = [
+      ['out', 'Hi Srikar, just a gentle reminder about the <b>Zigbee testing</b> and the <b>socket-pins report</b>. Let me know where they stand? 🙏'],
+      ['in', 'Zigbee testing is done ✅ socket pins by tomorrow'],
+      ['out', 'Perfect, thanks a lot! Will wait for the socket pins then. 👍'],
+      ['done', '✓ “Zigbee testing” — closed automatically'],
+    ];
+    const bubble = (kind, html) => {
+      const w = document.createElement('div');
+      if (kind === 'done') { w.className = 'flex justify-center pt-1'; w.innerHTML = '<span class="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-[11px] text-emerald-300">' + html + '</span>'; return w; }
+      w.className = 'flex ' + (kind === 'out' ? 'justify-end' : 'justify-start');
+      w.innerHTML = '<div class="max-w-[82%] rounded-2xl px-3 py-2 text-[13px] leading-snug ' + (kind === 'out' ? 'bg-emerald-600/90 text-white rounded-br-sm' : 'bg-zinc-800 text-zinc-100 rounded-bl-sm') + '">' + html + '</div>';
+      return w;
+    };
+    let played = false;
+    const wio = new IntersectionObserver((es) => es.forEach((e) => {
+      if (!e.isIntersecting || played) return; played = true; wio.disconnect();
+      const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      MSGS.forEach(([k, t], i) => setTimeout(() => {
+        const b = bubble(k, t); b.style.opacity = 0; b.style.transition = 'opacity .4s'; chat.appendChild(b); requestAnimationFrame(() => (b.style.opacity = 1));
+      }, reduce ? 0 : 300 + i * 1100));
+    }), { threshold: 0.4 });
+    wio.observe(chat);
+  })();
 </script>
 </body>
 </html>
