@@ -175,6 +175,16 @@ function RemindersTab() {
   const [addNumberFor, setAddNumberFor] = useState<string | null>(null);
   const [openThread, setOpenThread] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+
+  async function scanTasks() {
+    setScanning(true);
+    try {
+      const d = await (await fetch('/api/reminders/scan-tasks', { method: 'POST' })).json();
+      toast('success', d.updated > 0 ? `Found ${d.updated} ${d.updated === 1 ? 'person' : 'people'} in your tasks` : 'No new people found — you’re all caught up');
+      load();
+    } catch { toast('error', 'Could not scan tasks'); } finally { setScanning(false); }
+  }
 
   function load() {
     fetch('/api/reminders').then((r) => r.json()).then((d) => setReminders(d.reminders || [])).catch(() => setReminders([]));
@@ -207,6 +217,13 @@ function RemindersTab() {
   return (
     <div className="space-y-4">
       <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">WhatsApp sending is live — active reminders go out automatically at their scheduled times, and replies get handled for you. Open a reminder's 💬 to see the conversation.</p>
+
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-zinc-400">Old tasks that name a person can become reminders.</span>
+        <button onClick={scanTasks} disabled={scanning} title="Find people mentioned in your open tasks" className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+          {scanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}Scan tasks for people
+        </button>
+      </div>
 
       {suggestions.length > 0 && (
         <section className="space-y-2">

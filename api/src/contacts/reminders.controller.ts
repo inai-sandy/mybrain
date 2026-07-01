@@ -33,6 +33,12 @@ export class RemindersController {
     return this.reminders.suggestions();
   }
 
+  /** AI-backfill the person on old open tasks so they surface as suggestions (BEA-738). */
+  @Post('scan-tasks')
+  scanTasks() {
+    return this.reminders.scanTasksForPeople();
+  }
+
   /** Draft a reminder message in the user's voice. */
   @Post('draft')
   draft(@Body() body: { taskId?: string; taskTitle?: string; contactName?: string; userInput?: string }) {

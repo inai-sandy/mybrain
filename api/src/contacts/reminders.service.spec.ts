@@ -37,6 +37,43 @@ describe('RemindersService.suggestions (BEA-721)', () => {
 });
 
 
+describe('RemindersService.scanTasksForPeople (BEA-738)', () => {
+  it('backfills party on open tasks that name a person, skips the rest', async () => {
+    const updates: any[] = [];
+    const prisma: any = {
+      task: {
+        findMany: async () => [{ id: 't1', title: 'Follow up with Srikar on the dongle' }, { id: 't2', title: 'Work on the portal' }],
+        update: async ({ where, data }: any) => updates.push({ id: where.id, party: data.party }),
+      },
+      setting: { findUnique: async () => null }, // voiceComplete → default engine
+    };
+    const llm: any = { completeWith: async () => '[{"id":"t1","person":"Srikar"},{"id":"t2","person":null}]' };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    const res = await svc.scanTasksForPeople();
+    expect(res).toEqual({ scanned: 2, updated: 1 });
+    expect(updates).toEqual([{ id: 't1', party: 'Srikar' }]);
+  });
+
+  it('does nothing when no open task has a blank party', async () => {
+    const prisma: any = { task: { findMany: async () => [] } };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    expect(await svc.scanTasksForPeople()).toEqual({ scanned: 0, updated: 0 });
+  });
+
+  it('ignores AI ids that are not in the scanned set', async () => {
+    const updates: any[] = [];
+    const prisma: any = {
+      task: { findMany: async () => [{ id: 't1', title: 'Ask Ravi for the file' }], update: async ({ where, data }: any) => updates.push({ id: where.id, party: data.party }) },
+      setting: { findUnique: async () => null },
+    };
+    const llm: any = { completeWith: async () => '[{"id":"HALLUCINATED","person":"Ghost"},{"id":"t1","person":"Ravi"}]' };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    const res = await svc.scanTasksForPeople();
+    expect(res.updated).toBe(1);
+    expect(updates).toEqual([{ id: 't1', party: 'Ravi' }]);
+  });
+});
+
 describe('RemindersService pause/resume (BEA-720)', () => {
   function makeSvc(cur: any) {
     const calls = { deleteMany: 0, createMany: 0, updateData: null as any };

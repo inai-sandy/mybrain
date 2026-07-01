@@ -137,6 +137,39 @@ export class RemindersService {
     };
   }
 
+  /**
+   * One-tap AI backfill (BEA-738): for open tasks with a blank `party`, pull the person each
+   * task is chasing out of its title and save it — so they surface as reminder suggestions.
+   * Only fills blanks (never overwrites). Returns how many were scanned/updated.
+   */
+  async scanTasksForPeople(): Promise<{ scanned: number; updated: number }> {
+    const tasks = await this.prisma.task.findMany({
+      where: { status: 'open', OR: [{ party: null }, { party: '' }] },
+      select: { id: true, title: true },
+    });
+    if (!tasks.length) return { scanned: 0, updated: 0 };
+    const ids = new Set(tasks.map((t) => t.id));
+    const list = tasks.map((t) => `${t.id} :: ${t.title}`).join('\n');
+    const prompt = `Each line below is a task: "<id> :: <title>". For each, if the task is about following up with / chasing / asking / getting something from a SPECIFIC named person, give that person's name exactly as written. If there's no clear individual (or it's a generic role like "the team"), use null.\n\nTasks:\n${list}\n\nReturn ONLY a JSON array, nothing else: [{"id":"<id>","person":"<name or null>"}]`;
+    const raw = await this.voiceComplete(prompt, 'task-people-scan', 1500);
+    let arr: any[] = [];
+    try {
+      const m = raw.match(/\[[\s\S]*\]/);
+      arr = m ? JSON.parse(m[0]) : [];
+    } catch {
+      arr = [];
+    }
+    let updated = 0;
+    for (const item of arr) {
+      const id = item?.id;
+      const person = String(item?.person ?? '').trim();
+      if (!ids.has(id) || !person || person.toLowerCase() === 'null') continue;
+      await this.prisma.task.update({ where: { id }, data: { party: person } }).catch(() => undefined);
+      updated++;
+    }
+    return { scanned: tasks.length, updated };
+  }
+
   /** Suggestions = every OPEN task that names a person (`party`), resolved to a contact (BEA-721). */
   async suggestions() {
     const tasks = await this.prisma.task.findMany({
