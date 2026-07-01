@@ -29,7 +29,7 @@ export class ReminderAgentService {
     return (r.message || 'this').trim();
   }
 
-  private parseJson(raw: string): { reply?: string; resolved?: boolean; outcome?: string } | null {
+  private parseJson(raw: string): { send?: boolean; reply?: string; resolved?: boolean; outcome?: string } | null {
     if (!raw) return null;
     try {
       const m = raw.match(/\{[\s\S]*\}/);
@@ -68,21 +68,24 @@ Rules:
 - Goal: find out where "${subject}" stands. If they've clearly said it's done or given a final status, acknowledge warmly and gently wrap up.
 - Mid-conversation: don't re-greet by name every time; just reply naturally. Don't sign off with my name.
 
-Then decide if this is now resolved (they gave a clear final status, or it's done). Reply with ONLY this JSON, nothing else:
-{"reply": "<my message to them>", "resolved": true or false, "outcome": "<one short line summarising the result — only if resolved>"}`;
+Also decide whether to reply at all right now (don't be pushy — a real person doesn't keep chasing):
+- Reply if they gave a real update, asked something, or it's resolved (then just a short, warm acknowledgement).
+- Do NOT reply (set "send": false) if they're only being non-committal — "I'll let you know", "ok", "sure", "will update you" — and you've already acknowledged, or the chat has naturally wound down. Wait for a real update instead of nudging again.
+
+Then decide if it's now resolved (they gave a clear final status, or it's done). Reply with ONLY this JSON, nothing else:
+{"send": true or false, "reply": "<my message to them — only if send is true>", "resolved": true or false, "outcome": "<one short line summarising the result — only if resolved>"}`;
 
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 500);
     const parsed = this.parseJson(raw);
     const replyText = (parsed?.reply || '').trim();
-    if (!replyText) {
-      this.log.warn(`agent produced no reply for reminder ${reminderId}`);
-      return;
-    }
 
-    // Never send the same message twice — if we've already sent this exact reply, skip the send. (BEA-735)
+    // The agent can choose to stay quiet (send:false) rather than keep pushing. (BEA-737)
+    // Never send the same message twice either. (BEA-735)
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
     const alreadySent = (reminder.messages || []).some((m: any) => m.direction === 'out' && norm(m.body) === norm(replyText));
-    if (alreadySent) {
+    if (parsed?.send === false || !replyText) {
+      this.log.log(`agent: staying quiet (nothing to add / winding down) for reminder ${reminderId}`);
+    } else if (alreadySent) {
       this.log.log(`agent: skipping duplicate reply for reminder ${reminderId}`);
     } else {
       const res = await this.postbox.sendText(number, replyText);

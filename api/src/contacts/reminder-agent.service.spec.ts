@@ -47,6 +47,14 @@ describe('ReminderAgentService (BEA-730)', () => {
     expect(state.sent).toBe(0);
   });
 
+  it('stays quiet when the agent decides not to reply (send:false) — BEA-737', async () => {
+    const reminder = activeReminder([{ direction: 'out', body: 'ok, do let me know' }, { direction: 'in', body: 'sure' }]);
+    const { svc, state } = setup('{"send":false,"reply":"","resolved":false}', reminder);
+    await svc.onReply('r1');
+    expect(state.sent).toBe(0); // non-committal → agent goes quiet, no push
+    expect(state.out).toHaveLength(0);
+  });
+
   it('skips a reply identical to one already sent — never repeats (BEA-735)', async () => {
     const reminder = activeReminder([{ direction: 'out', body: 'Great, thanks!' }, { direction: 'in', body: 'ok' }]);
     const { svc, state } = setup('{"reply":"Great,  THANKS!","resolved":false}', reminder); // same message, diff case/space
