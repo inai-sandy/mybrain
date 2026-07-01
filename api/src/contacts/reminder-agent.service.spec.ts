@@ -46,4 +46,20 @@ describe('ReminderAgentService (BEA-730)', () => {
     await svc.onReply('r1');
     expect(state.sent).toBe(0);
   });
+
+  it('skips a reply identical to one already sent — never repeats (BEA-735)', async () => {
+    const reminder = activeReminder([{ direction: 'out', body: 'Great, thanks!' }, { direction: 'in', body: 'ok' }]);
+    const { svc, state } = setup('{"reply":"Great,  THANKS!","resolved":false}', reminder); // same message, diff case/space
+    await svc.onReply('r1');
+    expect(state.sent).toBe(0); // duplicate → not sent again
+    expect(state.out).toHaveLength(0);
+  });
+
+  it('still closes on resolution even when the reply is a duplicate (BEA-735)', async () => {
+    const reminder = activeReminder([{ direction: 'out', body: 'Perfect, thanks!' }, { direction: 'in', body: 'done' }]);
+    const { svc, state } = setup('{"reply":"Perfect, thanks!","resolved":true,"outcome":"Done"}', reminder);
+    await svc.onReply('r1');
+    expect(state.sent).toBe(0); // duplicate reply not re-sent
+    expect(state.updated).toMatchObject({ status: 'done', feedback: 'Done' }); // but still closed
+  });
 });

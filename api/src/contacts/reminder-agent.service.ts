@@ -79,10 +79,17 @@ Then decide if this is now resolved (they gave a clear final status, or it's don
       return;
     }
 
-    const res = await this.postbox.sendText(number, replyText);
-    await this.prisma.reminderMessage
-      .create({ data: { reminderId, direction: 'out', body: replyText, wamid: res.wamid || null } })
-      .catch(() => undefined);
+    // Never send the same message twice — if we've already sent this exact reply, skip the send. (BEA-735)
+    const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const alreadySent = (reminder.messages || []).some((m: any) => m.direction === 'out' && norm(m.body) === norm(replyText));
+    if (alreadySent) {
+      this.log.log(`agent: skipping duplicate reply for reminder ${reminderId}`);
+    } else {
+      const res = await this.postbox.sendText(number, replyText);
+      await this.prisma.reminderMessage
+        .create({ data: { reminderId, direction: 'out', body: replyText, wamid: res.wamid || null } })
+        .catch(() => undefined);
+    }
 
     if (parsed?.resolved) {
       await this.prisma.reminder

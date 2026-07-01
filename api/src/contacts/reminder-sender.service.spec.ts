@@ -40,6 +40,21 @@ describe('ReminderSenderService (BEA-729)', () => {
     expect(updates[0].status).toBe('failed');
   });
 
+  it('skips the scheduled nudge once the contact has replied (BEA-735)', async () => {
+    let sent = 0;
+    const updates: any[] = [];
+    const prisma: any = {
+      reminderSend: {
+        findMany: async () => [{ id: 's5', reminder: { id: 'r5', status: 'active', contact: { name: 'X', whatsappNumber: '919' }, messages: [{ direction: 'in', body: 'hi' }] } }],
+        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
+      },
+    };
+    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => { sent++; return {}; } };
+    await new ReminderSenderService(prisma, postbox).tick();
+    expect(sent).toBe(0); // contact engaged → don't fire the same template nudge
+    expect(updates[0]).toMatchObject({ id: 's5', status: 'skipped' });
+  });
+
   it('does nothing (no DB query) when Postbox is not configured', async () => {
     let queried = false;
     const prisma: any = { reminderSend: { findMany: async () => { queried = true; return []; } } };

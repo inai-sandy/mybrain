@@ -40,7 +40,7 @@ export class ReminderSenderService implements OnModuleInit {
     if (!this.postbox.isConfigured()) return; // WhatsApp not wired yet — leave sends queued
     const due = await this.prisma.reminderSend.findMany({
       where: { status: 'queued', at: { lte: new Date() } },
-      include: { reminder: { include: { contact: true } } },
+      include: { reminder: { include: { contact: true, messages: { where: { direction: 'in' }, take: 1 } } } },
       orderBy: { at: 'asc' },
       take: 25,
     });
@@ -48,6 +48,11 @@ export class ReminderSenderService implements OnModuleInit {
       const r: any = send.reminder;
       if (!r || r.status !== 'active') {
         await this.mark(send.id, 'failed', null, r ? `reminder is ${r.status}` : 'reminder gone');
+        continue;
+      }
+      // Once the contact has replied, the two-way agent handles it — stop firing the same template nudge. (BEA-735)
+      if (r.messages && r.messages.length > 0) {
+        await this.mark(send.id, 'skipped', null, 'contact replied — agent is handling the conversation');
         continue;
       }
       const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
