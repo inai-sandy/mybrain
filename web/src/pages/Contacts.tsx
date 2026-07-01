@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
@@ -240,7 +240,7 @@ function RemindersTab() {
             return (
               <li key={rm.id} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
+                  <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
                       <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{st.label}</span>
@@ -250,51 +250,87 @@ function RemindersTab() {
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
                     </div>
-                  </div>
+                  </button>
                   <div className="flex shrink-0 items-center">
-                    <button onClick={() => setOpenThread(openThread === rm.id ? null : rm.id)} title="Conversation" className={'rounded-lg p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (openThread === rm.id ? 'text-emerald-600' : 'text-zinc-400')}><MessageCircle className="h-4 w-4" /></button>
+                    <button onClick={() => setOpenThread(rm.id)} title="Open chat" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><MessageCircle className="h-4 w-4" /></button>
                     {(rm.status === 'active' || rm.status === 'paused') && <button onClick={() => { setEditing(rm); setShowForm(true); }} title="Edit" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
                     {rm.status === 'active' && <button onClick={() => act(rm.id, 'pause')} title="Pause" className="rounded-lg p-1.5 text-zinc-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-500/10"><Pause className="h-4 w-4" /></button>}
                     {rm.status === 'paused' && <button onClick={() => act(rm.id, 'resume')} title="Resume" className="rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><Play className="h-4 w-4" /></button>}
                     <button onClick={() => act(rm.id, 'delete')} title="Delete" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
-                {openThread === rm.id && <ReminderThread reminderId={rm.id} />}
               </li>
             );
           })}
         </ul>
       )}
       <button onClick={() => { setEditing(null); setPrefill(null); setShowForm(true); }} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"><Plus className="h-4 w-4" />New reminder</button>
+      {openThread && (() => { const r = reminders.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}
       {showForm && <NewReminderForm reminder={editing} prefill={prefill} onClose={() => { setShowForm(false); setPrefill(null); }} onSaved={() => { setShowForm(false); setPrefill(null); load(); }} />}
       {addNumberFor !== null && <ContactForm contact={null} initialName={addNumberFor} onClose={() => setAddNumberFor(null)} onSaved={() => { setAddNumberFor(null); load(); }} />}
     </div>
   );
 }
 
-/** The WhatsApp conversation for a reminder (our nudges + the contact's replies) + the captured outcome. (BEA-730) */
-function ReminderThread({ reminderId }: { reminderId: string }) {
+/** A full chat window for one reminder — the WhatsApp conversation + captured outcome. (BEA-733) */
+function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () => void }) {
   const [data, setData] = useState<{ messages: { id: string; direction: string; body: string; at: string }[]; feedback: string | null; status: string } | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const st = REM_STATUS[reminder.status] || REM_STATUS.active;
+  const about = reminder.subject || reminder.task?.title;
   useEffect(() => {
-    fetch(`/api/reminders/${reminderId}/thread`).then((r) => r.json()).then(setData).catch(() => setData({ messages: [], feedback: null, status: '' }));
-  }, [reminderId]);
-  if (!data) return <div className="mt-2 border-t border-zinc-100 pt-2 text-xs text-zinc-400 dark:border-zinc-800">Loading…</div>;
+    fetch(`/api/reminders/${reminder.id}/thread`).then((r) => r.json()).then(setData).catch(() => setData({ messages: [], feedback: null, status: '' }));
+  }, [reminder.id]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [data]);
+  const fmt = (s: string) => new Date(s).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+
   return (
-    <div className="mt-2 space-y-1.5 border-t border-zinc-100 pt-2 dark:border-zinc-800">
-      {data.messages.length === 0 ? (
-        <p className="text-xs text-zinc-400">No messages yet — the nudge sends at the scheduled time, and replies show up here.</p>
-      ) : (
-        data.messages.map((m) => (
-          <div key={m.id} className={'flex ' + (m.direction === 'out' ? 'justify-end' : 'justify-start')}>
-            <div className={'max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ' + (m.direction === 'out' ? 'bg-emerald-500/15 text-emerald-900 dark:text-emerald-100' : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200')}>{m.body}</div>
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="flex w-full flex-col bg-white dark:bg-zinc-900 sm:h-[80vh] sm:max-w-md sm:rounded-2xl sm:border sm:border-zinc-200 sm:shadow-2xl sm:dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800">
+          <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-semibold">{reminder.contact?.name || 'Contact'}</span>
+              <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{st.label}</span>
+            </div>
+            <div className="truncate text-xs text-zinc-400">
+              {reminder.contact?.whatsappNumber ? '+' + reminder.contact.whatsappNumber : 'no number'}{about ? ` · re: ${about}` : ''}
+            </div>
           </div>
-        ))
-      )}
-      {data.feedback && (
-        <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span><b>Outcome:</b> {data.feedback}</span>
         </div>
-      )}
+
+        {/* Messages */}
+        <div className="flex-1 space-y-2 overflow-y-auto bg-zinc-50 px-3 py-4 dark:bg-zinc-950/40">
+          {!data ? (
+            <p className="text-center text-xs text-zinc-400">Loading…</p>
+          ) : data.messages.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-zinc-400">
+              <MessageCircle className="h-8 w-8" />
+              <p className="text-sm">No messages yet</p>
+              <p className="max-w-[240px] text-xs">The nudge sends at the scheduled time{reminder.times?.length ? ` (${reminder.times.join(', ')})` : ''}. Replies — and the agent's answers — appear here.</p>
+            </div>
+          ) : (
+            data.messages.map((m) => (
+              <div key={m.id} className={'flex flex-col ' + (m.direction === 'out' ? 'items-end' : 'items-start')}>
+                <div className={'max-w-[82%] rounded-2xl px-3 py-2 text-sm ' + (m.direction === 'out' ? 'rounded-br-sm bg-emerald-500/20 text-emerald-950 dark:text-emerald-50' : 'rounded-bl-sm bg-white text-zinc-800 shadow-sm dark:bg-zinc-800 dark:text-zinc-100')}>
+                  <p className="whitespace-pre-wrap">{m.body}</p>
+                </div>
+                <span className="mt-0.5 px-1 text-[10px] text-zinc-400">{m.direction === 'out' ? 'You' : reminder.contact?.name?.split(' ')[0] || 'Them'} · {fmt(m.at)}</span>
+              </div>
+            ))
+          )}
+          <div ref={endRef} />
+        </div>
+
+        {/* Outcome footer */}
+        {data?.feedback && (
+          <div className="flex items-start gap-1.5 border-t border-zinc-100 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-800 dark:border-zinc-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span><b>Outcome:</b> {data.feedback}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
