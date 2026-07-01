@@ -237,7 +237,10 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   private async writeBackId(refType: string | null | undefined, id: string, target: string, resultId: string) {
     const data = target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId };
     const type = refType || 'item';
-    await this.modelOf(type)
+    const model = this.modelOf(type);
+    // Table-less refTypes (e.g. 'agent-learning') have no row to link — skip instead of throwing. (BEA-691)
+    if (!model?.update) { this.bumpLastIndexed(refType); return; }
+    await model
       .update({ where: { [this.pkOf(type)]: id }, data })
       .catch(() => undefined);
     this.bumpLastIndexed(refType);
@@ -280,10 +283,17 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         let resultId: string | undefined;
         if (row.target === 'supermemory') resultId = await this.sm.save(p.content, p.tags ?? []);
         else resultId = await this.rag.save(p.content, p.title, p.tags ?? []);
+        // The store WRITE succeeded — commit 'done' NOW. Writing the id back onto the source row is
+        // best-effort bookkeeping and must NEVER revert this success: if it threw and re-queued the row,
+        // the next sweep would re-save a brand-new duplicate doc forever (the "Agent learned" runaway,
+        // BEA-690/691). So write-back runs in its own guard and can only ever no-op. (BEA-691)
         await this.prisma.memoryOutbox.update({ where: { id: row.id }, data: { status: 'done' } });
-        // Record where it landed so the UI can show per-store status — on the right table.
         if (row.itemId && resultId) {
-          await this.writeBackId((row as any).refType, row.itemId, row.target, resultId);
+          try {
+            await this.writeBackId((row as any).refType, row.itemId, row.target, resultId);
+          } catch (wbErr) {
+            this.log.warn(`outbox write-back failed (refType=${(row as any).refType} id=${row.itemId}) — kept 'done', not retrying: ${(wbErr as Error)?.message ?? wbErr}`);
+          }
         }
         processed++;
       } catch (e: any) {
@@ -527,6 +537,36 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       await this.modelOf(type).update({ where: { [pk]: r[pk] }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
     }
     return rows.length;
+  }
+
+  /**
+   * Delete every doc carrying `tag` from BOTH stores — by tag, so it catches ORPHANS the app no longer
+   * tracks (e.g. duplicate agent-learnings, vault labels after the link ids were cleared). (BEA-690)
+   * RAG: list_docs is capped at 100, so delete-and-relist until empty. SuperMemory: paginate, filter, delete.
+   */
+  /** List RAG docs carrying a tag (id + title), for the "Saved by agents" view. Capped at 100. (BEA-700) */
+  async listRagByTag(tag: string, limit = 100): Promise<{ id: string; title: string }[]> {
+    return this.rag.list(limit, tag).catch(() => [] as { id: string; title: string; tags: string[] }[]);
+  }
+
+  async purgeByTag(tag: string): Promise<{ rag: number; supermemory: number }> {
+    let rag = 0;
+    for (let i = 0; i < 1000; i++) {
+      const docs = await this.rag.list(100, tag).catch(() => [] as { id: string }[]);
+      if (!docs.length) break;
+      for (const d of docs) { if (d.id) { await this.rag.delete(d.id).catch(() => undefined); rag++; } }
+    }
+    // SuperMemory: collect all ids carrying the tag across pages, then delete (deleting mid-paginate shifts pages).
+    const smIds: string[] = [];
+    for (let page = 1; page <= 1000; page++) {
+      const res = await this.sm.list(100, page).catch(() => ({ total: 0, docs: [] as any[] }));
+      const docs = res.docs || [];
+      for (const d of docs) if ((d.tags || []).includes(tag)) smIds.push(d.id);
+      if (docs.length < 100) break;
+    }
+    let supermemory = 0;
+    for (const id of smIds) { if (id) { await this.sm.delete(id).catch(() => undefined); supermemory++; } }
+    return { rag, supermemory };
   }
 
   rechunkStatus() {

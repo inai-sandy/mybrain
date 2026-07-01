@@ -90,6 +90,24 @@ export class TelegramService implements OnModuleInit {
     await this.send(owner, `🤖 <b>${title} needs you</b>\n\n${this.esc(args.question)}`, { reply_markup: { inline_keyboard: rows } });
   }
 
+  /** A background/long flow run finished or failed — notify the owner (workspace ⑥). */
+  async notifyFlowDone(args: { flowName?: string; status: string; snippet?: string }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    const name = this.esc(args.flowName || 'Your flow');
+    if (args.status === 'failed') { await this.send(owner, `⚠️ <b>${name} failed</b>\n\nOpen My Brain to see what happened.`); return; }
+    const snip = args.snippet ? `\n\n${this.esc(args.snippet.slice(0, 300))}` : '';
+    await this.send(owner, `✅ <b>${name} finished</b>${snip}`);
+  }
+
+  /** Flow paused on an "Ask me" block — notify the owner to open the app and answer (Move B). */
+  async notifyFlowWaiting(args: { flowName?: string; question: string }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    const name = this.esc(args.flowName || 'Your flow');
+    await this.send(owner, `⏸️ <b>${name} is waiting for you</b>\n\n${this.esc(args.question)}\n\nOpen My Brain to answer and continue.`);
+  }
+
   private agentBtnLabel(o: any): string {
     const s = typeof o === 'string' ? o : o?.label || o?.text || o?.value || JSON.stringify(o);
     return String(s).slice(0, 60);

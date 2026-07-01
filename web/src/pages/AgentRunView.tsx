@@ -141,7 +141,7 @@ export function AgentRunView() {
   async function saveLearnings() {
     setSavingLearn(true);
     try {
-      const items = proposed.map((l, i) => ({ text: l.text, keep: keepSel[i] !== false }));
+      const items = proposed.map((l, i) => ({ text: l.text, keep: keepSel[i] === true }));
       await fetch(`/api/agent/runs/${id}/learnings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
       const r = await fetch(`/api/agent/runs/${id}`);
       if (r.ok) setRun(await r.json());
@@ -289,17 +289,18 @@ export function AgentRunView() {
           {/* What I learned — keep / forget (BEA-624) */}
           {proposed.length > 0 && (
             <div className="rounded-2xl border border-indigo-300 bg-indigo-50 p-4 dark:border-indigo-500/30 dark:bg-indigo-500/10">
-              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-indigo-900 dark:text-indigo-100"><Sparkles className="h-4 w-4" />What I learned — keep what's useful</div>
+              <div className="mb-1 flex items-center gap-2 text-sm font-medium text-indigo-900 dark:text-indigo-100"><Sparkles className="h-4 w-4" />What I learned</div>
+              <p className="mb-2 text-xs text-indigo-700/80 dark:text-indigo-300/80">Nothing is saved to your brain unless you tick it. Tick only what's worth remembering long-term.</p>
               <ul className="space-y-1.5">
                 {proposed.map((l, i) => (
                   <li key={i} className="flex items-start gap-2">
-                    <input type="checkbox" checked={keepSel[i] !== false} onChange={(e) => setKeepSel((s) => ({ ...s, [i]: e.target.checked }))} className="mt-1 accent-indigo-600" />
+                    <input type="checkbox" checked={keepSel[i] === true} onChange={(e) => setKeepSel((s) => ({ ...s, [i]: e.target.checked }))} className="mt-1 accent-indigo-600" />
                     <span className="text-sm text-zinc-800 dark:text-zinc-200">{l.text}</span>
                   </li>
                 ))}
               </ul>
-              <button onClick={saveLearnings} disabled={savingLearn} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
-                {savingLearn && <Loader2 className="h-4 w-4 animate-spin" />}Save to memory
+              <button onClick={saveLearnings} disabled={savingLearn || !proposed.some((_, i) => keepSel[i] === true)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
+                {savingLearn && <Loader2 className="h-4 w-4 animate-spin" />}Save ticked to my brain
               </button>
             </div>
           )}

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { estimateCost, isIncludedFeature } from './pricing';
 
 const CACHE_MS = 5 * 60 * 1000; // OpenRouter/OpenAI usage doesn't move fast — don't hammer them
 
@@ -25,17 +26,23 @@ export class UsageService {
   async features(days = 7, from?: string, to?: string) {
     const dr = this.dateFilter(from, to);
     const at = dr || { gte: new Date(Date.now() - Math.max(1, Math.min(366, days)) * 86400_000) };
-    const rows = await this.prisma.usageLog.findMany({ where: { at }, select: { feature: true, cost: true } });
-    const map: Record<string, { cost: number; requests: number }> = {};
+    const rows = await this.prisma.usageLog.findMany({ where: { at }, select: { feature: true, cost: true, model: true, promptTokens: true, completionTokens: true } });
+    const map: Record<string, { cost: number; requests: number; included: boolean }> = {};
     for (const r of rows) {
-      map[r.feature] = map[r.feature] || { cost: 0, requests: 0 };
+      // Use the provider's $ where it gave one, else estimate from the tokens we logged (BEA-716).
+      const cost = r.cost ?? estimateCost(r.model, r.promptTokens, r.completionTokens);
+      map[r.feature] = map[r.feature] || { cost: 0, requests: 0, included: isIncludedFeature(r.feature) };
       map[r.feature].requests++;
-      map[r.feature].cost += r.cost || 0;
+      map[r.feature].cost += cost;
     }
     const features = Object.entries(map)
-      .map(([feature, v]) => ({ feature, cost: v.cost, requests: v.requests }))
-      .sort((a, b) => b.requests - a.requests);
-    return { days, from, to, features, totalCost: features.reduce((s, f) => s + f.cost, 0), totalRequests: rows.length };
+      .map(([feature, v]) => ({ feature, cost: v.cost, requests: v.requests, included: v.included }))
+      .sort((a, b) => b.cost - a.cost);
+    // Flat-rate Codex features ('included') are shown separately and kept OUT of the real spend total.
+    const totalCost = features.filter((f) => !f.included).reduce((s, f) => s + f.cost, 0);
+    const includedEstimate = features.filter((f) => f.included).reduce((s, f) => s + f.cost, 0);
+    const includedRequests = features.filter((f) => f.included).reduce((s, f) => s + f.requests, 0);
+    return { days, from, to, features, totalCost, includedEstimate, includedRequests, totalRequests: rows.length };
   }
 
   /** Individual requests (newest first), optionally filtered by feature and date range. */

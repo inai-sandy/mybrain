@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { HermesClient } from './hermes.client';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { AgentScheduler } from './agent-scheduler.service';
 import { EngineWatchdog } from './engine-watchdog.service';
@@ -11,13 +10,13 @@ import { MemoryModule } from '../memory/memory.module';
 import { LlmModule } from '../llm/llm.module';
 
 /**
- * Hermes bridge (BEA-618) — connects My Brain to the Hermes engine over its WS JSON-RPC API,
- * mirrors runs into our AgentRun (BEA-619) and saves outputs into Documents (BEA-622).
+ * Agent engine bridge — runs agent turns on the host Codex (via codex-runner) and mirrors them into
+ * our AgentRun + Documents. (Was the Hermes WS bridge; Hermes removed BEA-663/667.)
  */
 @Module({
   imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule],
   controllers: [HermesController],
-  providers: [HermesClient, HermesBridgeService, AgentScheduler, EngineWatchdog],
-  exports: [HermesClient, HermesBridgeService],
+  providers: [HermesBridgeService, AgentScheduler, EngineWatchdog],
+  exports: [HermesBridgeService],
 })
 export class HermesModule {}

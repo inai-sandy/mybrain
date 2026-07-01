@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
 
-type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean };
+type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.
@@ -73,6 +73,18 @@ export class AgentController {
   @Post('runs')
   createRun(@Body() body: { agentId?: string; title?: string; input?: string }) {
     return this.agent.createRun(body || {});
+  }
+
+  /** Clear finished runs (all, or one agent's via ?agentId=). In-flight runs are kept. */
+  @Delete('runs')
+  clearRuns(@Query('agentId') agentId?: string) {
+    return this.agent.clearRuns(agentId || undefined);
+  }
+
+  /** Delete one run. Refuses if it's still in progress. */
+  @Delete('runs/:id')
+  deleteRun(@Param('id') id: string) {
+    return this.agent.deleteRun(id);
   }
 
   @Get('runs/:id')

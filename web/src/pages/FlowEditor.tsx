@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { FlowProcess } from '../ui/FlowProcess';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, Handle, Position,
   useNodesState, useEdgesState, addEdge, useReactFlow,
-  type Node, type Edge, type Connection,
+  BaseEdge, EdgeLabelRenderer, getBezierPath,
+  type Node, type Edge, type Connection, type EdgeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowLeft, Save, Loader2, Sparkles, Search, Wand2, Server, Plus, X, Boxes } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Sparkles, Search, Wand2, Server, Plus, X, Boxes, Play, Trash2, Bot, History, CheckCircle2, AlertCircle, MinusCircle, Clock, ListOrdered } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type PaletteItem = { type: 'skill' | 'tool' | 'generic'; kind?: string; id: string; name: string; description?: string; group?: string };
@@ -23,20 +25,45 @@ const KIND_STYLE: Record<string, string> = {
   if: 'border-rose-400 bg-rose-50 dark:border-rose-500/40 dark:bg-rose-500/10',
   filter: 'border-teal-400 bg-teal-50 dark:border-teal-500/40 dark:bg-teal-500/10',
   wait: 'border-zinc-400 bg-zinc-50 dark:border-zinc-500/40 dark:bg-zinc-700/40',
+  ask_user: 'border-amber-400 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10',
   output: 'border-zinc-400 bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800',
 };
 
-// Lets a node's inline "+" reach the editor to open the picker targeting that node.
-const AddCtx = createContext<(nodeId: string) => void>(() => undefined);
+// Lets a node's controls (inline "+", on/off) reach the editor.
+const NodeCtx = createContext<{ addAfter: (id: string) => void; toggleEnabled: (id: string) => void }>({ addAfter: () => undefined, toggleEnabled: () => undefined });
+const TOGGLEABLE = new Set(['skill', 'tool', 'ask_ai', 'subquestion']);
 
-function NodeBox({ id, data }: { id: string; data: any }) {
-  const addAfter = useContext(AddCtx);
+function RunBadge({ s }: { s?: string }) {
+  if (!s) return null;
+  const cls = 'absolute -right-2 -top-2 z-10 rounded-full bg-white dark:bg-zinc-900';
+  if (s === 'running') return <span className={cls}><Loader2 className="h-4 w-4 animate-spin text-blue-500" /></span>;
+  if (s === 'done') return <span className={cls}><CheckCircle2 className="h-4 w-4 text-emerald-500" /></span>;
+  if (s === 'failed') return <span className={cls}><AlertCircle className="h-4 w-4 text-rose-500" /></span>;
+  if (s === 'skipped') return <span className={cls}><MinusCircle className="h-4 w-4 text-zinc-400" /></span>;
+  return null;
+}
+
+function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boolean }) {
+  const { addAfter, toggleEnabled } = useContext(NodeCtx);
+  const off = data.enabled === false;
+  const rs = data.runStatus as string | undefined;
+  const runRing = rs === 'running' ? ' ring-2 ring-blue-400' : rs === 'done' ? ' ring-2 ring-emerald-400' : rs === 'failed' ? ' ring-2 ring-rose-400' : '';
   return (
-    <div className={'relative rounded-lg border px-3 py-2 text-xs shadow-sm ' + (KIND_STYLE[data.kind] || KIND_STYLE.tool)} style={{ minWidth: 130, maxWidth: 220 }}>
+    <div className={'relative cursor-pointer rounded-lg border px-3 py-2 text-xs shadow-sm transition-shadow hover:ring-2 hover:ring-emerald-400/40 ' + (KIND_STYLE[data.kind] || KIND_STYLE.tool) + (off ? ' opacity-40' : '') + (selected ? ' ring-2 ring-emerald-500' : runRing)} style={{ minWidth: 130, maxWidth: 220 }}>
+      <RunBadge s={rs} />
       {data.kind !== 'question' && <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-zinc-400" />}
-      <div className="truncate font-medium text-zinc-800 dark:text-zinc-100">{data.label}</div>
-      {data.sub && <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-500">{data.sub}</div>}
-      {data.kind === 'merge' && <div className="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">{(data.mode || 'ai') === 'ai' ? 'AI synthesise' : 'Stack raw'}</div>}
+      <div className="flex items-start gap-1.5">
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium text-zinc-800 dark:text-zinc-100">{data.label}</div>
+          {data.sub && <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-500">{data.sub}</div>}
+          {data.kind === 'merge' && <div className="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">{(data.mode || 'ai') === 'ai' ? 'AI synthesise' : 'Stack raw'}</div>}
+        </div>
+        {TOGGLEABLE.has(data.kind) && (
+          <button className="nodrag nopan mt-0.5 shrink-0" title={off ? 'Disabled — click to include' : 'Click to skip this branch'} onClick={(e) => { e.stopPropagation(); toggleEnabled(id); }}>
+            <span className={'flex h-3.5 w-6 items-center rounded-full px-0.5 transition-colors ' + (off ? 'bg-zinc-300 dark:bg-zinc-600' : 'bg-emerald-500')}><span className={'block h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform ' + (off ? 'translate-x-0' : 'translate-x-2.5')} /></span>
+          </button>
+        )}
+      </div>
       {data.kind !== 'output' && <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-zinc-400" />}
       {data.kind !== 'output' && (
         <button
@@ -49,11 +76,33 @@ function NodeBox({ id, data }: { id: string; data: any }) {
 }
 const nodeTypes = { box: NodeBox };
 
+// Edge with a ✕ at its midpoint so a connection can be disconnected (BEA-705). Also deletable via Backspace.
+const EdgeCtx = createContext<(id: string) => void>(() => undefined);
+function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, selected }: EdgeProps) {
+  const remove = useContext(EdgeCtx);
+  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <button
+          className={'nodrag nopan pointer-events-auto absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white text-zinc-400 shadow-sm transition-colors hover:border-rose-400 hover:text-rose-600 dark:bg-zinc-900 ' + (selected ? 'border-rose-400 text-rose-500' : 'border-zinc-300 dark:border-zinc-600')}
+          style={{ left: labelX, top: labelY }}
+          title="Disconnect this link"
+          onClick={(e) => { e.stopPropagation(); remove(id); }}
+        ><X className="h-3 w-3" /></button>
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+const edgeTypes = { deletable: DeletableEdge };
+
 let idc = 0;
 const nid = (p: string) => `${p}_${Date.now().toString(36)}_${idc++}`;
 
-function Editor() {
-  const { id } = useParams();
+function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
+  const params = useParams();
+  const id = flowId ?? params.id;
   const nav = useNavigate();
   const toast = useToast();
   const { screenToFlowPosition } = useReactFlow();
@@ -64,15 +113,35 @@ function Editor() {
   const [question, setQuestion] = useState('');
   const [palette, setPalette] = useState<Palette>({ generics: [], tools: [], skills: [] });
   const [saving, setSaving] = useState(false);
+  const [running, setRunning] = useState(false);
   const [splitting, setSplitting] = useState(false);
   // picker: { pos, target? } — target set when opened from a node's "+", to auto-connect
   const [picker, setPicker] = useState<{ pos: { x: number; y: number }; target?: string } | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [agentId, setAgentId] = useState<string | null>(null);
+  // live run watching — show statuses on the canvas instead of leaving the editor
+  const [watchRunId, setWatchRunId] = useState<string | null>(null);
+  const [watchStatus, setWatchStatus] = useState<string>('');
+  const [runStatuses, setRunStatuses] = useState<Record<string, string>>({});
+  const [schedule, setSchedule] = useState<any>(null);
+  const [schedOpen, setSchedOpen] = useState(false);
+  const [proc, setProc] = useState<{ process: any; prompt: string } | null>(null);
+  const [showProc, setShowProc] = useState(false);
+  const [searchParams] = useSearchParams();
+
+  async function loadProcess() {
+    try { const d = await fetch(`/api/flows/${id}/prompt`).then((r) => r.json()); setProc({ process: d.process, prompt: d.prompt }); }
+    catch { /* noop */ }
+  }
+  function openProcess() { loadProcess(); setShowProc(true); }
 
   useEffect(() => {
     fetch('/api/flows/palette').then((r) => r.json()).then(setPalette).catch(() => undefined);
     fetch(`/api/flows/${id}`).then((r) => r.json()).then((f) => {
       setName(f.name || 'Untitled flow');
       setQuestion(f.question || '');
+      setAgentId(f.agentId || null);
+      setSchedule(f.schedule || null);
       const g = f.graph || { nodes: [], edges: [] };
       if (!g.nodes?.length) {
         setNodes([
@@ -82,11 +151,14 @@ function Editor() {
         ]);
         setEdges([{ id: 'm-o', source: 'merge', target: 'output' }]);
       } else { setNodes(g.nodes); setEdges(g.edges || []); }
+      // Just generated from an agent → show "How it runs" right away (BEA-669).
+      if (searchParams.get('generated') && g.nodes?.length) { setTimeout(() => openProcess(), 300); }
     }).catch(() => toast('error', 'Could not load flow'));
     // eslint-disable-next-line
   }, [id]);
 
   const onConnect = useCallback((c: Connection) => setEdges((e) => addEdge({ ...c, animated: true }, e)), [setEdges]);
+  const removeEdge = useCallback((eid: string) => setEdges((es) => es.filter((e) => e.id !== eid)), [setEdges]);
 
   function addNode(item: PaletteItem, pos: { x: number; y: number }): string {
     const newId = nid(item.type);
@@ -114,54 +186,160 @@ function Editor() {
     setPicker({ pos });
   }
 
-  async function autoSplit() {
+  // Auto-plan: the agent reads the question and lays out the WHOLE flow (branches + tools/skills + merge + output).
+  async function autoPlan() {
     if (!question.trim()) { toast('error', 'Type the question first'); return; }
     setSplitting(true);
     try {
-      const r = await fetch('/api/flows/decompose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
-      const d = await r.json();
-      const subs: string[] = d.subquestions || [];
-      if (!subs.length) { toast('error', 'Could not split that — try rephrasing'); return; }
-      setNodes((ns) => {
-        const others = ns.filter((n) => n.data.kind !== 'subquestion');
-        const branches = subs.map((s, i) => ({ id: nid('subq'), type: 'box', position: { x: 60 + i * 210, y: 160 }, data: { kind: 'subquestion', label: `Sub-question ${i + 1}`, sub: s } } as Node));
-        return others.concat(branches);
-      });
-      toast('success', `Split into ${subs.length} sub-questions — use “+” on each to add a skill or tool`);
-    } catch { toast('error', 'Could not split'); } finally { setSplitting(false); }
+      await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question }) });
+      const r = await fetch(`/api/flows/${id}/plan`, { method: 'POST' });
+      const f = await r.json();
+      if (!r.ok) throw new Error();
+      const g = f.graph || { nodes: [], edges: [] };
+      setNodes(g.nodes || []);
+      setEdges(g.edges || []);
+      setSelected(null);
+      toast('success', 'Planned the whole flow — tweak any block, then Run');
+      openProcess(); // show how it will run
+    } catch { toast('error', 'Could not plan the flow'); } finally { setSplitting(false); }
   }
 
+  function toggleEnabled(nodeId: string) {
+    setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, enabled: n.data.enabled === false } } : n)));
+  }
+  // edit a node's fields from the inspector
+  function setNodeData(nodeId: string, patch: Record<string, any>) {
+    setNodes((ns) => ns.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n)));
+  }
+  function deleteNode(nodeId: string) {
+    setNodes((ns) => ns.filter((n) => n.id !== nodeId));
+    setEdges((es) => es.filter((e) => e.source !== nodeId && e.target !== nodeId));
+    setSelected(null);
+  }
+  function graphJson() {
+    return { nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })), edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated })) };
+  }
   async function save() {
     setSaving(true);
     try {
-      const graph = { nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })), edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated })) };
-      const r = await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, question, graph }) });
+      const r = await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, question, graph: graphJson() }) });
       if (!r.ok) throw new Error();
       toast('success', 'Flow saved');
     } catch { toast('error', 'Could not save'); } finally { setSaving(false); }
   }
+  async function saveSchedule(s: any) {
+    setSchedule(s);
+    try {
+      await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schedule: s }) });
+      toast('success', s ? 'Schedule saved' : 'Schedule turned off');
+    } catch { toast('error', 'Could not save schedule'); }
+    setSchedOpen(false);
+  }
+  async function run() {
+    setRunning(true);
+    try {
+      await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, question, graph: graphJson() }) });
+      const r = await fetch(`/api/flows/${id}/run`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not run');
+      // stay on the canvas and watch it light up live
+      setRunStatuses({}); setWatchStatus('running'); setWatchRunId(d.runId); setSelected(null);
+    } catch (e: any) { toast('error', e?.message || 'Could not run'); } finally { setRunning(false); }
+  }
+
+  // poll the watched run and project node statuses onto the canvas
+  useEffect(() => {
+    if (!watchRunId) return;
+    let alive = true; let t: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      const run = await fetch(`/api/flows/runs/${watchRunId}`).then((r) => r.json()).catch(() => null);
+      if (!alive) return;
+      if (run) {
+        const sts: Record<string, string> = {};
+        for (const [k, v] of Object.entries(run.results || {})) sts[k] = (v as any).status;
+        setRunStatuses(sts); setWatchStatus(run.status);
+      }
+      if (!run || run.status === 'running') t = setTimeout(tick, 2000);
+      else if (run.status === 'done') toast('success', 'Flow finished');
+    };
+    tick();
+    return () => { alive = false; if (t) clearTimeout(t); };
+    // eslint-disable-next-line
+  }, [watchRunId]);
+
+  const selectedNode = nodes.find((n) => n.id === selected) || null;
+  // Nodes reachable from the Merge (stopping at Output) run as "finishing steps" after combining.
+  const postMergeIds = (() => {
+    const merge = nodes.find((n) => n.data?.kind === 'merge');
+    const set = new Set<string>();
+    if (!merge) return set;
+    const adj = new Map<string, string[]>();
+    for (const e of edges) { if (!adj.has(e.source)) adj.set(e.source, []); adj.get(e.source)!.push(e.target); }
+    const stack = [...(adj.get(merge.id) || [])];
+    while (stack.length) {
+      const id = stack.pop()!;
+      const node = nodes.find((n) => n.id === id);
+      if (!node || set.has(id) || node.data?.kind === 'output') continue;
+      set.add(id);
+      stack.push(...(adj.get(id) || []));
+    }
+    return set;
+  })();
+  const dispNodes = nodes.map((n) => ({ ...n, selected: n.id === selected, data: { ...n.data, runStatus: watchRunId ? runStatuses[n.id] : undefined } }));
+  const dispEdges = edges.map((e) => ({ ...e, type: 'deletable' })); // render every link with a ✕ to disconnect
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100dvh - 1px)' }}>
+    <div className="flex flex-col" style={{ height: embedded ? '100%' : 'calc(100dvh - 1px)' }}>
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
-        <button onClick={() => nav('/flows')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /></button>
-        <input value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none hover:border-zinc-200 focus:border-emerald-400 dark:hover:border-zinc-700" />
+        {!embedded && <button onClick={() => nav('/flows')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /></button>}
+        {embedded ? <div className="min-w-0 flex-1" /> : <input value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none hover:border-zinc-200 focus:border-emerald-400 dark:hover:border-zinc-700" />}
+        {agentId && !embedded && <button onClick={() => nav(`/agent/agents/${agentId}`)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-300 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10"><Bot className="h-4 w-4" />Open agent</button>}
         <button onClick={openToolbarPicker} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" />Add block</button>
-        <button onClick={save} disabled={saving} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
+        <button onClick={() => setSchedOpen((o) => !o)} title="Run on a schedule" className={'inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' + (schedule ? 'border-amber-300 text-amber-700 dark:border-amber-500/40 dark:text-amber-300' : 'border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800')}><Clock className="h-4 w-4" /><span className="hidden sm:inline">{schedLabel(schedule)}</span></button>
+        <button onClick={openProcess} title="How this flow will run" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><ListOrdered className="h-4 w-4" /><span className="hidden sm:inline">How it runs</span></button>
+        {!embedded && <button onClick={() => nav(`/flows/${id}/runs`)} title="Run history & documents" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><History className="h-4 w-4" /></button>}
+        <button onClick={save} disabled={saving} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
+        <button onClick={run} disabled={running} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Run</button>
       </header>
+      {schedOpen && <SchedulePopover schedule={schedule} onSave={saveSchedule} onClose={() => setSchedOpen(false)} />}
       <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
         <span className="shrink-0 text-xs font-medium text-zinc-500">Question</span>
         <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="The one big ask… e.g. “Full competitor analysis of Tesla.”" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
-        <button onClick={autoSplit} disabled={splitting} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{splitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Auto-split</button>
+        <button onClick={autoPlan} disabled={splitting} title="Let the agent plan the whole flow from your question" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{splitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Auto-plan</button>
       </div>
-      <div className="relative min-h-0 flex-1" ref={wrap}>
-        <AddCtx.Provider value={addAfter}>
-          <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }} colorMode="system">
-            <Background gap={16} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-        </AddCtx.Provider>
-        {picker && <BlockPicker palette={palette} onPick={pick} onClose={() => setPicker(null)} />}
+      <div className="min-h-0 flex-1">
+        <div className="flex h-full">
+          <div className="relative min-h-0 flex-1" ref={wrap}>
+            <NodeCtx.Provider value={{ addAfter, toggleEnabled }}>
+             <EdgeCtx.Provider value={removeEdge}>
+              <ReactFlow nodes={dispNodes} edges={dispEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_, n) => setSelected(n.id)} onPaneClick={() => setSelected(null)} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: 'deletable', animated: true }} deleteKeyCode={['Backspace', 'Delete']} fitView proOptions={{ hideAttribution: true }} colorMode="system">
+                <Background gap={16} />
+                <Controls showInteractive={false} />
+              </ReactFlow>
+             </EdgeCtx.Provider>
+            </NodeCtx.Provider>
+            {picker && <BlockPicker palette={palette} onPick={pick} onClose={() => setPicker(null)} />}
+            {showProc && (
+              <div className="absolute inset-0 z-30 flex items-start justify-center bg-black/30 p-4 pt-12" onClick={() => setShowProc(false)}>
+                <div className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex shrink-0 items-center justify-between border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                    <span className="text-sm font-semibold">How this flow runs</span>
+                    <button onClick={() => setShowProc(false)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-auto p-3">{proc ? <FlowProcess process={proc.process} prompt={proc.prompt} /> : <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Working out the plan…</div>}</div>
+                </div>
+              </div>
+            )}
+            {watchRunId && (
+              <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 items-center gap-3 rounded-full border border-zinc-200 bg-white/95 px-4 py-1.5 text-sm shadow-lg backdrop-blur dark:border-zinc-700 dark:bg-zinc-900/95">
+                {watchStatus === 'running' ? <span className="flex items-center gap-1.5"><Loader2 className="h-4 w-4 animate-spin text-blue-500" />Running…</span> : watchStatus === 'done' ? <span className="flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4 text-emerald-500" />Finished</span> : <span className="flex items-center gap-1.5"><AlertCircle className="h-4 w-4 text-rose-500" />Failed</span>}
+                <Link to={`/flows/runs/${watchRunId}`} className="font-medium text-emerald-600 hover:underline dark:text-emerald-400">View results</Link>
+                <button onClick={() => { setWatchRunId(null); setRunStatuses({}); }} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+              </div>
+            )}
+          </div>
+          {selectedNode && <Inspector node={selectedNode} postMerge={postMergeIds.has(selectedNode.id)} onChange={setNodeData} onDelete={deleteNode} onClose={() => setSelected(null)} />}
+        </div>
       </div>
     </div>
   );
@@ -208,6 +386,123 @@ function PickerGroup({ icon, title, items, onPick }: { icon: React.ReactNode; ti
   );
 }
 
-export function FlowEditor() {
-  return <ReactFlowProvider><Editor /></ReactFlowProvider>;
+// Which field holds the editable text, per kind.
+const TEXT_FIELD: Record<string, { key: string; label: string; placeholder: string }> = {
+  question: { key: 'sub', label: 'Question', placeholder: 'Your one big ask…' },
+  subquestion: { key: 'sub', label: 'Sub-question', placeholder: 'A focused part of the question…' },
+  text: { key: 'text', label: 'Text', placeholder: 'A fixed value or instruction…' },
+  note: { key: 'sub', label: 'Note', placeholder: 'A comment for yourself…' },
+  ask_ai: { key: 'sub', label: 'Prompt (optional)', placeholder: 'Used when nothing is connected above…' },
+  ask_user: { key: 'sub', label: 'Question to ask you', placeholder: 'e.g. Approve this draft? / Which option?' },
+};
+
+function Inspector({ node, postMerge, onChange, onDelete, onClose }: { node: Node; postMerge?: boolean; onChange: (id: string, patch: Record<string, any>) => void; onDelete: (id: string) => void; onClose: () => void }) {
+  const d: any = node.data;
+  const kind: string = d.kind;
+  const set = (patch: Record<string, any>) => onChange(node.id, patch);
+  const tf = TEXT_FIELD[kind];
+  const labelCls = 'block text-[11px] font-medium uppercase tracking-wide text-zinc-500';
+  const inputCls = 'mt-1 w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
+  return (
+    <>
+      {/* dim the canvas on phone so the sheet reads as a focused editor; tap to close */}
+      <div className="fixed inset-0 z-[55] bg-black/40 sm:hidden" onClick={onClose} />
+      <div className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[82vh] flex-col rounded-t-2xl border-t border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:static sm:z-auto sm:h-full sm:max-h-none sm:w-80 sm:shrink-0 sm:rounded-none sm:border-l sm:border-t-0">
+        <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-600 sm:hidden" />
+        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Edit · {kind.replace('_', ' ')}</span>
+          <button onClick={onClose} className="ml-auto text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex-1 space-y-3 overflow-auto p-3 pb-24 sm:pb-3">
+        <div>
+          <label className={labelCls}>Name</label>
+          <input value={d.label || ''} onChange={(e) => set({ label: e.target.value })} className={inputCls} />
+        </div>
+        {tf && (
+          <div>
+            <label className={labelCls}>{tf.label}</label>
+            <textarea value={d[tf.key] || ''} onChange={(e) => set({ [tf.key]: e.target.value })} placeholder={tf.placeholder} rows={4} className={inputCls + ' resize-y leading-snug'} />
+          </div>
+        )}
+        {kind === 'merge' && (
+          <div>
+            <label className={labelCls}>How to combine</label>
+            <select value={d.mode || 'ai'} onChange={(e) => set({ mode: e.target.value })} className={inputCls}>
+              <option value="ai">AI synthesise — blend into one answer</option>
+              <option value="raw">Stack raw — keep each part as-is</option>
+            </select>
+          </div>
+        )}
+        {(kind === 'skill' || kind === 'tool') && (
+          <>
+            {postMerge && <div className="rounded-lg border border-violet-200 bg-violet-50/60 px-2.5 py-1.5 text-xs text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300">This runs as a <strong>finishing step</strong>, after the parts are combined — it shapes the final answer.</div>}
+            {d.sub && kind === 'skill' && <div className="rounded-lg bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800/60">{d.sub}</div>}
+            <div>
+              <label className={labelCls}>Extra guidance (optional)</label>
+              <textarea value={d.guidance || ''} onChange={(e) => set({ guidance: e.target.value })} placeholder="e.g. keep it under 5 bullet points" rows={3} className={inputCls + ' resize-y leading-snug'} />
+            </div>
+          </>
+        )}
+        {kind === 'wait' && (
+          <div>
+            <label className={labelCls}>Seconds</label>
+            <input type="number" min={0} value={d.seconds ?? 0} onChange={(e) => set({ seconds: Number(e.target.value) })} className={inputCls} />
+          </div>
+        )}
+        {kind === 'ask_user' && (
+          <div>
+            <label className={labelCls}>Choices (optional, one per line)</label>
+            <textarea value={(d.options || []).join('\n')} onChange={(e) => set({ options: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} placeholder={'Leave empty for a free-text answer.\nApprove\nReject'} rows={3} className={inputCls + ' resize-y leading-snug'} />
+            <p className="mt-1 text-[11px] text-zinc-400">Empty = free text. Add lines to get tap buttons. The flow pauses here until you answer (in-app or later).</p>
+          </div>
+        )}
+        {(kind === 'if' || kind === 'filter') && <div className="rounded-lg bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800/60">Passes input straight through for now — conditions come in a later update.</div>}
+          <button onClick={() => onDelete(node.id)} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-500/30 dark:hover:bg-rose-500/10"><Trash2 className="h-3.5 w-3.5" />Delete block</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function schedLabel(s: any): string {
+  if (!s) return 'Schedule';
+  const at = s.at || '';
+  if (s.every === 'day') return `Daily ${at}`;
+  if (s.every === 'weekday') return `Weekdays ${at}`;
+  if (s.every === 'week') return `${DOW[s.dow ?? 1]} ${at}`;
+  return 'Scheduled';
+}
+
+function SchedulePopover({ schedule, onSave, onClose }: { schedule: any; onSave: (s: any) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState<any>(schedule);
+  const every = draft?.every || 'off';
+  const inputCls = 'mt-1 w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
+  const setEvery = (v: string) => setDraft(v === 'off' ? null : { every: v, at: draft?.at || '08:00', dow: draft?.dow ?? 1 });
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="absolute right-4 top-16 z-50 w-72 space-y-3 rounded-xl border border-zinc-200 bg-white p-3 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Run automatically</div>
+        <select value={every} onChange={(e) => setEvery(e.target.value)} className={inputCls}>
+          <option value="off">Off</option>
+          <option value="day">Every day</option>
+          <option value="weekday">Weekdays (Mon–Fri)</option>
+          <option value="week">Weekly</option>
+        </select>
+        {draft && (
+          <div className="flex gap-2">
+            <label className="flex-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500">Time<input type="time" value={draft.at || '08:00'} onChange={(e) => setDraft({ ...draft, at: e.target.value })} className={inputCls} /></label>
+            {draft.every === 'week' && <label className="flex-1 text-[11px] font-medium uppercase tracking-wide text-zinc-500">Day<select value={draft.dow ?? 1} onChange={(e) => setDraft({ ...draft, dow: Number(e.target.value) })} className={inputCls}>{DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}</select></label>}
+          </div>
+        )}
+        <p className="text-[11px] text-zinc-400">{draft ? `Runs ${schedLabel(draft).toLowerCase()} on your local time. Results land in Run history.` : 'This flow won’t run on its own.'}</p>
+        <button onClick={() => onSave(draft)} className="w-full rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500">Save schedule</button>
+      </div>
+    </>
+  );
+}
+
+export function FlowEditor({ flowId, embedded }: { flowId?: string; embedded?: boolean } = {}) {
+  return <ReactFlowProvider><Editor flowId={flowId} embedded={embedded} /></ReactFlowProvider>;
 }

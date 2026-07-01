@@ -52,6 +52,11 @@ export class LlmService {
     }
   }
 
+  /** Public: log usage for a request made outside this service (e.g. a Codex agent run). (BEA-716) */
+  async recordUsage(feature: string, model: string, usage: any): Promise<void> {
+    return this.logUsage(feature, model, usage);
+  }
+
   /** Record one AI request's cost (never blocks or fails the actual request). */
   private async logUsage(feature: string, model: string, usage: any): Promise<void> {
     try {

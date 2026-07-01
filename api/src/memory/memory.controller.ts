@@ -31,6 +31,15 @@ export class MemoryController {
     return this.mem.retryFailed();
   }
 
+  /** Delete every doc carrying a tag from BOTH stores — for purging orphaned docs (e.g. agent
+   *  learnings, vault labels) the app no longer tracks. (BEA-690) */
+  @Post('purge-tag')
+  async purgeTag(@Body() body: { tag?: string }) {
+    const tag = (body?.tag || '').trim();
+    if (!tag) return { error: 'tag required' };
+    return this.mem.purgeByTag(tag);
+  }
+
   /** Browse the user's existing SuperMemory documents + total count. */
   @Get('browse')
   async browse(@Query('page') page?: string, @Query('limit') limit?: string) {

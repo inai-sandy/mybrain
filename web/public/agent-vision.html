@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>My Brain — Agents</title>
+<meta name="description" content="Tell it a goal. It does the whole job — and only stops to ask when it really matters. Designed by Sandeep Karnati." />
+<meta name="theme-color" content="#07090f" />
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { color-scheme: dark; }
+  html { scroll-behavior:smooth; }
+  body { background:#07090f; color:#e4e4e7; font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow-x:hidden; }
+  .orb { position:absolute; border-radius:9999px; filter:blur(70px); opacity:.45; animation:drift 16s ease-in-out infinite alternate; pointer-events:none; }
+  @keyframes drift { from{transform:translate(0,0) scale(1)} to{transform:translate(60px,-40px) scale(1.15)} }
+  .reveal { opacity:0; transform:translateY(26px); transition:opacity .7s ease, transform .7s ease; }
+  .reveal.shown { opacity:1; transform:none; }
+  @keyframes pulse-ring { 0%{transform:scale(.85);opacity:.8} 100%{transform:scale(1.6);opacity:0} }
+  .pulse-ring { animation:pulse-ring 2.6s cubic-bezier(.2,.6,.4,1) infinite; }
+  .pulse-ring.d2 { animation-delay:1.3s; }
+  .flow-path { stroke-dasharray:8 8; animation:dash 1.2s linear infinite; }
+  @keyframes dash { to{stroke-dashoffset:-16} }
+  .gtext { background:linear-gradient(100deg,#34d399,#818cf8 55%,#f472b6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .tap { cursor:pointer; transition:transform .25s ease, box-shadow .25s ease, border-color .25s; }
+  .tap:hover { transform:translateY(-4px); }
+  .tap.active { border-color:#34d399 !important; box-shadow:0 0 32px rgba(52,211,153,.22); transform:translateY(-4px); }
+  .tap.active-i { border-color:#818cf8 !important; box-shadow:0 0 32px rgba(129,140,248,.25); transform:translateY(-4px); }
+  .caret::after { content:"▋"; animation:blink 1s steps(1) infinite; color:#34d399; }
+  @keyframes blink { 50%{opacity:0} }
+  .navlink { transition:color .2s; }
+  .navlink.on { color:#34d399; }
+  @keyframes spin { to{transform:rotate(360deg)} }
+  .spin { display:inline-block; animation:spin 1s linear infinite; }
+  .act { opacity:0; transform:translateY(10px); transition:all .5s ease; }
+  .act.in { opacity:1; transform:none; }
+  .arrow { animation:bob 1.6s ease-in-out infinite; }
+  @keyframes bob { 50%{transform:translateY(8px)} }
+  details.curious { border:1px dashed rgba(129,140,248,.4); border-radius:1rem; }
+  details.curious summary { cursor:pointer; list-style:none; padding:.7rem 1rem; color:#a5b4fc; font-size:.8rem; }
+  details.curious summary::before { content:"🔍 "; }
+  details.curious[open] summary { border-bottom:1px dashed rgba(129,140,248,.3); }
+  details.curious .body { padding:.8rem 1rem; font-size:.8rem; color:#a1a1aa; line-height:1.6; }
+  .mem-chip { transition:all .4s ease; opacity:.35; }
+  .mem-chip.hit { opacity:1; border-color:#34d399 !important; box-shadow:0 0 18px rgba(52,211,153,.3); transform:scale(1.06); }
+  .tl-item { opacity:0; transform:translateX(-14px); transition:all .5s ease; }
+  .tl-item.in { opacity:1; transform:none; }
+  section { scroll-margin-top:5rem; }
+  @media (prefers-reduced-motion: reduce) {
+    .orb,.pulse-ring,.flow-path,.caret::after,.spin,.arrow { animation:none !important; }
+    .reveal{transition:none;opacity:1;transform:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== TOP BAR ===== -->
+<nav class="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-black/40 border-b border-zinc-800/80">
+  <div class="max-w-6xl mx-auto px-4 py-2.5 grid grid-cols-[auto_1fr] items-center gap-3">
+    <a href="#top" class="font-extrabold shrink-0">🤖 <span class="gtext">Agents</span></a>
+    <div class="hidden md:flex justify-end gap-6 text-sm text-zinc-500" id="navlinks"></div>
+  </div>
+</nav>
+
+<div class="pt-14" id="top"></div>
+
+<!-- ================= HERO ================= -->
+<header class="relative min-h-[88vh] flex flex-col items-center justify-center text-center px-6 overflow-hidden">
+  <div class="orb w-96 h-96 bg-emerald-500/50 -top-20 -left-24"></div>
+  <div class="orb w-[28rem] h-[28rem] bg-indigo-600/40 bottom-0 -right-32" style="animation-delay:4s"></div>
+  <div class="orb w-72 h-72 bg-pink-500/30 top-1/3 left-1/2" style="animation-delay:8s"></div>
+  <div class="relative mb-8">
+    <div class="pulse-ring absolute inset-0 rounded-full border-2 border-emerald-400/60"></div>
+    <div class="pulse-ring d2 absolute inset-0 rounded-full border-2 border-indigo-400/50"></div>
+    <div class="relative h-28 w-28 rounded-full bg-gradient-to-br from-emerald-500/30 to-indigo-600/30 border border-emerald-400/40 flex items-center justify-center text-6xl backdrop-blur">🤖</div>
+  </div>
+  <h1 class="text-5xl sm:text-7xl font-black tracking-tight"><span class="gtext">Agents</span></h1>
+  <p class="mt-4 max-w-2xl text-lg sm:text-2xl text-zinc-300 font-light">Tell it a goal. It does the whole job —<br/>and <span class="text-emerald-400 font-medium">only stops to ask</span> when it really matters.</p>
+  <p class="mt-5 text-sm uppercase tracking-[0.25em] text-zinc-500">Designed by <span class="text-zinc-300">Sandeep Karnati</span></p>
+  <div class="mt-9 flex flex-wrap items-center justify-center gap-3 text-sm">
+    <span class="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-emerald-200">🌙 Works while you're away</span>
+    <span class="rounded-full border border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-indigo-200">🛡️ Asks before anything risky</span>
+    <span class="rounded-full border border-pink-500/40 bg-pink-500/10 px-4 py-2 text-pink-200">🧠 Remembers every run</span>
+  </div>
+  <a href="#about" class="mt-12 text-2xl text-zinc-600 arrow">↓</a>
+</header>
+
+<main class="max-w-5xl mx-auto px-6 pb-10 space-y-28">
+
+  <!-- ============ 1. WHAT IT IS ============ -->
+  <section id="about" class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">What it is</p>
+    <h2 class="text-3xl sm:text-5xl font-extrabold leading-tight">Not a prompt you copy.<br/>A worker that <span class="gtext">finishes the job</span>.</h2>
+    <p class="mt-4 text-zinc-400 max-w-2xl mx-auto">The old "workflows" were a baby step. This is the real thing.</p>
+    <div class="mt-8 grid sm:grid-cols-2 gap-5 text-left">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <p class="text-sm text-zinc-500 uppercase tracking-wide mb-3">The old workflows — the baby version</p>
+        <ul class="space-y-2 text-zinc-400">
+          <li>📋 Just handed you a prompt to paste elsewhere</li>
+          <li>1️⃣ One shot, then it stopped</li>
+          <li>😶 Forgot everything the moment it ended</li>
+          <li>🚪 No follow-through — the work was still yours</li>
+        </ul>
+      </div>
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+        <p class="text-sm text-emerald-400 uppercase tracking-wide mb-3">A real Agent</p>
+        <ul class="space-y-2 text-zinc-200">
+          <li>🧩 Does a whole multi-step task, start to end</li>
+          <li>🙋 Pauses to ask you — you tap an answer</li>
+          <li>📄 Saves the finished result as a real file</li>
+          <li>🔁 Runs on a schedule, and remembers last time</li>
+          <li>📈 Gets a little smarter about you each run</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. ONE TASK, START TO FINISH ============ -->
+  <section id="flow" class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">How a task runs</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">One task, start to finish <span class="text-zinc-500 text-xl font-normal">— tap each step</span></h2>
+    <div class="mt-8 grid sm:grid-cols-5 gap-3 relative">
+      <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
+      <div class="tap flow-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="0"><div class="text-3xl">🎯</div><div class="mt-1 font-bold text-sm">Trigger</div><div class="text-[11px] text-zinc-500">you ask, or a schedule fires</div></div>
+      <div class="tap flow-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="1"><div class="text-3xl">⚙️</div><div class="mt-1 font-bold text-sm">Think &amp; do</div><div class="text-[11px] text-zinc-500">plans and works</div></div>
+      <div class="tap flow-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="2"><div class="text-3xl">🙋</div><div class="mt-1 font-bold text-sm">Ask you</div><div class="text-[11px] text-zinc-500">only when it matters</div></div>
+      <div class="tap flow-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="3"><div class="text-3xl">📄</div><div class="mt-1 font-bold text-sm">Save it</div><div class="text-[11px] text-zinc-500">a real file</div></div>
+      <div class="tap flow-step rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-step="4"><div class="text-3xl">🔁</div><div class="mt-1 font-bold text-sm">Do it again</div><div class="text-[11px] text-zinc-500">on schedule</div></div>
+    </div>
+    <div class="mt-5 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[110px] text-left"><p class="text-sm text-zinc-300" id="flowText">👆 Tap a step to see what happens there.</p></div>
+  </section>
+
+  <!-- ============ 3. ARCHITECTURE ============ -->
+  <section id="architecture" class="reveal">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Under the hood</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">The engine, <span class="gtext">as a living picture</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Everything runs on your own server, and your data never leaves your control. Tap any block.</p>
+    </div>
+    <div class="space-y-3 mt-8">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="0"><div class="text-2xl">📱</div><div class="font-bold text-sm mt-1">Phone app</div><div class="text-[11px] text-zinc-500">start a task · watch it run</div></div>
+        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="1"><div class="text-2xl">✈️</div><div class="font-bold text-sm mt-1">Telegram</div><div class="text-[11px] text-zinc-500">answer questions · get the result</div></div>
+      </div>
+      <div class="flex justify-center"><svg width="4" height="22"><line x1="2" y1="0" x2="2" y2="22" stroke="#34d399" stroke-width="2" class="flow-path"/></svg></div>
+      <div class="tap arch-node rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5 text-center" data-arch="2">
+        <div class="text-2xl">🖥️</div><div class="font-bold mt-1">Your private server</div>
+        <div class="text-[11px] text-zinc-500">runs the agent engine — even while your phone is off</div>
+      </div>
+      <div class="flex justify-center"><svg width="4" height="22"><line x1="2" y1="0" x2="2" y2="22" stroke="#818cf8" stroke-width="2" class="flow-path"/></svg></div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="3"><div class="text-2xl">🔧</div><div class="font-bold text-sm mt-1">The durable engine</div><div class="text-[11px] text-zinc-500">never loses its place</div></div>
+        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="4"><div class="text-2xl">🧠</div><div class="font-bold text-sm mt-1">The brain</div><div class="text-[11px] text-zinc-500">does the thinking</div></div>
+        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="5"><div class="text-2xl">📚</div><div class="font-bold text-sm mt-1">Your memory</div><div class="text-[11px] text-zinc-500">what it knows about you</div></div>
+        <div class="tap arch-node rounded-2xl border border-zinc-700 bg-zinc-900 p-4 text-center" data-arch="6"><div class="text-2xl">🔌</div><div class="font-bold text-sm mt-1">Your connectors</div><div class="text-[11px] text-zinc-500">Slack, WhatsApp, Gmail…</div></div>
+      </div>
+    </div>
+    <div class="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[120px] mt-3"><p class="text-sm text-zinc-300" id="archText">👆 Tap any block of the engine.</p></div>
+    <details class="curious mt-4">
+      <summary>For the curious — the real engine</summary>
+      <div class="body">The agent runs on <b>LangGraph.js</b> — an open-source (MIT) library that runs <i>inside</i> our own app and writes every step to our own SQLite. So a run survives a server restart and resumes <b>exactly</b> where it paused — we tested this: the process was killed mid-run and picked up clean from the saved checkpoint. The thinking is done by the <b>Codex CLI</b> running headless on a flat ChatGPT subscription (no per-use bill), with <b>Claude Sonnet</b> as an automatic fallback if the daily limit is hit. Connectors live in our own app with secrets encrypted at rest, and are offered to the agent over one in-house MCP server — the secrets themselves never reach the model.</div>
+    </details>
+  </section>
+
+  <!-- ============ 4. THE LIVE RUN SCREEN ============ -->
+  <section id="run" class="reveal">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Watch it work</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">The live run screen</h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">The plan ticks off on the left; what it's doing reads in plain English on the right. This is a live simulation — scroll it into view.</p>
+    </div>
+    <div class="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950 overflow-hidden shadow-2xl shadow-emerald-500/5">
+      <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5 text-sm">
+        <div class="flex items-center gap-2"><span class="text-lg">🔎</span><b>Research &amp; Save</b></div>
+        <div class="flex items-center gap-3 text-xs text-zinc-500"><span id="runStatus" class="rounded-full bg-emerald-500/15 px-2.5 py-1 text-emerald-300">● Running</span><span id="runProg">Step 1 of 5</span></div>
+      </div>
+      <div class="grid md:grid-cols-[minmax(0,42%)_1fr]">
+        <div class="border-b md:border-b-0 md:border-r border-zinc-800 p-4 space-y-2.5" id="planList">
+          <div class="plan-row flex items-start gap-2.5 text-sm" data-i="0"><span class="ind w-4 text-center text-zinc-600">○</span><span class="lbl text-zinc-600">Find sources</span></div>
+          <div class="plan-row flex items-start gap-2.5 text-sm" data-i="1"><span class="ind w-4 text-center text-zinc-600">○</span><span class="lbl text-zinc-600">Read them</span></div>
+          <div class="plan-row flex items-start gap-2.5 text-sm" data-i="2"><span class="ind w-4 text-center text-zinc-600">○</span><span class="lbl text-zinc-600">Ask you which angle</span></div>
+          <div class="plan-row flex items-start gap-2.5 text-sm" data-i="3"><span class="ind w-4 text-center text-zinc-600">○</span><span class="lbl text-zinc-600">Write it up</span></div>
+          <div class="plan-row flex items-start gap-2.5 text-sm" data-i="4"><span class="ind w-4 text-center text-zinc-600">○</span><span class="lbl text-zinc-600">Save to Documents</span></div>
+        </div>
+        <div class="p-4 space-y-2.5 min-h-[260px]" id="actStream"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. QUESTIONS DONE RIGHT ============ -->
+  <section id="questions" class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">When it asks</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">Questions, <span class="gtext">done right</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Three simple shapes — the same in the app and on Telegram.</p>
+    <div class="mt-8 grid sm:grid-cols-3 gap-4 text-left">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <p class="text-xs uppercase tracking-wide text-emerald-400 mb-2">Tap a choice</p>
+        <p class="text-sm text-zinc-300 mb-3">Reply to Ravi about the invoice?</p>
+        <div class="flex flex-wrap gap-2 text-xs">
+          <span class="rounded-full bg-emerald-600 px-3 py-1.5 text-white">Reply politely</span>
+          <span class="rounded-full border border-zinc-700 px-3 py-1.5 text-zinc-300">Ask for time</span>
+          <span class="rounded-full border border-zinc-700 px-3 py-1.5 text-zinc-300">Ignore</span>
+        </div>
+      </div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <p class="text-xs uppercase tracking-wide text-indigo-400 mb-2">Approve · edit · reject</p>
+        <p class="text-xs text-zinc-400 italic border-l-2 border-zinc-700 pl-2 mb-3">"Hi Ravi — sending the updated invoice today, thanks for your patience…"</p>
+        <div class="flex flex-wrap gap-2 text-xs">
+          <span class="rounded-full bg-emerald-600 px-3 py-1.5 text-white">Approve &amp; send</span>
+          <span class="rounded-full border border-zinc-700 px-3 py-1.5 text-zinc-300">Edit</span>
+          <span class="rounded-full border border-zinc-700 px-3 py-1.5 text-zinc-300">Reject</span>
+        </div>
+      </div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <p class="text-xs uppercase tracking-wide text-pink-400 mb-2">Mini form</p>
+        <p class="text-sm text-zinc-300 mb-3">A couple of details:</p>
+        <div class="space-y-2 text-xs">
+          <div class="rounded-lg border border-zinc-700 px-3 py-2 text-zinc-500">Which account? ▾</div>
+          <div class="rounded-lg border border-zinc-700 px-3 py-2 text-zinc-500">How much?</div>
+        </div>
+      </div>
+    </div>
+    <div class="mt-5 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 text-sm text-zinc-300 max-w-3xl mx-auto">
+      It only asks before something that <b>sends, deletes, pays, or shares</b>. It <b>batches</b> its questions, offers a <b>smart default with a countdown</b> ("going with <i>Reply politely</i> in 2h"), and goes quiet overnight — so it helps without nagging.
+    </div>
+  </section>
+
+  <!-- ============ 6. MEMORY SUPERPOWER ============ -->
+  <section id="memory" class="reveal">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">The difference</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">It gets to <span class="gtext">know you</span></h2>
+      <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Other agents start from zero every time. Yours doesn't. Tap to watch a run.</p>
+    </div>
+    <div class="mt-7 flex justify-center">
+      <button id="memRun" class="tap rounded-full border border-emerald-500/50 bg-emerald-500/10 px-5 py-2 text-sm text-emerald-200">▶ Show a run</button>
+    </div>
+    <p class="mt-6 text-sm text-zinc-400 text-center">Before it starts, it pulls what it already knows about you:</p>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3" id="memGrid">
+      <div class="mem-chip rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-400">🤝 Ravi prefers WhatsApp</div>
+      <div class="mem-chip rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-400">🧾 Invoice INV-204 unpaid</div>
+      <div class="mem-chip rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-400">🌙 You sign off as "—S"</div>
+      <div class="mem-chip rounded-xl border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-400">📄 The solar deal notes</div>
+    </div>
+    <div id="memAfter" class="mt-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5 opacity-0 transition-opacity duration-700">
+      <p class="text-sm font-bold text-emerald-300">✨ After the run — what I learned</p>
+      <div class="mt-3 space-y-2 text-sm">
+        <div class="flex items-center justify-between gap-2 rounded-lg bg-zinc-900/70 px-3 py-2"><span class="text-zinc-200">Ravi will pay by Friday</span><span class="flex gap-1.5 text-xs"><span class="rounded bg-emerald-600 px-2 py-1 text-white">keep</span><span class="rounded border border-zinc-700 px-2 py-1 text-zinc-400">edit</span><span class="rounded border border-zinc-700 px-2 py-1 text-zinc-400">forget</span></span></div>
+        <div class="flex items-center justify-between gap-2 rounded-lg bg-zinc-900/70 px-3 py-2"><span class="text-zinc-200">He's away next week</span><span class="flex gap-1.5 text-xs"><span class="rounded bg-emerald-600 px-2 py-1 text-white">keep</span><span class="rounded border border-zinc-700 px-2 py-1 text-zinc-400">edit</span><span class="rounded border border-zinc-700 px-2 py-1 text-zinc-400">forget</span></span></div>
+      </div>
+      <p class="mt-3 text-xs text-zinc-500">Only what you <b>keep</b> goes into memory. Next run, it already knows.</p>
+    </div>
+    <details class="curious mt-5">
+      <summary>For the curious — how the memory loop works</summary>
+      <div class="body">Before a run, the agent searches your second brain (the memory vault + SuperMemory) for anything relevant and shows it — you can drop a wrong item before it proceeds. After a run, it proposes new facts; only the ones you keep are written back, each tagged with the agent and the exact run so you can trace and reverse them. Every agent also keeps its own little notebook that carries across its recurring runs. Your Vault and secrets are never read into an agent.</div>
+    </details>
+  </section>
+
+  <!-- ============ 7. STARTS FULL ============ -->
+  <section id="starters" class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Day one</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">Starts full, <span class="gtext">not empty</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Open it to ready-made agents you can run or make your own.</p>
+    <div class="mt-8 grid grid-cols-2 sm:grid-cols-4 gap-3 text-left">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 hover:border-emerald-500/40 transition-all"><div class="text-3xl">☀️</div><div class="font-bold text-sm mt-2">Morning Brief</div><div class="text-[11px] text-zinc-500 mt-0.5">your day, every weekday 7am</div></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 hover:border-emerald-500/40 transition-all"><div class="text-3xl">✉️</div><div class="font-bold text-sm mt-2">Inbox Triage</div><div class="text-[11px] text-zinc-500 mt-0.5">drafts replies, you approve</div></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 hover:border-emerald-500/40 transition-all"><div class="text-3xl">✍️</div><div class="font-bold text-sm mt-2">Weekly Review</div><div class="text-[11px] text-zinc-500 mt-0.5">your week, every Friday</div></div>
+      <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-4 relative"><span class="absolute top-2 right-2 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] text-white">Building first</span><div class="text-3xl">🔎</div><div class="font-bold text-sm mt-2">Research &amp; Save</div><div class="text-[11px] text-zinc-400 mt-0.5">a topic → a saved file</div></div>
+    </div>
+    <div class="mt-7 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6">
+      <p class="text-sm font-bold text-zinc-200">🪄 Skills gallery</p>
+      <p class="text-xs text-zinc-500 mt-1">Install a skill or connector in one tap — then your agents can use it.</p>
+      <div class="mt-4 flex flex-wrap justify-center gap-2 text-xs">
+        <span class="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-zinc-300">💬 Slack · install</span>
+        <span class="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-zinc-300">🟢 WhatsApp · install</span>
+        <span class="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-zinc-300">📧 Gmail · connected ✓</span>
+        <span class="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-zinc-300">📁 Drive · install</span>
+      </div>
+      <p class="mt-4 text-xs text-zinc-500">Your own saved prompts &amp; documents can become skills too.</p>
+    </div>
+  </section>
+
+  <!-- ============ 8. ROADMAP ============ -->
+  <section id="roadmap" class="reveal">
+    <div class="text-center">
+      <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">The plan</p>
+      <h2 class="text-3xl sm:text-5xl font-extrabold">Three steps to <span class="gtext">the full thing</span></h2>
+    </div>
+    <div class="mt-8 space-y-0 max-w-2xl mx-auto" id="timeline">
+      <div class="tl-item flex gap-4 pb-7 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-emerald-500"></span><div><b class="text-sm text-emerald-300">Phase 1 — The loop</b><p class="text-xs text-zinc-400 mt-1">One agent runs end to end: thinks on Codex, asks you on Telegram, saves to your Documents, and runs on a schedule. <b>Research &amp; Save</b> goes first.</p></div></div>
+      <div class="tl-item flex gap-4 pb-7 border-l-2 border-zinc-800 pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-indigo-500"></span><div><b class="text-sm text-indigo-300">Phase 2 — The canvas</b><p class="text-xs text-zinc-400 mt-1">A drag-and-drop builder, in our own design, so you can wire up your own agents step by step.</p></div></div>
+      <div class="tl-item flex gap-4 pb-0 border-l-2 border-transparent pl-5 relative"><span class="absolute -left-[7px] top-1 h-3 w-3 rounded-full bg-pink-500"></span><div><b class="text-sm text-pink-300">Phase 3 — Everything connected</b><p class="text-xs text-zinc-400 mt-1">WhatsApp, Slack and more connectors, plus deep ties into your Tasks, Memory and the Lab.</p></div></div>
+    </div>
+  </section>
+
+  <!-- ============ CLOSING ============ -->
+  <section class="reveal text-center pt-4">
+    <h2 class="text-4xl sm:text-5xl font-black leading-tight">Most assistants wait for <span class="text-zinc-500">instructions</span>.<br/><span class="gtext">This one gets the job done.</span></h2>
+    <p class="mt-5 text-zinc-400 max-w-xl mx-auto">You set the goal once. It works, checks in only when it counts, saves the result, and does it again tomorrow.</p>
+    <div class="mt-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-emerald-300 font-medium">✨ Agents — your work, handled</div>
+  </section>
+
+</main>
+
+<footer class="border-t border-zinc-800 py-7 text-center text-xs text-zinc-600">
+  Designed by <span class="text-zinc-400 font-medium">Sandeep Karnati</span> · part of My Brain · private by design
+</footer>
+
+<script>
+  // ---------- nav ----------
+  const NAV = [['about','What it is'],['flow','How it runs'],['architecture','Engine'],['run','Live run'],['questions','Questions'],['memory','Memory'],['starters','Starters'],['roadmap','Roadmap']];
+  const navWrap = document.getElementById('navlinks');
+  NAV.forEach(([id,label]) => {
+    const a = document.createElement('a');
+    a.href = '#' + id; a.textContent = label; a.className = 'navlink hover:text-zinc-200'; a.dataset.id = id;
+    navWrap.appendChild(a);
+  });
+  const navById = {};
+  document.querySelectorAll('.navlink').forEach(a => navById[a.dataset.id] = a);
+  const navio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    document.querySelectorAll('.navlink').forEach(a => a.classList.remove('on'));
+    const a = navById[e.target.id]; if (a) a.classList.add('on');
+  }), { rootMargin: '-40% 0px -55% 0px' });
+  NAV.forEach(([id]) => { const el = document.getElementById(id); if (el) navio.observe(el); });
+
+  // ---------- reveal ----------
+  const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('shown')), { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+  // ---------- flow step-flow ----------
+  const FLOW = [
+    ['🎯 Trigger', 'You ask in plain words ("research our vendor options and save it"), or a schedule fires on its own. The run begins.'],
+    ['⚙️ Think & do', 'It makes a plan, then works through it — searching, reading, drafting — using the skills and connectors you gave it.'],
+    ['🙋 Ask you', 'It only stops for the things that matter — sending, deleting, paying, sharing. The question pops up on your phone; you tap an answer. A smart default kicks in if you’re away.'],
+    ['📄 Save the result', 'The finished work becomes a real file in your Documents — versioned and shareable — not a message that scrolls away.'],
+    ['🔁 Do it again', 'If it’s a recurring job, it runs on its schedule and remembers last time — so it never repeats itself or starts from scratch.'],
+  ];
+  const flowSteps = document.querySelectorAll('.flow-step'); const flowText = document.getElementById('flowText');
+  flowSteps.forEach((s) => s.addEventListener('click', () => {
+    flowSteps.forEach((x) => x.classList.remove('active')); s.classList.add('active');
+    const [t, d] = FLOW[+s.dataset.step]; flowText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
+  }));
+
+  // ---------- architecture ----------
+  const ARCH = [
+    ['📱 Phone app', 'Where you start a task, pick its skills, set its schedule, and watch it run live. Installs from the browser, works like a native app.'],
+    ['✈️ Telegram', 'How it reaches you when you’re away: a tap-to-answer question, a nudge, and the finished result delivered to your chat.'],
+    ['🖥️ Your private server', 'The heart. The agent engine runs here on hardware you control — so a long job keeps going even with your phone off.'],
+    ['🔧 The durable engine', 'Remembers exactly where each run is, step by step. Pause for an hour or a day, restart the server — it picks up right where it left off.'],
+    ['🧠 The brain', 'Does the actual thinking and tool-use. Runs on a flat subscription, not a per-use bill, with an automatic backup brain if a limit is hit.'],
+    ['📚 Your memory', 'Your second brain. The agent reads it before a run and writes back what it learned after — the reason it gets smarter about you.'],
+    ['🔌 Your connectors', 'Slack, WhatsApp, Gmail and more — each lives in your app with its keys encrypted, offered to the agent as a tool it can use.'],
+  ];
+  const archText = document.getElementById('archText');
+  document.querySelectorAll('.arch-node').forEach((n) => n.addEventListener('click', () => {
+    document.querySelectorAll('.arch-node').forEach((x) => x.classList.remove('active-i'));
+    n.classList.add('active-i');
+    const [t, d] = ARCH[+n.dataset.arch];
+    archText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
+  }));
+
+  // ---------- live run demo ----------
+  const planRows = [...document.querySelectorAll('.plan-row')];
+  const actStream = document.getElementById('actStream');
+  const runStatus = document.getElementById('runStatus');
+  const runProg = document.getElementById('runProg');
+  const INDS = {
+    pending: ['○', 'text-zinc-600', 'text-zinc-600'],
+    run:     ['<span class="spin">◐</span>', 'text-emerald-400', 'text-white'],
+    wait:    ['⏸', 'text-amber-400', 'text-amber-200'],
+    done:    ['✓', 'text-emerald-400', 'text-zinc-300'],
+  };
+  function setPlan(i, state) {
+    const row = planRows[i]; if (!row) return;
+    const [icon, ic, lc] = INDS[state];
+    const ind = row.querySelector('.ind'), lbl = row.querySelector('.lbl');
+    ind.className = 'ind w-4 text-center ' + ic; ind.innerHTML = icon;
+    lbl.className = 'lbl ' + lc;
+  }
+  function addAct(html, cls) {
+    const d = document.createElement('div');
+    d.className = 'act ' + (cls || '');
+    d.innerHTML = html;
+    actStream.appendChild(d);
+    void d.offsetWidth; // reflow
+    requestAnimationFrame(() => d.classList.add('in'));
+    return d;
+  }
+  const RUN_STEPS = [
+    [200,  () => { setPlan(0,'run'); runProg.textContent='Step 1 of 5'; addAct('<span class="text-zinc-500 text-xs">looking for sources on vendor options…</span>'); }],
+    [1300, () => { setPlan(0,'done'); addAct('<span class="text-zinc-300 text-sm">📑 Found 6 useful sources.</span>'); }],
+    [1700, () => { setPlan(1,'run'); runProg.textContent='Step 2 of 5'; addAct('<span class="text-zinc-500 text-xs">reading them — pulling the key points…</span>'); }],
+    [3000, () => { setPlan(1,'done'); }],
+    [3300, () => { setPlan(2,'wait'); runProg.textContent='Step 3 of 5'; runStatus.innerHTML='● Waiting on you'; runStatus.className='rounded-full bg-amber-500/15 px-2.5 py-1 text-amber-300';
+      addAct('<div class="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3"><p class="text-sm text-amber-100 mb-2">Two angles found — which should I focus on?</p><div class="flex flex-wrap gap-2 text-xs"><span id="qa" class="rounded-full bg-zinc-800 px-3 py-1.5 text-zinc-200">Cost savings</span><span class="rounded-full bg-zinc-800 px-3 py-1.5 text-zinc-200">Speed</span></div><p class="mt-2 text-[11px] text-amber-300/70">default: Cost savings · auto in 2h</p></div>'); }],
+    [5200, () => { const qa = document.getElementById('qa'); if (qa) { qa.className='rounded-full bg-emerald-600 px-3 py-1.5 text-white'; qa.textContent='✓ Cost savings'; }
+      runStatus.innerHTML='● Running'; runStatus.className='rounded-full bg-emerald-500/15 px-2.5 py-1 text-emerald-300';
+      setPlan(2,'done'); addAct('<span class="text-zinc-400 text-sm">👍 Got it — focusing on cost savings.</span>'); }],
+    [5700, () => { setPlan(3,'run'); runProg.textContent='Step 4 of 5'; addAct('<span class="text-zinc-500 text-xs">writing up the comparison…</span>'); }],
+    [7000, () => { setPlan(3,'done'); }],
+    [7300, () => { setPlan(4,'run'); runProg.textContent='Step 5 of 5'; addAct('<span class="text-zinc-500 text-xs">saving to your Documents…</span>'); }],
+    [8300, () => { setPlan(4,'done'); runStatus.innerHTML='✓ Done'; runStatus.className='rounded-full bg-emerald-500/20 px-2.5 py-1 text-emerald-300';
+      addAct('<div class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 flex items-center justify-between gap-2"><span class="text-sm text-zinc-200">📄 Saved: <b>Research — Vendor options</b></span><span class="rounded-full border border-emerald-500/40 px-3 py-1 text-xs text-emerald-300">Open</span></div>'); }],
+  ];
+  let runPlayed = false;
+  const runio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting || runPlayed) return; runPlayed = true; runio.disconnect();
+    RUN_STEPS.forEach(([t, fn]) => setTimeout(fn, t));
+  }), { threshold: 0.35 });
+  runio.observe(document.getElementById('run'));
+
+  // ---------- memory demo ----------
+  const memChips = [...document.querySelectorAll('#memGrid .mem-chip')];
+  const memAfter = document.getElementById('memAfter');
+  let memPlaying = false;
+  function playMem() {
+    if (memPlaying) return; memPlaying = true;
+    memChips.forEach((c) => c.classList.remove('hit')); memAfter.style.opacity = 0;
+    memChips.forEach((c, j) => setTimeout(() => c.classList.add('hit'), 250 + j * 280));
+    setTimeout(() => { memAfter.style.opacity = 1; memPlaying = false; }, 250 + memChips.length * 280 + 500);
+  }
+  document.getElementById('memRun').addEventListener('click', playMem);
+  let memAuto = false;
+  const memio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting || memAuto) return; memAuto = true; memio.disconnect(); setTimeout(playMem, 400);
+  }), { threshold: 0.4 });
+  memio.observe(document.getElementById('memGrid'));
+
+  // ---------- timeline ----------
+  const tlio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return; tlio.disconnect();
+    document.querySelectorAll('.tl-item').forEach((m, i) => setTimeout(() => m.classList.add('in'), i * 250));
+  }), { threshold: 0.3 });
+  tlio.observe(document.getElementById('timeline'));
+</script>
+</body>
+</html>

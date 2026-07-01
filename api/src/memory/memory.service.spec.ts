@@ -113,6 +113,42 @@ describe('MemoryService outbox', () => {
     expect(sm.delete).toHaveBeenCalledWith('sm-old');
     expect(rag.delete).toHaveBeenCalledWith('rag-old');
   });
+
+  it('a table-less refType (agent-learning) saves ONCE and stays done — never loops (BEA-691)', async () => {
+    const prisma = fakePrisma();
+    const rag: any = { save: jest.fn(async () => 'rag1') };
+    const sm: any = { save: jest.fn(async () => 'sm1') };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    // refType 'agent-learning' has NO backing table → write-back used to throw → revert → re-save loop.
+    await svc.enqueue('User likes X', { refType: 'agent-learning', refId: 'run-1', title: 'Agent learned', tags: ['agent', 'learning'], targets: ['rag'] });
+    await svc.drain();
+    await svc.drain(); // a second sweep must NOT re-save a duplicate
+
+    expect(rag.save).toHaveBeenCalledTimes(1);
+    const row = prisma.rows.find((r: any) => r.target === 'rag');
+    expect(row.status).toBe('done'); // committed and stays done despite the table-less write-back
+  });
+
+  it('purgeByTag deletes every tagged doc from BOTH stores, incl. orphans (BEA-690)', async () => {
+    const prisma = fakePrisma();
+    // RAG: list_docs capped at 100 → delete-and-relist; first call has 2 tagged docs, then empty.
+    const ragPages = [[{ id: 'r1', title: 'Agent learned', tags: ['agent', 'learning'] }, { id: 'r2', title: 'Agent learned', tags: ['agent', 'learning'] }], []];
+    const rag: any = { list: jest.fn(async () => ragPages.shift() ?? []), delete: jest.fn(async () => undefined) };
+    // SuperMemory: paginate; mixed tags, only 'learning' ones are deleted; a non-full page ends pagination.
+    const smPage1 = [{ id: 's1', tags: ['learning'] }, { id: 's2', tags: ['bookmark'] }, { id: 's3', tags: ['learning'] }];
+    const sm: any = { list: jest.fn(async (_l: number, page: number) => ({ total: 3, docs: page === 1 ? smPage1 : [] })), delete: jest.fn(async () => undefined) };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    const res = await svc.purgeByTag('learning');
+
+    expect(res).toEqual({ rag: 2, supermemory: 2 });
+    expect(rag.delete).toHaveBeenCalledWith('r1');
+    expect(rag.delete).toHaveBeenCalledWith('r2');
+    expect(sm.delete).toHaveBeenCalledWith('s1');
+    expect(sm.delete).toHaveBeenCalledWith('s3');
+    expect(sm.delete).not.toHaveBeenCalledWith('s2'); // untagged doc untouched
+  });
 });
 
 describe('MemoryService.searchScoped (strict scoping)', () => {

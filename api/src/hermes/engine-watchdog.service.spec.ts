@@ -1,20 +1,29 @@
 import { EngineWatchdog } from './engine-watchdog.service';
 
-describe('EngineWatchdog.shouldRestart (BEA-632)', () => {
-  const TEN_MIN = 10 * 60_000;
+// Repointed to the direct Codex runner in F5 (BEA-663): the watchdog now pings codex-runner /status
+// and records health; it no longer auto-restarts (the Hermes helper-restart was removed).
+describe('EngineWatchdog (direct Codex)', () => {
+  const fakeAgent = () => ({ recorded: [] as any[], recordEngineHealth: jest.fn(async function (this: any, p: any) { this.recorded.push(p); }) });
 
-  it('does not restart before enough consecutive failures', () => {
-    expect(EngineWatchdog.shouldRestart(1, 1_000_000, 0)).toBe(false);
-    expect(EngineWatchdog.shouldRestart(2, 1_000_000, 0)).toBe(false);
+  it('records healthy when the runner reports ready', async () => {
+    const agent = fakeAgent();
+    const orig = (global as any).fetch;
+    (global as any).fetch = jest.fn(async () => ({ ok: true, json: async () => ({ ready: true }) }));
+    try {
+      const wd = new EngineWatchdog(agent as any);
+      await (wd as any).tick();
+      expect(agent.recordEngineHealth).toHaveBeenCalledWith(expect.objectContaining({ error: null }));
+    } finally { (global as any).fetch = orig; }
   });
 
-  it('restarts after 3 consecutive failures when none happened recently', () => {
-    expect(EngineWatchdog.shouldRestart(3, 1_000_000, 0)).toBe(true);
-  });
-
-  it('rate-limits: will not restart again within 10 minutes of the last one', () => {
-    const now = 100 * 60_000;
-    expect(EngineWatchdog.shouldRestart(5, now, now - (TEN_MIN - 1))).toBe(false); // 9m59s ago → blocked
-    expect(EngineWatchdog.shouldRestart(5, now, now - TEN_MIN)).toBe(true); // exactly 10m ago → allowed
+  it('records an error when the runner is unreachable (and does not throw / restart)', async () => {
+    const agent = fakeAgent();
+    const orig = (global as any).fetch;
+    (global as any).fetch = jest.fn(async () => { throw new Error('down'); });
+    try {
+      const wd = new EngineWatchdog(agent as any);
+      await (wd as any).tick();
+      expect(agent.recordEngineHealth).toHaveBeenCalledWith(expect.objectContaining({ error: expect.stringContaining('unreachable') }));
+    } finally { (global as any).fetch = orig; }
   });
 });

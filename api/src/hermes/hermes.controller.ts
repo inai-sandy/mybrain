@@ -1,6 +1,5 @@
-import { Body, Controller, Get, Param, Post, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, BadRequestException } from '@nestjs/common';
 import { HermesBridgeService } from './hermes-bridge.service';
-import { HermesClient } from './hermes.client';
 import { AgentService } from '../agent/agent.service';
 import { AgentToolsService } from '../agent/agent-tools.service';
 import { MemoryService } from '../memory/memory.service';
@@ -13,7 +12,6 @@ import { MemoryService } from '../memory/memory.service';
 export class HermesController {
   constructor(
     private readonly bridge: HermesBridgeService,
-    private readonly hermes: HermesClient,
     private readonly agent: AgentService,
     private readonly tools: AgentToolsService,
     private readonly memory: MemoryService,
@@ -42,7 +40,26 @@ export class HermesController {
   async runAgent(@Param('id') id: string) {
     const agent = await this.agent.getAgent(id);
     if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');
-    return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric });
+    // Honour the agent's default depth (BEA-695). 'deep' agents are run via their flow by the UI; if this
+    // single-turn endpoint is hit for one, it falls back to standard depth (non-quick).
+    const depth = agent.defaultDepth === 'quick' ? 'quick' : 'standard';
+    return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth });
+  }
+
+  // ---- "Saved by agents" trust view (BEA-700) ----
+  @Get('saved')
+  listSaved() {
+    return this.bridge.listSavedByAgents();
+  }
+
+  @Delete('saved/doc/:id')
+  deleteSavedDoc(@Param('id') id: string) {
+    return this.bridge.deleteSavedDocument(id);
+  }
+
+  @Post('saved/clear-learnings')
+  clearLearnings() {
+    return this.bridge.clearAgentLearnings();
   }
 
   /** Guided builder (BEA-643): draft an agent config from a one-line idea, for the user to review + save. */
@@ -63,40 +80,57 @@ export class HermesController {
     return { started: n };
   }
 
+  /** Suggest eval cases from the agent's Task + Outcome (Evals ③). */
+  @Post('agents/:id/suggest-evals')
+  suggestEvals(@Param('id') id: string) {
+    return this.bridge.suggestEvals(id);
+  }
+
   /** Rich engine status for the settings panel + the Agents "engine online" pill. */
   @Get('engine')
   async engine() {
-    const [status, counts, health] = await Promise.all([this.hermes.engineStatus(), this.agent.engineCounts(), this.agent.engineHealth()]);
+    const [status, counts, health] = await Promise.all([this.codexEngineStatus(), this.agent.engineCounts(), this.agent.engineHealth()]);
     // The agent's My Brain tools are mounted as a host MCP server in the Codex runtime — show them.
     const tools = { ...this.tools.describe(), connected: !!status.connectedToCodex };
     return { ...status, counts, tools, health };
   }
 
-  /** Restart the engine via the locked-down host helper (it only runs `systemctl restart mybrain-agent`). */
+  /** Engine status from the host codex-runner directly (post-Hermes). Shape kept compatible with the UI pill. */
+  private async codexEngineStatus() {
+    const RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
+    try {
+      const r = await fetch(`${RUNNER}/status`, { signal: AbortSignal.timeout(8000) });
+      const s: any = r.ok ? await r.json() : {};
+      return { ok: !!s.ready, version: s.version || null, model: process.env.AGENT_MODEL || 'gpt-5.5', connectedToCodex: !!s.ready, provider: 'openai-codex', authRequired: !s.loggedIn, gatewayRunning: false };
+    } catch {
+      return { ok: false, version: null, model: 'gpt-5.5', connectedToCodex: false, provider: 'openai-codex', authRequired: true, gatewayRunning: false };
+    }
+  }
+
+  /**
+   * Engine restart is a no-op now: the engine is the host codex-runner (systemd-managed, auto-restarted
+   * on crash) reached per-turn via `codex exec`. The old helper restarted the now-removed Hermes service,
+   * so we must NOT call it (that would revive Hermes). Kept so the settings button doesn't 404.
+   */
   @Post('engine/restart')
   async restart() {
-    const url = process.env.AGENT_HELPER_URL || 'http://172.18.0.1:8770';
-    const token = process.env.AGENT_HELPER_TOKEN || '';
-    try {
-      const r = await fetch(`${url}/restart`, { method: 'POST', headers: { 'x-token': token }, signal: AbortSignal.timeout(20000) });
-      if (!r.ok) throw new Error('helper returned ' + r.status);
-      return { ok: true };
-    } catch (e: any) {
-      throw new BadRequestException('Could not restart the engine — ' + (e?.message || 'helper unreachable'));
-    }
+    return { ok: true, message: 'The Codex runtime is managed automatically — no manual restart needed.' };
   }
 
   /** Start an agent run: kicks off Hermes in the background, returns the run row immediately. */
   @Post('run')
-  run(@Body() body: { prompt?: string; title?: string; agentId?: string; saveCollectionId?: string | null; save?: boolean; quick?: boolean }) {
+  run(@Body() body: { prompt?: string; title?: string; agentId?: string; saveCollectionId?: string | null; save?: boolean; quick?: boolean; depth?: 'quick' | 'standard' | 'deep' }) {
     if (!body?.prompt?.trim()) throw new BadRequestException('A prompt is required');
+    // Depth model (BEA-695): quick/standard run here as a single turn; legacy `quick` bool maps to depth.
+    // 'deep' is a flow — callers route it to the flow endpoints, so it shouldn't reach this handler.
+    const depth = body.depth ?? (body.quick ? 'quick' : 'standard');
     return this.bridge.startRun({
       prompt: body.prompt.trim(),
       title: body.title?.trim() || undefined,
       agentId: body.agentId,
       saveCollectionId: body.saveCollectionId ?? null,
-      save: body.quick ? false : body.save,
-      quick: body.quick,
+      save: depth === 'quick' ? false : body.save,
+      depth,
     });
   }
 }

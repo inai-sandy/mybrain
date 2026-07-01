@@ -14,47 +14,72 @@ function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
     attachOutput: jest.fn(async (runId: string, docId: string) => { runs[runId].outputDocId = docId; return runs[runId]; }),
     finishRun: jest.fn(async (runId: string, patch: any) => { Object.assign(runs[runId], patch, { ended: true }); return runs[runId]; }),
     setLearnings: jest.fn(async function (this: any, _runId: string, items: any) { this.learnings = items; return runs['run-1']; }),
-    ask: jest.fn(async function (this: any, runId: string, q: any) { this.asked.push({ runId, ...q }); return { id: 'wp1', resumeToken: 'tok', status: 'pending', kind: q.kind, options: q.options }; }),
-    getWaitpoint: jest.fn(async (_token: string) => ({ status: 'answered', answer: opts.answer ?? 'speed', defaultValue: null })),
+    setEvals: jest.fn(async () => undefined),
   };
 }
 const fakeDocs = () => ({ create: jest.fn(async (i: any) => ({ id: 'doc-1', slug: 'x', title: i.title })) });
 const fakeTg = () => ({ pushAgentQuestion: jest.fn(async () => undefined) });
 const fakeMem = (hits: any[] = []) => ({ searchBrain: jest.fn(async () => hits), enqueue: jest.fn(async () => undefined) });
 const fakeLlm = (out = '') => ({ complete: jest.fn(async () => out) });
-const fakeHermes = (behaviour: (h: any) => Promise<any>) => ({ runTurn: jest.fn(async (text: string, h: any) => behaviour({ ...h, _text: text })) });
 
-function build(hermes: any, agent: any, mem = fakeMem(), llm = fakeLlm(), docs = fakeDocs(), tg = fakeTg()) {
-  return new HermesBridgeService(hermes as any, agent as any, docs as any, tg as any, mem as any, llm as any);
+// The engine is the host codex-runner, reached over HTTP. Mock global.fetch to drive a turn.
+// resp: object or (body)=>object with { text?, events?, httpError?, error?, throw? }.
+function mockCodex(resp: any = {}) {
+  const fn = jest.fn(async (_url: string, init: any) => {
+    const body = JSON.parse((init && init.body) || '{}');
+    const r = (typeof resp === 'function' ? resp(body) : resp) || {};
+    if (r.throw) throw new Error(r.throw);
+    if (r.httpError) return { ok: false, json: async () => ({ error: r.error || 'boom' }) } as any;
+    return { ok: true, json: async () => ({ text: r.text ?? 'ok', sessionId: 's', events: r.events ?? [] }) } as any;
+  });
+  (global as any).fetch = fn;
+  return fn;
 }
 
-describe('HermesBridgeService (618 + 620 + 624)', () => {
-  it('streams steps and saves the result as a Document on success', async () => {
+function build(agent: any, mem = fakeMem(), llm = fakeLlm(), docs = fakeDocs(), tg = fakeTg()) {
+  return new HermesBridgeService(agent as any, docs as any, tg as any, mem as any, llm as any);
+}
+
+describe('HermesBridgeService (Codex engine)', () => {
+  let savedFetch: any;
+  beforeEach(() => { savedFetch = (global as any).fetch; });
+  afterEach(() => { (global as any).fetch = savedFetch; });
+
+  it('runs a turn via the codex-runner and saves the result as a Document', async () => {
     const agent = fakeAgent();
     const docs = fakeDocs();
-    const hermes = fakeHermes(async (h) => { h.onStep?.({ label: 'Searching the web', status: 'done' }); return { sessionId: 's', finalText: '# Findings', status: 'complete' }; });
-    await build(hermes, agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'research', title: 'Vendor research' });
+    const fetchMock = mockCodex({ text: '# Findings' });
+    await build(agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'research', title: 'Vendor research' });
+    expect(fetchMock).toHaveBeenCalledWith('http://172.18.0.1:8765/run', expect.objectContaining({ method: 'POST' }));
     expect(docs.create).toHaveBeenCalledWith(expect.objectContaining({ title: 'Vendor research', contentText: '# Findings' }));
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', outputDocId: 'doc-1', resultText: '# Findings' });
   });
 
-  it('BEA-624 recall: prepends brain context to the task and logs a step', async () => {
+  it('surfaces a tool call (mybrain) as a step', async () => {
+    const agent = fakeAgent();
+    mockCodex({ text: 'ok', events: [{ type: 'mcp_tool_call', name: 'mybrain' }] });
+    await build(agent).execute('run-1', { prompt: 'do it', title: 'T' });
+    expect(agent.steps.some((s: any) => /Used your brain/.test(s.label))).toBe(true);
+  });
+
+  it('BEA-692 research-first: appends research-then-brain guidance, does NOT pre-inject the brain', async () => {
     const agent = fakeAgent();
     let seenPrompt = '';
-    const hermes = fakeHermes(async (h) => { seenPrompt = h._text; return { sessionId: 's', finalText: 'ok', status: 'complete' }; });
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
     const mem = fakeMem([{ title: 'Ravi', content: 'prefers WhatsApp' }]);
-    await build(hermes, agent, mem, fakeLlm()).execute('run-1', { prompt: 'draft a note to Ravi' });
-    expect(mem.searchBrain).toHaveBeenCalledWith('draft a note to Ravi', 18);
-    expect(seenPrompt).toContain('prefers WhatsApp'); // context injected
-    expect(seenPrompt).toContain('Task: draft a note to Ravi');
-    expect(agent.steps.some((s) => /Recalled 1 note/.test(s.label))).toBe(true);
+    await build(agent, mem, fakeLlm()).execute('run-1', { prompt: 'draft a note to Ravi' });
+    expect(mem.searchBrain).not.toHaveBeenCalled(); // no pre-injected recall
+    expect(seenPrompt).toContain('Research the topic properly FIRST');
+    expect(seenPrompt).toContain('search_brain'); // brain is consulted as a tool, AFTER research
+    expect(seenPrompt).not.toContain('prefers WhatsApp'); // not dumped into the prompt
+    expect(agent.steps.some((s) => /Recalled/.test(s.label))).toBe(false);
   });
 
   it('BEA-624 learn: proposes durable facts from the result', async () => {
     const agent = fakeAgent();
-    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'big result text', status: 'complete' }));
+    mockCodex({ text: 'big result text' });
     const llm = fakeLlm('Ravi pays by Friday\nThe invoice is INV-204\n');
-    await build(hermes, agent, fakeMem(), llm).execute('run-1', { prompt: 'x' });
+    await build(agent, fakeMem(), llm).execute('run-1', { prompt: 'x' });
     expect(agent.setLearnings).toHaveBeenCalled();
     expect(agent.learnings).toEqual([
       { text: 'Ravi pays by Friday', status: 'proposed' },
@@ -62,89 +87,109 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
     ]);
   });
 
-  it('autopilot autonomy never asks: clarify proceeds with default, approval is denied without a Telegram ping', async () => {
-    const agent = fakeAgent({ cfg: { autonomy: 'autopilot' } });
-    const tg = fakeTg();
-    let clarifyAns: any, approveAns: any;
-    const hermes = fakeHermes(async (h) => {
-      clarifyAns = await h.onClarify?.({ question: 'Which?', choices: ['a', 'b'] });
-      approveAns = await h.onApproval?.({ command: 'rm' });
-      return { sessionId: 's', finalText: 'ok', status: 'complete' };
-    });
-    await build(hermes, agent, fakeMem(), fakeLlm(), fakeDocs(), tg).execute('run-1', { prompt: 'x' });
-    expect(clarifyAns).toBe('a'); // proceeded with the first choice, no waitpoint
-    expect(approveAns).toBe('deny'); // never auto-runs risky
-    expect(agent.ask).not.toHaveBeenCalled();
-    expect(tg.pushAgentQuestion).not.toHaveBeenCalled();
-  });
-
-  it('recall off (setting) skips the brain search', async () => {
+  it('recall off (setting): brain is not offered as a tool, but it still researches', async () => {
     const agent = fakeAgent({ cfg: { recall: false } });
     const mem = fakeMem([{ title: 'x', content: 'y' }]);
-    await build(fakeHermes(async () => ({ sessionId: 's', finalText: 'ok', status: 'complete' })), agent, mem).execute('run-1', { prompt: 'x' });
+    let seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
+    await build(agent, mem).execute('run-1', { prompt: 'x' });
     expect(mem.searchBrain).not.toHaveBeenCalled();
+    expect(seenPrompt).not.toContain('search_brain'); // brain disabled → not mentioned
+    expect(seenPrompt).toContain('Research the topic'); // still researches
   });
 
-  it('BEA-620 relays a clarify question and returns the choice', async () => {
-    const agent = fakeAgent({ answer: 'speed' });
-    const tg = fakeTg();
-    let returned: any;
-    const hermes = fakeHermes(async (h) => { returned = await h.onClarify?.({ question: 'Which?', choices: ['cost', 'speed'] }); return { sessionId: 's', finalText: 'done', status: 'complete' }; });
-    await build(hermes, agent, fakeMem(), fakeLlm(), fakeDocs(), tg).execute('run-1', { prompt: 'x' });
-    expect(tg.pushAgentQuestion).toHaveBeenCalled();
-    expect(returned).toBe('speed');
-  }, 15000);
+  it('BEA-695 depth=standard saves a document; depth=quick does not', async () => {
+    let agent = fakeAgent();
+    let docs = fakeDocs();
+    mockCodex({ text: 'an answer' });
+    await build(agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'x', depth: 'standard' });
+    expect(docs.create).toHaveBeenCalled();
 
-  it('BEA-620 approval maps approve->once / reject->deny', async () => {
-    const a1 = fakeAgent({ answer: 'approve' }); let c1: any;
-    await build(fakeHermes(async (h) => { c1 = await h.onApproval?.({ command: 'rm' }); return { sessionId: 's', finalText: 'ok', status: 'complete' }; }), a1).execute('run-1', { prompt: 'x' });
-    expect(c1).toBe('once');
-    const a2 = fakeAgent({ answer: 'reject' }); let c2: any;
-    await build(fakeHermes(async (h) => { c2 = await h.onApproval?.({ command: 'rm' }); return { sessionId: 's', finalText: 'ok', status: 'complete' }; }), a2).execute('run-1', { prompt: 'x' });
-    expect(c2).toBe('deny');
-  }, 15000);
+    agent = fakeAgent();
+    docs = fakeDocs();
+    mockCodex({ text: 'an answer' });
+    await build(agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'x', depth: 'quick' });
+    expect(docs.create).not.toHaveBeenCalled(); // quick saves nothing
+  });
+
+  it('BEA-695 startRun records the chosen depth on the run', async () => {
+    const agent = fakeAgent();
+    mockCodex({ text: 'x' });
+    await build(agent).startRun({ prompt: 'go', depth: 'quick' });
+    expect(agent.createRun).toHaveBeenCalledWith(expect.objectContaining({ depth: 'quick' }));
+  });
+
+  it('BEA-696 fails the Outcome → revises exactly once (no loop)', async () => {
+    const agent = fakeAgent();
+    let codexCalls = 0;
+    mockCodex(() => { codexCalls++; return { text: `answer ${codexCalls}` }; });
+    const llm = fakeLlm('{"verdict":"fail","score":20,"criteria":[],"notes":"missing sources"}');
+    await build(agent, fakeMem(), llm, fakeDocs()).execute('run-1', { prompt: 'x', rubric: 'must cite 3 sources', depth: 'standard' });
+    expect(codexCalls).toBe(2); // initial + one revise, never more
+  });
+
+  it('BEA-696 passes the Outcome → no retry', async () => {
+    const agent = fakeAgent();
+    let codexCalls = 0;
+    mockCodex(() => { codexCalls++; return { text: 'good answer' }; });
+    const llm = fakeLlm('{"verdict":"pass","score":90,"criteria":[],"notes":"solid"}');
+    await build(agent, fakeMem(), llm, fakeDocs()).execute('run-1', { prompt: 'x', rubric: 'r', depth: 'standard' });
+    expect(codexCalls).toBe(1);
+  });
+
+  it('BEA-700 listSavedByAgents returns agent-tagged docs + brain learnings', async () => {
+    const docs: any = { list: async () => ({ documents: [{ id: 'd1', title: 'Saved A', tags: ['agent'], description: 'x', createdAt: '2026-06-30' }, { id: 'd2', title: 'Note', tags: ['note'] }] }), remove: async () => undefined };
+    const mem: any = { listRagByTag: async () => [{ id: 'l1', title: 'Agent learned' }] };
+    const svc = new HermesBridgeService({} as any, docs, fakeTg() as any, mem, fakeLlm() as any);
+    const res = await svc.listSavedByAgents();
+    expect(res.documents.map((d: any) => d.id)).toEqual(['d1']); // only the 'agent'-tagged doc
+    expect(res.brainLearnings).toHaveLength(1);
+  });
 
   it('marks the run failed (no document) when the engine errors', async () => {
     const agent = fakeAgent();
     const docs = fakeDocs();
-    await build(fakeHermes(async () => ({ sessionId: 's', finalText: '', status: 'error', error: 'boom' })), agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'x' });
+    mockCodex({ httpError: true, error: 'boom' });
+    await build(agent, fakeMem(), fakeLlm(), docs).execute('run-1', { prompt: 'x' });
     expect(docs.create).not.toHaveBeenCalled();
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'failed', error: 'boom' });
   });
 
   it('turns a connection failure into a friendly message', async () => {
     const agent = fakeAgent();
-    const hermes = { runTurn: jest.fn(async () => { throw new Error('fetch failed'); }) };
-    await build(hermes, agent).execute('run-1', { prompt: 'x' });
+    mockCodex({ throw: 'fetch failed' });
+    await build(agent).execute('run-1', { prompt: 'x' });
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'failed', error: expect.stringMatching(/reach the agent engine/i) });
   });
 
   it('startRun creates the run row and returns it', async () => {
     const agent = fakeAgent();
-    const run = await build(fakeHermes(async () => ({ sessionId: 's', finalText: 'x', status: 'complete' })), agent).startRun({ prompt: 'go', title: 'T' });
+    mockCodex({ text: 'x' });
+    const run = await build(agent).startRun({ prompt: 'go', title: 'T' });
     expect(run.id).toBe('run-1');
   });
 
-  it('BEA-630 quick mode: keeps recall (grounded) but skips learn-after and saving; stores the answer inline', async () => {
+  it('BEA-630 quick mode: research-aware, skips learn-after and saving; stores the answer inline', async () => {
     const agent = fakeAgent();
     const docs = fakeDocs();
     const mem = fakeMem([{ title: 'X', content: 'context' }]);
     const llm = fakeLlm('a durable fact');
     let seenPrompt = '';
-    const hermes = fakeHermes(async (h) => { seenPrompt = h._text; return { sessionId: 's', finalText: 'the quick answer', status: 'complete' }; });
-    await build(hermes, agent, mem, llm, docs).execute('run-1', { prompt: 'what is X?', quick: true });
-    expect(mem.searchBrain).toHaveBeenCalled();         // recall stays (cheap + keeps it grounded)
-    expect(seenPrompt).toContain('context');            // brain context injected
-    expect(agent.setLearnings).not.toHaveBeenCalled();  // no learn-after
-    expect(docs.create).not.toHaveBeenCalled();         // no document save
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'the quick answer' }; });
+    await build(agent, mem, llm, docs).execute('run-1', { prompt: 'what is X?', quick: true });
+    expect(mem.searchBrain).not.toHaveBeenCalled(); // brain is a tool now, not pre-injected
+    expect(seenPrompt).toContain('search_brain'); // recall on by default → offered as a tool
+    expect(seenPrompt).toContain('Keep it short');
+    expect(agent.setLearnings).not.toHaveBeenCalled();
+    expect(docs.create).not.toHaveBeenCalled();
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', resultText: 'the quick answer' });
   });
 
   it('BEA-641 grades the result against the Outcome rubric and stores it', async () => {
     const agent = fakeAgent();
-    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'the answer', status: 'complete' }));
+    mockCodex({ text: 'the answer' });
     const llm = fakeLlm('{"verdict":"pass","score":90,"criteria":[{"text":"covers X","met":true}],"notes":"looks good"}');
-    await build(hermes, agent, fakeMem(), llm).execute('run-1', { prompt: 'x', save: false, rubric: 'Must cover X' });
+    await build(agent, fakeMem(), llm).execute('run-1', { prompt: 'x', save: false, rubric: 'Must cover X' });
     const graded = (agent.finishRun as jest.Mock).mock.calls.find((c) => c[1]?.grade);
     expect(graded).toBeTruthy();
     expect(JSON.parse(graded[1].grade)).toMatchObject({ verdict: 'pass', score: 90 });
@@ -152,14 +197,14 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
 
   it('BEA-641 does not grade when no rubric is set', async () => {
     const agent = fakeAgent();
-    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'the answer', status: 'complete' }));
-    await build(hermes, agent, fakeMem(), fakeLlm('{}')).execute('run-1', { prompt: 'x', save: false });
+    mockCodex({ text: 'the answer' });
+    await build(agent, fakeMem(), fakeLlm('{}')).execute('run-1', { prompt: 'x', save: false });
     expect((agent.finishRun as jest.Mock).mock.calls.every((c) => !c[1]?.grade)).toBe(true);
   });
 
   it('BEA-643 draftAgent turns an idea into a config (name, task, bulleted outcome, evals)', async () => {
     const llm = fakeLlm('Sure! {"name":"Email Triage","task":"summarise unread emails","outcome":["one line each","flag urgent"],"evals":["3 emails","CEO request"]}');
-    const out = await build(fakeHermes(async () => ({ sessionId: 's', finalText: '', status: 'complete' })), fakeAgent(), fakeMem(), llm).draftAgent('summarise my emails');
+    const out = await build(fakeAgent(), fakeMem(), llm).draftAgent('summarise my emails');
     expect(out.name).toBe('Email Triage');
     expect(out.prompt).toContain('summarise');
     expect(out.rubric).toBe('- one line each\n- flag urgent');
@@ -177,11 +222,12 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
       appendStep: jest.fn(async () => undefined),
       finishRun: jest.fn(async (id: string, p: any) => { Object.assign(runs[id], p); return runs[id]; }),
       setEvals: jest.fn(async (_id: string, e: any) => { saved = JSON.parse(JSON.stringify(e)); }),
+      setLearnings: jest.fn(async () => undefined),
       engineSettings: jest.fn(async () => ({ model: '', autonomy: 'cautious', askTimeoutMin: 20, recall: false, learn: false, outputCollectionId: null })),
     };
-    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'an answer', status: 'complete' }));
+    mockCodex({ text: 'an answer' });
     const llm = fakeLlm('{"verdict":"pass","score":88,"criteria":[],"notes":"ok"}');
-    await build(hermes, agent, fakeMem(), llm).runEvals('a1');
+    await build(agent, fakeMem(), llm).runEvals('a1');
     expect(agent.setEvals).toHaveBeenCalled();
     expect(saved.length).toBe(2);
     expect(saved.every((c: any) => c.lastVerdict === 'pass' && c.lastRunId)).toBe(true);
@@ -189,8 +235,8 @@ describe('HermesBridgeService (618 + 620 + 624)', () => {
 
   it('BEA-630 normal mode still stores the answer text inline (resultText)', async () => {
     const agent = fakeAgent();
-    const hermes = fakeHermes(async () => ({ sessionId: 's', finalText: 'big result text', status: 'complete' }));
-    await build(hermes, agent, fakeMem(), fakeLlm()).execute('run-1', { prompt: 'x', save: false });
+    mockCodex({ text: 'big result text' });
+    await build(agent, fakeMem(), fakeLlm()).execute('run-1', { prompt: 'x', save: false });
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', resultText: 'big result text' });
   });
 });

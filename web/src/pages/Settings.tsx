@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, type LucideIcon } from 'lucide-react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
@@ -41,59 +42,174 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
 
 type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity';
 
-export function Settings({ email }: { email?: string }) {
-  const [tab, setTab] = useState<Tab>('integrations');
-  const tabs: { id: Tab; label: string; icon: LucideIcon }[] = [
-    { id: 'account', label: 'Account', icon: User },
-    { id: 'integrations', label: 'Integrations', icon: Plug },
-    { id: 'agent', label: 'Agent Engine', icon: Bot },
-    { id: 'cli', label: 'CLI', icon: Terminal },
-    { id: 'google', label: 'Google', icon: Globe },
-    { id: 'models', label: 'Models', icon: Cpu },
-    { id: 'usage', label: 'Usage', icon: Wallet },
-    { id: 'index', label: 'Index', icon: Database },
-    { id: 'prompts', label: 'Prompts', icon: MessageSquare },
-    { id: 'sync', label: 'Sync', icon: RefreshCw },
-    { id: 'activity', label: 'Activity', icon: FlaskConical },
-    { id: 'appearance', label: 'Appearance', icon: Palette },
-  ];
+type Cat = { id: Tab; label: string; icon: LucideIcon; desc: string; group: string };
+const CATS: Cat[] = [
+  { id: 'account', label: 'Account', icon: User, desc: 'Sign-in, privacy, reset', group: 'You & the app' },
+  { id: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme & display', group: 'You & the app' },
+  { id: 'usage', label: 'Usage', icon: Wallet, desc: 'Tokens & costs', group: 'You & the app' },
+  { id: 'integrations', label: 'Integrations', icon: Plug, desc: 'Connected services & keys', group: 'Connections' },
+  { id: 'google', label: 'Google', icon: Globe, desc: 'Workspace services', group: 'Connections' },
+  { id: 'cli', label: 'CLI', icon: Terminal, desc: 'Command-line access', group: 'Connections' },
+  { id: 'sync', label: 'Sync', icon: RefreshCw, desc: 'Import & reconcile memory', group: 'Connections' },
+  { id: 'agent', label: 'Agent Engine', icon: Bot, desc: 'How agents run', group: 'AI brain' },
+  { id: 'models', label: 'Models', icon: Cpu, desc: 'Which models do what', group: 'AI brain' },
+  { id: 'prompts', label: 'Prompts', icon: MessageSquare, desc: 'Tune the AI prompts', group: 'AI brain' },
+  { id: 'index', label: 'Index', icon: Database, desc: "What's in your brain", group: 'AI brain' },
+  { id: 'activity', label: 'Activity', icon: FlaskConical, desc: 'The Lab & learning', group: 'AI brain' },
+];
+const GROUPS = ['You & the app', 'Connections', 'AI brain'];
 
+/** Best-effort live status shown on the tiles. */
+function useSettingsStatus() {
+  const [s, setS] = useState<Record<string, string>>({});
+  const { theme } = useTheme();
+  useEffect(() => {
+    setS((p) => ({ ...p, appearance: theme === 'dark' ? 'Dark' : 'Light' }));
+    /* eslint-disable-next-line */
+    fetch('/api/agent/engine').then((r) => r.json()).then((e) => setS((p) => ({ ...p, agent: e?.ok ? 'Online' : 'Offline' }))).catch(() => undefined);
+    fetch('/api/connectors').then((r) => r.json()).then((d) => { const list = Array.isArray(d) ? d : d?.connectors || []; const n = list.filter((c: any) => c.connected || c.configured).length; if (list.length) setS((p) => ({ ...p, integrations: `${n} connected` })); }).catch(() => undefined);
+    fetch('/api/explore/sources').then((r) => r.json()).then((d) => { const list = Array.isArray(d) ? d : d?.sources || []; const on = list.filter((x: any) => x.enabled).length; if (list.length) setS((p) => ({ ...p, index: `${on} sources on` })); }).catch(() => undefined);
+    fetch('/api/google/status').then((r) => r.json()).then((d) => { if (d?.email) setS((p) => ({ ...p, google: d.email })); else if (d?.connected) setS((p) => ({ ...p, google: 'Connected' })); }).catch(() => undefined);
+  }, [theme]);
+  return s;
+}
+
+function renderSection(id: Tab, email?: string): ReactNode {
+  switch (id) {
+    case 'account': return <AccountSection email={email} />;
+    case 'integrations': return <IntegrationsSection />;
+    case 'agent': return <AgentEngineSection />;
+    case 'cli': return <CliSection />;
+    case 'google': return <GoogleServicesSection />;
+    case 'models': return <ModelsSection />;
+    case 'usage': return <UsageCard />;
+    case 'index': return <IndexSection />;
+    case 'prompts': return <PromptsSection />;
+    case 'sync': return <SyncSection />;
+    case 'activity': return <LabActivitySection />;
+    case 'appearance': return <AppearanceSection />;
+  }
+}
+
+// Deep search index — every notable setting, findable by keyword (BEA-714). anchor = id on the detail page.
+const SEARCH_INDEX: { label: string; keywords: string; cat: Tab; anchor?: string }[] = [
+  { label: 'Dark / light theme', keywords: 'dark light theme appearance colour color mode display', cat: 'appearance', anchor: 'set-theme' },
+  { label: 'Account & sign-in', keywords: 'account email sign in login logout password', cat: 'account' },
+  { label: 'Privacy', keywords: 'privacy data export', cat: 'account' },
+  { label: 'Reset / clear app', keywords: 'reset clear wipe app', cat: 'account' },
+  { label: 'Usage, tokens & cost', keywords: 'usage tokens cost spend wallet billing money', cat: 'usage' },
+  { label: 'SuperMemory', keywords: 'supermemory memory store connector', cat: 'integrations' },
+  { label: 'RAG store', keywords: 'rag vector memory store', cat: 'integrations' },
+  { label: 'Notion', keywords: 'notion pages import', cat: 'integrations' },
+  { label: 'Telegram', keywords: 'telegram bot notify notification push', cat: 'integrations' },
+  { label: 'Raindrop bookmarks', keywords: 'raindrop bookmark', cat: 'integrations' },
+  { label: 'Tavily web reader', keywords: 'tavily web read page', cat: 'integrations' },
+  { label: 'Deepgram (voice key)', keywords: 'deepgram voice dictation transcribe speech key', cat: 'integrations' },
+  { label: 'Apify (Instagram)', keywords: 'apify instagram bookmark enrich', cat: 'integrations' },
+  { label: 'Google Workspace', keywords: 'google gmail drive docs sheets calendar workspace', cat: 'google' },
+  { label: 'CLI access', keywords: 'cli terminal command line codex', cat: 'cli' },
+  { label: 'Import / reconcile memory', keywords: 'sync import reconcile supermemory backfill', cat: 'sync' },
+  { label: 'Agent autonomy', keywords: 'autonomy cautious balanced autopilot agent permission approve', cat: 'agent', anchor: 'set-autonomy' },
+  { label: 'Agent model', keywords: 'agent model codex gpt engine default', cat: 'agent', anchor: 'set-model' },
+  { label: 'Recall brain before a run', keywords: 'recall brain context before search agent', cat: 'agent', anchor: 'set-recall' },
+  { label: 'Learn after runs', keywords: 'learn learnings remember after run agent', cat: 'agent', anchor: 'set-learn' },
+  { label: 'Which model does what', keywords: 'models story lab meeting voice haiku sonnet gemini per feature', cat: 'models' },
+  { label: 'AI prompts', keywords: 'prompt prompts tune instructions wording', cat: 'prompts' },
+  { label: 'What gets indexed', keywords: 'index sources vault tasks notes documents memory enable disable', cat: 'index' },
+  { label: 'The Lab & activity', keywords: 'lab activity learning mood heatmap findings', cat: 'activity' },
+];
+
+function SettingsSearch() {
+  const nav = useNavigate();
+  const [q, setQ] = useState('');
+  const ql = q.trim().toLowerCase();
+  const results = ql ? SEARCH_INDEX.filter((s) => s.label.toLowerCase().includes(ql) || s.keywords.includes(ql)).slice(0, 8) : [];
+  const go = (s: { cat: Tab; anchor?: string }) => { setQ(''); nav(`/settings/${s.cat}${s.anchor ? '#' + s.anchor : ''}`); };
+  return (
+    <div className="relative">
+      <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+        <Search className="h-4 w-4 shrink-0 text-zinc-400" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && results[0]) go(results[0]); if (e.key === 'Escape') setQ(''); }} placeholder="Search settings…" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-400" />
+      </div>
+      {ql && (
+        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+          {results.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-zinc-500">No settings match “{q}”.</div>
+          ) : results.map((s, i) => {
+            const cat = CATS.find((c) => c.id === s.cat)!;
+            return (
+              <button key={i} onClick={() => go(s)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                <cat.icon className="h-4 w-4 shrink-0 text-zinc-400" />
+                <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                <span className="shrink-0 text-xs text-zinc-400">{cat.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Scroll to + briefly highlight a settings anchor when the URL has a #hash (BEA-714). */
+function useHashHighlight(active: boolean) {
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!active || !hash) return;
+    const el = document.getElementById(hash.slice(1));
+    if (!el) return;
+    const t = setTimeout(() => {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('ring-2', 'ring-emerald-400', 'rounded-xl', 'transition');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-emerald-400'), 2200);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [active, hash]);
+}
+
+export function Settings({ email }: { email?: string }) {
+  const { category } = useParams();
+  const nav = useNavigate();
+  const status = useSettingsStatus();
+  const active = CATS.find((c) => c.id === category);
+  useHashHighlight(!!active);
+
+  // ---- detail page for one category ----
+  if (active) {
+    return (
+      <div className="space-y-4">
+        <button onClick={() => nav('/settings')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Settings</button>
+        <h1 className="flex items-center gap-2 text-2xl font-extrabold"><active.icon className="h-6 w-6 text-emerald-600" />{active.label}</h1>
+        {renderSection(active.id, email)}
+      </div>
+    );
+  }
+
+  // ---- tile launcher home ----
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-extrabold">Settings</h1>
-        <p className="text-zinc-500">Your account, connected services, and appearance.</p>
+        <p className="text-zinc-500">Your account, connected services, and how your brain runs.</p>
       </div>
-
-      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={
-              'shrink-0 whitespace-nowrap flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ' +
-              (tab === t.id
-                ? 'border-emerald-600 text-emerald-600'
-                : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')
-            }
-          >
-            <t.icon size={16} /> {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'account' && <AccountSection email={email} />}
-      {tab === 'integrations' && <IntegrationsSection />}
-      {tab === 'agent' && <AgentEngineSection />}
-      {tab === 'cli' && <CliSection />}
-      {tab === 'google' && <GoogleServicesSection />}
-      {tab === 'models' && <ModelsSection />}
-      {tab === 'usage' && <UsageCard />}
-      {tab === 'index' && <IndexSection />}
-      {tab === 'prompts' && <PromptsSection />}
-      {tab === 'sync' && <SyncSection />}
-      {tab === 'activity' && <LabActivitySection />}
-      {tab === 'appearance' && <AppearanceSection />}
+      <SettingsSearch />
+      {GROUPS.map((g) => (
+        <section key={g} className="space-y-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{g}</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {CATS.filter((c) => c.group === g).map((c) => (
+              <button key={c.id} onClick={() => nav(`/settings/${c.id}`)} className="group flex flex-col rounded-2xl border border-zinc-200 bg-white p-4 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex items-center justify-between">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"><c.icon className="h-5 w-5" /></span>
+                  <ChevronRight className="h-4 w-4 text-zinc-300 transition-colors group-hover:text-emerald-500 dark:text-zinc-600" />
+                </div>
+                <div className="mt-2 font-medium group-hover:text-emerald-600">{c.label}</div>
+                <div className="mt-0.5 text-xs text-zinc-500">{status[c.id] || c.desc}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -178,9 +294,9 @@ function AccountSection({ email }: { email?: string }) {
   );
 }
 
-function EngineField({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function EngineField({ label, hint, children, id }: { label: string; hint?: string; children: ReactNode; id?: string }) {
   return (
-    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div id={id} className="flex flex-col gap-1.5 scroll-mt-20 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0 sm:pt-1.5">
         <div className="text-sm font-medium">{label}</div>
         {hint && <div className="text-xs text-zinc-500">{hint}</div>}
@@ -205,9 +321,9 @@ function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (
   );
 }
 
-function EngineToggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+function EngineToggle({ label, hint, checked, onChange, id }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; id?: string }) {
   return (
-    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+    <div id={id} className="flex flex-col gap-1.5 scroll-mt-20 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <div className="min-w-0">
         <div className="text-sm font-medium">{label}</div>
         {hint && <div className="text-xs text-zinc-500">{hint}</div>}
@@ -325,12 +441,12 @@ function AgentEngineSection() {
           {justSaved && <span className="flex items-center gap-1 text-xs text-emerald-600"><Check size={14} />Saved</span>}
         </div>
         <div className="space-y-5">
-          <EngineField label="Model" hint="Which Codex model runs your agents">
+          <EngineField id="set-model" label="Model" hint="Which Codex model runs your agents">
             <select value={cfg.model ?? ''} onChange={(e) => save({ model: e.target.value })} className="w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
               {(models.length ? models : [{ value: '', label: 'Engine default' }]).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
           </EngineField>
-          <EngineField label="Autonomy" hint="How often it stops to ask you before acting">
+          <EngineField id="set-autonomy" label="Autonomy" hint="How often it stops to ask you before acting">
             <select value={cfg.autonomy} onChange={(e) => save({ autonomy: e.target.value })} className="w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
               <option value="cautious">Cautious — ask before send/delete/share</option>
               <option value="balanced">Balanced — ask only on the big ones</option>
@@ -343,8 +459,8 @@ function AgentEngineSection() {
               <span className="text-sm text-zinc-500">minutes</span>
             </div>
           </EngineField>
-          <EngineToggle label="Recall my brain before each run" hint="Pulls relevant notes from your memory into the task" checked={!!cfg.recall} onChange={(v) => save({ recall: v })} />
-          <EngineToggle label="Propose what it learned after" hint="Suggests durable facts to keep — you confirm" checked={!!cfg.learn} onChange={(v) => save({ learn: v })} />
+          <EngineToggle id="set-recall" label="Recall my brain before each run" hint="Pulls relevant notes from your memory into the task" checked={!!cfg.recall} onChange={(v) => save({ recall: v })} />
+          <EngineToggle id="set-learn" label="Propose what it learned after" hint="Suggests durable facts to keep — you confirm" checked={!!cfg.learn} onChange={(v) => save({ learn: v })} />
           <EngineField label="Save results to" hint="Default Documents collection for agent outputs">
             <select value={cfg.outputCollectionId ?? ''} onChange={(e) => save({ outputCollectionId: e.target.value || null })} className="w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
               <option value="">Documents (no collection)</option>
@@ -433,7 +549,7 @@ function AppearanceSection() {
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 max-w-xl">
       <h2 className="font-semibold mb-3">Appearance</h2>
-      <div className="flex items-center justify-between">
+      <div id="set-theme" className="flex items-center justify-between scroll-mt-20">
         <span className="text-sm text-zinc-500">Theme</span>
         <button onClick={toggle} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm capitalize">
           {theme} mode
@@ -841,68 +957,97 @@ function fmtUsd(n?: number): string {
   return '$' + n.toFixed(2);
 }
 
+const USAGE_BUCKETS: { key: string; label: string; icon: LucideIcon; match: RegExp }[] = [
+  { key: 'agents', label: 'Agents & flows', icon: Bot, match: /^(agent|flow|eval)/ },
+  { key: 'daily', label: 'Daily & Story', icon: Sparkles, match: /(story|day-summary|month-story|year-story|suggested-task|task-dump|personality)/ },
+  { key: 'lab', label: 'The Lab', icon: FlaskConical, match: /(mind-model|mentor|lab)/ },
+  { key: 'voice', label: 'Voice & Meetings', icon: Mic, match: /(voice|meeting|transcribe)/ },
+  { key: 'research', label: 'Research & Email', icon: Bookmark, match: /(explore|bookmark|research|gmail|capture)/ },
+  { key: 'chat', label: 'Chat', icon: MessageSquare, match: /^chat/ },
+];
+const usageBucket = (feature: string) => USAGE_BUCKETS.find((b) => b.match.test(feature));
+
 function UsageCard() {
   const [u, setU] = useState<UsageData | null>(null);
+  const [feat, setFeat] = useState<any>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     fetch('/api/usage').then((r) => r.json()).then(setU).catch(() => setFailed(true));
+    fetch('/api/usage/features?days=30').then((r) => r.json()).then(setFeat).catch(() => undefined);
   }, []);
   const or = u?.openrouter;
-  const oa = u?.openai;
   const pct = or?.credits && or.credits.total > 0 ? Math.min(100, Math.round((or.credits.used / or.credits.total) * 100)) : null;
+  const total = feat?.totalCost ?? 0;
+  const tiles = (() => {
+    if (!feat?.features) return null;
+    const m: Record<string, { label: string; icon: LucideIcon; cost: number; requests: number }> = {};
+    for (const f of feat.features) {
+      if (f.included) continue;
+      const b = usageBucket(f.feature);
+      const key = b?.key || 'other';
+      m[key] = m[key] || { label: b?.label || 'Other', icon: b?.icon || Boxes, cost: 0, requests: 0 };
+      m[key].cost += f.cost; m[key].requests += f.requests;
+    }
+    return Object.values(m).sort((a, b) => b.cost - a.cost);
+  })();
+
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
       <h2 className="flex items-center gap-2 font-semibold mb-1"><Wallet size={18} className="text-emerald-600" /> API usage</h2>
-      <p className="text-sm text-zinc-500 mb-4">What your AI actually costs — fetched live from the providers (refreshed every few minutes).</p>
-      {failed ? (
+      <p className="text-sm text-zinc-500 mb-4">What your AI actually costs — computed from real token usage (last 30 days).</p>
+      {failed && !feat ? (
         <p className="text-sm text-zinc-400">Couldn’t load usage right now.</p>
-      ) : !u ? (
+      ) : !feat ? (
         <p className="text-sm text-zinc-400">Loading…</p>
       ) : (
         <div className="space-y-5">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">OpenRouter — this app</div>
-            {or ? (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {[['Today', or.today], ['This week', or.week], ['This month', or.month], ['All-time', or.total]].map(([label, val]) => (
-                    <div key={label as string} className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 p-2.5 text-center">
-                      <div className="text-lg font-extrabold tabular-nums">{fmtUsd(val as number)}</div>
-                      <div className="text-[10px] text-zinc-400">{label}</div>
-                    </div>
-                  ))}
-                </div>
-                {or.credits && (
-                  <div className="mt-3">
-                    <div className="flex justify-between text-xs text-zinc-500 mb-1">
-                      <span>Account credits (all your OpenRouter apps)</span>
-                      <span className="tabular-nums">{fmtUsd(or.credits.remaining)} left of {fmtUsd(or.credits.total)}</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
-                      <div className={'h-full ' + ((pct ?? 0) > 90 ? 'bg-rose-500' : (pct ?? 0) > 75 ? 'bg-amber-500' : 'bg-emerald-500')} style={{ width: `${pct ?? 0}%` }} />
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="text-sm text-zinc-400">Connect your OpenRouter key in Integrations to see usage.</p>
-            )}
+          {/* Real total + included */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-800/40">
+              <div className="text-xs text-zinc-500">Real spend · last 30 days</div>
+              <div className="mt-1 text-3xl font-extrabold tabular-nums">{fmtUsd(total)}</div>
+              <div className="text-xs text-zinc-400">{(feat.totalRequests || 0).toLocaleString()} requests</div>
+            </div>
+            <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-4 dark:border-violet-500/30 dark:bg-violet-500/10">
+              <div className="text-xs text-violet-700 dark:text-violet-300">Included in your ChatGPT plan</div>
+              <div className="mt-1 text-3xl font-extrabold tabular-nums text-violet-700 dark:text-violet-300">~{fmtUsd(feat.includedEstimate || 0)}</div>
+              <div className="text-xs text-violet-700/70 dark:text-violet-300/70">{(feat.includedRequests || 0).toLocaleString()} agent runs · not billed</div>
+            </div>
           </div>
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2">OpenAI — voice transcription</div>
-            {oa?.available ? (
-              <div className="grid grid-cols-3 gap-2">
-                {[['Today', oa.today], ['This week', oa.week], ['30 days', oa.month]].map(([label, val]) => (
-                  <div key={label as string} className="rounded-lg bg-zinc-50 dark:bg-zinc-800/60 p-2.5 text-center">
-                    <div className="text-lg font-extrabold tabular-nums">{fmtUsd(val as number)}</div>
-                    <div className="text-[10px] text-zinc-400">{label}</div>
-                  </div>
-                ))}
+
+          {/* By-feature tiles */}
+          {tiles && tiles.length > 0 && (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Where it goes</div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {tiles.map((t) => {
+                  const share = total > 0 ? Math.round((t.cost / total) * 100) : 0;
+                  return (
+                    <div key={t.label} className="rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+                      <div className="flex items-center gap-1.5 text-sm font-medium"><t.icon size={15} className="text-emerald-600" />{t.label}</div>
+                      <div className="mt-1.5 text-lg font-extrabold tabular-nums">{fmtUsd(t.cost)}</div>
+                      <div className="text-[11px] text-zinc-400">{t.requests} req · {share}%</div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800"><div className="h-full bg-emerald-500" style={{ width: `${share}%` }} /></div>
+                    </div>
+                  );
+                })}
               </div>
-            ) : (
-              <p className="text-sm text-zinc-400">OpenAI only shares spend with an <b>Admin key</b>. Create one at platform.openai.com (Settings → API keys → Admin keys, usage-read scope) and paste it in Integrations → “OpenAI Admin (usage)”.</p>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* OpenRouter credits */}
+          {or?.credits && (
+            <div>
+              <div className="flex justify-between text-xs text-zinc-500 mb-1">
+                <span>OpenRouter account credits</span>
+                <span className="tabular-nums">{fmtUsd(or.credits.remaining)} left of {fmtUsd(or.credits.total)}</span>
+              </div>
+              <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                <div className={'h-full ' + ((pct ?? 0) > 90 ? 'bg-rose-500' : (pct ?? 0) > 75 ? 'bg-amber-500' : 'bg-emerald-500')} style={{ width: `${pct ?? 0}%` }} />
+              </div>
+            </div>
+          )}
+
           <RequestLog />
         </div>
       )}

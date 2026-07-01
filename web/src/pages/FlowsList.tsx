@@ -27,7 +27,7 @@ export function FlowsList() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6 space-y-5">
+    <div className="space-y-5">
       <header className="flex items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-500 text-white"><Workflow className="h-5 w-5" /></div>
         <div className="min-w-0 flex-1">

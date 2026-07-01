@@ -1,5 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { HermesClient, HermesRunHandlers } from './hermes.client';
+// Engine run types (formerly in the now-removed hermes.client).
+export type RunStep = { label: string; status?: string; detail?: string; kind?: string };
+export interface HermesRunHandlers {
+  onStep?: (step: RunStep) => void;
+  onClarify?: (q: { requestId?: string; question: string; choices?: string[] }) => Promise<string>;
+  onApproval?: (a: { command?: string; description?: string }) => Promise<string>;
+}
+export interface HermesRunResult { sessionId: string; finalText: string; status: string; error?: string; usage?: any }
 import { AgentService } from '../agent/agent.service';
 import { DocumentsService } from '../documents/documents.service';
 import { TelegramService } from '../telegram/telegram.service';
@@ -8,6 +15,9 @@ import { LlmService } from '../llm/llm.service';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
+const codexToolLabel = (n?: string) => (n === 'mybrain' ? 'Used your brain' : n ? `Used ${n}` : 'Used a tool');
 
 export type StartRunInput = {
   prompt: string;
@@ -18,6 +28,8 @@ export type StartRunInput = {
   save?: boolean;
   /** Quick mode: skip recall + learn-after + document save, just reply concisely (BEA-630). */
   quick?: boolean;
+  /** Run depth (BEA-695): quick = fast single turn, no save; standard = research+save. (deep = flow, routed by callers) */
+  depth?: 'quick' | 'standard' | 'deep';
   /** The Outcome (definition of done) to grade this run against (BEA-641). */
   rubric?: string;
 };
@@ -32,7 +44,6 @@ export class HermesBridgeService {
   private readonly log = new Logger('HermesBridge');
 
   constructor(
-    private readonly hermes: HermesClient,
     private readonly agent: AgentService,
     private readonly documents: DocumentsService,
     private readonly telegram: TelegramService,
@@ -54,17 +65,22 @@ export class HermesBridgeService {
     }
   }
 
-  /** Recall-before: pull relevant context from the user's brain and prepend it to the task. */
-  private async recall(runId: string, task: string): Promise<string> {
-    try {
-      const hits = await this.memory.searchBrain(task, 18);
-      if (!hits?.length) return task;
-      const ctx = hits.map((h) => `- ${h.title || 'note'}: ${(h.content || '').replace(/\s+/g, ' ').slice(0, 220)}`).join('\n');
-      await this.agent.appendStep(runId, { label: `Recalled ${hits.length} note${hits.length > 1 ? 's' : ''} from your brain`, status: 'done' }).catch(() => undefined);
-      return `Relevant context from the user's own second brain (use where helpful, ignore if not):\n${ctx}\n\n---\nTask: ${task}`;
-    } catch {
-      return task;
+  /**
+   * Research-first guidance appended to the task (BEA-692): research the topic, THEN consult the
+   * user's brain via the search_brain tool, reconciling and trusting the user's own notes for their
+   * own terms. Replaces the old "pre-inject the brain recall" behaviour.
+   */
+  private researchGuidance(quick: boolean, brainAvailable: boolean): string {
+    const brainStep = brainAvailable
+      ? '\n2. THEN check the user\'s own second brain — call the search_brain tool to find anything they\'ve already saved on this, and weave it in / reconcile it with your research.'
+      : '';
+    const trust = brainAvailable
+      ? ' Treat the user\'s own notes as authoritative for THEIR terms, projects, people and decisions — if something is the user\'s own concept or framework, research it on their terms; never lead with "I couldn\'t verify X" when X is the user\'s own thing.'
+      : '';
+    if (quick) {
+      return `\n\nAnswer concisely. Research the topic (don\'t rely on memory alone)${brainAvailable ? '; quickly check the user\'s brain with the search_brain tool if it helps' : ''}.${trust} Keep it short. Do not save anything.`;
     }
+    return `\n\n---\nHow to approach this:\n1. Research the topic properly FIRST — use web search and read sources, combined with what you know. Be thorough; don\'t stop at a single search.${brainStep}\n3. Give a clear, well-structured answer. **Cite your sources inline** as [1], [2]… and end with a short "Sources" list (web links + which brain notes you used) so the reader can verify. Don\'t state facts you couldn\'t support.${trust}`;
   }
 
   /** Learn-after: propose a few durable facts from the result (the user keeps/forgets later). */
@@ -145,9 +161,35 @@ export class HermesBridgeService {
     }
   }
 
+  /** "Saved by agents" (BEA-700): everything agents wrote — Documents (tag 'agent') + brain learnings. */
+  async listSavedByAgents(): Promise<{ documents: any[]; brainLearnings: { id: string; title: string }[] }> {
+    let documents: any[] = [];
+    try {
+      const res: any = await this.documents.list();
+      const rows = res?.documents || res || [];
+      documents = rows
+        .filter((d: any) => (Array.isArray(d.tags) ? d.tags : []).includes('agent'))
+        .map((d: any) => ({ id: d.id, title: d.title, snippet: (d.description || '').slice(0, 160), when: d.createdAt || d.updatedAt }));
+    } catch { /* */ }
+    const brainLearnings = await this.memory.listRagByTag('learning').catch(() => []);
+    return { documents, brainLearnings };
+  }
+
+  /** Undo one agent-saved Document. */
+  async deleteSavedDocument(id: string) {
+    await this.documents.remove(id);
+    return { ok: true };
+  }
+
+  /** Clear ALL kept agent learnings from both brain stores (no per-item provenance to undo singly yet). */
+  async clearAgentLearnings() {
+    return this.memory.purgeByTag('learning');
+  }
+
   /** Create the run row and kick off execution in the background; returns immediately. */
   async startRun(input: StartRunInput) {
-    const run = await this.agent.createRun({ agentId: input.agentId ?? null, title: input.title || 'Agent run', input: input.prompt });
+    const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
+    const run = await this.agent.createRun({ agentId: input.agentId ?? null, title: input.title || 'Agent run', input: input.prompt, depth });
     // fire-and-forget — the run screen polls GET /api/agent/runs/:id for live progress
     this.execute(run.id, input).catch((e) => this.log.error(`run ${run.id} crashed: ${e?.message || e}`));
     return run;
@@ -157,39 +199,120 @@ export class HermesBridgeService {
    * Run-evals (BEA-642): run every saved eval case for an agent, grade each against the Outcome,
    * and record the verdict on the case. Runs in the BACKGROUND, persisting after each so the UI streams.
    */
+  /** Suggest realistic eval inputs from the agent's Task + Outcome (Evals ③); appends, deduped. */
+  async suggestEvals(agentId: string): Promise<{ added: number }> {
+    const agent: any = await this.agent.getAgent(agentId).catch(() => null);
+    if (!agent) return { added: 0 };
+    let arr: any[] = [];
+    try {
+      const out = await this.llm.complete(
+        `An AI agent runs this Task:\n"${(agent.prompt || '').slice(0, 600)}"\nIts Outcome (what a good result looks like):\n"${(agent.rubric || '').slice(0, 400)}"\n\nSuggest 4 realistic, varied example INPUTS to test this agent on. Reply with ONLY a JSON array of short input strings, no prose.`,
+        500, 'suggest-evals',
+      );
+      const m = (out || '').match(/\[[\s\S]*\]/);
+      if (m) arr = JSON.parse(m[0]);
+    } catch { arr = []; }
+    const existing: any[] = Array.isArray(agent.evals) ? agent.evals : [];
+    const seen = new Set(existing.map((e) => String(e.input || '').trim().toLowerCase()));
+    const fresh = (Array.isArray(arr) ? arr : []).map((s) => String(s).trim()).filter(Boolean).filter((s) => !seen.has(s.toLowerCase())).slice(0, 5);
+    if (!fresh.length) return { added: 0 };
+    const next = [...existing, ...fresh.map((input) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input }))];
+    await this.agent.setEvals(agentId, next).catch(() => undefined);
+    return { added: fresh.length };
+  }
+
   async runEvals(agentId: string): Promise<void> {
     const agent: any = await this.agent.getAgent(agentId).catch(() => null);
     const evals: any[] = Array.isArray(agent?.evals) ? agent.evals : [];
     if (!agent || !evals.length) return;
+    // clear stale flags from any interrupted previous run
+    for (const c of evals) c.running = false;
+    await this.agent.setEvals(agentId, evals).catch(() => undefined);
+
     for (const c of evals) {
       if (!c?.input) continue;
-      try {
-        const run = await this.agent.createRun({ agentId, title: `Eval — ${agent.name}`, input: c.input });
-        const prompt = agent.prompt ? `${agent.prompt}\n\n[Test input] ${c.input}` : c.input;
-        await this.execute(run.id, { prompt, title: `Eval — ${agent.name}`, agentId, rubric: agent.rubric, save: false });
-        const r: any = await this.agent.getRun(run.id).catch(() => null);
-        c.lastRunId = run.id;
-        c.lastVerdict = r?.grade?.verdict || (r?.status === 'failed' ? 'fail' : 'partial');
-        c.lastScore = r?.grade?.score ?? null;
-      } catch {
-        c.lastVerdict = 'fail';
-        c.lastScore = null;
-      }
+      c.running = true; // UI shows a spinner on the one in progress
+      await this.agent.setEvals(agentId, evals).catch(() => undefined);
+
+      let r = await this.runOneEval(agentId, agent, c);
+      // an engine failure/timeout (not a graded fail) → auto-retry once so you don't have to re-run by hand
+      if (r?.status === 'failed') r = await this.runOneEval(agentId, agent, c);
+
+      c.running = false;
+      c.lastRunId = r?.runId ?? c.lastRunId;
+      c.lastVerdict = r?.grade?.verdict || (r?.status === 'failed' ? 'fail' : 'partial');
+      c.lastScore = r?.grade?.score ?? null;
+      c.lastCriteria = Array.isArray(r?.grade?.criteria) ? r.grade.criteria : null; // per-criterion detail (Evals ②)
+      c.lastNotes = r?.grade?.notes || null;
       c.lastRunAt = new Date().toISOString();
-      await this.agent.setEvals(agentId, evals); // persist as we go
+      await this.agent.setEvals(agentId, evals).catch(() => undefined); // persist as we go
+    }
+  }
+
+  /** Run one eval case once; returns {runId, status, grade} (never throws). */
+  private async runOneEval(agentId: string, agent: any, c: any): Promise<{ runId?: string; status?: string; grade?: any }> {
+    try {
+      const run = await this.agent.createRun({ agentId, title: `Eval — ${agent.name}`, input: c.input });
+      const prompt = agent.prompt ? `${agent.prompt}\n\n[Test input] ${c.input}` : c.input;
+      await this.execute(run.id, { prompt, title: `Eval — ${agent.name}`, agentId, rubric: agent.rubric, save: false });
+      const r: any = await this.agent.getRun(run.id).catch(() => null);
+      return { runId: run.id, status: r?.status, grade: r?.grade };
+    } catch {
+      return { status: 'failed' };
     }
   }
 
   /** Synchronous variant (used by tests / callers that want to await the whole run). */
+  /**
+   * F2 (BEA-660): run a turn through the host Codex directly (no Hermes), via the codex-runner /run.
+   * Same HermesRunResult shape so execute() is engine-agnostic. Tool calls surface as steps.
+   */
+  private async runViaCodex(prompt: string, handlers: HermesRunHandlers, opts: { title?: string; model?: string; sessionId?: string; skill?: string; bypass?: boolean }): Promise<HermesRunResult> {
+    try {
+      const r = await fetch(`${CODEX_RUNNER}/run`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt, model: opts.model, sandbox: 'read-only', sessionId: opts.sessionId, skill: opts.skill, bypass: opts.bypass, timeoutMs: 240000 }),
+        signal: AbortSignal.timeout(250000),
+      });
+      const d: any = await r.json().catch(() => ({}));
+      if (!r.ok) return { sessionId: d?.sessionId, finalText: '', status: 'error', error: d?.error || 'Codex run failed' };
+      for (const ev of d.events || []) {
+        if (ev.type === 'mcp_tool_call') handlers.onStep?.({ label: codexToolLabel(ev.name), status: 'done', kind: 'tool' });
+        else if (ev.type === 'command_execution') handlers.onStep?.({ label: 'Ran a command', status: 'done', kind: 'tool' });
+        else if (ev.type === 'web_search') handlers.onStep?.({ label: 'Searched the web', status: 'done', kind: 'tool' });
+      }
+      return { sessionId: d.sessionId, finalText: String(d.text || ''), status: 'ok', error: undefined, usage: d.usage };
+    } catch (e: any) {
+      return { sessionId: undefined, finalText: '', status: 'error', error: String((e && e.message) || e) };
+    }
+  }
+
+  /**
+   * Move A (BEA-664): run a skill block in Codex with the skill's REAL folder in the working dir.
+   * Lightweight (no AgentRun row) — used by the flow runner's skill nodes.
+   */
+  async runSkillTurn(skillSlug: string, prompt: string, opts: { model?: string } = {}): Promise<string> {
+    // skills run sandboxed (workspace-write in the per-run skill folder) — no bypass needed now that
+    // the host's bubblewrap sandbox works (BEA-665).
+    const r = await this.runViaCodex(prompt, {}, { model: opts.model, skill: skillSlug });
+    if (r.status === 'error') throw new Error(r.error || 'skill run failed');
+    return r.finalText || '';
+  }
+
   async execute(runId: string, input: StartRunInput) {
-    const quick = !!input.quick;
+    // Depth drives behaviour: quick = fast single turn, no save; standard = research + save. (deep runs
+    // as a flow, routed by callers — never reaches here.) Legacy `quick` bool maps to depth. (BEA-695)
+    const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
+    const quick = depth === 'quick';
     await this.agent.appendStep(runId, { label: quick ? 'Starting up (quick answer)' : 'Starting up', status: 'done' });
     const cfg = await this.agent.engineSettings();
     const timeoutMs = cfg.askTimeoutMin * 60_000;
-    // Recall still runs in quick mode (it's ~1s and keeps answers grounded in the user's brain);
-    // quick mode only skips the expensive learn-after + document save, and asks for a short answer.
-    let prompt = cfg.recall ? await this.recall(runId, input.prompt) : input.prompt;
-    if (quick) prompt += '\n\nAnswer directly and concisely from the context above and what you know. Keep it short. Do not save anything.';
+    // Research FIRST, brain SECOND (BEA-692). We no longer pre-inject a RAG recall as the opening
+    // context (that made the agent "start with the brain"). Instead it researches the topic, then
+    // consults the user's brain via the search_brain tool and reconciles — trusting the user's own
+    // notes for their own terms. cfg.recall just means "the brain is available as a tool".
+    let prompt = input.prompt + this.researchGuidance(quick, cfg.recall);
 
     const handlers: HermesRunHandlers = {
       onStep: (s) => void this.agent.appendStep(runId, s).catch(() => undefined),
@@ -236,7 +359,7 @@ export class HermesBridgeService {
 
     let result;
     try {
-      result = await this.hermes.runTurn(prompt, handlers, { title: input.title, model: cfg.model || undefined });
+      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: cfg.model || undefined });
     } catch (e: any) {
       clearInterval(heartbeat);
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
@@ -249,20 +372,32 @@ export class HermesBridgeService {
       return;
     }
 
-    const text = (result.finalText || '').trim();
+    let text = (result.finalText || '').trim();
     await this.agent.appendStep(runId, { label: `Answer received · ${text.length.toLocaleString()} chars · ${fmtElapsed(Math.round((Date.now() - startedAt) / 1000))}`, status: 'done', kind: 'log' }).catch(() => undefined);
-    // Quick mode skips the extra learn-after AI call and the document save — just return the answer.
-    if (!quick && text && cfg.learn) await this.proposeLearnings(runId, text);
-    // Grade-and-iterate (BEA-641): score the result against the agent's Outcome, if one is set.
+    // Log Codex token usage as the flat-rate 'agent' feature so Usage can show its "included" value. (BEA-716)
+    if (result.usage) await this.llm.recordUsage('agent', cfg.model || 'codex', result.usage).catch(() => undefined);
+    // Self-check against the Outcome + ONE auto-retry on a fail (BEA-696). Grade the answer; if it
+    // fails the user's definition of done, revise once with the grader's notes and keep the better one.
     let gradeJson: string | undefined;
     if (!quick && input.rubric && text) {
       await this.agent.appendStep(runId, { label: 'Checking against your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
-      const g = await this.gradeRun(input.rubric, text);
-      if (g) {
-        gradeJson = JSON.stringify(g);
-        await this.agent.appendStep(runId, { label: `Outcome: ${g.verdict} · ${g.score}/100`, status: g.verdict === 'fail' ? 'failed' : g.verdict === 'partial' ? 'info' : 'done' }).catch(() => undefined);
+      let g = await this.gradeRun(input.rubric, text);
+      if (g) await this.agent.appendStep(runId, { label: `Outcome: ${g.verdict} · ${g.score}/100`, status: g.verdict === 'fail' ? 'failed' : g.verdict === 'partial' ? 'info' : 'done' }).catch(() => undefined);
+      if (g && g.verdict === 'fail') {
+        await this.agent.appendStep(runId, { label: 'Revising once to meet your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
+        const revisePrompt = `Your previous answer did NOT meet the user's definition of done. Fix it.\n\nThe Outcome (definition of done):\n${input.rubric}\n\nWhat was wrong: ${g.notes || 'it fell short of the Outcome'}\n\nYour previous answer:\n${text}\n\nProduce a better answer that fully meets every part of the Outcome. Keep the inline citations/sources.`;
+        const r2 = await this.runViaCodex(revisePrompt, handlers, { title: input.title, model: cfg.model || undefined }).catch(() => null);
+        const text2 = (r2?.finalText || '').trim();
+        if (text2) {
+          const g2 = await this.gradeRun(input.rubric, text2);
+          if (g2 && (g2.score || 0) >= (g.score || 0)) { text = text2; g = g2; }
+          await this.agent.appendStep(runId, { label: `Revised · ${g?.verdict} · ${g?.score}/100`, status: g?.verdict === 'fail' ? 'failed' : 'done' }).catch(() => undefined);
+        }
       }
+      if (g) gradeJson = JSON.stringify(g);
     }
+    // Learn-after runs on the FINAL (possibly revised) text. Quick skips it.
+    if (!quick && text && cfg.learn) await this.proposeLearnings(runId, text);
     if (!quick && input.save !== false && text) {
       try {
         const doc = await this.documents.create({

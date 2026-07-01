@@ -11,3 +11,6 @@ data/
 *.db
 secrets.env
 .claude/checks/.building
+
+# local sqlite journals (never commit)
+*.db-journal

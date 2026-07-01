@@ -56,6 +56,29 @@ function fakePrisma() {
         Object.assign(r, data);
         return r;
       },
+      delete: async ({ where }: any) => {
+        const i = runs.findIndex((x) => x.id === where.id);
+        if (i < 0) throw new Error('run not found');
+        const [removed] = runs.splice(i, 1);
+        for (let j = wps.length - 1; j >= 0; j--) if (wps[j].runId === removed.id) wps.splice(j, 1); // FK cascade
+        return removed;
+      },
+      deleteMany: async ({ where }: any = {}) => {
+        const match = (r: any) => {
+          if (where?.agentId !== undefined && r.agentId !== where.agentId) return false;
+          if (where?.status?.in && !where.status.in.includes(r.status)) return false;
+          if (where?.status?.notIn && where.status.notIn.includes(r.status)) return false;
+          return true;
+        };
+        let count = 0;
+        for (let i = runs.length - 1; i >= 0; i--) {
+          if (!match(runs[i])) continue;
+          const [rm] = runs.splice(i, 1);
+          for (let j = wps.length - 1; j >= 0; j--) if (wps[j].runId === rm.id) wps.splice(j, 1);
+          count++;
+        }
+        return { count };
+      },
     },
     waitpoint: {
       create: async ({ data }: any) => {
@@ -270,6 +293,43 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     const a = await svc.createAgent({ name: 'Temp', prompt: 'x' });
     await svc.deleteAgent(a.id);
     expect(await svc.listAgents()).toHaveLength(0);
+  });
+
+  it('deleteRun removes a finished run and cascades its waitpoints (BEA-684)', async () => {
+    const run = await svc.createRun({ input: 'topic' });
+    await svc.ask(run.id, { question: 'Which angle?', kind: 'choice', options: ['a', 'b'] });
+    await prisma.agentRun.update({ where: { id: run.id }, data: { status: 'done' } });
+    await svc.deleteRun(run.id);
+    expect(prisma._runs).toHaveLength(0);
+    expect(prisma._wps).toHaveLength(0); // cascaded
+    await expect(svc.getRun(run.id)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('deleteRun refuses a run that is still in progress (BEA-684)', async () => {
+    const run = await svc.createRun({ input: 'topic' }); // status 'running'
+    await expect(svc.deleteRun(run.id)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma._runs).toHaveLength(1); // kept
+  });
+
+  it('clearRuns deletes finished runs but keeps in-flight ones, scoped by agent (BEA-684)', async () => {
+    const ag = await svc.createAgent({ name: 'A', prompt: 'x' });
+    const other = await svc.createAgent({ name: 'B', prompt: 'y' });
+    const done = await svc.createRun({ agentId: ag.id });
+    await prisma.agentRun.update({ where: { id: done.id }, data: { status: 'done' } });
+    const live = await svc.createRun({ agentId: ag.id }); // running
+    const otherDone = await svc.createRun({ agentId: other.id });
+    await prisma.agentRun.update({ where: { id: otherDone.id }, data: { status: 'failed' } });
+
+    const res = await svc.clearRuns(ag.id);
+    expect(res.deleted).toBe(1);
+    const left = (await svc.listRuns({ agentId: ag.id })).map((r) => r.id);
+    expect(left).toEqual([live.id]); // in-flight kept
+    expect(await svc.listRuns({ agentId: other.id })).toHaveLength(1); // other agent untouched
+
+    const all = await svc.clearRuns(); // no scope → clears all finished, keeps the running one
+    expect(all.deleted).toBe(1);
+    expect(prisma._runs).toHaveLength(1);
+    expect(prisma._runs[0].id).toBe(live.id);
   });
 
   it('reconcileOrphans fails running AND paused runs left by a restart, leaving terminal runs alone (BEA-629, BEA-632)', async () => {

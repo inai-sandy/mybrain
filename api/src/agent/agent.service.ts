@@ -93,12 +93,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- runs ----------
 
-  async createRun(input: { agentId?: string | null; title?: string; input?: string } = {}) {
+  async createRun(input: { agentId?: string | null; title?: string; input?: string; depth?: string } = {}) {
     const run = await this.prisma.agentRun.create({
       data: {
         agentId: input.agentId ?? null,
         title: input.title ?? null,
         input: input.input ?? null,
+        depth: input.depth ?? null,
         status: 'running',
       },
     });
@@ -119,6 +120,26 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     const run = await this.prisma.agentRun.findUnique({ where: { id }, include: { waitpoints: true } });
     if (!run) throw new NotFoundException('Run not found');
     return this.shapeRun(run);
+  }
+
+  /** Statuses that mean "still in flight" — these can't be deleted (cancel first). */
+  private readonly liveRunStatuses = ['running', 'awaiting_input'];
+
+  /** Delete a single run (its waitpoints cascade). Saved Documents are NOT touched. */
+  async deleteRun(id: string) {
+    const run = await this.prisma.agentRun.findUnique({ where: { id } });
+    if (!run) throw new NotFoundException('Run not found');
+    if (this.liveRunStatuses.includes(run.status)) throw new BadRequestException('This run is still in progress — cancel it first.');
+    await this.prisma.agentRun.delete({ where: { id } });
+    return { ok: true };
+  }
+
+  /** Clear finished runs — all of them, or just one agent's. In-flight runs are kept. */
+  async clearRuns(agentId?: string) {
+    const where: any = { status: { notIn: this.liveRunStatuses } };
+    if (agentId) where.agentId = agentId;
+    const res = await this.prisma.agentRun.deleteMany({ where });
+    return { ok: true, deleted: res.count };
   }
 
   // ---------- engine settings (configurable knobs) ----------
@@ -178,7 +199,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
@@ -191,11 +212,17 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         autonomy: input.autonomy || 'cautious',
         schedule: input.schedule ? JSON.stringify(input.schedule) : null,
         scheduleText: input.scheduleText || null,
+        defaultDepth: this.normDepth(input.defaultDepth),
         collectionId: input.collectionId ?? null,
         enabled: input.enabled ?? true,
       },
     });
     return this.shapeAgent(a);
+  }
+
+  /** Clamp a depth value to the allowed set (default 'standard'). */
+  private normDepth(d?: string): string {
+    return d && ['quick', 'standard', 'deep'].includes(d) ? d : 'standard';
   }
 
   async listAgents() {
@@ -209,7 +236,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeAgent(a);
   }
 
-  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean }) {
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string }) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
     const data: any = {};
@@ -224,6 +251,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (patch.scheduleText !== undefined) data.scheduleText = patch.scheduleText || null;
     if (patch.collectionId !== undefined) data.collectionId = patch.collectionId ?? null;
     if (patch.enabled !== undefined) data.enabled = patch.enabled;
+    if (patch.defaultDepth !== undefined) data.defaultDepth = this.normDepth(patch.defaultDepth);
     const updated = await this.prisma.agent.update({ where: { id }, data });
     return this.shapeAgent(updated);
   }
