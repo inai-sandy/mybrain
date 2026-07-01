@@ -50,6 +50,10 @@ sudo docker run -d --name "$NAME" --restart unless-stopped \
   -e TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
   -e RAINDROP_TOKEN="${RAINDROP_TOKEN:-}" \
   -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+  -e POSTBOX_URL="${POSTBOX_URL:-https://postbox.1site.ai/api}" \
+  -e POSTBOX_API_KEY="${POSTBOX_API_KEY:-}" \
+  -e POSTBOX_REMINDER_TEMPLATE="${POSTBOX_REMINDER_TEMPLATE:-reminder_nudge}" \
+  -e POSTBOX_REMINDER_LANG="${POSTBOX_REMINDER_LANG:-en}" \
   "$IMAGE"
 
 echo "-> ensure Caddy route"

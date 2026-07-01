@@ -3,7 +3,7 @@ import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, C
 import { useToast } from '../ui/Toast';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[] };
-type Reminder = { id: string; contactId: string; taskId: string | null; message: string; count: number; times: string[]; status: string; contact?: Contact; task?: { id: string; title: string } | null };
+type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; count: number; times: string[]; status: string; contact?: Contact; task?: { id: string; title: string } | null };
 
 const PAGE_SIZE = 20;
 
@@ -171,7 +171,7 @@ function RemindersTab() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Reminder | null>(null);
-  const [prefill, setPrefill] = useState<{ contactId: string; contactName: string; message: string; taskId?: string } | null>(null);
+  const [prefill, setPrefill] = useState<{ contactId: string; contactName: string; message: string; taskId?: string; subject?: string } | null>(null);
   const [addNumberFor, setAddNumberFor] = useState<string | null>(null);
   const [drafting, setDrafting] = useState<string | null>(null);
 
@@ -197,7 +197,7 @@ function RemindersTab() {
     setDrafting(s.task.id);
     try {
       const d = await (await fetch('/api/reminders/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: s.task.id, contactName: s.contact!.name }) })).json();
-      setPrefill({ contactId: s.contact!.id, contactName: s.contact!.name, message: d.message || '', taskId: s.task.id });
+      setPrefill({ contactId: s.contact!.id, contactName: s.contact!.name, message: d.message || '', taskId: s.task.id, subject: s.task.title });
       setEditing(null);
       setShowForm(true);
     } catch { toast('error', 'Could not draft a message'); } finally { setDrafting(null); }
@@ -205,7 +205,7 @@ function RemindersTab() {
 
   return (
     <div className="space-y-4">
-      <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">WhatsApp sending isn’t connected yet — these are scheduled and ready; they’ll go out once your WhatsApp number is set up.</p>
+      <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">WhatsApp sending is wired up — reminders start going out automatically the moment your reminder template is approved by Meta.</p>
 
       {suggestions.length > 0 && (
         <section className="space-y-2">
@@ -269,10 +269,11 @@ function RemindersTab() {
   );
 }
 
-function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Reminder | null; prefill?: { contactId: string; contactName: string; message: string; taskId?: string } | null; onClose: () => void; onSaved: () => void }) {
+function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Reminder | null; prefill?: { contactId: string; contactName: string; message: string; taskId?: string; subject?: string } | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactId, setContactId] = useState(reminder?.contactId || prefill?.contactId || '');
+  const [subject, setSubject] = useState(reminder?.subject || prefill?.subject || '');
   const [message, setMessage] = useState(reminder?.message || prefill?.message || '');
   const [count, setCount] = useState(reminder?.count || 3);
   const [saving, setSaving] = useState(false);
@@ -300,8 +301,8 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
     setSaving(true);
     try {
       const r = reminder
-        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message.trim(), count }) })
-        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, message: message.trim(), count }) });
+        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), count }) })
+        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), count }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not save');
       toast('success', reminder ? 'Reminder updated' : 'Reminder created');
       onSaved();
@@ -325,6 +326,10 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
             </select>
           </label>
         )}
+        <label className="block text-xs text-zinc-500">What's this about?
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. the PCB samples" className={inp + ' mt-1'} />
+          <span className="mt-1 block text-[10px] text-zinc-400">Goes into the first WhatsApp nudge: “…a gentle reminder about <b>{subject.trim() || 'this'}</b>.”</span>
+        </label>
         <div>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-xs text-zinc-500">{prefill ? 'Message (drafted for you — edit freely)' : 'Message'}</span>

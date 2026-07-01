@@ -165,7 +165,7 @@ export class RemindersService {
     if (sends.length) await this.prisma.reminderSend.createMany({ data: sends.map((at) => ({ reminderId, at })) });
   }
 
-  async create(input: { contactId?: string; taskId?: string; message?: string; count?: number }) {
+  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; count?: number }) {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
@@ -173,7 +173,15 @@ export class RemindersService {
     const count = Math.max(1, Math.min(5, Math.round(input.count || 1)));
     const times = spreadTimes(count);
     const r = await this.prisma.reminder.create({
-      data: { contactId: input.contactId, taskId: input.taskId || null, message: input.message.trim(), count, times: JSON.stringify(times), status: 'active' },
+      data: {
+        contactId: input.contactId,
+        taskId: input.taskId || null,
+        subject: input.subject?.trim() || null,
+        message: input.message.trim(),
+        count,
+        times: JSON.stringify(times),
+        status: 'active',
+      },
     });
     await this.reseed(r.id, times);
     return this.get(r.id);
@@ -186,10 +194,11 @@ export class RemindersService {
     return { ...this.shape(r), task };
   }
 
-  async update(id: string, patch: { message?: string; count?: number; status?: string }) {
+  async update(id: string, patch: { subject?: string; message?: string; count?: number; status?: string }) {
     const cur = await this.prisma.reminder.findUnique({ where: { id } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
+    if (patch.subject !== undefined) data.subject = patch.subject.trim() || null;
     if (patch.message !== undefined) {
       if (!patch.message.trim()) throw new BadRequestException('The message cannot be empty');
       data.message = patch.message.trim();

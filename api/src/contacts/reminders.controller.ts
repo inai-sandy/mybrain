@@ -40,12 +40,12 @@ export class RemindersController {
   }
 
   @Post()
-  create(@Body() body: { contactId?: string; taskId?: string; message?: string; count?: number }) {
+  create(@Body() body: { contactId?: string; taskId?: string; subject?: string; message?: string; count?: number }) {
     return this.reminders.create(body || {});
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { message?: string; count?: number; status?: string }) {
+  update(@Param('id') id: string, @Body() body: { subject?: string; message?: string; count?: number; status?: string }) {
     return this.reminders.update(id, body || {});
   }
 

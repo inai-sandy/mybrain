@@ -827,7 +827,8 @@ model Reminder {
   contactId    String
   contact      Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
   taskId       String? // the Task this chases (status stays the user's to close)
-  message      String // the text we send, in the user's voice
+  subject      String? // short "what you're chasing" for the template {{2}} (task title if linked)
+  message      String // the free-text we send in the 24h window (in the user's voice)
   count        Int            @default(1) // how many times today (1-5)
   times        String         @default("[]") // JSON array of ISO datetimes to send at
   status       String         @default("active") // active | done | stopped
@@ -836,6 +837,7 @@ model Reminder {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   sends        ReminderSend[]
+  messages     ReminderMessage[]
 
   @@index([contactId])
   @@index([status])
@@ -847,10 +849,25 @@ model ReminderSend {
   reminderId String
   reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
   at         DateTime
-  status     String   @default("queued") // queued | sent | failed
-  providerId String? // the BSP message id once sent
+  status     String   @default("queued") // queued | sent | delivered | read | failed
+  providerId String? // the BSP (Postbox/WhatsApp) message id once sent
+  error      String? // friendly error if the send failed
   createdAt  DateTime @default(now())
 
   @@index([reminderId])
   @@index([status])
+}
+
+/// The WhatsApp conversation for a reminder: our outbound nudges + the contact's replies.
+/// C1 records these; the two-way agent (C2) reads/acts on them.
+model ReminderMessage {
+  id         String   @id @default(uuid())
+  reminderId String
+  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+  direction  String // out | in
+  body       String
+  wamid      String?
+  createdAt  DateTime @default(now())
+
+  @@index([reminderId])
 }
