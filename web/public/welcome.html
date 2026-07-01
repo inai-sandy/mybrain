@@ -387,6 +387,17 @@
   </div>
 </section>
 
+<!-- ========== everything.app (Apple-style feature index) ========== -->
+<section class="win-anchor boot" data-app="Everything" data-icon="⭐" data-accent="emerald">
+  <div class="text-center mb-10">
+    <p class="mono text-xs text-emerald-400 mb-2">everything.app</p>
+    <h2 class="text-3xl sm:text-5xl font-extrabold tracking-tight">Everything, <span class="gtext">in one place</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-xl mx-auto">The whole brain, end to end — nothing left out. <span class="mono text-zinc-500">150+ modules and counting.</span></p>
+  </div>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-10" id="catalog"></div>
+  <p class="text-center text-zinc-500 mt-10 text-sm">…and it grows every week.</p>
+</section>
+
 <!-- ========== closing ========== -->
 <section class="reveal text-center pt-6">
   <h2 class="text-4xl sm:text-5xl font-black leading-tight">Most apps manage what you <span class="text-zinc-500">do</span>.<br/><span class="gtext">This one understands who you are.</span></h2>
@@ -626,6 +637,36 @@
     const el = document.getElementById('conns'), text = document.getElementById('connText');
     if (!el) return;
     CONNS.forEach(([ic, name, desc]) => { const b = document.createElement('button'); b.className = 'tap conn win p-4 text-center'; b.innerHTML = '<div class="text-2xl">' + ic + '</div><div class="mt-1 font-bold text-sm">' + name + '</div>'; b.onclick = () => { document.querySelectorAll('.conn').forEach((x) => x.classList.remove('on')); b.classList.add('on'); text.innerHTML = '<b class="text-indigo-300">' + ic + ' ' + name + '</b><br/><span class="text-zinc-300">' + desc + '</span>'; }; el.appendChild(b); });
+  })();
+
+  // ---------- everything: Apple-style feature index ----------
+  (function () {
+    const el = document.getElementById('catalog'); if (!el) return;
+    const CATALOG = [
+      ['🎙️', 'Capture &amp; voice', ['Quick Capture — files, links, text, Notion pages, auto de-duped', 'Hold-to-talk voice on every screen, live Deepgram streaming', 'Batch fallback so words are never lost + instant AI cleanup', 'Morning brain-dump → an auto-built, prioritized day']],
+      ['🧠', 'Memory &amp; search', ['Dual memory: your server (RAG) + a cloud twin, every item mirrored', 'Self-healing sync: retrying queue + 15-min reconcile sweep', 'Ask your whole brain → cited answers, ranked by relevance × recency', 'Everything browser, saved answers, ⌘K global search', 'Index manager: per-section toggles, counts, re-chunk']],
+      ['🤖', 'Agents', ['Templates or describe-an-idea → AI drafts task, rubric &amp; tests', 'Searches brain &amp; web, reads URLs, Gmail/Calendar/Drive, HTTP', 'Human-in-the-loop pauses — approve in-app or on Telegram', 'Evals auto-graded against the rubric', '“Saved by agents” audit + learnings capture', 'Schedules; runs on your Codex subscription']],
+      ['🕸️', 'Flows', ['Visual drag-and-drop canvas of branches, tools &amp; logic', 'Auto-plan: a question → AI lays out the whole flow', 'Copy a self-contained prompt that stays in sync', 'Live runs with per-node badges + terminal log', 'Schedule + run history with saved outputs']],
+      ['📱', 'Agentic messaging', ['1–5 friendly WhatsApp nudges across working hours', 'Drafts in your voice; bundles a person’s reminders into one', 'Two-way agent replies, stays quiet without a real update', 'Closes items only when genuinely resolved', 'Per-contact threads; pause / resume / stop', '“Scan tasks for people” finds who to chase']],
+      ['📖', 'The daily loop', ['Dump your brain → tasks; must-dos pinned; close the day', 'Story of the Day with Work/Personal reads + mood', 'Day summary, monthly chapters, a Story of the Year', 'AI-suggested next-day tasks', 'Open-days nudge so nothing is left unfinished']],
+      ['✅', 'Tasks &amp; activity', ['Filters: priority, category, sphere, person, “Promises”', 'GitHub-style history heatmap; a by-person view', 'AI “Remove duplicates” with visual clustering', 'Activity hub: Day replay, Insights, portrait, Your book', 'Follow-through %, hours, estimate-vs-actual']],
+      ['🔬', 'The Lab', ['Situation cards: Goal → Blocked by → Lever', 'Obsidian-style Map of you ↔ people ↔ patterns', 'Mood over time + what energizes vs drains you', 'Heatmaps: best weekdays + the avoidance map', 'Findings on a trust-ladder, decaying on their own rhythm', 'Learns from closed days; a nightly Review trains it', 'About Me grounds it from day one']],
+      ['🧭', 'Mentor', ['Honest daily guidance after your story', 'Focus areas you keep — or AI suggests', '“Are you following it?” on-track score + mood', 'Sunday weekly review: one pattern, one experiment']],
+      ['🔐', 'The Vault', ['Zero-knowledge — encrypted in your browser', 'Master passphrase + Recovery Key + biometric unlock', '10+ types; import 1Password / Bitwarden / CSV', 'Weak/reused audit, 30-sec clipboard clear, audit log', 'Auto-lock on idle; labels-only indexing']],
+      ['📧', 'Google &amp; Gmail', ['Tile launcher with live hints (unread, next event)', 'Gmail Daily Brief — an intelligent inbox summary', 'Gmail Requests: pin, bulk refresh, share, export', 'Important emails in memory; Drive, Calendar, Tasks']],
+      ['📄', 'Documents', ['Notion-style + Markdown editor; upload md/html/pdf/zip', 'Import from a URL with AI title/tags/summary', 'Collections, search, bulk tag/move/share/export', 'Public links: password, expiry, view counter, QR', 'Convert any doc into a Capture']],
+      ['🧩', 'Skills', ['Create from a SKILL.md or import from a GitHub repo', 'One-click “Deploy everywhere” across targets', 'Tracks origin, usage &amp; last-used; share skills']],
+      ['📥', 'Notes · Ideas · Bookmarks · Meetings', ['Notes — Keep-style: colors, tags, checklists, voice', 'Ideas — rough thought → organized idea + a workflow', 'Bookmarks — auto-imported, videos watched by AI', 'Meetings — recorded, transcribed, decisions captured']],
+      ['🎛️', 'AI engines', ['Per-feature model picker (Claude, GPT, Gemini, Llama)', 'Background work on your Codex sub — near-zero cost', 'Automatic Sonnet fallback so nothing stalls', 'Every instruction is an editable prompt; usage &amp; cost view']],
+      ['⚙️', 'Settings &amp; platform', ['~23 integrations, each with a live “Test” button', 'Installable PWA, dark mode, native-feel mobile scroll', 'Accounts, HTTPS, auto-logout; back-swipe navigation', 'Deep settings search']],
+      ['🛡️', 'Safety &amp; backups', ['Nightly encrypted backups pulled to a home machine', 'Every backup checksummed &amp; integrity-tested', 'A watchdog guarding the server', 'Your data, on hardware you control']],
+    ];
+    CATALOG.forEach(([ic, title, items]) => {
+      const d = document.createElement('div'); d.className = 'break-inside-avoid';
+      d.innerHTML = '<div class="flex items-center gap-2 mb-3 pb-2 border-b border-white/10"><span class="text-lg">' + ic + '</span><h3 class="font-semibold tracking-tight text-zinc-100">' + title + '</h3></div>' +
+        '<ul class="divide-y divide-white/5">' + items.map((x) => '<li class="py-2 text-[13px] text-zinc-400 leading-snug">' + x + '</li>').join('') + '</ul>';
+      el.appendChild(d);
+    });
   })();
 </script>
 </body>
