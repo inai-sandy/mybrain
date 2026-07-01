@@ -47,8 +47,31 @@ export function localTimesToUtc(times: string[], now: Date, offsetMin = REMINDER
 }
 
 /** Concrete UTC datetimes for today at each local HH:MM (used to seed queued sends). */
+/**
+ * Schedule `times.length` (= count) nudges as concrete UTC datetimes — fixed TOTAL, spilling
+ * across days: fill today's still-future slots first, then roll the rest onto the next day(s)
+ * at the same daily slot times. So 3 slots made at 4 PM → 1 today + 2 tomorrow. (BEA-740)
+ */
+export function scheduleNudges(times: string[], now: Date, offsetMin = REMINDER_TZ_OFFSET, maxDays = 7): Date[] {
+  const total = times.length;
+  const local = new Date(now.getTime() + offsetMin * 60000);
+  const y = local.getUTCFullYear();
+  const mo = local.getUTCMonth();
+  const da = local.getUTCDate();
+  const out: Date[] = [];
+  for (let day = 0; day < maxDays && out.length < total; day++) {
+    for (const t of times) {
+      const [h, m] = t.split(':').map(Number);
+      const utc = new Date(Date.UTC(y, mo, da + day, h, m, 0, 0) - offsetMin * 60000);
+      if (utc.getTime() > now.getTime() - 60000) out.push(utc); // strictly future (60s grace)
+      if (out.length >= total) break;
+    }
+  }
+  return out;
+}
+
 function sendsForToday(times: string[]): Date[] {
-  return localTimesToUtc(times, new Date());
+  return scheduleNudges(times, new Date());
 }
 
 @Injectable()

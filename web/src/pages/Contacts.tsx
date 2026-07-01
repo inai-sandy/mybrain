@@ -458,9 +458,10 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} placeholder="Type roughly what you want to say — then tap Clean up to tidy it…" className={inp + ' resize-none'} />
         </div>
         <div>
-          <div className="mb-1 flex items-center justify-between text-xs text-zinc-500"><span>How many times today?</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{count}</span></div>
+          <div className="mb-1 flex items-center justify-between text-xs text-zinc-500"><span>How many nudges?</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{count}</span></div>
           <input type="range" min={1} max={5} value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-full accent-emerald-600" />
           <div className="mt-1.5 flex flex-wrap gap-1">{previewTimes(count).map((t) => <span key={t} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{t}</span>)}</div>
+          <p className="mt-1 text-[10px] text-zinc-400">Spread over these times — any that have already passed today roll to the next day, until all {count} go out (or they reply).</p>
         </div>
         <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{reminder ? 'Save' : 'Create reminder'}</button>
       </div>

@@ -1,4 +1,28 @@
-import { spreadTimes, localTimesToUtc, RemindersService } from './reminders.service';
+import { spreadTimes, localTimesToUtc, scheduleNudges, RemindersService } from './reminders.service';
+
+describe('scheduleNudges — fixed total, spill over days (BEA-740)', () => {
+  const times = ['09:00', '12:45', '16:30']; // spreadTimes(3)
+  it('made in the morning → all nudges go today', () => {
+    const now = new Date('2026-07-01T02:00:00Z'); // 07:30 IST
+    const out = scheduleNudges(times, now, 330);
+    expect(out).toHaveLength(3);
+    expect(out.every((d) => d.toISOString().slice(0, 10) === '2026-07-01')).toBe(true);
+  });
+  it('made at 4 PM → 1 today, the remaining 2 roll to tomorrow', () => {
+    const now = new Date('2026-07-01T10:30:00Z'); // 16:00 IST
+    const out = scheduleNudges(times, now, 330);
+    expect(out).toHaveLength(3);
+    expect(out[0].toISOString()).toBe('2026-07-01T11:00:00.000Z'); // today 16:30 IST
+    expect(out[1].toISOString()).toBe('2026-07-02T03:30:00.000Z'); // tomorrow 09:00 IST
+    expect(out[2].toISOString()).toBe('2026-07-02T07:15:00.000Z'); // tomorrow 12:45 IST
+  });
+  it('made late evening → all nudges roll to tomorrow', () => {
+    const now = new Date('2026-07-01T18:00:00Z'); // 23:30 IST
+    const out = scheduleNudges(times, now, 330);
+    expect(out).toHaveLength(3);
+    expect(out.every((d) => d.toISOString().slice(0, 10) === '2026-07-02')).toBe(true);
+  });
+});
 
 describe('localTimesToUtc — reminder times are in the user tz (BEA-734)', () => {
   it('interprets HH:MM as IST and converts to the right UTC instant', () => {
