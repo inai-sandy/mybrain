@@ -25,7 +25,7 @@ describe('RemindersService.suggestions (BEA-721)', () => {
       reminder: { findMany: async () => [{ taskId: 't2' }] },
     };
     const contacts: any = { findByName: async (n: string) => (n.toLowerCase() === 'ravi' ? { id: 'c1', name: 'Ravi', whatsappNumber: '91999' } : null) };
-    const svc = new RemindersService(prisma, {} as any, contacts);
+    const svc = new RemindersService(prisma, {} as any, contacts, {} as any);
     const { suggestions } = await svc.suggestions();
     expect(suggestions).toHaveLength(2); // blank-party task excluded
     const ravi = suggestions.find((s) => s.task.id === 't1')!;
@@ -50,7 +50,7 @@ describe('RemindersService pause/resume (BEA-720)', () => {
         createMany: async () => { calls.createMany++; return {}; },
       },
     };
-    const svc = new RemindersService(prisma, {} as any, {} as any);
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
     return { svc, calls };
   }
 
@@ -76,7 +76,7 @@ describe('RemindersService.draftMessage clean up (BEA-720/731)', () => {
 
   it('reformats the user’s own rough words via the chosen engine', async () => {
     const llm: any = { completeWith: async () => '  "Hi Ravi, any update on the samples?"  ' };
-    const svc = new RemindersService(prisma, llm, {} as any);
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
     const { message } = await svc.draftMessage({ userInput: 'chase ravi re samples', contactName: 'Ravi' });
     expect(message).toBe('Hi Ravi, any update on the samples?'); // quotes + whitespace stripped
   });
@@ -84,7 +84,7 @@ describe('RemindersService.draftMessage clean up (BEA-720/731)', () => {
   it('retries once, then falls back to the raw words if the engine keeps failing (BEA-731)', async () => {
     let calls = 0;
     const llm: any = { completeWith: async () => { calls++; return ''; } };
-    const svc = new RemindersService(prisma, llm, {} as any);
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
     const { message } = await svc.draftMessage({ userInput: 'call sunil tomorrow', contactName: 'Sunil' });
     expect(message).toBe('call sunil tomorrow'); // raw preserved, never lost
     expect(calls).toBe(2); // tried, then retried once

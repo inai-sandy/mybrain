@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ContactsService } from './contacts.service';
+import { PostboxService } from './postbox.service';
 
 /** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -56,7 +57,32 @@ export class RemindersService {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly contacts: ContactsService,
+    private readonly postbox: PostboxService,
   ) {}
+
+  /** Send a manual message to the contact from the chat window (user takes over). Free-text, 24h-window. (BEA-736) */
+  async sendManual(id: string, body: string) {
+    const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
+    if (!r) throw new NotFoundException('Reminder not found');
+    const text = (body || '').trim();
+    if (!text) throw new BadRequestException('Type a message');
+    const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
+    if (!number) throw new BadRequestException('This contact has no WhatsApp number');
+    if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
+    const res = await this.postbox.sendText(number, text);
+    if (res.error) {
+      // Most common: outside the 24h window (WhatsApp only allows free text within 24h of their last reply).
+      throw new BadRequestException(
+        /window|session|24|re-?open|outside/i.test(res.error)
+          ? "You can only send a free message within 24 hours of their last reply. They'll still get the scheduled reminder — you can chat once they reply."
+          : res.error,
+      );
+    }
+    const msg = await this.prisma.reminderMessage.create({
+      data: { reminderId: id, direction: 'out', body: text, wamid: res.wamid || null },
+    });
+    return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt };
+  }
 
   // ---- "Clean up" engine picker (own Settings model; defaults to a reliable API model). (BEA-731) ----
 

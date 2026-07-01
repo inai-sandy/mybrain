@@ -274,7 +274,10 @@ function RemindersTab() {
 
 /** A full chat window for one reminder — the WhatsApp conversation + captured outcome. (BEA-733) */
 function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () => void }) {
+  const toast = useToast();
   const [data, setData] = useState<{ messages: { id: string; direction: string; body: string; at: string }[]; feedback: string | null; status: string } | null>(null);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
   const st = REM_STATUS[reminder.status] || REM_STATUS.active;
   const about = reminder.subject || reminder.task?.title;
@@ -283,6 +286,23 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
   }, [reminder.id]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [data]);
   const fmt = (s: string) => new Date(s).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+
+  async function send() {
+    const body = text.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      const r = await fetch(`/api/reminders/${reminder.id}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.message || 'Could not send');
+      setData((prev) => (prev ? { ...prev, messages: [...prev.messages, d] } : prev));
+      setText('');
+    } catch (e: any) {
+      toast('error', e.message || 'Could not send');
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
@@ -330,6 +350,21 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span><b>Outcome:</b> {data.feedback}</span>
           </div>
         )}
+
+        {/* Compose — send a WhatsApp message to the contact yourself (BEA-736) */}
+        <div className="flex items-end gap-2 border-t border-zinc-100 p-2 dark:border-zinc-800">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+            rows={1}
+            placeholder={`Message ${reminder.contact?.name?.split(' ')[0] || 'them'}…`}
+            className="max-h-28 min-h-[40px] flex-1 resize-none rounded-2xl border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
+          />
+          <button onClick={send} disabled={sending || !text.trim()} title="Send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
     </div>
   );

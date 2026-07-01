@@ -55,6 +55,12 @@ export class RemindersController {
     return this.reminders.thread(id);
   }
 
+  /** Send a manual message to the contact from the chat window (BEA-736). */
+  @Post(':id/message')
+  sendMessage(@Param('id') id: string, @Body() body: { body?: string }) {
+    return this.reminders.sendManual(id, body?.body || '');
+  }
+
   @Post(':id/pause')
   pause(@Param('id') id: string) {
     return this.reminders.pause(id);
