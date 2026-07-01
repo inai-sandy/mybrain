@@ -206,7 +206,7 @@ function RemindersTab() {
 
   return (
     <div className="space-y-4">
-      <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">WhatsApp sending is wired up — reminders start going out automatically the moment your reminder template is approved by Meta.</p>
+      <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">WhatsApp sending is live — active reminders go out automatically at their scheduled times, and replies get handled for you. Open a reminder's 💬 to see the conversation.</p>
 
       {suggestions.length > 0 && (
         <section className="space-y-2">
