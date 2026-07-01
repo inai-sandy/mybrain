@@ -208,7 +208,7 @@ function RemindersTab() {
     setDrafting(s.task.id);
     try {
       const d = await (await fetch('/api/reminders/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId: s.task.id, contactName: s.contact!.name }) })).json();
-      setPrefill({ contactId: s.contact!.id, contactName: s.contact!.name, message: d.message || '', taskId: s.task.id, subject: s.task.title });
+      setPrefill({ contactId: s.contact!.id, contactName: s.contact!.name, message: d.message || '', taskId: s.task.id, subject: d.subject || s.task.title });
       setEditing(null);
       setShowForm(true);
     } catch { toast('error', 'Could not draft a message'); } finally { setDrafting(null); }

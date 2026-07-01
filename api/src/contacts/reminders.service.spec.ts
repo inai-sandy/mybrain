@@ -99,11 +99,11 @@ describe('RemindersService pause/resume (BEA-720)', () => {
     expect(calls.createMany).toBe(0);
   });
 
-  it('resume → status active, re-queues today’s sends from stored times', async () => {
+  it('resume → status active, reseeds today’s remaining sends', async () => {
     const { svc, calls } = makeSvc({ id: 'r1', status: 'paused', times: JSON.stringify(['09:00', '16:30']), taskId: null, contact: {}, sends: [] });
     await svc.resume('r1');
     expect(calls.updateData.status).toBe('active');
-    expect(calls.createMany).toBe(1);
+    expect(calls.deleteMany).toBe(1); // reseed ran (createMany count is time-of-day dependent after the IST/skip-past fix, so we don't assert it)
   });
 });
 
@@ -125,6 +125,21 @@ describe('RemindersService.draftMessage clean up (BEA-720/731)', () => {
     const { message } = await svc.draftMessage({ userInput: 'call sunil tomorrow', contactName: 'Sunil' });
     expect(message).toBe('call sunil tomorrow'); // raw preserved, never lost
     expect(calls).toBe(2); // tried, then retried once
+  });
+
+  it('task draft returns a clean short subject + message (BEA-739)', async () => {
+    const llm: any = { completeWith: async () => '{"message":"Hi Raja, any update on those videos?","subject":"the panel videos"}' };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    const r = await svc.draftMessage({ taskTitle: 'Instruct Raja to create panel videos', contactName: 'Raja' });
+    expect(r.message).toContain('any update');
+    expect(r.subject).toBe('the panel videos'); // clean noun phrase, not the raw title
+  });
+
+  it('task draft falls back to the title as subject if AI output is unparseable (BEA-739)', async () => {
+    const llm: any = { completeWith: async () => 'not json at all' };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    const r = await svc.draftMessage({ taskTitle: 'Chase Ravi for the file', contactName: 'Ravi' });
+    expect(r.subject).toBe('Chase Ravi for the file'); // graceful fallback
   });
 });
 

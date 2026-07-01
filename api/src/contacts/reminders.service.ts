@@ -218,10 +218,22 @@ export class RemindersService {
       title = t?.title;
     }
     if (!title) throw new BadRequestException('Type what you want to say, or link a task, so I can draft the message');
-    const prompt = `Write a short WhatsApp message I'd send to ${who} to gently chase this task: "${title}".\n\nRules:\n- Sound EXACTLY like a real person texting a colleague — warm, friendly, casual. NEVER like a bot or AI.\n- Plain, simple English. Short sentences. 1-2 sentences max.\n- Greet them by first name if a name is given. Don't sign off with my name.\n- No emojis unless natural. No "Dear", no formal language.\n- Write in natural, warm Indian English — the everyday way an Indian professional texts a colleague or vendor on WhatsApp (not American-sounding, not stiff/formal, and NOT a caricature).\n- Naturally nudge them to reply with the status/update, woven right into the message the way a real person would (e.g. "…do let me know where it stands when you get a chance"). NEVER add it as a separate line or a robotic "Please reply with the status".\nReturn ONLY the message text, nothing else.`;
-    const text = await this.voiceComplete(prompt, 'reminder-draft');
-    const msg = (text || '').trim().replace(/^["']|["']$/g, '');
-    return { message: msg || `Hi ${firstName}, just checking in on "${title}" — any update when you get a chance?` };
+    const prompt = `I want to gently chase this on WhatsApp with ${who}. The task (written for myself) is: "${title}".\n\nGive me TWO things:\n1. "message" — the short WhatsApp message I'd actually send. Warm, natural Indian English, the everyday way an Indian professional texts a colleague/vendor. Plain, 1-2 short sentences, NEVER bot-like. Greet by first name, don't sign off with my name. Naturally woven in: ask them to reply with the status/update (not a robotic "please reply").\n2. "subject" — a SHORT noun phrase (3 to 6 words) naming ONLY the thing I'm chasing, to slot into "a gentle reminder about ___". Strip the verb and the person's name. e.g. task "Instruct Raja to create install & reset videos for the magnetic touch panel" → subject "the magnetic touch panel videos". task "Get the status report from Vijay" → subject "the status report".\n\nReturn ONLY JSON, nothing else: {"message":"<message>","subject":"<subject>"}`;
+    const raw2 = await this.voiceComplete(prompt, 'reminder-draft', 400);
+    let message = '';
+    let subject = '';
+    try {
+      const m = raw2.match(/\{[\s\S]*\}/);
+      const j = m ? JSON.parse(m[0]) : {};
+      message = String(j.message || '').trim().replace(/^["']|["']$/g, '');
+      subject = String(j.subject || '').trim().replace(/^["']|["']$/g, '');
+    } catch {
+      /* fall back below */
+    }
+    return {
+      message: message || `Hi ${firstName}, just checking in on "${title}" — any update when you get a chance?`,
+      subject: subject || title,
+    };
   }
 
   private parse(s: any): string[] {

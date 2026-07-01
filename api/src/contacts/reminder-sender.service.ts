@@ -68,9 +68,10 @@ export class ReminderSenderService implements OnModuleInit {
         this.log.warn(`send ${send.id} failed: ${res.error}`);
       } else {
         await this.mark(send.id, 'sent', res.wamid, null);
-        // record the outbound nudge on the conversation thread
+        // record the ACTUAL message the contact received (the rendered reminder_nudge template) on the thread
+        const rendered = `Hi ${firstName}, just a gentle reminder about ${subject}. Do let me know where it stands whenever you get a chance. Thanks!`;
         await this.prisma.reminderMessage
-          .create({ data: { reminderId: r.id, direction: 'out', body: `(reminder) about ${subject}`, wamid: res.wamid || null } })
+          .create({ data: { reminderId: r.id, direction: 'out', body: rendered, wamid: res.wamid || null } })
           .catch(() => undefined);
       }
     }
