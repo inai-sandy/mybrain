@@ -10,6 +10,11 @@ export class ContactsController {
     return this.contacts.list(q || undefined, Number(page) || 1, Number(pageSize) || 20);
   }
 
+  @Get(':id')
+  get(@Param('id') id: string) {
+    return this.contacts.get(id);
+  }
+
   @Post()
   create(@Body() body: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[] }) {
     return this.contacts.create(body || {});

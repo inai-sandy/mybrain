@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[] };
@@ -9,6 +10,9 @@ const PAGE_SIZE = 20;
 
 export function Contacts() {
   const [tab, setTab] = useState<'contacts' | 'reminders'>('contacts');
+  const [params, setParams] = useSearchParams();
+  const openContactId = params.get('contact');
+  if (openContactId) return <ContactDetail contactId={openContactId} />;
   return (
     <div className="space-y-5">
       <header>
@@ -20,12 +24,114 @@ export function Contacts() {
           <button key={t} onClick={() => setTab(t)} className={'-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize transition-colors ' + (tab === t ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{t}</button>
         ))}
       </div>
-      {tab === 'contacts' ? <ContactsTab /> : <RemindersTab />}
+      {tab === 'contacts' ? <ContactsTab onOpen={(id) => setParams({ contact: id })} /> : <RemindersTab />}
     </div>
   );
 }
 
-function ContactsTab() {
+/** One contact's own page: their details + their reminders (grouped) + add/chat. (BEA-756) */
+function ContactDetail({ contactId }: { contactId: string }) {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [contact, setContact] = useState<Contact | null>(null);
+  const [reminders, setReminders] = useState<Reminder[] | null>(null);
+  const [openThread, setOpenThread] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
+  const [editContact, setEditContact] = useState(false);
+
+  function load() {
+    fetch(`/api/contacts/${contactId}`).then((r) => (r.ok ? r.json() : null)).then(setContact).catch(() => setContact(null));
+    fetch('/api/reminders').then((r) => r.json()).then((d) => setReminders((d.reminders || []).filter((x: Reminder) => x.contactId === contactId))).catch(() => setReminders([]));
+  }
+  useEffect(load, [contactId]);
+
+  async function act(id: string, kind: 'pause' | 'resume' | 'delete') {
+    if (kind === 'delete' && !window.confirm('Delete this reminder?')) return;
+    try {
+      const r = await fetch(kind === 'delete' ? `/api/reminders/${id}` : `/api/reminders/${id}/${kind}`, { method: kind === 'delete' ? 'DELETE' : 'POST' });
+      if (!r.ok) throw new Error();
+      toast('success', kind === 'pause' ? 'Reminder paused' : kind === 'resume' ? 'Reminder resumed' : 'Reminder deleted');
+      load();
+    } catch { toast('error', 'Could not update'); }
+  }
+
+  const groups = [
+    { key: 'active', label: 'Active', items: (reminders || []).filter((r) => r.status === 'active') },
+    { key: 'paused', label: 'Paused', items: (reminders || []).filter((r) => r.status === 'paused') },
+    { key: 'done', label: 'Done & stopped', items: (reminders || []).filter((r) => r.status === 'done' || r.status === 'stopped') },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Contacts</button>
+
+      <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-lg font-semibold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{(contact?.name || '·').slice(0, 1).toUpperCase()}</span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-lg font-semibold">{contact?.name || 'Contact'}</div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
+            {contact?.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{contact.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
+            {contact?.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
+          </div>
+          {contact?.notes && <p className="mt-0.5 truncate text-xs text-zinc-400">{contact.notes}</p>}
+        </div>
+        {contact && <button onClick={() => setEditContact(true)} title="Edit contact" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
+      </div>
+
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Reminders</h3>
+      {reminders === null ? (
+        <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+      ) : reminders.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No reminders for {contact?.name || 'this contact'} yet. Add the first one below.</div>
+      ) : (
+        <div className="space-y-4">
+          {groups.map((g) => g.items.length === 0 ? null : (
+            <section key={g.key} className="space-y-2">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">{g.label} · {g.items.length}</div>
+              <ul className="space-y-2">
+                {g.items.map((rm) => {
+                  const st = REM_STATUS[rm.status] || REM_STATUS.active;
+                  return (
+                    <li key={rm.id} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+                      <div className="flex items-start gap-2">
+                        <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-medium">{rm.subject?.trim() || rm.task?.title || 'Reminder'}</span>
+                            <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{st.label}</span>
+                          </div>
+                          <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 items-center">
+                          <button onClick={() => setOpenThread(rm.id)} title="Open chat" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><MessageCircle className="h-4 w-4" /></button>
+                          {(rm.status === 'active' || rm.status === 'paused') && <button onClick={() => { setEditingReminder(rm); setShowForm(true); }} title="Edit" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
+                          {rm.status === 'active' && <button onClick={() => act(rm.id, 'pause')} title="Pause" className="rounded-lg p-1.5 text-zinc-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-500/10"><Pause className="h-4 w-4" /></button>}
+                          {rm.status === 'paused' && <button onClick={() => act(rm.id, 'resume')} title="Resume" className="rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><Play className="h-4 w-4" /></button>}
+                          <button onClick={() => act(rm.id, 'delete')} title="Delete" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+
+      <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50"><Plus className="h-4 w-4" />Add reminder</button>
+
+      {openThread && (() => { const r = reminders?.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}
+      {showForm && <NewReminderForm reminder={editingReminder} prefill={editingReminder ? null : { contactId, contactName: contact?.name || '', message: '' }} onClose={() => { setShowForm(false); setEditingReminder(null); }} onSaved={() => { setShowForm(false); setEditingReminder(null); load(); }} />}
+      {editContact && contact && <ContactForm contact={contact} onClose={() => setEditContact(false)} onSaved={() => { setEditContact(false); load(); }} />}
+    </div>
+  );
+}
+
+function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const toast = useToast();
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -74,16 +180,18 @@ function ContactsTab() {
       ) : (
         <ul className="space-y-2">
           {contacts.map((c) => (
-            <li key={c.id} className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{c.name.slice(0, 1).toUpperCase()}</span>
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{c.name}</div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
-                  {c.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{c.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
-                  {c.notes && <span className="truncate">{c.notes}</span>}
-                  {c.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
+            <li key={c.id} className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 transition-colors hover:border-emerald-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/40">
+              <button onClick={() => onOpen(c.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left" title="Open contact">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{c.name.slice(0, 1).toUpperCase()}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{c.name}</div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
+                    {c.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{c.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
+                    {c.notes && <span className="truncate">{c.notes}</span>}
+                    {c.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
+                  </div>
                 </div>
-              </div>
+              </button>
               <button onClick={() => { setEditing(c); setShowForm(true); }} title="Edit" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>
               <button onClick={() => del(c)} title="Delete" className="shrink-0 rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
             </li>
@@ -464,7 +572,7 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
         </label>
         <div>
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs text-zinc-500">{prefill ? 'Message (drafted for you — edit freely)' : 'Message'}</span>
+            <span className="text-xs text-zinc-500">{prefill?.message ? 'Message (drafted for you — edit freely)' : 'Message'}</span>
             <button type="button" onClick={cleanUp} disabled={cleaning || !message.trim()} title="Reformat your words into a proper message" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-40 dark:hover:bg-emerald-500/10">
               {cleaning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}Clean up
             </button>
