@@ -1,4 +1,50 @@
-import { spreadTimes, localTimesToUtc, scheduleNudges, RemindersService } from './reminders.service';
+import { spreadTimes, localTimesToUtc, scheduleNudges, RemindersService, looksCommandLike, stripCommandLead } from './reminders.service';
+
+describe('looksCommandLike / stripCommandLead (BEA-754)', () => {
+  it('flags command-style subjects, passes clean topics through', () => {
+    expect(looksCommandLike('Ask Srikar to report on socket pins work')).toBe(true);
+    expect(looksCommandLike('Follow up with Srikar on Zigbee dongle testing')).toBe(true);
+    expect(looksCommandLike('Tell Dharmendra to label Beakn in videos')).toBe(true);
+    expect(looksCommandLike('the socket pins work')).toBe(false); // already a topic
+    expect(looksCommandLike('the status report')).toBe(false);
+    expect(looksCommandLike('')).toBe(false);
+  });
+  it('deterministic fallback strips the leading command clause', () => {
+    expect(stripCommandLead('Ask Srikar to report on socket pins work')).toBe('report on socket pins work');
+    expect(stripCommandLead('Follow up with Srikar on Zigbee dongle testing')).toBe('Zigbee dongle testing');
+    expect(stripCommandLead('the status report')).toBe('the status report'); // nothing to strip → unchanged
+  });
+});
+
+describe('RemindersService.cleanSubject (BEA-754)', () => {
+  const prisma: any = { setting: { findUnique: async () => null } };
+
+  it('leaves an already-clean subject untouched (no AI call)', async () => {
+    let called = 0;
+    const llm: any = { completeWith: async () => { called++; return 'x'; } };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    expect(await svc.cleanSubject('the socket pins work', 'Srikar')).toBe('the socket pins work');
+    expect(called).toBe(0); // clean subjects skip the model entirely
+  });
+
+  it('rewrites a command-like subject into the AI noun phrase', async () => {
+    const llm: any = { completeWith: async () => '"the socket pins work."' };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    expect(await svc.cleanSubject('Ask Srikar to report on socket pins work', 'Srikar')).toBe('the socket pins work'); // quotes + trailing dot stripped
+  });
+
+  it('falls back to the deterministic strip when the model returns nothing', async () => {
+    const llm: any = { completeWith: async () => '' };
+    const svc = new RemindersService(prisma, llm, {} as any, {} as any);
+    expect(await svc.cleanSubject('Follow up with Srikar on Zigbee dongle testing', 'Srikar')).toBe('Zigbee dongle testing');
+  });
+
+  it('returns empty for an empty subject', async () => {
+    const svc = new RemindersService(prisma, { completeWith: async () => '' } as any, {} as any, {} as any);
+    expect(await svc.cleanSubject('', 'Srikar')).toBe('');
+    expect(await svc.cleanSubject(null, 'Srikar')).toBe('');
+  });
+});
 
 describe('scheduleNudges — fixed total, spill over days (BEA-740)', () => {
   const times = ['09:00', '12:45', '16:30']; // spreadTimes(3)

@@ -7,6 +7,32 @@ import { PostboxService } from './postbox.service';
 /** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
+/** Verbs that mark a subject as a task/command sentence rather than a clean topic. (BEA-754) */
+const COMMAND_LEAD = /^(tell|ask|remind|instruct|get|follow[\s-]?up(\s+with)?|check(\s+with)?|nudge|inform|make sure|have|let|chase|push|ping)\b/i;
+
+/**
+ * A reminder subject fills "a gentle reminder about ___", so it must read as a
+ * thing ("the socket pins"), not a command ("Ask Srikar to report on socket pins").
+ * True when the subject is phrased as an instruction and needs cleaning. (BEA-754)
+ */
+export function looksCommandLike(subject: string): boolean {
+  return COMMAND_LEAD.test((subject || '').trim());
+}
+
+/**
+ * Deterministic fallback used only when the AI cleaner is unavailable: strip a
+ * leading "Tell <Name> to " / "Follow up with <Name> on " command clause so the
+ * subject at least stops repeating the instruction. (BEA-754)
+ */
+export function stripCommandLead(subject: string): string {
+  const s = (subject || '').trim();
+  const stripped = s.replace(
+    /^(tell|ask|remind|instruct|get|follow[\s-]?up(\s+with)?|check(\s+with)?|nudge|inform|make sure|have|let|chase|push|ping)\s+(\S+\s+)?(to|about|on|for|that|regarding|re)\s+/i,
+    '',
+  );
+  return stripped !== s && stripped.trim() ? stripped.trim() : s;
+}
+
 /**
  * Spread `count` reminder times evenly across the working day (09:00–16:30 local), as "HH:MM" strings.
  * 1 → [09:00]; 3 → [09:00, 12:45, 16:30]; capped at 5. (BEA-720)
@@ -273,6 +299,26 @@ export class RemindersService {
     };
   }
 
+  /**
+   * Turn a task-style subject ("Ask Srikar to report on the socket pins") into a
+   * short noun phrase ("the socket pins work") that reads well after
+   * "a gentle reminder about ___". Clean subjects pass through untouched; only
+   * command-like ones are rewritten (AI, with a deterministic fallback). (BEA-754)
+   */
+  async cleanSubject(source?: string | null, contactName?: string): Promise<string> {
+    const raw = (source || '').trim();
+    if (!raw || !looksCommandLike(raw)) return raw;
+    const who = (contactName || 'them').trim().split(/\s+/)[0];
+    const prompt = `Rewrite this into a SHORT noun phrase (3 to 6 words) naming ONLY the thing being chased, to slot into "a gentle reminder about ___". Strip the leading verb and any person's name. No trailing full stop.\n\nTask: "${raw}"\n\nExamples:\n"Instruct Raja to create install & reset videos for the magnetic touch panel" -> "the magnetic touch panel videos"\n"Get the status report from Vijay" -> "the status report"\n"Follow up with ${who} on the Zigbee dongle testing" -> "the Zigbee dongle testing"\n\nReturn ONLY the phrase, nothing else.`;
+    const text = await this.voiceComplete(prompt, 'reminder-subject', 60).catch(() => '');
+    const clean = (text || '')
+      .split('\n')[0]
+      .trim()
+      .replace(/^["']|["'.]+$/g, '')
+      .trim();
+    return clean || stripCommandLead(raw);
+  }
+
   private parse(s: any): string[] {
     try {
       return s ? JSON.parse(s) : [];
@@ -312,11 +358,14 @@ export class RemindersService {
     if (!input.message?.trim()) throw new BadRequestException('Write the reminder message');
     const count = Math.max(1, Math.min(5, Math.round(input.count || 1)));
     const times = spreadTimes(count);
+    // Clean a command-like subject ("Ask Srikar to …") into a topic ("the …") so the
+    // nudge reads "a gentle reminder about the …", not "about Ask Srikar to …". (BEA-754)
+    const subject = (await this.cleanSubject(input.subject, contact.name)) || null;
     const r = await this.prisma.reminder.create({
       data: {
         contactId: input.contactId,
         taskId: input.taskId || null,
-        subject: input.subject?.trim() || null,
+        subject,
         message: input.message.trim(),
         count,
         times: JSON.stringify(times),
@@ -335,10 +384,10 @@ export class RemindersService {
   }
 
   async update(id: string, patch: { subject?: string; message?: string; count?: number; status?: string }) {
-    const cur = await this.prisma.reminder.findUnique({ where: { id } });
+    const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
-    if (patch.subject !== undefined) data.subject = patch.subject.trim() || null;
+    if (patch.subject !== undefined) data.subject = (await this.cleanSubject(patch.subject, cur.contact?.name)) || null;
     if (patch.message !== undefined) {
       if (!patch.message.trim()) throw new BadRequestException('The message cannot be empty');
       data.message = patch.message.trim();
