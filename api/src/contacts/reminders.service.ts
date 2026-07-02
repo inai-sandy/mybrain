@@ -50,6 +50,25 @@ export function spreadTimes(count: number): string[] {
   return out;
 }
 
+/**
+ * Clean a user-chosen list of "HH:MM" send times: keep only valid 24h times,
+ * zero-pad, de-duplicate, sort ascending, cap at 5. Returns [] if none valid
+ * (caller then falls back to spreadTimes). (BEA-755)
+ */
+export function sanitizeTimes(times: unknown): string[] {
+  if (!Array.isArray(times)) return [];
+  const seen = new Set<string>();
+  for (const raw of times) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(raw).trim());
+    if (!m) continue;
+    const h = Number(m[1]);
+    const mi = Number(m[2]);
+    if (h > 23 || mi > 59) continue;
+    seen.add(`${String(h).padStart(2, '0')}:${m[2]}`);
+  }
+  return [...seen].sort().slice(0, 5);
+}
+
 /** The user's timezone offset in minutes east of UTC (IST = +330). Configurable. (BEA-734) */
 export const REMINDER_TZ_OFFSET = Number(process.env.REMINDER_TZ_OFFSET_MINUTES) || 330;
 
@@ -352,13 +371,16 @@ export class RemindersService {
     if (sends.length) await this.prisma.reminderSend.createMany({ data: sends.map((at) => ({ reminderId, at })) });
   }
 
-  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; count?: number }) {
+  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; count?: number; times?: string[] }) {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
     if (!input.message?.trim()) throw new BadRequestException('Write the reminder message');
-    const count = Math.max(1, Math.min(5, Math.round(input.count || 1)));
-    const times = spreadTimes(count);
+    // Explicit chosen slots (BEA-755) win; else spread `count` across the day (back-compat).
+    const chosen = sanitizeTimes(input.times);
+    if (input.times !== undefined && chosen.length === 0) throw new BadRequestException('Pick at least one send time');
+    const times = chosen.length ? chosen : spreadTimes(Math.max(1, Math.min(5, Math.round(input.count || 1))));
+    const count = times.length;
     // Clean a command-like subject ("Ask Srikar to …") into a topic ("the …") so the
     // nudge reads "a gentle reminder about the …", not "about Ask Srikar to …". (BEA-754)
     const subject = (await this.cleanSubject(input.subject, contact.name)) || null;
@@ -384,7 +406,7 @@ export class RemindersService {
     return { ...this.shape(r), task };
   }
 
-  async update(id: string, patch: { subject?: string; message?: string; count?: number; status?: string }) {
+  async update(id: string, patch: { subject?: string; message?: string; count?: number; status?: string; times?: string[] }) {
     const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
@@ -394,7 +416,14 @@ export class RemindersService {
       data.message = patch.message.trim();
     }
     let times: string[] | null = null;
-    if (patch.count !== undefined) {
+    if (patch.times !== undefined) {
+      // Explicit chosen slots (BEA-755).
+      const chosen = sanitizeTimes(patch.times);
+      if (chosen.length === 0) throw new BadRequestException('Pick at least one send time');
+      times = chosen;
+      data.times = JSON.stringify(times);
+      data.count = times.length;
+    } else if (patch.count !== undefined) {
       const count = Math.max(1, Math.min(5, Math.round(patch.count)));
       data.count = count;
       times = spreadTimes(count);

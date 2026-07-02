@@ -155,12 +155,21 @@ const REM_STATUS: Record<string, { label: string; cls: string; icon: typeof Cloc
   stopped: { label: 'Stopped', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300', icon: X },
 };
 
-/** Mirror of the backend spreadTimes for the live preview. */
-function previewTimes(count: number): string[] {
-  const n = Math.max(1, Math.min(5, Math.round(count || 1)));
-  const start = 9 * 60, end = 16 * 60 + 30, out: string[] = [];
-  for (let i = 0; i < n; i++) { const m = n === 1 ? start : Math.round(start + ((end - start) * i) / (n - 1)); out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`); }
-  return out;
+// Three named send slots the user toggles on/off and can re-time. (BEA-755)
+type Slot = { key: string; label: string; time: string; on: boolean };
+const SLOT_DEFS = [
+  { key: 'morning', label: 'Morning', def: '09:00', lo: 0, hi: 720 }, // before 12:00
+  { key: 'afternoon', label: 'Afternoon', def: '13:00', lo: 720, hi: 960 }, // 12:00–16:00
+  { key: 'evening', label: 'Evening', def: '17:00', lo: 960, hi: 1440 }, // 16:00 onward
+];
+const toMin = (t: string) => Number(t.split(':')[0]) * 60 + Number(t.split(':')[1] || 0);
+/** Map a reminder's saved times onto the three slots (by time of day); empty → all slots on at defaults. */
+function timesToSlots(times?: string[]): Slot[] {
+  const has = times && times.length;
+  return SLOT_DEFS.map((s) => {
+    const hit = has ? times!.find((t) => toMin(t) >= s.lo && toMin(t) < s.hi) : null;
+    return { key: s.key, label: s.label, time: hit || s.def, on: has ? !!hit : true };
+  });
 }
 
 type Suggestion = { task: { id: string; title: string; party: string }; contact: Contact | null; noNumber: boolean; hasActiveReminder: boolean };
@@ -396,7 +405,8 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
   const [contactId, setContactId] = useState(reminder?.contactId || prefill?.contactId || '');
   const [subject, setSubject] = useState(reminder?.subject || prefill?.subject || '');
   const [message, setMessage] = useState(reminder?.message || prefill?.message || '');
-  const [count, setCount] = useState(reminder?.count || 3);
+  const [slots, setSlots] = useState<Slot[]>(() => timesToSlots(reminder?.times));
+  const times = slots.filter((s) => s.on).map((s) => s.time).sort();
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const locked = !!reminder || !!prefill; // contact is fixed (editing, or coming from a suggestion)
@@ -419,11 +429,12 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
   async function save() {
     if (!locked && !contactId) { toast('error', 'Pick a contact'); return; }
     if (!message.trim()) { toast('error', 'Write the message'); return; }
+    if (times.length === 0) { toast('error', 'Turn on at least one send time'); return; }
     setSaving(true);
     try {
       const r = reminder
-        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), count }) })
-        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), count }) });
+        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), times }) })
+        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), times }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not save');
       toast('success', reminder ? 'Reminder updated' : 'Reminder created');
       onSaved();
@@ -461,10 +472,19 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} placeholder="Type roughly what you want to say — then tap Clean up to tidy it…" className={inp + ' resize-none'} />
         </div>
         <div>
-          <div className="mb-1 flex items-center justify-between text-xs text-zinc-500"><span>How many nudges?</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{count}</span></div>
-          <input type="range" min={1} max={5} value={count} onChange={(e) => setCount(Number(e.target.value))} className="w-full accent-emerald-600" />
-          <div className="mt-1.5 flex flex-wrap gap-1">{previewTimes(count).map((t) => <span key={t} className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{t}</span>)}</div>
-          <p className="mt-1 text-[10px] text-zinc-400">Spread over these times — any that have already passed today roll to the next day, until all {count} go out (or they reply).</p>
+          <div className="mb-1.5 flex items-center justify-between text-xs text-zinc-500"><span>When to send</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{times.length ? `${times.length} a day` : 'none on'}</span></div>
+          <div className="space-y-1.5">
+            {slots.map((s, i) => (
+              <div key={s.key} className={'flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors ' + (s.on ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-zinc-200 dark:border-zinc-700')}>
+                <button type="button" role="switch" aria-checked={s.on} aria-label={`${s.label} nudge`} onClick={() => setSlots((xs) => xs.map((x, j) => (j === i ? { ...x, on: !x.on } : x)))} className={'relative h-5 w-9 shrink-0 rounded-full transition-colors ' + (s.on ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-600')}>
+                  <span className={'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ' + (s.on ? 'left-[18px]' : 'left-0.5')} />
+                </button>
+                <span className={'flex-1 text-sm ' + (s.on ? 'font-medium text-zinc-700 dark:text-zinc-100' : 'text-zinc-400')}>{s.label}</span>
+                <input type="time" value={s.time} disabled={!s.on} onChange={(e) => setSlots((xs) => xs.map((x, j) => (j === i ? { ...x, time: e.target.value || x.time } : x)))} className="rounded-md border border-zinc-200 bg-transparent px-2 py-1 text-sm outline-none focus:border-emerald-400 disabled:opacity-40 dark:border-zinc-700" />
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] text-zinc-400">Turn on the times you want. Any that already passed today roll to the next day, until each goes out (or they reply).</p>
         </div>
         <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{reminder ? 'Save' : 'Create reminder'}</button>
       </div>
