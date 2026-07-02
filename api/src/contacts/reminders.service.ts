@@ -8,7 +8,8 @@ import { PostboxService } from './postbox.service';
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 /** Verbs that mark a subject as a task/command sentence rather than a clean topic. (BEA-754) */
-const COMMAND_LEAD = /^(tell|ask|remind|instruct|get|follow[\s-]?up(\s+with)?|check(\s+with)?|nudge|inform|make sure|have|let|chase|push|ping)\b/i;
+const COMMAND_LEAD =
+  /^(tell|ask|remind|instruct|get|follow[\s-]?up(\s+with)?|check(\s+with)?|nudge|inform|make sure|have|let|chase|push|ping|discuss|share|send|create|prepare|arrange|coordinate|confirm|collect|provide|review|update|finali[sz]e|schedule|organi[sz]e|complete|submit|upload|call|email|message|escalate|clarify|sort out|figure out)\b/i;
 
 /**
  * A reminder subject fills "a gentle reminder about ___", so it must read as a
