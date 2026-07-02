@@ -1,4 +1,17 @@
 import { ReminderSenderService, joinSubjects } from './reminder-sender.service';
+import { PostboxService } from './postbox.service';
+
+// The real renderer — reused in tests so the expected chat body is never a
+// second hardcoded copy of the template. (BEA-753)
+const renderReminderTemplate = (fn: string, subj: string) => new PostboxService().renderReminderTemplate(fn, subj);
+
+describe('PostboxService.renderReminderTemplate (BEA-753)', () => {
+  it('renders the approved reminder_nudge body from name + subject', () => {
+    expect(renderReminderTemplate('Dharmendra', 'the support videos')).toBe(
+      'Hi Dharmendra, just a gentle reminder about the support videos. Do let me know where it stands whenever you get a chance. Thanks!',
+    );
+  });
+});
 
 describe('joinSubjects (BEA-742)', () => {
   it('joins subjects naturally', () => {
@@ -26,13 +39,22 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       { id: 's2', reminder: { id: 'r2', status: 'active', contactId: 'c1', subject: 'the socket pins', contact: { name: 'Srikar', whatsappNumber: '919812345678' } } },
     ];
     const { prisma, state } = makePrisma(sends);
+    let sentName = '';
     let sentSubject = '';
-    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async (_to: string, _fn: string, subj: string) => { sentSubject = subj; return { wamid: 'w' }; } };
+    const postbox: any = {
+      isConfigured: () => true,
+      renderReminderTemplate,
+      sendReminderTemplate: async (_to: string, fn: string, subj: string) => { sentName = fn; sentSubject = subj; return { wamid: 'w' }; },
+    };
     await new ReminderSenderService(prisma, postbox).tick();
     expect(sentSubject).toBe('the Zigbee testing and the socket pins'); // combined subject
     expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(2); // both sends marked sent
     expect(state.msgs).toHaveLength(1); // ONE message stored on the contact conversation
     expect(state.msgs[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
+    // The stored chat body is EXACTLY what the template renders with the same
+    // name + subject that were sent — no separate hardcoded copy. (BEA-753)
+    expect(state.msgs[0].body).toBe(renderReminderTemplate(sentName, sentSubject));
+    expect(state.msgs[0].body).toContain('the Zigbee testing and the socket pins');
   });
 
   it('skips all of a contact’s nudges once they have replied', async () => {

@@ -95,7 +95,9 @@ export class ReminderSenderService implements OnModuleInit {
         continue;
       }
       for (const s of g.sends) await this.mark(s.id, 'sent', res.wamid, null);
-      const rendered = `Hi ${firstName}, just a gentle reminder about ${combined}. Do let me know where it stands whenever you get a chance. Thanks!`;
+      // Store exactly what the template renders — same source as the send, so the
+      // chat window can never show a message different from what actually went out. (BEA-753)
+      const rendered = this.postbox.renderReminderTemplate(firstName, combined);
       await this.prisma.reminderMessage
         .create({ data: { contactId, reminderId: [...g.reminders.keys()][0], direction: 'out', body: rendered, wamid: res.wamid || null } })
         .catch(() => undefined);
