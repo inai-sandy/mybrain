@@ -45,12 +45,13 @@ export function Dashboard() {
 
   useEffect(() => {
     fetch('/api/home').then((r) => (r.ok ? r.json() : null)).then(setD).catch(() => undefined);
-    fetch('/api/usage')
+    // Same source as Settings → Usage (real computed spend from our token log), just a 7-day
+    // slice — so the KPI always reconciles with the 30-day figure there. (BEA-757)
+    fetch('/api/usage/features?days=7')
       .then((r) => (r.ok ? r.json() : null))
       .then((u) => {
         if (!u) return;
-        const wk = (u.openrouter?.week ?? 0) + (u.openai?.available ? u.openai.week ?? 0 : 0);
-        setAiWeek(wk);
+        setAiWeek(u.totalCost ?? 0);
       })
       .catch(() => undefined);
   }, []);
@@ -88,7 +89,7 @@ export function Dashboard() {
           context={ftDelta !== null ? 'this week vs last' : 'this week'}
         />
         <Kpi icon={Timer} tint="text-sky-500" label="Time spent" value={d ? mins(d.insights.minutesToday ?? 0) : '—'} context={d ? `today · ${mins(d.insights.minutesSpent)} in 30 days` : 'today'} />
-        <Kpi icon={Coins} tint="text-violet-500" label="AI cost" value={aiWeek === null ? '—' : fmtUsd(aiWeek)} context="this week" />
+        <Kpi icon={Coins} tint="text-violet-500" label="AI cost" value={aiWeek === null ? '—' : fmtUsd(aiWeek)} context="last 7 days" />
       </div>
 
       {/* Proactive connections the brain surfaced (hidden when none) */}
