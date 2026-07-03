@@ -166,7 +166,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
                         <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                           <div className="flex items-center gap-2">
                             <span className="truncate font-medium">{rm.subject?.trim() || rm.task?.title || 'Reminder'}</span>
-                            <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>
+                            <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
                           </div>
                           <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
                           <div className="mt-1.5 flex flex-wrap gap-1">
@@ -467,7 +467,7 @@ function RemindersTab() {
                   <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
-                      <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>
+                      <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
                     </div>
                     {rm.task && <div className="text-xs text-zinc-400">re: {rm.task.title}</div>}
                     <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
@@ -603,6 +603,7 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
   const [contactId, setContactId] = useState(reminder?.contactId || prefill?.contactId || '');
   const [subject, setSubject] = useState(reminder?.subject || prefill?.subject || '');
   const [message, setMessage] = useState(reminder?.message || prefill?.message || '');
+  const [notes, setNotes] = useState(reminder?.notes || '');
   const [slots, setSlots] = useState<Slot[]>(() => timesToSlots(reminder?.times));
   const times = slots.filter((s) => s.on).map((s) => s.time).sort();
   const [saving, setSaving] = useState(false);
@@ -631,8 +632,8 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
     setSaving(true);
     try {
       const r = reminder
-        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), times }) })
-        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), times }) });
+        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), notes: notes.trim(), times }) })
+        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), notes: notes.trim(), times }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not save');
       toast('success', reminder ? 'Reminder updated' : 'Reminder created');
       onSaved();
@@ -669,6 +670,10 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
           </div>
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={3} placeholder="Type roughly what you want to say — then tap Clean up to tidy it…" className={inp + ' resize-none'} />
         </div>
+        <label className="block text-xs text-zinc-500">Notes for the assistant (context — not sent)
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="e.g. This is for the Beakn Q3 order. If they ask about pricing, it's agreed at the quoted rate." className={inp + ' mt-1 resize-none'} />
+          <span className="mt-1 block text-[10px] text-zinc-400">Your AI assistant uses this to answer their replies. If it can't, it flags you.</span>
+        </label>
         <div>
           <div className="mb-1.5 flex items-center justify-between text-xs text-zinc-500"><span>When to send</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{times.length ? `${times.length} a day` : 'none on'}</span></div>
           <div className="space-y-1.5">

@@ -57,25 +57,29 @@ export class ReminderAgentService {
 
     const items: { n: number; reminderId: string; subject: string }[] = [];
     for (let i = 0; i < reminders.length; i++) items.push({ n: i + 1, reminderId: reminders[i].id, subject: await this.subjectFor(reminders[i]) });
-    const itemList = items.map((it) => `${it.n}. ${it.subject}`).join('\n');
+    const itemList = items.map((it, i) => `${it.n}. ${it.subject}${reminders[i].notes?.trim() ? ` — context Sandeep gave: ${reminders[i].notes.trim()}` : ''}`).join('\n');
 
-    const prompt = `You are me, texting ${name} on WhatsApp to follow up on ${items.length === 1 ? 'this open item' : 'these open items'}:
+    // Sandeep's transparent AI assistant — identifies itself, uses the notes as context, and
+    // escalates to Sandeep when it can't answer, instead of impersonating him. (BEA-765/766)
+    const prompt = `You are Sandeep's AI assistant. You're texting ${name} on WhatsApp on Sandeep's behalf, following up on ${items.length === 1 ? 'this open item' : 'these open items'}:
 ${itemList}
 
 Conversation so far:
 ${thread}
 
-Write my next single reply to whatever they just said.
+Write the assistant's next single reply to whatever ${name} just said.
 Rules:
-- Warm, natural Indian English — exactly how a real Indian professional texts a colleague/vendor. NEVER sound like a bot or AI.
-- Plain, short — 1-2 sentences. ONE message, even if there are several items.
-- Don't re-greet every time; reply naturally. Don't sign off with my name.
+- Warm, natural, plain Indian English. You ARE Sandeep's AI assistant — do NOT pretend to be Sandeep. If they ask who you are, tell them you're Sandeep's AI assistant helping him keep track, and he'll jump in when needed.
+- Warmly invite them to reply or ask anything they want to discuss.
+- Short — 1-2 sentences, ONE message even if there are several items.
+- Use the context Sandeep gave (above) to answer their questions when you can.
+- If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
 - Don't be pushy: if they're only non-committal ("I'll let you know", "ok", "sure") and you've already acknowledged, set "send": false and wait for a real update.
 
 For EACH numbered item, decide if it's now resolved — ONLY if they clearly addressed THAT item (said it's done / gave its final status). Give a one-line outcome for resolved items.
 
 Reply with ONLY this JSON, nothing else:
-{"send": true or false, "reply": "<one message — only if send is true>", "items": [{"n": <number>, "resolved": true or false, "outcome": "<one line if resolved>"}]}`;
+{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "items": [{"n": <number>, "resolved": true or false, "outcome": "<one line if resolved>"}]}`;
 
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 700);
     const parsed: any = this.parseJson(raw) || {};
@@ -93,6 +97,12 @@ Reply with ONLY this JSON, nothing else:
       await this.prisma.reminderMessage
         .create({ data: { contactId, reminderId: reminders[0].id, direction: 'out', body: replyText, wamid: res.wamid || null } })
         .catch(() => undefined);
+    }
+
+    // The agent couldn't answer → flag the contact's reminders so Sandeep sees "needs you" and replies. (BEA-766)
+    if (parsed.needsSandeep) {
+      await this.prisma.reminder.updateMany({ where: { contactId, status: 'active' }, data: { needsOwner: true } }).catch(() => undefined);
+      this.log.log(`agent: flagged contact ${contactId} — needs Sandeep`);
     }
 
     // Close only the items the contact actually resolved.

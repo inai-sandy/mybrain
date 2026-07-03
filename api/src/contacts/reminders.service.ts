@@ -150,6 +150,8 @@ export class RemindersService {
     const msg = await this.prisma.reminderMessage.create({
       data: { contactId: r.contactId, reminderId: id, direction: 'out', body: text, wamid: res.wamid || null },
     });
+    // Sandeep just replied → clear the "needs you" flag for this contact. (BEA-766)
+    await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
     return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt };
   }
 
@@ -389,7 +391,7 @@ export class RemindersService {
     return { armed };
   }
 
-  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; count?: number; times?: string[] }) {
+  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[] }) {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
@@ -408,6 +410,7 @@ export class RemindersService {
         taskId: input.taskId || null,
         subject,
         message: input.message.trim(),
+        notes: input.notes?.trim() || null,
         count,
         times: JSON.stringify(times),
         status: 'active',
@@ -424,11 +427,12 @@ export class RemindersService {
     return { ...this.shape(r), task };
   }
 
-  async update(id: string, patch: { subject?: string; message?: string; count?: number; status?: string; times?: string[] }) {
+  async update(id: string, patch: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[] }) {
     const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
     if (patch.subject !== undefined) data.subject = (await this.cleanSubject(patch.subject, cur.contact?.name)) || null;
+    if (patch.notes !== undefined) data.notes = patch.notes?.trim() || null;
     if (patch.message !== undefined) {
       if (!patch.message.trim()) throw new BadRequestException('The message cannot be empty');
       data.message = patch.message.trim();
