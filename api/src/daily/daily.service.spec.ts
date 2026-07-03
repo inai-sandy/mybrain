@@ -583,6 +583,18 @@ describe('DailyService', () => {
     expect(d.estimateVsActual.actual).toBe(80);
   });
 
+  it('weights follow-through by part-done progress (BEA-761)', async () => {
+    const { svc, tasks } = makeService();
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    tasks.push({ day: today, status: 'done' }); // 100
+    tasks.push({ day: today, status: 'open', progress: 60 }); // counts as 60, not 0
+    tasks.push({ day: today, status: 'open', progress: 0 }); // 0
+    const d = await svc.dashboard(30);
+    expect(d.totals.tasksTotal).toBe(3);
+    expect(d.totals.tasksDone).toBe(1); // still one FINISHED
+    expect(d.totals.followThrough).toBe(53); // (100+60+0)/3 = 53, not 33
+  });
+
   it('keeps the personality read locked until 10 active days', async () => {
     const { svc, dumps } = makeService();
     for (let i = 0; i < 4; i++) dumps.push({ day: `2026-05-0${i + 1}` });

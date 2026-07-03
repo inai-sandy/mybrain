@@ -417,7 +417,19 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       minutesEstimated: estimated,
       // the user-stated working minutes for the day (the real working-hours figure); null if not set
       workedMinutes: story?.workedMinutes ?? null,
+      // weighted view: part-done tasks count for their % (a 60% task = 60), done = 100. (BEA-761)
+      tasksPartial: dayTasks.filter((t) => t.status !== 'done' && (t.progress || 0) > 0).length,
+      progressPct: this.avgProg(dayTasks),
     };
+  }
+
+  /** Effective completion of a task, 0–100: a done task is 100, else its part-done progress. (BEA-761) */
+  private prog(t: { status: string; progress?: number | null }): number {
+    return t.status === 'done' ? 100 : Math.max(0, Math.min(100, t.progress || 0));
+  }
+  /** Weighted follow-through: the average effective completion across a set of tasks. (BEA-761) */
+  private avgProg(list: { status: string; progress?: number | null }[]): number {
+    return list.length ? Math.round(list.reduce((s, t) => s + this.prog(t), 0) / list.length) : 0;
   }
 
   /** Build (or rebuild) the AI day-summary, store it, and index it to RAG + SuperMemory (tagged "activity"). */
@@ -435,13 +447,16 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
-    const openList = dayTasks.filter((t) => t.status !== 'done').map((t) => `○ ${t.title}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
+    // Part-done (30/60) get their own line so the summary credits real progress, not just finished. (BEA-761)
+    const partialList = dayTasks.filter((t) => t.status !== 'done' && (t.progress || 0) > 0).map((t) => `◐ ${t.title} — ${t.progress}% done`);
+    const openList = dayTasks.filter((t) => t.status !== 'done' && !(t.progress || 0)).map((t) => `○ ${t.title}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
     const activityLines = timeline.filter((e) => e.type !== 'task').map((e) => `- ${e.title}`);
 
     const tmpl = await this.prompts.get('daily.summary');
     const prompt =
       `${tmpl}\n\n` +
-      `Tasks done (${st.tasksDone}/${st.tasksTotal}, ~${st.minutesSpent}m):\n${doneList.join('\n') || '(none)'}\n\n` +
+      `Tasks done (${st.tasksDone}/${st.tasksTotal} finished, ${st.progressPct}% overall progress, ~${st.minutesSpent}m):\n${doneList.join('\n') || '(none)'}\n\n` +
+      `Part done (real progress, not finished):\n${partialList.join('\n') || '(none)'}\n\n` +
       `Still pending:\n${openList.join('\n') || '(none)'}\n\n` +
       `Other activity in the app:\n${activityLines.join('\n') || '(none)'}\n\n` +
       `His story of the day${story?.mood ? ` (mood: ${story.mood})` : ''}:\n${story?.rawText?.slice(0, 2000) || '(not told)'}`;
@@ -1374,8 +1389,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // follow-through trend: last 7 days vs the 7 before (drives the home KPI arrow)
     const ftBetween = (from: string, to: string) => {
       const win = tasks.filter((t) => t.day && t.day >= from && t.day <= to);
-      const d = win.filter((t) => t.status === 'done').length;
-      return win.length ? Math.round((d / win.length) * 100) : null;
+      return win.length ? this.avgProg(win) : null; // weighted: part-done counts (BEA-761)
     };
 
     const minutesWorked = Object.values(workedByDay).reduce((s, x) => s + x, 0);
@@ -1388,7 +1402,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     return {
       days: span,
-      totals: { tasksTotal: tasks.length, tasksDone: done.length, followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : 0 },
+      totals: { tasksTotal: tasks.length, tasksDone: done.length, followThrough: this.avgProg(tasks) },
       followTrend: { week: ftBetween(this.dayAdd(today, -6), today), prevWeek: ftBetween(this.dayAdd(today, -13), this.dayAdd(today, -7)) },
       minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
       minutesWorked,
