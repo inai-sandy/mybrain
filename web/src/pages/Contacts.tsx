@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft } from 'lucide-react';
+import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[] };
@@ -39,12 +39,28 @@ function ContactDetail({ contactId }: { contactId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [editContact, setEditContact] = useState(false);
+  const [tab, setTab] = useState<'reminders' | 'tasks' | 'mentions'>('reminders');
+  const [tasks, setTasks] = useState<{ id: string; title: string; status: string; day?: string | null }[] | null>(null);
+  const [mentions, setMentions] = useState<{ mentions: number; firstSeen: string; lastSeen: string; days: { day: string; items: { type: string; text: string }[] }[] } | null>(null);
 
   function load() {
     fetch(`/api/contacts/${contactId}`).then((r) => (r.ok ? r.json() : null)).then(setContact).catch(() => setContact(null));
     fetch('/api/reminders').then((r) => r.json()).then((d) => setReminders((d.reminders || []).filter((x: Reminder) => x.contactId === contactId))).catch(() => setReminders([]));
   }
   useEffect(load, [contactId]);
+  // Tasks involving this person + where they show up in stories — matched by name (BEA-762).
+  useEffect(() => {
+    const name = contact?.name?.trim();
+    if (!name) return;
+    fetch(`/api/tasks/by-person?name=${encodeURIComponent(name)}`).then((r) => (r.ok ? r.json() : { tasks: [] })).then((d) => setTasks(d.tasks || [])).catch(() => setTasks([]));
+    fetch(`/api/daily/people/detail?name=${encodeURIComponent(name)}`).then((r) => (r.ok ? r.json() : null)).then(setMentions).catch(() => setMentions(null));
+  }, [contact?.name]);
+  const fmtDay = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return new Date(y, m - 1, dd).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+  const MENTION_ICON: Record<string, { icon: typeof CheckCircle2; cls: string }> = {
+    task: { icon: CheckCircle2, cls: 'text-emerald-500' },
+    story: { icon: Moon, cls: 'text-indigo-400' },
+    note: { icon: MessageSquare, cls: 'text-zinc-500' },
+  };
 
   async function act(id: string, kind: 'pause' | 'resume' | 'delete') {
     if (kind === 'delete' && !window.confirm('Delete this reminder?')) return;
@@ -79,8 +95,42 @@ function ContactDetail({ contactId }: { contactId: string }) {
         {contact && <button onClick={() => setEditContact(true)} title="Edit contact" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
       </div>
 
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Reminders</h3>
-      {reminders === null ? (
+      {/* Tabs: everything about this person in one place (BEA-762) */}
+      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+        {([['reminders', 'Reminders', reminders?.length], ['tasks', 'Tasks', tasks?.length], ['mentions', 'Mentions', mentions?.mentions]] as const).map(([id, label, n]) => (
+          <button key={id} onClick={() => setTab(id)} className={'-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{label}{n ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{n}</span> : null}</button>
+        ))}
+      </div>
+
+      {tab === 'tasks' && (
+        tasks === null ? <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+        : tasks.length === 0 ? <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No tasks mention {contact?.name || 'this contact'} yet.</div>
+        : <ul className="space-y-2">{tasks.map((t) => (
+            <li key={t.id} className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+              <CheckCircle2 className={'mt-0.5 h-4 w-4 shrink-0 ' + (t.status === 'done' ? 'text-emerald-500' : 'text-zinc-300 dark:text-zinc-600')} />
+              <span className={'text-sm ' + (t.status === 'done' ? 'text-zinc-400 line-through' : '')}>{t.title}</span>
+            </li>
+          ))}</ul>
+      )}
+
+      {tab === 'mentions' && (
+        mentions === null ? <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">{contact?.name || 'This contact'} hasn't come up in your stories yet.</div>
+        : <div className="space-y-4">
+            <p className="text-xs text-zinc-500">{mentions.mentions} day{mentions.mentions === 1 ? '' : 's'} · first {fmtDay(mentions.firstSeen)} · last {fmtDay(mentions.lastSeen)}</p>
+            {mentions.days.map((d) => (
+              <div key={d.day}>
+                <div className="mb-1.5 flex items-center gap-2"><span className="text-xs font-semibold text-zinc-500">{fmtDay(d.day)}</span><span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" /></div>
+                <ul className="space-y-1.5">
+                  {d.items.map((it, i) => { const ic = MENTION_ICON[it.type] || MENTION_ICON.note; const Icon = ic.icon; return (
+                    <li key={i} className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-300"><Icon className={'mt-0.5 h-3.5 w-3.5 shrink-0 ' + ic.cls} /><span>{it.text}</span></li>
+                  ); })}
+                </ul>
+              </div>
+            ))}
+          </div>
+      )}
+
+      {tab === 'reminders' && (reminders === null ? (
         <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
       ) : reminders.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No reminders for {contact?.name || 'this contact'} yet. Add the first one below.</div>
@@ -120,9 +170,9 @@ function ContactDetail({ contactId }: { contactId: string }) {
             </section>
           ))}
         </div>
-      )}
+      ))}
 
-      <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50"><Plus className="h-4 w-4" />Add reminder</button>
+      {tab === 'reminders' && <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50"><Plus className="h-4 w-4" />Add reminder</button>}
 
       {openThread && (() => { const r = reminders?.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}
       {showForm && <NewReminderForm reminder={editingReminder} prefill={editingReminder ? null : { contactId, contactName: contact?.name || '', message: '' }} onClose={() => { setShowForm(false); setEditingReminder(null); }} onSaved={() => { setShowForm(false); setEditingReminder(null); load(); }} />}

@@ -182,6 +182,9 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
     weeklyReview: { findMany: async () => [] },
+    contact: {
+      findMany: async () => [],
+    },
     personMention: {
       findMany: async ({ where }: any = {}) => peopleMentions.filter((m) => !where?.name || m.name === where.name),
       deleteMany: async ({ where }: any = {}) => {

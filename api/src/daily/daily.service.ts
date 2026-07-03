@@ -929,8 +929,17 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       firstSeen: mentions[mentions.length - 1].day,
       lastSeen: mentions[0].day,
       otherSpellings: Object.keys(aliases).filter((k) => aliases[k] === canonical),
+      contactId: await this.contactIdFor(canonical), // link this person to a saved Contact if one matches (BEA-762)
       days,
     };
+  }
+
+  /** Resolve a person's name to a saved Contact id (case-insensitive), or null. (BEA-762) */
+  private async contactIdFor(name: string): Promise<string | null> {
+    const lc = String(name || '').trim().toLowerCase();
+    if (!lc) return null;
+    const contacts = await this.prisma.contact.findMany({ select: { id: true, name: true } });
+    return contacts.find((c) => (c.name || '').trim().toLowerCase() === lc)?.id || null;
   }
 
   /** Extract people's names from the user's own story (tiny Haiku call, idempotent per name+day). */
@@ -972,8 +981,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
         e.firstSeen = r.day < e.firstSeen ? r.day : e.firstSeen;
       } else map.set(r.name, { name: r.name, mentions: 1, firstSeen: r.day, lastSeen: r.day });
     }
+    // Attach the saved-Contact id where a person's name matches a contact. (BEA-762)
+    const contacts = await this.prisma.contact.findMany({ select: { id: true, name: true } });
+    const cmap = new Map(contacts.map((c) => [(c.name || '').trim().toLowerCase(), c.id]));
     const people = [...map.values()]
-      .map((p) => ({ ...p, fading: p.mentions >= 2 && p.lastSeen < cutoff }))
+      .map((p) => ({ ...p, fading: p.mentions >= 2 && p.lastSeen < cutoff, contactId: cmap.get(p.name.trim().toLowerCase()) || null }))
       .sort((a, b) => b.mentions - a.mentions || b.lastSeen.localeCompare(a.lastSeen));
     return { people, count: people.length };
   }

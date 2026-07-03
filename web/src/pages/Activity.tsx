@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -669,10 +669,18 @@ function PeopleCard() {
 
 /** Double-tap → the person's full history: every task, story sentence and note involving them. */
 function PersonDetailSheet({ name, onClose }: { name: string; onClose: () => void }) {
-  const [d, setD] = useState<{ name: string; mentions: number; firstSeen: string; lastSeen: string; otherSpellings: string[]; days: { day: string; items: { type: string; text: string }[] }[] } | null>(null);
+  const [d, setD] = useState<{ name: string; mentions: number; firstSeen: string; lastSeen: string; otherSpellings: string[]; contactId: string | null; days: { day: string; items: { type: string; text: string }[] }[] } | null>(null);
+  const navigate = useNavigate();
+  const toast = useToast();
   useEffect(() => {
     fetch(`/api/daily/people/detail?name=${encodeURIComponent(name)}`).then((r) => (r.ok ? r.json() : null)).then(setD).catch(() => undefined);
   }, [name]);
+  // Bridge story-people to Contacts: open the contact, or create one from this person. (BEA-762)
+  async function addContact() {
+    const r = await fetch('/api/contacts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    if (r.ok) { const c = await r.json(); toast('success', `${name} added to contacts`); navigate(`/contacts?contact=${c.id}`); }
+    else toast('error', 'Could not add contact');
+  }
 
   const ICONS: Record<string, { icon: any; cls: string; label: string }> = {
     task: { icon: CheckCircle2, cls: 'text-emerald-500 bg-emerald-500/10', label: 'Task' },
@@ -695,6 +703,11 @@ function PersonDetailSheet({ name, onClose }: { name: string; onClose: () => voi
                 {d.mentions} day{d.mentions === 1 ? '' : 's'} · first {prettyDay(d.firstSeen).replace(/^[A-Za-z]+, /, '')} · last {prettyDay(d.lastSeen).replace(/^[A-Za-z]+, /, '')}
                 {d.otherSpellings.length > 0 && <> · also written as {d.otherSpellings.join(', ')}</>}
               </p>
+              {d.contactId ? (
+                <button onClick={() => { navigate(`/contacts?contact=${d.contactId}`); onClose(); }} className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-300">Open contact page →</button>
+              ) : (
+                <button onClick={addContact} className="mb-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-300"><Plus size={14} /> Add as contact</button>
+              )}
               <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
                 {d.days.map((dayEntry) => (
                   <div key={dayEntry.day}>
