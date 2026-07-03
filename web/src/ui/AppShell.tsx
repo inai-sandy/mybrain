@@ -70,7 +70,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>
           <Logo size={collapsed ? 30 : 34} /> {!collapsed && 'My Brain'}
         </div>
-        <nav className="flex-1 space-y-1">
+        <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end} title={collapsed ? n.label : undefined} className={deskItemCls}>
               <n.icon size={18} /> {!collapsed && n.label}
@@ -100,7 +100,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
                 <X size={20} />
               </button>
             </div>
-            <nav className="flex-1 space-y-1">
+            <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1">
               {NAV.map((n) => (
                 <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setDrawer(false)} className={itemCls}>
                   <n.icon size={18} /> {n.label}
