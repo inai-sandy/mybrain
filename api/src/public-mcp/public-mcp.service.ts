@@ -3,6 +3,7 @@ import { randomBytes, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { DocumentsService } from '../documents/documents.service';
+import { OAuthService } from '../oauth/oauth.service';
 
 const TOKEN_KEY = 'mcp.public.token';
 const ENABLED_KEY = 'mcp.public.enabled';
@@ -64,9 +65,15 @@ export class PublicMcpService {
     return this.config();
   }
 
-  /** Validate a presented bearer token (constant-time) and that the endpoint is enabled. */
+  /**
+   * Validate a presented bearer token and that the endpoint is enabled. Accepts EITHER the
+   * legacy static token (mbk_…) OR an OAuth access token issued via the connector flow (BEA-758).
+   */
   async authorize(presented: string | undefined): Promise<boolean> {
     if (!presented || !(await this.isEnabled())) return false;
+    // OAuth access token (signed JWT, aud "mcp").
+    if (OAuthService.verifyAccess(presented)) return true;
+    // Legacy static token — constant-time compare.
     const real = await this.ensureToken();
     const a = Buffer.from(presented);
     const b = Buffer.from(real);

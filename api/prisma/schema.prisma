@@ -125,17 +125,17 @@ model BrainDump {
 
 /// The mandatory nightly story — the user's free narrative of the day (problems, joy, events).
 model Story {
-  id            String   @id @default(uuid())
-  day           String // local day key YYYY-MM-DD
-  rawText       String
-  source        String   @default("app") // app | telegram | voice
-  mood          String? // optional one-tap mood/energy
-  workedMinutes Int? // user-stated hours worked that day (the real working-hours figure)
+  id              String   @id @default(uuid())
+  day             String // local day key YYYY-MM-DD
+  rawText         String
+  source          String   @default("app") // app | telegram | voice
+  mood            String? // optional one-tap mood/energy
+  workedMinutes   Int? // user-stated hours worked that day (the real working-hours figure)
   workedBreakdown String? // JSON [{category, minutes}] — AI split of the stated hours across topics
-  supermemoryId String? // Explore index doc ids (so re-index replaces, no dupes)
-  ragId         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  supermemoryId   String? // Explore index doc ids (so re-index replaces, no dupes)
+  ragId           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 /// The AI's end-of-day summary of everything the user did — stored to Activity + RAG/SuperMemory.
@@ -202,26 +202,26 @@ model UsageLog {
 
 /// A quick-capture note (Google Keep style) — LOCAL ONLY, never synced to RAG/SuperMemory.
 model Note {
-  id        String   @id @default(uuid())
-  title     String?
-  content   String? // plain-text body
-  checklist String? // JSON array of { text, done } for checklist notes
-  color     String   @default("default") // color key, shown as a top strip
-  tags      String? // JSON array of strings
-  pinned    Boolean  @default(false)
-  archived  Boolean  @default(false)
+  id            String   @id @default(uuid())
+  title         String?
+  content       String? // plain-text body
+  checklist     String? // JSON array of { text, done } for checklist notes
+  color         String   @default("default") // color key, shown as a top strip
+  tags          String? // JSON array of strings
+  pinned        Boolean  @default(false)
+  archived      Boolean  @default(false)
   supermemoryId String? // Explore index doc ids (only set when Notes indexing is enabled)
   ragId         String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// Per-section index control for Explore: whether a source is indexed + when it last was. (BEA-335)
 model IndexSource {
-  type          String   @id // task | story | item | idea | meeting | note
-  enabled       Boolean  @default(true)
+  type          String    @id // task | story | item | idea | meeting | note
+  enabled       Boolean   @default(true)
   lastIndexedAt DateTime?
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime  @updatedAt
 }
 
 /// A saved Explore answer (question + synthesised answer + its sources). Separate from the index. (BEA-339)
@@ -258,30 +258,30 @@ model MentorDay {
 /// A document in the Documents library — md/html files the user creates to share & re-use.
 /// Separate from Item/Capture: NOT indexed into memory unless the user explicitly converts it. (BEA-532)
 model Document {
-  id           String   @id @default(uuid())
-  slug         String   @unique // stable public/url key (editable link name)
-  shortCode    String?  @unique // short share code -> /s/:code (BEA-584)
+  id            String    @id @default(uuid())
+  slug          String    @unique // stable public/url key (editable link name)
+  shortCode     String?   @unique // short share code -> /s/:code (BEA-584)
   sharePassword String? // bcrypt hash; when set, the public link asks for a password (BEA-585)
-  expiresAt    DateTime? // when set + passed, the public link is treated as un-shared (BEA-585)
-  viewCount    Int      @default(0) // public opens of the shared link (BEA-586)
-  starred      Boolean  @default(false) // favourited by the owner (BEA-596)
-  allowDownload Boolean @default(false) // let recipients of a shared link download it (BEA-597)
-  siteEntry    String? // for kind 'site': entry html path inside the extracted folder (BEA-587)
-  title        String
-  description  String? // <=200 char summary (manual now; AI-filled later)
-  kind         String   @default("md") // md | html | pdf | image | other
-  mime         String?
-  filename     String?
-  contentText  String? // md/html text content (binary files use filePath later)
-  filePath     String? // for pdf/images on the volume (later step)
-  bytes        Int?
-  sourceUrl    String? // when imported from the internet (later step)
-  originServer String? // when landed from another server (later step)
-  collectionId String? // folder/collection (later step)
-  tags         String   @default("[]") // JSON string array
-  shared       Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  expiresAt     DateTime? // when set + passed, the public link is treated as un-shared (BEA-585)
+  viewCount     Int       @default(0) // public opens of the shared link (BEA-586)
+  starred       Boolean   @default(false) // favourited by the owner (BEA-596)
+  allowDownload Boolean   @default(false) // let recipients of a shared link download it (BEA-597)
+  siteEntry     String? // for kind 'site': entry html path inside the extracted folder (BEA-587)
+  title         String
+  description   String? // <=200 char summary (manual now; AI-filled later)
+  kind          String    @default("md") // md | html | pdf | image | other
+  mime          String?
+  filename      String?
+  contentText   String? // md/html text content (binary files use filePath later)
+  filePath      String? // for pdf/images on the volume (later step)
+  bytes         Int?
+  sourceUrl     String? // when imported from the internet (later step)
+  originServer  String? // when landed from another server (later step)
+  collectionId  String? // folder/collection (later step)
+  tags          String    @default("[]") // JSON string array
+  shared        Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([kind])
   @@index([collectionId])
@@ -311,27 +311,27 @@ model WeeklyReview {
 
 /// A month of life woven into one chapter (from the Stories of the Day) — and the building block of the year book.
 model MonthStory {
-  id        String   @id @default(uuid())
-  month     String   @unique // YYYY-MM
-  title     String? // chapter title
-  text      String
+  id            String   @id @default(uuid())
+  month         String   @unique // YYYY-MM
+  title         String? // chapter title
+  text          String
   supermemoryId String? // Explore index doc ids (re-index replaces, no dupes)
   ragId         String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// The Story of the Year — the book itself, woven from the monthly chapters (Dec 31 + on-demand "year so far").
 model YearStory {
-  id        String   @id @default(uuid())
-  year      String   @unique // YYYY
-  title     String?
-  text      String
-  partial   Boolean  @default(false) // true = a "year so far" draft, rewritten as months land
+  id            String   @id @default(uuid())
+  year          String   @unique // YYYY
+  title         String?
+  text          String
+  partial       Boolean  @default(false) // true = a "year so far" draft, rewritten as months land
   supermemoryId String? // Explore index doc ids (re-index replaces, no dupes)
   ragId         String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// One person mentioned in the user's own story on one day (people memory; aggregated per person in code).
@@ -531,16 +531,16 @@ model Waitpoint {
 /// One day's Gmail "Daily Brief": unread count + an AI summary of that day's important emails.
 /// Generated nightly (11:58 PM local) and on first open; keyed by local day so history is instant.
 model GmailBrief {
-  day         String   @id // YYYY-MM-DD in the user's timezone
-  unread      Int      @default(0)
-  summary     String   @default("")
-  sections    String? // JSON array of {heading, points[], link} accordion topic cards
-  items       String? // JSON array of {from, subject, time} important emails
-  model       String?
+  day           String   @id // YYYY-MM-DD in the user's timezone
+  unread        Int      @default(0)
+  summary       String   @default("")
+  sections      String? // JSON array of {heading, points[], link} accordion topic cards
+  items         String? // JSON array of {from, subject, time} important emails
+  model         String?
   supermemoryId String? // Explore index doc ids (mandatory section)
   ragId         String?
-  generatedAt DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  generatedAt   DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// A saved "Gmail request": a natural-language email search turned into an AI briefing of one thread.
@@ -564,13 +564,13 @@ model GmailRequest {
 
 /// A recorded meeting. Audio is captured first; transcription + AI summary are opt-in (ticket B).
 model Meeting {
-  id            String    @id @default(uuid())
-  title         String    @default("Untitled meeting")
+  id            String   @id @default(uuid())
+  title         String   @default("Untitled meeting")
   agenda        String? // optional pre-meeting notes the AI considers
   audioPath     String? // stored recording on the data volume
   audioMime     String? // e.g. audio/webm
-  durationSec   Int       @default(0)
-  status        String    @default("recorded") // recorded | transcribing | transcribed
+  durationSec   Int      @default(0)
+  status        String   @default("recorded") // recorded | transcribing | transcribed
   engine        String? // which transcription engine was used
   transcript    String?
   summary       String?
@@ -579,12 +579,12 @@ model Meeting {
   actionItems   String? // JSON array of {title, ...}
   language      String?
   tags          String? // JSON array of AI keywords
-  savedToMemory Boolean   @default(false)
+  savedToMemory Boolean  @default(false)
   supermemoryId String?
   ragId         String?
-  shared        Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  shared        Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// A commitment the owner made ("I'll send X by Friday") — extracted from the day. (BEA-355)
@@ -638,23 +638,23 @@ model VaultMeta {
 /// One encrypted vault item. `blob` is the envelope-encrypted secret (ciphertext only).
 /// The other columns are SEARCHABLE METADATA only — never a secret value. (BEA-345)
 model VaultItem {
-  id         String   @id @default(uuid())
-  type       String // login | apisecret | card | bank | crypto | identity | document | note | license | wifi | membership
-  blob       String // JSON EncryptedBlob {v, item:{iv,ct}, dataKey:{iv,ct}}
-  title      String? // searchable
-  website    String? // searchable
-  username   String? // searchable
-  tags       String? // searchable (comma-separated)
-  cardType   String? // searchable (e.g. "Visa")
-  bankName   String? // searchable
-  collection String? // Personal | Work | Beakn | Family
-  favorite   Boolean  @default(false)
+  id            String   @id @default(uuid())
+  type          String // login | apisecret | card | bank | crypto | identity | document | note | license | wifi | membership
+  blob          String // JSON EncryptedBlob {v, item:{iv,ct}, dataKey:{iv,ct}}
+  title         String? // searchable
+  website       String? // searchable
+  username      String? // searchable
+  tags          String? // searchable (comma-separated)
+  cardType      String? // searchable (e.g. "Visa")
+  bankName      String? // searchable
+  collection    String? // Personal | Work | Beakn | Family
+  favorite      Boolean  @default(false)
   // Pointers to the LABEL-ONLY index docs (BEA-368). Store-doc ids only — never a secret. Lets an
   // edit replace its indexed metadata and a delete remove it. The encrypted `blob` is NEVER indexed.
   supermemoryId String?
   ragId         String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 /// A device whose biometric/passkey (WebAuthn PRF) can unlock the vault. Stores ONLY the vault key
@@ -670,17 +670,17 @@ model VaultDevice {
 /// Per-item audit trail — records WHEN an action happened (revealed/edited/copied/created), never the
 /// value. Lets the owner see access history. (BEA-353)
 model VaultAudit {
-  id        String   @id @default(uuid())
-  itemId    String
-  action    String // created | edited | revealed | copied
-  at        DateTime @default(now())
+  id     String   @id @default(uuid())
+  itemId String
+  action String // created | edited | revealed | copied
+  at     DateTime @default(now())
 }
 
 /// One important email stored in memory (BEA-439). PK = Gmail message id so re-sync upserts (no dupes).
 /// Full body is indexed into RAG + SuperMemory for whole-brain recall. supermemoryId/ragId are the
 /// index doc pointers (replace-on-edit), never the secret.
 model EmailMemory {
-  id            String   @id // Gmail message id
+  id            String    @id // Gmail message id
   threadId      String
   fromAddr      String
   subject       String
@@ -690,8 +690,8 @@ model EmailMemory {
   body          String? // full plain-text body
   supermemoryId String?
   ragId         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@index([day])
 }
@@ -736,7 +736,7 @@ model MindEvidence {
   day        String // YYYY-MM-DD
   signal     String // done | postponed | skipped | told | created
   snippet    String?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime    @default(now())
 
   @@index([findingId])
 }
@@ -777,34 +777,34 @@ model MindChain {
 
 /// A visual flow (Phase 2 / n8n-style canvas, BEA-644). graph = React Flow {nodes, edges} JSON.
 model Flow {
-  id        String   @id @default(uuid())
-  name      String   @default("Untitled flow")
-  question  String? // the entry question the flow answers
-  agentId   String? // the agent this flow was generated from (Agent↔Flow merge)
-  graph     String   @default("{\"nodes\":[],\"edges\":[]}")
+  id           String   @id @default(uuid())
+  name         String   @default("Untitled flow")
+  question     String? // the entry question the flow answers
+  agentId      String? // the agent this flow was generated from (Agent↔Flow merge)
+  graph        String   @default("{\"nodes\":[],\"edges\":[]}")
   schedule     String? // JSON Sched {every, at, dow} — when set, runs on a timer (Stage 3)
   lastFiredKey String? // dedup key so a schedule fires once per slot
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 /// One execution of a Flow (BEA-646). results = JSON {nodeId: {status, output, kind, label}}.
 model FlowRun {
-  id          String    @id @default(uuid())
-  flowId      String?
-  status      String    @default("running") // running | done | failed
-  results     String    @default("{}")
-  finalOutput String?
-  documentIds String    @default("[]") // documents this run produced: JSON [{id, slug, title}]
-  terminal    String    @default("[]") // live play-by-play: JSON [{text, at}]
-  error       String?
+  id           String    @id @default(uuid())
+  flowId       String?
+  status       String    @default("running") // running | done | failed
+  results      String    @default("{}")
+  finalOutput  String?
+  documentIds  String    @default("[]") // documents this run produced: JSON [{id, slug, title}]
+  terminal     String    @default("[]") // live play-by-play: JSON [{text, at}]
+  error        String?
   waitNodeId   String? // Move B: the "Ask me" node the run is paused on
   waitQuestion String? // the question shown to the user
   waitKind     String? // free_text | choice
   waitOptions  String    @default("[]") // JSON array of choices
   waitToken    String? // opaque resume token
-  startedAt   DateTime  @default(now())
-  endedAt     DateTime?
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
 }
 
 /// A person you can send WhatsApp reminders to (BEA-719).
@@ -823,19 +823,19 @@ model Contact {
 
 /// A WhatsApp reminder to chase a contact about a task (BEA-720).
 model Reminder {
-  id           String         @id @default(uuid())
+  id           String            @id @default(uuid())
   contactId    String
-  contact      Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact      Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
   taskId       String? // the Task this chases (status stays the user's to close)
   subject      String? // short "what you're chasing" for the template {{2}} (task title if linked)
   message      String // the free-text we send in the 24h window (in the user's voice)
-  count        Int            @default(1) // how many times today (1-5)
-  times        String         @default("[]") // JSON array of ISO datetimes to send at
-  status       String         @default("active") // active | done | stopped
+  count        Int               @default(1) // how many times today (1-5)
+  times        String            @default("[]") // JSON array of ISO datetimes to send at
+  status       String            @default("active") // active | done | stopped
   feedback     String? // captured result once the contact says it's done
   lastFiredKey String? // dedup key for the daily scheduler
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
   sends        ReminderSend[]
   messages     ReminderMessage[]
 
@@ -872,4 +872,28 @@ model ReminderMessage {
 
   @@index([contactId])
   @@index([reminderId])
+}
+
+/// A third-party OAuth client that registered (Dynamic Client Registration) to reach the public MCP. (BEA-758)
+model OAuthClient {
+  id           String   @id // the client_id
+  secret       String? // optional; public clients (Claude) use PKCE with no secret
+  name         String?
+  redirectUris String // JSON array of allowed redirect URIs
+  createdAt    DateTime @default(now())
+}
+
+/// A short-lived authorization code (PKCE) issued after the owner approves an OAuth client. (BEA-758)
+model OAuthCode {
+  code          String   @id
+  clientId      String
+  redirectUri   String
+  codeChallenge String // S256 challenge; verified against the verifier at the token endpoint
+  scope         String?
+  userId        String
+  used          Boolean  @default(false)
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([clientId])
 }

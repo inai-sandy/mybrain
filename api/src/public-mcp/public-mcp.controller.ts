@@ -20,7 +20,12 @@ export class PublicMcpController {
       ? auth.replace(/^Bearer\s+/i, '').trim()
       : ((req.query?.token as string | undefined) || undefined);
     if (!(await this.mcp.authorize(presented))) {
-      res.status(401).json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized — send Authorization: Bearer <token> and enable the RAG MCP server in My Brain settings.' } });
+      // Point OAuth clients (claude.ai connectors) at the resource metadata so they can discover
+      // the sign-in flow, per RFC 9728 / the MCP auth spec. (BEA-758)
+      const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0] || 'https';
+      const host = (req.headers['x-forwarded-host'] as string) || (req.headers['host'] as string) || 'mybrain.1site.ai';
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${proto}://${host}/.well-known/oauth-protected-resource"`);
+      res.status(401).json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized — send Authorization: Bearer <token>, or connect via OAuth, and enable the RAG MCP server in My Brain settings.' } });
       return;
     }
     const body: any = req.body;

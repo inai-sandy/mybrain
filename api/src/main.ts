@@ -6,11 +6,19 @@ import * as express from 'express';
 import cookieParser from 'cookie-parser';
 import { existsSync } from 'fs';
 import { AppModule } from './app.module';
+import { OAuthService } from './oauth/oauth.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.use(cookieParser());
   app.setGlobalPrefix('api');
+
+  // OAuth discovery MUST live at the domain root (not under /api) so MCP clients can find it.
+  // Registered before the SPA fallback so they aren't shadowed by index.html. (BEA-758)
+  const oauth = app.get(OAuthService);
+  const server = app.getHttpAdapter().getInstance();
+  server.get('/.well-known/oauth-authorization-server', (req: express.Request, res: express.Response) => res.json(oauth.authServerMetadata(oauth.origin(req))));
+  server.get('/.well-known/oauth-protected-resource', (req: express.Request, res: express.Response) => res.json(oauth.protectedResourceMetadata(oauth.origin(req))));
 
   // Serve the built React app (copied to ../public in the Docker image).
   const pub = join(__dirname, '..', 'public');

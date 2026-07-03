@@ -32,11 +32,12 @@ import { DocumentsModule } from './documents/documents.module';
 import { AgentModule } from './agent/agent.module';
 import { HermesModule } from './hermes/hermes.module';
 import { PublicMcpModule } from './public-mcp/public-mcp.module';
+import { OAuthModule } from './oauth/oauth.module';
 import { FlowsModule } from './flows/flows.module';
 import { ContactsModule } from './contacts/contacts.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule, PublicMcpModule, FlowsModule, ContactsModule],
+  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
