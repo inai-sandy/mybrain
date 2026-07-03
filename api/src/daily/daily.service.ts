@@ -4,6 +4,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { matchContact, contactSpellings, norm as normName } from '../contacts/person-identity';
 import { MentorService } from '../mentor/mentor.service';
 import { MentalModelService } from '../mind/mentalmodel.service';
 
@@ -898,11 +899,22 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async personDetail(name: string) {
     const canonical = String(name || '').trim();
     if (!canonical) return null;
-    const mentions = await this.prisma.personMention.findMany({ where: { name: canonical }, orderBy: { day: 'desc' } });
-    if (!mentions.length) return null;
+    const contacts = await this.contactsShaped();
+    const contact = matchContact(contacts, canonical);
     const aliases = await this.peopleAliases();
-    const spellings = [canonical, ...Object.keys(aliases).filter((k) => aliases[k] === canonical)].map((s) => s.toLowerCase());
-    const has = (text?: string | null) => !!text && spellings.some((sp) => text.toLowerCase().includes(sp));
+    // Every spelling of this one person: the contact's name+aliases, plus taught story spellings. (BEA-763)
+    const spellSet = new Set<string>();
+    const add = (s: string) => { const t = String(s || '').trim(); if (t) spellSet.add(t); };
+    add(canonical);
+    if (contact) contactSpellings(contact).forEach(add);
+    Object.keys(aliases).filter((k) => aliases[k] === canonical).forEach(add);
+    const spellings = [...spellSet];
+    const spellingsLc = spellings.map((s) => s.toLowerCase());
+    const rows = await this.prisma.personMention.findMany({ where: { name: { in: spellings } }, orderBy: { day: 'desc' } });
+    if (!rows.length) return null;
+    const uniqDays = [...new Set(rows.map((r) => r.day))].sort((a, b) => b.localeCompare(a)); // desc, de-duped across spellings
+    const mentions = uniqDays.map((day) => ({ day }));
+    const has = (text?: string | null) => !!text && spellingsLc.some((sp) => text.toLowerCase().includes(sp));
     const sentencesWith = (text: string) =>
       text
         .split(/(?<=[.!?。])\s+|\n+/)
@@ -924,22 +936,26 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       days.push({ day: m.day, items });
     }
     return {
-      name: canonical,
+      name: contact?.name || canonical,
       mentions: mentions.length,
       firstSeen: mentions[mentions.length - 1].day,
       lastSeen: mentions[0].day,
-      otherSpellings: Object.keys(aliases).filter((k) => aliases[k] === canonical),
-      contactId: await this.contactIdFor(canonical), // link this person to a saved Contact if one matches (BEA-762)
+      otherSpellings: spellings.filter((s) => normName(s) !== normName(contact?.name || canonical)),
+      contactId: contact?.id || null, // link this person to a saved Contact if one matches (BEA-762/763)
       days,
     };
   }
 
-  /** Resolve a person's name to a saved Contact id (case-insensitive), or null. (BEA-762) */
+  /** All contacts, with aliases parsed — for the person↔contact matcher. (BEA-763) */
+  private async contactsShaped(): Promise<{ id: string; name: string; aliases: string[] }[]> {
+    const rows = await this.prisma.contact.findMany({ select: { id: true, name: true, aliases: true } });
+    return rows.map((c) => ({ id: c.id, name: c.name, aliases: this.jarr((c as any).aliases) }));
+  }
+  private jarr(s?: string | null): string[] {
+    try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+  }
   private async contactIdFor(name: string): Promise<string | null> {
-    const lc = String(name || '').trim().toLowerCase();
-    if (!lc) return null;
-    const contacts = await this.prisma.contact.findMany({ select: { id: true, name: true } });
-    return contacts.find((c) => (c.name || '').trim().toLowerCase() === lc)?.id || null;
+    return matchContact(await this.contactsShaped(), name)?.id || null;
   }
 
   /** Extract people's names from the user's own story (tiny Haiku call, idempotent per name+day). */
@@ -981,11 +997,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
         e.firstSeen = r.day < e.firstSeen ? r.day : e.firstSeen;
       } else map.set(r.name, { name: r.name, mentions: 1, firstSeen: r.day, lastSeen: r.day });
     }
-    // Attach the saved-Contact id where a person's name matches a contact. (BEA-762)
-    const contacts = await this.prisma.contact.findMany({ select: { id: true, name: true } });
-    const cmap = new Map(contacts.map((c) => [(c.name || '').trim().toLowerCase(), c.id]));
+    // Attach the saved-Contact id where a person's name matches a contact's name OR alias. (BEA-762/763)
+    const contacts = await this.contactsShaped();
     const people = [...map.values()]
-      .map((p) => ({ ...p, fading: p.mentions >= 2 && p.lastSeen < cutoff, contactId: cmap.get(p.name.trim().toLowerCase()) || null }))
+      .map((p) => ({ ...p, fading: p.mentions >= 2 && p.lastSeen < cutoff, contactId: matchContact(contacts, p.name)?.id || null }))
       .sort((a, b) => b.mentions - a.mentions || b.lastSeen.localeCompare(a.lastSeen));
     return { people, count: people.length };
   }

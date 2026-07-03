@@ -814,6 +814,7 @@ model Contact {
   whatsappNumber String? // E.164 digits incl. country code; null until you add one
   notes          String?
   tags           String     @default("[]") // JSON string array
+  aliases        String     @default("[]") // JSON array of other spellings/names for this same person (BEA-763)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]

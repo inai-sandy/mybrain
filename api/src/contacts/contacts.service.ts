@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { matchContact, contactSpellings, similarity, norm } from './person-identity';
 
 /** Contacts — people you can send WhatsApp reminders to (BEA-719). */
 @Injectable()
@@ -14,7 +15,17 @@ export class ContactsService {
     }
   }
   private shape(c: any) {
-    return { ...c, tags: this.parse(c.tags) };
+    return { ...c, tags: this.parse(c.tags), aliases: this.parse(c.aliases) };
+  }
+  private cleanNames(list?: string[]): string[] {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of list) {
+      const t = String(s || '').trim().slice(0, 80);
+      if (t && !seen.has(norm(t))) { seen.add(norm(t)); out.push(t); }
+    }
+    return out;
   }
   /** Keep digits + country code only; blank → null. */
   private normNumber(n?: string | null): string | null {
@@ -40,7 +51,7 @@ export class ContactsService {
     return this.shape(c);
   }
 
-  async create(input: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[] }) {
+  async create(input: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[]; aliases?: string[] }) {
     const name = (input.name || '').trim();
     if (!name) throw new BadRequestException('A name is required');
     const c = await this.prisma.contact.create({
@@ -49,13 +60,14 @@ export class ContactsService {
         whatsappNumber: this.normNumber(input.whatsappNumber),
         notes: input.notes?.trim() || null,
         tags: JSON.stringify(Array.isArray(input.tags) ? input.tags : []),
+        aliases: JSON.stringify(this.cleanNames(input.aliases).filter((a) => norm(a) !== norm(name))),
       },
     });
     return this.shape(c);
   }
 
-  async update(id: string, patch: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[] }) {
-    await this.get(id);
+  async update(id: string, patch: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[]; aliases?: string[] }) {
+    const cur = await this.get(id);
     const data: any = {};
     if (patch.name !== undefined) {
       const n = String(patch.name).trim();
@@ -65,8 +77,42 @@ export class ContactsService {
     if (patch.whatsappNumber !== undefined) data.whatsappNumber = this.normNumber(patch.whatsappNumber);
     if (patch.notes !== undefined) data.notes = patch.notes?.trim() || null;
     if (patch.tags !== undefined) data.tags = JSON.stringify(Array.isArray(patch.tags) ? patch.tags : []);
+    if (patch.aliases !== undefined) {
+      const name = norm(data.name || cur.name);
+      data.aliases = JSON.stringify(this.cleanNames(patch.aliases).filter((a) => norm(a) !== name));
+    }
     const c = await this.prisma.contact.update({ where: { id }, data });
     return this.shape(c);
+  }
+
+  /** Append one alias (used by "add as alias" suggestions). */
+  async addAlias(id: string, alias: string) {
+    const cur = await this.get(id);
+    const next = this.cleanNames([...(cur.aliases || []), alias]).filter((a) => norm(a) !== norm(cur.name));
+    const c = await this.prisma.contact.update({ where: { id }, data: { aliases: JSON.stringify(next) } });
+    return this.shape(c);
+  }
+
+  /** Suggest close story/task names that likely mean this same person (fuzzy, ≥0.55). (BEA-763) */
+  async aliasSuggestions(id: string) {
+    const contact = await this.get(id);
+    const all = (await this.prisma.contact.findMany()).map((c) => this.shape(c));
+    const others = all.filter((c) => c.id !== contact.id);
+    const mine = contactSpellings(contact).map(norm);
+    // Candidate names from stories + task parties, with a count.
+    const counts = new Map<string, number>();
+    for (const m of await this.prisma.personMention.findMany({ select: { name: true } })) counts.set(m.name, (counts.get(m.name) || 0) + 1);
+    for (const t of await this.prisma.task.findMany({ where: { party: { not: null } }, select: { party: true } })) {
+      const p = (t.party || '').trim();
+      if (p) counts.set(p, (counts.get(p) || 0) + 1);
+    }
+    const suggestions = [...counts.entries()]
+      .filter(([nm]) => nm && !mine.includes(norm(nm)) && !matchContact(others, nm)) // not already me, not someone else
+      .map(([nm, count]) => ({ name: nm, count, score: Math.max(...contactSpellings(contact).map((s) => similarity(s, nm))) }))
+      .filter((s) => s.score >= 0.55)
+      .sort((a, b) => b.score - a.score || b.count - a.count)
+      .slice(0, 6);
+    return { suggestions };
   }
 
   async remove(id: string) {
@@ -76,12 +122,10 @@ export class ContactsService {
     return { ok: true };
   }
 
-  /** Resolve a task's `party` name to a contact, case-insensitive (used by reminders, BEA-721). */
+  /** Resolve a name to a contact by its name OR any alias (used by reminders + people links). (BEA-763) */
   async findByName(name?: string | null) {
     if (!name?.trim()) return null;
-    const lc = name.trim().toLowerCase();
-    const all = await this.prisma.contact.findMany();
-    const hit = all.find((c) => (c.name || '').toLowerCase() === lc);
-    return hit ? this.shape(hit) : null;
+    const all = (await this.prisma.contact.findMany()).map((c) => this.shape(c));
+    return matchContact(all, name) || null;
   }
 }

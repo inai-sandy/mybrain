@@ -186,7 +186,12 @@ function makeService(opts: { llmText?: string | null } = {}) {
       findMany: async () => [],
     },
     personMention: {
-      findMany: async ({ where }: any = {}) => peopleMentions.filter((m) => !where?.name || m.name === where.name),
+      findMany: async ({ where }: any = {}) => peopleMentions.filter((m) => {
+        const n = where?.name;
+        if (n == null) return true;
+        if (typeof n === 'object' && Array.isArray(n.in)) return n.in.includes(m.name);
+        return m.name === n;
+      }),
       deleteMany: async ({ where }: any = {}) => {
         for (let i = peopleMentions.length - 1; i >= 0; i--) if (!where?.name || peopleMentions[i].name === where.name) peopleMentions.splice(i, 1);
         return {};

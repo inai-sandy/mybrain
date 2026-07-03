@@ -6,6 +6,7 @@ function makeService(llmText: string | null) {
   const dumps: any[] = [];
   let seq = 0;
   const prisma: any = {
+    contact: { findMany: async () => [] },
     setting: {
       findUnique: async ({ where }: any) => (settings[where.key] ? { key: where.key, value: settings[where.key] } : null),
       upsert: async ({ where, create, update }: any) => {

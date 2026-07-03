@@ -15,13 +15,23 @@ export class ContactsController {
     return this.contacts.get(id);
   }
 
+  @Get(':id/alias-suggestions')
+  aliasSuggestions(@Param('id') id: string) {
+    return this.contacts.aliasSuggestions(id);
+  }
+
+  @Post(':id/alias')
+  addAlias(@Param('id') id: string, @Body() body: { alias?: string }) {
+    return this.contacts.addAlias(id, body?.alias || '');
+  }
+
   @Post()
-  create(@Body() body: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[] }) {
+  create(@Body() body: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[]; aliases?: string[] }) {
     return this.contacts.create(body || {});
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[] }) {
+  update(@Param('id') id: string, @Body() body: { name?: string; whatsappNumber?: string; notes?: string; tags?: string[]; aliases?: string[] }) {
     return this.contacts.update(id, body || {});
   }
 

@@ -3,6 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { MemoryService } from '../memory/memory.service';
+import { matchContact, contactSpellings } from '../contacts/person-identity';
+
+const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const DEFAULT_TASKS_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -371,7 +374,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     } catch {
       /* ignore */
     }
-    const spellings = [canonical, ...Object.keys(aliases).filter((k) => aliases[k] === canonical)];
+    // Union of story-taught spellings + the matching Contact's name/aliases, so "Vijay" and
+    // "Vijaya Durga" resolve to the same person. (BEA-763)
+    const contacts = (await this.prisma.contact.findMany({ select: { id: true, name: true, aliases: true } })).map((c) => ({ id: c.id, name: c.name, aliases: jarr((c as any).aliases) }));
+    const contact = matchContact(contacts, canonical);
+    const spellSet = new Set<string>([canonical, ...Object.keys(aliases).filter((k) => aliases[k] === canonical)]);
+    if (contact) for (const s of contactSpellings(contact)) spellSet.add(s);
+    const spellings = [...spellSet].filter(Boolean);
     const res = spellings.map((s) => new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
     const hit = (txt?: string | null) => !!txt && res.some((re) => re.test(txt));
     const rows = await this.prisma.task.findMany({ take: 5000 });

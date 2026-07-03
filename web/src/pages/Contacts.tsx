@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
-type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[] };
+type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
 type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; count: number; times: string[]; status: string; contact?: Contact; task?: { id: string; title: string } | null };
 
 const PAGE_SIZE = 20;
@@ -42,19 +42,24 @@ function ContactDetail({ contactId }: { contactId: string }) {
   const [tab, setTab] = useState<'reminders' | 'tasks' | 'mentions'>('reminders');
   const [tasks, setTasks] = useState<{ id: string; title: string; status: string; day?: string | null }[] | null>(null);
   const [mentions, setMentions] = useState<{ mentions: number; firstSeen: string; lastSeen: string; days: { day: string; items: { type: string; text: string }[] }[] } | null>(null);
+  const [sugg, setSugg] = useState<{ name: string; count: number }[]>([]);
 
   function load() {
     fetch(`/api/contacts/${contactId}`).then((r) => (r.ok ? r.json() : null)).then(setContact).catch(() => setContact(null));
     fetch('/api/reminders').then((r) => r.json()).then((d) => setReminders((d.reminders || []).filter((x: Reminder) => x.contactId === contactId))).catch(() => setReminders([]));
   }
   useEffect(load, [contactId]);
-  // Tasks involving this person + where they show up in stories — matched by name (BEA-762).
-  useEffect(() => {
-    const name = contact?.name?.trim();
-    if (!name) return;
-    fetch(`/api/tasks/by-person?name=${encodeURIComponent(name)}`).then((r) => (r.ok ? r.json() : { tasks: [] })).then((d) => setTasks(d.tasks || [])).catch(() => setTasks([]));
-    fetch(`/api/daily/people/detail?name=${encodeURIComponent(name)}`).then((r) => (r.ok ? r.json() : null)).then(setMentions).catch(() => setMentions(null));
-  }, [contact?.name]);
+  // Tasks involving this person, story mentions, and fuzzy "same person?" suggestions (BEA-762/763).
+  function loadPerson() {
+    fetch(`/api/tasks/by-person?name=${encodeURIComponent(contact?.name || '')}`).then((r) => (r.ok ? r.json() : { tasks: [] })).then((d) => setTasks(d.tasks || [])).catch(() => setTasks([]));
+    fetch(`/api/daily/people/detail?name=${encodeURIComponent(contact?.name || '')}`).then((r) => (r.ok ? r.json() : null)).then(setMentions).catch(() => setMentions(null));
+    fetch(`/api/contacts/${contactId}/alias-suggestions`).then((r) => (r.ok ? r.json() : { suggestions: [] })).then((d) => setSugg(d.suggestions || [])).catch(() => setSugg([]));
+  }
+  useEffect(() => { if (contact?.name) loadPerson(); /* eslint-disable-next-line */ }, [contact?.name, contact?.aliases?.join(',')]);
+  async function addAlias(alias: string) {
+    const r = await fetch(`/api/contacts/${contactId}/alias`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias }) });
+    if (r.ok) { toast('success', `Linked "${alias}" to ${contact?.name}`); setContact(await r.json()); } else toast('error', 'Could not add');
+  }
   const fmtDay = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return new Date(y, m - 1, dd).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
   const MENTION_ICON: Record<string, { icon: typeof CheckCircle2; cls: string }> = {
     task: { icon: CheckCircle2, cls: 'text-emerald-500' },
@@ -90,10 +95,23 @@ function ContactDetail({ contactId }: { contactId: string }) {
             {contact?.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{contact.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
             {contact?.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
           </div>
+          {contact?.aliases && contact.aliases.length > 0 && <p className="mt-0.5 text-xs text-zinc-400">also known as {contact.aliases.join(', ')}</p>}
           {contact?.notes && <p className="mt-0.5 truncate text-xs text-zinc-400">{contact.notes}</p>}
         </div>
         {contact && <button onClick={() => setEditContact(true)} title="Edit contact" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
       </div>
+
+      {/* Fuzzy "same person?" suggestions — one-tap to link an alias (BEA-763) */}
+      {sugg.length > 0 && (
+        <div className="rounded-xl border border-indigo-300/40 bg-indigo-500/5 p-3 dark:border-indigo-500/30">
+          <div className="mb-2 text-xs font-medium text-indigo-600 dark:text-indigo-300">Same person? Link these names to {contact?.name}:</div>
+          <div className="flex flex-wrap gap-2">
+            {sugg.map((s) => (
+              <button key={s.name} onClick={() => addAlias(s.name)} className="inline-flex items-center gap-1 rounded-full border border-indigo-300/60 bg-white px-2.5 py-1 text-xs text-zinc-700 hover:border-indigo-500 hover:text-indigo-600 dark:border-indigo-500/40 dark:bg-zinc-900 dark:text-zinc-200"><Plus className="h-3 w-3" />{s.name}<span className="text-[10px] text-zinc-400">×{s.count}</span></button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tabs: everything about this person in one place (BEA-762) */}
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
@@ -273,6 +291,7 @@ function ContactForm({ contact, initialName, onClose, onSaved }: { contact: Cont
   const [number, setNumber] = useState(contact?.whatsappNumber || '');
   const [notes, setNotes] = useState(contact?.notes || '');
   const [tags, setTags] = useState((contact?.tags || []).join(', '));
+  const [aliases, setAliases] = useState((contact?.aliases || []).join(', '));
   const [saving, setSaving] = useState(false);
   const inp = 'w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
 
@@ -280,7 +299,7 @@ function ContactForm({ contact, initialName, onClose, onSaved }: { contact: Cont
     if (!name.trim()) { toast('error', 'Give the contact a name'); return; }
     setSaving(true);
     try {
-      const body = { name: name.trim(), whatsappNumber: number.trim(), notes: notes.trim(), tags: tags.split(',').map((t) => t.trim()).filter(Boolean) };
+      const body = { name: name.trim(), whatsappNumber: number.trim(), notes: notes.trim(), tags: tags.split(',').map((t) => t.trim()).filter(Boolean), aliases: aliases.split(',').map((t) => t.trim()).filter(Boolean) };
       const r = await fetch(contact ? `/api/contacts/${contact.id}` : '/api/contacts', { method: contact ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not save');
       toast('success', contact ? 'Contact updated' : 'Contact added');
@@ -299,6 +318,7 @@ function ContactForm({ contact, initialName, onClose, onSaved }: { contact: Cont
         <label className="block text-xs text-zinc-500">WhatsApp number (with country code)<input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="e.g. +91 98765 43210" className={inp + ' mt-1'} inputMode="tel" /></label>
         <label className="block text-xs text-zinc-500">Notes (optional)<textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inp + ' mt-1 resize-none'} /></label>
         <label className="block text-xs text-zinc-500">Tags (comma-separated)<input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="vendor, team" className={inp + ' mt-1'} /></label>
+        <label className="block text-xs text-zinc-500">Also known as (other names/spellings, comma-separated)<input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="e.g. Vijay, Vijay Durga" className={inp + ' mt-1'} /><span className="mt-1 block text-[10px] text-zinc-400">Their tasks &amp; story mentions under any of these names show up as this one person.</span></label>
         <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{contact ? 'Save' : 'Add contact'}</button>
       </div>
     </div>
