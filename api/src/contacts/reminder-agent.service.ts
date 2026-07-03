@@ -99,9 +99,11 @@ Reply with ONLY this JSON, nothing else:
         .catch(() => undefined);
     }
 
-    // The agent couldn't answer → flag the contact's reminders so Sandeep sees "needs you" and replies. (BEA-766)
+    // The agent couldn't answer → flag the contact's reminders ("needs you") AND WhatsApp Sandeep. (BEA-766/767)
     if (parsed.needsSandeep) {
       await this.prisma.reminder.updateMany({ where: { contactId, status: 'active' }, data: { needsOwner: true } }).catch(() => undefined);
+      const lastIn = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
+      await this.notifyOwner(name, lastIn);
       this.log.log(`agent: flagged contact ${contactId} — needs Sandeep`);
     }
 
@@ -115,6 +117,18 @@ Reply with ONLY this JSON, nothing else:
           .catch(() => undefined);
         this.log.log(`reminder ${rid} resolved: ${it.outcome || ''}`);
       }
+    }
+  }
+
+  /** WhatsApp Sandeep when the agent is stuck: nice free-text in-window, template fallback cold. (BEA-767) */
+  private async notifyOwner(contactName: string, lastMsg: string): Promise<void> {
+    const owner = ((await this.prisma.setting.findUnique({ where: { key: 'owner.whatsapp' } }))?.value || '').replace(/[^\d]/g, '');
+    if (!owner || !this.postbox.isConfigured()) return;
+    const snippet = lastMsg ? `: "${lastMsg.replace(/\s+/g, ' ').trim().slice(0, 200)}"` : '';
+    const res = await this.postbox.sendText(owner, `⚠ ${contactName} messaged and needs you${snippet}. I said you'll get back to them — open My Brain to reply.`);
+    if (res.error) {
+      // Outside the 24h free-text window → fall back to the approved template so it still lands.
+      await this.postbox.sendReminderTemplate(owner, 'Sandeep', `${contactName}, who needs your reply in My Brain`).catch(() => undefined);
     }
   }
 }
