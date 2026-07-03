@@ -151,6 +151,9 @@ export class FlowRunnerService {
   async start(flowId: string): Promise<{ runId: string }> {
     const flow = await this.prisma.flow.findUnique({ where: { id: flowId } });
     if (!flow) throw new NotFoundException('Flow not found');
+    // No stacking: if this flow already has a live run, return it instead of starting another. (BEA-772)
+    const active = await this.prisma.flowRun.findFirst({ where: { flowId, status: { in: ['running', 'waiting'] } }, orderBy: { startedAt: 'desc' } });
+    if (active) return { runId: active.id };
     const run = await this.prisma.flowRun.create({ data: { flowId, status: 'running', results: '{}' } });
     void this.execute(run.id, flow).catch(async (e) => {
       this.log.error(`flow run ${run.id} crashed: ${e?.message || e}`);
@@ -356,7 +359,12 @@ export class FlowRunnerService {
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
       case 'tool':
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
-        if (FlowRunnerService.AGENT_TOOLS.has(refId)) return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), `Flow · ${label}`);
+        if (FlowRunnerService.AGENT_TOOLS.has(refId)) {
+          // Title the branch run by its sub-question, not a generic "Web search". (BEA-772)
+          const focus = /THIS BRANCH FOCUSES ON:\s*([^\n]+)/.exec(input || '')?.[1]?.trim();
+          const runTitle = focus ? focus.slice(0, 70) : `Flow · ${label}`;
+          return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), runTitle);
+        }
         return this.askModel(this.toolPrompt(refId, label, input) + this.guidance(node)); // unknown tool → reason directly
       // Move A: run the REAL skill in Codex with its folder in the working dir; fall back to the model.
       case 'skill': {
@@ -414,7 +422,13 @@ export class FlowRunnerService {
     // serialise on the engine so concurrent branches don't stall each other into timeouts
     return this.runOnEngine(async () => {
       const run = await this.agent.createRun({ title, input: prompt });
-      await this.bridge.execute(run.id, { prompt, title, save: false });
+      try {
+        await this.bridge.execute(run.id, { prompt, title, save: false });
+      } catch (e: any) {
+        // A thrown execute must never leave the branch run stuck on "running". (BEA-772)
+        await this.prisma.agentRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
+        throw e;
+      }
       const r: any = await this.agent.getRun(run.id).catch(() => null);
       if (r?.status === 'failed') throw new Error(r.error || 'node failed');
       return r?.resultText || '';
