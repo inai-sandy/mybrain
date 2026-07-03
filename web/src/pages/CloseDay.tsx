@@ -3,8 +3,9 @@ import { Check, Circle, Moon, X, Lock, Mic } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { StoryModal } from './DailyStory';
+import { Task, DoneModal } from './taskShared';
 
-type T = { id: string; title: string; status: string; pinned?: boolean; sphere?: string };
+type T = Task;
 type DayInfo = {
   day: string;
   isToday: boolean;
@@ -23,6 +24,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   const [info, setInfo] = useState<DayInfo | null>(null);
   const [telling, setTelling] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [doneFor, setDoneFor] = useState<T | null>(null); // opens the done+follow-up sheet
   const toast = useToast();
 
   async function load() {
@@ -36,10 +38,16 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [day]);
 
   async function toggle(t: T) {
-    // one tap = done (credited to this day); tap again = reopen. Kept light so finishing a day is fast.
-    const done = t.status !== 'done';
-    const r = await fetch(`/api/tasks/${t.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done }) });
-    if (r.ok) setTasks((list) => (list || []).map((x) => (x.id === t.id ? { ...x, status: done ? 'done' : 'open' } : x)));
+    // Open task → the done sheet (log time + optional repeat/follow-up), same as the Tasks page.
+    if (t.status !== 'done') { setDoneFor(t); return; }
+    // Done task → reopen quickly.
+    const r = await fetch(`/api/tasks/${t.id}/done`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: false }) });
+    if (r.ok) setTasks((list) => (list || []).map((x) => (x.id === t.id ? { ...x, status: 'open', progress: 0 } : x)));
+  }
+  // 30% / 60% part-done — snaps back to 0 if you tap the active one.
+  async function progress(t: T, pct: number) {
+    const r = await fetch(`/api/tasks/${t.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ progress: pct }) });
+    if (r.ok) setTasks((list) => (list || []).map((x) => (x.id === t.id ? { ...x, progress: pct, status: pct === 100 ? 'done' : x.status } : x)));
   }
 
   async function seal(close: () => void) {
@@ -95,12 +103,21 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
             <ul className="space-y-1.5 max-h-[40vh] overflow-y-auto pr-1">
               {tasks.map((t) => {
                 const done = t.status === 'done';
+                const prog = t.progress ?? 0;
                 return (
-                  <li key={t.id}>
-                    <button onClick={() => toggle(t)} className="w-full flex items-start gap-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5 text-left hover:border-emerald-500/40">
-                      <span className={'mt-0.5 shrink-0 ' + (done ? 'text-emerald-600' : 'text-zinc-300 dark:text-zinc-600')}>{done ? <Check size={18} /> : <Circle size={18} />}</span>
-                      <span className={'text-sm flex-1 ' + (done ? 'line-through text-zinc-400' : '')}>{t.title}{t.sphere === 'personal' && <span className="ml-1.5 text-[11px] text-violet-500">🏠</span>}</span>
-                    </button>
+                  <li key={t.id} className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-2.5 hover:border-emerald-500/40">
+                    <div className="flex items-start gap-2.5">
+                      <button onClick={() => toggle(t)} title={done ? 'Reopen' : 'Mark done'} className={'mt-0.5 shrink-0 ' + (done ? 'text-emerald-600' : 'text-zinc-300 dark:text-zinc-600 hover:text-emerald-600')}>{done ? <Check size={18} /> : <Circle size={18} />}</button>
+                      <span className={'text-sm flex-1 ' + (done ? 'line-through text-zinc-400' : '')}>{t.title}{t.sphere === 'personal' && <span className="ml-1.5 text-[11px] text-violet-500">🏠</span>}{t.party && <span className="ml-1.5 text-[11px] text-amber-600 dark:text-amber-400">🤝 {t.party}</span>}</span>
+                    </div>
+                    {!done && (
+                      <div className="mt-2 flex items-center gap-2 pl-[26px]">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${prog}%` }} /></div>
+                        {[30, 60].map((pct) => (
+                          <button key={pct} onClick={() => progress(t, prog === pct ? 0 : pct)} title={prog === pct ? 'Clear progress' : `Mark ${pct}% done`} className={'rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ' + (prog === pct ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-zinc-300 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700')}>{pct}%</button>
+                        ))}
+                      </div>
+                    )}
                   </li>
                 );
               })}
@@ -123,6 +140,8 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
               onSaved={() => load()}
             />
           )}
+
+          {doneFor && <DoneModal task={doneFor} onClose={() => setDoneFor(null)} onSaved={() => load()} />}
         </>
       )}
     </Sheet>
