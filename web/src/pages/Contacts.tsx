@@ -117,7 +117,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
         mentions === null ? <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">{contact?.name || 'This contact'} hasn't come up in your stories yet.</div>
         : <div className="space-y-4">
             <p className="text-xs text-zinc-500">{mentions.mentions} day{mentions.mentions === 1 ? '' : 's'} · first {fmtDay(mentions.firstSeen)} · last {fmtDay(mentions.lastSeen)}</p>
-            {mentions.days.map((d) => (
+            {mentions.days.filter((d) => d.items.length).map((d) => (
               <div key={d.day}>
                 <div className="mb-1.5 flex items-center gap-2"><span className="text-xs font-semibold text-zinc-500">{fmtDay(d.day)}</span><span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" /></div>
                 <ul className="space-y-1.5">
