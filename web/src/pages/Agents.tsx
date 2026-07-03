@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck } from 'lucide-react';
+import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { DictateButton } from '../ui/DictateButton';
@@ -182,6 +182,8 @@ export function Agents() {
   const [starterPick, setStarterPick] = useState<Starter | null>(null);
   const [showAsk, setShowAsk] = useState(false);
   const [agentSort, setAgentSort] = useState<'recent' | 'name'>('recent');
+  // Run popup: after planning a deep research, pick which sub-questions to run. (BEA-773)
+  const [planFor, setPlanFor] = useState<{ flowId: string; subs: { id: string; branchIdx: number; sub: string; on: boolean }[] } | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 6;
   const [q, setQ] = useState('');
@@ -234,9 +236,14 @@ export function Agents() {
     setStarting(true);
     try {
       if (depth === 'deep') {
-        // Deep = a full flow: create one from the task, auto-plan it, run it. (One dial, routed internally.)
+        // Deep = a full flow: create one, plan it into sub-questions, then let the user pick which to run. (BEA-773)
         const fl = await (await fetch('/api/flows', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: title.trim() || text.slice(0, 60), question: text }) })).json();
         await fetch(`/api/flows/${fl.id}/plan`, { method: 'POST' }).catch(() => undefined);
+        const flow = await (await fetch(`/api/flows/${fl.id}`)).json();
+        const subs = ((flow.graph?.nodes || []) as any[])
+          .filter((n) => n.data?.kind === 'subquestion')
+          .map((n) => ({ id: n.id, branchIdx: Number(/^b(\d+)_/.exec(n.id)?.[1] ?? 0), sub: (n.data?.sub || '').toString(), on: true }));
+        if (subs.length > 1) { setPlanFor({ flowId: fl.id, subs }); setStarting(false); return; } // show the picker
         const run = await (await fetch(`/api/flows/${fl.id}/run`, { method: 'POST' })).json();
         if (run?.runId) { nav(`/flows/runs/${run.runId}`); return; }
         throw new Error('Could not start the deep run');
@@ -251,8 +258,51 @@ export function Agents() {
     }
   }
 
+  // Run the planned flow with only the ticked sub-questions (disable the rest for this run). (BEA-773)
+  async function runSelected() {
+    if (!planFor) return;
+    const chosen = planFor.subs.filter((s) => s.on);
+    if (!chosen.length) { toast('error', 'Pick at least one sub-question'); return; }
+    setStarting(true);
+    try {
+      const disabled = new Set(planFor.subs.filter((s) => !s.on).map((s) => s.branchIdx));
+      if (disabled.size) {
+        const flow = await (await fetch(`/api/flows/${planFor.flowId}`)).json();
+        const nodes = ((flow.graph?.nodes || []) as any[]).map((n) => {
+          const m = /^b(\d+)_/.exec(n.id);
+          return m && disabled.has(Number(m[1])) ? { ...n, data: { ...n.data, enabled: false } } : n;
+        });
+        await fetch(`/api/flows/${planFor.flowId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ graph: { ...flow.graph, nodes } }) });
+      }
+      const run = await (await fetch(`/api/flows/${planFor.flowId}/run`, { method: 'POST' })).json();
+      setPlanFor(null);
+      if (run?.runId) nav(`/flows/runs/${run.runId}`);
+      else throw new Error('Could not start');
+    } catch (e: any) { toast('error', e?.message || 'Could not start'); setStarting(false); }
+  }
+
   return (
     <div className="space-y-6">
+      {planFor && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={() => !starting && setPlanFor(null)}>
+          <div className="w-full max-w-md space-y-3 rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-emerald-600" />What should I research?</h2>
+              <button onClick={() => setPlanFor(null)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+            </div>
+            <p className="text-xs text-zinc-500">I split your ask into these questions. Untick any you don't want — or run them all.</p>
+            <div className="space-y-1.5">
+              {planFor.subs.map((s, i) => (
+                <label key={s.id} className={'flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 text-sm transition-colors ' + (s.on ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-zinc-200 dark:border-zinc-700')}>
+                  <input type="checkbox" checked={s.on} onChange={(e) => setPlanFor((p) => p ? { ...p, subs: p.subs.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)) } : p)} className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600" />
+                  <span className={s.on ? 'text-zinc-700 dark:text-zinc-100' : 'text-zinc-400'}>{s.sub}</span>
+                </label>
+              ))}
+            </div>
+            <button onClick={runSelected} disabled={starting || !planFor.subs.some((s) => s.on)} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{starting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Research {planFor.subs.filter((s) => s.on).length} question{planFor.subs.filter((s) => s.on).length === 1 ? '' : 's'}</button>
+          </div>
+        </div>
+      )}
       <header className="flex items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-indigo-500 text-white">
           <Bot className="h-5 w-5" />
