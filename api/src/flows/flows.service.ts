@@ -256,7 +256,7 @@ export class FlowsService {
     let plan: any = null;
     try {
       const out = await this.llm.complete(
-        `You plan a visual workflow ("flow") that answers a request by splitting it into independent branches that run, then merge into one answer.\n\nRequest:\n"${q.slice(0, 800)}"\n\nSteps you may place in a branch (use the EXACT id):\nTOOLS:\n${toolList}\nSKILLS (only use one if its description is an OBVIOUS fit for THIS request — most tasks need NONE):\n${skillList || '(no skills)'}\n\nRules:\n- Plan 2-4 branches. Each branch = a short sub-question + 1-3 ordered steps.\n- For facts about the world, use web_search then ask_ai.\n- If the request is about the USER's own project, work, notes or context, INCLUDE one branch that uses search_brain then ask_ai.\n- Do NOT add a skill unless it clearly matches the request (e.g. don't use a UI/design skill for a research task). When unsure, use ask_ai.\n- End each branch with ask_ai so it produces written output.\n\nReply with ONLY JSON, no prose:\n{"branches":[{"subquestion":"...","steps":[{"kind":"tool","id":"web_search"},{"kind":"ask_ai"}]}],"merge":"ai"}\nkind is "tool"+id, "skill"+id, or "ask_ai" (no id). merge is "ai" or "raw".`,
+        `You plan a visual workflow ("flow") that answers a request by splitting it into independent branches that run, then merge into one answer.\n\nRequest:\n"${q.slice(0, 800)}"\n\nSteps you may place in a branch (use the EXACT id):\nTOOLS:\n${toolList}\nSKILLS (only use one if its description is an OBVIOUS fit for THIS request — most tasks need NONE):\n${skillList || '(no skills)'}\n\nRules:\n- Plan 2-4 branches. Each branch = a short sub-question + 1-3 ordered steps.\n- Each sub-question MUST be self-contained: name the exact subject explicitly (e.g. the specific repo/product/person from the request), never a pronoun or a generic word that could be misread out of context.\n- For facts about the world, use web_search then ask_ai.\n- If the request is about the USER's own project, work, notes or context, INCLUDE one branch that uses search_brain then ask_ai.\n- Do NOT add a skill unless it clearly matches the request (e.g. don't use a UI/design skill for a research task). When unsure, use ask_ai.\n- End each branch with ask_ai so it produces written output.\n\nReply with ONLY JSON, no prose:\n{"branches":[{"subquestion":"...","steps":[{"kind":"tool","id":"web_search"},{"kind":"ask_ai"}]}],"merge":"ai"}\nkind is "tool"+id, "skill"+id, or "ask_ai" (no id). merge is "ai" or "raw".`,
         1100,
         'flow-plan',
       );
@@ -309,7 +309,7 @@ export class FlowsService {
     });
 
     const mergeY = maxY + ROW + 20;
-    nodes.push({ id: 'merge', type: 'box', position: { x: CX, y: mergeY }, data: { kind: 'merge', label: 'Merge', mode: plan?.merge === 'raw' ? 'raw' : 'ai' } });
+    nodes.push({ id: 'merge', type: 'box', position: { x: CX, y: mergeY }, data: { kind: 'merge', label: 'Merge', mode: plan?.merge === 'raw' ? 'raw' : 'ai', goal: question.slice(0, 500) } });
     lasts.forEach((l) => edges.push({ id: `e_${l}_merge`, source: l, target: 'merge', animated: true }));
     nodes.push({ id: 'output', type: 'box', position: { x: CX, y: mergeY + ROW }, data: { kind: 'output', label: 'Output' } });
     edges.push({ id: 'e_merge_output', source: 'merge', target: 'output', animated: true });

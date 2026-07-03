@@ -341,11 +341,18 @@ export class FlowRunnerService {
     const refId = node.data?.refId;
     switch (kind) {
       case 'question': return node.data?.sub || input || '';
-      case 'subquestion': return node.data?.sub || input || '';
+      // Thread the whole research goal into every branch so a sub-search can't drift off-topic. (BEA-771)
+      case 'subquestion': {
+        const goal = (input || '').trim(); // upstream = the original question (+ prior branch findings)
+        const focus = (node.data?.sub || '').trim();
+        if (!focus) return goal;
+        if (!goal) return focus;
+        return `OVERALL RESEARCH GOAL (interpret every term and stay strictly within this):\n${goal}\n\nTHIS BRANCH FOCUSES ON:\n${focus}`;
+      }
       case 'text': return node.data?.text || node.data?.sub || '';
       case 'note': case 'wait': case 'if': case 'filter': return input; // pass-through (v0)
       case 'output': return input;
-      case 'merge': return this.merge(node.data?.mode || 'ai', inputs);
+      case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal);
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
       case 'tool':
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
@@ -391,8 +398,8 @@ export class FlowRunnerService {
   private toolPrompt(toolId: string, label: string, input: string): string {
     const map: Record<string, string> = {
       search_brain: `Search my second brain (notes, documents, saved memories) and answer:\n${input}`,
-      web_search: `Search the web and answer this, citing what you find:\n${input}`,
-      web_read: `Open and read the most relevant page(s), then answer:\n${input}`,
+      web_search: `You are researching one part of a larger goal (stated below). Search the web for THIS part, staying strictly within the overall goal — interpret every ambiguous term the way the goal intends (e.g. a name may be a specific GitHub repo or product named in the goal, not a generic word). Answer concisely and cite the sources (URLs) you actually used.\n\n${input}`,
+      web_read: `Open and read the most relevant page(s) for this — staying within the overall goal stated below — then answer with citations:\n${input}`,
       gmail: `Look at my Gmail and answer:\n${input}`,
       calendar: `Look at my calendar and answer:\n${input}`,
       drive: `Look in my Google Drive and answer:\n${input}`,
@@ -414,14 +421,16 @@ export class FlowRunnerService {
     });
   }
 
-  private async merge(mode: string, outputs: string[]): Promise<string> {
+  private async merge(mode: string, outputs: string[], goal?: string): Promise<string> {
     const parts = outputs.filter(Boolean);
     if (!parts.length) return '';
     if (parts.length === 1) return parts[0];
     if (mode === 'raw') return parts.map((o, i) => `## Part ${i + 1}\n\n${o}`).join('\n\n');
+    const goalBlock = (goal || '').trim() ? `The original question this must answer:\n"${goal!.trim()}"\n\n` : '';
     const out = await this.llm.complete(
-      `Combine these parts into ONE clear, well-structured answer. Remove repetition, keep all the substance, use headings where helpful.\n\n${parts.map((p, i) => `--- Part ${i + 1} ---\n${p}`).join('\n\n')}`,
-      1400,
+      // Cited synthesis over the branch findings, anchored to the original goal. (BEA-771)
+      `${goalBlock}Write ONE clear, well-structured answer to the question above by synthesising the research parts below. Rules: stay strictly on the question's topic; keep every substantive finding; remove repetition; use headings where helpful; prefer points that more than one part supports; and KEEP the source citations/URLs from the parts inline so claims stay traceable. If the parts disagree or a key point is unverified, say so briefly.\n\n${parts.map((p, i) => `--- Research part ${i + 1} ---\n${p}`).join('\n\n')}`,
+      1600,
       'flow-merge',
     );
     return out || parts.join('\n\n');
