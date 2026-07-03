@@ -512,7 +512,18 @@ function PublicRagMcpCard() {
         <h2 className="flex items-center gap-2 font-semibold"><Boxes size={18} className="text-indigo-500" /> RAG server for other agents</h2>
         <Switch checked={cfg.enabled} onChange={setEnabled} disabled={busy} />
       </div>
-      <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">Let outside agents (Claude Desktop, ChatGPT, n8n…) <b>search your brain</b> over HTTPS — read-only. Keep the token secret; anyone with it can search your memory. {cfg.enabled ? '' : 'Currently off — turn it on to allow connections.'}</p>
+      <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">Let outside agents (Claude, ChatGPT, n8n…) <b>search your brain</b> over HTTPS — read-only. Keep the token secret; anyone with it can search your memory. {cfg.enabled ? '' : 'Currently off — turn it on to allow connections.'}</p>
+
+      {/* Web connector via OAuth (BEA-759) */}
+      <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+        <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Add to Claude Chat (web)</div>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-300">
+          <li>In Claude, open <b>Settings → Connectors → Add custom connector</b>.</li>
+          <li>Paste the <b>Endpoint URL</b> (below). Leave the OAuth Client&nbsp;ID <b>blank</b>.</li>
+          <li>Click <b>Connect</b> → sign in with your My Brain email &amp; password → <b>Allow</b>.</li>
+        </ol>
+        <p className="mt-2 text-xs text-emerald-700/70 dark:text-emerald-300/70">It signs in with your My Brain login — no token to paste. Make sure this server is turned on (toggle above).</p>
+      </div>
 
       <label className="mb-1 block text-xs text-zinc-500">Endpoint</label>
       <div className="mb-3 flex gap-2">
@@ -533,7 +544,7 @@ function PublicRagMcpCard() {
         ))}
       </ul>
 
-      <label className="mb-1 block text-xs text-zinc-500">Connect (paste into the agent's MCP config)</label>
+      <label className="mb-1 block text-xs text-zinc-500">Or use a token — Claude Code, Desktop &amp; API (paste into the agent's MCP config)</label>
       <pre className="overflow-x-auto whitespace-pre rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950">{snippet}</pre>
       <div className="mt-4 flex justify-between">
         <button onClick={() => copy(snippet, 'Config')} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Copy config</button>
