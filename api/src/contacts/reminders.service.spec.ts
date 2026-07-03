@@ -163,7 +163,7 @@ describe('RemindersService pause/resume (BEA-720)', () => {
     const prisma: any = {
       reminder: {
         findUnique: async () => cur,
-        update: async ({ data }: any) => { calls.updateData = data; cur = { ...cur, ...data }; return cur; },
+        update: async ({ data }: any) => { calls.updateData = { ...calls.updateData, ...data }; cur = { ...cur, ...data }; return cur; }, // merge across the status + reseed(armedDay) updates
       },
       reminderSend: {
         deleteMany: async () => { calls.deleteMany++; return {}; },

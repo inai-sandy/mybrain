@@ -830,11 +830,15 @@ model Reminder {
   taskId       String? // the Task this chases (status stays the user's to close)
   subject      String? // short "what you're chasing" for the template {{2}} (task title if linked)
   message      String // the free-text we send in the 24h window (in the user's voice)
+  notes        String? // standing context Sandeep adds; fed into the agent's replies (BEA-765)
   count        Int               @default(1) // how many times today (1-5)
   times        String            @default("[]") // JSON array of ISO datetimes to send at
   status       String            @default("active") // active | done | stopped
   feedback     String? // captured result once the contact says it's done
   lastFiredKey String? // dedup key for the daily scheduler
+  armedDay     String? // local day (YYYY-MM-DD) this reminder was armed/seeded for — one-day lifecycle (BEA-764)
+  pausedAuto   Boolean           @default(false) // true when auto-paused at day rollover (vs paused by the user)
+  needsOwner   Boolean           @default(false) // agent couldn't answer → flagged for Sandeep to reply (BEA-766)
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   sends        ReminderSend[]

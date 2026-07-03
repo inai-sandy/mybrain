@@ -73,6 +73,11 @@ export class RemindersController {
     return this.reminders.sendManual(id, body?.body || '');
   }
 
+  @Post('resume-today')
+  resumeToday() {
+    return this.reminders.resumeToday();
+  }
+
   @Post(':id/pause')
   pause(@Param('id') id: string) {
     return this.reminders.pause(id);

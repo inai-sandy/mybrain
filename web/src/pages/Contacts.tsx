@@ -4,7 +4,7 @@ import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, C
 import { useToast } from '../ui/Toast';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
-type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; count: number; times: string[]; status: string; contact?: Contact; task?: { id: string; title: string } | null };
+type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; contact?: Contact; task?: { id: string; title: string } | null };
 
 const PAGE_SIZE = 20;
 
@@ -166,7 +166,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
                         <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                           <div className="flex items-center gap-2">
                             <span className="truncate font-medium">{rm.subject?.trim() || rm.task?.title || 'Reminder'}</span>
-                            <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{st.label}</span>
+                            <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
                           <div className="mt-1.5 flex flex-wrap gap-1">
@@ -327,11 +327,16 @@ function ContactForm({ contact, initialName, onClose, onSaved }: { contact: Cont
 
 // ---- Reminders tab (BEA-720) ----
 const REM_STATUS: Record<string, { label: string; cls: string; icon: typeof Clock }> = {
-  active: { label: 'Active', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400', icon: Clock },
-  paused: { label: 'Paused', cls: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300', icon: Pause },
+  active: { label: 'Active · sends today', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300', icon: Clock },
+  paused: { label: 'Paused', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', icon: Pause },
   done: { label: 'Done', cls: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300', icon: CheckCircle2 },
-  stopped: { label: 'Stopped', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300', icon: X },
+  stopped: { label: 'Stopped', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400', icon: X },
 };
+/** The status pill label, with the one-day nuance for auto-paused reminders. (BEA-764) */
+function remStatusLabel(rm: { status: string; pausedAuto?: boolean }): string {
+  if (rm.status === 'paused' && rm.pausedAuto) return 'Paused · new day';
+  return REM_STATUS[rm.status]?.label || rm.status;
+}
 
 // Three named send slots the user toggles on/off and can re-time. (BEA-755)
 type Slot = { key: string; label: string; time: string; on: boolean };
@@ -390,6 +395,16 @@ function RemindersTab() {
     } catch { toast('error', 'Could not update'); }
   }
 
+  async function resumeToday() {
+    try {
+      const r = await fetch('/api/reminders/resume-today', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error();
+      toast('success', d.armed ? `Re-armed ${d.armed} reminder${d.armed === 1 ? '' : 's'} for today` : 'Nothing paused to re-arm');
+      load();
+    } catch { toast('error', 'Could not re-arm'); }
+  }
+
   async function add(s: Suggestion) {
     if (s.noNumber) { setAddNumberFor(s.task.party); return; } // add a number first
     setDrafting(s.task.id);
@@ -432,7 +447,12 @@ function RemindersTab() {
         </section>
       )}
 
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Your reminders</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Your reminders</h3>
+        {(reminders || []).some((r) => r.status === 'paused') && (
+          <button onClick={resumeToday} title="Re-arm all paused reminders to send today" className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500"><Play className="h-3.5 w-3.5" />Send today's chases</button>
+        )}
+      </div>
       {reminders === null ? (
         <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
       ) : reminders.length === 0 ? (
@@ -447,7 +467,7 @@ function RemindersTab() {
                   <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
-                      <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{st.label}</span>
+                      <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>
                     </div>
                     {rm.task && <div className="text-xs text-zinc-400">re: {rm.task.title}</div>}
                     <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>

@@ -13,6 +13,30 @@ describe('PostboxService.renderReminderTemplate (BEA-753)', () => {
   });
 });
 
+describe('rollDay — one-day auto-pause (BEA-764)', () => {
+  it('pauses active reminders armed on a past day (or never armed) and clears their queued sends', async () => {
+    const updates: any[] = [];
+    let deleted = 0;
+    const prisma: any = {
+      reminder: {
+        // real prisma applies the where; the mock returns the stale set it would match
+        findMany: async () => [
+          { id: 'r1', status: 'active', armedDay: null },
+          { id: 'r2', status: 'active', armedDay: '2000-01-01' },
+        ],
+        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
+      },
+      reminderSend: { deleteMany: async () => { deleted++; return {}; } },
+    };
+    await new ReminderSenderService(prisma, { isConfigured: () => false } as any).rollDay();
+    expect(updates).toEqual([
+      { id: 'r1', status: 'paused', pausedAuto: true },
+      { id: 'r2', status: 'paused', pausedAuto: true },
+    ]);
+    expect(deleted).toBe(2); // stale queued sends cleared for each
+  });
+});
+
 describe('joinSubjects (BEA-742)', () => {
   it('joins subjects naturally', () => {
     expect(joinSubjects(['the videos'])).toBe('the videos');
@@ -25,7 +49,12 @@ describe('joinSubjects (BEA-742)', () => {
 function makePrisma(sends: any[], inboundCount = 0) {
   const state: any = { updates: [] as any[], msgs: [] as any[] };
   const prisma: any = {
-    reminderSend: { findMany: async () => sends, update: async ({ where, data }: any) => state.updates.push({ id: where.id, ...data }) },
+    reminder: { findMany: async () => [], update: async () => ({}) }, // rollDay() — no stale reminders in these tests
+    reminderSend: {
+      findMany: async ({ where }: any = {}) => (where?.status === 'queued' && where?.at ? sends : []), // only the send-path query returns sends
+      update: async ({ where, data }: any) => state.updates.push({ id: where.id, ...data }),
+      deleteMany: async () => ({}),
+    },
     reminderMessage: { count: async () => inboundCount, create: async ({ data }: any) => state.msgs.push(data) },
     task: { findUnique: async () => null },
   };
@@ -69,7 +98,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
 
   it('does nothing (no DB query) when Postbox is not configured', async () => {
     let queried = false;
-    const prisma: any = { reminderSend: { findMany: async () => { queried = true; return []; } } };
+    const prisma: any = { reminder: { findMany: async () => [], update: async () => ({}) }, reminderSend: { findMany: async () => { queried = true; return []; }, deleteMany: async () => ({}) } };
     await new ReminderSenderService(prisma, { isConfigured: () => false } as any).tick();
     expect(queried).toBe(false);
   });

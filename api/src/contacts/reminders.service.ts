@@ -364,11 +364,29 @@ export class RemindersService {
     return { reminders: rows.map((r) => ({ ...this.shape(r), task: r.taskId ? taskMap.get(r.taskId) || null : null })) };
   }
 
-  /** Replace a reminder's queued sends with fresh ones for the given times. */
+  /** The user's local day key (YYYY-MM-DD) — reminders live for exactly one such day. (BEA-764) */
+  todayKey(): string {
+    return new Date(Date.now() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);
+  }
+
+  /** Replace a reminder's queued sends with fresh ones for today, and (re)arm it for THIS day. (BEA-764) */
   private async reseed(reminderId: string, times: string[]) {
     await this.prisma.reminderSend.deleteMany({ where: { reminderId, status: 'queued' } });
     const sends = sendsForToday(times);
     if (sends.length) await this.prisma.reminderSend.createMany({ data: sends.map((at) => ({ reminderId, at })) });
+    await this.prisma.reminder.update({ where: { id: reminderId }, data: { armedDay: this.todayKey(), pausedAuto: false } }).catch(() => undefined);
+  }
+
+  /** Re-arm every paused reminder for today (the "Send today's chases" button). (BEA-764) */
+  async resumeToday() {
+    const paused = await this.prisma.reminder.findMany({ where: { status: 'paused' } });
+    let armed = 0;
+    for (const r of paused) {
+      await this.prisma.reminder.update({ where: { id: r.id }, data: { status: 'active' } });
+      await this.reseed(r.id, this.parse(r.times));
+      armed++;
+    }
+    return { armed };
   }
 
   async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; count?: number; times?: string[] }) {

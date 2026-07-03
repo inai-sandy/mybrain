@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
+import { REMINDER_TZ_OFFSET } from './reminders.service';
 
 /** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
 export function joinSubjects(subjects: string[]): string {
@@ -45,7 +46,20 @@ export class ReminderSenderService implements OnModuleInit {
     return 'this';
   }
 
+  /** One-day lifecycle: at each new local day, auto-pause reminders armed on an earlier day so
+   *  "active" always means "will send today". They stay put until the user re-arms them. (BEA-764) */
+  async rollDay() {
+    const todayKey = new Date(Date.now() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);
+    const stale = await this.prisma.reminder.findMany({ where: { status: 'active', OR: [{ armedDay: null }, { armedDay: { lt: todayKey } }] } });
+    for (const r of stale) {
+      await this.prisma.reminder.update({ where: { id: r.id }, data: { status: 'paused', pausedAuto: true } }).catch(() => undefined);
+      await this.prisma.reminderSend.deleteMany({ where: { reminderId: r.id, status: 'queued' } }).catch(() => undefined);
+    }
+    if (stale.length) this.log.log(`auto-paused ${stale.length} reminder(s) at day rollover`);
+  }
+
   async tick() {
+    await this.rollDay(); // roll the day first, so nothing armed for a past day fires
     if (!this.postbox.isConfigured()) return; // WhatsApp not wired yet — leave sends queued
     const due = await this.prisma.reminderSend.findMany({
       where: { status: 'queued', at: { lte: new Date() } },
