@@ -109,8 +109,11 @@ export class MeetingsService {
           actionItems: JSON.stringify(ai.actionItems || []),
         },
       });
-      // Optionally free the recording right after a successful transcription.
-      if (await this.getAutoDeleteAudio()) await this.deleteAudio(id);
+      // Optionally free the recording — but ONLY when the summary also succeeded. summarize() returns
+      // an empty summary on an LLM hiccup (it never throws); deleting the audio then left the meeting
+      // permanently without a summary and no way to retry (transcribe needs the audio). (BEA-805)
+      const summaryOk = !!(ai.summary && ai.summary.trim());
+      if (summaryOk && (await this.getAutoDeleteAudio())) await this.deleteAudio(id);
       return this.get(id);
     } catch (e) {
       this.logger.warn(`Meeting transcribe failed (${id}): ${String((e as Error)?.message || e)}`);
