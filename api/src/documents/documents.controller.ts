@@ -111,8 +111,7 @@ export class DocumentsController {
   }
 
   /** Owner: stream a file from an extracted ZIP site (entry when no path). (BEA-587) */
-  @Get(':id/site')
-  @Get(':id/site/*')
+  @Get([':id/site', ':id/site/*']) // one decorator with both paths — stacking two @Get overwrote the first, so sub-assets 404'd (BEA-802)
   async siteFile(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const rest = (req.params as any)[0] || '';
     const f = await this.docs.siteFile(id, rest);
@@ -210,8 +209,7 @@ export class DocumentsController {
 
   /** Public: stream a file from a SHARED ZIP site (entry when no path). (BEA-587) */
   @Public()
-  @Get('public/:slug/site')
-  @Get('public/:slug/site/*')
+  @Get(['public/:slug/site', 'public/:slug/site/*']) // combined so sub-assets register too (BEA-802)
   async publicSiteFile(@Param('slug') slug: string, @Req() req: Request, @Res() res: Response) {
     const rest = (req.params as any)[0] || '';
     const f = await this.docs.sharedSiteFile(slug, rest);
