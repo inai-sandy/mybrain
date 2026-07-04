@@ -212,4 +212,22 @@ describe('TasksService', () => {
     // never rolls same-day or backwards
     expect((await svc.rollDayForward('2026-06-13', '2026-06-13')).rolled).toBe(0);
   });
+
+  it('clears category / estimate / note when the edit sends null (BEA-782)', async () => {
+    const { svc, tasks } = makeService(null);
+    const created = await svc.create({ title: 'Wire the panel', category: 'Beakn', estimateMin: 45, note: 'ask Srikar first' });
+    expect(created).toMatchObject({ category: 'Beakn', estimateMin: 45, note: 'ask Srikar first' });
+
+    // the form now sends null (not undefined) for a cleared field
+    await svc.update(created!.id, { category: null as any, estimateMin: null as any, note: null as any });
+    const after = tasks.find((t) => t.id === created!.id);
+    expect(after.category).toBeNull();
+    expect(after.estimateMin).toBeNull();
+    expect(after.note).toBeNull();
+
+    // an ABSENT field (undefined) must still keep the old value
+    await svc.update(created!.id, { title: 'Wire the panel v2' });
+    expect(after.title).toBe('Wire the panel v2');
+    expect(after.category).toBeNull(); // untouched
+  });
 });

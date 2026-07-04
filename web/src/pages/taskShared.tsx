@@ -319,11 +319,13 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
     setBusy(true);
     const body = {
       title,
-      category: category.trim() || undefined,
+      // null (not undefined) so JSON keeps the key — the server clears the field on null
+      // but "keeps the old value" when the key is absent. (BEA-782)
+      category: category.trim() || null,
       priority,
-      estimateMin: estimate ? Number(estimate) : undefined,
+      estimateMin: estimate ? Number(estimate) : null,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      note: note.trim() || undefined,
+      note: note.trim() || null,
       pinned,
       sphere,
       reminderCount: reminders,
