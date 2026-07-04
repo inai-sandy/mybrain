@@ -66,6 +66,23 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     expect(ownerPing.body).toContain('needs you');
   });
 
+  it('serializes concurrent replies for the same contact — no double reply (BEA-788)', async () => {
+    let active = 0, maxActive = 0;
+    const prisma: any = {
+      contact: { findUnique: async () => ({ id: 'c1', name: 'X', whatsappNumber: '919' }) },
+      reminder: { findMany: async () => [{ id: 'r1', status: 'active', subject: 'x', taskId: null }], update: async () => {}, updateMany: async () => {} },
+      reminderMessage: { findMany: async () => [{ direction: 'in', body: 'hi' }], create: async () => {} },
+      setting: { findUnique: async () => ({ value: '919885698665' }) },
+      task: { findUnique: async () => null },
+    };
+    const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
+    // the LLM turn tracks how many run at once
+    const remindersSvc: any = { voiceComplete: async () => { active++; maxActive = Math.max(maxActive, active); await new Promise((r) => setTimeout(r, 20)); active--; return '{"send":true,"reply":"ok","items":[]}'; } };
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc);
+    await Promise.all([svc.onContactReply('c1'), svc.onContactReply('c1')]);
+    expect(maxActive).toBe(1); // the two turns never overlapped
+  });
+
   it('skips a reply identical to one already sent (no repeats)', async () => {
     const messages = [{ direction: 'out', body: 'Great, thanks!' }, { direction: 'in', body: 'ok' }];
     const { svc, state } = setup('{"send":true,"reply":"Great,  THANKS!","items":[]}', { messages });

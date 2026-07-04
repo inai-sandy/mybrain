@@ -43,7 +43,21 @@ export class ReminderAgentService {
    * Handle an inbound reply for a whole CONTACT: one reply covering all their open reminders,
    * closing only the item(s) they actually addressed (partial replies keep the rest open). (BEA-742)
    */
+  /** Per-contact serialization so a burst of replies runs the agent one turn at a time. (BEA-788) */
+  private replyChains = new Map<string, Promise<void>>();
+
   async onContactReply(contactId: string): Promise<void> {
+    // A contact often sends 2-3 messages a couple of seconds apart. Running the agent concurrently
+    // makes it send two replies (neither turn sees the other's outbound row). Chain them per contact
+    // so each turn sees the previous reply and de-dupes correctly. (BEA-788)
+    const prev = this.replyChains.get(contactId) ?? Promise.resolve();
+    const next = prev.catch(() => undefined).then(() => this.processContactReply(contactId));
+    this.replyChains.set(contactId, next);
+    next.catch(() => undefined).finally(() => { if (this.replyChains.get(contactId) === next) this.replyChains.delete(contactId); });
+    return next;
+  }
+
+  private async processContactReply(contactId: string): Promise<void> {
     const contact: any = await this.prisma.contact.findUnique({ where: { id: contactId } });
     if (!contact) return;
     const number = (contact.whatsappNumber || '').replace(/[^\d]/g, '');
