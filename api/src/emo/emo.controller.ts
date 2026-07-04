@@ -6,8 +6,9 @@ import { EmoCardsService, EmoLane, EmoStatus } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
+import { EmoTaskService } from './emo-task.service';
 
-/** EMO section API (862/863/864/869) — feed, transcript router, capture upload, and lane dispatch. */
+/** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
 export class EmoController {
   constructor(
@@ -15,6 +16,7 @@ export class EmoController {
     private readonly router: EmoRouterService,
     private readonly capture_: EmoCaptureService,
     private readonly search: EmoSearchService,
+    private readonly taskLane: EmoTaskService,
   ) {}
 
   // The seam for a transcript already in hand (e.g. the device, or tests): transcript → cards.
@@ -61,8 +63,9 @@ export class EmoController {
   @Post('cards/:id/answer')
   async answer(@Param('id') id: string, @Body() body: { answer?: string }) {
     const res = await this.cards.answer(id, (body?.answer ?? '').toString());
-    // Search: the answer completes the clarify → run the agent (background; card is cooking meanwhile).
+    // The answer completes the clarify → hand the card back to its lane.
     if (res.ok && res.card?.lane === 'search') void this.search.run(id).catch(() => undefined);
+    else if (res.ok && res.card?.lane === 'task') void this.taskLane.handle(id).catch(() => undefined);
     return res;
   }
 

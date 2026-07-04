@@ -10,6 +10,7 @@ function makeCards() {
 }
 
 const searchStub: any = { clarify: jest.fn(async () => undefined) };
+const taskStub: any = { handle: jest.fn(async () => undefined) };
 describe('EmoRouterService (BEA-863)', () => {
   it('splits one transcript into multiple cards across lanes', async () => {
     const llm: any = { complete: async () => JSON.stringify({ segments: [
@@ -18,7 +19,7 @@ describe('EmoRouterService (BEA-863)', () => {
       { lane: 'search', summary: 'Search: CCTV market', text: 'what do we have on the cctv market' },
     ] }) };
     const { svc, created } = makeCards();
-    const out = await new EmoRouterService(llm, svc, searchStub).route('… long dump …', { source: 'browser' });
+    const out = await new EmoRouterService(llm, svc, searchStub, taskStub).route('… long dump …', { source: 'browser' });
     expect(out.cards).toHaveLength(3);
     expect(created.map((c) => c.lane)).toEqual(['task', 'reminder', 'search']);
     // terminal vs actionable status
@@ -30,10 +31,10 @@ describe('EmoRouterService (BEA-863)', () => {
     const llm: any = { complete: async () => JSON.stringify({ segments: [{ lane: 'story', summary: 'Met the vendor', text: 'met the vendor, felt good' }] }) };
     const { created } = makeCards();
     const { svc } = makeCards();
-    await new EmoRouterService(llm, svc, searchStub).route('met the vendor, felt good');
+    await new EmoRouterService(llm, svc, searchStub, taskStub).route('met the vendor, felt good');
     // (use svc's own created via a fresh pair)
     const pair = makeCards();
-    await new EmoRouterService(llm, pair.svc, searchStub).route('met the vendor, felt good');
+    await new EmoRouterService(llm, pair.svc, searchStub, taskStub).route('met the vendor, felt good');
     expect(pair.created[0].lane).toBe('story');
     expect(pair.created[0].status).toBe('done');
     void created;
@@ -42,7 +43,7 @@ describe('EmoRouterService (BEA-863)', () => {
   it('files a fallback note card when the LLM output is unusable — nothing is lost (BEA-863)', async () => {
     const llm: any = { complete: async () => 'sorry, I cannot help with that' };
     const { svc, created } = makeCards();
-    const out = await new EmoRouterService(llm, svc, searchStub).route('some rambling voice note');
+    const out = await new EmoRouterService(llm, svc, searchStub, taskStub).route('some rambling voice note');
     expect(out.cards).toHaveLength(1);
     expect(created[0].lane).toBe('note');
     expect(created[0].rawTranscript).toBe('some rambling voice note'); // the whole thing kept
@@ -51,6 +52,6 @@ describe('EmoRouterService (BEA-863)', () => {
   it('returns nothing for an empty transcript', async () => {
     const llm: any = { complete: async () => '' };
     const { svc } = makeCards();
-    expect((await new EmoRouterService(llm, svc, searchStub).route('   ')).cards).toHaveLength(0);
+    expect((await new EmoRouterService(llm, svc, searchStub, taskStub).route('   ')).cards).toHaveLength(0);
   });
 });

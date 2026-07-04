@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
 import { EmoCardsService, EmoLane } from './emo-cards.service';
 import { EmoSearchService } from './emo-search.service';
+import { EmoTaskService } from './emo-task.service';
 
 type Segment = { lane: EmoLane; summary: string; text: string };
 
@@ -40,6 +41,7 @@ export class EmoRouterService {
     private readonly llm: LlmService,
     private readonly cards: EmoCardsService,
     private readonly search: EmoSearchService,
+    private readonly taskLane: EmoTaskService,
   ) {}
 
   private parseSegments(raw: string | null, transcript: string): Segment[] {
@@ -83,8 +85,9 @@ export class EmoRouterService {
       }).catch((e) => { this.log.warn(`card create failed (${s.lane}): ${e?.message || e}`); return null; });
       if (card) {
         cards.push(card);
-        // Hand each card to its lane. Search always clarifies first (BEA-869). Other lanes plug in here.
+        // Hand each card to its lane. Search always clarifies first (869); Tasks creates real tasks (866).
         if (card.lane === 'search') void this.search.clarify(card.id).catch(() => undefined);
+        else if (card.lane === 'task') void this.taskLane.handle(card.id).catch(() => undefined);
       }
     }
     return { cards };
