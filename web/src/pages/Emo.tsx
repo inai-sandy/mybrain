@@ -262,6 +262,23 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
 
           {card.detail && <div className="mb-4 whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">{card.detail}</div>}
 
+          {/* Go deeper — quick research → a saved deep-research flow (BEA-871) */}
+          {card.lane === 'research' && card.status === 'done' && !card.links.some((l) => l.kind === 'flow') && (
+            <button
+              onClick={async () => {
+                setBusy(true);
+                const r = await fetch(`/api/emo/cards/${card.id}/go-deeper`, { method: 'POST' }).catch(() => null);
+                setBusy(false);
+                if (r?.ok) { toast('success', 'Deep research flow built and saved.'); onChanged(); close(); }
+                else toast('error', 'Could not build the deep flow.');
+              }}
+              disabled={busy}
+              className="mb-4 inline-flex items-center gap-1.5 rounded-lg border border-indigo-300 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+            >
+              🔎 Go deeper — build a research flow
+            </button>
+          )}
+
           {card.rawTranscript && (
             <details className="text-sm">
               <summary className="cursor-pointer text-xs font-medium text-zinc-500">What you said (transcript)</summary>

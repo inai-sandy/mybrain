@@ -29,6 +29,13 @@ export class EmoController {
     return this.story.mergeToday();
   }
 
+  // Quick Research (EMO 11): "Go deeper" → turn a quick card into a saved deep-research flow.
+  @Post('cards/:id/go-deeper')
+  async goDeeper(@Param('id') id: string) {
+    await this.researchLane.goDeeper(id);
+    return this.cards.get(id);
+  }
+
   // The seam for a transcript already in hand (e.g. the device, or tests): transcript → cards.
   @Post('capture')
   capture(@Body() body: { transcript?: string; source?: string; audioPath?: string }) {
