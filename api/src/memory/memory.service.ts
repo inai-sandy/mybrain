@@ -619,12 +619,16 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
             this.rechunk.done++;
           }
         }
+      } catch (e: any) {
+        // Without this catch, a throw from the outer findMany/count (e.g. a DB blip) rejects the
+        // fire-and-forget IIFE — an unhandled rejection that crashes the whole app. (BEA-784)
+        this.log.warn(`rechunk aborted: ${e?.message || e}`);
       } finally {
         this.rechunk.running = false;
         this.rechunk.finishedAt = Date.now();
         this.log.log(`rechunk done: ${this.rechunk.rechunked} re-chunked, ${this.rechunk.skipped} skipped`);
       }
-    })();
+    })().catch(() => undefined); // belt-and-braces: never let this background job reject unhandled
 
     return { started: true, total, running: true };
   }

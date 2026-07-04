@@ -436,4 +436,27 @@ describe('MemoryService.startRechunk (BEA-337)', () => {
     expect(items[0].ragId).toBe('new-rag'); // relinked
     expect(svc.rechunkStatus().rechunked).toBe(1);
   });
+
+  it('a DB error during the background job is contained — no unhandled rejection / crash (BEA-784)', async () => {
+    const prisma: any = {
+      item: { count: async () => 1, findMany: async () => { throw new Error('db blip'); } },
+      idea: { count: async () => 0, findMany: async () => [] },
+      meeting: { count: async () => 0, findMany: async () => [] },
+    };
+    const svc = new MemoryService(prisma, { save: jest.fn() } as any, { save: jest.fn() } as any);
+
+    // guard: fail the test if the background job rejects unhandled
+    let unhandled: any = null;
+    const onUnhandled = (e: any) => { unhandled = e; };
+    process.on('unhandledRejection', onUnhandled);
+
+    const res = await svc.startRechunk();
+    expect(res.started).toBe(true);
+    for (let i = 0; i < 100 && svc.rechunkStatus().running; i++) await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 20)); // let any stray rejection surface
+
+    process.off('unhandledRejection', onUnhandled);
+    expect(unhandled).toBeNull();                 // did not crash the process
+    expect(svc.rechunkStatus().running).toBe(false); // status reset cleanly
+  });
 });
