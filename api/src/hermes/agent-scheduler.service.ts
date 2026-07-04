@@ -53,19 +53,25 @@ export class AgentScheduler implements OnModuleInit, OnModuleDestroy {
 
   async tick(now: Date = new Date()): Promise<number> {
     const tz = await this.tz();
-    const { dayKey, hm, dow } = this.localParts(now, tz);
     const agents = await this.agent.listSchedulable();
+    // Look back a few minutes so a drifted/stalled 60s timer can't skip a slot; lastFiredKey still
+    // dedups per (day,minute) so each slot fires at most once. (BEA-798)
+    const slots = [2, 1, 0].map((back) => this.localParts(new Date(now.getTime() - back * 60_000), tz));
     let fired = 0;
     for (const a of agents) {
-      const key = `${dayKey}:${hm}`;
-      if (a.lastFiredKey === key) continue;
-      if (!this.matches(a.schedule as Sched, hm, dow)) continue;
-      await this.agent.markFired(a.id, key);
-      try {
-        await this.bridge.startRun({ prompt: a.prompt, title: a.name, agentId: a.id, saveCollectionId: a.collectionId });
-        fired++;
-      } catch (e: any) {
-        this.log.error(`scheduled agent ${a.id} failed to start: ${e?.message || e}`);
+      for (const { dayKey, hm, dow } of slots) {
+        const key = `${dayKey}:${hm}`;
+        if (a.lastFiredKey === key) continue;
+        if (!this.matches(a.schedule as Sched, hm, dow)) continue;
+        await this.agent.markFired(a.id, key);
+        a.lastFiredKey = key;
+        try {
+          await this.bridge.startRun({ prompt: a.prompt, title: a.name, agentId: a.id, saveCollectionId: a.collectionId });
+          fired++;
+        } catch (e: any) {
+          this.log.error(`scheduled agent ${a.id} failed to start: ${e?.message || e}`);
+        }
+        break;
       }
     }
     return fired;

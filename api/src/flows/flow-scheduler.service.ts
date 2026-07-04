@@ -53,19 +53,26 @@ export class FlowScheduler implements OnModuleInit, OnModuleDestroy {
 
   async tick(now: Date = new Date()): Promise<number> {
     const tz = await this.tz();
-    const { dayKey, hm, dow } = this.localParts(now, tz);
     const flows = await this.flows.listSchedulable();
+    // Look back over the last few minutes so a drifted/stalled 60s timer can't skip a slot entirely
+    // (a tick at 09:00:59.9 then 09:02:00.1 would otherwise miss 09:01). The per-(day,minute)
+    // lastFiredKey dedup still guarantees each slot fires at most once. (BEA-798)
+    const slots = [2, 1, 0].map((back) => this.localParts(new Date(now.getTime() - back * 60_000), tz));
     let fired = 0;
     for (const f of flows) {
-      const key = `${dayKey}:${hm}`;
-      if (f.lastFiredKey === key) continue;
-      if (!this.matches(f.schedule as Sched, hm, dow)) continue;
-      await this.flows.markFired(f.id, key);
-      try {
-        await this.runner.start(f.id);
-        fired++;
-      } catch (e: any) {
-        this.log.error(`scheduled flow ${f.id} failed to start: ${e?.message || e}`);
+      for (const { dayKey, hm, dow } of slots) {
+        const key = `${dayKey}:${hm}`;
+        if (f.lastFiredKey === key) continue;
+        if (!this.matches(f.schedule as Sched, hm, dow)) continue;
+        await this.flows.markFired(f.id, key);
+        f.lastFiredKey = key; // don't fire another slot for this flow in the same tick
+        try {
+          await this.runner.start(f.id);
+          fired++;
+        } catch (e: any) {
+          this.log.error(`scheduled flow ${f.id} failed to start: ${e?.message || e}`);
+        }
+        break; // at most one slot per flow per tick
       }
     }
     return fired;
