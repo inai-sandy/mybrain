@@ -420,6 +420,16 @@ describe('DailyService', () => {
       expect(tasks.find((t) => t.id === 'tt').day).toBe(tomorrow);
     });
 
+    it('does not mark the morning wrap done if wrapYesterday throws (BEA-826)', async () => {
+      const { svc } = makeService();
+      jest.spyOn(svc as any, 'localHM').mockReturnValue('23:00'); // past the 10:00 checkpoint
+      jest.spyOn(svc as any, 'dayKey').mockReturnValue('2026-07-02');
+      jest.spyOn(svc as any, 'wrapYesterday').mockRejectedValueOnce(new Error('db down'));
+      const setSpy = jest.spyOn(svc as any, 'setSetting');
+      await expect(svc.morningWrapTick()).rejects.toThrow();
+      expect(setSpy).not.toHaveBeenCalledWith('daily.lastMorningWrap', '2026-07-02'); // guard NOT set → will retry
+    });
+
     it('wrapUp of an OLD day rolls tasks to today, not onto the sealed day+1 (BEA-781)', async () => {
       const { svc, tasks } = makeService({ llmText: '{}' });
       const today = istToday();

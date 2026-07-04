@@ -601,8 +601,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const today = this.dayKey(tz);
     const seen = await this.prisma.setting.findUnique({ where: { key: 'daily.lastMorningWrap' } });
     if (seen?.value === today) return; // once per day
-    await this.setSetting('daily.lastMorningWrap', today);
+    // Mark done ONLY after a successful pass — setting the guard first meant a failed wrap left
+    // yesterday permanently unclosed (no summary, no Lab learn) and never retried. (BEA-826)
     await this.wrapYesterday(today);
+    await this.setSetting('daily.lastMorningWrap', today);
   }
 
   /** Close yesterday if its story is in; otherwise flag a single Telegram reminder. Clock-independent. (BEA-467) */
