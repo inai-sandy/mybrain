@@ -208,16 +208,18 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const [editing, setEditing] = useState<Contact | null>(null);
   const [showForm, setShowForm] = useState(false);
 
+  const reqId = useRef(0);
   function load() {
-    setContacts((c) => c); // keep current while refreshing
+    const my = ++reqId.current; // latest-wins: ignore a slow response once a newer request started (BEA-814)
     fetch(`/api/contacts?q=${encodeURIComponent(q)}&page=${page}&pageSize=${PAGE_SIZE}`)
       .then((r) => r.json())
-      .then((d) => { setContacts(d.contacts || []); setTotal(d.total || 0); })
-      .catch(() => setContacts([]));
+      .then((d) => { if (my !== reqId.current) return; setContacts(d.contacts || []); setTotal(d.total || 0); })
+      .catch(() => { if (my === reqId.current) setContacts([]); });
   }
-  // debounce search; reset to page 1 on query change
-  useEffect(() => { const t = setTimeout(() => { setPage(1); }, 250); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [q, page]);
+  // reset to page 1 when the query changes; debounce the actual fetch so typing doesn't fire one
+  // request per keystroke (and stale ones can't overwrite newer via the latest-wins guard). (BEA-814)
+  useEffect(() => { setPage(1); }, [q]);
+  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, page]);
 
   async function del(c: Contact) {
     if (!window.confirm(`Delete "${c.name}"? Any reminders to them are removed too.`)) return;
