@@ -175,6 +175,7 @@ export function Agents() {
   const [title, setTitle] = useState('');
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [starting, setStarting] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null); // guard a saved-agent Run against double-tap (BEA-819)
   const [saveResult, setSaveResult] = useState(true);
   const [depth, setDepth] = useState<Depth>('standard');
   const [agents, setAgents] = useState<any[] | null>(null);
@@ -197,12 +198,14 @@ export function Agents() {
   }, []);
 
   async function runSaved(id: string) {
+    if (runningId) return; // already starting a run — ignore the double-tap (BEA-819)
+    setRunningId(id);
     try {
       const r = await fetch(`/api/agent/agents/${id}/run`, { method: 'POST' });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not start');
       const row = await r.json();
       nav(`/agent/runs/${row.id}`);
-    } catch (e: any) { toast('error', e?.message || 'Could not run that agent'); }
+    } catch (e: any) { toast('error', e?.message || 'Could not run that agent'); setRunningId(null); }
   }
   async function toggleSaved(a: any) {
     await fetch(`/api/agent/agents/${a.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: !a.enabled }) });
@@ -420,7 +423,7 @@ export function Agents() {
                         {!a.enabled && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">paused</span>}
                       </div>
                       <div className="mt-3 flex items-center gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
-                        <button onClick={(e) => { e.stopPropagation(); runSaved(a.id); }} title="Run now" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"><Play className="h-3.5 w-3.5" />Run</button>
+                        <button onClick={(e) => { e.stopPropagation(); runSaved(a.id); }} disabled={!!runningId} title="Run now" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-500/10">{runningId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}Run</button>
                         <button onClick={(e) => { e.stopPropagation(); toggleSaved(a); }} title={a.enabled ? 'Pause schedule' : 'Resume schedule'} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Power className="h-3.5 w-3.5" /></button>
                         <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete "${a.name}"?`)) delSaved(a.id); }} title="Delete" className="ml-auto rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>
                       </div>
