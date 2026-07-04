@@ -1,7 +1,5 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Response } from 'express';
-import { createReadStream } from 'fs';
 import { EmoCardsService, EmoLane, EmoStatus } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
@@ -27,21 +25,12 @@ export class EmoController {
     return this.router.route(transcript, { source: body?.source, audioPath: body?.audioPath });
   }
 
-  // Browser capture (EMO 4): upload a recording → save + batch-transcribe → router → cards.
+  // Browser capture (EMO 4): upload a recording → transcribe in memory → router → cards (audio not kept).
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async upload(@UploadedFile() file: any) {
     if (!file?.buffer?.length) throw new BadRequestException('No recording uploaded');
     return this.capture_.capture(file.buffer, file.originalname || 'recording.webm', file.mimetype || 'audio/webm', 'emo-voice');
-  }
-
-  // Stream a card's stored recording (the receipt) for playback.
-  @Get('cards/:id/audio')
-  async audio(@Param('id') id: string, @Res() res: Response) {
-    const found = await this.capture_.audioFor(id);
-    if (!found) throw new NotFoundException('No recording for this card');
-    res.setHeader('Content-Type', 'audio/webm');
-    createReadStream(found.path).on('error', () => res.status(404).end()).pipe(res);
   }
 
   @Get('cards')

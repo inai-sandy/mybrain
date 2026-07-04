@@ -220,9 +220,6 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
             <button onClick={close} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
           </div>
 
-          {/* the recording — the receipt */}
-          {card.audioPath && <audio controls preload="none" src={`/api/emo/cards/${card.id}/audio`} className="mb-4 w-full" />}
-
           {/* Needs-you: the on-card clarify (durable HITL) */}
           {card.status === 'needs_you' && card.needsQuestion && (
             <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
