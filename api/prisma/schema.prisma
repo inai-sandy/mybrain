@@ -176,6 +176,8 @@ model SuggestedTask {
   reason    String? // why the Story of the Day suggests it
   status    String   @default("pending") // pending | added | dismissed
   createdAt DateTime @default(now())
+
+  @@index([forDay]) // matches the migration-created index (BEA-828)
 }
 
 /// One evidence-grounded read of the user's personality — confirmable in the Validate panel.
@@ -198,6 +200,9 @@ model UsageLog {
   promptTokens     Int?
   completionTokens Int?
   cost             Float? // USD — exact from OpenRouter; null where the provider doesn't report it
+
+  @@index([at]) // matches the migration-created indexes (BEA-828)
+  @@index([feature])
 }
 
 /// A quick-capture note (Google Keep style) — LOCAL ONLY, never synced to RAG/SuperMemory.
@@ -214,6 +219,8 @@ model Note {
   ragId         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@index([archived, pinned]) // matches the migration-created index (BEA-828)
 }
 
 /// Per-section index control for Explore: whether a source is indexed + when it last was. (BEA-335)
@@ -655,6 +662,9 @@ model VaultItem {
   ragId         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  @@index([type]) // matches the migration-created indexes (BEA-828)
+  @@index([collection])
 }
 
 /// A device whose biometric/passkey (WebAuthn PRF) can unlock the vault. Stores ONLY the vault key
@@ -674,6 +684,8 @@ model VaultAudit {
   itemId String
   action String // created | edited | revealed | copied
   at     DateTime @default(now())
+
+  @@index([itemId]) // matches the migration-created index (BEA-828)
 }
 
 /// One important email stored in memory (BEA-439). PK = Gmail message id so re-sync upserts (no dupes).
