@@ -5,6 +5,7 @@ import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
+import { EmoReminderService } from './emo-reminder.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -15,6 +16,7 @@ export class EmoController {
     private readonly capture_: EmoCaptureService,
     private readonly search: EmoSearchService,
     private readonly taskLane: EmoTaskService,
+    private readonly reminderLane: EmoReminderService,
   ) {}
 
   // The seam for a transcript already in hand (e.g. the device, or tests): transcript → cards.
@@ -55,6 +57,7 @@ export class EmoController {
     // The answer completes the clarify → hand the card back to its lane.
     if (res.ok && res.card?.lane === 'search') void this.search.run(id).catch(() => undefined);
     else if (res.ok && res.card?.lane === 'task') void this.taskLane.handle(id).catch(() => undefined);
+    else if (res.ok && res.card?.lane === 'reminder') void this.reminderLane.handle(id).catch(() => undefined);
     return res;
   }
 

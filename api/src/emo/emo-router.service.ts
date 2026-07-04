@@ -3,6 +3,7 @@ import { LlmService } from '../llm/llm.service';
 import { EmoCardsService, EmoLane } from './emo-cards.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
+import { EmoReminderService } from './emo-reminder.service';
 
 type Segment = { lane: EmoLane; summary: string; text: string };
 
@@ -42,6 +43,7 @@ export class EmoRouterService {
     private readonly cards: EmoCardsService,
     private readonly search: EmoSearchService,
     private readonly taskLane: EmoTaskService,
+    private readonly reminderLane: EmoReminderService,
   ) {}
 
   private parseSegments(raw: string | null, transcript: string): Segment[] {
@@ -88,6 +90,7 @@ export class EmoRouterService {
         // Hand each card to its lane. Search always clarifies first (869); Tasks creates real tasks (866).
         if (card.lane === 'search') void this.search.clarify(card.id).catch(() => undefined);
         else if (card.lane === 'task') void this.taskLane.handle(card.id).catch(() => undefined);
+        else if (card.lane === 'reminder') void this.reminderLane.handle(card.id).catch(() => undefined);
       }
     }
     return { cards };
