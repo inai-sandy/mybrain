@@ -33,6 +33,13 @@ function make(keys: Record<string, any>, logs: any[] = []) {
 }
 
 describe('UsageService', () => {
+  it('anchors a YYYY-MM-DD range to IST days, not UTC (BEA-806)', () => {
+    const { svc } = make({});
+    const at = (svc as any).dateFilter('2026-07-02', '2026-07-02');
+    expect(at.gte.toISOString()).toBe('2026-07-01T18:30:00.000Z'); // 2 Jul 00:00 IST
+    expect(at.lte.toISOString()).toBe('2026-07-02T18:29:59.999Z'); // 2 Jul 23:59:59.999 IST
+  });
+
   it('maps OpenRouter key usage + account credits', async () => {
     const { svc } = make({ openrouter: { apiKey: 'k' } });
     const s = await svc.summary();

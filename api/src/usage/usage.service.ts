@@ -14,11 +14,13 @@ export class UsageService {
   ) {}
   private cache: { at: number; data: any } | null = null;
 
-  /** Build an `at` filter from a YYYY-MM-DD date range (inclusive). */
+  /** Build an `at` filter from a YYYY-MM-DD date range (inclusive). The dates are the user's LOCAL
+   *  (IST) days, so anchor the boundaries to +05:30 — using UTC midnights attributed spend made
+   *  00:00–05:30 IST to the wrong day and gave wrong totals at the edges. (BEA-806) */
   private dateFilter(from?: string, to?: string): any {
     const at: any = {};
-    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) at.gte = new Date(from + 'T00:00:00.000Z');
-    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) at.lte = new Date(to + 'T23:59:59.999Z');
+    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) at.gte = new Date(from + 'T00:00:00.000+05:30');
+    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) at.lte = new Date(to + 'T23:59:59.999+05:30');
     return Object.keys(at).length ? at : null;
   }
 
