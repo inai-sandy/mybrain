@@ -66,6 +66,14 @@ export class OAuthService {
     }
     const id = 'mbc_' + randomBytes(16).toString('hex');
     const name = typeof body?.client_name === 'string' ? body.client_name.slice(0, 120) : null;
+    // Registration is public (@Public) so bound the table — otherwise anyone can create unlimited
+    // rows to bloat the DB. Keep the newest MAX_CLIENTS by pruning the oldest. (BEA-830)
+    const MAX_CLIENTS = 50;
+    const count = await this.prisma.oAuthClient.count();
+    if (count >= MAX_CLIENTS) {
+      const old = await this.prisma.oAuthClient.findMany({ orderBy: { createdAt: 'asc' }, take: count - MAX_CLIENTS + 1, select: { id: true } });
+      await this.prisma.oAuthClient.deleteMany({ where: { id: { in: old.map((o) => o.id) } } });
+    }
     await this.prisma.oAuthClient.create({ data: { id, name, redirectUris: JSON.stringify(uris) } });
     return {
       client_id: id,

@@ -8,8 +8,19 @@ function makePrisma() {
   const codes: any[] = [];
   const prisma: any = {
     oAuthClient: {
-      create: async ({ data }: any) => { clients.push({ ...data }); return data; },
+      create: async ({ data }: any) => { clients.push({ ...data, createdAt: data.createdAt ?? new Date(Date.now() + clients.length) }); return data; },
       findUnique: async ({ where }: any) => clients.find((c) => c.id === where.id) || null,
+      count: async () => clients.length,
+      findMany: async ({ orderBy, take }: any = {}) => {
+        let r = [...clients];
+        if (orderBy?.createdAt === 'asc') r.sort((a, b) => +a.createdAt - +b.createdAt);
+        return (take ? r.slice(0, take) : r).map((c) => ({ id: c.id }));
+      },
+      deleteMany: async ({ where }: any) => {
+        const ids = new Set(where.id.in);
+        for (let i = clients.length - 1; i >= 0; i--) if (ids.has(clients[i].id)) clients.splice(i, 1);
+        return { count: ids.size };
+      },
     },
     oAuthCode: {
       create: async ({ data }: any) => { codes.push({ ...data }); return data; },
@@ -29,6 +40,13 @@ describe('OAuthService — DCR (BEA-758)', () => {
     expect(reg.token_endpoint_auth_method).toBe('none');
     await expect(svc.register({ redirect_uris: [] })).rejects.toBeTruthy();
     await expect(svc.register({ redirect_uris: ['http://evil.com/cb'] })).rejects.toBeTruthy(); // non-https, non-localhost
+  });
+
+  it('caps the client table so DCR cannot grow it unbounded (BEA-830)', async () => {
+    const { prisma, clients } = makePrisma();
+    const svc = new OAuthService(prisma);
+    for (let i = 0; i < 60; i++) await svc.register({ redirect_uris: ['https://claude.ai/cb'] });
+    expect(clients.length).toBeLessThanOrEqual(50); // oldest pruned, newest kept
   });
 });
 
