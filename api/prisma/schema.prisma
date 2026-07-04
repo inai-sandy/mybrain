@@ -854,7 +854,7 @@ model ReminderSend {
   reminderId String
   reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
   at         DateTime
-  status     String   @default("queued") // queued | sent | delivered | read | failed
+  status     String   @default("queued") // queued | sending (claimed, BEA-775) | sent | delivered | read | failed | skipped
   providerId String? // the BSP (Postbox/WhatsApp) message id once sent
   error      String? // friendly error if the send failed
   createdAt  DateTime @default(now())

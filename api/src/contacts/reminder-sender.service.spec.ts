@@ -47,12 +47,13 @@ describe('joinSubjects (BEA-742)', () => {
 });
 
 function makePrisma(sends: any[], lastInboundAt: Date | null = null) {
-  const state: any = { updates: [] as any[], msgs: [] as any[] };
+  const state: any = { updates: [] as any[], msgs: [] as any[], claims: [] as string[] };
   const prisma: any = {
     reminder: { findMany: async () => [], update: async () => ({}) }, // rollDay() — no stale reminders in these tests
     reminderSend: {
       findMany: async ({ where }: any = {}) => (where?.status === 'queued' && where?.at ? sends : []), // only the send-path query returns sends
       update: async ({ where, data }: any) => state.updates.push({ id: where.id, ...data }),
+      updateMany: async ({ data }: any) => { state.claims.push(data.status); return { count: sends.length }; }, // claim step (BEA-775)
       deleteMany: async () => ({}),
     },
     reminderMessage: {
@@ -113,6 +114,47 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     await new ReminderSenderService(prisma, postbox).tick();
     expect(sent).toBe(1); // the stale conversation must not block a fresh reminder
     expect(state.updates[0].status).toBe('sent');
+  });
+
+  it('claims due sends (queued → sending) BEFORE calling Postbox (BEA-775)', async () => {
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: '919' } } }];
+    const { prisma, state } = makePrisma(sends);
+    const order: string[] = [];
+    const postbox: any = {
+      isConfigured: () => true, renderReminderTemplate,
+      sendReminderTemplate: async () => { order.push('send'); return { wamid: 'w' }; },
+    };
+    // record the claim before the send by wrapping updateMany
+    const origUpdateMany = prisma.reminderSend.updateMany;
+    prisma.reminderSend.updateMany = async (a: any) => { order.push('claim'); return origUpdateMany(a); };
+    await new ReminderSenderService(prisma, postbox).tick();
+    expect(state.claims).toContain('sending'); // rows were claimed
+    expect(order).toEqual(['claim', 'send']); // claim happens first, so an overlapping tick can't re-send
+  });
+
+  it('does not let two overlapping ticks both send (re-entrancy guard) (BEA-775)', async () => {
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: '919' } } }];
+    const { prisma } = makePrisma(sends);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let sent = 0;
+    const postbox: any = { isConfigured: () => true, renderReminderTemplate, sendReminderTemplate: async () => { sent++; await gate; return { wamid: 'w' }; } };
+    const svc = new ReminderSenderService(prisma, postbox);
+    const p1 = svc.tick();          // sets sending=true synchronously, then blocks in the send
+    const p2 = svc.tick();          // sees sending=true → returns immediately, no send
+    await p2;
+    release();                      // let the first tick's single send complete
+    await p1;
+    expect(sent).toBe(1);           // exactly one send total — the overlap did NOT double-send
+  });
+
+  it('fails orphaned in-flight sends on boot, never re-sending (BEA-775)', async () => {
+    let failed: any = null;
+    const prisma: any = { reminderSend: { updateMany: async ({ where, data }: any) => { failed = { where, data }; return { count: 2 }; } } };
+    const n = await new ReminderSenderService(prisma, { isConfigured: () => false } as any).reclaimOrphanSends();
+    expect(n).toBe(2);
+    expect(failed.where).toEqual({ status: 'sending' });
+    expect(failed.data.status).toBe('failed');
   });
 
   it('does nothing (no DB query) when Postbox is not configured', async () => {

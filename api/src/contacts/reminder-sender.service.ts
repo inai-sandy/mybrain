@@ -22,6 +22,9 @@ export function joinSubjects(subjects: string[]): string {
 export class ReminderSenderService implements OnModuleInit {
   private readonly log = new Logger('ReminderSender');
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** Re-entrancy guard: a slow Postbox call can make one tick outlast the 60s timer, so two ticks
+   *  could overlap and re-send the same queued rows. This ensures only one tick runs at a time. (BEA-775) */
+  private sending = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -29,9 +32,19 @@ export class ReminderSenderService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    // A row claimed 'sending' whose process died mid-send is orphaned — fail it rather than risk a
+    // re-send (at-most-once). Any 'sending' row at boot is definitively orphaned. (BEA-775)
+    this.reclaimOrphanSends().catch(() => undefined);
     this.timer = setInterval(() => {
       this.tick().catch((e) => this.log.warn(`tick: ${e?.message}`));
     }, 60_000);
+  }
+
+  /** Fail sends left mid-flight ('sending') by a restart, so they never double-send. (BEA-775) */
+  async reclaimOrphanSends(): Promise<number> {
+    const res = await this.prisma.reminderSend.updateMany({ where: { status: 'sending' }, data: { status: 'failed', error: 'interrupted before delivery could be confirmed' } });
+    if (res.count) this.log.warn(`failed ${res.count} orphaned in-flight send(s) on boot`);
+    return res.count;
   }
 
   /** Short subject for the template {{2}}: the reminder's own subject, else the linked task title, else a trimmed message, else "this". */
@@ -59,6 +72,16 @@ export class ReminderSenderService implements OnModuleInit {
   }
 
   async tick() {
+    if (this.sending) return; // never let two ticks overlap — that re-sent the same rows (BEA-775)
+    this.sending = true;
+    try {
+      await this.tickInner();
+    } finally {
+      this.sending = false;
+    }
+  }
+
+  private async tickInner() {
     await this.rollDay(); // roll the day first, so nothing armed for a past day fires
     if (!this.postbox.isConfigured()) return; // WhatsApp not wired yet — leave sends queued
     const due = await this.prisma.reminderSend.findMany({
@@ -68,6 +91,9 @@ export class ReminderSenderService implements OnModuleInit {
       take: 50,
     });
     if (!due.length) return;
+    // Claim these rows ('queued' → 'sending') BEFORE the slow Postbox calls, so a later tick or a
+    // restart can never pick them up and send the same message again. (BEA-775)
+    await this.prisma.reminderSend.updateMany({ where: { id: { in: due.map((d) => d.id) }, status: 'queued' }, data: { status: 'sending' } });
 
     // Group due sends by CONTACT — a contact with several reminders gets ONE combined nudge. (BEA-742)
     const groups = new Map<string, { number: string; name: string; sends: any[]; reminders: Map<string, any> }>();
