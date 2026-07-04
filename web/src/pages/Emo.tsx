@@ -10,7 +10,7 @@ type Link = { kind: string; id: string; label?: string };
 type Card = {
   id: string; lane: string; status: string; title?: string | null; summary?: string | null; detail?: string | null;
   links: Link[]; needsQuestion?: string | null; needsOptions: string[]; needsAnswer?: string | null;
-  day: string; rawTranscript?: string | null; audioPath?: string | null; createdAt: string;
+  day: string; rawTranscript?: string | null; audioPath?: string | null; error?: string | null; createdAt: string;
 };
 
 const LANE: Record<string, { icon: string; label: string }> = {
@@ -42,6 +42,9 @@ export default function Emo() {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [counts, setCounts] = useState<{ needsYou: number; cooking: number }>({ needsYou: 0, cooking: 0 });
   const [status, setStatus] = useState<'' | 'needs_you' | 'cooking' | 'done'>('');
+  const [lane, setLane] = useState('');
+  const [limit, setLimit] = useState(200);
+  const [total, setTotal] = useState(0);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Card | null>(null);
   const [recording, setRecording] = useState(false);
@@ -98,14 +101,24 @@ export default function Emo() {
   }
 
   async function load() {
+    const url = `/api/emo/cards?take=${limit}` + (status ? `&status=${status}` : '') + (lane ? `&lane=${lane}` : '');
     const [c, k] = await Promise.all([
-      fetch('/api/emo/cards?take=200' + (status ? `&status=${status}` : '')).then((r) => (r.ok ? r.json() : { cards: [] })).catch(() => ({ cards: [] })),
+      fetch(url).then((r) => (r.ok ? r.json() : { cards: [], total: 0 })).catch(() => ({ cards: [], total: 0 })),
       fetch('/api/emo/counts').then((r) => (r.ok ? r.json() : { needsYou: 0, cooking: 0 })).catch(() => ({ needsYou: 0, cooking: 0 })),
     ]);
     setCards(c.cards || []);
+    setTotal(c.total ?? (c.cards || []).length);
     setCounts(k);
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status, lane, limit]);
+
+  // Keep cooking cards fresh — poll while anything is still cooking (no manual reload needed). (BEA-880)
+  useEffect(() => {
+    if (counts.cooking <= 0) return;
+    const t = setInterval(() => { load(); }, 6000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line
+  }, [counts.cooking, status, lane, limit]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -143,6 +156,10 @@ export default function Emo() {
         <button onClick={() => setStatus(status === 'cooking' ? '' : 'cooking')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'cooking' ? 'ring-2 ring-amber-400' : ''} ${STATUS.cooking.cls}`}>⏳ Cooking {counts.cooking}</button>
         <button onClick={() => setStatus(status === 'done' ? '' : 'done')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'done' ? 'ring-2 ring-emerald-400' : ''} ${STATUS.done.cls}`}>✓ Done</button>
         {status && <button onClick={() => setStatus('')} className="rounded-full px-3 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">All</button>}
+        <select value={lane} onChange={(e) => setLane(e.target.value)} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="">All lanes</option>
+          {Object.entries(LANE).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+        </select>
         <div className="relative ml-auto">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cards" className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
@@ -158,6 +175,7 @@ export default function Emo() {
           {q || status ? 'No cards match.' : 'No cards yet — your voice captures will land here.'}
         </div>
       ) : (
+        <>
         <div className="space-y-6">
           {groups.map(([day, dayCards]) => {
             const captures = day === istToday() ? dayCards.filter((c) => c.lane === 'story') : [];
@@ -179,6 +197,12 @@ export default function Emo() {
             );
           })}
         </div>
+        {!q && total > (cards?.length || 0) && (
+          <div className="pt-3 text-center">
+            <button onClick={() => setLimit((l) => l + 200)} className="rounded-full border border-zinc-200 px-4 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800">Load more · {cards?.length || 0} of {total}</button>
+          </div>
+        )}
+        </>
       )}
 
       {open && <CardDetail card={open} onClose={() => setOpen(null)} onChanged={() => { load(); }} />}
@@ -261,6 +285,8 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
           )}
 
           {card.detail && <div className="mb-4 whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">{card.detail}</div>}
+
+          {card.error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">⚠ {card.error}</div>}
 
           {/* Go deeper — quick research → a saved deep-research flow (BEA-871) */}
           {card.lane === 'research' && card.status === 'done' && !card.links.some((l) => l.kind === 'flow') && (
