@@ -86,6 +86,25 @@ describe('MemoryService outbox', () => {
     expect(prisma.rows.find((r: any) => r.target === 'supermemory').status).toBe('done');
   });
 
+  it('a corrupt payload fails only its own row — the rest of the batch still drains (BEA-779)', async () => {
+    const prisma = fakePrisma();
+    const sm: any = { save: jest.fn(async () => 'sm1') };
+    const rag: any = { save: jest.fn(async () => 'rag1') };
+    const svc = new MemoryService(prisma, sm, rag);
+
+    // a poison row at the HEAD of the queue (createdAt asc), then a healthy pair
+    prisma.rows.push({ id: 'bad', status: 'pending', attempts: 0, target: 'rag', payload: '{not json' });
+    await svc.enqueue('healthy'); // pushes a good sm + rag pair
+
+    const { processed } = await svc.drain();
+
+    const bad = prisma.rows.find((r: any) => r.id === 'bad');
+    expect(bad.status).toBe('pending'); // isolated failure, retryable
+    expect(bad.attempts).toBe(1);
+    expect(processed).toBe(2); // the healthy pair still went through — no stall
+    expect(prisma.rows.filter((r: any) => r.status === 'done').length).toBe(2);
+  });
+
   it('records the returned store ids onto the item', async () => {
     const prisma = fakePrisma();
     const sm: any = { save: jest.fn(async () => 'sm-id-1') };

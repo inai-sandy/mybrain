@@ -278,8 +278,11 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     });
     let processed = 0;
     for (const row of pending) {
-      const p = JSON.parse(row.payload);
       try {
+        // Parse INSIDE the per-row try: a single corrupt payload must fail only its own row, never
+        // throw before the catch and abort the whole drain (which, being fetched createdAt asc, would
+        // park the poison row at the head of every batch and stall ALL indexing forever). (BEA-779)
+        const p = JSON.parse(row.payload);
         let resultId: string | null | undefined;
         if (row.target === 'supermemory') resultId = await this.sm.save(p.content, p.tags ?? []);
         else resultId = await this.rag.save(p.content, p.title, p.tags ?? []);
