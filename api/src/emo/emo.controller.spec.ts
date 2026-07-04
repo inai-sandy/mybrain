@@ -9,7 +9,14 @@ describe('EmoController (BEA-862)', () => {
     update: jest.fn(async () => ({ id: 'c1', status: 'done' })),
     remove: jest.fn(async () => ({ ok: true })),
   };
-  const ctrl = new EmoController(svc);
+  const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1' }] })) };
+  const ctrl = new EmoController(svc, router);
+
+  it('routes a capture transcript and rejects an empty one', async () => {
+    await ctrl.capture({ transcript: 'remind me to call the bank' });
+    expect(router.route).toHaveBeenCalledWith('remind me to call the bank', { source: undefined, audioPath: undefined });
+    expect(() => ctrl.capture({ transcript: '  ' })).toThrow();
+  });
 
   it('passes feed filters through to the service', async () => {
     await ctrl.list('needs_you' as any, 'search' as any, '2026-07-04', '20', '0');
