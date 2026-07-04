@@ -32,8 +32,14 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     await svc.onContactReply('c1');
     expect(state.sent).toBe(1);
     expect(state.out[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
-    expect(state.updated['r1']).toMatchObject({ status: 'done', feedback: 'Zigbee testing done' }); // resolved item closed
+    expect(state.updated['r1']).toMatchObject({ status: 'done', needsOwner: false, feedback: 'Zigbee testing done' }); // resolved item closed + flag cleared
     expect(state.updated['r2']).toBeUndefined(); // other item stays open
+  });
+
+  it('clears a stuck "needs you" flag once the agent handles the conversation (BEA-786)', async () => {
+    const { svc, state } = setup('{"send":true,"reply":"Thanks, noted!","needsSandeep":false,"items":[]}');
+    await svc.onContactReply('c1');
+    expect(state.flagged).toMatchObject({ needsOwner: false }); // prior flag cleared, not left stuck
   });
 
   it('stays quiet when the agent decides not to reply (send:false)', async () => {

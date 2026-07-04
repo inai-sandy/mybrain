@@ -105,6 +105,10 @@ Reply with ONLY this JSON, nothing else:
       const lastIn = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
       await this.notifyOwner(name, lastIn);
       this.log.log(`agent: flagged contact ${contactId} — needs Sandeep`);
+    } else {
+      // The agent handled this exchange without getting stuck — clear any prior "needs you" flag so
+      // the badge doesn't stay stuck until the owner happens to type a manual message. (BEA-786)
+      await this.prisma.reminder.updateMany({ where: { contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
     }
 
     // Close only the items the contact actually resolved.
@@ -113,7 +117,7 @@ Reply with ONLY this JSON, nothing else:
       if (it?.resolved && byN.has(it.n)) {
         const rid = byN.get(it.n)!;
         await this.prisma.reminder
-          .update({ where: { id: rid }, data: { status: 'done', feedback: (it.outcome || 'Resolved').trim() } })
+          .update({ where: { id: rid }, data: { status: 'done', needsOwner: false, feedback: (it.outcome || 'Resolved').trim() } })
           .catch(() => undefined);
         this.log.log(`reminder ${rid} resolved: ${it.outcome || ''}`);
       }
