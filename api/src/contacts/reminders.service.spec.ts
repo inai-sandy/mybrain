@@ -83,6 +83,23 @@ describe('scheduleNudges — fixed total, spill over days (BEA-740)', () => {
   });
 });
 
+describe('RemindersService.thread — whole contact conversation (BEA-789)', () => {
+  it('shows all of the contact\'s messages, even a combined nudge tagged to another reminder', async () => {
+    const prisma: any = {
+      reminder: { findUnique: async () => ({ id: 'r2', status: 'active', feedback: null, contactId: 'c1', contact: { name: 'Srikar' } }) },
+      reminderMessage: {
+        findMany: async ({ where }: any) => (where.contactId === 'c1'
+          ? [{ id: 'm1', direction: 'out', body: 'combined nudge (tagged to r1)', createdAt: new Date() }, { id: 'm2', direction: 'in', body: 'done', createdAt: new Date() }]
+          : []),
+      },
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    const t = await svc.thread('r2');
+    expect(t.contactName).toBe('Srikar');
+    expect(t.messages).toHaveLength(2); // the nudge shows here too, not an empty chat
+  });
+});
+
 describe('RemindersService.reseed — arm for the first send day (BEA-785)', () => {
   it('arms a reminder for the IST day of its first scheduled send, not always today', async () => {
     const captured: any = {};

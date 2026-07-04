@@ -197,14 +197,20 @@ export class RemindersService {
   async thread(id: string) {
     const r = await this.prisma.reminder.findUnique({
       where: { id },
-      include: { messages: { orderBy: { createdAt: 'asc' } }, contact: { select: { name: true } } },
+      include: { contact: { select: { name: true } } },
     });
     if (!r) throw new NotFoundException('Reminder not found');
+    // The WhatsApp conversation is per CONTACT (a combined nudge covers several reminders and is
+    // stored once, tagged with only the first reminder). Show the whole contact thread here so the
+    // other reminders don't render an empty chat missing the message that actually went out. (BEA-789)
+    const messages = r.contactId
+      ? await this.prisma.reminderMessage.findMany({ where: { contactId: r.contactId }, orderBy: { createdAt: 'asc' } })
+      : [];
     return {
       status: r.status,
       feedback: r.feedback,
       contactName: r.contact?.name || null,
-      messages: r.messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.createdAt })),
+      messages: messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.createdAt })),
     };
   }
 
