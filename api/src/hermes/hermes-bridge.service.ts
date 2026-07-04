@@ -396,6 +396,13 @@ export class HermesBridgeService {
       }
       if (g) gradeJson = JSON.stringify(g);
     }
+    // If the user cancelled while this turn was still running, discard the result — don't propose
+    // learnings, save a document, or flip the run back to 'done'. (BEA-793)
+    const cur: any = await this.agent.getRun(runId).catch(() => null);
+    if (cur?.status === 'cancelled') {
+      await this.agent.appendStep(runId, { label: 'Cancelled — result discarded', status: 'failed' }).catch(() => undefined);
+      return;
+    }
     // Learn-after runs on the FINAL (possibly revised) text. Quick skips it.
     if (!quick && text && cfg.learn) await this.proposeLearnings(runId, text);
     if (!quick && input.save !== false && text) {

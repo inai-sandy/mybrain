@@ -250,6 +250,17 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(ans.applied).toBe(false);
   });
 
+  it('finishRun cannot revive a cancelled run (BEA-793)', async () => {
+    const run = await svc.createRun();
+    await svc.cancelRun(run.id);
+    // a Codex turn that completes after the cancel must NOT flip it back to done
+    const after = await svc.finishRun(run.id, { status: 'done', resultText: 'late result', outputDocId: 'doc1' });
+    expect(after.status).toBe('cancelled');
+    const fresh = await svc.getRun(run.id);
+    expect(fresh.status).toBe('cancelled');
+    expect(fresh.outputDocId ?? null).toBeNull(); // no result attached
+  });
+
   it('appendStep records plain-English progress', async () => {
     const run = await svc.createRun();
     await svc.appendStep(run.id, { label: 'Read sources', status: 'done' });

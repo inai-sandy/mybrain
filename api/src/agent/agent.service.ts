@@ -294,6 +294,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string; resultText?: string; grade?: string } = {}) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
     if (!run) throw new NotFoundException('Run not found');
+    // A run that already reached a terminal state must NOT be revived — otherwise a Codex turn that
+    // finishes after the user cancelled would flip 'cancelled' back to 'done' and save its result. (BEA-793)
+    if (run.status === 'cancelled' || run.status === 'done' || run.status === 'failed') return this.shapeRun(run);
     const updated = await this.prisma.agentRun.update({
       where: { id },
       data: {
