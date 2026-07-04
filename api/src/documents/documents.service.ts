@@ -352,9 +352,15 @@ export class DocumentsService {
     return 'md';
   }
 
+  /** multer/busboy decode multipart filenames as latin1, so a name like "Report — Final.md" arrives
+   *  mojibaked ("Report â€" Final"). Re-decode as UTF-8 to recover it (ASCII names are unchanged). (BEA-801) */
+  private fixFilename(name: string): string {
+    try { return Buffer.from(name, 'latin1').toString('utf8'); } catch { return name; }
+  }
+
   /** Create a document from an uploaded file (md/html/pdf/image). (BEA-534) */
   async createFromUpload(file: UploadFile) {
-    const name = file.originalname || 'upload';
+    const name = this.fixFilename(file.originalname || 'upload');
     const ext = extname(name).toLowerCase();
     if (ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed') {
       return this.createFromZip(file);
@@ -406,7 +412,7 @@ export class DocumentsService {
 
   /** Unzip a multi-file site into its own folder; keep the original zip for download. (BEA-587) */
   async createFromZip(file: UploadFile) {
-    const name = file.originalname || 'site.zip';
+    const name = this.fixFilename(file.originalname || 'site.zip');
     const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Site';
     const id = randomUUID();
     const dir = join(sitesDir(), id);

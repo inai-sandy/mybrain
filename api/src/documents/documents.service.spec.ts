@@ -65,6 +65,16 @@ describe('DocumentsService', () => {
     expect(doc.contentText).toContain('Heading');
   });
 
+  it('recovers a UTF-8 filename that multer decoded as latin1 (em-dash) (BEA-801)', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    // busboy hands us the UTF-8 bytes of "Report — Final.md" decoded as latin1 (the mojibake)
+    const mangled = Buffer.from('Report — Final.md', 'utf8').toString('latin1');
+    const doc = await svc.createFromUpload({ originalname: mangled, mimetype: 'text/markdown', buffer: Buffer.from('# hi', 'utf8'), size: 4 });
+    expect(doc.title).toBe('Report — Final'); // clean em-dash, not "Report â€" Final"
+    expect(doc.title).not.toMatch(/â€/);
+  });
+
   it('lists newest-first without content, gets full content, updates, and deletes', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
