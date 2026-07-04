@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { AgentService } from '../agent/agent.service';
@@ -20,8 +20,10 @@ class PauseSignal { constructor(public nodeId: string) {} }
  * in parallel; skill/tool/ask_ai nodes run through the agent engine; merge synthesises (AI or raw).
  */
 @Injectable()
-export class FlowRunnerService {
+export class FlowRunnerService implements OnModuleInit {
   private readonly log = new Logger('FlowRunner');
+  /** Runs cancelled in this process — checked before a live driver writes back, so a cancel sticks. */
+  private cancelled = new Set<string>();
   constructor(
     private readonly prisma: PrismaService,
     private readonly bridge: HermesBridgeService,
@@ -33,6 +35,47 @@ export class FlowRunnerService {
     private readonly telegram: TelegramService,
     private readonly flows: FlowsService,
   ) {}
+
+  onModuleInit() {
+    // A flow run's driver (the execute() walk) lives in this process's memory. A restart
+    // (deploy/crash/reboot — we docker rm -f on every ship) leaves 'running' rows with nothing to
+    // advance them, and start()'s no-stacking guard then hands that dead run back on every future
+    // Run click and schedule — the flow can never run again. Fail those orphans on boot. (BEA-776)
+    this.reconcileOrphans().catch(() => undefined);
+  }
+
+  /**
+   * Fail flow runs left mid-flight by a restart (BEA-776). Only 'running' rows are orphaned: a
+   * 'waiting' run is durable — answer() re-drives it from the persisted per-node results, so it
+   * survives a restart and must be left alone. Idempotent; terminal runs are untouched.
+   */
+  async reconcileOrphans(): Promise<number> {
+    const orphans = await this.prisma.flowRun.findMany({ where: { status: 'running' }, select: { id: true, terminal: true } });
+    if (!orphans.length) return 0;
+    const now = new Date();
+    const msg = 'Interrupted by a restart — please run it again.';
+    for (const o of orphans) {
+      const term = this.parseArr(o.terminal);
+      term.push({ text: '✗ interrupted by a restart', at: now.getTime() });
+      await this.prisma.flowRun
+        .update({ where: { id: o.id }, data: { status: 'failed', error: msg, endedAt: now, terminal: JSON.stringify(term.slice(-300)), waitNodeId: null, waitQuestion: null, waitToken: null } })
+        .catch(() => undefined);
+    }
+    this.log.warn(`reconciled ${orphans.length} orphaned flow run(s) on boot`);
+    return orphans.length;
+  }
+
+  /** Cancel a run that's still running or waiting, freeing the flow to run again. (BEA-776) */
+  async cancelRun(id: string): Promise<{ ok: boolean }> {
+    const r = await this.prisma.flowRun.findUnique({ where: { id } });
+    if (!r) throw new NotFoundException('Run not found');
+    if (r.status !== 'running' && r.status !== 'waiting') return { ok: false };
+    this.cancelled.add(id); // so a still-live driver won't write this run back to done/failed
+    const term = this.parseArr(r.terminal);
+    term.push({ text: '⊘ cancelled', at: Date.now() });
+    await this.prisma.flowRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date(), terminal: JSON.stringify(term.slice(-300)), waitNodeId: null, waitQuestion: null, waitToken: null } });
+    return { ok: true };
+  }
 
   /**
    * Evals ① (BEA-670): run an agent's eval cases through its flow approach. For each case we re-plan
@@ -197,7 +240,7 @@ export class FlowRunnerService {
     const terminal: { text: string; at: number }[] = this.parseArr(runRow?.terminal);
     const memo = new Map<string, Promise<string>>();
     for (const [nid, rr] of Object.entries(results)) if ((rr as NodeResult)?.status === 'done') memo.set(nid, Promise.resolve((rr as NodeResult).output || ''));
-    const persist = () => this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
+    const persist = () => this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
     if (!opts.evalMode && !terminal.length) term('▶ started');
 
@@ -254,6 +297,8 @@ export class FlowRunnerService {
     for (const n of terminals) { const r = results[n.id]; if (r?.output) finalOutput = r.output; }
 
     // Save the outputs as Documents you can browse later (Agent↔Flow merge ④) — but not for eval runs.
+    // If the run was cancelled while this driver was mid-flight, don't resurrect it as 'done'. (BEA-776)
+    if (this.cancelled.has(runId)) { this.cancelled.delete(runId); return; }
     const docs = opts.evalMode ? [] : await this.saveDocuments(flow, graph, incoming, results, finalOutput);
     if (!opts.evalMode) term('✓ done');
 

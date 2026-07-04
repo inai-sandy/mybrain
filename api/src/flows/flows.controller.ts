@@ -62,6 +62,12 @@ export class FlowsController {
     return this.runner.answer(runId, (body?.answer ?? '').toString());
   }
 
+  // cancel a running/waiting run so the flow is free to run again (BEA-776)
+  @Post('runs/:runId/cancel')
+  cancel(@Param('runId') runId: string) {
+    return this.runner.cancelRun(runId);
+  }
+
   // run an agent's eval cases through its flow (Evals ①). Background; UI polls the agent for progress.
   @Post('agents/:agentId/run-evals')
   runAgentEvals(@Param('agentId') agentId: string) {
