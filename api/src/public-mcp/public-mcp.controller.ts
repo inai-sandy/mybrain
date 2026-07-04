@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Put, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { Public } from '../auth/public.decorator';
 import { PublicMcpService } from './public-mcp.service';
@@ -13,6 +14,8 @@ export class PublicMcpController {
 
   // ---- The public MCP endpoint (its own bearer-token auth, not the session guard) ----
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } }) // stop token brute-force; generous enough for real tool calls (BEA-829)
   @Post()
   async rpc(@Req() req: Request, @Res() res: Response) {
     const auth = req.headers['authorization'];

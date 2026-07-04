@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { Public } from '../auth/public.decorator';
 import { AuthService } from '../auth/auth.service';
@@ -10,6 +11,8 @@ import { OAuthService } from './oauth.service';
  * Consent reuses the My Brain login — the owner signs in on the Allow screen if needed.
  */
 @Public()
+@UseGuards(ThrottlerGuard)
+@Throttle({ default: { limit: 30, ttl: 60_000 } }) // rate-limit the whole OAuth surface (register/token/authorize): 30/min/IP (BEA-829)
 @Controller('oauth')
 export class OAuthController {
   constructor(

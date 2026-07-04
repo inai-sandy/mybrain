@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -37,7 +38,11 @@ import { FlowsModule } from './flows/flows.module';
 import { ContactsModule } from './contacts/contacts.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule],
+  imports: [
+    // Rate-limit config (BEA-829). NOT applied globally — a global guard would throttle the app's own
+    // polling; only the sensitive endpoints opt in via @UseGuards(ThrottlerGuard)+@Throttle.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule],
   controllers: [HealthController],
 })
 export class AppModule {}

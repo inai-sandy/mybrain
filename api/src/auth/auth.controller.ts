@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { Public } from './public.decorator';
@@ -9,6 +10,8 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 8, ttl: 60_000 } }) // brute-force guard: 8 login attempts / minute / IP (BEA-829)
   @Post('login')
   async login(
     @Body() body: { email?: string; password?: string },
