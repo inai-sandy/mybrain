@@ -82,6 +82,18 @@ function makeService(opts: { llmText?: string | null } = {}) {
         tasks.push(row);
         return row;
       },
+      update: async ({ where, data }: any) => {
+        const t = tasks.find((x) => x.id === where.id);
+        if (!t) return null;
+        if (data.day !== undefined) t.day = data.day;
+        if (data.status !== undefined) t.status = data.status;
+        if (data.rolloverCount?.increment) t.rolloverCount = (t.rolloverCount || 0) + data.rolloverCount.increment;
+        return t;
+      },
+      delete: async ({ where }: any) => {
+        const i = tasks.findIndex((x) => x.id === where.id);
+        return i >= 0 ? (tasks.splice(i, 1), {}) : null;
+      },
     },
     dayClose: {
       findUnique: async ({ where }: any) => dayCloses.find((c) => c.day === where.day) || null,
@@ -393,6 +405,26 @@ describe('DailyService', () => {
       const r = await svc.closeDay(today, false);
       expect(r!.rolled).toBe(1);
       expect(tasks.find((t) => t.id === 'tt').day).toBe(tomorrow);
+    });
+
+    it('wrapUp of an OLD day rolls tasks to today, not onto the sealed day+1 (BEA-781)', async () => {
+      const { svc, tasks } = makeService({ llmText: '{}' });
+      const today = istToday();
+      const oldDay = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 5); return d.toISOString().slice(0, 10); })();
+      tasks.push({ id: 'old1', day: oldDay, status: 'open', title: 'left over', rolloverCount: 0 });
+      const r = await svc.wrapUp(oldDay, [], undefined, ['old1'], []);
+      expect(r.rolled).toBe(1);
+      expect(tasks.find((t) => t.id === 'old1').day).toBe(today); // NOT oldDay+1 (which is sealed/past)
+    });
+
+    it('wrapUp of TODAY still rolls tasks to tomorrow (BEA-781)', async () => {
+      const { svc, tasks } = makeService({ llmText: '{}' });
+      const today = istToday();
+      const tomorrow = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+      tasks.push({ id: 'tdy', day: today, status: 'open', title: 'carry', rolloverCount: 0 });
+      const r = await svc.wrapUp(today, [], undefined, ['tdy'], []);
+      expect(r.rolled).toBe(1);
+      expect(tasks.find((t) => t.id === 'tdy').day).toBe(tomorrow);
     });
 
     it('activity() reports provisional for an un-sealed written day and final once closed', async () => {

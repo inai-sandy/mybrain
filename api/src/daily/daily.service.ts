@@ -327,12 +327,17 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
           .catch(() => undefined);
       }
     }
-    // Carry-forward: roll the chosen unfinished tasks to tomorrow, drop the ones the user dropped.
-    const tomorrow = this.dayAdd(day, 1);
+    // Carry-forward: roll the chosen unfinished tasks forward, drop the ones the user dropped.
+    // Land on max(day+1, today): when wrapping an OLD day, day+1 may already be sealed/past, which
+    // would strand the tasks (gone from Today, the "finish yesterday" banner, and all rollover).
+    // today is never sealed, so the tasks stay visible and workable. (BEA-781)
+    const next = this.dayAdd(day, 1);
+    const today = this.dayKey(tz);
+    const target = next > today ? next : today;
     let rolled = 0;
     let dropped = 0;
     for (const id of (roll || []).slice(0, 50)) {
-      const r = await this.prisma.task.update({ where: { id }, data: { day: tomorrow, status: 'open', rolloverCount: { increment: 1 } } }).catch(() => null);
+      const r = await this.prisma.task.update({ where: { id }, data: { day: target, status: 'open', rolloverCount: { increment: 1 } } }).catch(() => null);
       if (r) rolled++;
     }
     for (const id of (drop || []).slice(0, 50)) {
