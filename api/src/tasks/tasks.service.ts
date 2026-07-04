@@ -480,7 +480,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       where: { id },
       data: {
         status: done ? 'done' : 'open',
-        progress: done ? 100 : t.progress, // mark-open keeps prior progress
+        // Un-checking a done task resets progress to 0 — it was overwritten to 100 when marked done,
+        // so "keep prior progress" wrongly left it at 100 and every weighted metric counted the
+        // now-open task as fully complete. (A genuinely-open task's progress is left untouched.) (BEA-807)
+        progress: done ? 100 : (t.status === 'done' ? 0 : t.progress),
         completedAt: done ? new Date() : null,
         actualMin: done ? (Number.isFinite(actualMin as any) ? Math.max(1, Math.round(Number(actualMin))) : t.actualMin) : null,
       },

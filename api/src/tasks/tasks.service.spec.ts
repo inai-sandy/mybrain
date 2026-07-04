@@ -109,6 +109,16 @@ describe('TasksService', () => {
     expect(done!.completedAt).toBeTruthy();
   });
 
+  it('un-checking a done task resets its progress to 0, not 100 (BEA-807)', async () => {
+    const { svc } = makeService(JSON.stringify({ tasks: [{ title: 'X' }] }));
+    const { tasks } = await svc.dump('x');
+    const id = tasks[0].id;
+    await svc.setDone(id, true);                 // progress -> 100
+    const reopened = await svc.setDone(id, false); // un-check
+    expect(reopened!.status).toBe('open');
+    expect(reopened!.progress).toBe(0);          // NOT left at 100 (which inflated every weighted metric)
+  });
+
   it('saves partial progress (30/60) and snaps stray values to the nearest step', async () => {
     const { svc } = makeService(JSON.stringify({ tasks: [{ title: 'Big job' }] }));
     const { tasks } = await svc.dump('big job');
