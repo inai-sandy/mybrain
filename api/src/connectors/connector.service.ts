@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
@@ -12,6 +12,7 @@ export function isKnownConnector(n: string): n is ConnectorName {
 
 @Injectable()
 export class ConnectorService implements OnModuleInit {
+  private readonly log = new Logger('ConnectorService');
   constructor(private readonly prisma: PrismaService) {}
 
   /** Seed connectors from env on first boot (so existing keys load without the UI). */
@@ -55,7 +56,14 @@ export class ConnectorService implements OnModuleInit {
   async get<T = Record<string, any>>(name: ConnectorName): Promise<T | null> {
     const row = await this.prisma.connector.findUnique({ where: { name } });
     if (!row) return null;
-    return JSON.parse(decrypt(row.secrets)) as T;
+    try {
+      return JSON.parse(decrypt(row.secrets)) as T;
+    } catch (e: any) {
+      // A changed/missing CONNECTOR_KEY (or a corrupt row) makes decrypt/parse throw. Degrade to
+      // "not connected" so integrations show a reconnect prompt instead of an opaque 500. (BEA-822)
+      this.log.warn(`connector ${name}: saved secret unreadable — reconnect needed: ${e?.message || e}`);
+      return null;
+    }
   }
 
   /**

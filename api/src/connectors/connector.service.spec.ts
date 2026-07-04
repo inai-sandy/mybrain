@@ -20,4 +20,10 @@ describe('ConnectorService', () => {
     // But reading it back returns the original object.
     expect(await svc.get('supermemory')).toEqual({ apiKey: 'sm_secret_abc' });
   });
+
+  it('returns null (reconnect needed) instead of throwing on an unreadable secret (BEA-822)', async () => {
+    const prisma: any = { connector: { findUnique: async () => ({ name: 'telegram', secrets: 'not-valid-encrypted-data' }) } };
+    const svc = new ConnectorService(prisma);
+    await expect(svc.get('telegram')).resolves.toBeNull(); // no throw, no opaque 500
+  });
 });
