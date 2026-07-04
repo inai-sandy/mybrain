@@ -1,0 +1,27 @@
+import { EmoController } from './emo.controller';
+
+describe('EmoController (BEA-862)', () => {
+  const svc: any = {
+    list: jest.fn(async () => ({ cards: [], total: 0 })),
+    counts: jest.fn(async () => ({ needsYou: 1, cooking: 2 })),
+    get: jest.fn(async () => ({ id: 'c1' })),
+    answer: jest.fn(async () => ({ ok: true })),
+    update: jest.fn(async () => ({ id: 'c1', status: 'done' })),
+    remove: jest.fn(async () => ({ ok: true })),
+  };
+  const ctrl = new EmoController(svc);
+
+  it('passes feed filters through to the service', async () => {
+    await ctrl.list('needs_you' as any, 'search' as any, '2026-07-04', '20', '0');
+    expect(svc.list).toHaveBeenCalledWith({ status: 'needs_you', lane: 'search', day: '2026-07-04', take: 20, skip: 0 });
+  });
+
+  it('exposes counts, get, answer, update, remove', async () => {
+    expect(await ctrl.counts()).toEqual({ needsYou: 1, cooking: 2 });
+    await ctrl.answer('c1', { answer: 'yes' });
+    expect(svc.answer).toHaveBeenCalledWith('c1', 'yes');
+    await ctrl.update('c1', { status: 'done' });
+    expect(svc.update).toHaveBeenCalledWith('c1', { status: 'done' });
+    expect((await ctrl.remove('c1')).ok).toBe(true);
+  });
+});
