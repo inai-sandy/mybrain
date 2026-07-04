@@ -26,7 +26,7 @@ describe('rollDay — one-day auto-pause (BEA-764)', () => {
         ],
         update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
       },
-      reminderSend: { deleteMany: async () => { deleted++; return {}; } },
+      reminderSend: { count: async () => 0, deleteMany: async () => { deleted++; return {}; } },
     };
     await new ReminderSenderService(prisma, { isConfigured: () => false } as any).rollDay();
     expect(updates).toEqual([
@@ -34,6 +34,20 @@ describe('rollDay — one-day auto-pause (BEA-764)', () => {
       { id: 'r2', status: 'paused', pausedAuto: true },
     ]);
     expect(deleted).toBe(2); // stale queued sends cleared for each
+  });
+
+  it('does NOT pause a reminder that still has a future send queued (BEA-790)', async () => {
+    const updates: any[] = [];
+    const prisma: any = {
+      reminder: {
+        findMany: async () => [{ id: 'fresh', status: 'active', armedDay: null }], // null armedDay (e.g. swallowed write)
+        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
+      },
+      // one future send is still queued → mid-lifecycle, must be left active
+      reminderSend: { count: async ({ where }: any) => (where?.at?.gt ? 1 : 0), deleteMany: async () => ({}) },
+    };
+    await new ReminderSenderService(prisma, { isConfigured: () => false } as any).rollDay();
+    expect(updates).toHaveLength(0); // not paused, sends not deleted
   });
 });
 

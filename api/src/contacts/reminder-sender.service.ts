@@ -62,13 +62,21 @@ export class ReminderSenderService implements OnModuleInit {
   /** One-day lifecycle: at each new local day, auto-pause reminders armed on an earlier day so
    *  "active" always means "will send today". They stay put until the user re-arms them. (BEA-764) */
   async rollDay() {
-    const todayKey = new Date(Date.now() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);
+    const now = new Date();
+    const todayKey = new Date(now.getTime() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);
     const stale = await this.prisma.reminder.findMany({ where: { status: 'active', OR: [{ armedDay: null }, { armedDay: { lt: todayKey } }] } });
+    let paused = 0;
     for (const r of stale) {
+      // Never pause a reminder that still has a FUTURE send queued — it's mid-lifecycle (just armed,
+      // or spilling to a later day). This also protects a freshly-created reminder whose armedDay write
+      // was swallowed (null), which used to get auto-paused within 60s and its sends deleted. (BEA-790)
+      const pending = await this.prisma.reminderSend.count({ where: { reminderId: r.id, status: 'queued', at: { gt: now } } });
+      if (pending > 0) continue;
       await this.prisma.reminder.update({ where: { id: r.id }, data: { status: 'paused', pausedAuto: true } }).catch(() => undefined);
       await this.prisma.reminderSend.deleteMany({ where: { reminderId: r.id, status: 'queued' } }).catch(() => undefined);
+      paused++;
     }
-    if (stale.length) this.log.log(`auto-paused ${stale.length} reminder(s) at day rollover`);
+    if (paused) this.log.log(`auto-paused ${paused} reminder(s) at day rollover`);
   }
 
   async tick() {
