@@ -72,6 +72,16 @@ export default function Emo() {
   }
   function stopRec() { recRef.current?.stop(); setRecording(false); }
 
+  async function mergeStory() {
+    const r = await fetch('/api/emo/story/merge', { method: 'POST' }).catch(() => null);
+    if (r?.ok) {
+      const d = await r.json().catch(() => ({ merged: 0 }));
+      if (d.merged > 0) { toast('success', `${d.merged} moment${d.merged === 1 ? '' : 's'} added to today's story`); load(); }
+      else toast('success', 'Nothing new to merge');
+      navigate('/today');
+    } else toast('error', 'Could not merge into the story.');
+  }
+
   async function uploadBlob(blob: Blob) {
     if (!blob.size) return;
     setUploading(true);
@@ -160,7 +170,7 @@ export default function Emo() {
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/40">
                     <div className="mb-1 flex items-center justify-between px-1">
                       <span className="text-xs font-medium text-zinc-500">Today's Captures ({captures.length})</span>
-                      <button onClick={() => navigate('/today')} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
+                      <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
                     </div>
                     {captures.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
                   </div>

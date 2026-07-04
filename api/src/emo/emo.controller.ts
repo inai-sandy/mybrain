@@ -6,6 +6,7 @@ import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
 import { EmoReminderService } from './emo-reminder.service';
+import { EmoStoryService } from './emo-story.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -17,7 +18,14 @@ export class EmoController {
     private readonly search: EmoSearchService,
     private readonly taskLane: EmoTaskService,
     private readonly reminderLane: EmoReminderService,
+    private readonly story: EmoStoryService,
   ) {}
+
+  // Story lane (EMO 5): append today's captures into the Day Story (user-initiated; never closes the day).
+  @Post('story/merge')
+  mergeStory() {
+    return this.story.mergeToday();
+  }
 
   // The seam for a transcript already in hand (e.g. the device, or tests): transcript → cards.
   @Post('capture')
