@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { matchContact, contactSpellings, similarity, norm } from './person-identity';
+import { matchContact, matchContactsAll, contactSpellings, similarity, norm } from './person-identity';
 
 /** Contacts — people you can send WhatsApp reminders to (BEA-719). */
 @Injectable()
@@ -127,5 +127,12 @@ export class ContactsService {
     if (!name?.trim()) return null;
     const all = (await this.prisma.contact.findMany()).map((c) => this.shape(c));
     return matchContact(all, name) || null;
+  }
+
+  /** EVERY contact matching a name/alias — lets callers gate on ambiguity ("which Dharmendra?"). (BEA-875) */
+  async findAllByName(name?: string | null) {
+    if (!name?.trim()) return [];
+    const all = (await this.prisma.contact.findMany()).map((c) => this.shape(c));
+    return matchContactsAll(all, name);
   }
 }

@@ -1,33 +1,64 @@
 import { EmoReminderService } from './emo-reminder.service';
 
-function make(opts: { extract: any; contact?: any; card?: any } ) {
+function make(opts: { extract: any; contacts?: any[]; card?: any }) {
   const updates: any[] = [];
-  const card = opts.card ?? { id: 'c1', lane: 'reminder', rawTranscript: 'remind Dharmendra about the socket pins on Friday', summary: 'Reminder: Dharmendra', needsAnswer: null };
+  const card = opts.card ?? { id: 'c1', lane: 'reminder', rawTranscript: 'remind Dharmendra about the socket pins', summary: 'Reminder: Dharmendra', needsAnswer: null };
   const cards: any = { get: jest.fn(async () => card), update: jest.fn(async (_id: string, p: any) => { updates.push(p); return { ...card, ...p }; }) };
   const llm: any = { complete: jest.fn(async () => JSON.stringify(opts.extract)) };
-  const contacts: any = { findByName: jest.fn(async () => opts.contact ?? null) };
+  const list = opts.contacts ?? [];
+  const contacts: any = { findAllByName: jest.fn(async () => list) };
   const reminders: any = { draftMessage: jest.fn(async () => ({ message: 'Hi Dharmendra, quick nudge on the socket pins.' })), create: jest.fn(async () => ({ id: 'rem1' })) };
   return { svc: new EmoReminderService(llm, cards, contacts, reminders), cards, contacts, reminders, updates };
 }
 
-describe('EmoReminderService (BEA-867)', () => {
-  it('creates a real WhatsApp reminder when the contact matches', async () => {
-    const { svc, reminders, updates } = make({ extract: { who: 'Dharmendra', what: 'the socket pins', when: 'Friday' }, contact: { id: 'k1', name: 'Dharmendra' } });
+describe('EmoReminderService (BEA-867 / BEA-875)', () => {
+  it('creates a reminder for today when exactly one contact matches', async () => {
+    const { svc, reminders, updates } = make({ extract: { who: 'Dharmendra', what: 'the socket pins', when: '' }, contacts: [{ id: 'k1', name: 'Dharmendra' }] });
     await svc.handle('c1');
     expect(reminders.create).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'k1', subject: 'the socket pins' }));
     const done = updates[updates.length - 1];
     expect(done.status).toBe('done');
-    expect(done.summary).toContain('Reminder set: Dharmendra');
-    expect(done.summary).toContain('Friday');
+    expect(done.summary).toContain('Reminder set for today: Dharmendra');
     expect(done.links[0]).toMatchObject({ kind: 'reminder', id: 'rem1' });
   });
 
   it('gates on Needs-you when the contact is not found (never guesses)', async () => {
-    const { svc, reminders, updates } = make({ extract: { who: 'Dharmendra', what: 'the socket pins', when: '' }, contact: null });
+    const { svc, reminders, updates } = make({ extract: { who: 'Dharmendra', what: 'the socket pins', when: '' }, contacts: [] });
     await svc.handle('c1');
     expect(reminders.create).not.toHaveBeenCalled();
     expect(updates[0]).toMatchObject({ status: 'needs_you' });
     expect(updates[0].needsQuestion).toContain('Dharmendra');
+  });
+
+  it('CRITICAL: gates when two contacts share the name — never messages the wrong one (BEA-875)', async () => {
+    const { svc, reminders, updates } = make({
+      extract: { who: 'Dharmendra', what: 'the socket pins', when: '' },
+      contacts: [{ id: 'k1', name: 'Dharmendra', whatsappNumber: '911111110001' }, { id: 'k2', name: 'Dharmendra', whatsappNumber: '911111110002' }],
+    });
+    await svc.handle('c1');
+    expect(reminders.create).not.toHaveBeenCalled();
+    expect(updates[0].status).toBe('needs_you');
+    expect(updates[0].needsQuestion).toMatch(/which one/i);
+    expect(updates[0].needsOptions).toHaveLength(2);
+    expect(updates[0].needsOptions[0]).toContain('0001');
+  });
+
+  it('CRITICAL: does NOT silently send today for a future day — clarifies instead (BEA-875)', async () => {
+    const { svc, reminders, updates } = make({ extract: { who: 'Dharmendra', what: 'the socket pins', when: 'Friday' }, contacts: [{ id: 'k1', name: 'Dharmendra' }] });
+    await svc.handle('c1');
+    expect(reminders.create).not.toHaveBeenCalled();
+    expect(updates[0].status).toBe('needs_you');
+    expect(updates[0].needsQuestion).toMatch(/today/i);
+  });
+
+  it('proceeds when the user confirms today after a future-day clarify', async () => {
+    const { svc, reminders } = make({
+      extract: { who: 'Dharmendra', what: 'the socket pins', when: 'Friday' },
+      contacts: [{ id: 'k1', name: 'Dharmendra' }],
+      card: { id: 'c1', lane: 'reminder', rawTranscript: 'remind Dharmendra about the socket pins on Friday', summary: 'Reminder', needsAnswer: 'today' },
+    });
+    await svc.handle('c1');
+    expect(reminders.create).toHaveBeenCalled();
   });
 
   it('gates on Needs-you when there is no clear person', async () => {
@@ -38,14 +69,14 @@ describe('EmoReminderService (BEA-867)', () => {
   });
 
   it('uses the answered name to resolve the contact on retry', async () => {
-    const { svc, contacts } = make({ extract: { who: '', what: 'the socket pins', when: '' }, contact: { id: 'k1', name: 'Dharmendra K' }, card: { id: 'c1', lane: 'reminder', rawTranscript: 'remind about the socket pins', summary: 'Reminder', needsAnswer: 'Dharmendra K' } });
+    const { svc, contacts } = make({ extract: { who: '', what: 'the socket pins', when: '' }, contacts: [{ id: 'k1', name: 'Dharmendra K' }], card: { id: 'c1', lane: 'reminder', rawTranscript: 'remind about the socket pins', summary: 'Reminder', needsAnswer: 'Dharmendra K' } });
     await svc.handle('c1');
-    expect(contacts.findByName).toHaveBeenCalledWith('Dharmendra K');
+    expect(contacts.findAllByName).toHaveBeenCalledWith('Dharmendra K');
   });
 
   it('ignores a non-reminder card', async () => {
     const { svc, contacts } = make({ extract: {}, card: { id: 'c1', lane: 'task' } });
     await svc.handle('c1');
-    expect(contacts.findByName).not.toHaveBeenCalled();
+    expect(contacts.findAllByName).not.toHaveBeenCalled();
   });
 });

@@ -29,6 +29,13 @@ export function matchContact<T extends PersonContact>(contacts: T[], name: strin
   return contacts.find((c) => contactSpellings(c).some((s) => norm(s) === n)) || null;
 }
 
+/** EVERY contact a name could refer to — for ambiguity detection ("which Dharmendra?"). (BEA-875) */
+export function matchContactsAll<T extends PersonContact>(contacts: T[], name: string): T[] {
+  const n = norm(name);
+  if (!n) return [];
+  return contacts.filter((c) => contactSpellings(c).some((s) => norm(s) === n));
+}
+
 /** Names to search for given a query: the matching contact's full spelling set, else just the name. */
 export function spellingsForName(contacts: PersonContact[], name: string): string[] {
   const c = matchContact(contacts, name);
