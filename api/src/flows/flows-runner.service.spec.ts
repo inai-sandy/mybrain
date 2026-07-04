@@ -63,6 +63,24 @@ describe('FlowRunnerService.execute — failure propagation (BEA-800)', () => {
   });
 });
 
+describe('FlowRunnerService.runForEval — detached from the flow (BEA-797)', () => {
+  it('creates the eval run with flowId null so it cannot block or pollute the flow', async () => {
+    let createdData: any = null;
+    const prisma: any = {
+      flowRun: {
+        create: async ({ data }: any) => { createdData = data; return { id: 'ev1', ...data }; },
+        update: async () => ({}),
+        findUnique: async () => ({ status: 'done', finalOutput: 'x' }),
+      },
+    };
+    const flows: any = { planFlow: async () => ({ nodes: [], edges: [] }) };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, flows);
+    (svc as any).execute = jest.fn(async () => undefined);
+    await (svc as any).runForEval('f1', 'some input');
+    expect(createdData.flowId).toBeNull();
+  });
+});
+
 describe('FlowRunnerService.answer — atomic claim (BEA-791)', () => {
   it('a double-answer starts only ONE driver', async () => {
     const row: any = { id: 'r1', status: 'waiting', waitNodeId: 'n1', results: '{}', flowId: 'f1' };

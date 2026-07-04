@@ -117,7 +117,10 @@ export class FlowRunnerService implements OnModuleInit {
   /** Run the agent's flow approach for one input (re-planned for that input), synchronously. */
   private async runForEval(realFlowId: string, input: string): Promise<{ runId: string; finalOutput: string; status: string }> {
     const fresh = await this.flows.planFlow(input).catch(() => ({ nodes: [], edges: [] }));
-    const run = await this.prisma.flowRun.create({ data: { flowId: realFlowId, status: 'running', results: '{}' } });
+    // Eval runs are detached from the flow (flowId: null) so they can't collide with the no-stacking
+    // guard (a user's Run would otherwise get handed an eval run of a different input), don't pollute
+    // the flow's run history, and can't lock the flow if one crashes mid-eval. Still viewable by id. (BEA-797)
+    const run = await this.prisma.flowRun.create({ data: { flowId: null, status: 'running', results: '{}' } });
     const synthetic = { id: realFlowId, name: 'Eval run', graph: JSON.stringify(fresh) };
     try { await this.execute(run.id, synthetic, { evalMode: true }); }
     catch (e: any) { await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined); }
