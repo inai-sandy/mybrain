@@ -914,12 +914,14 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (contact) contactSpellings(contact).forEach(add);
     Object.keys(aliases).filter((k) => aliases[k] === canonical).forEach(add);
     const spellings = [...spellSet];
-    const spellingsLc = spellings.map((s) => s.toLowerCase());
     const rows = await this.prisma.personMention.findMany({ where: { name: { in: spellings } }, orderBy: { day: 'desc' } });
     if (!rows.length) return null;
     const uniqDays = [...new Set(rows.map((r) => r.day))].sort((a, b) => b.localeCompare(a)); // desc, de-duped across spellings
     const mentions = uniqDays.map((day) => ({ day }));
-    const has = (text?: string | null) => !!text && spellingsLc.some((sp) => text.toLowerCase().includes(sp));
+    // Word-boundary match (like tasks.byPerson) — a plain includes() made "Ram" match "program",
+    // "Ana" match "banana", etc., pulling unrelated history onto the person page. (BEA-810)
+    const spellingRes = spellings.map((s) => new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
+    const has = (text?: string | null) => !!text && spellingRes.some((re) => re.test(text));
     const sentencesWith = (text: string) =>
       text
         .split(/(?<=[.!?。])\s+|\n+/)

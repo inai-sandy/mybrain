@@ -359,6 +359,19 @@ describe('DailyService', () => {
       expect(d!.days[0].items.find((i: any) => i.type === 'story')!.text).not.toContain('gym');
     });
 
+    it('matches names on word boundaries, not substrings (BEA-810)', async () => {
+      const { svc, peopleMentions, stories, tasks, notes } = makeService();
+      peopleMentions.push({ name: 'Ram', day: '2026-06-11' });
+      stories.push({ id: 's2', day: '2026-06-11', rawText: 'Reviewed the program roadmap and the diagram.', createdAt: new Date() });
+      tasks.push({ id: 't2', day: '2026-06-11', title: 'Finish the program plan', status: 'open' });
+      notes.push({ id: 'n2', day: '2026-06-11', text: 'Updated the histogram' });
+      const d = await svc.personDetail('Ram');
+      const dump = JSON.stringify(d);
+      expect(dump).not.toContain('program');  // "Ram" must NOT match inside "program"
+      expect(dump).not.toContain('diagram');
+      expect(dump).not.toContain('histogram');
+    });
+
 
   it('weaves the two-sphere Story of the Day (professional + personal, separate moods)', async () => {
     const { svc, dayStories } = makeService({ llmText: '{"professional":{"story":"You closed the Srikar payment thread.","moodScore":72},"personal":{"story":"Dinner with the family felt unhurried.","moodScore":85},"mood":"settled","moodScore":78}' });
