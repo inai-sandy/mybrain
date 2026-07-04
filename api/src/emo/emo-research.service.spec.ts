@@ -36,7 +36,7 @@ describe('EmoResearchService — Quick (BEA-871)', () => {
     await svc.handle('c1');
     expect(flows.create).not.toHaveBeenCalled(); // no flow built for quick
     expect(agent.createRun).toHaveBeenCalled();
-    expect(bridge.execute).toHaveBeenCalled();
+    expect(bridge.execute).toHaveBeenCalledWith('run1', expect.objectContaining({ depth: 'quick', save: false })); // fast tier, not the slow path (BEA-879)
     const done = updates[updates.length - 1];
     expect(done.status).toBe('done');
     expect(done.summary).toMatch(/^Quick research:/);

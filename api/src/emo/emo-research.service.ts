@@ -47,11 +47,11 @@ export class EmoResearchService {
   // ---- Quick research (BEA-871) --------------------------------------------------------------
 
   private async runQuick(cardId: string, text: string): Promise<void> {
-    const query = text.replace(/\bquick\b/i, '').replace(/^\s*research\s*(on)?\s*/i, '').trim() || text;
+    const query = text.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').trim() || text;
     const prompt = `Do a QUICK one-pass research pass over my second brain AND the web on the topic below, then return a CONCISE one-screen answer: a one-line headline, 4–6 tight bullet findings each with a source, and one "next step". Keep it short — this is the fast tier.\n\nTopic: ${query}`;
     try {
       const run: any = await this.agent.createRun({ title: `Emo quick research: ${query.slice(0, 50)}`, input: prompt });
-      await this.bridge.execute(run.id, { prompt, title: 'Emo quick research', save: false, depth: 'standard' });
+      await this.bridge.execute(run.id, { prompt, title: 'Emo quick research', save: false, depth: 'quick' });
       const r: any = await this.agent.getRun(run.id).catch(() => null);
       const out = r?.resultText?.trim();
       await this.cards.update(cardId, {
@@ -104,7 +104,7 @@ export class EmoResearchService {
 
   /** Create + pre-plan (but do NOT run) a research flow from a brief. Returns {flowId, topic}. */
   private async createResearchFlow(base: string): Promise<{ flowId: string; topic: string; question: string } | null> {
-    let topic = base.replace(/^\s*(deep\s+)?research\s*(on)?\s*/i, '').slice(0, 60).trim() || 'Research';
+    let topic = base.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').slice(0, 60).trim() || 'Research';
     let question = base;
     try {
       const raw = await this.llm.complete(
