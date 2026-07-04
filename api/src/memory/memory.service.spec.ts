@@ -68,6 +68,24 @@ describe('MemoryService outbox', () => {
     expect(smRow.attempts).toBe(1);
   });
 
+  it('does NOT mark done (retries, no phantom id) when a store returns no id (BEA-778)', async () => {
+    const prisma = fakePrisma();
+    const sm: any = { save: jest.fn(async () => 'sm1') };
+    const rag: any = { save: jest.fn(async () => null) }; // store error → no real id
+    const svc = new MemoryService(prisma, sm, rag);
+
+    await svc.enqueue('hello', { itemId: 'item-1' });
+    await svc.drain();
+
+    const ragRow = prisma.rows.find((r: any) => r.target === 'rag');
+    expect(ragRow.status).toBe('pending'); // NOT 'done' — the doc wasn't really saved
+    expect(ragRow.attempts).toBe(1);       // queued for retry
+    // and no phantom ragId ('saved') was written back onto the source row
+    expect(prisma.itemUpdates.some((u: any) => u.data.ragId)).toBe(false);
+    // the good store still committed independently
+    expect(prisma.rows.find((r: any) => r.target === 'supermemory').status).toBe('done');
+  });
+
   it('records the returned store ids onto the item', async () => {
     const prisma = fakePrisma();
     const sm: any = { save: jest.fn(async () => 'sm-id-1') };

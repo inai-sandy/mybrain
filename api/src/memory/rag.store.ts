@@ -91,13 +91,15 @@ export class RagStore implements OnModuleDestroy {
     }
   }
 
-  async save(content: string, title?: string, tags: string[] = []): Promise<string> {
+  async save(content: string, title?: string, tags: string[] = []): Promise<string | null> {
     const name = (content?.length ?? 0) > CHUNK_THRESHOLD ? 'save_chunked_doc' : 'save_doc';
     return this.call(async (c) => {
       const r = await c.callTool({ name, arguments: { content, title, tags } });
       const p = this.parse(r);
-      // chunked save returns parent_id; whole-doc save returns id.
-      return p?.parent_id ?? p?.id ?? 'saved';
+      // chunked save returns parent_id; whole-doc save returns id. An error payload (callTool returns
+      // isError instead of throwing) has neither → return null so the caller treats it as a FAILURE and
+      // never records a phantom "saved" doc it can't later find or repair. (BEA-778)
+      return p?.parent_id ?? p?.id ?? null;
     });
   }
 

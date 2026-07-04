@@ -280,9 +280,13 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     for (const row of pending) {
       const p = JSON.parse(row.payload);
       try {
-        let resultId: string | undefined;
+        let resultId: string | null | undefined;
         if (row.target === 'supermemory') resultId = await this.sm.save(p.content, p.tags ?? []);
         else resultId = await this.rag.save(p.content, p.title, p.tags ?? []);
+        // A store that returned no real id did NOT save (an error payload, or a malformed response).
+        // Treat that as a failure so the row is retried instead of being marked 'done' with the doc lost
+        // and un-repairable (ragId would be a phantom 'saved'). (BEA-778)
+        if (!resultId || resultId === 'saved') throw new Error(`memory ${row.target} returned no document id`);
         // The store WRITE succeeded — commit 'done' NOW. Writing the id back onto the source row is
         // best-effort bookkeeping and must NEVER revert this success: if it threw and re-queued the row,
         // the next sweep would re-save a brand-new duplicate doc forever (the "Agent learned" runaway,
