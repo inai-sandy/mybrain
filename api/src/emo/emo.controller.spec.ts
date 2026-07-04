@@ -11,7 +11,8 @@ describe('EmoController (BEA-862)', () => {
   };
   const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1' }] })) };
   const capture: any = { capture: jest.fn(async () => ({ cards: [], transcript: 'x' })), audioFor: jest.fn(async () => null) };
-  const ctrl = new EmoController(svc, router, capture);
+  const search: any = { clarify: jest.fn(), run: jest.fn(async () => undefined) };
+  const ctrl = new EmoController(svc, router, capture, search);
 
   it('uploads a recording to the capture pipeline, and rejects an empty upload', async () => {
     await ctrl.upload({ buffer: Buffer.from('audio'), originalname: 'r.webm', mimetype: 'audio/webm' });
@@ -28,6 +29,12 @@ describe('EmoController (BEA-862)', () => {
   it('passes feed filters through to the service', async () => {
     await ctrl.list('needs_you' as any, 'search' as any, '2026-07-04', '20', '0');
     expect(svc.list).toHaveBeenCalledWith({ status: 'needs_you', lane: 'search', day: '2026-07-04', take: 20, skip: 0 });
+  });
+
+  it('runs the search agent after a search card is answered (BEA-869)', async () => {
+    svc.answer.mockResolvedValueOnce({ ok: true, card: { id: 'c1', lane: 'search' } });
+    await ctrl.answer('c1', { answer: 'South India' });
+    expect(search.run).toHaveBeenCalledWith('c1');
   });
 
   it('exposes counts, get, answer, update, remove', async () => {

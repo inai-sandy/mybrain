@@ -23,7 +23,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   needs_you: { label: 'Needs you', cls: 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300' },
 };
 const ROUTE: Record<string, (id: string) => string> = {
-  task: () => '/tasks', reminder: () => '/contacts', flow: (id) => `/flows/${id}`, meeting: () => '/meetings', document: (id) => `/doc/${id}`,
+  task: () => '/tasks', reminder: () => '/contacts', flow: (id) => `/flows/${id}`, meeting: () => '/meetings', document: (id) => `/doc/${id}`, agent: (id) => `/agent/runs/${id}`,
 };
 
 function istToday() { return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); }
