@@ -56,6 +56,14 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', outputDocId: 'doc-1', resultText: '# Findings' });
   });
 
+  it('finalizes the run as failed if execute throws before its own try (BEA-799)', async () => {
+    const agent = fakeAgent();
+    agent.engineSettings = jest.fn(async () => { throw new Error('db down'); }); // throws before execute's try
+    await build(agent).startRun({ prompt: 'hi', title: 'T' });
+    await new Promise((r) => setTimeout(r, 20)); // let the fire-and-forget catch settle
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'failed' }));
+  });
+
   it('surfaces a tool call (mybrain) as a step', async () => {
     const agent = fakeAgent();
     mockCodex({ text: 'ok', events: [{ type: 'mcp_tool_call', name: 'mybrain' }] });

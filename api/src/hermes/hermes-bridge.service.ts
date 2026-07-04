@@ -190,8 +190,13 @@ export class HermesBridgeService {
   async startRun(input: StartRunInput) {
     const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
     const run = await this.agent.createRun({ agentId: input.agentId ?? null, title: input.title || 'Agent run', input: input.prompt, depth });
-    // fire-and-forget — the run screen polls GET /api/agent/runs/:id for live progress
-    this.execute(run.id, input).catch((e) => this.log.error(`run ${run.id} crashed: ${e?.message || e}`));
+    // fire-and-forget — the run screen polls GET /api/agent/runs/:id for live progress.
+    // execute() awaits appendStep/engineSettings before its own try, so a transient DB error there
+    // would leave the run stuck 'running'. Always finalize on any escape. (BEA-799)
+    this.execute(run.id, input).catch(async (e) => {
+      this.log.error(`run ${run.id} crashed: ${e?.message || e}`);
+      await this.agent.finishRun(run.id, { status: 'failed', error: friendlyError(e?.message || String(e)) }).catch(() => undefined);
+    });
     return run;
   }
 
