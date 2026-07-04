@@ -63,4 +63,13 @@ describe('EmailMemoryService (BEA-439)', () => {
     await (svc as any).maybeBackfill();
     expect(google.gmailImportantForDay).not.toHaveBeenCalled();
   });
+
+  it('backfill tags/queries emails by IST day, matching the brief (BEA-812)', async () => {
+    const { svc, google } = make({ metas: [] });
+    // 2026-07-02 21:00 UTC = 2026-07-03 02:30 IST → the day key must be July 3 (IST), not July 2 (UTC)
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-07-02T21:00:00Z').getTime());
+    await svc.backfill(1);
+    spy.mockRestore();
+    expect(google.gmailImportantForDay).toHaveBeenCalledWith('2026-07-03', 40);
+  });
 });

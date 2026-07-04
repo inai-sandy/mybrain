@@ -6,8 +6,10 @@ import { MemoryService } from '../memory/memory.service';
 // Stores each important email (full body) in memory — RAG + SuperMemory — for whole-brain recall. (BEA-439)
 type Meta = { id: string; threadId: string; from: string; subject: string; date: string; snippet: string };
 
+// IST day key — the backfill must tag/query emails by the SAME day the Gmail brief uses (IST), or
+// EmailMemory.day ends up with two vocabularies and the Lab's per-day email lookup misses them. (BEA-812)
 function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return new Date(d.getTime() + 330 * 60000).toISOString().slice(0, 10);
 }
 function parseDate(s?: string): Date | null {
   if (!s) return null;
