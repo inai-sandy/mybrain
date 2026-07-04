@@ -92,10 +92,14 @@ export class ReminderSenderService implements OnModuleInit {
     }
 
     for (const [contactId, g] of groups) {
-      // Once the contact has replied, the two-way agent handles the conversation — stop firing template nudges. (BEA-735)
-      const replied = await this.prisma.reminderMessage.count({ where: { contactId, direction: 'in' } });
+      // While a conversation is genuinely LIVE, the two-way agent handles it — don't also fire a
+      // template nudge. "Live" = they replied within WhatsApp's 24h session window; older than that
+      // the chat is closed, so a NEW reminder must send as normal. Previously this was "ever replied",
+      // which silently killed every future reminder to anyone who ever answered once. (BEA-774, was BEA-735)
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const replied = await this.prisma.reminderMessage.count({ where: { contactId, direction: 'in', createdAt: { gte: since } } });
       if (replied > 0) {
-        for (const s of g.sends) await this.mark(s.id, 'skipped', null, 'contact replied — agent is handling the conversation');
+        for (const s of g.sends) await this.mark(s.id, 'skipped', null, 'contact replied recently — agent is handling the live conversation');
         continue;
       }
       const firstName = g.name.trim().split(/\s+/)[0];

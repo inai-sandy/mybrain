@@ -46,7 +46,7 @@ describe('joinSubjects (BEA-742)', () => {
   });
 });
 
-function makePrisma(sends: any[], inboundCount = 0) {
+function makePrisma(sends: any[], lastInboundAt: Date | null = null) {
   const state: any = { updates: [] as any[], msgs: [] as any[] };
   const prisma: any = {
     reminder: { findMany: async () => [], update: async () => ({}) }, // rollDay() — no stale reminders in these tests
@@ -55,7 +55,16 @@ function makePrisma(sends: any[], inboundCount = 0) {
       update: async ({ where, data }: any) => state.updates.push({ id: where.id, ...data }),
       deleteMany: async () => ({}),
     },
-    reminderMessage: { count: async () => inboundCount, create: async ({ data }: any) => state.msgs.push(data) },
+    reminderMessage: {
+      // Honour the createdAt>=since filter so the 24h scoping is actually exercised (BEA-774):
+      // a reply counts only if it lands inside the requested window.
+      count: async ({ where }: any = {}) => {
+        const since = where?.createdAt?.gte as Date | undefined;
+        if (!lastInboundAt) return 0;
+        return since && lastInboundAt < since ? 0 : 1;
+      },
+      create: async ({ data }: any) => state.msgs.push(data),
+    },
     task: { findUnique: async () => null },
   };
   return { prisma, state };
@@ -86,14 +95,24 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     expect(state.msgs[0].body).toContain('the Zigbee testing and the socket pins');
   });
 
-  it('skips all of a contact’s nudges once they have replied', async () => {
+  it('skips a contact’s nudges while they are in a LIVE conversation (replied < 24h ago) (BEA-774)', async () => {
     const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: '919' } } }];
-    const { prisma, state } = makePrisma(sends, 1); // 1 inbound = contact engaged
+    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 60 * 60 * 1000)); // replied 1h ago
     let sent = 0;
     const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => { sent++; return {}; } };
     await new ReminderSenderService(prisma, postbox).tick();
     expect(sent).toBe(0);
     expect(state.updates[0].status).toBe('skipped');
+  });
+
+  it('STILL sends a new reminder when the last reply was over 24h ago (BEA-774)', async () => {
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'the videos', contact: { name: 'X', whatsappNumber: '919' } } }];
+    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)); // replied 3 days ago
+    let sent = 0;
+    const postbox: any = { isConfigured: () => true, renderReminderTemplate, sendReminderTemplate: async () => { sent++; return { wamid: 'w' }; } };
+    await new ReminderSenderService(prisma, postbox).tick();
+    expect(sent).toBe(1); // the stale conversation must not block a fresh reminder
+    expect(state.updates[0].status).toBe('sent');
   });
 
   it('does nothing (no DB query) when Postbox is not configured', async () => {
