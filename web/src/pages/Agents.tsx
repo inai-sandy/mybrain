@@ -265,16 +265,12 @@ export function Agents() {
     if (!chosen.length) { toast('error', 'Pick at least one sub-question'); return; }
     setStarting(true);
     try {
-      const disabled = new Set(planFor.subs.filter((s) => !s.on).map((s) => s.branchIdx));
-      if (disabled.size) {
-        const flow = await (await fetch(`/api/flows/${planFor.flowId}`)).json();
-        const nodes = ((flow.graph?.nodes || []) as any[]).map((n) => {
-          const m = /^b(\d+)_/.exec(n.id);
-          return m && disabled.has(Number(m[1])) ? { ...n, data: { ...n.data, enabled: false } } : n;
-        });
-        await fetch(`/api/flows/${planFor.flowId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ graph: { ...flow.graph, nodes } }) });
-      }
-      const run = await (await fetch(`/api/flows/${planFor.flowId}/run`, { method: 'POST' })).json();
+      // Skip the unticked branches for THIS run only — sent to the run endpoint, never saved onto the
+      // flow (a saved enabled:false used to cripple every later plain Run / schedule). (BEA-796)
+      const skipBranches = planFor.subs.filter((s) => !s.on).map((s) => s.branchIdx);
+      const run = await (await fetch(`/api/flows/${planFor.flowId}/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skipBranches }),
+      })).json();
       setPlanFor(null);
       if (run?.runId) nav(`/flows/runs/${run.runId}`);
       else throw new Error('Could not start');

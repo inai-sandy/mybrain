@@ -38,6 +38,40 @@ describe('FlowRunnerService.reconcileOrphans (BEA-776)', () => {
   });
 });
 
+describe('FlowRunnerService.applySkip — per-run branch selection (BEA-796)', () => {
+  const flow = {
+    id: 'f1', name: 'Flow',
+    graph: JSON.stringify({
+      nodes: [
+        { id: 'question', data: { kind: 'question' } },
+        { id: 'b0_sq', data: { kind: 'subquestion' } }, { id: 'b0_s0', data: { kind: 'tool' } },
+        { id: 'b1_sq', data: { kind: 'subquestion' } }, { id: 'b1_s0', data: { kind: 'tool' } },
+        { id: 'merge', data: { kind: 'merge' } },
+      ],
+      edges: [],
+    }),
+  };
+
+  it('disables only the skipped branch, and never mutates the saved flow', () => {
+    const svc = runnerWithPrisma({});
+    const original = flow.graph; // saved graph string
+    const out = (svc as any).applySkip(flow, [1]);
+    const nodes = JSON.parse(out.graph).nodes as any[];
+    const on = (id: string) => nodes.find((n) => n.id === id)?.data?.enabled;
+    expect(on('b1_sq')).toBe(false); // skipped branch off
+    expect(on('b1_s0')).toBe(false);
+    expect(on('b0_sq')).toBeUndefined(); // kept branch untouched (no enabled flag)
+    expect(on('question')).toBeUndefined();
+    expect(flow.graph).toBe(original); // the saved flow object is NOT mutated
+  });
+
+  it('returns the flow unchanged when nothing is skipped', () => {
+    const svc = runnerWithPrisma({});
+    expect((svc as any).applySkip(flow, [])).toBe(flow);
+    expect((svc as any).applySkip(flow, undefined)).toBe(flow);
+  });
+});
+
 describe('FlowRunnerService.cancelRun (BEA-776)', () => {
   it("cancels a running run and frees the flow", async () => {
     let saved: any = null;

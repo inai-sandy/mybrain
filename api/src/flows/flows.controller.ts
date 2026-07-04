@@ -90,8 +90,8 @@ export class FlowsController {
   }
 
   @Post(':id/run')
-  run(@Param('id') id: string) {
-    return this.runner.start(id);
+  run(@Param('id') id: string, @Body() body?: { skipBranches?: number[] }) {
+    return this.runner.start(id, { skipBranches: Array.isArray(body?.skipBranches) ? body!.skipBranches : undefined });
   }
 
   @Patch(':id')

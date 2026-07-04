@@ -191,14 +191,27 @@ export class FlowRunnerService implements OnModuleInit {
     return rows.map((r) => ({ id: r.id, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt, finalOutput: r.finalOutput?.slice(0, 240) || null, documents: this.parseArr(r.documentIds) }));
   }
 
-  async start(flowId: string): Promise<{ runId: string }> {
+  /** Turn off the given branch indexes (b{idx}_*) for ONE run only, without touching the saved flow. (BEA-796) */
+  private applySkip(flow: any, skipBranches?: number[]): any {
+    if (!skipBranches?.length) return flow;
+    const skip = new Set(skipBranches.map(Number));
+    const graph = this.parse(flow.graph);
+    const nodes = (graph.nodes || []).map((n: any) => {
+      const m = /^b(\d+)_/.exec(n.id);
+      return m && skip.has(Number(m[1])) ? { ...n, data: { ...n.data, enabled: false } } : n;
+    });
+    return { ...flow, graph: JSON.stringify({ ...graph, nodes }) };
+  }
+
+  async start(flowId: string, opts: { skipBranches?: number[] } = {}): Promise<{ runId: string }> {
     const flow = await this.prisma.flow.findUnique({ where: { id: flowId } });
     if (!flow) throw new NotFoundException('Flow not found');
     // No stacking: if this flow already has a live run, return it instead of starting another. (BEA-772)
     const active = await this.prisma.flowRun.findFirst({ where: { flowId, status: { in: ['running', 'waiting'] } }, orderBy: { startedAt: 'desc' } });
     if (active) return { runId: active.id };
     const run = await this.prisma.flowRun.create({ data: { flowId, status: 'running', results: '{}' } });
-    void this.execute(run.id, flow).catch(async (e) => {
+    const flowForRun = this.applySkip(flow, opts.skipBranches); // per-run selection; saved flow untouched (BEA-796)
+    void this.execute(run.id, flowForRun).catch(async (e) => {
       this.log.error(`flow run ${run.id} crashed: ${e?.message || e}`);
       await this.prisma.flowRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
       this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
@@ -239,7 +252,9 @@ export class FlowRunnerService implements OnModuleInit {
     const results: Record<string, NodeResult> = this.parse(runRow?.results) || {};
     const terminal: { text: string; at: number }[] = this.parseArr(runRow?.terminal);
     const memo = new Map<string, Promise<string>>();
-    for (const [nid, rr] of Object.entries(results)) if ((rr as NodeResult)?.status === 'done') memo.set(nid, Promise.resolve((rr as NodeResult).output || ''));
+    // Seed both 'done' and 'skipped' so a resumed run doesn't re-run branches that were skipped
+    // (a per-run selection isn't re-applied on resume, which reloads the saved flow). (BEA-796)
+    for (const [nid, rr] of Object.entries(results)) { const st = (rr as NodeResult)?.status; if (st === 'done' || st === 'skipped') memo.set(nid, Promise.resolve((rr as NodeResult).output || '')); }
     const persist = () => this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
     if (!opts.evalMode && !terminal.length) term('▶ started');
