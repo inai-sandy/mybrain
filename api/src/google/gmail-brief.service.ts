@@ -118,8 +118,14 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     // missed nights, downtime). Runs before the nightly-generate branch so its early returns don't skip it. (BEA-343)
     await this.finalizeRecentBriefs(today).catch(() => undefined);
     if (this.localHM(tz) >= BRIEF_AT) {
-      if (await this.prisma.gmailBrief.findUnique({ where: { day: today } })) return;
-      await this.generate(today, false, true).catch((e) => this.log.warn(`brief ${today}: ${e?.message || e}`));
+      // Nightly: build the FULL brief once and push. A midday on-demand build may already have
+      // created a partial row for today; that used to make this return early, so the night's full
+      // brief never ran and the Telegram push never fired. Regenerate (force) and push, guarded by a
+      // self-contained marker so we don't rebuild/re-push every minute after 23:58. (BEA-803)
+      const doneDay = (await this.prisma.setting.findUnique({ where: { key: 'gmailbrief.nightlyDone' } }).catch(() => null))?.value;
+      if (doneDay === today) return;
+      await this.generate(today, true, true).catch((e) => this.log.warn(`brief ${today}: ${e?.message || e}`));
+      await this.setSetting('gmailbrief.nightlyDone', today).catch(() => undefined);
     } else {
       const y = this.dayAdd(today, -1);
       if (await this.prisma.gmailBrief.findUnique({ where: { day: y } })) return;
