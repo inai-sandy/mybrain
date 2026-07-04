@@ -10,7 +10,14 @@ describe('EmoController (BEA-862)', () => {
     remove: jest.fn(async () => ({ ok: true })),
   };
   const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1' }] })) };
-  const ctrl = new EmoController(svc, router);
+  const capture: any = { capture: jest.fn(async () => ({ cards: [], transcript: 'x' })), audioFor: jest.fn(async () => null) };
+  const ctrl = new EmoController(svc, router, capture);
+
+  it('uploads a recording to the capture pipeline, and rejects an empty upload', async () => {
+    await ctrl.upload({ buffer: Buffer.from('audio'), originalname: 'r.webm', mimetype: 'audio/webm' });
+    expect(capture.capture).toHaveBeenCalled();
+    await expect(ctrl.upload({} as any)).rejects.toThrow(); // no buffer
+  });
 
   it('routes a capture transcript and rejects an empty one', async () => {
     await ctrl.capture({ transcript: 'remind me to call the bank' });

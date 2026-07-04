@@ -1,21 +1,43 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { createReadStream } from 'fs';
 import { EmoCardsService, EmoLane, EmoStatus } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
+import { EmoCaptureService } from './emo-capture.service';
 
-/** EMO section API (BEA-862/863) — the feed reads/acts on cards; /capture routes a transcript to cards. */
+/** EMO section API (862/863/864) — feed, transcript router, and the record→transcribe→cards upload. */
 @Controller('emo')
 export class EmoController {
   constructor(
     private readonly cards: EmoCardsService,
     private readonly router: EmoRouterService,
+    private readonly capture_: EmoCaptureService,
   ) {}
 
-  // The seam the capture pipeline (EMO 4) calls: a transcript → one or more cards via the AI router.
+  // The seam for a transcript already in hand (e.g. the device, or tests): transcript → cards.
   @Post('capture')
   capture(@Body() body: { transcript?: string; source?: string; audioPath?: string }) {
     const transcript = (body?.transcript ?? '').toString().trim();
     if (!transcript) throw new BadRequestException('transcript is required');
     return this.router.route(transcript, { source: body?.source, audioPath: body?.audioPath });
+  }
+
+  // Browser capture (EMO 4): upload a recording → save + batch-transcribe → router → cards.
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file'))
+  async upload(@UploadedFile() file: any) {
+    if (!file?.buffer?.length) throw new BadRequestException('No recording uploaded');
+    return this.capture_.capture(file.buffer, file.originalname || 'recording.webm', file.mimetype || 'audio/webm', 'emo-voice');
+  }
+
+  // Stream a card's stored recording (the receipt) for playback.
+  @Get('cards/:id/audio')
+  async audio(@Param('id') id: string, @Res() res: Response) {
+    const found = await this.capture_.audioFor(id);
+    if (!found) throw new NotFoundException('No recording for this card');
+    res.setHeader('Content-Type', 'audio/webm');
+    createReadStream(found.path).on('error', () => res.status(404).end()).pipe(res);
   }
 
   @Get('cards')

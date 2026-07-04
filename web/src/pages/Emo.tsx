@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, ExternalLink } from 'lucide-react';
+import { Search, X, ExternalLink, Mic, Square, Loader2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Sheet } from '../ui/Sheet';
+
+function fmtElapsed(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 
 type Link = { kind: string; id: string; label?: string };
 type Card = {
@@ -36,11 +38,54 @@ function hhmm(iso: string) { return new Date(iso).toLocaleTimeString(undefined, 
 
 export default function Emo() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [cards, setCards] = useState<Card[] | null>(null);
   const [counts, setCounts] = useState<{ needsYou: number; cooking: number }>({ needsYou: 0, cooking: 0 });
   const [status, setStatus] = useState<'' | 'needs_you' | 'cooking' | 'done'>('');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<Card | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function startRec() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const mr = new MediaRecorder(stream, { mimeType: mime });
+      chunksRef.current = [];
+      mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (timerRef.current) clearInterval(timerRef.current);
+        await uploadBlob(new Blob(chunksRef.current, { type: 'audio/webm' }));
+      };
+      mr.start();
+      recRef.current = mr;
+      setRecording(true);
+      setElapsed(0);
+      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+    } catch { toast('error', 'Microphone permission is needed to record.'); }
+  }
+  function stopRec() { recRef.current?.stop(); setRecording(false); }
+
+  async function uploadBlob(blob: Blob) {
+    if (!blob.size) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('file', blob, 'recording.webm');
+    const r = await fetch('/api/emo/upload', { method: 'POST', body: fd }).catch(() => null);
+    setUploading(false);
+    if (r?.ok) {
+      const d = await r.json().catch(() => ({ cards: [] }));
+      const n = d.cards?.length || 0;
+      toast('success', n ? `${n} card${n === 1 ? '' : 's'} filed` : 'Saved');
+      load();
+    } else toast('error', 'Could not process that recording.');
+  }
 
   async function load() {
     const [c, k] = await Promise.all([
@@ -73,6 +118,13 @@ export default function Emo() {
           <h1 className="text-xl font-bold">Emo</h1>
           <p className="text-xs text-zinc-400">Everything you captured by voice — one card per moment.</p>
         </div>
+        {uploading ? (
+          <button disabled className="inline-flex items-center gap-2 rounded-full bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"><Loader2 size={16} className="animate-spin" />Transcribing…</button>
+        ) : recording ? (
+          <button onClick={stopRec} className="inline-flex items-center gap-2 rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-500"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-white" /><Square size={14} fill="currentColor" />Stop · {fmtElapsed(elapsed)}</button>
+        ) : (
+          <button onClick={startRec} className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-500"><Mic size={16} />Record</button>
+        )}
       </div>
 
       {/* attention strip */}
@@ -167,6 +219,9 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
             </div>
             <button onClick={close} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
           </div>
+
+          {/* the recording — the receipt */}
+          {card.audioPath && <audio controls preload="none" src={`/api/emo/cards/${card.id}/audio`} className="mb-4 w-full" />}
 
           {/* Needs-you: the on-card clarify (durable HITL) */}
           {card.status === 'needs_you' && card.needsQuestion && (
