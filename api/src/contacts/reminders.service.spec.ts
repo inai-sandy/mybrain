@@ -83,6 +83,22 @@ describe('scheduleNudges — fixed total, spill over days (BEA-740)', () => {
   });
 });
 
+describe('RemindersService.reseed — arm for the first send day (BEA-785)', () => {
+  it('arms a reminder for the IST day of its first scheduled send, not always today', async () => {
+    const captured: any = {};
+    const prisma: any = {
+      reminderSend: { deleteMany: async () => ({}), createMany: async ({ data }: any) => { captured.sends = data; return { count: data.length }; } },
+      reminder: { update: async ({ data }: any) => { captured.armedDay = data.armedDay; return {}; } },
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    await (svc as any).reseed('r1', ['09:00', '13:00', '16:30']);
+    // whatever "now" is, armedDay must equal the IST day of the first send — so a late-evening
+    // reminder (all sends tomorrow) is armed for tomorrow and survives tonight's rollDay.
+    const firstSendIstDay = new Date(new Date(captured.sends[0].at).getTime() + 330 * 60000).toISOString().slice(0, 10);
+    expect(captured.armedDay).toBe(firstSendIstDay);
+  });
+});
+
 describe('localTimesToUtc — reminder times are in the user tz (BEA-734)', () => {
   it('interprets HH:MM as IST and converts to the right UTC instant', () => {
     const now = new Date('2026-07-01T00:00:00Z'); // 05:30 IST, same local day

@@ -376,7 +376,13 @@ export class RemindersService {
     await this.prisma.reminderSend.deleteMany({ where: { reminderId, status: 'queued' } });
     const sends = sendsForToday(times);
     if (sends.length) await this.prisma.reminderSend.createMany({ data: sends.map((at) => ({ reminderId, at })) });
-    await this.prisma.reminder.update({ where: { id: reminderId }, data: { armedDay: this.todayKey(), pausedAuto: false } }).catch(() => undefined);
+    // Arm for the day of the FIRST scheduled send, not "today". A reminder created late in the
+    // evening has all its slots rolled to tomorrow; stamping today made rollDay auto-pause it at
+    // midnight and delete those sends, so it never fired. (BEA-785)
+    const armedDay = sends.length
+      ? new Date(sends[0].getTime() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10)
+      : this.todayKey();
+    await this.prisma.reminder.update({ where: { id: reminderId }, data: { armedDay, pausedAuto: false } }).catch(() => undefined);
   }
 
   /** Re-arm every paused reminder for today (the "Send today's chases" button). (BEA-764) */
