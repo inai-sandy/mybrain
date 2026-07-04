@@ -22,13 +22,21 @@ export class EmoTaskService {
     try {
       const res: any = await this.tasks.dump(text, 'emo');
       const created: any[] = Array.isArray(res?.tasks) ? res.tasks : [];
-      // Vague → ask on the card (reuses the dump clarity check), unless the owner already answered.
+      // Vague FIRST time → ask once on the card (reuses the dump clarity check).
       if (res?.question && !created.length && !card.needsAnswer) {
         await this.cards.update(cardId, { needsQuestion: res.question, status: 'needs_you' });
         return;
       }
       if (!created.length) {
-        await this.cards.update(cardId, { status: 'done', summary: card.summary || 'Nothing to add' });
+        // Already asked (or nothing parsed) and STILL no task — never discard the user's words. (BEA-877)
+        // Capture one best-effort task from the raw text so it's saved and editable.
+        const raw = (card.rawTranscript || card.needsAnswer || card.summary || '').trim();
+        const t: any = raw ? await this.tasks.create({ title: raw.slice(0, 140), category: 'Emo' }).catch(() => null) : null;
+        if (t?.id) {
+          await this.cards.update(cardId, { summary: `Task added: ${t.title}`, links: [{ kind: 'task', id: t.id, label: (t.title || '').slice(0, 60) }], status: 'done' });
+        } else {
+          await this.cards.update(cardId, { status: 'needs_you', needsQuestion: res?.question || 'I couldn’t turn that into a task — can you say it as a clear to-do?' });
+        }
         return;
       }
       const links = created.map((t) => ({ kind: 'task', id: t.id, label: (t.title || '').slice(0, 60) }));
