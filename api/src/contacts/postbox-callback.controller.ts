@@ -41,7 +41,13 @@ export class PostboxCallbackController {
         const dup = body.wamid ? await this.prisma.reminderMessage.findFirst({ where: { wamid: body.wamid, direction: 'in' } }) : null;
         if (dup) return { ok: true };
         // Store the reply on this CONTACT's conversation (shared across their reminders). (BEA-742)
-        const contact = await this.prisma.contact.findFirst({ where: { whatsappNumber: from } });
+        // WhatsApp's `from` always carries the country code, but a contact may be saved without it
+        // (e.g. a 10-digit number). Try an exact match, then fall back to the last 10 digits so those
+        // replies aren't silently dropped (which also kept template nudges firing at them). (BEA-787)
+        let contact = await this.prisma.contact.findFirst({ where: { whatsappNumber: from } });
+        if (!contact && from.length >= 10) {
+          contact = await this.prisma.contact.findFirst({ where: { whatsappNumber: { endsWith: from.slice(-10) } } });
+        }
         if (contact) {
           await this.prisma.reminderMessage
             .create({ data: { contactId: contact.id, direction: 'in', body: text, wamid: body.wamid || null } })
