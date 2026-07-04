@@ -56,6 +56,19 @@ function fakePrisma() {
         Object.assign(r, data);
         return r;
       },
+      updateMany: async ({ where, data }: any) => {
+        const match = (r: any) => {
+          if (where?.id !== undefined && r.id !== where.id) return false;
+          if (where?.status !== undefined) {
+            if (typeof where.status === 'object' && Array.isArray(where.status.in)) return where.status.in.includes(r.status);
+            return r.status === where.status;
+          }
+          return true;
+        };
+        const hit = runs.filter(match);
+        hit.forEach((r) => Object.assign(r, data));
+        return { count: hit.length };
+      },
       delete: async ({ where }: any) => {
         const i = runs.findIndex((x) => x.id === where.id);
         if (i < 0) throw new Error('run not found');
@@ -259,6 +272,32 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     const fresh = await svc.getRun(run.id);
     expect(fresh.status).toBe('cancelled');
     expect(fresh.outputDocId ?? null).toBeNull(); // no result attached
+  });
+
+  it('answering a question whose run already finished does not revive it (BEA-794)', async () => {
+    const run = await svc.createRun();
+    const wp = await svc.ask(run.id, { question: 'pick', options: ['a'] });
+    // the run finished (e.g. Codex cap) while the question was still open
+    await (svc as any).prisma.agentRun.update({ where: { id: run.id }, data: { status: 'failed', endedAt: new Date() } });
+    await svc.answerByToken(wp.resumeToken, 'a');
+    expect((await svc.getRun(run.id)).status).toBe('failed'); // NOT flipped back to running
+  });
+
+  it('an expired question does not flip an already-finished run to failed (BEA-794)', async () => {
+    const run = await svc.createRun();
+    const wp = await svc.ask(run.id, { question: 'pick', options: ['a'] });
+    await (svc as any).prisma.waitpoint.update({ where: { id: wp.id }, data: { expiresAt: new Date(Date.now() - 1000), defaultValue: null } });
+    await (svc as any).prisma.agentRun.update({ where: { id: run.id }, data: { status: 'done', endedAt: new Date() } });
+    await svc.sweepExpired(new Date());
+    expect((await svc.getRun(run.id)).status).toBe('done'); // NOT flipped to failed
+  });
+
+  it('finishing a run cancels its open question (BEA-794)', async () => {
+    const run = await svc.createRun();
+    const wp = await svc.ask(run.id, { question: 'pick', options: ['a'] });
+    await svc.finishRun(run.id, { status: 'done', resultText: 'ok' });
+    const w = (await svc.getRun(run.id)).waitpoints.find((x: any) => x.id === wp.id);
+    expect(w.status).toBe('cancelled');
   });
 
   it('appendStep records plain-English progress', async () => {

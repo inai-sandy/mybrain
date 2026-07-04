@@ -10,6 +10,7 @@ function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
     asked: [] as any[],
     engineSettings: jest.fn(async () => ({ model: '', autonomy: 'cautious', askTimeoutMin: 20, recall: true, learn: true, outputCollectionId: null, ...(opts.cfg || {}) })),
     createRun: jest.fn(async (i: any) => { runs['run-1'] = { id: 'run-1', status: 'running', ...i }; return runs['run-1']; }),
+    getRun: jest.fn(async (runId: string) => runs[runId] || null), // used to skip result-saving on a cancelled run (BEA-793)
     appendStep: jest.fn(async (runId: string, s: any) => { steps.push({ runId, ...s }); return runs[runId]; }),
     attachOutput: jest.fn(async (runId: string, docId: string) => { runs[runId].outputDocId = docId; return runs[runId]; }),
     finishRun: jest.fn(async (runId: string, patch: any) => { Object.assign(runs[runId], patch, { ended: true }); return runs[runId]; }),

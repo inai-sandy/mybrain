@@ -297,6 +297,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // A run that already reached a terminal state must NOT be revived — otherwise a Codex turn that
     // finishes after the user cancelled would flip 'cancelled' back to 'done' and save its result. (BEA-793)
     if (run.status === 'cancelled' || run.status === 'done' || run.status === 'failed') return this.shapeRun(run);
+    // A finishing run must not leave an open question behind that a later tap/timeout could act on. (BEA-794)
+    await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } }).catch(() => undefined);
     const updated = await this.prisma.agentRun.update({
       where: { id },
       data: {
@@ -400,10 +402,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       const run = fresh ? await this.prisma.agentRun.findUnique({ where: { id: fresh.runId } }) : null;
       return { applied: false, alreadyResolved: true, status: fresh?.status, waitpoint: fresh && this.shapeWaitpoint(fresh), run: run && this.shapeRun(run) };
     }
-    // Hand the run back to the engine (the bridge / MCP resumes the Hermes session from here).
-    const run = await this.prisma.agentRun.update({ where: { id: wp.runId }, data: { status: 'running' } });
+    // Hand the run back to the engine ONLY if it's still waiting. If it already finished (e.g. the
+    // Codex turn hit its cap and failed while the question was open), answering must NOT flip a
+    // terminal run back to 'running' with no driver — that leaves it stuck forever. (BEA-794)
+    await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: 'awaiting_input' }, data: { status: 'running' } });
+    const run = await this.prisma.agentRun.findUnique({ where: { id: wp.runId } });
     const fresh = await this.prisma.waitpoint.findUnique({ where: { id: wp.id } });
-    return { applied: true, alreadyResolved: false, status: 'answered', waitpoint: this.shapeWaitpoint(fresh), run: this.shapeRun(run) };
+    return { applied: true, alreadyResolved: false, status: 'answered', waitpoint: this.shapeWaitpoint(fresh), run: run ? this.shapeRun(run) : null };
   }
 
   /** Apply timeouts to overdue questions: use the smart default if there is one, else park the run. */
@@ -418,7 +423,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         const res = await this.prisma.waitpoint.updateMany({ where: { id: wp.id, status: 'pending' }, data: { status: 'expired', answeredAt: new Date() } });
         if (res.count > 0) {
           handled++;
-          await this.prisma.agentRun.update({ where: { id: wp.runId }, data: { status: 'failed', error: 'No answer in time, so this run was parked.', endedAt: new Date() } });
+          // Only park a run that is actually still waiting — never flip a run that already finished
+          // (done/failed/cancelled) to 'failed' and lose its visible result. (BEA-794)
+          await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: 'awaiting_input' }, data: { status: 'failed', error: 'No answer in time, so this run was parked.', endedAt: new Date() } });
         }
       }
     }
