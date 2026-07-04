@@ -61,6 +61,16 @@ describe('TelegramService', () => {
     expect(sent.some((m) => String(m.chat_id) === '999' && /private/i.test(m.text))).toBe(true);
   });
 
+  it('does not advance the update offset when handling throws (BEA-824)', async () => {
+    const { svc, settings } = make();
+    await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
+    expect(settings['telegram.lastUpdateId']).toBe('1'); // advanced after success
+    // a handler error must NOT mark the message as seen (it would be permanently dropped)
+    jest.spyOn(svc as any, 'processUpdate').mockRejectedValueOnce(new Error('boom'));
+    await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: 'hi' } });
+    expect(settings['telegram.lastUpdateId']).toBe('1'); // NOT advanced to 2
+  });
+
   it('runs an inline /dump for the owner and replies with the task list', async () => {
     const { svc, tasks, sent } = make();
     await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });

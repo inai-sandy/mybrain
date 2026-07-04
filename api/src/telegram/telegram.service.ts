@@ -400,13 +400,23 @@ export class TelegramService implements OnModuleInit {
 
   // ---- inbound update handling ----
   async handleUpdate(update: any): Promise<void> {
+    // de-dupe: ignore any update id we've already fully processed
+    const last = Number((await this.getSetting('telegram.lastUpdateId')) || 0);
+    const uid = Number(update?.update_id || 0);
+    if (uid && uid <= last) return;
     try {
-      // de-dupe: ignore any update id we've already processed
-      const last = Number((await this.getSetting('telegram.lastUpdateId')) || 0);
-      const uid = Number(update?.update_id || 0);
-      if (uid && uid <= last) return;
+      await this.processUpdate(update);
+      // Advance the offset ONLY after the message was handled. Previously it advanced first, so any
+      // handler error (transcription/LLM/DB) permanently dropped the message — it was marked "seen"
+      // and could never be retried on a redelivery. (BEA-824)
       if (uid) await this.setSetting('telegram.lastUpdateId', String(uid));
+    } catch (e: any) {
+      this.log.warn(`handleUpdate error (offset not advanced — will retry on redelivery): ${e?.message}`);
+    }
+  }
 
+  private async processUpdate(update: any): Promise<void> {
+    {
       if (update.callback_query) return this.handleCallback(update.callback_query);
       const msg = update.message;
       if (!msg) return;
@@ -464,8 +474,6 @@ export class TelegramService implements OnModuleInit {
 
       if (text.startsWith('/')) return this.handleCommand(chatId, text);
       return this.handlePlain(chatId, text);
-    } catch (e: any) {
-      this.log.warn(`handleUpdate error: ${e?.message}`);
     }
   }
 
