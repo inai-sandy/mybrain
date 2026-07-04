@@ -107,8 +107,8 @@ export class MentalModelService implements OnModuleInit {
   }
 
   /** Reflect on ONE day and remember it — called the moment a day is CLOSED (morning or night). (BEA-458) */
-  async learnDay(day: string): Promise<{ proposed: number; reinforced: number }> {
-    const r = await this.run(day);
+  async learnDay(day: string, skippedOverride?: any[]): Promise<{ proposed: number; reinforced: number }> {
+    const r = await this.run(day, skippedOverride);
     await this.markLearned(day);
     await this.logRun(day, r);
     if (r.proposed || r.reinforced) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
@@ -230,8 +230,8 @@ export class MentalModelService implements OnModuleInit {
   }
 
   /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
-  async run(day: string): Promise<{ proposed: number; reinforced: number }> {
-    const signals = await this.ingestion.gatherDaySignals(day);
+  async run(day: string, skippedOverride?: any[]): Promise<{ proposed: number; reinforced: number }> {
+    const signals = await this.ingestion.gatherDaySignals(day, undefined, skippedOverride);
     if (!signals.hasSignal) return { proposed: 0, reinforced: 0 };
 
     const existing = await this.prisma.mindFinding.findMany({

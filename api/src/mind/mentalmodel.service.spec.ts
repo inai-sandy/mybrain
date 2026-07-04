@@ -68,8 +68,8 @@ describe('MentalModelService close-day learning (BEA-458)', () => {
     const { svc, ingestion, settings } = harness({ llmJson: ONE_FINDING, closed: ['2026-06-18', '2026-06-19'] });
     const r = await svc.runNow();
     expect(r.days).toBe(2); // both closed days, none learned yet
-    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-18');
-    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-19');
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-18', undefined, undefined);
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-19', undefined, undefined);
     expect(JSON.parse(settings['mind.learnedDays'])).toEqual(['2026-06-18', '2026-06-19']);
   });
 
@@ -80,7 +80,7 @@ describe('MentalModelService close-day learning (BEA-458)', () => {
     const r = await svc.runNow(); // nothing new → re-reflect on the latest
     expect(r.days).toBe(1);
     expect(ingestion.gatherDaySignals).toHaveBeenCalledTimes(1);
-    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-19');
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledWith('2026-06-19', undefined, undefined);
   });
 
   it('learnDay reflects on the given day and records it as learned', async () => {

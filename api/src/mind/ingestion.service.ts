@@ -21,7 +21,10 @@ function nextDay(day: string): string {
 export class MindIngestionService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async gatherDaySignals(day: string, today: string = ymd(new Date())): Promise<DaySignals> {
+  // skippedOverride: the day's open tasks captured BEFORE close rolled them forward. Without it,
+  // closeDay's rollover empties the day's open tasks before the Lab reads them, so "skipped" — the
+  // signal the model calls the richest — was always empty. (BEA-808)
+  async gatherDaySignals(day: string, today: string = ymd(new Date()), skippedOverride?: any[]): Promise<DaySignals> {
     const sig = (t: any): TaskSignal => ({
       id: t.id,
       title: t.title,
@@ -36,8 +39,9 @@ export class MindIngestionService {
     const planned = await this.prisma.task.findMany({ where: { day } });
     const done = planned.filter((t) => t.status === 'done').map(sig);
     const openPlanned = planned.filter((t) => t.status !== 'done');
-    // Skipped = planned for a day already in the past but never done.
-    const skipped = (day < today ? openPlanned : []).map(sig);
+    // Skipped = planned for a day already in the past but never done. Use the pre-rollover snapshot
+    // when the caller (close) provides it, since the rollover has already moved them off the day. (BEA-808)
+    const skipped = (skippedOverride ?? (day < today ? openPlanned : [])).map(sig);
 
     // Postponed = chronically deferred & still open (standing avoidance signals), most-deferred first.
     const postponed = (

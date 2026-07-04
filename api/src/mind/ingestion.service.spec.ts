@@ -48,6 +48,15 @@ describe('MindIngestionService.gatherDaySignals (BEA-446)', () => {
     expect(s.hasSignal).toBe(true);
   });
 
+  it('uses the pre-rollover skipped snapshot when close provides it (BEA-808)', async () => {
+    // the day's open tasks were already rolled forward, so the day query finds only the done one
+    const svc = make({ tasks: [{ id: 'a', title: 'Ship the quote', day: D, status: 'done', rolloverCount: 0, createdAt: new Date(D + 'T09:00:00') }] });
+    const snapshot = [{ id: 'b', title: 'Call the bank', day: D, status: 'open', rolloverCount: 0 }]; // captured before rollover
+    const s = await svc.gatherDaySignals(D, TODAY, snapshot);
+    expect(s.tasks.skipped.map((t) => t.id)).toEqual(['b']); // skipped came from the snapshot, not the (emptied) day query
+    expect(s.tasks.done.map((t) => t.id)).toEqual(['a']);
+  });
+
   it('a future/today planned-open task is NOT counted as skipped', async () => {
     const svc = make({ tasks: [{ id: 'x', title: 'Today task', day: TODAY, status: 'open', rolloverCount: 0, createdAt: new Date(TODAY + 'T09:00:00') }] });
     const s = await svc.gatherDaySignals(TODAY, TODAY);

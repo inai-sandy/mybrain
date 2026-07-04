@@ -571,6 +571,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // 1. SEAL FIRST — the fast, essential work, so the request returns immediately and the day actually closes
     //    even if the LLM artifacts below are slow. (BEA-541: the 4 LLM calls used to run first and time out
     //    the request before the seal, leaving the day un-closed.)
+    // Snapshot the day's still-open tasks BEFORE the rollover moves them off the day — this is the
+    // Lab's "skipped" signal, which was always empty because rollDayForward ran first. (BEA-808)
+    const skippedSnapshot = day < today ? await this.prisma.task.findMany({ where: { day, status: { not: 'done' } } }) : [];
     // Roll the day's genuine leftovers forward: a past day → today; closing today → tomorrow.
     const target = day < today ? today : this.dayAdd(day, 1);
     const rolled = (await this.tasks.rollDayForward(day, target)).rolled;
@@ -585,7 +588,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       await this.generateDayStory(day, true).catch(() => undefined);
       await this.mentor.runMentorDay(day, true).catch(() => undefined);
       await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
-      await this.mind.learnDay(day).catch(() => undefined); // the Lab reflects once the day is complete (BEA-458)
+      await this.mind.learnDay(day, skippedSnapshot).catch(() => undefined); // the Lab reflects once the day is complete, with the pre-rollover skipped set (BEA-458, BEA-808)
     })().catch(() => undefined);
     return { day, closed: true, auto, rolled };
   }
