@@ -106,6 +106,18 @@ describe('MentorService', () => {
       expect(stats.avgPersonalMood).toBe(42);
     });
 
+    it('weekStats.followThrough is weighted by progress, matching the Dashboard (BEA-809)', async () => {
+      const { svc, tasks } = makeService(null);
+      // one done (100) + one 60% + one 0% over the week → weighted (100+60+0)/3 = 53, not binary 1/3=33
+      tasks.push(
+        { id: 't1', day: '2026-06-08', status: 'done', progress: 100 },
+        { id: 't2', day: '2026-06-09', status: 'open', progress: 60 },
+        { id: 't3', day: '2026-06-10', status: 'open', progress: 0 },
+      );
+      const stats = await (svc as any).weekStats('2026-06-08');
+      expect(stats.followThrough).toBe(53); // weighted, not 33
+    });
+
     it('weekStartOf maps any day to its Monday (Mon..Sun weeks)', () => {
       const { svc } = makeService(null);
       expect(svc.weekStartOf('2026-06-08')).toBe('2026-06-08'); // a Monday

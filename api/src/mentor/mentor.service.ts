@@ -305,7 +305,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       weekStart,
       tasksTotal: tasks.length,
       tasksDone: done.length,
-      followThrough: tasks.length ? Math.round((done.length / tasks.length) * 100) : null,
+      // Weighted like the Dashboard (done=100, else the task's own %), so the weekly review number
+      // matches the home KPI instead of a binary done/total that disagreed on 30/60% weeks. (BEA-809)
+      followThrough: tasks.length ? Math.round(tasks.reduce((s, t) => s + (t.status === 'done' ? 100 : (t.progress || 0)), 0) / tasks.length) : null,
       minutesSpent: done.reduce((s, t) => s + (t.actualMin || 0), 0),
       avgAdherence: avg(mentorDays.map((m) => m.adherenceScore)),
       avgMood: avg(nums(dayStories.map((s) => s.moodScore))),
