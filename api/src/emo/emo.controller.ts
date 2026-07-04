@@ -7,6 +7,7 @@ import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
 import { EmoReminderService } from './emo-reminder.service';
 import { EmoStoryService } from './emo-story.service';
+import { EmoResearchService } from './emo-research.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -19,6 +20,7 @@ export class EmoController {
     private readonly taskLane: EmoTaskService,
     private readonly reminderLane: EmoReminderService,
     private readonly story: EmoStoryService,
+    private readonly researchLane: EmoResearchService,
   ) {}
 
   // Story lane (EMO 5): append today's captures into the Day Story (user-initiated; never closes the day).
@@ -66,6 +68,7 @@ export class EmoController {
     if (res.ok && res.card?.lane === 'search') void this.search.run(id).catch(() => undefined);
     else if (res.ok && res.card?.lane === 'task') void this.taskLane.handle(id).catch(() => undefined);
     else if (res.ok && res.card?.lane === 'reminder') void this.reminderLane.handle(id).catch(() => undefined);
+    else if (res.ok && res.card?.lane === 'research') void this.researchLane.handle(id).catch(() => undefined);
     return res;
   }
 

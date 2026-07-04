@@ -16,5 +16,6 @@ import { FlowsController } from './flows.controller';
   imports: [SkillsModule, LlmModule, AgentModule, HermesModule, DocumentsModule, MemoryModule, TelegramModule],
   controllers: [FlowsController],
   providers: [FlowsService, FlowRunnerService, FlowScheduler],
+  exports: [FlowsService], // EMO Deep Research lane (BEA-870) builds & saves flows
 })
 export class FlowsModule {}

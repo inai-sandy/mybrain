@@ -5,6 +5,7 @@ import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
 import { EmoReminderService } from './emo-reminder.service';
 import { EmoMeetingService } from './emo-meeting.service';
+import { EmoResearchService } from './emo-research.service';
 
 type Segment = { lane: EmoLane; summary: string; text: string };
 
@@ -46,6 +47,7 @@ export class EmoRouterService {
     private readonly taskLane: EmoTaskService,
     private readonly reminderLane: EmoReminderService,
     private readonly meetingLane: EmoMeetingService,
+    private readonly researchLane: EmoResearchService,
   ) {}
 
   private parseSegments(raw: string | null, transcript: string): Segment[] {
@@ -94,6 +96,7 @@ export class EmoRouterService {
         else if (card.lane === 'task') void this.taskLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'reminder') void this.reminderLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'meeting') void this.meetingLane.handle(card.id).catch(() => undefined);
+        else if (card.lane === 'research') void this.researchLane.handle(card.id).catch(() => undefined);
       }
     }
     return { cards };

@@ -5,6 +5,7 @@ import { HermesModule } from '../hermes/hermes.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { DailyModule } from '../daily/daily.module';
+import { FlowsModule } from '../flows/flows.module';
 import { EmoCardsService } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
@@ -13,13 +14,14 @@ import { EmoTaskService } from './emo-task.service';
 import { EmoReminderService } from './emo-reminder.service';
 import { EmoStoryService } from './emo-story.service';
 import { EmoMeetingService } from './emo-meeting.service';
+import { EmoResearchService } from './emo-research.service';
 import { EmoController } from './emo.controller';
 
-/** EMO — Voice → Cards. Storage/feed/router/capture + lanes: Search, Tasks, Reminders, Story, Meetings. */
+/** EMO — Voice → Cards. Storage/feed/router/capture + lanes: Search, Tasks, Reminders, Story, Meetings, Research. */
 @Module({
-  imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule],
+  imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule],
   controllers: [EmoController],
-  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoReminderService, EmoStoryService, EmoMeetingService],
+  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService],
   exports: [EmoCardsService, EmoRouterService],
 })
 export class EmoModule {}
