@@ -451,10 +451,12 @@ function TaskHistory() {
   useEffect(() => {
     if (!sel) return;
     setDayTasks(null);
+    let alive = true; // latest-wins: ignore a slow response once the selected day changed (BEA-816)
     fetch(`/api/tasks?day=${sel}`)
       .then((r) => r.json())
-      .then((d) => setDayTasks(d.tasks || []))
-      .catch(() => setDayTasks([]));
+      .then((d) => { if (alive) setDayTasks(d.tasks || []); })
+      .catch(() => { if (alive) setDayTasks([]); });
+    return () => { alive = false; };
   }, [sel]);
 
   if (!cal) return <p className="text-sm text-zinc-400">Loading…</p>;

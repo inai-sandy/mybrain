@@ -63,17 +63,20 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
   const [closing, setClosing] = useState<string | null>(null);
   const toast = useToast();
 
+  const reqId = useRef(0);
   async function load(d?: string) {
     // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
+    const my = ++reqId.current; // latest-wins: rapid Prev/Next must not let a slow earlier response win (BEA-816)
     try {
       const r = await fetch('/api/daily/activity' + (d ? `?day=${d}` : ''));
       if (r.ok) {
         const j = await r.json();
+        if (my !== reqId.current) return; // a newer navigation superseded this one
         setData(j);
         if (j.day !== day) onDay(j.day);
       }
     } finally {
-      setLoading(false);
+      if (my === reqId.current) setLoading(false);
     }
   }
   useEffect(() => {
