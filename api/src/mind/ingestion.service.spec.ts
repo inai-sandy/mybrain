@@ -63,6 +63,16 @@ describe('MindIngestionService.gatherDaySignals (BEA-446)', () => {
     expect(s.tasks.skipped).toHaveLength(0);
   });
 
+  it('captures created items by IST day, not UTC (BEA-811)', async () => {
+    // created 2026-07-02 20:00 UTC = 2026-07-03 01:30 IST → belongs to July 3 (IST), not July 2
+    const t = { id: 'z', title: 'late-night task', day: '2026-07-03', status: 'open', rolloverCount: 0, createdAt: new Date('2026-07-02T20:00:00Z') };
+    const svc = make({ tasks: [t] });
+    const jul2 = await svc.gatherDaySignals('2026-07-02', '2026-07-05');
+    expect(jul2.tasks.created.find((x) => x.id === 'z')).toBeUndefined(); // NOT attributed to July 2
+    const jul3 = await svc.gatherDaySignals('2026-07-03', '2026-07-05');
+    expect(jul3.tasks.created.find((x) => x.id === 'z')).toBeTruthy();     // correctly on July 3 IST
+  });
+
   it('parses the story mood + worked breakdown (the feelings layer)', async () => {
     const svc = make({
       stories: [{ day: D, rawText: 'Long day, the pricing fight drained me.', mood: 'tired', workedMinutes: 480, workedBreakdown: JSON.stringify([{ category: 'Beakn', minutes: 300 }]), createdAt: new Date(D + 'T22:00:00') }],

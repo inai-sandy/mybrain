@@ -48,9 +48,10 @@ export class MindIngestionService {
       await this.prisma.task.findMany({ where: { status: 'open', rolloverCount: { gt: 0 } }, orderBy: { rolloverCount: 'desc' }, take: 12 })
     ).map(sig);
 
-    // Captured that day.
-    const start = new Date(day + 'T00:00:00');
-    const end = new Date(nextDay(day) + 'T00:00:00');
+    // Captured that day — the window is an IST day (the container runs UTC, so a bare 'T00:00:00'
+    // meant UTC midnight and shifted the whole window 5.5h, attributing items to the wrong day). (BEA-811)
+    const start = new Date(day + 'T00:00:00+05:30');
+    const end = new Date(nextDay(day) + 'T00:00:00+05:30');
     const created = (await this.prisma.task.findMany({ where: { createdAt: { gte: start, lt: end } } })).map(sig);
 
     const ideaRows = await this.prisma.idea.findMany({ where: { createdAt: { gte: start, lt: end } } });
