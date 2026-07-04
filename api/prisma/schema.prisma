@@ -914,3 +914,32 @@ model OAuthCode {
 
   @@index([clientId])
 }
+
+/// EMO (BEA-861) — a "receipt" card for every voice capture. Deliberately THIN: it carries the raw
+/// recording + transcript + a one-line summary of what Emo did, and LINKS to the real object
+/// (task/reminder/flow/meeting/document) which stays the single source of truth. The "answer-later"
+/// clarify (Needs-you HITL) lives ON the card. Named EmoCard so it never collides with UI "cards"
+/// (which are Items). Design: /home/sandy/emo-behavior-design.md
+model EmoCard {
+  id            String   @id @default(uuid())
+  lane          String // search | story | reminder | task | meeting | research | note
+  status        String   @default("cooking") // done | cooking | needs_you
+  title         String?
+  summary       String? // one-line "what Emo did" — readable without opening the link
+  detail        String? // markdown body (curated findings, meeting summary, …)
+  links         String   @default("[]") // JSON [{kind,id,label}] pointers to the real objects
+  needsQuestion String? // the clarify question shown on the card (durable Needs-you HITL)
+  needsOptions  String   @default("[]") // JSON array of suggested answers (optional)
+  needsAnswer   String? // the owner's answer once given
+  source        String   @default("emo") // where the capture came from
+  day           String // IST day key YYYY-MM-DD — powers the "Today's Captures" grouping
+  rawTranscript String?
+  audioPath     String? // the raw recording file (part of the receipt)
+  error         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([day])
+  @@index([status])
+  @@index([lane])
+}

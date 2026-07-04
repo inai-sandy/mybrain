@@ -1,0 +1,145 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+export type EmoLane = 'search' | 'story' | 'reminder' | 'task' | 'meeting' | 'research' | 'note';
+export type EmoStatus = 'done' | 'cooking' | 'needs_you';
+export type EmoLink = { kind: string; id: string; label?: string };
+
+export interface CreateEmoCard {
+  lane: EmoLane;
+  status?: EmoStatus;
+  title?: string | null;
+  summary?: string | null;
+  detail?: string | null;
+  links?: EmoLink[];
+  needsQuestion?: string | null;
+  needsOptions?: string[];
+  source?: string;
+  day?: string;
+  rawTranscript?: string | null;
+  audioPath?: string | null;
+}
+
+/**
+ * EMO (BEA-861) — storage for the "receipt" cards every voice capture files into. Thin: the card
+ * carries the recording + transcript + a one-line summary and LINKS to the real object; it is not a
+ * second copy of your data. The "answer-later" clarify (Needs-you) lives on the card.
+ */
+@Injectable()
+export class EmoCardsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /** IST day key (the whole app keys days in IST). Powers the "Today's Captures" grouping. */
+  todayKey(): string {
+    return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  }
+
+  private parse<T>(s: string | null | undefined, fallback: T): T {
+    try { return s ? (JSON.parse(s) as T) : fallback; } catch { return fallback; }
+  }
+
+  /** Shape a row for the API: JSON fields parsed. */
+  shape(r: any) {
+    return {
+      id: r.id,
+      lane: r.lane,
+      status: r.status,
+      title: r.title,
+      summary: r.summary,
+      detail: r.detail,
+      links: this.parse<EmoLink[]>(r.links, []),
+      needsQuestion: r.needsQuestion,
+      needsOptions: this.parse<string[]>(r.needsOptions, []),
+      needsAnswer: r.needsAnswer,
+      source: r.source,
+      day: r.day,
+      rawTranscript: r.rawTranscript,
+      audioPath: r.audioPath,
+      error: r.error,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
+  }
+
+  async create(input: CreateEmoCard) {
+    const row = await this.prisma.emoCard.create({
+      data: {
+        lane: input.lane,
+        status: input.status ?? 'cooking',
+        title: input.title ?? null,
+        summary: input.summary ?? null,
+        detail: input.detail ?? null,
+        links: JSON.stringify(input.links ?? []),
+        needsQuestion: input.needsQuestion ?? null,
+        needsOptions: JSON.stringify(input.needsOptions ?? []),
+        source: input.source ?? 'emo',
+        day: input.day ?? this.todayKey(),
+        rawTranscript: input.rawTranscript ?? null,
+        audioPath: input.audioPath ?? null,
+      },
+    });
+    return this.shape(row);
+  }
+
+  /** Feed query — newest first, optional filters. The UI does the day/Today's-Captures grouping. */
+  async list(opts: { status?: EmoStatus; lane?: EmoLane; day?: string; take?: number; skip?: number } = {}) {
+    const where: any = {};
+    if (opts.status) where.status = opts.status;
+    if (opts.lane) where.lane = opts.lane;
+    if (opts.day) where.day = opts.day;
+    const take = Math.min(200, Math.max(1, opts.take ?? 50));
+    const [rows, total] = await Promise.all([
+      this.prisma.emoCard.findMany({ where, orderBy: { createdAt: 'desc' }, take, skip: Math.max(0, opts.skip ?? 0) }),
+      this.prisma.emoCard.count({ where }),
+    ]);
+    return { cards: rows.map((r) => this.shape(r)), total };
+  }
+
+  /** Counts for the attention strip (Needs you / Cooking). */
+  async counts() {
+    const [needsYou, cooking] = await Promise.all([
+      this.prisma.emoCard.count({ where: { status: 'needs_you' } }),
+      this.prisma.emoCard.count({ where: { status: 'cooking' } }),
+    ]);
+    return { needsYou, cooking };
+  }
+
+  async get(id: string) {
+    const r = await this.prisma.emoCard.findUnique({ where: { id } });
+    if (!r) throw new NotFoundException('Card not found');
+    return this.shape(r);
+  }
+
+  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null }>) {
+    const exists = await this.prisma.emoCard.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) throw new NotFoundException('Card not found');
+    const data: any = {};
+    if (patch.status !== undefined) data.status = patch.status;
+    if (patch.title !== undefined) data.title = patch.title;
+    if (patch.summary !== undefined) data.summary = patch.summary;
+    if (patch.detail !== undefined) data.detail = patch.detail;
+    if (patch.links !== undefined) data.links = JSON.stringify(patch.links);
+    if (patch.needsQuestion !== undefined) data.needsQuestion = patch.needsQuestion;
+    if (patch.needsOptions !== undefined) data.needsOptions = JSON.stringify(patch.needsOptions);
+    if (patch.needsAnswer !== undefined) data.needsAnswer = patch.needsAnswer;
+    if (patch.error !== undefined) data.error = patch.error;
+    const row = await this.prisma.emoCard.update({ where: { id }, data });
+    return this.shape(row);
+  }
+
+  /** Record the owner's answer to a Needs-you card and hand it back to its lane (status → cooking). */
+  async answer(id: string, answer: string) {
+    const r = await this.prisma.emoCard.findUnique({ where: { id } });
+    if (!r) throw new NotFoundException('Card not found');
+    if (r.status !== 'needs_you') return { ok: false, message: 'This card is not waiting for an answer.' };
+    const row = await this.prisma.emoCard.update({ where: { id }, data: { needsAnswer: String(answer ?? ''), status: 'cooking' } });
+    return { ok: true, card: this.shape(row) };
+  }
+
+  async remove(id: string) {
+    const exists = await this.prisma.emoCard.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) throw new NotFoundException('Card not found');
+    await this.prisma.emoCard.delete({ where: { id } });
+    return { ok: true };
+  }
+}
