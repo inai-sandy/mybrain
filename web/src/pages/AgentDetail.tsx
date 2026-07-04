@@ -47,6 +47,7 @@ export function AgentDetail() {
   const [runs, setRuns] = useState<any[] | null>(null);
   const [showCanvas, setShowCanvas] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dirtyRef = useRef(false); // true once you edit Task/Outcome — the eval poll must not overwrite it (BEA-817)
 
   // Mobile leads with the readable steps; the canvas is a tap away (editing on a phone is fiddly).
   useEffect(() => { if (typeof window !== 'undefined') setShowCanvas(window.innerWidth >= 640); }, []);
@@ -57,7 +58,7 @@ export function AgentDetail() {
       setFlow(fl);
       if (fl) fetch(`/api/flows/${fl.id}/prompt`).then((r) => r.json()).then((p) => { setPrompt(p.prompt || ''); setProcess(p.process || null); }).catch(() => undefined);
     }).catch(() => undefined);
-    return fetch(`/api/agent/agents/${id}`).then((r) => r.json()).then((d) => { setA(d); setTask(d.prompt || ''); setRubric(d.rubric || ''); return d; }).catch(() => { setA(null); return null; });
+    return fetch(`/api/agent/agents/${id}`).then((r) => r.json()).then((d) => { setA(d); if (!dirtyRef.current) { setTask(d.prompt || ''); setRubric(d.rubric || ''); } return d; }).catch(() => { setA(null); return null; });
   }
   useEffect(() => { load(); return () => { if (pollRef.current) clearInterval(pollRef.current); }; /* eslint-disable-next-line */ }, [id]);
 
@@ -117,7 +118,7 @@ export function AgentDetail() {
     if (r.ok) { const d = await r.json(); setA(d); return d; }
     toast('error', 'Could not save');
   }
-  async function saveCfg() { setSavingCfg(true); await patch({ prompt: task, rubric }); setSavingCfg(false); toast('success', 'Saved'); }
+  async function saveCfg() { setSavingCfg(true); await patch({ prompt: task, rubric }); dirtyRef.current = false; setSavingCfg(false); toast('success', 'Saved'); }
   async function addEval() { const input = newInput.trim(); if (!input) return; await patch({ evals: [...(a.evals || []), { id: 'ev_' + Math.random().toString(36).slice(2, 9), input }] }); setNewInput(''); }
   async function delEval(eid: string) { await patch({ evals: (a.evals || []).filter((e: any) => e.id !== eid) }); }
   async function suggestEvals() {
@@ -183,14 +184,14 @@ export function AgentDetail() {
             <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <label className="block text-xs font-medium text-zinc-500">Task — what it does each run
                 <div className="relative mt-1">
-                  <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} className={inp + ' pr-11'} />
-                  <DictateButton onText={(t) => setTask((p) => (p ? p + ' ' : '') + t)} className="absolute right-2 top-2" />
+                  <textarea value={task} onChange={(e) => { dirtyRef.current = true; setTask(e.target.value); }} rows={3} className={inp + ' pr-11'} />
+                  <DictateButton onText={(t) => { dirtyRef.current = true; setTask((p) => (p ? p + ' ' : '') + t); }} className="absolute right-2 top-2" />
                 </div>
               </label>
               <label className="block text-xs font-medium text-zinc-500">Outcome — what does a good result look like? (each run is graded against this)
                 <div className="relative mt-1">
-                  <textarea value={rubric} onChange={(e) => setRubric(e.target.value)} rows={3} placeholder="e.g. Has 3 bullets. Each is one short sentence. Mentions a source." className={inp + ' pr-11'} />
-                  <DictateButton onText={(t) => setRubric((p) => (p ? p + ' ' : '') + t)} className="absolute right-2 top-2" />
+                  <textarea value={rubric} onChange={(e) => { dirtyRef.current = true; setRubric(e.target.value); }} rows={3} placeholder="e.g. Has 3 bullets. Each is one short sentence. Mentions a source." className={inp + ' pr-11'} />
+                  <DictateButton onText={(t) => { dirtyRef.current = true; setRubric((p) => (p ? p + ' ' : '') + t); }} className="absolute right-2 top-2" />
                 </div>
               </label>
               <button onClick={saveCfg} disabled={savingCfg} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900">{savingCfg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
