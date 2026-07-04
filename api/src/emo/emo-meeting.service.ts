@@ -59,7 +59,7 @@ export class EmoMeetingService {
       });
     } catch (e: any) {
       this.log.warn(`meeting lane failed (${cardId}): ${e?.message || e}`);
-      await this.cards.update(cardId, { status: 'done', error: String(e?.message || e), detail: `Couldn’t summarise the meeting.\n\n---\n### Transcript\n${transcript}` }).catch(() => undefined);
+      await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I couldn’t summarise that meeting — the full transcript is saved below. Retry?', error: String(e?.message || e), detail: `Couldn’t summarise the meeting.\n\n---\n### Transcript\n${transcript}` }).catch(() => undefined);
     }
   }
 }

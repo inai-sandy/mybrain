@@ -23,7 +23,7 @@ export class EmoStoryService {
   }
 
   async mergeToday(): Promise<{ merged: number; storyDay: string }> {
-    const day = this.cards.todayKey();
+    const day = await this.cards.todayKey();
     const { cards: list } = await this.cards.list({ lane: 'story', day, take: 200 });
     const unmerged = list.filter((c) => !this.mergedAlready(c));
     if (!unmerged.length) return { merged: 0, storyDay: day };

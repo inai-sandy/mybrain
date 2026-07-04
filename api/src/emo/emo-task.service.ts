@@ -44,7 +44,7 @@ export class EmoTaskService {
       await this.cards.update(cardId, { summary, links, status: 'done' });
     } catch (e: any) {
       this.log.warn(`task lane failed (${cardId}): ${e?.message || e}`);
-      await this.cards.update(cardId, { status: 'done', error: String(e?.message || e), summary: card.summary || 'Couldn’t add the task' }).catch(() => undefined);
+      await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I couldn’t add that task — reword it and try again?', error: String(e?.message || e) }).catch(() => undefined);
     }
   }
 }

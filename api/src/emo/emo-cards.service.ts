@@ -29,9 +29,18 @@ export interface CreateEmoCard {
 export class EmoCardsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** IST day key (the whole app keys days in IST). Powers the "Today's Captures" grouping. */
-  todayKey(): string {
-    return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  /** The user's configured timezone (matches DailyService — the one source of truth for "today"). */
+  private async tz(): Promise<string> {
+    try {
+      const row = await this.prisma.setting.findUnique({ where: { key: 'tasks.tz' } });
+      return ((row as any)?.value || '').trim() || 'Asia/Kolkata';
+    } catch { return 'Asia/Kolkata'; }
+  }
+
+  /** The current day key in the user's timezone. Powers "Today's Captures". Reused, not a hardcoded offset. (BEA-878) */
+  async todayKey(): Promise<string> {
+    const tz = await this.tz();
+    return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   }
 
   private parse<T>(s: string | null | undefined, fallback: T): T {
@@ -73,7 +82,7 @@ export class EmoCardsService {
         needsQuestion: input.needsQuestion ?? null,
         needsOptions: JSON.stringify(input.needsOptions ?? []),
         source: input.source ?? 'emo',
-        day: input.day ?? this.todayKey(),
+        day: input.day ?? (await this.todayKey()),
         rawTranscript: input.rawTranscript ?? null,
         audioPath: input.audioPath ?? null,
       },

@@ -46,9 +46,10 @@ export class EmoController {
 
   // Browser capture (EMO 4): upload a recording → transcribe in memory → router → cards (audio not kept).
   @Post('upload')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 50 * 1024 * 1024 } })) // 50 MB cap (BEA-878)
   async upload(@UploadedFile() file: any) {
     if (!file?.buffer?.length) throw new BadRequestException('No recording uploaded');
+    if (file.mimetype && !/^audio\//i.test(file.mimetype)) throw new BadRequestException('Upload an audio recording');
     return this.capture_.capture(file.buffer, file.originalname || 'recording.webm', file.mimetype || 'audio/webm', 'emo-voice');
   }
 

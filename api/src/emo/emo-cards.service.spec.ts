@@ -29,7 +29,7 @@ describe('EmoCardsService (BEA-861)', () => {
     const card = await svc.create({ lane: 'task', summary: 'Task added: finish BOM', links: [{ kind: 'task', id: 't1', label: 'finish BOM' }] });
     expect(card.lane).toBe('task');
     expect(card.status).toBe('cooking'); // default
-    expect(card.day).toBe(svc.todayKey()); // IST today
+    expect(card.day).toBe(await svc.todayKey()); // today in the configured tz
     expect(card.links).toEqual([{ kind: 'task', id: 't1', label: 'finish BOM' }]); // parsed back to an array
     expect(card.needsOptions).toEqual([]);
   });
