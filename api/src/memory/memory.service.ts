@@ -770,10 +770,17 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
             tags = built.tags;
           }
 
+          const refId = row[this.pkOf(table)];
+          // Don't re-enqueue a row that already has a save waiting in the outbox — the drain is slow
+          // (~1 row/s), so a burst would otherwise queue the same content several times and create
+          // duplicate docs in the stores. A pending row will drain and link the id shortly. (BEA-804)
+          const alreadyQueued = await this.prisma.memoryOutbox.findFirst({ where: { itemId: refId, refType: table, status: 'pending' } });
+          if (alreadyQueued) continue;
+
           const targets: Array<'supermemory' | 'rag'> = [];
           if (missingSm) targets.push('supermemory');
           if (missingRag) targets.push('rag');
-          await this.enqueue(content, { refType: table, refId: row[this.pkOf(table)], title, tags, targets }).catch(() => undefined);
+          await this.enqueue(content, { refType: table, refId, title, tags, targets }).catch(() => undefined);
           reEnqueued++;
           perType[table] = (perType[table] || 0) + 1;
         }

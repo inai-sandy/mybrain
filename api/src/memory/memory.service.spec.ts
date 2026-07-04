@@ -248,6 +248,7 @@ describe('MemoryService.reconcile (BEA-333 safety net)', () => {
           return { count: data.length };
         },
         findMany: async () => outbox.filter((r) => r.status === 'pending' && r.attempts < 3),
+        findFirst: async ({ where }: any) => outbox.find((r) => r.itemId === where.itemId && r.refType === where.refType && r.status === where.status) || null,
         update: async ({ where, data }: any) => {
           Object.assign(outbox.find((x) => x.id === where.id), data);
           return {};
@@ -319,6 +320,17 @@ describe('MemoryService.reconcile (BEA-333 safety net)', () => {
     expect(sm.save).not.toHaveBeenCalled(); // SM untouched — no duplicate
     expect(seed.item[0].ragId).toBe('rag-i');
     expect(seed.item[0].supermemoryId).toBe('sm-existing'); // unchanged
+  });
+
+  it('does not re-enqueue a row that already has a pending save (no duplicate docs) (BEA-804)', async () => {
+    const seed: any = { meeting: [{ id: 'm1', title: 'Sync', summary: 'x', ragId: null, supermemoryId: null }] };
+    const prisma = makeReconcilePrisma(seed);
+    // a save for this ref is already queued (not yet drained)
+    prisma._outbox.push({ id: '1', status: 'pending', attempts: 0, target: 'rag', itemId: 'm1', refType: 'meeting', payload: '{}' });
+    const svc = new MemoryService(prisma, { save: jest.fn() } as any, { save: jest.fn() } as any);
+
+    const res = await svc.reconcile();
+    expect(res.reEnqueued).toBe(0); // skipped — the pending row will drain and link it
   });
 
   it('revives failed outbox rows', async () => {
