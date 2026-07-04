@@ -308,12 +308,26 @@ export class FlowRunnerService implements OnModuleInit {
       throw e;
     }
 
+    // Only a genuinely DONE terminal counts as the answer — never a failed node's error text, which
+    // would otherwise be promoted to finalOutput and saved as a Document. (BEA-800)
     let finalOutput = '';
-    for (const n of terminals) { const r = results[n.id]; if (r?.output) finalOutput = r.output; }
+    for (const n of terminals) { const r = results[n.id]; if (r?.status === 'done' && r.output) finalOutput = r.output; }
 
-    // Save the outputs as Documents you can browse later (Agent↔Flow merge ④) — but not for eval runs.
     // If the run was cancelled while this driver was mid-flight, don't resurrect it as 'done'. (BEA-776)
     if (this.cancelled.has(runId)) { this.cancelled.delete(runId); return; }
+
+    // If nothing succeeded and a step failed, the run FAILED — don't report 'done' with a blank answer. (BEA-800)
+    if (!opts.evalMode && !finalOutput.trim()) {
+      const failed = Object.values(results).find((r) => r.status === 'failed');
+      if (failed) {
+        if (!terminal.length || terminal[terminal.length - 1]?.text !== '✗ a step failed') term('✗ a step failed');
+        await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
+        this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
+        return;
+      }
+    }
+
+    // Save the outputs as Documents you can browse later (Agent↔Flow merge ④) — but not for eval runs.
     const docs = opts.evalMode ? [] : await this.saveDocuments(flow, graph, incoming, results, finalOutput);
     if (!opts.evalMode) term('✓ done');
 

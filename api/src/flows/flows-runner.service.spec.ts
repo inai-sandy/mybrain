@@ -38,6 +38,31 @@ describe('FlowRunnerService.reconcileOrphans (BEA-776)', () => {
   });
 });
 
+describe('FlowRunnerService.execute — failure propagation (BEA-800)', () => {
+  it('marks the run failed (not done/blank) when the only branch fails', async () => {
+    let saved: any = null;
+    const prisma: any = {
+      flowRun: {
+        findUnique: async () => ({ id: 'r1', results: '{}', terminal: '[]' }),
+        update: async ({ data }: any) => { saved = data; return {}; },
+      },
+      agentRun: { update: async () => ({}) },
+    };
+    const bridge: any = { execute: async () => { throw new Error('engine boom'); } };
+    const agent: any = { createRun: async () => ({ id: 'ar1' }), getRun: async () => ({ status: 'failed', error: 'engine boom' }) };
+    const telegram: any = { notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, bridge, agent, {} as any, {} as any, {} as any, {} as any, telegram, {} as any);
+
+    // one web_search tool node (an agent-engine tool) that will fail; no output node → it's the terminal
+    const flow = { id: 'f1', name: 'F', graph: JSON.stringify({ nodes: [{ id: 't1', data: { kind: 'tool', refId: 'web_search', label: 'Web' } }], edges: [] }) };
+    await (svc as any).execute('r1', flow);
+
+    expect(saved.status).toBe('failed');       // NOT 'done'
+    expect(saved.finalOutput).toBeUndefined(); // no blank/error answer promoted
+    expect(String(saved.error)).toMatch(/boom/);
+  });
+});
+
 describe('FlowRunnerService.answer — atomic claim (BEA-791)', () => {
   it('a double-answer starts only ONE driver', async () => {
     const row: any = { id: 'r1', status: 'waiting', waitNodeId: 'n1', results: '{}', flowId: 'f1' };
