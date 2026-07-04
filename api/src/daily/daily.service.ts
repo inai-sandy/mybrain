@@ -40,7 +40,38 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.monthTick().catch(() => undefined);
       this.yearTick().catch(() => undefined);
       this.personalityTick().catch(() => undefined);
+      this.repairTick().catch(() => undefined);
     }, 60_000);
+  }
+
+  private lastRepairAt = 0;
+  /** Throttled repair for sealed-but-incomplete days (a close whose background story/summary failed). */
+  async repairTick(): Promise<void> {
+    if (Date.now() - this.lastRepairAt < 10 * 60_000) return; // at most every 10 minutes
+    this.lastRepairAt = Date.now();
+    await this.repairSealedDays();
+  }
+
+  /** A day can be sealed (dayClose row exists) but missing its story/summary if the close's background
+   *  jobs failed — and the periodic ticks skip closed days, so it never self-heals. Regenerate the
+   *  missing narrative for recently-closed days that have no story yet. (BEA-827) */
+  async repairSealedDays(): Promise<number> {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const from = this.dayAdd(today, -3);
+    const closes = await this.prisma.dayClose.findMany({ where: { day: { gte: from, lte: today } }, select: { day: true } });
+    if (!closes.length) return 0;
+    const days = closes.map((c) => c.day);
+    const haveStory = new Set((await this.prisma.dayStory.findMany({ where: { day: { in: days } }, select: { day: true } })).map((s) => s.day));
+    let repaired = 0;
+    for (const day of days) {
+      if (haveStory.has(day)) continue; // already complete
+      await this.generateSummary(day, true).catch(() => undefined);
+      await this.generateDayStory(day, true).catch(() => undefined);
+      await this.mentor.runMentorDay(day, true).catch(() => undefined);
+      repaired++;
+    }
+    return repaired;
   }
   onModuleDestroy() {
     if (this.tick) clearInterval(this.tick);

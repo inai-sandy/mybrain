@@ -420,6 +420,26 @@ describe('DailyService', () => {
       expect(tasks.find((t) => t.id === 'tt').day).toBe(tomorrow);
     });
 
+    it('repairSealedDays regenerates the story for a sealed day missing it (BEA-827)', async () => {
+      const { svc, dayCloses } = makeService();
+      const today = istToday();
+      dayCloses.push({ day: today, auto: true });
+      const storySpy = jest.spyOn(svc, 'generateDayStory').mockResolvedValue({} as any);
+      jest.spyOn(svc, 'generateSummary').mockResolvedValue({} as any);
+      expect(await svc.repairSealedDays()).toBe(1);
+      expect(storySpy).toHaveBeenCalledWith(today, true);
+    });
+
+    it('repairSealedDays skips a sealed day that already has its story (BEA-827)', async () => {
+      const { svc, dayCloses, dayStories } = makeService();
+      const today = istToday();
+      dayCloses.push({ day: today, auto: true });
+      dayStories.push({ day: today, text: 'already told', moodScore: 50, createdAt: new Date(), updatedAt: new Date() });
+      const storySpy = jest.spyOn(svc, 'generateDayStory');
+      expect(await svc.repairSealedDays()).toBe(0);
+      expect(storySpy).not.toHaveBeenCalled();
+    });
+
     it('does not mark the morning wrap done if wrapYesterday throws (BEA-826)', async () => {
       const { svc } = makeService();
       jest.spyOn(svc as any, 'localHM').mockReturnValue('23:00'); // past the 10:00 checkpoint
