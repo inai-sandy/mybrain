@@ -38,6 +38,31 @@ describe('FlowRunnerService.reconcileOrphans (BEA-776)', () => {
   });
 });
 
+describe('FlowRunnerService.answer — atomic claim (BEA-791)', () => {
+  it('a double-answer starts only ONE driver', async () => {
+    const row: any = { id: 'r1', status: 'waiting', waitNodeId: 'n1', results: '{}', flowId: 'f1' };
+    const prisma: any = {
+      flowRun: {
+        findUnique: async () => ({ ...row }),
+        // atomic: flip waiting->running only if still waiting
+        updateMany: async ({ where, data }: any) => {
+          if (where.status === 'waiting' && row.status === 'waiting') { row.status = data.status; return { count: 1 }; }
+          return { count: 0 };
+        },
+        update: async () => ({}),
+      },
+      flow: { findUnique: async () => ({ id: 'f1', name: 'F', graph: '{}' }) },
+    };
+    const svc = runnerWithPrisma(prisma);
+    (svc as any).execute = jest.fn(async () => undefined); // don't actually run the graph
+
+    const [a, b] = await Promise.all([svc.answer('r1', 'x'), svc.answer('r1', 'y')]);
+    const oks = [a, b].filter((r) => r.ok).length;
+    expect(oks).toBe(1);                       // exactly one caller won
+    expect((svc as any).execute).toHaveBeenCalledTimes(1); // and only one driver started
+  });
+});
+
 describe('FlowRunnerService.applySkip — per-run branch selection (BEA-796)', () => {
   const flow = {
     id: 'f1', name: 'Flow',

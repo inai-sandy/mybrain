@@ -345,11 +345,15 @@ export class FlowRunnerService implements OnModuleInit {
     const run = await this.prisma.flowRun.findUnique({ where: { id: runId } });
     if (!run) throw new NotFoundException('Run not found');
     if (run.status !== 'waiting' || !(run as any).waitNodeId) return { ok: false, message: 'This run is not waiting for an answer.' };
+    // Atomically claim the waiting run so a double-tap (or web + Telegram) can't start two drivers on
+    // the same run — duplicate Codex turns, duplicate documents, clobbered results. Only one wins. (BEA-791)
+    const claim = await this.prisma.flowRun.updateMany({ where: { id: runId, status: 'waiting' }, data: { status: 'running' } });
+    if (claim.count === 0) return { ok: false, message: 'This run is already being answered.' };
     const flow = run.flowId ? await this.prisma.flow.findUnique({ where: { id: run.flowId } }) : null;
     const results: Record<string, NodeResult> = this.parse(run.results) || {};
     const nodeId = (run as any).waitNodeId as string;
     results[nodeId] = { status: 'done', output: String(answer || ''), kind: 'ask_user', label: results[nodeId]?.label || 'Ask me' };
-    await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'running', results: JSON.stringify(results), waitNodeId: null, waitQuestion: null, waitToken: null } });
+    await this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), waitNodeId: null, waitQuestion: null, waitToken: null } });
     void this.execute(runId, flow).catch(async (e) => {
       this.log.error(`flow run ${runId} crashed on resume: ${e?.message || e}`);
       await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
