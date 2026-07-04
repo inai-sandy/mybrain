@@ -42,12 +42,19 @@ export class AuthService implements OnModuleInit {
   }
 
   issueToken(payload: { id: string; email: string }): string {
-    return jwt.sign(payload, SESSION_SECRET, { expiresIn: SESSION_TTL_SECONDS });
+    // typ:'session' marks this as a login token (vs the OAuth access/refresh tokens signed with the
+    // same secret). New tokens carry it; verifyToken doesn't require it, so existing cookies keep working.
+    return jwt.sign({ ...payload, typ: 'session' }, SESSION_SECRET, { expiresIn: SESSION_TTL_SECONDS });
   }
 
   verifyToken(token: string): { id: string; email: string } | null {
     try {
       const decoded = jwt.verify(token, SESSION_SECRET) as any;
+      // The OAuth server signs read-only MCP access/refresh tokens with this SAME secret. Without this
+      // check a connector token could be replayed as a full login cookie. Reject anything that looks
+      // like an OAuth token (typ:'access'/'refresh' or aud:'mcp'), and require real session claims. (BEA-777)
+      if (decoded.typ === 'access' || decoded.typ === 'refresh' || decoded.aud === 'mcp') return null;
+      if (!decoded.id || !decoded.email) return null;
       return { id: decoded.id, email: decoded.email };
     } catch {
       return null;
