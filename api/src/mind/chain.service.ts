@@ -14,7 +14,7 @@ export class MindChainService {
   ) {}
 
   private today() {
-    return new Date().toISOString().slice(0, 10);
+    return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); // IST day, not the UTC container day (BEA-813)
   }
 
   list() {

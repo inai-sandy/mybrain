@@ -73,6 +73,11 @@ export class MentalModelService implements OnModuleInit {
   private ymd(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
+  /** Today's IST day key — used for lifecycle/decay so a finding confirmed late at night isn't
+   *  stamped with the previous UTC day and made to decay early. (BEA-813) */
+  private todayIst(): string {
+    return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  }
 
   // ---- closed-day bookkeeping (BEA-458) ----
   private async learnedSet(): Promise<Set<string>> {
@@ -112,7 +117,7 @@ export class MentalModelService implements OnModuleInit {
     await this.markLearned(day);
     await this.logRun(day, r);
     if (r.proposed || r.reinforced) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
-    await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
+    await this.lifecycle.runDaily(this.todayIst()).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
     await this.chains.inferFromDay(day).catch((e) => this.log.warn(`mind chains: ${e?.message ?? e}`)); // propose blocker/lever chains (BEA-516)
     await this.chains.reviewActiveChains(day).catch((e) => this.log.warn(`mind chains review: ${e?.message ?? e}`)); // re-derive shifted/resolved blockers — ToC "repeat" (BEA-526)
     return r;
@@ -145,7 +150,7 @@ export class MentalModelService implements OnModuleInit {
       await this.logRun(day, r);
       if (r && (r.proposed || r.reinforced)) this.log.log(`mind: learned ${day} → ${r.proposed} new, ${r.reinforced} reinforced`);
     }
-    await this.lifecycle.runDaily(this.ymd(new Date())).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
+    await this.lifecycle.runDaily(this.todayIst()).catch((e) => this.log.warn(`mind lifecycle: ${e?.message ?? e}`));
   }
 
   /** "Run now": learn every closed-but-unlearned day; if all caught up, re-reflect on the latest closed day. (BEA-458) */
@@ -165,7 +170,7 @@ export class MentalModelService implements OnModuleInit {
         reinforced += r.reinforced;
       }
     }
-    await this.lifecycle.runDaily(this.ymd(new Date())).catch(() => undefined);
+    await this.lifecycle.runDaily(this.todayIst()).catch(() => undefined);
     return { proposed, reinforced, days: targets.length };
   }
 

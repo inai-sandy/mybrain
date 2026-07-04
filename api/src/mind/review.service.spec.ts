@@ -28,6 +28,15 @@ function makePrisma(findings: any[]) {
 const base = { evidenceCount: 1, pinned: false, trend: 'steady', status: 'emerging', valence: 'neutral', confidence: 0.4, validated: null as string | null, firstSeenDay: '2026-06-01', lastSeenDay: '2026-06-20' };
 
 describe('MindReviewService (BEA-449)', () => {
+  it('today() uses the IST day, not the UTC container day (BEA-813)', () => {
+    const { prisma } = makePrisma([]);
+    const svc = new MindReviewService(prisma);
+    // 2026-07-02 21:00 UTC = 2026-07-03 02:30 IST → today should be July 3
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-07-02T21:00:00Z').getTime());
+    expect((svc as any).today()).toBe('2026-07-03');
+    spy.mockRestore();
+  });
+
   it('confirm boosts the finding and ripples a small boost to neighbours sharing a node', async () => {
     const target = { ...base, id: 't', subject: 'money tasks', relation: 'drains', object: 'you', confidence: 0.4 };
     const neighbour = { ...base, id: 'n', subject: 'admin', relation: 'tires', object: 'you', confidence: 0.5 };

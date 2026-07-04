@@ -123,7 +123,7 @@ export class MindController {
   /** Run the living lifecycle (decay/promote/consolidate) on demand. */
   @Post('lifecycle')
   async runLifecycle() {
-    return this.lifecycle.runDaily(new Date().toISOString().slice(0, 10));
+    return this.lifecycle.runDaily(new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10)); // IST today (BEA-813)
   }
 
   /** Merge duplicate findings now (lexical + semantic). (BEA-459) */
