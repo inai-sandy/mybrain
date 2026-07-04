@@ -227,7 +227,10 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
       const r = await fetch(`/api/contacts/${c.id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error();
       toast('success', 'Contact deleted');
-      load();
+      // If that was the last contact on this page, step back a page so we don't strand an empty
+      // "No contacts yet" view with no pager to return. (BEA-815)
+      if ((contacts?.length ?? 0) <= 1 && page > 1) setPage((p) => p - 1); // setPage reloads
+      else load();
     } catch { toast('error', 'Could not delete'); }
   }
 
