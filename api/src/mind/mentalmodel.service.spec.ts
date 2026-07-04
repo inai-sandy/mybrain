@@ -88,6 +88,21 @@ describe('MentalModelService close-day learning (BEA-458)', () => {
     await svc.learnDay('2026-06-20');
     expect(JSON.parse(settings['mind.learnedDays'])).toContain('2026-06-20');
   });
+
+  it('never drops learned days past ~150, so old days are not re-learned every hour (BEA-780)', async () => {
+    const closed = Array.from({ length: 200 }, (_, i) => `d${String(i).padStart(3, '0')}`);
+    const { svc, settings } = harness({ llmJson: ONE_FINDING, closed });
+    await svc.runNow(); // learns all 200
+    expect(JSON.parse(settings['mind.learnedDays']).length).toBe(200); // the old 150-cap would have dropped 50
+
+    // a second pass finds nothing new to learn — it only re-reflects the latest day, NOT the dropped 50
+    const { svc: svc2, ingestion } = harness({ llmJson: ONE_FINDING, closed });
+    await svc2.runNow();
+    ingestion.gatherDaySignals.mockClear();
+    const r = await svc2.runNow();
+    expect(r.days).toBe(1);
+    expect(ingestion.gatherDaySignals).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('MentalModelService.run (BEA-447)', () => {
@@ -106,6 +121,15 @@ describe('MentalModelService.run (BEA-447)', () => {
     expect(updated[0].data.evidenceCount).toBe(3); // 2 + 1
     expect(updated[0].data.confidence).toBeGreaterThan(0.5); // reinforced upward
     expect(evidence.length).toBe(2);
+  });
+
+  it('reinforcing while reflecting on an OLDER day does not move lastSeenDay backwards (BEA-780)', async () => {
+    const llmJson = JSON.stringify({
+      findings: [{ reinforcesId: 'exist-1', statement: 'Admin work drains you', kind: 'behavioural', subject: 'admin', relation: 'drains', object: 'you', valence: 'draining', confidence: 0.5, cadence: 'daily', evidence: [{ signal: 'postponed', snippet: 'again' }] }],
+    });
+    const { svc, updated } = harness({ llmJson, existing: [{ id: 'exist-1', statement: 'Admin work drains you', confidence: 0.5, evidenceCount: 2, status: 'emerging', lastSeenDay: '2026-06-25' }] });
+    await svc.run('2026-06-20'); // an older day than the finding's lastSeenDay
+    expect(updated[0].data.lastSeenDay).toBe('2026-06-25'); // kept the later date, not dragged back to 2026-06-20
   });
 
   it('salvages complete findings from a TRUNCATED (token-capped) LLM response', async () => {

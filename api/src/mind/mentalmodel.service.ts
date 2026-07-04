@@ -88,8 +88,10 @@ export class MentalModelService implements OnModuleInit {
   private async markLearned(day: string): Promise<void> {
     const set = await this.learnedSet();
     set.add(day);
-    const bounded = [...set].sort().slice(-150); // keep the set from growing without bound
-    const value = JSON.stringify(bounded);
+    // Keep the FULL set of learned days. The old 150-day cap dropped older days, so once >150 days
+    // were closed they fell out of the set and catchUp() re-learned them (a fresh LLM pass) every
+    // hour, forever — a runaway. One short date string per closed day is tiny. (BEA-780)
+    const value = JSON.stringify([...set].sort());
     await this.prisma.setting.upsert({ where: { key: LEARNED_KEY }, create: { key: LEARNED_KEY, value }, update: { value } }).catch(() => undefined);
   }
 
@@ -234,7 +236,7 @@ export class MentalModelService implements OnModuleInit {
 
     const existing = await this.prisma.mindFinding.findMany({
       where: { status: { in: ['proposed', 'emerging', 'established'] }, NOT: { validated: 'refuted' } },
-      select: { id: true, statement: true, confidence: true, evidenceCount: true, status: true },
+      select: { id: true, statement: true, confidence: true, evidenceCount: true, status: true, lastSeenDay: true },
       orderBy: { confidence: 'desc' },
       take: 60,
     });
@@ -278,7 +280,9 @@ export class MentalModelService implements OnModuleInit {
           data: {
             confidence: newConf,
             evidenceCount: cur.evidenceCount + 1,
-            lastSeenDay: day,
+            // Never move freshness backwards when reflecting on an older day, or a daily-cadence
+            // finding would falsely start to decay. Keep the later of the two. (BEA-780)
+            lastSeenDay: cur.lastSeenDay && cur.lastSeenDay > day ? cur.lastSeenDay : day,
             trend: 'rising',
             status: cur.status === 'proposed' && newConf >= 0.4 ? 'emerging' : cur.status,
           },
