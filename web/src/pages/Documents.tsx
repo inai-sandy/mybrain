@@ -140,7 +140,7 @@ export function Documents() {
       const d = await r.json().catch(() => ({}));
       toast('success', `${d.count ?? ids.length} updated`);
       clearSel();
-      load();
+      refresh();
     } else toast('error', 'Could not update');
   }
   async function exportZip() {
@@ -189,18 +189,25 @@ export function Documents() {
     load();
   }, []);
 
+  // Re-run the current search now (used after a mutation so the search view doesn't keep showing a
+  // just-deleted/edited doc — it only refreshed `items`, never `results`). (BEA-818)
+  function runSearch() {
+    if (!searching) { setResults([]); return; }
+    fetch(`/api/documents/search?q=${encodeURIComponent(q.trim())}`)
+      .then((r) => r.json())
+      .then((d) => setResults(d.documents || []))
+      .catch(() => setResults([]));
+  }
+  // Reload the library AND, if a search is showing, refresh its results too.
+  async function refresh() { await load(); runSearch(); }
   useEffect(() => {
     if (!searching) {
       setResults([]);
       return;
     }
-    const t = setTimeout(() => {
-      fetch(`/api/documents/search?q=${encodeURIComponent(q.trim())}`)
-        .then((r) => r.json())
-        .then((d) => setResults(d.documents || []))
-        .catch(() => setResults([]));
-    }, 250);
+    const t = setTimeout(runSearch, 250);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, searching]);
 
   async function upload(files: FileList | null) {
@@ -224,7 +231,7 @@ export function Documents() {
     const r = await fetch(`/api/documents/${it.id}`, { method: 'DELETE' });
     if (r.ok) {
       toast('success', 'Deleted');
-      load();
+      refresh();
     } else toast('error', 'Could not delete');
   }
 
@@ -522,13 +529,13 @@ export function Documents() {
           onSaved={() => {
             setCreating(false);
             setEditing(null);
-            load();
+            refresh();
           }}
         />
       )}
       {managing && <ManageCollections collections={collections} onClose={() => setManaging(false)} onChanged={load} />}
       <ConfirmDialog open={bulkDel} title={`Delete ${selected.size} document${selected.size === 1 ? '' : 's'}?`} message="These will be permanently removed." confirmLabel="Delete" onCancel={() => setBulkDel(false)} onConfirm={bulkRemove} />
-      {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); load(); if (id) navigate(`/documents/${id}`); }} />}
+      {importing && <ImportUrlModal onClose={() => setImporting(false)} onDone={(id) => { setImporting(false); refresh(); if (id) navigate(`/documents/${id}`); }} />}
       <ConfirmDialog open={!!del} title="Delete this document?" message={del ? `"${del.title}" will be permanently removed.` : ''} confirmLabel="Delete" onCancel={() => setDel(null)} onConfirm={() => del && remove(del)} />
       {sharing && <DocumentShareDialog id={sharing.id} title={sharing.title} slug={sharing.slug} shortCode={sharing.shortCode} initialShared={sharing.shared} hasPassword={sharing.hasPassword} expiresAt={sharing.expiresAt} allowDownload={sharing.allowDownload} viewCount={sharing.viewCount} onClose={() => setSharing(null)} onChanged={() => load()} />}
     </div>
