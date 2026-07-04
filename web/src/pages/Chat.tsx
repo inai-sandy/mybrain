@@ -118,6 +118,9 @@ export function Chat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState<string | null>(null);
+  // The session a reply is being streamed for — so a reply can never land in whichever chat
+  // happens to be open when the user switches mid-stream. (BEA-783)
+  const [streamFor, setStreamFor] = useState<string | null>(null);
   const [delFor, setDelFor] = useState<Session | null>(null);
   const [search, setSearch] = useState('');
   const [scopeFilter, setScopeFilter] = useState('');
@@ -174,12 +177,14 @@ export function Chat() {
   async function send(text?: string) {
     const t = (text ?? input).trim();
     if (!t || !active || sending) return;
+    const sid = active.id; // pin the conversation this reply belongs to (BEA-783)
     setInput('');
     setSending(true);
     setStreaming('');
-    setActive((a) => (a ? { ...a, messages: [...a.messages, { id: 'tmp-u', role: 'user', content: t, sources: [], followups: [], starred: false, createdAt: new Date().toISOString() }] } : a));
+    setStreamFor(sid);
+    setActive((a) => (a && a.id === sid ? { ...a, messages: [...a.messages, { id: 'tmp-u', role: 'user', content: t, sources: [], followups: [], starred: false, createdAt: new Date().toISOString() }] } : a));
     try {
-      const r = await fetch(`/api/chat/sessions/${active.id}/message/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) });
+      const r = await fetch(`/api/chat/sessions/${sid}/message/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: t }) });
       if (!r.ok || !r.body) throw new Error('no stream');
       const reader = r.body.getReader();
       const dec = new TextDecoder();
@@ -205,7 +210,9 @@ export function Chat() {
         }
       }
       if (finalMsg) {
-        setActive((a) => (a ? { ...a, title: a.title === 'New chat' ? t.slice(0, 60) : a.title, messages: [...a.messages.filter((m) => m.id !== 'tmp-u'), finalUser!, finalMsg!] } : a));
+        // Only apply to the originating conversation. If the user switched away, the reply is
+        // already saved server-side and shows when they reopen that chat. (BEA-783)
+        setActive((a) => (a && a.id === sid ? { ...a, title: a.title === 'New chat' ? t.slice(0, 60) : a.title, messages: [...a.messages.filter((m) => m.id !== 'tmp-u'), finalUser!, finalMsg!] } : a));
         loadSessions(search);
       } else {
         toast('error', 'No reply');
@@ -215,6 +222,7 @@ export function Chat() {
     } finally {
       setSending(false);
       setStreaming(null);
+      setStreamFor(null);
     }
   }
 
@@ -306,7 +314,7 @@ export function Chat() {
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
         <div className="max-w-3xl mx-auto w-full px-4 py-6 space-y-6">
-          {active.messages.length === 0 && !streaming && (
+          {active.messages.length === 0 && !(streaming !== null && streamFor === active.id) && (
             <div className="text-center text-sm text-zinc-400 mt-10">
               <Sparkles className="mx-auto mb-2 text-emerald-500" size={24} />
               <p className="mb-4 text-zinc-500">Ask anything about your {sc?.label.toLowerCase()}.</p>
@@ -318,7 +326,7 @@ export function Chat() {
             </div>
           )}
           {active.messages.map((m) => <Bubble key={m.id} m={m} onStar={toggleStar} onFollow={send} />)}
-          {streaming !== null && (
+          {streaming !== null && streamFor === active.id && (
             <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />
           )}
           <div ref={endRef} />
