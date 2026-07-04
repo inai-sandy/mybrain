@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { isBodyScrollLocked } from './scrollLock';
 
 /**
  * Left-edge swipe-back gesture. Installed iOS PWAs don't get the native swipe-back,
@@ -17,6 +18,12 @@ export function useEdgeSwipeBack(enabled = true) {
 
     const onStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) {
+        tracking = false;
+        return;
+      }
+      // Don't navigate the page away from under an open modal/sheet (you'd lose typed input), and
+      // don't hijack a swipe that starts inside a horizontal scroller (heatmaps etc.). (BEA-821)
+      if (isBodyScrollLocked() || (e.target as Element | null)?.closest?.('.overflow-x-auto')) {
         tracking = false;
         return;
       }

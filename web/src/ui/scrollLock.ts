@@ -32,6 +32,11 @@ export function lockBodyScroll(): void {
   count++;
 }
 
+/** True while any sheet/modal has the body locked — used to suppress edge-swipe-back. (BEA-821) */
+export function isBodyScrollLocked(): boolean {
+  return count > 0;
+}
+
 export function unlockBodyScroll(): void {
   count = Math.max(0, count - 1);
   if (count === 0 && saved) {
