@@ -10,14 +10,18 @@ import { Sheet } from '../ui/Sheet';
  * (resolves "that"/"the other one"), and BARGE-IN — talk over Emo (or tap) to cut it off and redirect.
  */
 
+// Name lives in the greeting + the LLM's questions/answers (used naturally there). The short clips stay
+// name-free so they don't sound stitched, and every pool never repeats its last line (BEA-894).
 const GREETING = 'Hey Sandy, what do you need?';
-const ACK = ['Let me check, Sandy.', 'One second, Sandy.', 'Okay Sandy, looking now.'];
-const FILLERS = ['Still with you, Sandy.', 'Almost there.', 'Just a moment.', 'Yeah, still working on it.', 'Hold on Sandy, nearly done.'];
+const ACK = ['Okay, let me look.', 'Sure, one sec.', 'On it — checking now.', 'Let me see.', 'Alright, looking now.', 'Give me a moment.'];
+const FILLERS = ['Still on it.', 'Almost there.', 'Just a moment.', 'Nearly done now.', 'Bear with me a sec.', 'Hang on, pulling it up.'];
+const CLOSINGS = ['The full card’s in your Emo section.', 'I’ve saved it as a card for you.', 'The details are on the card.', 'It’s saved in your Emo section.'];
+const DONE_LINES = ['Done — it’s in your Emo section.', 'Sorted, I’ve added that for you.', 'All set — that’s saved.'];
+const OKAY_LINES = ['Okay, no problem.', 'Sure, I’ll leave it.', 'Alright then.'];
 const GOODBYE = /^\s*(bye|goodbye|good bye|thank you|thanks|that'?s all|that is all|that'?s it|stop|nothing|no thanks|ok bye|okay bye|i'?m done|i am done|done)\b/i;
 const YES = /\b(yes|yeah|yep|yup|sure|ok|okay|please|do it|go ahead|of course|definitely)\b/i;
 
 function fmt(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
-function rand<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
 type Phase = 'boot' | 'idle' | 'recording' | 'thinking' | 'speaking' | 'done';
 type Turn = { role: 'user' | 'emo'; text: string; cardId?: string };
@@ -44,6 +48,14 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
   const mounted = useRef(true);
   const phaseRef = useRef<Phase>('boot');
   function setPh(p: Phase) { phaseRef.current = p; setPhase(p); }
+  const lastPick = useRef<Record<string, string>>({});
+  /** Pick a line from a pool, never the same one twice in a row. */
+  function pick(pool: string[], key: string): string {
+    const opts = pool.length > 1 ? pool.filter((x) => x !== lastPick.current[key]) : pool;
+    const c = opts[Math.floor(Math.random() * opts.length)];
+    lastPick.current[key] = c;
+    return c;
+  }
 
   useEffect(() => {
     mounted.current = true;
@@ -161,9 +173,9 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
     if (!mounted.current) return;
     if (!blob.size) { setPh('idle'); return; }
     setPh('thinking'); waiting.current = true;
-    void playClip(rand(ACK));
-    const f1 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 4000);
-    const f2 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 9000);
+    void playClip(pick(ACK, 'ack'));
+    const f1 = setTimeout(() => { if (waiting.current) void playClip(pick(FILLERS, 'filler')); }, 4000);
+    const f2 = setTimeout(() => { if (waiting.current) void playClip(pick(FILLERS, 'filler')); }, 9000);
     const done = () => { clearTimeout(f1); clearTimeout(f2); waiting.current = false; };
 
     const fd = new FormData(); fd.append('audio', blob, 'ask.webm');
@@ -179,9 +191,8 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
       if (YES.test(text)) {
         await fetch('/api/emo/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript: action, source: 'emo-ask-action' }) }).catch(() => null);
         onCardCreated?.();
-        done(); push({ role: 'emo', text: 'Done, Sandy — it’s in your Emo section.' });
-        setPh('speaking'); await speak('Done, Sandy. It’s in your Emo section.');
-      } else { done(); push({ role: 'emo', text: 'Okay, Sandy.' }); setPh('speaking'); await speak('Okay, Sandy.'); }
+        done(); const dl = pick(DONE_LINES, 'confirm'); push({ role: 'emo', text: dl }); setPh('speaking'); await speak(dl);
+      } else { done(); const ol = pick(OKAY_LINES, 'confirm'); push({ role: 'emo', text: ol }); setPh('speaking'); await speak(ol); }
       setPh('done'); return;
     }
 
@@ -206,7 +217,7 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
       history.current = [];
       push({ role: 'emo', text: summary, cardId: res.cardId });
       onCardCreated?.();
-      setPh('speaking'); await speak(summary + ' The full card is in your Emo section.');
+      setPh('speaking'); await speak(summary + ' ' + pick(CLOSINGS, 'closing'));
       // Offer a next action if there is one.
       if (res.offer?.spoken && res.offer?.action) {
         pendingOffer.current = res.offer.action;
