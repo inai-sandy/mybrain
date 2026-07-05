@@ -5,7 +5,8 @@ import { ExploreService } from '../explore/explore.service';
 import { EmoCardsService } from './emo-cards.service';
 
 export type AskTurn = { role: 'user' | 'emo'; text: string };
-export type AskResult = { mode: 'clarify'; question: string } | { mode: 'answer'; summary: string; cardId: string };
+export type AskOffer = { spoken: string; action: string };
+export type AskResult = { mode: 'clarify'; question: string } | { mode: 'answer'; summary: string; cardId: string; offer?: AskOffer };
 
 /**
  * EMO Ask (BEA-890) — the interactive voice Ask. One HTTP call per turn:
@@ -24,30 +25,35 @@ export class EmoAskService {
     private readonly cards: EmoCardsService,
   ) {}
 
-  async ask(input: { question: string; history?: AskTurn[] }): Promise<AskResult> {
+  async ask(input: { question: string; history?: AskTurn[]; sessionContext?: string }): Promise<AskResult> {
     const history = (input.history || []).filter((t) => t && t.text && (t.role === 'user' || t.role === 'emo'));
     const userText = (input.question || '').trim();
-    if (!userText && !history.length) return { mode: 'clarify', question: 'What would you like to know?' };
+    if (!userText && !history.length) return { mode: 'clarify', question: 'What would you like to know, Sandy?' };
+
+    // Thread memory: what Sandy already asked earlier this session (to resolve "that" / "the other one").
+    const sessionCtx = (input.sessionContext || '').trim();
+    const ctxBlock = sessionCtx ? `\n\nEarlier this session (use to resolve references like "that", "the other one"):\n${sessionCtx}\n` : '';
 
     const clarifyCount = history.filter((t) => t.role === 'emo').length;
     const convo = [...history, { role: 'user' as const, text: userText }].map((t) => `${t.role === 'emo' ? 'Emo' : 'User'}: ${t.text}`).join('\n');
 
     // Ground the clarifying question in what's ACTUALLY in the brain (so it's relevant, not generic).
-    const hits = await this.memory.searchBrain(convo.slice(0, 400), 8).catch(() => [] as any[]);
+    const hits = await this.memory.searchBrain(`${sessionCtx} ${convo}`.slice(0, 400), 8).catch(() => [] as any[]);
     const topics = hits.length
       ? hits.map((h: any, i: number) => `${i + 1}. ${h.title || 'untitled'} — ${(h.content || '').replace(/\s+/g, ' ').slice(0, 100)}`).join('\n')
       : '(nothing found yet)';
 
     // Always clarify at least once; after that only if still broad; hard cap at 3.
     if (clarifyCount < 3) {
-      const q = await this.decideClarify(convo, topics, clarifyCount === 0);
+      const q = await this.decideClarify(convo + ctxBlock, topics, clarifyCount === 0);
       if (q) return { mode: 'clarify', question: q };
     }
 
     // Answer from the whole brain, then file the Search card.
     const userTurns = [...history.filter((t) => t.role === 'user').map((t) => t.text), userText].filter(Boolean);
-    const refined = userTurns.length > 1 ? `${userTurns[0]} — specifically: ${userTurns.slice(1).join('; ')}` : userTurns[0] || userText;
-    const ans = await this.explore.ask(refined).catch(() => ({ answer: '', sources: [] as any[], matches: 0 }));
+    const baseQ = userTurns.length > 1 ? `${userTurns[0]} — specifically: ${userTurns.slice(1).join('; ')}` : userTurns[0] || userText;
+    const retrievalQ = sessionCtx ? `${baseQ}\n\n(Earlier context: ${sessionCtx})` : baseQ;
+    const ans = await this.explore.ask(retrievalQ).catch(() => ({ answer: '', sources: [] as any[], matches: 0 }));
     const answer = (ans.answer || '').trim() || "I couldn't find anything about that in your brain yet.";
     const summary = await this.summarize(answer);
     // A COMPLETE card: the question, the full answer, and cited sources (renders scrollable in the detail view).
@@ -55,9 +61,10 @@ export class EmoAskService {
     const sourcesMd = sources.length
       ? '\n\n---\n\n**Sources**\n\n' + sources.map((s) => `${s.n ?? '•'}. ${s.link ? `[${s.title || 'Source'}](${s.link})` : s.title || 'Source'}${s.when ? ` · ${s.when}` : ''}${s.snippet ? `\n   ${String(s.snippet).replace(/\s+/g, ' ').slice(0, 160)}` : ''}`).join('\n')
       : '';
-    const detail = `**${refined}**\n\n${answer}${sourcesMd}`;
-    const card = await this.cards.create({ lane: 'search', status: 'done', summary, detail, rawTranscript: refined });
-    return { mode: 'answer', summary, cardId: (card as any).id };
+    const detail = `**${baseQ}**\n\n${answer}${sourcesMd}`;
+    const card = await this.cards.create({ lane: 'search', status: 'done', summary, detail, rawTranscript: baseQ });
+    const offer = await this.actionOffer(answer, baseQ).catch(() => undefined);
+    return { mode: 'answer', summary, cardId: (card as any).id, offer };
   }
 
   /** Decide whether to ask another clarifying question. Returns the question, or '' to answer now. */
@@ -69,6 +76,19 @@ export class EmoAskService {
     const out = ((await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 60, 'emo-ask-clarify').catch(() => '')) || '').trim();
     if (!out || /^answer\b/i.test(out)) return '';
     return out.replace(/^(emo|question)\s*:\s*/i, '').replace(/^["']|["']$/g, '').slice(0, 160);
+  }
+
+  /** After answering, spot ONE genuinely useful next action to offer by voice (add a task / remind someone). */
+  private async actionOffer(answer: string, question: string): Promise<AskOffer | undefined> {
+    const prompt = `Sandy asked: "${question}"\nEmo answered: "${answer.slice(0, 800)}"\n\nIf there is ONE clear, specific next action Sandy would likely want RIGHT NOW — either add a TASK, or send a REMINDER to a named person — reply with JSON:\n{"offer":"<one short spoken yes/no question, e.g. Want me to remind Srikar about the Zigbee testing?>","action":"<a plain command Emo can run, e.g. Remind Srikar to test the Zigbee dongle>"}\nOnly when it's genuinely useful and unambiguous. Otherwise reply exactly: {}`;
+    const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 120, 'emo-ask-offer').catch(() => '')) || '';
+    try {
+      const j = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}');
+      const spoken = String(j.offer || '').trim();
+      const action = String(j.action || '').trim();
+      if (spoken && action) return { spoken, action };
+    } catch { /* no offer */ }
+    return undefined;
   }
 
   /** One short spoken sentence — the voice speaks this, not the card. */

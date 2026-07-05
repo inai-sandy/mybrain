@@ -1,57 +1,84 @@
 import { useState, useRef, useEffect } from 'react';
-import { Mic, Square, X, Loader2, Volume2, ExternalLink } from 'lucide-react';
+import { Mic, Square, X, Loader2, Volume2, ExternalLink, Hand } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 
 /**
- * EMO Ask — interactive voice talk-back (BEA-889/890). One turn per press, but hands-free after:
- * ask → Emo speaks a clarifying question (always ≥1, more only if still broad) → mic auto-opens and
- * silence auto-stops your reply → … → Emo answers from the whole brain, FILES a Search card, and
- * speaks a SHORT summary (never reads the card). Stays open for a follow-up. Instant spoken ack +
- * random fillers keep it from ever going silent. Same OpenAI voice we embed on the device.
+ * EMO Ask — interactive voice talk-back (BEA-889→893). Persistent mic for the whole session so it can
+ * listen while it speaks. On open Emo greets Sandy and starts listening. Flow: ask → clarify (≥1) →
+ * answer from the whole brain → files a complete Search card → speaks a SHORT summary → OFFERS a next
+ * action if useful ("Want me to remind Srikar?") → done. Extras: remembers the thread across questions
+ * (resolves "that"/"the other one"), and BARGE-IN — talk over Emo (or tap) to cut it off and redirect.
  */
 
+const GREETING = 'Hey Sandy, what do you need?';
 const ACK = ['Let me check, Sandy.', 'One second, Sandy.', 'Okay Sandy, looking now.'];
 const FILLERS = ['Still with you, Sandy.', 'Almost there.', 'Just a moment.', 'Yeah, still working on it.', 'Hold on Sandy, nearly done.'];
+const GOODBYE = /^\s*(bye|goodbye|good bye|thank you|thanks|that'?s all|that is all|that'?s it|stop|nothing|no thanks|ok bye|okay bye|i'?m done|i am done|done)\b/i;
+const YES = /\b(yes|yeah|yep|yup|sure|ok|okay|please|do it|go ahead|of course|definitely)\b/i;
 
 function fmt(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function rand<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
-type Phase = 'idle' | 'recording' | 'thinking' | 'speaking' | 'done';
-const GOODBYE = /^\s*(bye|goodbye|good bye|thank you|thanks|that'?s all|that is all|that'?s it|stop|nothing|no thanks|ok bye|okay bye|i'?m done|i am done|done)\b/i;
+type Phase = 'boot' | 'idle' | 'recording' | 'thinking' | 'speaking' | 'done';
 type Turn = { role: 'user' | 'emo'; text: string; cardId?: string };
 
 export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCardCreated?: () => void }) {
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>('boot');
   const [elapsed, setElapsed] = useState(0);
   const [convo, setConvo] = useState<Turn[]>([]);
-  const [started, setStarted] = useState(false);
 
+  const stream = useRef<MediaStream | null>(null);
+  const ac = useRef<AudioContext | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+  const buf = useRef<Uint8Array | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
-  const history = useRef<Turn[]>([]);
+  const history = useRef<Turn[]>([]);              // clarify chain for the CURRENT question
+  const sessionMem = useRef<{ q: string; a: string }[]>([]); // thread memory across questions
+  const pendingOffer = useRef<string | null>(null); // an action awaiting yes/no
   const clips = useRef<Map<string, string>>(new Map());
   const cur = useRef<HTMLAudioElement | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const raf = useRef<number | null>(null);
   const waiting = useRef(false);
   const mounted = useRef(true);
-  const ac = useRef<AudioContext | null>(null);
-  const raf = useRef<number | null>(null);
+  const phaseRef = useRef<Phase>('boot');
+  function setPh(p: Phase) { phaseRef.current = p; setPhase(p); }
 
   useEffect(() => {
     mounted.current = true;
-    [...ACK, ...FILLERS].forEach(prefetch);
-    return () => { mounted.current = false; cleanup(); };
+    void init();
+    return () => { mounted.current = false; teardown(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function cleanup() {
+  function teardown() {
     if (timer.current) clearInterval(timer.current);
     if (raf.current) cancelAnimationFrame(raf.current);
     if (cur.current) { cur.current.pause(); cur.current = null; }
     try { if (recRef.current?.state === 'recording') recRef.current.stop(); } catch { /* ignore */ }
+    stream.current?.getTracks().forEach((t) => t.stop());
     try { ac.current?.close(); } catch { /* ignore */ }
-    ac.current = null;
   }
+
+  async function init() {
+    await Promise.all([GREETING, ...ACK, ...FILLERS].map(prefetch));
+    const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } as any }).catch(() => null);
+    if (!mounted.current) { s?.getTracks().forEach((t) => t.stop()); return; }
+    if (s) {
+      stream.current = s;
+      try {
+        const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+        const ctx = new AC(); ac.current = ctx;
+        const src = ctx.createMediaStreamSource(s);
+        const an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
+        analyser.current = an; buf.current = new Uint8Array(an.frequencyBinCount);
+      } catch { /* analyser optional */ }
+    }
+    await playUrl(clips.current.get(GREETING)); // greet by name
+    if (mounted.current) startRec();
+  }
+
   async function prefetch(text: string) {
     if (clips.current.has(text)) return;
     try {
@@ -59,84 +86,82 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
       if (r.ok) clips.current.set(text, URL.createObjectURL(await r.blob()));
     } catch { /* ignore */ }
   }
-  function playUrl(url: string): Promise<void> {
+  function level(): number {
+    const an = analyser.current, d = buf.current;
+    if (!an || !d) return 0;
+    an.getByteTimeDomainData(d as any);
+    let sum = 0; for (let i = 0; i < d.length; i++) sum += Math.abs(d[i] - 128);
+    return sum / d.length;
+  }
+
+  /** Play audio while watching for the user talking OVER it → resolves 'barge' so we stop and listen. */
+  function playUrl(url?: string): Promise<'ended' | 'barge'> {
     return new Promise((resolve) => {
+      if (!url) return resolve('ended');
       if (cur.current) cur.current.pause();
       const a = new Audio(url); cur.current = a;
-      a.addEventListener('ended', () => resolve(), { once: true });
-      a.addEventListener('error', () => resolve(), { once: true });
-      a.play().catch(() => resolve());
+      let settled = false;
+      const finish = (how: 'ended' | 'barge') => { if (settled) return; settled = true; if (raf.current) cancelAnimationFrame(raf.current); resolve(how); };
+      a.addEventListener('ended', () => finish('ended'), { once: true });
+      a.addEventListener('error', () => finish('ended'), { once: true });
+      a.play().catch(() => finish('ended'));
+      if (analyser.current) {
+        let loud = 0; let last = performance.now();
+        const watch = () => {
+          if (settled) return;
+          const now = performance.now(); const dt = now - last; last = now;
+          if (level() > 16) loud += dt; else loud = Math.max(0, loud - dt * 1.5);
+          if (loud > 400) { a.pause(); finish('barge'); return; } // sustained loud = talking over Emo
+          raf.current = requestAnimationFrame(watch);
+        };
+        raf.current = requestAnimationFrame(watch);
+      }
     });
   }
-  function playClip(text: string): Promise<void> { const u = clips.current.get(text); return u ? playUrl(u) : Promise.resolve(); }
-  async function speak(text: string): Promise<void> {
+  function playClip(text: string) { return playUrl(clips.current.get(text)); }
+  async function speak(text: string): Promise<'ended' | 'barge'> {
     try {
       const r = await fetch('/api/voice/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-      if (r.ok) await playUrl(URL.createObjectURL(await r.blob()));
+      if (r.ok) return await playUrl(URL.createObjectURL(await r.blob()));
     } catch { /* ignore */ }
-  }
-  function waitForCurrent(): Promise<void> {
-    return new Promise((resolve) => {
-      const a = cur.current;
-      if (!a || a.ended || a.paused) return resolve();
-      a.addEventListener('ended', () => resolve(), { once: true });
-    });
+    return 'ended';
   }
   function push(t: Turn) { setConvo((c) => [...c, t]); }
+  function sessionContext(): string { return sessionMem.current.slice(-4).map((m) => `Q: ${m.q} → ${m.a}`).join('\n'); }
 
-  async function start() {
-    if (!mounted.current) return;
-    setStarted(true);
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } as any }).catch(() => null);
-    if (!stream) { setPhase('idle'); return; }
+  function startRec() {
+    const s = stream.current;
+    if (!s || !mounted.current) { setPh('idle'); return; }
     const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    const mr = new MediaRecorder(stream, { mimeType: mime });
+    const mr = new MediaRecorder(s, { mimeType: mime });
     chunks.current = [];
     mr.ondataavailable = (e) => { if (e.data.size) chunks.current.push(e.data); };
-    mr.onstop = () => { stream.getTracks().forEach((t) => t.stop()); if (raf.current) cancelAnimationFrame(raf.current); void onStopped(new Blob(chunks.current, { type: 'audio/webm' })); };
+    mr.onstop = () => { if (raf.current) cancelAnimationFrame(raf.current); void onStopped(new Blob(chunks.current, { type: 'audio/webm' })); };
     recRef.current = mr; mr.start();
-    setElapsed(0); setPhase('recording');
-    timer.current = setInterval(() => setElapsed((e) => { if (e + 1 >= 30) stop(); return e + 1; }), 1000);
-    listenForSilence(stream); // hands-free: auto-stop ~1.8s after you finish talking
-  }
-  function listenForSilence(stream: MediaStream) {
-    try {
-      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AC(); ac.current = ctx;
-      const src = ctx.createMediaStreamSource(stream);
-      const an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
-      const data = new Uint8Array(an.frequencyBinCount);
-      let spoke = false; let lastLoud = performance.now();
-      const tick = () => {
-        if (!recRef.current || recRef.current.state !== 'recording') return;
-        an.getByteTimeDomainData(data);
-        let sum = 0; for (let i = 0; i < data.length; i++) sum += Math.abs(data[i] - 128);
-        const level = sum / data.length;
-        const now = performance.now();
-        if (level > 6) { spoke = true; lastLoud = now; }
-        if (spoke && now - lastLoud > 1800) { stop(); return; }
-        raf.current = requestAnimationFrame(tick);
-      };
+    setElapsed(0); setPh('recording');
+    timer.current = setInterval(() => setElapsed((e) => { if (e + 1 >= 30) stopRec(); return e + 1; }), 1000);
+    let spoke = false; let lastLoud = performance.now();
+    const tick = () => {
+      if (recRef.current?.state !== 'recording') return;
+      const l = level(); const now = performance.now();
+      if (l > 6) { spoke = true; lastLoud = now; }
+      if (spoke && now - lastLoud > 1800) { stopRec(); return; } // hands-free: stop ~1.8s after you finish
       raf.current = requestAnimationFrame(tick);
-    } catch { /* silence detection optional */ }
+    };
+    raf.current = requestAnimationFrame(tick);
   }
-  function stop() {
+  function stopRec() {
     if (timer.current) clearInterval(timer.current);
     if (raf.current) cancelAnimationFrame(raf.current);
     try { if (recRef.current?.state === 'recording') recRef.current.stop(); } catch { /* ignore */ }
   }
-  function autoListen() {
-    if (!mounted.current) return;
-    setPhase('idle');
-    setTimeout(() => { if (mounted.current) void start(); }, 350);
-  }
+  function interrupt() { if (cur.current) cur.current.pause(); if (mounted.current) startRec(); } // tap-to-interrupt
 
   async function onStopped(blob: Blob) {
     if (!mounted.current) return;
-    if (!blob.size) { autoListen(); return; }
-    setPhase('thinking'); waiting.current = true;
+    if (!blob.size) { setPh('idle'); return; }
+    setPh('thinking'); waiting.current = true;
     void playClip(rand(ACK));
-    // fillers fire LATE + rarely, so short answers never trigger a "still working on it"
     const f1 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 4000);
     const f2 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 9000);
     const done = () => { clearTimeout(f1); clearTimeout(f2); waiting.current = false; };
@@ -144,34 +169,60 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
     const fd = new FormData(); fd.append('audio', blob, 'ask.webm');
     const tr = await fetch('/api/voice/transcribe', { method: 'POST', body: fd }).then((r) => r.json()).catch(() => ({ text: '' }));
     const text = (tr.text || '').trim();
-    if (!text) { done(); setPhase('idle'); return; } // heard nothing → stop (don't loop the mic)
-    if (GOODBYE.test(text)) { done(); if (cur.current) cur.current.pause(); setPhase('done'); return; } // "bye/thanks" → end cleanly
+    if (!text) { done(); setPh('idle'); return; }
+    if (GOODBYE.test(text) && !pendingOffer.current) { done(); if (cur.current) cur.current.pause(); setPh('done'); return; }
 
+    // Answering a "want me to…" action offer?
+    if (pendingOffer.current) {
+      const action = pendingOffer.current; pendingOffer.current = null;
+      push({ role: 'user', text });
+      if (YES.test(text)) {
+        await fetch('/api/emo/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript: action, source: 'emo-ask-action' }) }).catch(() => null);
+        onCardCreated?.();
+        done(); push({ role: 'emo', text: 'Done, Sandy — it’s in your Emo section.' });
+        setPh('speaking'); await speak('Done, Sandy. It’s in your Emo section.');
+      } else { done(); push({ role: 'emo', text: 'Okay, Sandy.' }); setPh('speaking'); await speak('Okay, Sandy.'); }
+      setPh('done'); return;
+    }
+
+    // Normal Ask turn.
     const prior = [...history.current];
     push({ role: 'user', text });
-    const res = await fetch('/api/emo/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: text, history: prior }) }).then((r) => r.json()).catch(() => null);
+    const res = await fetch('/api/emo/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: text, history: prior, sessionContext: sessionContext() }) }).then((r) => r.json()).catch(() => null);
     done();
     if (!mounted.current) return;
     history.current.push({ role: 'user', text });
 
-    if (!res) { setPhase('idle'); return; }
+    if (!res) { setPh('idle'); return; }
     if (res.mode === 'clarify' && res.question) {
       history.current.push({ role: 'emo', text: res.question });
       push({ role: 'emo', text: res.question });
-      setPhase('speaking'); await waitForCurrent(); await speak(res.question);
-      autoListen();
+      setPh('speaking'); const how = await speak(res.question);
+      startRec(); void how; // barge or ended → listen for the reply either way
     } else {
-      const summary = res.summary || "Here's what I found.";
-      push({ role: 'emo', text: summary, cardId: res.cardId });
-      setPhase('speaking'); await waitForCurrent(); await speak(summary + ' The full card is in your Emo section.');
-      onCardCreated?.();
+      const summary = res.summary || 'Here’s what I found.';
+      const baseQ = history.current.find((t) => t.role === 'user')?.text || text;
+      sessionMem.current.push({ q: baseQ, a: summary }); // remember the thread
       history.current = [];
-      setPhase('done'); // answer delivered → disconnect; do NOT reopen the mic
+      push({ role: 'emo', text: summary, cardId: res.cardId });
+      onCardCreated?.();
+      setPh('speaking'); await speak(summary + ' The full card is in your Emo section.');
+      // Offer a next action if there is one.
+      if (res.offer?.spoken && res.offer?.action) {
+        pendingOffer.current = res.offer.action;
+        push({ role: 'emo', text: res.offer.spoken });
+        setPh('speaking'); await speak(res.offer.spoken);
+        startRec(); // listen for yes/no
+        return;
+      }
+      setPh('done'); // no offer → disconnect
     }
   }
 
   const recording = phase === 'recording';
+  const speaking = phase === 'speaking';
   const busy = phase === 'thinking' || phase === 'speaking';
+  const boot = phase === 'boot';
 
   return (
     <Sheet onClose={onClose}>
@@ -179,10 +230,9 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
         <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-5 dark:bg-zinc-900 sm:rounded-2xl">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-semibold"><Mic size={17} className="text-emerald-500" /> Ask Emo</h2>
-            <button onClick={() => { cleanup(); close(); }} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
+            <button onClick={() => { teardown(); close(); }} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
           </div>
 
-          {/* the mic / status stage */}
           <div className="flex flex-col items-center justify-center py-5">
             {recording ? (
               <>
@@ -192,24 +242,26 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
                 </div>
                 <div className="mt-4 flex items-center gap-2 text-lg font-semibold tabular-nums"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500" /> {fmt(elapsed)}</div>
                 <p className="mt-1 text-xs text-zinc-400">Listening · offline · pauses when you stop</p>
-                <button onClick={stop} className="mt-4 inline-flex items-center gap-2 rounded-full bg-rose-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-rose-500"><Square size={14} fill="currentColor" /> Stop</button>
+                <button onClick={stopRec} className="mt-4 inline-flex items-center gap-2 rounded-full bg-rose-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-rose-500"><Square size={14} fill="currentColor" /> Stop</button>
               </>
-            ) : busy ? (
+            ) : speaking ? (
               <>
-                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
-                  {phase === 'speaking' ? <Volume2 size={34} className="animate-pulse" /> : <Loader2 size={34} className="animate-spin" />}
-                </div>
-                <p className="mt-4 text-sm text-zinc-500">{phase === 'speaking' ? 'Emo is answering…' : 'Thinking…'}</p>
+                <button onClick={interrupt} title="Tap to interrupt" className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500"><Volume2 size={34} className="animate-pulse" /></button>
+                <p className="mt-4 text-sm text-zinc-500">Emo is talking — <span className="text-emerald-600">talk over it or tap</span> to jump in</p>
+              </>
+            ) : busy || boot ? (
+              <>
+                <div className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500"><Loader2 size={34} className="animate-spin" /></div>
+                <p className="mt-4 text-sm text-zinc-500">{boot ? 'Waking Emo…' : 'Thinking…'}</p>
               </>
             ) : (
               <>
-                <button onClick={() => void start()} className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:scale-105 hover:bg-emerald-500"><Mic size={34} /></button>
-                <p className="mt-4 text-sm text-zinc-500">{phase === 'done' ? 'Done — tap to ask another' : started ? 'Go ahead — I’m listening' : 'Tap and ask a question'}</p>
+                <button onClick={() => startRec()} className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:scale-105 hover:bg-emerald-500"><Mic size={34} /></button>
+                <p className="mt-4 text-sm text-zinc-500">{phase === 'done' ? 'Done — tap to ask another' : 'Tap to ask'}</p>
               </>
             )}
           </div>
 
-          {/* the conversation transcript */}
           {convo.length > 0 && (
             <div className="mt-2 space-y-2">
               {convo.map((t, i) => (
@@ -223,6 +275,7 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
                   </div>
                 )
               ))}
+              {pendingOffer.current && <p className="flex items-center justify-center gap-1 text-xs text-zinc-400"><Hand size={11} /> say “yes” or “no”</p>}
             </div>
           )}
         </div>
