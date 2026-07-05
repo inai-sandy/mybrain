@@ -282,9 +282,24 @@ export class RemindersService {
   }
 
   /** Suggestions = every OPEN task that names a person (`party`), resolved to a contact (BEA-721). */
+  /** Dismiss one suggestion so it stops showing (BEA-882). */
+  async dismissSuggestion(taskId: string) {
+    if (!taskId) throw new BadRequestException('taskId is required');
+    await this.prisma.task.update({ where: { id: taskId }, data: { reminderSuggestDismissed: true } }).catch(() => undefined);
+    return { ok: true };
+  }
+
+  /** Clear every currently-suggested reminder at once (BEA-882). */
+  async dismissAllSuggestions() {
+    const { suggestions } = await this.suggestions();
+    const ids = suggestions.map((s) => s.task.id);
+    if (ids.length) await this.prisma.task.updateMany({ where: { id: { in: ids } }, data: { reminderSuggestDismissed: true } });
+    return { ok: true, dismissed: ids.length };
+  }
+
   async suggestions() {
     const tasks = await this.prisma.task.findMany({
-      where: { status: 'open', AND: [{ party: { not: null } }] },
+      where: { status: 'open', reminderSuggestDismissed: false, AND: [{ party: { not: null } }] },
       orderBy: [{ pinned: 'desc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
       select: { id: true, title: true, party: true, dueDate: true, pinned: true },
     });

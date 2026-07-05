@@ -1,5 +1,33 @@
 import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes } from './reminders.service';
 
+describe('suggestion dismiss (BEA-882)', () => {
+  it('dismissSuggestion flags the task so it stops showing', async () => {
+    const updated: any[] = [];
+    const prisma: any = { task: { update: async ({ where, data }: any) => { updated.push({ id: where.id, ...data }); return {}; } } };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    await svc.dismissSuggestion('t1');
+    expect(updated[0]).toEqual({ id: 't1', reminderSuggestDismissed: true });
+  });
+
+  it('dismissSuggestion rejects a missing taskId', async () => {
+    const svc = new RemindersService({} as any, {} as any, {} as any, {} as any);
+    await expect(svc.dismissSuggestion('')).rejects.toThrow();
+  });
+
+  it('dismissAllSuggestions clears every current suggestion', async () => {
+    const updatedMany: any[] = [];
+    const prisma: any = {
+      task: { findMany: async () => [{ id: 't1', title: 'x', party: 'A', dueDate: null, pinned: false }], updateMany: async ({ where, data }: any) => { updatedMany.push({ ids: where.id.in, data }); return { count: where.id.in.length }; } },
+      reminder: { findMany: async () => [] },
+    };
+    const contacts: any = { findByName: async () => ({ id: 'k1', name: 'A', whatsappNumber: '9' }) };
+    const svc = new RemindersService(prisma, {} as any, contacts, {} as any);
+    const r = await svc.dismissAllSuggestions();
+    expect(r.dismissed).toBe(1);
+    expect(updatedMany[0]).toEqual({ ids: ['t1'], data: { reminderSuggestDismissed: true } });
+  });
+});
+
 describe('scheduleOnDay — future-dated reminders (BEA-876)', () => {
   const IST = 330; // minutes
   it('schedules the slot on the given future day, in the future, and never earlier', () => {

@@ -33,6 +33,17 @@ export class RemindersController {
     return this.reminders.suggestions();
   }
 
+  // Clear suggested reminders so they stop piling up (BEA-882).
+  @Post('suggestions/dismiss')
+  dismissSuggestion(@Body() body: { taskId?: string }) {
+    return this.reminders.dismissSuggestion(body?.taskId || '');
+  }
+
+  @Post('suggestions/dismiss-all')
+  dismissAllSuggestions() {
+    return this.reminders.dismissAllSuggestions();
+  }
+
   /** AI-backfill the person on old open tasks so they surface as suggestions (BEA-738). */
   @Post('scan-tasks')
   scanTasks() {

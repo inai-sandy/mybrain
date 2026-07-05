@@ -431,6 +431,20 @@ function RemindersTab() {
     } catch { toast('error', 'Could not draft a message'); } finally { setDrafting(null); }
   }
 
+  // Dismiss suggestions so they stop piling up (BEA-882).
+  async function dismissSuggestion(taskId: string) {
+    setSuggestions((xs) => xs.filter((s) => s.task.id !== taskId)); // optimistic
+    try { await fetch('/api/reminders/suggestions/dismiss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ taskId }) }); }
+    catch { toast('error', 'Could not dismiss'); load(); }
+  }
+  async function clearAllSuggestions() {
+    if (!window.confirm('Clear all suggested reminders? They won’t come back (but you can still add reminders from Tasks).')) return;
+    const prev = suggestions;
+    setSuggestions([]);
+    const r = await fetch('/api/reminders/suggestions/dismiss-all', { method: 'POST' }).catch(() => null);
+    if (r?.ok) toast('success', 'Cleared all suggestions'); else { setSuggestions(prev); toast('error', 'Could not clear'); }
+  }
+
   return (
     <div className="space-y-4">
       <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">WhatsApp sending is live — active reminders go out automatically at their scheduled times, and replies get handled for you. Open a reminder's 💬 to see the conversation.</p>
@@ -444,7 +458,10 @@ function RemindersTab() {
 
       {suggestions.length > 0 && (
         <section className="space-y-2">
-          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400"><Sparkles className="h-3.5 w-3.5 text-emerald-500" />Suggested from your tasks</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400"><Sparkles className="h-3.5 w-3.5 text-emerald-500" />Suggested from your tasks <span className="text-zinc-400">· {suggestions.length}</span></h3>
+            <button onClick={clearAllSuggestions} className="text-xs font-medium text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400">Clear all</button>
+          </div>
           <ul className="space-y-2">
             {suggestions.map((s) => (
               <li key={s.task.id} className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
@@ -456,6 +473,7 @@ function RemindersTab() {
                   {drafting === s.task.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : s.noNumber ? <UserPlus className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
                   {s.noNumber ? 'Add number' : 'Add reminder'}
                 </button>
+                <button onClick={() => dismissSuggestion(s.task.id)} title="Dismiss this suggestion" aria-label="Dismiss suggestion" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-rose-600 dark:hover:bg-zinc-800 dark:hover:text-rose-400"><X className="h-4 w-4" /></button>
               </li>
             ))}
           </ul>
