@@ -10,8 +10,8 @@ import { Sheet } from '../ui/Sheet';
  * random fillers keep it from ever going silent. Same OpenAI voice we embed on the device.
  */
 
-const ACK = ['Let me check.', 'One second.', 'Okay, looking now.'];
-const FILLERS = ['Still with you.', 'Almost there.', 'Just a moment.', 'Yeah, still working on it.', 'Hold on, nearly done.'];
+const ACK = ['Let me check, Sandy.', 'One second, Sandy.', 'Okay Sandy, looking now.'];
+const FILLERS = ['Still with you, Sandy.', 'Almost there.', 'Just a moment.', 'Yeah, still working on it.', 'Hold on Sandy, nearly done.'];
 
 function fmt(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function rand<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }

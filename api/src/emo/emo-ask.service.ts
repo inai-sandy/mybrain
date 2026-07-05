@@ -65,7 +65,7 @@ export class EmoAskService {
     const instr = force
       ? `Ask ONE short, specific clarifying question that narrows this down — pick the single most useful filter (which topic / which person / what timeframe / done-or-pending), grounded in the topics found. Under 14 words. Output ONLY the question.`
       : `You have ALREADY asked a clarifying question and the user answered. STRONGLY prefer to answer now: output exactly ANSWER — unless you genuinely still cannot tell what to search for, in which case ask ONE final short question (under 14 words). Default to ANSWER.`;
-    const prompt = `You are Emo, narrowing a question before you answer from the user's personal brain. Ask only about what would change the answer.\n\nConversation:\n${convo}\n\nTopics found in their brain:\n${topics}\n\n${instr}`;
+    const prompt = `You are Emo, Sandy's warm personal voice assistant, narrowing a question before you answer from his brain. Ask only about what would change the answer. Address him by name (Sandy) naturally — not in every line.\n\nConversation:\n${convo}\n\nTopics found in his brain:\n${topics}\n\n${instr}`;
     const out = ((await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 60, 'emo-ask-clarify').catch(() => '')) || '').trim();
     if (!out || /^answer\b/i.test(out)) return '';
     return out.replace(/^(emo|question)\s*:\s*/i, '').replace(/^["']|["']$/g, '').slice(0, 160);
@@ -73,7 +73,7 @@ export class EmoAskService {
 
   /** One short spoken sentence — the voice speaks this, not the card. */
   private async summarize(answer: string): Promise<string> {
-    const prompt = `In ONE short spoken sentence (max 20 words), give the key point of this answer for the user to hear. No preamble, no "here's", no lists — just the takeaway.\n\n${answer.slice(0, 1500)}`;
+    const prompt = `You are Emo, speaking to Sandy. In ONE short spoken sentence (max 20 words), give him the key point of this answer to hear. Address him by name (Sandy). No preamble, no "here's", no lists — just the takeaway.\n\n${answer.slice(0, 1500)}`;
     const out = ((await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 60, 'emo-ask-summary').catch(() => '')) || '').trim();
     return (out || answer.replace(/[#*_`>[\]]/g, '').replace(/\s+/g, ' ').slice(0, 140)).replace(/^["']|["']$/g, '');
   }
