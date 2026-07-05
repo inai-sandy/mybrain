@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, ExternalLink, Mic, Square, Loader2 } from 'lucide-react';
+import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { Sheet } from '../ui/Sheet';
@@ -270,6 +270,15 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
   const lane = LANE[card.lane] || { icon: '•', label: card.lane };
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+
+  async function del(close: () => void) {
+    setBusy(true);
+    const r = await fetch(`/api/emo/cards/${card.id}`, { method: 'DELETE' }).catch(() => null);
+    setBusy(false);
+    if (r?.ok) { toast('success', 'Card deleted'); onChanged(); close(); }
+    else toast('error', 'Could not delete that card.');
+  }
 
   async function submitAnswer(close: () => void) {
     if (!answer.trim()) return;
@@ -292,8 +301,21 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
                 <div className="text-xs text-zinc-400">{lane.label} · {STATUS[card.status]?.label || card.status} · {hhmm(card.createdAt)}</div>
               </div>
             </div>
-            <button onClick={close} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setConfirmDel(true)} title="Delete card" className="rounded-lg p-1.5 text-zinc-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10 dark:hover:text-rose-300"><Trash2 size={17} /></button>
+              <button onClick={close} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X size={18} /></button>
+            </div>
           </div>
+
+          {confirmDel && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
+              <span className="text-sm text-rose-700 dark:text-rose-300">Delete this card permanently?</span>
+              <div className="flex shrink-0 gap-2">
+                <button onClick={() => setConfirmDel(false)} className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Cancel</button>
+                <button onClick={() => del(close)} disabled={busy} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
+              </div>
+            </div>
+          )}
 
           {/* Needs-you: the on-card clarify (durable HITL) */}
           {card.status === 'needs_you' && card.needsQuestion && (
