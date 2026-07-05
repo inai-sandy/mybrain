@@ -345,9 +345,11 @@ const REM_STATUS: Record<string, { label: string; cls: string; icon: typeof Cloc
   done: { label: 'Done', cls: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300', icon: CheckCircle2 },
   stopped: { label: 'Stopped', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400', icon: X },
 };
-/** The status pill label, with the one-day nuance for auto-paused reminders. (BEA-764) */
-function remStatusLabel(rm: { status: string; pausedAuto?: boolean }): string {
+/** The status pill label, with the one-day nuance for auto-paused reminders (BEA-764) and the
+ *  scheduled-day nuance for future-dated ones (BEA-881). */
+function remStatusLabel(rm: { status: string; pausedAuto?: boolean; armedDay?: string | null }): string {
   if (rm.status === 'paused' && rm.pausedAuto) return 'Paused · new day';
+  if (rm.status === 'active' && rm.armedDay && /^\d{4}-\d{2}-\d{2}$/.test(rm.armedDay) && rm.armedDay > todayIstKey()) return `Active · sends ${fmtDayKey(rm.armedDay)}`;
   return REM_STATUS[rm.status]?.label || rm.status;
 }
 
