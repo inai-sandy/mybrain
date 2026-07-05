@@ -1,5 +1,52 @@
 import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes } from './reminders.service';
 
+describe('update() reschedule (BEA-883)', () => {
+  const todayIST = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  const futureIST = (d: number) => new Date(Date.now() + 330 * 60000 + d * 86400000).toISOString().slice(0, 10);
+
+  function makeSvc(cur: any) {
+    let created: Date[] = [];
+    let row = { ...cur };
+    const prisma: any = {
+      setting: { findUnique: async () => null },
+      reminder: {
+        findUnique: async ({ include }: any) => ({ ...row, contact: { name: 'A' }, ...(include?.sends ? { sends: created.map((at, i) => ({ id: 's' + i, at, status: 'queued' })) } : {}) }),
+        update: async ({ data }: any) => { row = { ...row, ...data }; return {}; },
+      },
+      reminderSend: { deleteMany: async () => ({}), createMany: async ({ data }: any) => { created = data.map((d: any) => d.at); } },
+      task: { findUnique: async () => null },
+    };
+    return { svc: new RemindersService(prisma, {} as any, {} as any, {} as any), sends: () => created, row: () => row };
+  }
+
+  it('moves an active reminder to a future day when edited', async () => {
+    const future = futureIST(6);
+    const h = makeSvc({ id: 'r1', taskId: null, status: 'active', armedDay: todayIST(), times: JSON.stringify(['09:00']), pausedAuto: false });
+    await h.svc.update('r1', { message: 'updated', startDay: future });
+    expect(h.sends()).toHaveLength(1);
+    const dayIST = new Date(h.sends()[0].getTime() + 330 * 60000).toISOString().slice(0, 10);
+    expect(dayIST).toBe(future); // rescheduled onto the chosen day
+    expect(h.row().armedDay).toBe(future);
+  });
+
+  it('preserves a future reminder when an unrelated edit omits the date', async () => {
+    const future = futureIST(5);
+    const h = makeSvc({ id: 'r1', taskId: null, status: 'active', armedDay: future, times: JSON.stringify(['09:00']), pausedAuto: false });
+    await h.svc.update('r1', { message: 'just fixing the wording' }); // no startDay
+    const dayIST = new Date(h.sends()[0].getTime() + 330 * 60000).toISOString().slice(0, 10);
+    expect(dayIST).toBe(future); // NOT dragged to today
+  });
+
+  it('moves a future reminder back to today when the date is set to today', async () => {
+    const future = futureIST(4);
+    const h = makeSvc({ id: 'r1', taskId: null, status: 'active', armedDay: future, times: JSON.stringify(['09:00']), pausedAuto: false });
+    await h.svc.update('r1', { startDay: todayIST() }); // explicit today
+    // today 09:00 may already be past → 0 or a today/tomorrow spill, but NOT the original future day
+    const days = h.sends().map((at) => new Date(at.getTime() + 330 * 60000).toISOString().slice(0, 10));
+    expect(days).not.toContain(future);
+  });
+});
+
 describe('suggestion dismiss (BEA-882)', () => {
   it('dismissSuggestion flags the task so it stops showing', async () => {
     const updated: any[] = [];

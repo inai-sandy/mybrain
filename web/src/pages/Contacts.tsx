@@ -640,7 +640,8 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
   const [notes, setNotes] = useState(reminder?.notes || '');
   const [slots, setSlots] = useState<Slot[]>(() => timesToSlots(reminder?.times));
   const times = slots.filter((s) => s.on).map((s) => s.time).sort();
-  const [sendDay, setSendDay] = useState(todayIstKey()); // BEA-881: pick a future day (create only)
+  // BEA-881/883: pick a send day (create) or reschedule (edit) — pre-fill from the reminder's current day.
+  const [sendDay, setSendDay] = useState(reminder?.armedDay && reminder.armedDay > todayIstKey() ? reminder.armedDay : todayIstKey());
   const isFuture = sendDay > todayIstKey();
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
@@ -668,8 +669,8 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
     setSaving(true);
     try {
       const r = reminder
-        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), notes: notes.trim(), times }) })
-        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), notes: notes.trim(), times, ...(isFuture ? { startDay: sendDay } : {}) }) });
+        ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), notes: notes.trim(), times, startDay: sendDay }) })
+        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), notes: notes.trim(), times, startDay: sendDay }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not save');
       toast('success', reminder ? 'Reminder updated' : 'Reminder created');
       onSaved();
@@ -710,12 +711,10 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="e.g. This is for the Beakn Q3 order. If they ask about pricing, it's agreed at the quoted rate." className={inp + ' mt-1 resize-none'} />
           <span className="mt-1 block text-[10px] text-zinc-400">Your AI assistant uses this to answer their replies. If it can't, it flags you.</span>
         </label>
-        {!reminder && (
-          <label className="block text-xs text-zinc-500">Send on
-            <input type="date" value={sendDay} min={todayIstKey()} onChange={(e) => setSendDay(e.target.value || todayIstKey())} className={inp + ' mt-1'} />
-            <span className={'mt-1 block text-[10px] ' + (isFuture ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400')}>{isFuture ? `📅 Scheduled for ${fmtDayKey(sendDay)} — nothing goes out until then.` : 'Sends today at the times below.'}</span>
-          </label>
-        )}
+        <label className="block text-xs text-zinc-500">Send on
+          <input type="date" value={sendDay} min={todayIstKey()} onChange={(e) => setSendDay(e.target.value || todayIstKey())} className={inp + ' mt-1'} />
+          <span className={'mt-1 block text-[10px] ' + (isFuture ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400')}>{isFuture ? `📅 Scheduled for ${fmtDayKey(sendDay)} — nothing goes out until then.` : 'Sends today at the times below.'}</span>
+        </label>
         <div>
           <div className="mb-1.5 flex items-center justify-between text-xs text-zinc-500"><span>{isFuture ? 'Times on that day' : 'When to send'}</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{times.length ? `${times.length} a day` : 'none on'}</span></div>
           <div className="space-y-1.5">

@@ -478,7 +478,7 @@ export class RemindersService {
     return { ...this.shape(r), task };
   }
 
-  async update(id: string, patch: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[] }) {
+  async update(id: string, patch: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[]; startDay?: string }) {
     const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
@@ -507,8 +507,14 @@ export class RemindersService {
     // Keep today's queued sends in sync with the reminder's state.
     const targetStatus: string = data.status ?? cur.status;
     if (targetStatus === 'active') {
-      // active (incl. resuming or a count change) → make sure today's sends are queued
-      await this.reseed(id, times || this.parse(cur.times));
+      // Reschedule to a future day when asked (BEA-883). An explicit startDay in the patch wins
+      // (including moving back to "today" → undefined); if the patch omits it, PRESERVE the reminder's
+      // current future day so an unrelated edit (e.g. the message) never drags a future reminder to today.
+      const today = this.todayKey();
+      const patchDay = /^\d{4}-\d{2}-\d{2}$/.test(patch.startDay || '') && (patch.startDay as string) > today ? patch.startDay : undefined;
+      const keepFuture = (cur as any).armedDay && (cur as any).armedDay > today ? (cur as any).armedDay : undefined;
+      const startDay = patch.startDay !== undefined ? patchDay : keepFuture;
+      await this.reseed(id, times || this.parse(cur.times), startDay);
     } else {
       // paused / stopped / done → clear any still-queued sends so nothing goes out
       await this.prisma.reminderSend.deleteMany({ where: { reminderId: id, status: 'queued' } });

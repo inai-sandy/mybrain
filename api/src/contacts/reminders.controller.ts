@@ -62,7 +62,7 @@ export class RemindersController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[] }) {
+  update(@Param('id') id: string, @Body() body: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[]; startDay?: string }) {
     return this.reminders.update(id, body || {});
   }
 
