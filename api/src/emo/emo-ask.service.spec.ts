@@ -29,8 +29,9 @@ describe('EmoAskService (BEA-890)', () => {
     expect(explore.ask).toHaveBeenCalled();
     expect(r.mode).toBe('answer');
     expect(r.cardId).toBe('card1');
-    expect(created[0]).toMatchObject({ lane: 'search', status: 'done', detail: 'You have 3 trading tasks.' });
-    expect(r.summary).toBe('Short summary.');
+    expect(created[0]).toMatchObject({ lane: 'search', status: 'done' });
+    expect(created[0].detail).toContain('You have 3 trading tasks.'); // full answer lives on the card
+    expect(r.summary).toBe('Short summary.'); // voice speaks the summary, not the detail
   });
 
   it('caps clarifying at 3 and then answers even if the model still wants to clarify', async () => {

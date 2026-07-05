@@ -16,7 +16,8 @@ const FILLERS = ['Still with you.', 'Almost there.', 'Just a moment.', 'Yeah, st
 function fmt(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function rand<T>(a: T[]): T { return a[Math.floor(Math.random() * a.length)]; }
 
-type Phase = 'idle' | 'recording' | 'thinking' | 'speaking';
+type Phase = 'idle' | 'recording' | 'thinking' | 'speaking' | 'done';
+const GOODBYE = /^\s*(bye|goodbye|good bye|thank you|thanks|that'?s all|that is all|that'?s it|stop|nothing|no thanks|ok bye|okay bye|i'?m done|i am done|done)\b/i;
 type Turn = { role: 'user' | 'emo'; text: string; cardId?: string };
 
 export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCardCreated?: () => void }) {
@@ -135,18 +136,21 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
     if (!blob.size) { autoListen(); return; }
     setPhase('thinking'); waiting.current = true;
     void playClip(rand(ACK));
-    const f1 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 2800);
-    const f2 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 6500);
+    // fillers fire LATE + rarely, so short answers never trigger a "still working on it"
+    const f1 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 4000);
+    const f2 = setTimeout(() => { if (waiting.current) void playClip(rand(FILLERS)); }, 9000);
+    const done = () => { clearTimeout(f1); clearTimeout(f2); waiting.current = false; };
 
     const fd = new FormData(); fd.append('audio', blob, 'ask.webm');
     const tr = await fetch('/api/voice/transcribe', { method: 'POST', body: fd }).then((r) => r.json()).catch(() => ({ text: '' }));
     const text = (tr.text || '').trim();
-    if (!text) { clearTimeout(f1); clearTimeout(f2); waiting.current = false; autoListen(); return; } // heard nothing → keep listening
+    if (!text) { done(); setPhase('idle'); return; } // heard nothing → stop (don't loop the mic)
+    if (GOODBYE.test(text)) { done(); if (cur.current) cur.current.pause(); setPhase('done'); return; } // "bye/thanks" → end cleanly
 
     const prior = [...history.current];
     push({ role: 'user', text });
     const res = await fetch('/api/emo/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: text, history: prior }) }).then((r) => r.json()).catch(() => null);
-    clearTimeout(f1); clearTimeout(f2); waiting.current = false;
+    done();
     if (!mounted.current) return;
     history.current.push({ role: 'user', text });
 
@@ -161,8 +165,8 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
       push({ role: 'emo', text: summary, cardId: res.cardId });
       setPhase('speaking'); await waitForCurrent(); await speak(summary + ' The full card is in your Emo section.');
       onCardCreated?.();
-      history.current = []; // fresh thread for the follow-up
-      autoListen();
+      history.current = [];
+      setPhase('done'); // answer delivered → disconnect; do NOT reopen the mic
     }
   }
 
@@ -200,7 +204,7 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
             ) : (
               <>
                 <button onClick={() => void start()} className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-600/30 transition hover:scale-105 hover:bg-emerald-500"><Mic size={34} /></button>
-                <p className="mt-4 text-sm text-zinc-500">{started ? 'Go ahead — I’m listening' : 'Tap and ask a question'}</p>
+                <p className="mt-4 text-sm text-zinc-500">{phase === 'done' ? 'Done — tap to ask another' : started ? 'Go ahead — I’m listening' : 'Tap and ask a question'}</p>
               </>
             )}
           </div>
