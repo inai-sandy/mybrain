@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Markdown } from '../ui/markdown';
 import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles, Terminal, ChevronDown } from 'lucide-react';
 import { StatusBadge } from './Agents';
 
@@ -260,7 +261,7 @@ export function AgentRunView() {
           {run.status === 'done' && run.resultText && (
             <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">Answer</div>
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{run.resultText}</div>
+              <Markdown className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{run.resultText}</Markdown>
             </div>
           )}
           {run.status === 'done' && run.outputDocId && (

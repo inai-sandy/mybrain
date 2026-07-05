@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, ExternalLink, Mic, Square, Loader2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { Markdown } from '../ui/markdown';
 import { Sheet } from '../ui/Sheet';
 
 function fmtElapsed(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
@@ -284,7 +285,7 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
             </div>
           )}
 
-          {card.detail && <div className="mb-4 whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">{card.detail}</div>}
+          {card.detail && <Markdown className="mb-4 rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">{card.detail}</Markdown>}
 
           {card.error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">⚠ {card.error}</div>}
 

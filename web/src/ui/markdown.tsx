@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { List, ChevronLeft } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -41,6 +43,20 @@ export function stripLeadingUrl(md: string): string {
   while (i < lines.length && lines[i].trim() === '') i++;
   if (i < lines.length && /^https?:\/\/\S+$/.test(lines[i].trim())) lines.splice(0, i + 1);
   return lines.join('\n').replace(/^\n+/, '');
+}
+
+/** The one styling recipe for rendered AI markdown (bold, lists, headings, code, quotes). (BEA-885) */
+const MD_PROSE =
+  'break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2.5 [&_ul]:my-2.5 [&_ol]:my-2.5 [&_ul]:pl-5 [&_ol]:pl-5 [&_ul]:list-disc [&_ol]:list-decimal [&_li]:my-1 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-4 [&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:mt-4 [&_h3]:font-semibold [&_h3]:mt-3 [&_pre]:rounded-lg [&_pre]:bg-zinc-100 dark:[&_pre]:bg-zinc-800/80 [&_pre]:p-3 [&_pre]:my-2.5 [&_pre]:text-xs [&_pre]:overflow-x-auto [&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-zinc-100 dark:[&_:not(pre)>code]:bg-zinc-800 [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:text-[12.5px] [&_a]:text-emerald-600 [&_a]:underline [&_strong]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-300 dark:[&_blockquote]:border-zinc-600 [&_blockquote]:pl-3 [&_blockquote]:text-zinc-500';
+
+/** Render AI-generated markdown consistently across the app. Drop-in for any prose field that was
+ *  showing raw `**stars**` / `- dots`. Pass text-size/colour via className. (BEA-885) */
+export function Markdown({ children, className = '' }: { children?: string | null; className?: string }) {
+  return (
+    <div className={`${MD_PROSE} ${className}`}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{children || ''}</ReactMarkdown>
+    </div>
+  );
 }
 
 export const mdComponents = {

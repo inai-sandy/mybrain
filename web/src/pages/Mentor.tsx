@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Compass, Sparkles, Plus, Check, X, Trash2, RefreshCw, TrendingUp, Target, ChevronLeft, ChevronRight, CalendarRange } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { Markdown } from '../ui/markdown';
 
 type Focus = { id: string; title: string; description?: string | null; source: string; status: string };
 type MentorDay = { day: string; adherenceScore: number; moodScore?: number | null; guidance: string; prev?: { day: string; adherenceScore: number } | null; missing?: boolean };
@@ -129,7 +130,7 @@ export function Mentor() {
         {shown && shown.missing ? (
           <p className="text-sm text-zinc-500">No mentor read for this day. Pick another day, or tap a bar in the graph below.</p>
         ) : shown ? (
-          <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{shown.guidance}</p>
+          <Markdown className="text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">{shown.guidance}</Markdown>
         ) : (
           <div className="text-sm text-zinc-500">
             <p className="mb-3">Your Mentor writes guidance each night after your Story of the Day. Want a read now?</p>
@@ -267,7 +268,7 @@ function WeeklyReviews() {
                 </button>
                 {isOpen && (
                   <div className="px-3 pb-3">
-                    <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">{w.text}</p>
+                    <Markdown className="text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed">{w.text}</Markdown>
                     {w.pattern && <p className="mt-2 text-xs rounded-lg bg-indigo-500/5 border border-indigo-300/30 dark:border-indigo-500/20 px-2.5 py-1.5"><span className="font-semibold text-indigo-500">🔍 The pattern:</span> {w.pattern}</p>}
                     {w.experiment && <p className="mt-1.5 text-xs rounded-lg bg-amber-500/5 border border-amber-300/30 dark:border-amber-500/20 px-2.5 py-1.5"><span className="font-semibold text-amber-600">🧪 The experiment:</span> {w.experiment}</p>}
                   </div>

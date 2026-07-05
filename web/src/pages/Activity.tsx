@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { Markdown } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Sheet } from '../ui/Sheet';
 import { StoryModal } from './DailyStory';
@@ -166,7 +167,7 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
           data.dayStory.personalText ? (
             <StoryTabs ds={data.dayStory} />
           ) : (
-            <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{data.dayStory.text}</p>
+            <Markdown className="text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">{data.dayStory.text}</Markdown>
           )
         ) : (
           <div className="text-sm text-zinc-500">
@@ -182,7 +183,7 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
           {data?.summary && <button onClick={() => generate(true)} disabled={gen} className="text-xs text-zinc-400 hover:text-emerald-600 inline-flex items-center gap-1"><RefreshCw size={12} /> rebuild</button>}
         </div>
         {data?.summary ? (
-          <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">{data.summary.text}</p>
+          <Markdown className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">{data.summary.text}</Markdown>
         ) : (
           <div className="text-sm text-zinc-500">
             <p className="mb-3">{data?.isToday ? 'Auto-generates at 9:30 PM — or build it now.' : 'No summary was generated for this day.'}</p>
@@ -512,7 +513,7 @@ function MeView() {
           <button onClick={regenerate} disabled={busy} className="text-xs text-zinc-400 hover:text-emerald-600 inline-flex items-center gap-1"><RefreshCw size={12} className={busy ? 'animate-spin' : ''} /> refresh</button>
         </div>
         {p.summary ? (
-          <p className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap">{p.summary}</p>
+          <Markdown className="text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">{p.summary}</Markdown>
         ) : (
           <div className="text-sm text-zinc-500">
             <p className="mb-3">Enough data to build your profile. Generate it now.</p>
@@ -866,7 +867,7 @@ function StoryTabs({ ds }: { ds: NonNullable<DayStoryT> }) {
         <button onClick={() => setTab('pro')} className={'rounded-full px-3 py-1 text-xs border ' + (tab === 'pro' ? 'bg-emerald-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>💼 Professional{ds.proMoodScore != null ? ` · ${ds.proMoodScore}` : ''}</button>
         <button onClick={() => setTab('personal')} className={'rounded-full px-3 py-1 text-xs border ' + (tab === 'personal' ? 'bg-violet-600 text-white border-transparent' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>🏠 Personal{ds.personalMoodScore != null ? ` · ${ds.personalMoodScore}` : ''}</button>
       </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{tab === 'pro' ? ds.text : ds.personalText}</p>
+      <Markdown className="text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">{tab === 'pro' ? ds.text : ds.personalText}</Markdown>
       {score != null && <p className="mt-1.5 text-[11px] text-zinc-400">{tab === 'pro' ? 'Work' : 'Personal'} mood: {score}/100</p>}
     </div>
   );
@@ -947,7 +948,7 @@ function BookView() {
                 </button>
                 {isOpen && (
                   <div className="px-4 pb-4">
-                    <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed">{c.text}</p>
+                    <Markdown className="text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">{c.text}</Markdown>
                     <button onClick={() => write(c.month, true)} disabled={writing === c.month} className="mt-3 text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1">
                       <RefreshCw size={12} /> {writing === c.month ? 'Rewriting…' : 'rewrite chapter'}
                     </button>
@@ -1003,7 +1004,7 @@ function YearCard() {
       {have ? (
         <div className="mt-2">
           {ys!.title && <p className="font-bold text-lg">“{ys!.title}”</p>}
-          <p className={'mt-1 text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap leading-relaxed ' + (open ? '' : 'line-clamp-4')}>{ys!.text}</p>
+          <Markdown className={'mt-1 text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed ' + (open ? '' : 'line-clamp-4')}>{ys!.text}</Markdown>
           <button onClick={() => setOpen((v) => !v)} className="mt-2 text-xs text-amber-600 hover:underline">{open ? 'Show less' : 'Read the whole story'}</button>
         </div>
       ) : (

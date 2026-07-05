@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { Markdown } from '../ui/markdown';
 import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, MinusCircle, FileText, HelpCircle, Send, Terminal as TerminalIcon, Copy, Check, RotateCw } from 'lucide-react';
 
 const KIND_RANK: Record<string, number> = { question: 0, subquestion: 1, text: 1, skill: 2, tool: 2, ask_ai: 2, ask_user: 3, if: 3, filter: 3, wait: 3, note: 3, merge: 8, output: 9 };
@@ -115,7 +116,7 @@ export function FlowRunView() {
               {run.flowId && <button onClick={() => reRun(run.flowId)} disabled={rerunning} className="inline-flex items-center gap-1 rounded-lg border border-emerald-300/60 bg-white/70 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-white disabled:opacity-50 dark:border-emerald-500/30 dark:bg-zinc-900/60 dark:text-emerald-300">{rerunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}Re-run</button>}
             </div>
           </div>
-          <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-100">{run.finalOutput}</div>
+          <Markdown className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-100">{run.finalOutput}</Markdown>
         </div>
       )}
 
@@ -135,7 +136,7 @@ export function FlowRunView() {
                   {b.nodes.map((n) => (
                     <div key={n.nid}>
                       <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400"><NodeStatus s={n.status} />{n.label || n.kind}</div>
-                      {n.output && <div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{n.output.slice(0, 3000)}</div>}
+                      {n.output && <Markdown className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{n.output.slice(0, 3000)}</Markdown>}
                     </div>
                   ))}
                 </div>
@@ -145,7 +146,7 @@ export function FlowRunView() {
           {loose.map((i) => (
             <details key={i.nid} className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900" open={i.status === 'running'}>
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm [&::-webkit-details-marker]:hidden"><NodeStatus s={i.status} /><span className="min-w-0 flex-1 truncate font-medium">{i.label || i.kind}</span><span className="shrink-0 text-xs text-zinc-400">{i.kind}{i.status === 'skipped' ? ' · skipped' : ''}</span></summary>
-              {i.output && <div className="whitespace-pre-wrap border-t border-zinc-100 px-3 py-2 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">{i.output.slice(0, 3000)}</div>}
+              {i.output && <Markdown className="border-t border-zinc-100 px-3 py-2 text-xs leading-relaxed text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">{i.output.slice(0, 3000)}</Markdown>}
             </details>
           ))}
         </div>

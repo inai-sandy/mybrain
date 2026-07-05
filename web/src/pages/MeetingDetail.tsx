@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2, Share2, Brain, Plus, Trash2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { Markdown } from '../ui/markdown';
 import { ShareDialog } from '../ui/ShareDialog';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 
@@ -235,7 +236,7 @@ export function MeetingDetail() {
           {/* AI sections (populated after transcription) */}
           {transcribed && (
             <>
-              {d.summary && <Section icon={<FileText size={15} className="text-emerald-600" />} title="Summary"><p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap">{d.summary}</p></Section>}
+              {d.summary && <Section icon={<FileText size={15} className="text-emerald-600" />} title="Summary"><Markdown className="text-sm text-zinc-700 dark:text-zinc-200">{d.summary}</Markdown></Section>}
               {d.takeaways?.length > 0 && <Section icon={<Lightbulb size={15} className="text-amber-500" />} title="Key takeaways"><ul className="list-disc pl-5 text-sm text-zinc-700 dark:text-zinc-200 space-y-1">{d.takeaways.map((t, i) => <li key={i}>{t}</li>)}</ul></Section>}
               {d.decisions?.length > 0 && <Section icon={<Check size={15} className="text-emerald-600" />} title="Decisions"><ul className="list-disc pl-5 text-sm text-zinc-700 dark:text-zinc-200 space-y-1">{d.decisions.map((t, i) => <li key={i}>{t}</li>)}</ul></Section>}
               {d.actionItems?.length > 0 && (

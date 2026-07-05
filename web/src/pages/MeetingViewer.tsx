@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Logo } from '../ui/Logo';
+import { Markdown } from '../ui/markdown';
 import { Mic, Clock, FileText, Lightbulb, Check, ListChecks } from 'lucide-react';
 
 type Shared = {
@@ -57,7 +58,7 @@ export function MeetingViewer() {
 
             {d.summary && (
               <Block icon={<FileText size={15} className="text-emerald-600" />} title="Summary">
-                <p className="text-sm text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap">{d.summary}</p>
+                <Markdown className="text-sm text-zinc-700 dark:text-zinc-200">{d.summary}</Markdown>
               </Block>
             )}
             {d.takeaways?.length > 0 && (
