@@ -120,6 +120,26 @@ function sendsForToday(times: string[]): Date[] {
   return scheduleNudges(times, new Date());
 }
 
+/**
+ * Concrete UTC datetimes for a SPECIFIC local day (YYYY-MM-DD) at each HH:MM — for future-dated
+ * reminders (BEA-876). Only slots still in the future are kept, so a same-day call behaves like
+ * today's seeding and a future day lands entirely in the future (the tick only fires `at <= now`).
+ */
+export function scheduleOnDay(times: string[], dayKey: string, now: Date, offsetMin = REMINDER_TZ_OFFSET): Date[] {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey || '');
+  if (!m) return [];
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const da = Number(m[3]);
+  const out: Date[] = [];
+  for (const t of times) {
+    const [h, mm] = String(t).split(':').map(Number);
+    const utc = new Date(Date.UTC(y, mo, da, h || 0, mm || 0, 0, 0) - offsetMin * 60000);
+    if (utc.getTime() > now.getTime() - 60000) out.push(utc); // strictly future (60s grace)
+  }
+  return out.sort((a, b) => a.getTime() - b.getTime());
+}
+
 @Injectable()
 export class RemindersService {
   constructor(
@@ -378,9 +398,10 @@ export class RemindersService {
   }
 
   /** Replace a reminder's queued sends with fresh ones for today, and (re)arm it for THIS day. (BEA-764) */
-  private async reseed(reminderId: string, times: string[]) {
+  private async reseed(reminderId: string, times: string[], forDay?: string) {
     await this.prisma.reminderSend.deleteMany({ where: { reminderId, status: 'queued' } });
-    const sends = sendsForToday(times);
+    // forDay (a future YYYY-MM-DD) schedules the sends on that day; else today's still-future slots. (BEA-876)
+    const sends = forDay ? scheduleOnDay(times, forDay, new Date()) : sendsForToday(times);
     if (sends.length) await this.prisma.reminderSend.createMany({ data: sends.map((at) => ({ reminderId, at })) });
     // Arm for the day of the FIRST scheduled send, not "today". A reminder created late in the
     // evening has all its slots rolled to tomorrow; stamping today made rollDay auto-pause it at
@@ -403,7 +424,7 @@ export class RemindersService {
     return { armed };
   }
 
-  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[] }) {
+  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string }) {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
@@ -413,6 +434,9 @@ export class RemindersService {
     if (input.times !== undefined && chosen.length === 0) throw new BadRequestException('Pick at least one send time');
     const times = chosen.length ? chosen : spreadTimes(Math.max(1, Math.min(5, Math.round(input.count || 1))));
     const count = times.length;
+    // A FUTURE start day (YYYY-MM-DD) schedules the first send on that day; today/past → normal today
+    // seeding. The engine already leaves future sends dormant until they're due. (BEA-876)
+    const startDay = /^\d{4}-\d{2}-\d{2}$/.test(input.startDay || '') && (input.startDay as string) > this.todayKey() ? input.startDay : undefined;
     // Clean a command-like subject ("Ask Srikar to …") into a topic ("the …") so the
     // nudge reads "a gentle reminder about the …", not "about Ask Srikar to …". (BEA-754)
     const subject = (await this.cleanSubject(input.subject, contact.name)) || null;
@@ -428,7 +452,7 @@ export class RemindersService {
         status: 'active',
       },
     });
-    await this.reseed(r.id, times);
+    await this.reseed(r.id, times, startDay);
     return this.get(r.id);
   }
 

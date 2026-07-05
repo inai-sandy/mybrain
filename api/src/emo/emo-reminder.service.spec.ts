@@ -11,7 +11,31 @@ function make(opts: { extract: any; contacts?: any[]; card?: any }) {
   return { svc: new EmoReminderService(llm, cards, contacts, reminders), cards, contacts, reminders, updates };
 }
 
-describe('EmoReminderService (BEA-867 / BEA-875)', () => {
+const futureIstDay = (daysAhead: number) => new Date(Date.now() + 330 * 60000 + daysAhead * 86400000).toISOString().slice(0, 10);
+
+describe('EmoReminderService (BEA-867 / BEA-875 / BEA-876)', () => {
+  it('schedules a FUTURE-dated reminder when a concrete future day resolves (BEA-876)', async () => {
+    const future = futureIstDay(6);
+    const { svc, reminders, updates } = make({
+      extract: { who: 'Dharmendra', what: 'the socket pins', when: 'next Friday', startDay: future, time: '10:00' },
+      contacts: [{ id: 'k1', name: 'Dharmendra' }],
+    });
+    await svc.handle('c1');
+    expect(reminders.create).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'k1', startDay: future, times: ['10:00'] }));
+    const done = updates[updates.length - 1];
+    expect(done.status).toBe('done');
+    expect(done.summary).toMatch(/^Reminder set: Dharmendra,/); // dated, not "for today"
+  });
+
+  it('defaults a future reminder with no stated time to 09:00 (BEA-876)', async () => {
+    const future = futureIstDay(3);
+    const { svc, reminders } = make({
+      extract: { who: 'Srikar', what: 'the invoice', when: 'tomorrow', startDay: future, time: '' },
+      contacts: [{ id: 'k2', name: 'Srikar' }],
+    });
+    await svc.handle('c1');
+    expect(reminders.create).toHaveBeenCalledWith(expect.objectContaining({ startDay: future, times: ['09:00'] }));
+  });
   it('creates a reminder for today when exactly one contact matches', async () => {
     const { svc, reminders, updates } = make({ extract: { who: 'Dharmendra', what: 'the socket pins', when: '' }, contacts: [{ id: 'k1', name: 'Dharmendra' }] });
     await svc.handle('c1');

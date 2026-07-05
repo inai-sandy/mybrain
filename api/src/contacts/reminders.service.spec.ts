@@ -1,4 +1,32 @@
-import { spreadTimes, localTimesToUtc, scheduleNudges, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes } from './reminders.service';
+import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes } from './reminders.service';
+
+describe('scheduleOnDay — future-dated reminders (BEA-876)', () => {
+  const IST = 330; // minutes
+  it('schedules the slot on the given future day, in the future, and never earlier', () => {
+    const now = new Date('2026-07-05T03:00:00Z'); // 08:30 IST, 5 Jul
+    const sends = scheduleOnDay(['09:00'], '2026-07-10', now); // Fri 10 Jul, 09:00 IST
+    expect(sends).toHaveLength(1);
+    // 09:00 IST on 10 Jul == 03:30 UTC on 10 Jul
+    expect(sends[0].toISOString()).toBe('2026-07-10T03:30:00.000Z');
+    expect(sends[0].getTime()).toBeGreaterThan(now.getTime()); // strictly future → tick won't fire it now
+  });
+
+  it('drops slots that are already in the past (same-day, time gone)', () => {
+    const now = new Date('2026-07-05T10:00:00Z'); // 15:30 IST
+    expect(scheduleOnDay(['09:00'], '2026-07-05', now)).toHaveLength(0); // 09:00 IST already passed
+  });
+
+  it('returns nothing for a malformed day', () => {
+    expect(scheduleOnDay(['09:00'], 'not-a-date', new Date())).toEqual([]);
+  });
+
+  it('keeps multiple slots sorted', () => {
+    const now = new Date('2026-07-05T03:00:00Z');
+    const sends = scheduleOnDay(['18:00', '09:00'], '2026-07-10', now);
+    expect(sends.map((d) => d.getTime())).toEqual([...sends.map((d) => d.getTime())].sort((a, b) => a - b));
+    void IST;
+  });
+});
 
 describe('sanitizeTimes — user-chosen send slots (BEA-755)', () => {
   it('keeps valid times, zero-pads, dedupes, sorts, caps at 5', () => {

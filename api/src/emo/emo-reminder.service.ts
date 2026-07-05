@@ -20,17 +20,26 @@ export class EmoReminderService {
     private readonly reminders: RemindersService,
   ) {}
 
-  private async extract(text: string): Promise<{ who: string; what: string; when: string }> {
+  private todayKey(): string {
+    return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  }
+
+  private async extract(text: string): Promise<{ who: string; what: string; when: string; startDay: string; time: string }> {
     try {
       const raw = await this.llm.complete(
-        `From this spoken reminder, extract JSON {"who":"…","what":"…","when":"…"}.\n- who = the person to nudge on WhatsApp (their name), or "" if it's the user reminding themselves.\n- what = the thing to remind about, as a short topic (strip the verb and the name).\n- when = any timing words ("Friday", "tomorrow 10am"), or "".\nRequest: "${text}"\nReply ONLY JSON.`,
-        200, 'emo-reminder-extract',
+        `Today is ${this.todayKey()} (IST). From this spoken reminder, extract JSON {"who":"…","what":"…","when":"…","startDay":"…","time":"…"}.\n- who = the person to nudge on WhatsApp (their name), or "" if the user means themselves.\n- what = the thing to remind about, as a short topic (strip the verb and the name).\n- when = the timing words as said ("Friday", "tomorrow 10am"), or "".\n- startDay = if a day OTHER than today is meant, resolve it to a concrete FUTURE date YYYY-MM-DD; else "".\n- time = a specific clock time as HH:mm (24h) if one was said, else "".\nRequest: "${text}"\nReply ONLY JSON.`,
+        240, 'emo-reminder-extract',
       );
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
-      return { who: String(j.who || '').trim(), what: String(j.what || '').trim(), when: String(j.when || '').trim() };
+      return { who: String(j.who || '').trim(), what: String(j.what || '').trim(), when: String(j.when || '').trim(), startDay: String(j.startDay || '').trim(), time: String(j.time || '').trim() };
     } catch {
-      return { who: '', what: '', when: '' };
+      return { who: '', what: '', when: '', startDay: '', time: '' };
     }
+  }
+
+  /** Human day label for a card, e.g. "Fri 10 Jul". */
+  private humanDay(day: string): string {
+    try { return new Date(day + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); } catch { return day; }
   }
 
   /** A "when" that names a day other than today (day-of-week, tomorrow, next…, a date). */
@@ -51,7 +60,7 @@ export class EmoReminderService {
     if (!card || card.lane !== 'reminder') return;
     const text = [card.rawTranscript || card.summary || '', card.needsAnswer].filter(Boolean).join('. ').trim();
     try {
-      const { who, what, when } = await this.extract(text);
+      const { who, what, when, startDay, time } = await this.extract(text);
       const person = (card.needsAnswer && !who ? card.needsAnswer : who).trim();
 
       // Confidence gate — resolve the contact, but NEVER guess on ambiguity. (BEA-875)
@@ -81,22 +90,25 @@ export class EmoReminderService {
         return;
       }
 
-      // Reminders currently fire TODAY only (the engine has no future-date scheduling — BEA-876).
-      // If a future day was asked for, NEVER silently send today — clarify first.
+      // Future-dated reminders are now supported (BEA-876): if a concrete future day resolved, schedule
+      // the nudge for that day. If the words point to another day but we couldn't pin a date, clarify
+      // rather than silently sending today — reminders are too important to guess.
       const confirmedToday = /\b(today|now|go ahead|yes)\b/i.test(String(card.needsAnswer || ''));
-      if (when && this.isFutureDay(when) && !confirmedToday) {
+      const futureDay = /^\d{4}-\d{2}-\d{2}$/.test(startDay) && startDay > this.todayKey() ? startDay : undefined;
+      if (!futureDay && when && this.isFutureDay(when) && !confirmedToday) {
         await this.cards.update(cardId, {
-          needsQuestion: `Reminders go out today, but you said "${when}". Nudge ${contact.name} today, or make it a dated task instead?`,
-          needsOptions: ['Remind today', 'Make it a task'],
+          needsQuestion: `You said "${when}" but I couldn't pin the exact day. Which date should I remind ${contact.name}? (Or say "today".)`,
+          needsOptions: ['Today'],
           status: 'needs_you',
         });
         return;
       }
 
       const draft = await this.reminders.draftMessage({ contactName: contact.name, userInput: what }).catch(() => ({ message: what }));
-      const rem: any = await this.reminders.create({ contactId: contact.id, subject: what, message: draft.message || what, count: 1 });
+      const times = futureDay ? [/^\d{1,2}:\d{2}$/.test(time) ? time.padStart(5, '0') : '09:00'] : undefined;
+      const rem: any = await this.reminders.create({ contactId: contact.id, subject: what, message: draft.message || what, count: 1, times, startDay: futureDay });
       await this.cards.update(cardId, {
-        summary: `Reminder set for today: ${contact.name} — ${what}`,
+        summary: futureDay ? `Reminder set: ${contact.name}, ${this.humanDay(futureDay)} — ${what}` : `Reminder set for today: ${contact.name} — ${what}`,
         links: [{ kind: 'reminder', id: rem.id, label: contact.name }],
         status: 'done',
       });
