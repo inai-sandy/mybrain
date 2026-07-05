@@ -4,6 +4,7 @@ import { Search, X, ExternalLink, Mic, Square, Loader2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { Sheet } from '../ui/Sheet';
+import { DictateButton } from '../ui/DictateButton';
 
 function fmtElapsed(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 
@@ -47,6 +48,8 @@ export default function Emo() {
   const [limit, setLimit] = useState(200);
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState('');
+  const [dictated, setDictated] = useState('');
+  const [sending, setSending] = useState(false);
   const [open, setOpen] = useState<Card | null>(null);
   const [recording, setRecording] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -101,6 +104,22 @@ export default function Emo() {
     } else toast('error', 'Could not process that recording.');
   }
 
+  // Dictation-driven capture (BEA-886): the cleaned, name-accurate text → the router → cards (search/task/…).
+  async function submitCapture() {
+    const t = dictated.trim();
+    if (!t) return;
+    setSending(true);
+    const r = await fetch('/api/emo/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transcript: t, source: 'emo-dictation' }) }).catch(() => null);
+    setSending(false);
+    if (r?.ok) {
+      const d = await r.json().catch(() => ({ cards: [] }));
+      const n = d.cards?.length || 0;
+      toast('success', n ? `${n} card${n === 1 ? '' : 's'} filed` : 'Saved');
+      setDictated('');
+      load();
+    } else toast('error', 'Could not process that.');
+  }
+
   async function load() {
     const url = `/api/emo/cards?take=${limit}` + (status ? `&status=${status}` : '') + (lane ? `&lane=${lane}` : '');
     const [c, k] = await Promise.all([
@@ -149,6 +168,27 @@ export default function Emo() {
         ) : (
           <button onClick={startRec} className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-500"><Mic size={16} />Record</button>
         )}
+      </div>
+
+      {/* dictation box — the primary way in: dictate (names + AI cleanup) → review the text → Go → auto-routed cards */}
+      <div className="rounded-2xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex items-start gap-2">
+          <textarea
+            value={dictated}
+            onChange={(e) => setDictated(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitCapture(); }}
+            placeholder="Hold the mic and speak — a question to search, or a task / reminder / story / research to file…"
+            rows={2}
+            className="min-h-[3rem] flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500/50 dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <DictateButton onText={(t) => setDictated((d) => (d ? d.replace(/\s*$/, '') + ' ' : '') + t.trim())} size={18} className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300" />
+        </div>
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-[11px] text-zinc-400">Dictate · review the text · then Go</span>
+          <button onClick={submitCapture} disabled={sending || !dictated.trim()} className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+            {sending ? <Loader2 size={14} className="animate-spin" /> : null}Go
+          </button>
+        </div>
       </div>
 
       {/* attention strip */}
