@@ -1428,7 +1428,7 @@ function ChatModelCard() {
   );
 }
 
-type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; language: string };
+type VoiceCfg = { engine: string; engines: { id: string; name: string; configured: boolean }[]; cleanup: boolean; language: string; vocabulary: string };
 function VoiceModelCard() {
   const [cfg, setCfg] = useState<VoiceCfg | null>(null);
   const toast = useToast();
@@ -1450,6 +1450,10 @@ function VoiceModelCard() {
   async function saveLang(language: string) {
     setCfg((c) => (c ? { ...c, language } : c));
     await fetch('/api/voice/language', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language }) });
+  }
+  async function saveVocab(vocabulary: string) {
+    setCfg((c) => (c ? { ...c, vocabulary } : c));
+    await fetch('/api/voice/vocabulary', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vocabulary }) });
   }
 
   return (
@@ -1482,6 +1486,17 @@ function VoiceModelCard() {
           onChange={(e) => setCfg((c) => (c ? { ...c, language: e.target.value } : c))}
           onBlur={(e) => saveLang(e.target.value.trim())}
           placeholder="e.g. en for English (blank = auto-detect)"
+          className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+        />
+      </label>
+      <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">
+        Words to get right <span className="text-zinc-400">(optional — places, project terms)</span>
+        <textarea
+          value={cfg.vocabulary}
+          onChange={(e) => setCfg((c) => (c ? { ...c, vocabulary: e.target.value } : c))}
+          onBlur={(e) => saveVocab(e.target.value.trim())}
+          rows={2}
+          placeholder="e.g. Zigbee, touch panels, BOM, Kiot — your saved contacts are already included automatically"
           className="w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
       </label>

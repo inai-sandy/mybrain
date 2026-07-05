@@ -49,6 +49,11 @@ export class VoiceController {
     return this.voice.setLanguage(body?.language || '');
   }
 
+  @Put('vocabulary')
+  async setVocabulary(@Body() body: { vocabulary?: string }) {
+    return this.voice.setVoiceVocabulary(body?.vocabulary || '');
+  }
+
   // --- Deepgram model (live list + current choice) ---
   @Get('deepgram-models')
   async deepgramModels() {

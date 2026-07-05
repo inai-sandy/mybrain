@@ -57,6 +57,29 @@ export class VoiceService {
     await this.setSetting('voice.language', (l || '').trim().slice(0, 10));
     return { language: await this.language() };
   }
+  /** Optional user vocabulary (project words, place names…) mixed into the transcription hint. */
+  async voiceVocabulary(): Promise<string> {
+    return (await this.getSetting('voice.vocabulary')) || '';
+  }
+  async setVoiceVocabulary(v: string) {
+    await this.setSetting('voice.vocabulary', (v || '').trim().slice(0, 2000));
+    return { vocabulary: await this.voiceVocabulary() };
+  }
+  /** A short context hint biasing transcription toward the user's real names + terms (BEA-888). */
+  private async promptHint(): Promise<string> {
+    try {
+      const names = (await this.prisma.contact.findMany({ select: { name: true }, take: 200 }))
+        .map((c: any) => (c.name || '').trim())
+        .filter(Boolean);
+      const vocab = (await this.voiceVocabulary()).trim();
+      const parts: string[] = [];
+      if (names.length) parts.push(`People who may be mentioned by name: ${names.join(', ')}.`);
+      if (vocab) parts.push(`Common terms: ${vocab}.`);
+      return parts.join(' ').slice(0, 900); // ~200 tokens, OpenAI's prompt cap
+    } catch {
+      return '';
+    }
+  }
 
   /** Engines with a 'configured' flag (does the user have the key?). */
   async engines() {
@@ -69,7 +92,7 @@ export class VoiceService {
   }
 
   async config() {
-    return { engine: await this.getEngine(), engines: await this.engines(), cleanup: await this.cleanupOn(), language: await this.language() };
+    return { engine: await this.getEngine(), engines: await this.engines(), cleanup: await this.cleanupOn(), language: await this.language(), vocabulary: await this.voiceVocabulary() };
   }
 
   // ---- transcription ----
@@ -128,11 +151,13 @@ export class VoiceService {
     const c = await this.connectors.get<{ apiKey: string }>('openai');
     if (!c?.apiKey) return null;
     const lang = await this.language();
+    const hint = await this.promptHint();
     const call = async (model: string) => {
       const form = new FormData();
       form.append('file', new Blob([new Uint8Array(buf)]), filename);
       form.append('model', model);
       if (lang) form.append('language', lang);
+      if (hint) form.append('prompt', hint); // bias toward the user's real names/terms (BEA-888)
       const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any });
       if (!r.ok) return null;
       const d: any = await r.json();
@@ -192,6 +217,9 @@ export class VoiceService {
   /** Mint a short-lived Deepgram token so the browser can stream audio directly (key stays server-side).
    *  Returns null when Deepgram isn't configured → the client falls back to record-then-transcribe. */
   async streamToken(): Promise<{ token: string; model: string; expiresIn: number } | null> {
+    // Live streaming is Deepgram-only. If the user chose another engine, return null so the client
+    // records the clip and batch-transcribes with the CHOSEN engine instead (BEA-888).
+    if ((await this.getEngine()) !== 'deepgram') return null;
     const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
     if (!c?.apiKey) return null;
     try {
@@ -254,7 +282,9 @@ export class VoiceService {
     const raw = (text || '').trim();
     if (raw.length < 3) return raw; // nothing meaningful to clean
     const tmpl = await this.prompts.get('voice.cleanup');
-    const out = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300), 'voice-cleanup'))?.trim();
+    const hint = await this.promptHint();
+    const ctx = hint ? `\n\nCONTEXT — if a name or term was clearly misheard, correct it to one of these (do NOT add anything new):\n${hint}` : '';
+    const out = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, `${tmpl}${ctx}\n\nTRANSCRIPT:\n${raw}`, Math.min(2000, Math.round(raw.length / 2) + 300), 'voice-cleanup'))?.trim();
     if (!out) return raw;
     // Guard against the model "replying" instead of cleaning (e.g. on garbled/non-speech input).
     const looksLikeMeta = /\b(i don'?t see|please provide|no (transcript|text)|i can'?t|as an ai|it (looks|seems) like)\b/i.test(out) && out.length > raw.length + 40;

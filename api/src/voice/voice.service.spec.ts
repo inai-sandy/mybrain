@@ -1,6 +1,6 @@
 import { VoiceService } from './voice.service';
 
-function make(opts: { keys?: Record<string, any>; settings?: Record<string, string>; clean?: string } = {}) {
+function make(opts: { keys?: Record<string, any>; settings?: Record<string, string>; clean?: string; contacts?: { name: string }[] } = {}) {
   const settings: Record<string, string> = { ...(opts.settings || {}) };
   const prisma: any = {
     setting: {
@@ -11,6 +11,7 @@ function make(opts: { keys?: Record<string, any>; settings?: Record<string, stri
       },
     },
     usageLog: { create: async () => ({}) },
+    contact: { findMany: async () => opts.contacts ?? [] },
   };
   const keys = opts.keys ?? { openai: { apiKey: 'oa' } };
   const connectors: any = { get: async (n: string) => keys[n] ?? null };
@@ -53,6 +54,18 @@ describe('VoiceService', () => {
     const { svc } = make({ clean: "I don't see any transcript text to clean up. Please provide the speech you'd like cleaned." });
     const text = await svc.transcribe(Buffer.from('audio'), 'a.webm');
     expect(text).toBe('um hello world'); // raw STT kept, not the meta-message
+  });
+
+  it('streamToken returns null for a non-Deepgram engine, without calling Deepgram (BEA-888)', async () => {
+    const { svc, calls } = make({ settings: { 'voice.engine': 'openai' }, keys: { openai: { apiKey: 'oa' }, deepgram: { apiKey: 'dg' } } });
+    expect(await svc.streamToken()).toBeNull();
+    expect(calls.some((u) => u.includes('deepgram.com/v1/auth/grant'))).toBe(false);
+  });
+
+  it('streamToken attempts the Deepgram grant only when the engine IS Deepgram (BEA-888)', async () => {
+    const { svc, calls } = make({ settings: { 'voice.engine': 'deepgram' }, keys: { deepgram: { apiKey: 'dg' } } });
+    await svc.streamToken();
+    expect(calls.some((u) => u.includes('deepgram.com/v1/auth/grant'))).toBe(true);
   });
 
   it('reports engines with their configured flags', async () => {
