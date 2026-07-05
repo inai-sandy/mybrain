@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { looseJsonParse, narrativeField } from '../common/llm-json';
 import { MentalModelService } from '../mind/mentalmodel.service';
 import { TasksService } from '../tasks/tasks.service';
 
@@ -242,15 +243,11 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       (bigger ? `\n\n${bigger}` : '');
 
     const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200, 'mentor-guidance'))?.trim() || '';
-    let guidance = raw;
+    // Robustly pull guidance + score — never store a raw JSON blob if parsing hiccups (BEA-884).
+    const guidance = narrativeField(raw, 'guidance');
+    const parsed = looseJsonParse(raw);
     let adherenceScore = dayStory?.moodScore ?? 50;
-    try {
-      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.guidance) guidance = String(json.guidance).trim();
-      if (Number.isFinite(json?.adherenceScore)) adherenceScore = Math.max(0, Math.min(100, Math.round(Number(json.adherenceScore))));
-    } catch {
-      /* keep prose as guidance */
-    }
+    if (parsed && Number.isFinite(parsed.adherenceScore)) adherenceScore = Math.max(0, Math.min(100, Math.round(Number(parsed.adherenceScore))));
     if (!guidance) return null;
 
     const row = await this.prisma.mentorDay.upsert({
@@ -373,17 +370,11 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
 
     const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 1400, 'weekly-review'))?.trim() || '';
-    let text = raw;
-    let pattern: string | null = null;
-    let experiment: string | null = null;
-    try {
-      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.review) text = String(json.review).trim();
-      if (json?.pattern) pattern = String(json.pattern).trim().slice(0, 300);
-      if (json?.experiment) experiment = String(json.experiment).trim().slice(0, 300);
-    } catch {
-      /* keep prose */
-    }
+    // Robust parse — never store a raw JSON blob as the review (BEA-884).
+    const text = narrativeField(raw, 'review');
+    const parsed = looseJsonParse(raw);
+    const pattern: string | null = parsed?.pattern ? String(parsed.pattern).trim().slice(0, 300) : null;
+    const experiment: string | null = parsed?.experiment ? String(parsed.experiment).trim().slice(0, 300) : null;
     if (!text) return null;
 
     const row = await this.prisma.weeklyReview.upsert({

@@ -4,6 +4,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { looseJsonParse, narrativeField } from '../common/llm-json';
 import { matchContact, contactSpellings, norm as normName } from '../contacts/person-identity';
 import { MentorService } from '../mentor/mentor.service';
 import { MentalModelService } from '../mind/mentalmodel.service';
@@ -742,20 +743,19 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     let proMoodScore: number | null = null;
     let personalMoodScore: number | null = null;
     const score = (v: any): number | null => (Number.isFinite(v) ? Math.max(0, Math.min(100, Math.round(Number(v)))) : null);
-    try {
-      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.professional?.story || json?.personal?.story) {
-        // two-sphere shape: text = professional (or personal alone if work was silent)
-        text = String(json.professional?.story || json.personal?.story || '').trim();
-        personalText = json.professional?.story && json.personal?.story ? String(json.personal.story).trim() : null;
-        proMoodScore = score(json.professional?.moodScore);
-        personalMoodScore = score(json.personal?.moodScore);
-      } else if (json?.story) text = String(json.story).trim();
-      if (json?.mood) mood = String(json.mood).slice(0, 40);
-      moodScore = score(json?.moodScore);
-    } catch {
-      /* model returned prose, not JSON — keep it as the story */
+    // Robust parse — never store a raw JSON blob if the model emits messy JSON (BEA-884).
+    const parsed = looseJsonParse(raw);
+    if (parsed?.professional?.story || parsed?.personal?.story) {
+      // two-sphere shape: text = professional (or personal alone if work was silent)
+      text = String(parsed.professional?.story || parsed.personal?.story || '').trim();
+      personalText = parsed.professional?.story && parsed.personal?.story ? String(parsed.personal.story).trim() : null;
+      proMoodScore = score(parsed.professional?.moodScore);
+      personalMoodScore = score(parsed.personal?.moodScore);
+    } else {
+      text = narrativeField(raw, 'story'); // single-story JSON or plain prose — never a blob
     }
+    if (parsed?.mood) mood = String(parsed.mood).slice(0, 40);
+    moodScore = score(parsed?.moodScore);
     if (!text) text = this.fallbackSummary(st, doneList, openList);
 
     const row = await this.prisma.dayStory.upsert({
@@ -822,15 +822,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     const cfg = await this.bookModel();
     const raw = (await this.llm.completeWith(cfg, prompt, 2200, 'story-of-month'))?.trim() || '';
-    let text = raw;
-    let title: string | null = null;
-    try {
-      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.story) text = String(json.story).trim();
-      if (json?.title) title = String(json.title).trim().slice(0, 120);
-    } catch {
-      /* keep prose */
-    }
+    // Robust parse — never store a raw {"title":…,"story":…} blob if JSON hiccups (BEA-884).
+    const text = narrativeField(raw, 'story');
+    const parsed = looseJsonParse(raw);
+    const title: string | null = parsed?.title ? String(parsed.title).trim().slice(0, 120) : null;
     if (!text) return null;
 
     const row = await this.prisma.monthStory.upsert({
@@ -1080,19 +1075,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     const cfg = await this.bookModel();
     const raw = (await this.llm.completeWith(cfg, prompt, 3500, 'story-of-year'))?.trim() || '';
-    let text = raw;
-    let title: string | null = null;
-    let parsed = false;
-    try {
-      const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
-      if (json?.story) {
-        text = String(json.story).trim();
-        parsed = true;
-      }
-      if (json?.title) title = String(json.title).trim().slice(0, 120);
-    } catch {
-      /* keep prose */
-    }
+    // Robust parse — never store a raw {"title":…,"story":…} blob (BEA-884).
+    const parsedJson = looseJsonParse(raw);
+    const text = narrativeField(raw, 'story');
+    const title: string | null = parsedJson?.title ? String(parsedJson.title).trim().slice(0, 120) : null;
+    const parsed = !!(parsedJson && typeof parsedJson.story === 'string' && parsedJson.story.trim());
     // Guard: a model "reply" asking for more material must never be saved as the story.
     if (!parsed && /\b(i need|could you (share|provide)|please (share|provide)|remaining .*chapters)\b/i.test(text)) return null;
     if (!text) return null;

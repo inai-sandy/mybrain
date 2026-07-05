@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { looseJsonParse, narrativeField } from '../common/llm-json';
 import { VoiceService } from '../voice/voice.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -130,8 +131,8 @@ export class MeetingsService {
     const model = await this.getModel();
     const text = model ? await this.llm.completeWith(model, prompt, 2000, 'meeting-summary') : await this.llm.complete(prompt, 2000, 'meeting-summary');
     if (!text) return { summary: '', takeaways: [], decisions: [], actionItems: [] };
-    try {
-      const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+    const json = looseJsonParse(text); // robust — tolerates fences + raw newlines (BEA-884)
+    if (json) {
       const arr = (v: any) => (Array.isArray(v) ? v : []);
       return {
         title: String(json.title || '').trim().slice(0, 80) || undefined,
@@ -141,10 +142,9 @@ export class MeetingsService {
         decisions: arr(json.decisions).map((x: any) => String(x).trim()).filter(Boolean).slice(0, 20),
         actionItems: arr(json.actionItems).map((x: any) => (typeof x === 'string' ? { title: x } : { title: String(x?.title || '').trim(), owner: x?.owner || null })).filter((a: any) => a.title).slice(0, 30),
       };
-    } catch {
-      // Fall back to using the raw text as the summary so nothing is lost.
-      return { summary: text.trim().slice(0, 4000), takeaways: [], decisions: [], actionItems: [] };
     }
+    // Couldn't parse → keep a READABLE summary, never a raw JSON blob.
+    return { summary: narrativeField(text, 'summary').slice(0, 4000), takeaways: [], decisions: [], actionItems: [] };
   }
 
   private shape(m: any) {
