@@ -4,7 +4,14 @@ import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, C
 import { useToast } from '../ui/Toast';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
-type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; contact?: Contact; task?: { id: string; title: string } | null };
+type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
+
+/** Today's date key in IST (matches the reminder engine). */
+const todayIstKey = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+/** A reminder is scheduled for a FUTURE day (BEA-881/876). */
+const isFutureReminder = (r: Reminder) => !!r.armedDay && /^\d{4}-\d{2}-\d{2}$/.test(r.armedDay) && r.armedDay > todayIstKey();
+/** "Mon 6 Jul" from a YYYY-MM-DD key. */
+const fmtDayKey = (d?: string | null) => { try { return d ? new Date(d + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : ''; } catch { return d || ''; } };
 
 const PAGE_SIZE = 20;
 
@@ -170,6 +177,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
                           </div>
                           <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
                           <div className="mt-1.5 flex flex-wrap gap-1">
+                            {isFutureReminder(rm) && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">📅 {fmtDayKey(rm.armedDay)}</span>}
                             {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
                           </div>
                         </button>
@@ -477,6 +485,7 @@ function RemindersTab() {
                     {rm.task && <div className="text-xs text-zinc-400">re: {rm.task.title}</div>}
                     <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
                     <div className="mt-1.5 flex flex-wrap gap-1">
+                      {isFutureReminder(rm) && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">📅 {fmtDayKey(rm.armedDay)}</span>}
                       {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
                     </div>
                   </button>
@@ -611,6 +620,8 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
   const [notes, setNotes] = useState(reminder?.notes || '');
   const [slots, setSlots] = useState<Slot[]>(() => timesToSlots(reminder?.times));
   const times = slots.filter((s) => s.on).map((s) => s.time).sort();
+  const [sendDay, setSendDay] = useState(todayIstKey()); // BEA-881: pick a future day (create only)
+  const isFuture = sendDay > todayIstKey();
   const [saving, setSaving] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const locked = !!reminder || !!prefill; // contact is fixed (editing, or coming from a suggestion)
@@ -638,7 +649,7 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
     try {
       const r = reminder
         ? await fetch(`/api/reminders/${reminder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subject: subject.trim(), message: message.trim(), notes: notes.trim(), times }) })
-        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), notes: notes.trim(), times }) });
+        : await fetch('/api/reminders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId, taskId: prefill?.taskId, subject: subject.trim(), message: message.trim(), notes: notes.trim(), times, ...(isFuture ? { startDay: sendDay } : {}) }) });
       if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as any).message || 'Could not save');
       toast('success', reminder ? 'Reminder updated' : 'Reminder created');
       onSaved();
@@ -679,8 +690,14 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="e.g. This is for the Beakn Q3 order. If they ask about pricing, it's agreed at the quoted rate." className={inp + ' mt-1 resize-none'} />
           <span className="mt-1 block text-[10px] text-zinc-400">Your AI assistant uses this to answer their replies. If it can't, it flags you.</span>
         </label>
+        {!reminder && (
+          <label className="block text-xs text-zinc-500">Send on
+            <input type="date" value={sendDay} min={todayIstKey()} onChange={(e) => setSendDay(e.target.value || todayIstKey())} className={inp + ' mt-1'} />
+            <span className={'mt-1 block text-[10px] ' + (isFuture ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400')}>{isFuture ? `📅 Scheduled for ${fmtDayKey(sendDay)} — nothing goes out until then.` : 'Sends today at the times below.'}</span>
+          </label>
+        )}
         <div>
-          <div className="mb-1.5 flex items-center justify-between text-xs text-zinc-500"><span>When to send</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{times.length ? `${times.length} a day` : 'none on'}</span></div>
+          <div className="mb-1.5 flex items-center justify-between text-xs text-zinc-500"><span>{isFuture ? 'Times on that day' : 'When to send'}</span><span className="font-medium text-zinc-700 dark:text-zinc-200">{times.length ? `${times.length} a day` : 'none on'}</span></div>
           <div className="space-y-1.5">
             {slots.map((s, i) => (
               <div key={s.key} className={'flex items-center gap-2 rounded-lg border px-3 py-2 transition-colors ' + (s.on ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-zinc-200 dark:border-zinc-700')}>

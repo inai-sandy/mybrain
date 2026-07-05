@@ -46,7 +46,7 @@ export class RemindersController {
   }
 
   @Post()
-  create(@Body() body: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[] }) {
+  create(@Body() body: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string }) {
     return this.reminders.create(body || {});
   }
 
