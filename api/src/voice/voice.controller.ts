@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Put, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { VoiceService } from './voice.service';
 
 @Controller('voice')
@@ -52,6 +53,19 @@ export class VoiceController {
   @Put('vocabulary')
   async setVocabulary(@Body() body: { vocabulary?: string }) {
     return this.voice.setVoiceVocabulary(body?.vocabulary || '');
+  }
+
+  /** Speak text aloud with OpenAI TTS → mp3 (EMO's voice-out; the device plays the same). */
+  @Post('tts')
+  async tts(@Body() body: { text?: string; voice?: string }, @Res() res: Response) {
+    const audio = await this.voice.tts(body?.text || '', body?.voice);
+    if (!audio) {
+      res.status(400).json({ error: 'TTS unavailable — add an OpenAI key in Integrations' });
+      return;
+    }
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(audio);
   }
 
   // --- Deepgram model (live list + current choice) ---

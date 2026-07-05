@@ -13,6 +13,8 @@ const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
   { id: 'gemini', name: 'Gemini (via OpenRouter)', connector: 'openrouter' },
 ];
 
+const ttsCache = new Map<string, Buffer>(); // spoken fillers/ack repeat → instant after first generation (BEA-889)
+
 /** One transcription engine for the whole app (in-app mic + Telegram voice): record → STT → optional AI cleanup. */
 @Injectable()
 export class VoiceService {
@@ -64,6 +66,36 @@ export class VoiceService {
   async setVoiceVocabulary(v: string) {
     await this.setSetting('voice.vocabulary', (v || '').trim().slice(0, 2000));
     return { vocabulary: await this.voiceVocabulary() };
+  }
+  /** The OpenAI voice EMO speaks in (same voice we embed on the device). */
+  async ttsVoice(): Promise<string> {
+    return (await this.getSetting('voice.ttsVoice')) || 'nova';
+  }
+  async setTtsVoice(v: string) {
+    await this.setSetting('voice.ttsVoice', (v || 'nova').trim().slice(0, 30));
+    return { voice: await this.ttsVoice() };
+  }
+  /** Speak text with OpenAI TTS → mp3 bytes. Cached by voice+text so ack/fillers are instant on repeat (BEA-889). */
+  async tts(text: string, voice?: string): Promise<Buffer | null> {
+    const t = (text || '').trim().slice(0, 800);
+    if (!t) return null;
+    const v = (voice || (await this.ttsVoice())).trim();
+    const key = `${v}:${t}`;
+    const hit = ttsCache.get(key);
+    if (hit) return hit;
+    const c = await this.connectors.get<{ apiKey: string }>('openai');
+    if (!c?.apiKey) return null;
+    const r = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice: v, input: t }),
+    }).catch(() => null);
+    if (!r || !r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (ttsCache.size > 200) ttsCache.clear();
+    ttsCache.set(key, buf);
+    await this.prisma.usageLog.create({ data: { feature: 'voice-tts', model: 'gpt-4o-mini-tts', cost: null } }).catch(() => undefined);
+    return buf;
   }
   /** A short context hint biasing transcription toward the user's real names + terms (BEA-888). */
   private async promptHint(): Promise<string> {

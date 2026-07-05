@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2 } from 'lucide-react';
+import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2, Volume2 } from 'lucide-react';
+import { AskEmo } from './AskEmo';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { Sheet } from '../ui/Sheet';
@@ -50,6 +51,7 @@ export default function Emo() {
   const [q, setQ] = useState('');
   const [dictated, setDictated] = useState('');
   const [sending, setSending] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [open, setOpen] = useState<Card | null>(null);
   const [recording, setRecording] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -161,6 +163,8 @@ export default function Emo() {
           <h1 className="text-xl font-bold">Emo</h1>
           <p className="text-xs text-zinc-400">Everything you captured by voice — one card per moment.</p>
         </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setAsking(true)} className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"><Volume2 size={16} />Ask</button>
         {uploading ? (
           <button disabled className="inline-flex items-center gap-2 rounded-full bg-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"><Loader2 size={16} className="animate-spin" />Transcribing…</button>
         ) : recording ? (
@@ -168,6 +172,7 @@ export default function Emo() {
         ) : (
           <button onClick={startRec} className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-500"><Mic size={16} />Record</button>
         )}
+        </div>
       </div>
 
       {/* dictation box — the primary way in: dictate (names + AI cleanup) → review the text → Go → auto-routed cards */}
@@ -247,6 +252,7 @@ export default function Emo() {
       )}
 
       {open && <CardDetail card={open} onClose={() => setOpen(null)} onChanged={() => { load(); }} />}
+      {asking && <AskEmo onClose={() => setAsking(false)} />}
     </div>
   );
 }
