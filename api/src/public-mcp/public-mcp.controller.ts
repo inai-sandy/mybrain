@@ -56,6 +56,9 @@ export class PublicMcpController {
   @Put('config')
   setEnabled(@Body() body: { enabled?: boolean }) { return this.mcp.setEnabled(!!body?.enabled); }
 
+  @Put('write')
+  setWrite(@Body() body: { enabled?: boolean }) { return this.mcp.setWriteEnabled(!!body?.enabled); }
+
   @Post('regenerate')
   regenerate() { return this.mcp.regenerate(); }
 }

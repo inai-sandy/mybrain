@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MemoryModule } from '../memory/memory.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { EmoModule } from '../emo/emo.module';
 import { PublicMcpService } from './public-mcp.service';
 import { PublicMcpController } from './public-mcp.controller';
 
@@ -9,7 +10,7 @@ import { PublicMcpController } from './public-mcp.controller';
  * third-party agents search the owner's brain. Reuses MemoryService + DocumentsService.
  */
 @Module({
-  imports: [MemoryModule, DocumentsModule],
+  imports: [MemoryModule, DocumentsModule, EmoModule],
   controllers: [PublicMcpController],
   providers: [PublicMcpService],
 })

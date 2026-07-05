@@ -19,12 +19,13 @@ const fakeMem = () => ({
   searchRag: jest.fn(async () => [{ title: 'RagHit', content: 'raw vector content', source: 'rag' }]),
 });
 const fakeDocs = () => ({ get: jest.fn(async (id: string) => (id === 'doc-1' ? { title: 'Doc One', contentText: 'full document body' } : null)) });
+const fakeRouter = () => ({ route: jest.fn(async () => ({ cards: [{ lane: 'task' }, { lane: 'reminder' }] })) });
 
-function build(mem = fakeMem(), docs = fakeDocs(), prisma = fakePrisma()) {
-  return { svc: new PublicMcpService(prisma as any, mem as any, docs as any), mem, docs, prisma };
+function build(mem = fakeMem(), docs = fakeDocs(), prisma = fakePrisma(), router = fakeRouter()) {
+  return { svc: new PublicMcpService(prisma as any, mem as any, docs as any, router as any), mem, docs, prisma, router };
 }
 
-describe('PublicMcpService (BEA-631)', () => {
+describe('PublicMcpService (BEA-631 / BEA-872)', () => {
   it('initialize advertises tools capability + server info', async () => {
     const { svc } = build();
     const r = await svc.handleRpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
@@ -32,7 +33,7 @@ describe('PublicMcpService (BEA-631)', () => {
     expect(r.result.capabilities.tools).toBeDefined();
   });
 
-  it('tools/list returns the three read-only tools', async () => {
+  it('tools/list returns the three read-only tools by default (capture hidden)', async () => {
     const { svc } = build();
     const r = await svc.handleRpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
     expect(r.result.tools.map((t: any) => t.name)).toEqual(['search_brain', 'search_rag', 'fetch_document']);
@@ -59,6 +60,25 @@ describe('PublicMcpService (BEA-631)', () => {
     expect(ok.result.content[0].text).toMatch(/full document body/);
     const miss = await svc.handleRpc({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'fetch_document', arguments: { id: 'nope' } } });
     expect(miss.result.content[0].text).toMatch(/No document found/);
+  });
+
+  it('capture is HIDDEN and REFUSES to run while write is off (read-only posture)', async () => {
+    const { svc, router } = build();
+    const list = await svc.handleRpc({ jsonrpc: '2.0', id: 8, method: 'tools/list' });
+    expect(list.result.tools.map((t: any) => t.name)).not.toContain('capture');
+    const r = await svc.handleRpc({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'capture', arguments: { transcript: 'remind Dharmendra' } } });
+    expect(router.route).not.toHaveBeenCalled();
+    expect(r.result.content[0].text).toMatch(/not enabled/i);
+  });
+
+  it('capture appears + routes a transcript to Emo cards once write is enabled (BEA-872)', async () => {
+    const { svc, router } = build();
+    await svc.setWriteEnabled(true);
+    const list = await svc.handleRpc({ jsonrpc: '2.0', id: 10, method: 'tools/list' });
+    expect(list.result.tools.map((t: any) => t.name)).toContain('capture');
+    const r = await svc.handleRpc({ jsonrpc: '2.0', id: 11, method: 'tools/call', params: { name: 'capture', arguments: { transcript: 'finish the BOM and remind Srikar' } } });
+    expect(router.route).toHaveBeenCalledWith('finish the BOM and remind Srikar', expect.objectContaining({ source: 'emo-voice' }));
+    expect(r.result.content[0].text).toMatch(/filed 1 task, 1 reminder/i);
   });
 
   it('notifications get no response; unknown methods error', async () => {
