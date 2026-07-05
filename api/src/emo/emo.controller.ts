@@ -8,6 +8,7 @@ import { EmoTaskService } from './emo-task.service';
 import { EmoReminderService } from './emo-reminder.service';
 import { EmoStoryService } from './emo-story.service';
 import { EmoResearchService } from './emo-research.service';
+import { EmoAskService, AskTurn } from './emo-ask.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -21,7 +22,14 @@ export class EmoController {
     private readonly reminderLane: EmoReminderService,
     private readonly story: EmoStoryService,
     private readonly researchLane: EmoResearchService,
+    private readonly askSvc: EmoAskService,
   ) {}
+
+  // Interactive voice Ask (EMO Ask): one turn — clarify (>=1) or answer + file a Search card.
+  @Post('ask')
+  ask(@Body() body: { question?: string; history?: AskTurn[] }) {
+    return this.askSvc.ask({ question: (body?.question || '').toString(), history: Array.isArray(body?.history) ? body!.history! : [] });
+  }
 
   // Story lane (EMO 5): append today's captures into the Day Story (user-initiated; never closes the day).
   @Post('story/merge')

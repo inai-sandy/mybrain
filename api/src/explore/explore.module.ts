@@ -8,5 +8,6 @@ import { LlmModule } from '../llm/llm.module';
   imports: [MemoryModule, LlmModule],
   controllers: [ExploreController],
   providers: [ExploreService],
+  exports: [ExploreService],
 })
 export class ExploreModule {}

@@ -252,7 +252,7 @@ export default function Emo() {
       )}
 
       {open && <CardDetail card={open} onClose={() => setOpen(null)} onChanged={() => { load(); }} />}
-      {asking && <AskEmo onClose={() => setAsking(false)} />}
+      {asking && <AskEmo onClose={() => setAsking(false)} onCardCreated={() => load()} />}
     </div>
   );
 }
