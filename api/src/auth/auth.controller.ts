@@ -41,6 +41,11 @@ export class AuthController {
     return { token: await this.auth.getDeviceToken() };
   }
 
+  @Post('device-token/regenerate')
+  async regenerateDeviceToken() {
+    return { token: await this.auth.regenerateDeviceToken() };
+  }
+
   @Post('change-password')
   async changePassword(@Req() req: Request, @Body() body: { currentPassword?: string; newPassword?: string }) {
     const email = (req as any).user?.email;

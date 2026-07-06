@@ -55,6 +55,17 @@ export class VoiceController {
     return this.voice.setVoiceVocabulary(body?.vocabulary || '');
   }
 
+  /** EMO's spoken voice (OpenAI TTS). */
+  @Get('tts-voice')
+  async getTtsVoice() {
+    return { voice: await this.voice.ttsVoice(), voices: ['nova', 'alloy', 'echo', 'shimmer', 'onyx', 'fable', 'coral', 'sage'] };
+  }
+
+  @Put('tts-voice')
+  async setTtsVoice(@Body() body: { voice?: string }) {
+    return this.voice.setTtsVoice(body?.voice || 'nova');
+  }
+
   /** Speak text aloud with OpenAI TTS → mp3 (EMO's voice-out; the device plays the same). */
   @Post('tts')
   async tts(@Body() body: { text?: string; voice?: string }, @Res() res: Response) {

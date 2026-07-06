@@ -40,6 +40,13 @@ export class AuthService implements OnModuleInit {
     if (!this._deviceToken) await this.onModuleInit();
     return this._deviceToken || '';
   }
+  /** Mint a fresh device token (invalidates the old one — reflash the firmware after). */
+  async regenerateDeviceToken(): Promise<string> {
+    const dt = 'emod_' + randomBytes(24).toString('hex');
+    await this.prisma.setting.upsert({ where: { key: 'emo.device.token' }, create: { key: 'emo.device.token', value: dt }, update: { value: dt } });
+    this._deviceToken = dt;
+    return dt;
+  }
   /** Constant-time verify of the X-Device-Token header. */
   verifyDeviceToken(presented: string | undefined): boolean {
     if (!presented || !this._deviceToken) return false;

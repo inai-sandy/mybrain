@@ -40,7 +40,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity';
+type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity' | 'emo';
 
 type Cat = { id: Tab; label: string; icon: LucideIcon; desc: string; group: string };
 const CATS: Cat[] = [
@@ -51,6 +51,7 @@ const CATS: Cat[] = [
   { id: 'google', label: 'Google', icon: Globe, desc: 'Workspace services', group: 'Connections' },
   { id: 'cli', label: 'CLI', icon: Terminal, desc: 'Command-line access', group: 'Connections' },
   { id: 'sync', label: 'Sync', icon: RefreshCw, desc: 'Import & reconcile memory', group: 'Connections' },
+  { id: 'emo', label: 'EMO', icon: Mic, desc: 'Voice device & EMO voice', group: 'AI brain' },
   { id: 'agent', label: 'Agent Engine', icon: Bot, desc: 'How agents run', group: 'AI brain' },
   { id: 'models', label: 'Models', icon: Cpu, desc: 'Which models do what', group: 'AI brain' },
   { id: 'prompts', label: 'Prompts', icon: MessageSquare, desc: 'Tune the AI prompts', group: 'AI brain' },
@@ -77,6 +78,7 @@ function useSettingsStatus() {
 function renderSection(id: Tab, email?: string): ReactNode {
   switch (id) {
     case 'account': return <AccountSection email={email} />;
+    case 'emo': return <EmoSettingsSection />;
     case 'integrations': return <IntegrationsSection />;
     case 'agent': return <AgentEngineSection />;
     case 'cli': return <CliSection />;
@@ -1425,6 +1427,63 @@ function ChatModelCard() {
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
       </div>
     </AccordionCard>
+  );
+}
+
+/** Settings → EMO — the voice device token + EMO's voice, kept separate from the general Voice input (BEA-895). */
+function EmoSettingsSection() {
+  const toast = useToast();
+  const [token, setToken] = useState('');
+  const [reveal, setReveal] = useState(false);
+  const [voice, setVoice] = useState('nova');
+  const [voices, setVoices] = useState<string[]>([]);
+  useEffect(() => {
+    fetch('/api/auth/device-token').then((r) => r.json()).then((d) => setToken(d.token || '')).catch(() => undefined);
+    fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setVoice(d.voice || 'nova'); setVoices(d.voices || []); }).catch(() => undefined);
+  }, []);
+  async function regen() {
+    if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
+    const d = await fetch('/api/auth/device-token/regenerate', { method: 'POST' }).then((r) => r.json()).catch(() => null);
+    if (d?.token) { setToken(d.token); setReveal(true); toast('success', 'New device token generated'); }
+    else toast('error', 'Could not regenerate');
+  }
+  async function pickVoice(v: string) {
+    setVoice(v);
+    await fetch('/api/voice/tts-voice', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: v }) }).catch(() => undefined);
+    toast('success', `EMO voice set to ${v}`);
+  }
+  function copy() { navigator.clipboard?.writeText(token).then(() => toast('success', 'Device token copied')).catch(() => undefined); }
+  const masked = token ? token.slice(0, 7) + '••••••••••••••' + token.slice(-4) : '';
+  const sel = 'w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900';
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="flex items-center gap-2 text-lg font-semibold"><Mic size={18} className="text-emerald-500" /> EMO</h2>
+        <p className="text-sm text-zinc-500">Your voice device and the EMO Ask experience.</p>
+      </div>
+
+      <AccordionCard title="Device token" icon={Cpu}>
+        <p className="mb-3 text-sm text-zinc-500">Flash this into your EMO firmware — the device sends it to sign in (the <code>X-Device-Token</code> header). Keep it secret; anyone with it can reach your brain.</p>
+        <div className="flex items-center gap-2">
+          <input readOnly value={reveal ? token : masked} className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 font-mono text-sm dark:border-zinc-700 dark:bg-zinc-950" />
+          <button onClick={() => setReveal((r) => !r)} className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700">{reveal ? 'Hide' : 'Show'}</button>
+          <button onClick={copy} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500">Copy</button>
+        </div>
+        <button onClick={regen} className="mt-3 text-xs text-rose-500 hover:text-rose-400">Regenerate — invalidates the current token</button>
+      </AccordionCard>
+
+      <AccordionCard title="EMO voice" icon={Mic}>
+        <p className="mb-3 text-sm text-zinc-500">The voice EMO speaks in (OpenAI TTS) — the same one embedded on the device.</p>
+        <select value={voice} onChange={(e) => pickVoice(e.target.value)} className={sel}>
+          {voices.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </AccordionCard>
+
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        EMO also uses your transcription engine + “Words to get right” (Voice input) and the answer models (Models).
+        Current stack — ears: OpenAI GPT‑4o Transcribe · voice: OpenAI TTS · brain: Claude Sonnet 5 (answers) + Haiku 4.5 (quick).
+      </p>
+    </div>
   );
 }
 
