@@ -1,4 +1,21 @@
-import { fixOwnerVocative } from './reminder-agent.service';
+import { fixOwnerVocative, needsFirstAck } from './reminder-agent.service';
+
+describe('needsFirstAck — never leave a first "yes/ok" on read (BEA-902)', () => {
+  const reminder = { direction: 'out', body: 'Hi Rakesh, a gentle reminder about the production update.' };
+  it('owes an ack when the contact replies "yes"/"ok" and the agent has not replied', () => {
+    expect(needsFirstAck([reminder, { direction: 'in', body: 'Yes' }])).toBe(true);
+    expect(needsFirstAck([reminder, { direction: 'in', body: 'YES' }, { direction: 'in', body: 'ok' }])).toBe(true);
+  });
+  it('does NOT fire once the agent has already replied', () => {
+    expect(needsFirstAck([reminder, { direction: 'in', body: 'Yes' }, { direction: 'out', body: 'Great, thanks!' }, { direction: 'in', body: 'ok' }])).toBe(false);
+  });
+  it('does NOT fire for a substantive reply (let the model handle it)', () => {
+    expect(needsFirstAck([reminder, { direction: 'in', body: 'The BOM is done and uploaded to the drive.' }])).toBe(false);
+  });
+  it('does NOT fire with no inbound yet', () => {
+    expect(needsFirstAck([reminder])).toBe(false);
+  });
+});
 
 const fix = (t: string, contact = 'Dharmendra') => fixOwnerVocative(t, 'Sandeep', contact);
 

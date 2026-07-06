@@ -30,6 +30,19 @@ export function fixOwnerVocative(text: string, ownerName: string, contactName: s
 }
 
 /**
+ * Safety net (BEA-902): true when we owe the contact a first acknowledgment — the agent has NEVER
+ * replied to them yet AND their latest message is a bare affirmation. Prevents leaving a "yes/ok"
+ * on read. Once the agent has replied once, this returns false (the "don't repeat yourself" rule
+ * in the prompt then handles further fillers).
+ */
+export function needsFirstAck(messages: { direction: string; body: string }[]): boolean {
+  const hasAgentReply = messages.some((m, i) => m.direction === 'out' && i > 0 && messages[i - 1].direction === 'in');
+  const lastIn = [...messages].reverse().find((m) => m.direction === 'in');
+  const affirmative = /^\s*(y+e+s+|yep|yeah|ok(ay)?|sure|done|noted|great|thanks|thank you|will do|👍|✅|🙏)[\s.!]*$/i;
+  return !hasAgentReply && !!lastIn && affirmative.test(lastIn.body || '');
+}
+
+/**
  * The two-way "replies like you" reminder agent (BEA-730 / Postbox C2). When a contact
  * replies (stored by the Postbox callback), it reads the whole thread, answers back in the
  * user's voice (Indian English), and — when the matter is clearly resolved — records the
@@ -116,7 +129,8 @@ Rules:
 - Short — 1-2 sentences, ONE message even if there are several items.
 - Use the context Sandeep gave (above) to answer their questions when you can.
 - If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
-- Don't be pushy: if they're only non-committal ("I'll let you know", "ok", "sure") and you've already acknowledged, set "send": false and wait for a real update.
+- ALWAYS acknowledge their reply with a short, warm line — never leave them on read. A "yes"/"ok"/"sure" right after your reminder is their FIRST response: reply with a brief thanks (e.g. "Great, thanks — I'll wait for the update whenever you have it.").
+- Only stay silent (set "send": false) if your OWN previous message in this thread was ALREADY a short acknowledgment (not the reminder itself) AND their new message adds nothing new — then you'd just be repeating yourself.
 
 For EACH numbered item, decide if it's now resolved — ONLY if they clearly addressed THAT item (said it's done / gave its final status). Give a one-line outcome for resolved items.
 
@@ -126,7 +140,15 @@ Reply with ONLY this JSON, nothing else:
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 700);
     const parsed: any = this.parseJson(raw) || {};
     // Never let a reply go out addressing the contact by the owner's name (BEA-899).
-    const replyText = fixOwnerVocative((parsed.reply || '').trim(), 'Sandeep', name);
+    let replyText = fixOwnerVocative((parsed.reply || '').trim(), 'Sandeep', name);
+
+    // Safety net (BEA-902): never leave a contact on read on their FIRST reply. If the agent chose
+    // to stay quiet but it has NEVER replied to this contact and their latest message is a bare
+    // affirmation ("yes/ok/sure/done…"), send a short acknowledgment instead of nothing.
+    if ((parsed.send === false || !replyText) && needsFirstAck(messages)) {
+      replyText = `Great, thanks ${name}! I'll wait for the update whenever you have it.`;
+      parsed.send = true;
+    }
 
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
