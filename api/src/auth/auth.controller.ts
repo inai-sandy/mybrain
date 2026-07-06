@@ -35,6 +35,12 @@ export class AuthController {
     return { user: (req as any).user };
   }
 
+  /** Owner-only: the EMO hardware device token (flashed into the firmware; sent as X-Device-Token). */
+  @Get('device-token')
+  async deviceToken() {
+    return { token: await this.auth.getDeviceToken() };
+  }
+
   @Post('change-password')
   async changePassword(@Req() req: Request, @Body() body: { currentPassword?: string; newPassword?: string }) {
     const email = (req as any).user?.email;

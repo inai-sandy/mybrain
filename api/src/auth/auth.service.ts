@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
+import { randomBytes, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-insecure-secret-change-me';
@@ -9,18 +10,46 @@ export const SESSION_TTL_SECONDS = Number(process.env.SESSION_TTL_SECONDS) || 60
 
 @Injectable()
 export class AuthService implements OnModuleInit {
+  private _deviceToken: string | null = null;
+  private _owner: { id: string; email: string } | null = null;
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Seed the single owner account from env on first boot. */
+  /** Seed the single owner account from env on first boot; ensure the EMO device token. */
   async onModuleInit() {
     const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
     const password = process.env.ADMIN_PASSWORD;
-    if (!email || !password) return;
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (!existing) {
-      const passwordHash = await bcrypt.hash(password, 12);
-      await this.prisma.user.create({ data: { email, passwordHash } });
+    if (email && password) {
+      const existing = await this.prisma.user.findUnique({ where: { email } });
+      if (!existing) {
+        const passwordHash = await bcrypt.hash(password, 12);
+        await this.prisma.user.create({ data: { email, passwordHash } });
+      }
     }
+    // EMO hardware device token — long-lived; the device sends it as the X-Device-Token header (BEA-895).
+    let dt = (await this.prisma.setting.findUnique({ where: { key: 'emo.device.token' } }).catch(() => null))?.value || null;
+    if (!dt) {
+      dt = 'emod_' + randomBytes(24).toString('hex');
+      await this.prisma.setting.upsert({ where: { key: 'emo.device.token' }, create: { key: 'emo.device.token', value: dt }, update: {} }).catch(() => undefined);
+    }
+    this._deviceToken = dt;
+    this._owner = await this.prisma.user.findFirst({ select: { id: true, email: true } }).catch(() => null);
+  }
+
+  /** The EMO device token (owner-only; flashed into the firmware). */
+  async getDeviceToken(): Promise<string> {
+    if (!this._deviceToken) await this.onModuleInit();
+    return this._deviceToken || '';
+  }
+  /** Constant-time verify of the X-Device-Token header. */
+  verifyDeviceToken(presented: string | undefined): boolean {
+    if (!presented || !this._deviceToken) return false;
+    const a = Buffer.from(presented);
+    const b = Buffer.from(this._deviceToken);
+    return a.length === b.length && timingSafeEqual(a, b);
+  }
+  /** The owner identity the device acts as. */
+  deviceUser(): { id: string; email: string } | null {
+    return this._owner;
   }
 
   async validate(email: string, password: string): Promise<{ id: string; email: string }> {

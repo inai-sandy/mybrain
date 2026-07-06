@@ -34,10 +34,19 @@ export class AuthGuard implements CanActivate {
     const res = ctx.switchToHttp().getResponse<Response>();
     const token = (req as any).cookies?.[SESSION_COOKIE];
     const user = token ? this.auth.verifyToken(token) : null;
-    if (!user) throw new UnauthorizedException('Not signed in.');
-    (req as any).user = user;
-    // Sliding expiry → auto-logout after inactivity.
-    res.cookie(SESSION_COOKIE, this.auth.issueToken(user), cookieOpts());
-    return true;
+    if (user) {
+      (req as any).user = user;
+      // Sliding expiry → auto-logout after inactivity.
+      res.cookie(SESSION_COOKIE, this.auth.issueToken(user), cookieOpts());
+      return true;
+    }
+    // EMO hardware: a long-lived device token in the X-Device-Token header (no cookie / no sliding expiry).
+    const deviceToken = (req.headers['x-device-token'] as string) || '';
+    const owner = deviceToken && this.auth.verifyDeviceToken(deviceToken) ? this.auth.deviceUser() : null;
+    if (owner) {
+      (req as any).user = owner;
+      return true;
+    }
+    throw new UnauthorizedException('Not signed in.');
   }
 }
