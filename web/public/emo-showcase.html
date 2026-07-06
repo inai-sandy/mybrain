@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EMO — the agent you wear</title>
+<meta name="description" content="EMO doesn't just hear you — it acts. It sends the reminders, runs the research, turns your meetings into tasks, and answers from your whole memory. An AI agent you wear. Designed by Sandeep Karnati." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎙️%3C/text%3E%3C/svg%3E" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="EMO" />
+<meta property="og:title" content="EMO — the agent you wear" />
+<meta property="og:description" content="It doesn't just hear you — it acts. Sends your reminders, runs your research, turns meetings into tasks, answers from your whole memory. An AI agent you wear." />
+<meta property="og:url" content="https://mybrain.1site.ai/emo-showcase.html" />
+<meta property="og:image" content="https://mybrain.1site.ai/emo-og.png" />
+<meta property="og:image:secure_url" content="https://mybrain.1site.ai/emo-og.png" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="EMO — the agent you wear" />
+<meta name="twitter:description" content="It doesn't just hear you — it acts." />
+<meta name="twitter:image" content="https://mybrain.1site.ai/emo-og.png" />
+<meta name="theme-color" content="#07090f" />
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { color-scheme: dark; }
+  html { scroll-behavior:smooth; }
+  body { background:#07090f; color:#e4e4e7; font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; overflow-x:hidden; }
+  .orb { position:absolute; border-radius:9999px; filter:blur(70px); opacity:.45; animation:drift 16s ease-in-out infinite alternate; pointer-events:none; }
+  @keyframes drift { from{transform:translate(0,0) scale(1)} to{transform:translate(60px,-40px) scale(1.15)} }
+  .reveal { opacity:0; transform:translateY(26px); transition:opacity .7s ease, transform .7s ease; }
+  .reveal.shown { opacity:1; transform:none; }
+  @keyframes pulse-ring { 0%{transform:scale(.85);opacity:.8} 100%{transform:scale(1.7);opacity:0} }
+  .pulse-ring { animation:pulse-ring 2.8s cubic-bezier(.2,.6,.4,1) infinite; }
+  .pulse-ring.d2 { animation-delay:1.4s; }
+  .flow-path { stroke-dasharray:8 8; animation:dash 1.2s linear infinite; }
+  @keyframes dash { to{stroke-dashoffset:-16} }
+  .gtext { background:linear-gradient(100deg,#34d399,#818cf8 55%,#f472b6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .tick { font-variant-numeric:tabular-nums; }
+  .tap { cursor:pointer; transition:transform .25s ease, box-shadow .25s ease, border-color .25s; }
+  .tap:hover { transform:translateY(-4px); }
+  .tap.active { border-color:#34d399 !important; box-shadow:0 0 32px rgba(52,211,153,.22); transform:translateY(-4px); }
+  .caret::after { content:"▋"; animation:blink 1s steps(1) infinite; color:#34d399; }
+  @keyframes blink { 50%{opacity:0} }
+  .msg { opacity:0; transform:translateY(10px); transition:all .5s ease; }
+  .msg.in { opacity:1; transform:none; }
+  .act { opacity:0; transform:translateX(-8px); transition:all .5s ease; }
+  .act.in { opacity:1; transform:none; }
+  .wave { display:flex; align-items:center; gap:3px; height:40px; }
+  .wave i { width:4px; height:10px; border-radius:2px; background:linear-gradient(#34d399,#818cf8); animation:wv 1.1s ease-in-out infinite; }
+  @keyframes wv { 0%,100%{height:9px;opacity:.6} 50%{height:34px;opacity:1} }
+  .bounce { animation:bob 1.8s ease-in-out infinite; }
+  @keyframes bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(8px)} }
+  @media (prefers-reduced-motion: reduce) {
+    .orb,.pulse-ring,.flow-path,.caret::after,.wave i,.bounce { animation:none !important; }
+    .reveal{transition:none;opacity:1;transform:none}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== HERO ===================== -->
+<header class="relative min-h-[92vh] flex flex-col items-center justify-center text-center px-6 overflow-hidden">
+  <div class="orb w-96 h-96 bg-emerald-500/50 -top-20 -left-24"></div>
+  <div class="orb w-[28rem] h-[28rem] bg-indigo-600/40 bottom-0 -right-32" style="animation-delay:4s"></div>
+  <div class="orb w-72 h-72 bg-pink-500/30 top-1/3 left-1/2" style="animation-delay:8s"></div>
+
+  <div class="relative mb-9">
+    <div class="pulse-ring absolute inset-0 rounded-full border-2 border-emerald-400/60"></div>
+    <div class="pulse-ring d2 absolute inset-0 rounded-full border-2 border-indigo-400/50"></div>
+    <div class="relative h-32 w-32 rounded-full bg-gradient-to-br from-emerald-500/25 to-indigo-600/25 border border-emerald-400/40 flex items-center justify-center backdrop-blur">
+      <div class="wave" id="heroWave"></div>
+    </div>
+  </div>
+
+  <h1 class="text-6xl sm:text-8xl font-black tracking-tight">EM<span class="gtext">O</span></h1>
+  <p class="mt-3 text-lg sm:text-2xl font-semibold tracking-wide"><span class="gtext">The agent you wear.</span></p>
+  <p class="mt-5 max-w-xl text-base sm:text-xl text-zinc-300 font-light">It doesn't just <span class="text-zinc-500">hear</span> you — it <span class="text-emerald-400 font-medium">acts</span>. Sends the reminders, runs the research, turns your meetings into tasks — while you get on with your day.</p>
+  <p class="mt-6 text-sm uppercase tracking-[0.25em] text-zinc-500">Designed by <span class="text-zinc-300">Sandeep Karnati</span></p>
+
+  <div class="mt-10 flex flex-wrap items-center justify-center gap-6 text-sm text-zinc-400">
+    <div><span class="tick text-3xl font-extrabold text-emerald-400" data-count="1">0</span><br/>agent, on your collar</div>
+    <div class="h-10 w-px bg-zinc-700"></div>
+    <div><span class="tick text-3xl font-extrabold text-indigo-400" data-count="6">0</span><br/>jobs it does <i>for</i> you</div>
+    <div class="h-10 w-px bg-zinc-700"></div>
+    <div><span class="tick text-3xl font-extrabold text-pink-400" data-count="0">0</span><br/>apps to open</div>
+  </div>
+
+  <a href="#story" class="bounce mt-12 text-zinc-500 text-2xl" aria-label="Scroll">↓</a>
+</header>
+
+<main id="story" class="max-w-5xl mx-auto px-6 pb-16 space-y-28">
+
+  <!-- ===== THE SHIFT ===== -->
+  <section class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">The shift</p>
+    <h2 class="text-3xl sm:text-5xl font-extrabold leading-tight">Every other voice gadget takes <span class="text-zinc-500 line-through">dictation</span>.<br/>EMO takes <span class="gtext">action</span>.</h2>
+    <p class="mt-4 text-zinc-400 max-w-2xl mx-auto">A recorder gives you a transcript and leaves the work to you. EMO is an agent — it goes and does the thing you asked for.</p>
+    <div class="mt-9 grid sm:grid-cols-2 gap-5 text-left">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <p class="text-sm text-zinc-500 uppercase tracking-wide mb-3">A voice recorder / assistant</p>
+        <ul class="space-y-2 text-zinc-400"><li>🎧 Captures audio, hands you a transcript</li><li>🗂️ Maybe files a note</li><li>🙋 <b>You</b> still send the reminder</li><li>🙋 <b>You</b> still do the research</li></ul>
+      </div>
+      <div class="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6">
+        <p class="text-sm text-emerald-400 uppercase tracking-wide mb-3">EMO — an agent</p>
+        <ul class="space-y-2 text-zinc-200"><li>🔔 <b>Sends</b> the reminder, to the right person</li><li>🔬 <b>Builds</b> the research agent, ready to run</li><li>🎙️ <b>Turns</b> a meeting into a task list</li><li>💬 <b>Answers</b> from your memory — and acts</li></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SIX AGENTS IN ONE (tap grid) ===== -->
+  <section class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">One device</p>
+    <h2 class="text-3xl sm:text-5xl font-extrabold">Six agents, <span class="gtext">in one you wear</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Speak naturally — EMO knows which agent the moment needs. Tap one to see it work.</p>
+    <div class="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3" id="caps">
+      <div class="tap cap rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-center" data-c="0"><div class="text-3xl">🎯</div><div class="mt-1 font-bold text-sm">Agentic tasks</div></div>
+      <div class="tap cap rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-center" data-c="1"><div class="text-3xl">🔔</div><div class="mt-1 font-bold text-sm">Reminders it sends</div></div>
+      <div class="tap cap rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-center" data-c="2"><div class="text-3xl">💡</div><div class="mt-1 font-bold text-sm">Idea capture</div></div>
+      <div class="tap cap rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-center" data-c="3"><div class="text-3xl">🎙️</div><div class="mt-1 font-bold text-sm">Multi-person meetings</div></div>
+      <div class="tap cap rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-center" data-c="4"><div class="text-3xl">💬</div><div class="mt-1 font-bold text-sm">Ask your agent</div></div>
+      <div class="tap cap rounded-2xl border border-zinc-700 bg-zinc-900 p-5 text-center" data-c="5"><div class="text-3xl">🔬</div><div class="mt-1 font-bold text-sm">Idea → Research agent</div></div>
+    </div>
+    <div class="mt-5 rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-6 min-h-[130px] text-left"><p class="text-sm text-zinc-300" id="capText">👆 Tap an agent to see exactly what it does for you.</p></div>
+  </section>
+
+  <!-- ===== DEMO 1 — IT ACTS (typing → actions) ===== -->
+  <section class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">Watch it work</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">You speak once. EMO <span class="gtext">does three things</span>.</h2>
+    <div class="mt-8 rounded-2xl border border-zinc-800 bg-zinc-950 p-6 font-mono text-sm max-w-2xl mx-auto text-left shadow-2xl shadow-emerald-500/5">
+      <p class="text-zinc-500 mb-2">🎙️ you, holding the button:</p>
+      <p class="text-emerald-300 caret" id="typeLine"></p>
+      <div id="acts" class="mt-5 space-y-2.5">
+        <p class="text-zinc-500 act" data-a="0">⚙️ EMO gets to work — not filing, <b class="text-zinc-300">acting</b>:</p>
+        <p class="act text-zinc-200" data-a="1">🔔 <b>Reminder sent</b> → Srikar, on WhatsApp <span class="text-pink-400 text-xs">[Friday · 9 AM]</span></p>
+        <p class="act text-zinc-200" data-a="2">🔬 <b>Research agent built</b> → “CCTV camera market” <span class="text-indigo-400 text-xs">[4 branches · ready to run]</span></p>
+        <p class="act text-zinc-200" data-a="3">📌 <b>Task created</b> → Finish the BOM <span class="text-emerald-400 text-xs">[before the vendor call]</span></p>
+      </div>
+    </div>
+    <p class="mt-4 text-sm text-zinc-500">One breath. Three different agents. All done before you pocket your phone.</p>
+  </section>
+
+  <!-- ===== DEMO 2 — ASK YOUR AGENT ===== -->
+  <section class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-pink-400 mb-3">Ask your agent</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">It answers from your memory — <span class="gtext">then acts on it</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">Not a search box. It checks what you mean, answers from your own life, and offers the next move — then makes it.</p>
+    <div class="mt-7 rounded-2xl border border-zinc-800 bg-zinc-950 p-5 max-w-xl mx-auto text-left">
+      <div class="space-y-3" id="askDemo">
+        <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[82%]">🎙️ “What's going on with the Zigbee work?”</div></div>
+        <div class="msg text-[11px] text-zinc-500 pl-1">💬 EMO, one quick question first…</div>
+        <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-zinc-800 px-4 py-2.5 text-sm max-w-[85%] text-zinc-200">“The testing, or the parts order?”</div></div>
+        <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[82%]">🎙️ “Testing.”</div></div>
+        <div class="msg flex gap-2 text-[11px]">
+          <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">📝 Meeting · Jun 30</span>
+          <span class="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400">✅ Task</span>
+        </div>
+        <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-zinc-800 px-4 py-2.5 text-sm max-w-[88%] text-zinc-200" id="askAns"></div></div>
+        <div class="msg flex justify-end"><div class="rounded-2xl rounded-br-sm bg-emerald-600/90 px-4 py-2 text-sm max-w-[82%]">🎙️ “Yes, nudge him.”</div></div>
+        <div class="msg flex"><div class="rounded-2xl rounded-bl-sm bg-emerald-500/15 border border-emerald-500/30 px-4 py-2.5 text-sm max-w-[85%] text-emerald-200">✅ Done — I've messaged Srikar.</div></div>
+      </div>
+    </div>
+    <p class="mt-4 text-sm text-zinc-500">Asked · answered from memory · <b class="text-emerald-400">acted on</b> — all by voice.</p>
+  </section>
+
+  <!-- ===== SPOTLIGHT — IDEA → RESEARCH AGENT ===== -->
+  <section class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-3">The magic move</p>
+    <h2 class="text-3xl sm:text-4xl font-extrabold">A spoken idea becomes a <span class="gtext">working agent</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">This is the leap. You don't get a note to act on later — EMO turns the thought into a multi-step research agent, planned and ready to run.</p>
+    <div class="mt-9 grid sm:grid-cols-3 gap-3 relative items-stretch">
+      <svg class="hidden sm:block absolute top-1/2 left-0 w-full -z-10" height="4"><line x1="0" y1="2" x2="100%" y2="2" stroke="#3f3f46" stroke-width="2" class="flow-path"/></svg>
+      <div class="rounded-2xl border border-zinc-700 bg-zinc-900 p-5"><div class="text-3xl">💡</div><div class="mt-1 font-bold text-sm">Your idea</div><div class="text-[11px] text-zinc-500 mt-1">“Look into the CCTV market for me.”</div></div>
+      <div class="rounded-2xl border border-indigo-500/40 bg-indigo-500/5 p-5"><div class="text-3xl">🤖</div><div class="mt-1 font-bold text-sm">EMO plans it</div><div class="text-[11px] text-zinc-500 mt-1">breaks it into branches, sources, steps</div></div>
+      <div class="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5"><div class="text-3xl">🔬</div><div class="mt-1 font-bold text-sm">A research agent</div><div class="text-[11px] text-zinc-500 mt-1">4 branches · ready to run · yours to tweak</div></div>
+    </div>
+    <p class="mt-5 text-sm text-zinc-500">Idea in, agent out — hands-free. The expensive part waits for your “go”.</p>
+  </section>
+
+  <!-- ===== THE DEVICE ===== -->
+  <section class="reveal text-center">
+    <p class="text-xs uppercase tracking-[0.3em] text-emerald-400 mb-3">The device</p>
+    <h2 class="text-3xl sm:text-5xl font-extrabold">Simple outside. <span class="gtext">An agent inside.</span></h2>
+    <p class="mt-3 text-zinc-400 max-w-2xl mx-auto">All the thinking happens on your private brain. The thing you wear stays effortless.</p>
+    <div class="mt-9 grid grid-cols-2 sm:grid-cols-4 gap-4 text-left">
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><div class="text-3xl mb-1">🔘</div><h3 class="font-bold text-sm">One button</h3><p class="mt-1 text-xs text-zinc-400">Press to capture. Hold to talk to your agent. That's the whole interface.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><div class="text-3xl mb-1">⚡</div><h3 class="font-bold text-sm">Instant reply</h3><p class="mt-1 text-xs text-zinc-400">A warm answer the moment you speak — never a silent wait.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><div class="text-3xl mb-1">🔋</div><h3 class="font-bold text-sm">All day, for days</h3><p class="mt-1 text-xs text-zinc-400">Wears light and lasts — the radio only wakes for a two-second burst.</p></div>
+      <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-5"><div class="text-3xl mb-1">🔒</div><h3 class="font-bold text-sm">Only yours</h3><p class="mt-1 text-xs text-zinc-400">It works for one brain — yours. Your world stays your world.</p></div>
+    </div>
+  </section>
+
+  <!-- ===== CLOSING ===== -->
+  <section class="reveal text-center pt-4">
+    <h2 class="text-4xl sm:text-6xl font-black leading-tight">It doesn't just <span class="text-zinc-500">remember</span> your life.<br/><span class="gtext">It runs it.</span></h2>
+    <p class="mt-6 text-zinc-400 max-w-xl mx-auto">Press. Speak. Walk away. The reminder is sent, the research is planned, the task is set — before you've finished your coffee.</p>
+    <div class="mt-9 inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-6 py-3 text-emerald-300 font-medium">🎙️ EMO — the agent you wear</div>
+  </section>
+</main>
+
+<footer class="border-t border-zinc-800 py-8 text-center text-xs text-zinc-600">
+  Designed by <span class="text-zinc-400 font-medium">Sandeep Karnati</span> · a Beakn wearable
+</footer>
+
+<script>
+  // ---------- soundwave emblem ----------
+  const hw = document.getElementById('heroWave');
+  if (hw) for (let i = 0; i < 9; i++) { const b = document.createElement('i'); b.style.animationDelay = (i * 0.09) + 's'; hw.appendChild(b); }
+
+  // ---------- reveal + counters ----------
+  const io = new IntersectionObserver((es) => es.forEach((e) => e.isIntersecting && e.target.classList.add('shown')), { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+  const cio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return;
+    const el = e.target, target = +el.dataset.count, t0 = performance.now();
+    const step = (t) => { const p = Math.min(1, (t - t0) / 1400); el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step); cio.unobserve(el);
+  }));
+  document.querySelectorAll('[data-count]').forEach((el) => cio.observe(el));
+
+  // ---------- six agents (tap) ----------
+  const CAPS = [
+    ['🎯 Agentic tasks', 'Say what needs doing — even a rambling list. EMO splits it into separate, prioritized tasks, and can set an agent to actually work them, not just remember them.'],
+    ['🔔 Reminders it sends', '“Remind Srikar on Friday.” EMO finds the right person, writes the message, and sends it on WhatsApp at the right moment. It doesn\'t remind you to remind — it does it.'],
+    ['💡 Idea capture', 'The idea that strikes mid-walk is caught in a breath and kept in the right place — never lost, always findable, ready to become something bigger.'],
+    ['🎙️ Multi-person meetings', 'Record the whole room. EMO separates each speaker, writes the summary and the decisions, and turns the action items into real tasks — automatically.'],
+    ['💬 Ask your agent', 'Ask anything about your world. EMO checks what you mean, answers from your own memory with its sources, and offers to act — then does it.'],
+    ['🔬 Idea → Research agent', 'Speak a question and EMO builds a multi-step research agent — branches, sources and steps, planned and ready to run. An idea becomes a working agent, hands-free.'],
+  ];
+  const caps = document.querySelectorAll('.cap'), capText = document.getElementById('capText');
+  caps.forEach((s) => s.addEventListener('click', () => {
+    caps.forEach((x) => x.classList.remove('active')); s.classList.add('active');
+    const [t, d] = CAPS[+s.dataset.c]; capText.innerHTML = '<b class="text-indigo-300">' + t + '</b><br/><span class="text-zinc-300">' + d + '</span>';
+  }));
+
+  // ---------- demo 1: type → actions appear one by one ----------
+  const SCRIPT_TXT = '“remind Srikar about the Zigbee testing on Friday, look into the CCTV camera market for me, and finish the BOM before the vendor call…”';
+  const typeLine = document.getElementById('typeLine');
+  const tio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return; tio.disconnect();
+    let i = 0; const tick = () => {
+      typeLine.textContent = SCRIPT_TXT.slice(0, ++i);
+      if (i < SCRIPT_TXT.length) setTimeout(tick, 24);
+      else { typeLine.classList.remove('caret'); document.querySelectorAll('#acts .act').forEach((a, k) => setTimeout(() => a.classList.add('in'), 400 + k * 550)); }
+    };
+    tick();
+  }), { threshold: 0.5 });
+  tio.observe(typeLine);
+
+  // ---------- demo 2: ask replay ----------
+  const ASK_ANS = 'Srikar is still testing the Zigbee dongle — you asked him on the 30th and it\'s not confirmed yet. Want me to nudge him?';
+  const askAns = document.getElementById('askAns');
+  const aio = new IntersectionObserver((es) => es.forEach((e) => {
+    if (!e.isIntersecting) return; aio.disconnect();
+    const msgs = document.querySelectorAll('#askDemo .msg');
+    msgs.forEach((m, i) => setTimeout(() => {
+      m.classList.add('in');
+      if (m.querySelector('#askAns')) { let k = 0; const type = () => { askAns.textContent = ASK_ANS.slice(0, ++k); if (k < ASK_ANS.length) setTimeout(type, 15); }; setTimeout(type, 200); }
+    }, i * 780));
+  }), { threshold: 0.35 });
+  aio.observe(document.getElementById('askDemo'));
+</script>
+</body>
+</html>
