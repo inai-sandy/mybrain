@@ -17,6 +17,7 @@
     "@nestjs/throttler": "^5.2.0",
     "@notionhq/client": "^2.2.15",
     "@prisma/client": "^5.20.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/adm-zip": "^0.5.8",
     "@types/archiver": "^6.0.4",
     "adm-zip": "^0.5.17",

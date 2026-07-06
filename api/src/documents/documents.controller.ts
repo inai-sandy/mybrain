@@ -245,6 +245,17 @@ export class DocumentsController {
     res.sendFile(f.filePath);
   }
 
+  /** Link-preview image (title card) for a shared doc. Falls back to the static default. (BEA-900) */
+  @Public()
+  @Get('public/:slug/og.png')
+  async ogImage(@Param('slug') slug: string, @Res() res: Response) {
+    const png = await this.docs.ogImagePng(slug);
+    if (!png) { res.redirect(302, '/og-default.png'); return; }
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(png);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const d = await this.docs.get(id);

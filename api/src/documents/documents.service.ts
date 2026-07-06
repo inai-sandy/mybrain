@@ -7,6 +7,7 @@ import { join, extname, resolve, sep } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
+import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
 
 // pdf-parse v1 has no types; the /lib import avoids its debug-mode file read on require.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -757,6 +758,29 @@ export class DocumentsService {
     void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
     if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind, allowDownload: !!row.allowDownload };
     return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', siteEntry: row.siteEntry || null, allowDownload: !!row.allowDownload, updatedAt: row.updatedAt };
+  }
+
+  /** Link-preview meta for a shared doc (BEA-900). Null when not shared/live. */
+  async ogMeta(slug: string, origin: string): Promise<{ title: string; description: string; image: string; url: string } | null> {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || !this.isLive(row)) return null;
+    const ogPng = `${origin}/api/documents/public/${encodeURIComponent(slug)}/og.png`;
+    let image = ogPng;
+    // HTML/site docs may carry their own og:image — respect it; otherwise use the generated title card.
+    if ((row.kind === 'html' || row.kind === 'site') && !row.sharePassword) {
+      const own = extractOwnOgImage(row.contentText || '');
+      if (own) image = own;
+    }
+    const rawDesc = row.description || (row.sharePassword ? '' : (row.contentText || ''));
+    const desc = rawDesc.replace(/[#*_`>[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) || 'Shared from My Brain';
+    return { title: row.title || 'Shared document', description: desc, image, url: `${origin}/d/${slug}` };
+  }
+
+  /** Generated title-card PNG for a shared doc (BEA-900). Null when not shared/live or render fails. */
+  async ogImagePng(slug: string): Promise<Buffer | null> {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || !this.isLive(row)) return null;
+    try { return svgToPng(buildTitleCardSvg({ title: row.title, kind: row.kind })); } catch { return null; }
   }
 
   /** Verify a share password; on success return the content + a file-unlock token. (BEA-585) */
