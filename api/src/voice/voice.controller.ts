@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Put, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { VoiceService } from './voice.service';
@@ -72,6 +72,19 @@ export class VoiceController {
     const audio = await this.voice.tts(body?.text || '', body?.voice);
     if (!audio) {
       res.status(400).json({ error: 'TTS unavailable — add an OpenAI key in Integrations' });
+      return;
+    }
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(audio);
+  }
+
+  /** GET variant so the EMO device/app can stream it straight to a file (FileSystem.downloadAsync). */
+  @Get('tts')
+  async ttsGet(@Query('text') text: string, @Query('voice') voice: string, @Res() res: Response) {
+    const audio = await this.voice.tts(text || '', voice);
+    if (!audio) {
+      res.status(400).json({ error: 'TTS unavailable' });
       return;
     }
     res.setHeader('Content-Type', 'audio/mpeg');

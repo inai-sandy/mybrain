@@ -24,7 +24,12 @@ Lanes:
 - meeting — a long multi-speaker meeting recording.
 - note — anything else worth keeping.
 
-One note can hold SEVERAL intents across lanes — output each separately. For each intent give:
+IMPORTANT — be CONSERVATIVE. Output the FEWEST segments possible:
+- A single command is ONE segment. "Remind <person> about <topic>" = exactly ONE reminder, nothing else. "Add a task to <X>" = exactly ONE task.
+- NEVER create a "search" or "research" intent unless the user EXPLICITLY says to search / find / look into / research something. A reminder or task that merely MENTIONS a topic is NOT a search — do not add one.
+- Only split into multiple segments when there are clearly SEPARATE, distinct actions (e.g. two different to-dos, or a task AND a reminder). When in doubt, keep it as one.
+
+For each intent give:
 - "lane": one of the above
 - "summary": one short line of what Emo will do, e.g. "Task: finish the BOM by Friday" / "Reminder: Dharmendra, Fri" / "Search: CCTV market"
 - "text": the exact slice of the transcript for that intent
