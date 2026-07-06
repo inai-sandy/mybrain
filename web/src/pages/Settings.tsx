@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
+import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
@@ -1430,16 +1430,27 @@ function ChatModelCard() {
   );
 }
 
-/** Settings → EMO — the voice device token + EMO's voice, kept separate from the general Voice input (BEA-895). */
+/** Settings → EMO — the voice device token + the full Ears/Voice/Brain stack, kept separate from Voice input (BEA-895/896). */
+const EMO_BRAINS = [
+  { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 — best answers (default)' },
+  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
+  { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 — fast & cheap' },
+  { id: 'openai/gpt-5', name: 'GPT-5' },
+];
 function EmoSettingsSection() {
   const toast = useToast();
   const [token, setToken] = useState('');
   const [reveal, setReveal] = useState(false);
-  const [voice, setVoice] = useState('nova');
-  const [voices, setVoices] = useState<string[]>([]);
+  const [ttsVoice, setTtsVoice] = useState('nova');
+  const [ttsVoices, setTtsVoices] = useState<string[]>([]);
+  const [ears, setEars] = useState('');
+  const [earsEngines, setEarsEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
+  const [brain, setBrain] = useState('');
   useEffect(() => {
     fetch('/api/auth/device-token').then((r) => r.json()).then((d) => setToken(d.token || '')).catch(() => undefined);
-    fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setVoice(d.voice || 'nova'); setVoices(d.voices || []); }).catch(() => undefined);
+    fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setTtsVoice(d.voice || 'nova'); setTtsVoices(d.voices || []); }).catch(() => undefined);
+    fetch('/api/voice/config').then((r) => r.json()).then((d) => { setEars(d.engine || ''); setEarsEngines(d.engines || []); }).catch(() => undefined);
+    fetch('/api/explore/model').then((r) => r.json()).then((d) => setBrain(d.model || '')).catch(() => undefined);
   }, []);
   async function regen() {
     if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
@@ -1447,19 +1458,30 @@ function EmoSettingsSection() {
     if (d?.token) { setToken(d.token); setReveal(true); toast('success', 'New device token generated'); }
     else toast('error', 'Could not regenerate');
   }
+  function copy() { navigator.clipboard?.writeText(token).then(() => toast('success', 'Device token copied')).catch(() => undefined); }
+  async function pickEars(e: string) {
+    setEars(e);
+    await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: e }) }).catch(() => undefined);
+    toast('success', 'EMO ears updated');
+  }
   async function pickVoice(v: string) {
-    setVoice(v);
+    setTtsVoice(v);
     await fetch('/api/voice/tts-voice', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ voice: v }) }).catch(() => undefined);
     toast('success', `EMO voice set to ${v}`);
   }
-  function copy() { navigator.clipboard?.writeText(token).then(() => toast('success', 'Device token copied')).catch(() => undefined); }
+  async function pickBrain(m: string) {
+    setBrain(m);
+    await fetch('/api/explore/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: m.startsWith('anthropic/') || m.startsWith('openai/') ? 'openrouter' : 'openrouter', model: m }) }).catch(() => undefined);
+    toast('success', 'EMO brain updated');
+  }
   const masked = token ? token.slice(0, 7) + '••••••••••••••' + token.slice(-4) : '';
-  const sel = 'w-full max-w-[16rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900';
+  const sel = 'w-full max-w-[20rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900';
+  const brainOpts = brain && !EMO_BRAINS.some((b) => b.id === brain) ? [...EMO_BRAINS, { id: brain, name: brain }] : EMO_BRAINS;
   return (
     <div className="space-y-5">
       <div>
         <h2 className="flex items-center gap-2 text-lg font-semibold"><Mic size={18} className="text-emerald-500" /> EMO</h2>
-        <p className="text-sm text-zinc-500">Your voice device and the EMO Ask experience.</p>
+        <p className="text-sm text-zinc-500">Your voice device, and EMO’s ears, voice &amp; brain — all in one place.</p>
       </div>
 
       <AccordionCard title="Device token" icon={Cpu}>
@@ -1472,17 +1494,32 @@ function EmoSettingsSection() {
         <button onClick={regen} className="mt-3 text-xs text-rose-500 hover:text-rose-400">Regenerate — invalidates the current token</button>
       </AccordionCard>
 
-      <AccordionCard title="EMO voice" icon={Mic}>
+      <AccordionCard title="Ears — how EMO hears you" icon={Mic}>
+        <p className="mb-3 text-sm text-zinc-500">The transcription engine (speech → text). OpenAI GPT‑4o is recommended for your accent; it also gets your contact names right.</p>
+        <div className="space-y-2">
+          {earsEngines.map((e) => (
+            <label key={e.id} className={'flex items-start gap-3 rounded-lg border p-3 ' + (e.configured ? 'cursor-pointer ' : 'opacity-60 ') + (ears === e.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
+              <input type="radio" name="emoEars" disabled={!e.configured} checked={ears === e.id} onChange={() => pickEars(e.id)} className="mt-1 accent-emerald-600" />
+              <div className="min-w-0"><div className="text-sm font-medium">{e.name}</div><div className="text-xs text-zinc-500">{e.configured ? 'Ready' : 'Add this provider’s API key in Integrations'}</div></div>
+            </label>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-zinc-500">Your contacts are fed in automatically. Add other tricky words in <b>Voice input → Words to get right</b>.</p>
+      </AccordionCard>
+
+      <AccordionCard title="Voice — how EMO talks back" icon={Volume2}>
         <p className="mb-3 text-sm text-zinc-500">The voice EMO speaks in (OpenAI TTS) — the same one embedded on the device.</p>
-        <select value={voice} onChange={(e) => pickVoice(e.target.value)} className={sel}>
-          {voices.map((v) => <option key={v} value={v}>{v}</option>)}
+        <select value={ttsVoice} onChange={(e) => pickVoice(e.target.value)} className={sel}>
+          {ttsVoices.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
       </AccordionCard>
 
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        EMO also uses your transcription engine + “Words to get right” (Voice input) and the answer models (Models).
-        Current stack — ears: OpenAI GPT‑4o Transcribe · voice: OpenAI TTS · brain: Claude Sonnet 5 (answers) + Haiku 4.5 (quick).
-      </p>
+      <AccordionCard title="Brain — how EMO answers" icon={Brain}>
+        <p className="mb-3 text-sm text-zinc-500">The model that answers from your memory. Sonnet 5 is the most capable; Haiku is faster and cheaper. (The quick clarify + summary always use Haiku.)</p>
+        <select value={brain} onChange={(e) => pickBrain(e.target.value)} className={sel}>
+          {brainOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </AccordionCard>
     </div>
   );
 }
