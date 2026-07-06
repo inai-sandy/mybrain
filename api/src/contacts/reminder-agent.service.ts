@@ -4,6 +4,32 @@ import { PostboxService } from './postbox.service';
 import { RemindersService } from './reminders.service';
 
 /**
+ * Safety net (BEA-899): the reply is SENT TO the contact, so it must never address them by the
+ * OWNER's name. Rewrites owner-name greetings/sign-offs ("Hi Sandeep", "thanks … Sandeep!") to the
+ * contact's first name (or drops the name), while KEEPING legitimate third-person mentions
+ * ("I'll pass it to Sandeep", "Sandeep will get back to you").
+ */
+export function fixOwnerVocative(text: string, ownerName: string, contactName: string): string {
+  const owner = (ownerName || '').trim();
+  if (!owner || !text) return text;
+  const first = (contactName || '').trim().split(/\s+/)[0];
+  const rep = first && first.toLowerCase() !== 'them' ? first : '';
+  const O = owner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let out = text;
+  // Greeting at the start: "Hi/Hello/Hey/Dear Sandeep"
+  out = out.replace(new RegExp(`^(\\s*(?:hi|hello|hey|dear)\\s+)${O}\\b`, 'i'), (_m, g) => `${g}${rep}`.replace(/\s+$/, rep ? '' : ''));
+  // Greeting/ack word immediately before the name: "thanks Sandeep", "got it, Sandeep"
+  out = out.replace(new RegExp(`\\b(hi|hello|hey|thanks|thank you|got it|sure|okay|ok|great|cheers|noted)([ ,]+)${O}\\b`, 'gi'), (_m, g, sep) => (rep ? `${g}${sep}${rep}` : g));
+  // Sentence-ending vocative: "…the update Sandeep!" — unless it's a 3rd-person reference ("…to Sandeep.").
+  out = out.replace(new RegExp(`([ ,]+)${O}([!.?])`, 'gi'), (m, sep, punct, offset: number, str: string) => {
+    const before = str.slice(Math.max(0, offset - 18), offset).toLowerCase();
+    if (/\b(to|with|for|ask|tell|let|pass|by|and|of|know|reach|check)\s*$/.test(before)) return m; // keep 3rd-person mention
+    return rep ? `${sep}${rep}${punct}` : `${punct}`;
+  });
+  return out.replace(/[ \t]{2,}/g, ' ').replace(/\s+([!.?,])/g, '$1').trim();
+}
+
+/**
  * The two-way "replies like you" reminder agent (BEA-730 / Postbox C2). When a contact
  * replies (stored by the Postbox callback), it reads the whole thread, answers back in the
  * user's voice (Indian English), and — when the matter is clearly resolved — records the
@@ -75,7 +101,8 @@ export class ReminderAgentService {
 
     // Sandeep's transparent AI assistant — identifies itself, uses the notes as context, and
     // escalates to Sandeep when it can't answer, instead of impersonating him. (BEA-765/766)
-    const prompt = `You are Sandeep's AI assistant. You're texting ${name} on WhatsApp on Sandeep's behalf, following up on ${items.length === 1 ? 'this open item' : 'these open items'}:
+    const prompt = `You are the AI assistant for Sandeep (your boss — the person you represent, and NOT the person you are texting).
+You are texting ${name} on WhatsApp on Sandeep's behalf. In THIS chat, the person you are replying to is ${name}; Sandeep is not here. Following up on ${items.length === 1 ? 'this open item' : 'these open items'}:
 ${itemList}
 
 Conversation so far:
@@ -83,6 +110,7 @@ ${thread}
 
 Write the assistant's next single reply to whatever ${name} just said.
 Rules:
+- If you address them by name at all, use "${name}" — NEVER call them "Sandeep". Sandeep is your boss, not the person in this chat. Using no name is better than the wrong one. (You may still mention Sandeep in the third person, e.g. "I'll check with Sandeep".)
 - Warm, natural, plain Indian English. You ARE Sandeep's AI assistant — do NOT pretend to be Sandeep. If they ask who you are, tell them you're Sandeep's AI assistant helping him keep track, and he'll jump in when needed.
 - Warmly invite them to reply or ask anything they want to discuss.
 - Short — 1-2 sentences, ONE message even if there are several items.
@@ -97,7 +125,8 @@ Reply with ONLY this JSON, nothing else:
 
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 700);
     const parsed: any = this.parseJson(raw) || {};
-    const replyText = (parsed.reply || '').trim();
+    // Never let a reply go out addressing the contact by the owner's name (BEA-899).
+    const replyText = fixOwnerVocative((parsed.reply || '').trim(), 'Sandeep', name);
 
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
