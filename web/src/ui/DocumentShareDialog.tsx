@@ -190,6 +190,17 @@ export function DocumentShareDialog({
 
         {shared ? (
           <div className="space-y-4">
+            {/* Link-card preview — exactly what recipients see when they get the link (BEA-901) */}
+            <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
+              <img src={`/api/documents/public/${slug}/og.png`} alt="Link preview" className="w-full aspect-[1200/630] object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
+              <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50">
+                <p className="text-xs font-medium truncate">{title}</p>
+                <p className="text-[11px] text-zinc-400">mybrain.1site.ai</p>
+              </div>
+            </div>
+
+            <button onClick={nativeShare} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2.5 text-sm font-medium inline-flex items-center justify-center gap-2"><Share2 size={16} /> Share</button>
+
             <div>
               <div className="flex items-center justify-between mb-1">
                 <p className="text-xs font-medium text-zinc-500">Public link</p>
@@ -275,8 +286,7 @@ export function DocumentShareDialog({
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <button onClick={nativeShare} className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 inline-flex items-center gap-1.5"><Share2 size={15} /> Share via…</button>
+            <div className="flex items-center justify-end pt-1">
               <button onClick={() => setSharedState(false)} disabled={busy} className="text-sm text-red-500 hover:underline disabled:opacity-50 inline-flex items-center gap-1.5"><Lock size={14} /> Make private</button>
             </div>
           </div>
