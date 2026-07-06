@@ -70,17 +70,22 @@ export class EmoRouterService {
   }
 
   /** Route a transcript into cards. `audioPath`/`source` are threaded onto every card (the receipt). */
-  async route(transcript: string, opts: { audioPath?: string | null; source?: string } = {}): Promise<{ cards: any[] }> {
+  async route(transcript: string, opts: { audioPath?: string | null; source?: string; lane?: EmoLane } = {}): Promise<{ cards: any[] }> {
     const text = (transcript || '').trim();
     if (!text) return { cards: [] };
 
-    const raw = await this.llm.complete(`${PROMPT}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
-    let segments = this.parseSegments(raw, text);
-
-    // Nothing is lost: if the router couldn't make sense of it, keep the whole thing as a note.
-    if (!segments.length) {
-      this.log.warn('router produced no segments — filing a fallback note card');
-      segments = [{ lane: 'note', summary: text.replace(/\s+/g, ' ').slice(0, 120), text }];
+    let segments: Segment[];
+    if (opts.lane && LANES.includes(opts.lane)) {
+      // Forced mode (Meeting/Research from the app) — exactly one card in that lane, no guessing.
+      segments = [{ lane: opts.lane, summary: text.replace(/\s+/g, ' ').slice(0, 120), text }];
+    } else {
+      const raw = await this.llm.complete(`${PROMPT}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
+      segments = this.parseSegments(raw, text);
+      // Nothing is lost: if the router couldn't make sense of it, keep the whole thing as a note.
+      if (!segments.length) {
+        this.log.warn('router produced no segments — filing a fallback note card');
+        segments = [{ lane: 'note', summary: text.replace(/\s+/g, ' ').slice(0, 120), text }];
+      }
     }
 
     const cards: any[] = [];

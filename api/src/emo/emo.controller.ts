@@ -46,10 +46,11 @@ export class EmoController {
 
   // The seam for a transcript already in hand (e.g. the device, or tests): transcript → cards.
   @Post('capture')
-  capture(@Body() body: { transcript?: string; source?: string; audioPath?: string }) {
+  capture(@Body() body: { transcript?: string; source?: string; audioPath?: string; lane?: string }) {
     const transcript = (body?.transcript ?? '').toString().trim();
     if (!transcript) throw new BadRequestException('transcript is required');
-    return this.router.route(transcript, { source: body?.source, audioPath: body?.audioPath });
+    // `lane` forces a mode (Meeting/Research from the app) — skips the router's guessing.
+    return this.router.route(transcript, { source: body?.source, audioPath: body?.audioPath, lane: body?.lane as any });
   }
 
   // Browser capture (EMO 4): upload a recording → transcribe in memory → router → cards (audio not kept).
