@@ -56,13 +56,11 @@ export class EmoAskService {
     const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto' }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false }));
     const answer = (ans.answer || '').trim() || "I couldn't find anything about that in your brain yet.";
     const summary = await this.summarize(answer);
-    // A COMPLETE card: the question, the full answer, and cited sources (renders scrollable in the detail view).
+    // A COMPLETE card: the question + the full answer (inline [n] citations become tappable chips),
+    // with the cited sources stored STRUCTURED on the card so app + web render them as accordions.
     const sources = (ans.sources || []) as any[];
-    const sourcesMd = sources.length
-      ? '\n\n---\n\n**Sources**\n\n' + sources.map((s) => `${s.n ?? '•'}. ${s.link ? `[${s.title || 'Source'}](${s.link})` : s.title || 'Source'}${s.when ? ` · ${s.when}` : ''}${s.snippet ? `\n   ${String(s.snippet).replace(/\s+/g, ' ').slice(0, 160)}` : ''}`).join('\n')
-      : '';
-    const detail = `**${baseQ}**\n\n${answer}${sourcesMd}`;
-    const card = await this.cards.create({ lane: 'search', status: 'done', summary, detail, rawTranscript: baseQ });
+    const detail = `**${baseQ}**\n\n${answer}`;
+    const card = await this.cards.create({ lane: 'search', status: 'done', summary, detail, rawTranscript: baseQ, sources });
     const offer = await this.actionOffer(answer, baseQ).catch(() => undefined);
     return { mode: 'answer', summary, cardId: (card as any).id, offer };
   }

@@ -923,12 +923,13 @@ model OAuthCode {
 /// (which are Items). Design: /home/sandy/emo-behavior-design.md
 model EmoCard {
   id            String   @id @default(uuid())
-  lane          String // search | story | reminder | task | meeting | research | note
+  lane          String // search | story | reminder | task | meeting | research | note | talk
   status        String   @default("cooking") // done | cooking | needs_you
   title         String?
   summary       String? // one-line "what Emo did" — readable without opening the link
   detail        String? // markdown body (curated findings, meeting summary, …)
   links         String   @default("[]") // JSON [{kind,id,label}] pointers to the real objects
+  sources       String   @default("[]") // JSON [{n,title,link,when,snippet,sourceType,source}] cited sources
   needsQuestion String? // the clarify question shown on the card (durable Needs-you HITL)
   needsOptions  String   @default("[]") // JSON array of suggested answers (optional)
   needsAnswer   String? // the owner's answer once given

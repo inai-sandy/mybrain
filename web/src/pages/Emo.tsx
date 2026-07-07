@@ -4,6 +4,7 @@ import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2, Volume2 } from '
 import { AskEmo } from './AskEmo';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
+import { AnswerWithSources, EmoSource } from '../ui/Sources';
 import { Sheet } from '../ui/Sheet';
 import { DictateButton } from '../ui/DictateButton';
 
@@ -12,7 +13,7 @@ function fmtElapsed(s: number) { return `${Math.floor(s / 60)}:${String(s % 60).
 type Link = { kind: string; id: string; label?: string };
 type Card = {
   id: string; lane: string; status: string; title?: string | null; summary?: string | null; detail?: string | null;
-  links: Link[]; needsQuestion?: string | null; needsOptions: string[]; needsAnswer?: string | null;
+  links: Link[]; sources?: EmoSource[]; needsQuestion?: string | null; needsOptions: string[]; needsAnswer?: string | null;
   day: string; rawTranscript?: string | null; audioPath?: string | null; error?: string | null; createdAt: string;
 };
 
@@ -353,7 +354,11 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
             </div>
           )}
 
-          {card.detail && <Markdown className="mb-4 rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">{card.detail}</Markdown>}
+          {card.detail && (
+            card.sources && card.sources.length > 0
+              ? <div className="mb-4 rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/50"><AnswerWithSources answer={card.detail} sources={card.sources} /></div>
+              : <Markdown className="mb-4 rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/50">{card.detail}</Markdown>
+          )}
 
           {card.error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">⚠ {card.error}</div>}
 

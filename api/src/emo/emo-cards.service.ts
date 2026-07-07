@@ -18,6 +18,7 @@ export interface CreateEmoCard {
   day?: string;
   rawTranscript?: string | null;
   audioPath?: string | null;
+  sources?: any[];
 }
 
 /**
@@ -57,6 +58,7 @@ export class EmoCardsService {
       summary: r.summary,
       detail: r.detail,
       links: this.parse<EmoLink[]>(r.links, []),
+      sources: this.parse<any[]>(r.sources, []),
       needsQuestion: r.needsQuestion,
       needsOptions: this.parse<string[]>(r.needsOptions, []),
       needsAnswer: r.needsAnswer,
@@ -79,6 +81,7 @@ export class EmoCardsService {
         summary: input.summary ?? null,
         detail: input.detail ?? null,
         links: JSON.stringify(input.links ?? []),
+        sources: JSON.stringify(input.sources ?? []),
         needsQuestion: input.needsQuestion ?? null,
         needsOptions: JSON.stringify(input.needsOptions ?? []),
         source: input.source ?? 'emo',
@@ -119,7 +122,7 @@ export class EmoCardsService {
     return this.shape(r);
   }
 
-  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null; rawTranscript: string | null }>) {
+  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; sources: any[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null; rawTranscript: string | null }>) {
     const exists = await this.prisma.emoCard.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException('Card not found');
     const data: any = {};
@@ -129,6 +132,7 @@ export class EmoCardsService {
     if (patch.detail !== undefined) data.detail = patch.detail;
     if (patch.rawTranscript !== undefined) data.rawTranscript = patch.rawTranscript;
     if (patch.links !== undefined) data.links = JSON.stringify(patch.links);
+    if (patch.sources !== undefined) data.sources = JSON.stringify(patch.sources);
     if (patch.needsQuestion !== undefined) data.needsQuestion = patch.needsQuestion;
     if (patch.needsOptions !== undefined) data.needsOptions = JSON.stringify(patch.needsOptions);
     if (patch.needsAnswer !== undefined) data.needsAnswer = patch.needsAnswer;
