@@ -382,3 +382,25 @@ describe('spreadTimes (BEA-720)', () => {
     expect(spreadTimes(0)).toEqual(['09:00']);
   });
 });
+
+describe('resendTemplate (BEA-917)', () => {
+  it('sends the approved template and records the outgoing message', async () => {
+    const created: any[] = [];
+    const prisma: any = {
+      reminder: { findUnique: async () => ({ id: 'r1', contactId: 'k1', subject: 'the update', contact: { name: 'Rakesh', whatsappNumber: '919999999999' } }) },
+      reminderMessage: { create: async ({ data }: any) => { created.push(data); return { id: 'm1', ...data, createdAt: new Date() }; } },
+    };
+    let sentArgs: any = null;
+    const postbox: any = {
+      isConfigured: () => true,
+      sendReminderTemplate: async (to: string, first: string, subject: string) => { sentArgs = { to, first, subject }; return { wamid: 'w9', status: 'sent', error: null }; },
+      renderReminderTemplate: (f: string, s: string) => `Hi ${f}, just a gentle reminder about ${s}. Thanks!`,
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, postbox);
+    const res: any = await svc.resendTemplate('r1');
+    expect(sentArgs).toEqual({ to: '919999999999', first: 'Rakesh', subject: 'the update' });
+    expect(res.status).toBe('sent');
+    expect(created[0]).toMatchObject({ direction: 'out', wamid: 'w9', status: 'sent' });
+    expect(created[0].body).toContain('gentle reminder about the update');
+  });
+});

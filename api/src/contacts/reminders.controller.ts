@@ -84,6 +84,12 @@ export class RemindersController {
     return this.reminders.sendManual(id, body?.body || '');
   }
 
+  /** Re-send the approved template to re-open the 24h chat window. (BEA-917) */
+  @Post(':id/resend-template')
+  resendTemplate(@Param('id') id: string) {
+    return this.reminders.resendTemplate(id);
+  }
+
   @Post('resume-today')
   resumeToday() {
     return this.reminders.resumeToday();

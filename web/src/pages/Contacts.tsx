@@ -546,6 +546,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
   const [data, setData] = useState<{ contactName: string | null; messages: { id: string; direction: string; body: string; at: string; status?: string | null; error?: string | null }[]; items: ChatItem[]; lastInboundAt?: string | null } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [resending, setResending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
   const openItems = (data?.items || []).filter((i) => i.status === 'active');
   const doneItems = (data?.items || []).filter((i) => i.status === 'done' && i.feedback);
@@ -554,6 +555,23 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
   }, [reminder.contactId]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [data]);
   const fmt = (s: string) => new Date(s).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+
+  // WhatsApp only allows free text within 24h of the contact's last reply. (BEA-917)
+  const lastInMs = data?.lastInboundAt ? new Date(data.lastInboundAt).getTime() : 0;
+  const hoursLeft = lastInMs ? 24 - (Date.now() - lastInMs) / 3600000 : 0;
+  const windowOpen = hoursLeft > 0;
+
+  async function resendTemplate() {
+    if (resending) return;
+    setResending(true);
+    try {
+      const r = await fetch(`/api/reminders/${reminder.id}/resend-template`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.message || 'Could not re-send');
+      setData((prev) => (prev ? { ...prev, messages: [...prev.messages, d] } : prev));
+      toast('success', 'Template re-sent — it re-opens the chat once they get it.');
+    } catch (e: any) { toast('error', e.message || 'Could not re-send'); } finally { setResending(false); }
+  }
 
   async function send() {
     const body = text.trim();
@@ -573,8 +591,8 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex w-full flex-col bg-white dark:bg-zinc-900 sm:h-[80vh] sm:max-w-md sm:rounded-2xl sm:border sm:border-zinc-200 sm:shadow-2xl sm:dark:border-zinc-800" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900">
+      <div className="flex h-full w-full flex-col" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800">
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
@@ -606,6 +624,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
                 <span className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-zinc-400">
                   {m.direction === 'out' ? 'You' : reminder.contact?.name?.split(' ')[0] || 'Them'} · {fmt(m.at)}
                   {m.direction === 'out' && <MsgStatus status={m.status} error={m.error} />}
+                  {m.status === 'failed' && <button onClick={resendTemplate} disabled={resending} className="font-medium text-emerald-600 hover:underline disabled:opacity-50">Retry</button>}
                 </span>
               </div>
             ))
@@ -624,20 +643,40 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
           </div>
         )}
 
-        {/* Compose — send a WhatsApp message to the contact yourself (BEA-736) */}
-        <div className="flex items-end gap-2 border-t border-zinc-100 p-2 dark:border-zinc-800">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            rows={1}
-            placeholder={`Message ${reminder.contact?.name?.split(' ')[0] || 'them'}…`}
-            className="max-h-28 min-h-[40px] flex-1 resize-none rounded-2xl border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
-          />
-          <button onClick={send} disabled={sending || !text.trim()} title="Send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </button>
-        </div>
+        {/* Compose — window-aware (BEA-917). Free text only within 24h of their last reply. */}
+        {windowOpen ? (
+          <>
+            <div className="flex items-center justify-between px-3 pt-1.5 text-[11px] text-zinc-400">
+              <span>💬 You can reply freely for ~{Math.max(1, Math.ceil(hoursLeft))}h</span>
+              <button onClick={resendTemplate} disabled={resending} className="font-medium text-emerald-600 hover:underline disabled:opacity-50">{resending ? 'Sending…' : 'Resend template'}</button>
+            </div>
+            <div className="flex items-end gap-2 border-t border-zinc-100 p-2 dark:border-zinc-800">
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                rows={1}
+                placeholder={`Message ${reminder.contact?.name?.split(' ')[0] || 'them'}…`}
+                className="max-h-28 min-h-[40px] flex-1 resize-none rounded-2xl border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700"
+              />
+              <button onClick={send} disabled={sending || !text.trim()} title="Send" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
+                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+            <p className="text-xs text-zinc-500">
+              {data?.lastInboundAt
+                ? 'The 24-hour window to free-text has closed (WhatsApp only allows free replies within 24h of their last message).'
+                : `${reminder.contact?.name?.split(' ')[0] || 'They'} hasn’t replied yet, so you can’t free-text.`}{' '}
+              Re-send the approved template to (re-)open the chat.
+            </p>
+            <button onClick={resendTemplate} disabled={resending} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+              {resending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Resend template
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

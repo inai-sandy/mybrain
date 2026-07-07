@@ -172,7 +172,25 @@ export class RemindersService {
     });
     // Sandeep just replied → clear the "needs you" flag for this contact. (BEA-766)
     await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
-    return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt };
+    return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt, status: 'sent' };
+  }
+
+  /** Re-send the approved reminder template to re-open the 24h free-text window. (BEA-917) */
+  async resendTemplate(id: string) {
+    const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
+    if (!r) throw new NotFoundException('Reminder not found');
+    const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
+    if (!number) throw new BadRequestException('This contact has no WhatsApp number');
+    if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
+    const firstName = (r.contact?.name || 'there').trim().split(/\s+/)[0] || 'there';
+    const subject = (r.subject || 'the update').trim();
+    const res = await this.postbox.sendReminderTemplate(number, firstName, subject);
+    if (res.error) throw new BadRequestException(res.error);
+    const body = this.postbox.renderReminderTemplate(firstName, subject);
+    const msg = await this.prisma.reminderMessage.create({
+      data: { contactId: r.contactId, reminderId: id, direction: 'out', body, wamid: res.wamid || null, status: 'sent' },
+    });
+    return { id: msg.id, direction: 'out', body, at: msg.createdAt, status: 'sent' };
   }
 
   // ---- "Clean up" engine picker (own Settings model; defaults to a reliable API model). (BEA-731) ----
