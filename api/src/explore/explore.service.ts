@@ -48,7 +48,9 @@ export class ExploreService {
       });
       if (!r.ok) return [];
       const j: any = await r.json().catch(() => ({}));
-      const results: any[] = Array.isArray(j?.results) ? j.results : [];
+      let results: any[] = Array.isArray(j?.results) ? j.results : [];
+      // for news/current queries, surface the FRESHEST first (Tavily orders by relevance, not date)
+      if (newsy) results = [...results].sort((a, b) => new Date(b.published_date || 0).getTime() - new Date(a.published_date || 0).getTime());
       return results.slice(0, max).map((res, i) => ({
         n: i + 1,
         sourceType: 'web',
