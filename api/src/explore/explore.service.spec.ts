@@ -5,7 +5,8 @@ function make(hits: any[], answer = 'You shipped it on Tuesday [1].', resolved: 
   const llm: any = { completeWith: jest.fn(async () => answer) };
   // No explore.llm setting → ask() falls back to the default model.
   const prisma: any = { setting: { findUnique: async () => null } };
-  return { svc: new ExploreService(prisma, memory, llm), memory, llm };
+  const connectors: any = { get: jest.fn(async () => null) }; // no Tavily key → web search off
+  return { svc: new ExploreService(prisma, memory, llm, connectors), memory, llm };
 }
 
 describe('ExploreService.ask', () => {
