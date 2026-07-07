@@ -394,13 +394,13 @@ describe('resendTemplate (BEA-917)', () => {
     const postbox: any = {
       isConfigured: () => true,
       sendReminderTemplate: async (to: string, first: string, subject: string) => { sentArgs = { to, first, subject }; return { wamid: 'w9', status: 'sent', error: null }; },
-      renderReminderTemplate: (f: string, s: string) => `Hi ${f}, just a gentle reminder about ${s}. Thanks!`,
+      renderReminderTemplate: (f: string, s: string) => `Hi ${f}, I'm following up on behalf of Sandeep about ${s}. Could you let him know where it stands? A quick tap below is enough.`,
     };
     const svc = new RemindersService(prisma, {} as any, {} as any, postbox);
     const res: any = await svc.resendTemplate('r1');
     expect(sentArgs).toEqual({ to: '919999999999', first: 'Rakesh', subject: 'the update' });
     expect(res.status).toBe('sent');
     expect(created[0]).toMatchObject({ direction: 'out', wamid: 'w9', status: 'sent' });
-    expect(created[0].body).toContain('gentle reminder about the update');
+    expect(created[0].body).toContain('following up on behalf of Sandeep about the update');
   });
 });

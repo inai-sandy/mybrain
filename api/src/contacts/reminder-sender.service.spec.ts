@@ -6,9 +6,9 @@ import { PostboxService } from './postbox.service';
 const renderReminderTemplate = (fn: string, subj: string) => new PostboxService().renderReminderTemplate(fn, subj);
 
 describe('PostboxService.renderReminderTemplate (BEA-753)', () => {
-  it('renders the approved reminder_nudge body from name + subject', () => {
+  it('renders the approved reminder_nudge_v3 body from name + subject', () => {
     expect(renderReminderTemplate('Dharmendra', 'the support videos')).toBe(
-      'Hi Dharmendra, just a gentle reminder about the support videos. Do let me know where it stands whenever you get a chance. Thanks!',
+      "Hi Dharmendra, I'm following up on behalf of Sandeep about the support videos. Could you let him know where it stands? A quick tap below is enough.",
     );
   });
 });

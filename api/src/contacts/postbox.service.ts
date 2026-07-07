@@ -9,7 +9,7 @@ export class PostboxService {
   private readonly log = new Logger('Postbox');
   private readonly base = (process.env.POSTBOX_URL || 'https://postbox.1site.ai/api').replace(/\/$/, '');
   private readonly key = process.env.POSTBOX_API_KEY || '';
-  private readonly template = process.env.POSTBOX_REMINDER_TEMPLATE || 'reminder_nudge';
+  private readonly template = process.env.POSTBOX_REMINDER_TEMPLATE || 'reminder_nudge_v3';
   private readonly lang = process.env.POSTBOX_REMINDER_LANG || 'en';
 
   isConfigured(): boolean {
@@ -46,16 +46,18 @@ export class PostboxService {
   }
 
   /**
-   * The exact text of the approved `reminder_nudge` WhatsApp template, rendered
+   * The exact text of the approved `reminder_nudge_v3` WhatsApp template, rendered
    * with its two variables. This is the ONE place the reminder-nudge wording
    * lives — the chat window stores what this returns, so the message shown can
    * never drift from what {@link sendReminderTemplate} actually sends.
    *
    * IMPORTANT: this string MUST stay word-for-word identical to the Meta-approved
-   * `reminder_nudge` template body. If that template is edited, update this too.
+   * `reminder_nudge_v3` template body. If that template is edited, update this too.
+   * (v3 also carries three quick-reply buttons — Done / Still working on it /
+   * I'll reply here — which are static and not part of the rendered body text.)
    */
   renderReminderTemplate(firstName: string, subject: string): string {
-    return `Hi ${firstName}, just a gentle reminder about ${subject}. Do let me know where it stands whenever you get a chance. Thanks!`;
+    return `Hi ${firstName}, I'm following up on behalf of Sandeep about ${subject}. Could you let him know where it stands? A quick tap below is enough.`;
   }
 
   /** Send the approved reminder template. Returns { wamid, status, error }. */
