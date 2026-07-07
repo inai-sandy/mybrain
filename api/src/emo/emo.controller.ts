@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EmoCardsService, EmoLane, EmoStatus } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
@@ -10,6 +10,7 @@ import { EmoStoryService } from './emo-story.service';
 import { EmoResearchService } from './emo-research.service';
 import { EmoAskService, AskTurn } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
+import { EmoSettingsService, EmoSettings } from './emo-settings.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -25,7 +26,18 @@ export class EmoController {
     private readonly researchLane: EmoResearchService,
     private readonly askSvc: EmoAskService,
     private readonly talkSvc: EmoTalkService,
+    private readonly settingsSvc: EmoSettingsService,
   ) {}
+
+  // Shared EMO settings (BEA-908) — same source of truth for web + app.
+  @Get('settings')
+  getSettings() {
+    return this.settingsSvc.get();
+  }
+  @Put('settings')
+  putSettings(@Body() body: Partial<EmoSettings>) {
+    return this.settingsSvc.set(body || {});
+  }
 
   // Interactive voice Ask (EMO Ask): one turn — clarify (>=1) or answer + file a Search card.
   @Post('ask')
