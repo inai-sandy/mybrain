@@ -168,7 +168,7 @@ export class RemindersService {
       );
     }
     const msg = await this.prisma.reminderMessage.create({
-      data: { contactId: r.contactId, reminderId: id, direction: 'out', body: text, wamid: res.wamid || null },
+      data: { contactId: r.contactId, reminderId: id, direction: 'out', body: text, wamid: res.wamid || null, status: 'sent' },
     });
     // Sandeep just replied → clear the "needs you" flag for this contact. (BEA-766)
     await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
@@ -276,8 +276,10 @@ export class RemindersService {
     ]);
     return {
       contactName: contact?.name || null,
-      messages: messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.createdAt })),
+      messages: messages.map((m) => ({ id: m.id, direction: m.direction, body: m.body, at: m.createdAt, status: (m as any).status || null, error: (m as any).error || null })),
       items: reminders.map((r) => ({ id: r.id, subject: r.subject, status: r.status, feedback: r.feedback })),
+      // For 24h-window awareness in the UI (BEA-917): the contact's most recent inbound reply.
+      lastInboundAt: [...messages].reverse().find((m) => m.direction === 'in')?.createdAt || null,
     };
   }
 

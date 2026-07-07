@@ -532,9 +532,18 @@ function RemindersTab() {
 
 /** A full chat window for one reminder — the WhatsApp conversation + captured outcome. (BEA-733) */
 type ChatItem = { id: string; subject: string | null; status: string; feedback: string | null };
+/** WhatsApp-style delivery ticks on an outgoing reminder message. (BEA-916) */
+function MsgStatus({ status, error }: { status?: string | null; error?: string | null }) {
+  if (status === 'failed') return <span title={error || 'Failed to send'} className="font-semibold text-red-500">⚠ Failed</span>;
+  if (status === 'read') return <span title="Read" className="text-sky-500">✓✓</span>;
+  if (status === 'delivered') return <span title="Delivered" className="text-zinc-400">✓✓</span>;
+  if (status === 'sent') return <span title="Sent" className="text-zinc-400">✓</span>;
+  return null;
+}
+
 function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () => void }) {
   const toast = useToast();
-  const [data, setData] = useState<{ contactName: string | null; messages: { id: string; direction: string; body: string; at: string }[]; items: ChatItem[] } | null>(null);
+  const [data, setData] = useState<{ contactName: string | null; messages: { id: string; direction: string; body: string; at: string; status?: string | null; error?: string | null }[]; items: ChatItem[]; lastInboundAt?: string | null } | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -591,10 +600,13 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
           ) : (
             data.messages.map((m) => (
               <div key={m.id} className={'flex flex-col ' + (m.direction === 'out' ? 'items-end' : 'items-start')}>
-                <div className={'max-w-[82%] rounded-2xl px-3 py-2 text-sm ' + (m.direction === 'out' ? 'rounded-br-sm bg-emerald-500/20 text-emerald-950 dark:text-emerald-50' : 'rounded-bl-sm bg-white text-zinc-800 shadow-sm dark:bg-zinc-800 dark:text-zinc-100')}>
+                <div className={'max-w-[82%] rounded-2xl px-3 py-2 text-sm ' + (m.direction === 'out' ? (m.status === 'failed' ? 'rounded-br-sm bg-red-500/15 text-red-900 dark:text-red-100 border border-red-400/40' : 'rounded-br-sm bg-emerald-500/20 text-emerald-950 dark:text-emerald-50') : 'rounded-bl-sm bg-white text-zinc-800 shadow-sm dark:bg-zinc-800 dark:text-zinc-100')}>
                   <p className="whitespace-pre-wrap">{m.body}</p>
                 </div>
-                <span className="mt-0.5 px-1 text-[10px] text-zinc-400">{m.direction === 'out' ? 'You' : reminder.contact?.name?.split(' ')[0] || 'Them'} · {fmt(m.at)}</span>
+                <span className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-zinc-400">
+                  {m.direction === 'out' ? 'You' : reminder.contact?.name?.split(' ')[0] || 'Them'} · {fmt(m.at)}
+                  {m.direction === 'out' && <MsgStatus status={m.status} error={m.error} />}
+                </span>
               </div>
             ))
           )}

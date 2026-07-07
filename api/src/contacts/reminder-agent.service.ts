@@ -160,7 +160,7 @@ Reply with ONLY this JSON, nothing else:
     } else {
       const res = await this.postbox.sendText(number, replyText);
       await this.prisma.reminderMessage
-        .create({ data: { contactId, reminderId: reminders[0].id, direction: 'out', body: replyText, wamid: res.wamid || null } })
+        .create({ data: { contactId, reminderId: reminders[0].id, direction: 'out', body: replyText, wamid: res.wamid || null, status: 'sent' } })
         .catch(() => undefined);
     }
 

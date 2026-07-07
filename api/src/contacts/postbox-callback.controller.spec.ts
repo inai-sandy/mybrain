@@ -44,3 +44,31 @@ describe('PostboxCallbackController — inbound number matching (BEA-787)', () =
     expect(agentCalls).toHaveLength(0);
   });
 });
+
+describe('PostboxCallbackController — delivery status → chat message (BEA-916)', () => {
+  function setupStatus() {
+    const updates: any[] = [];
+    const prisma: any = {
+      reminderSend: { findFirst: async () => null, update: async () => ({}) },
+      reminderMessage: { updateMany: async ({ where, data }: any) => { updates.push({ where, data }); return { count: 1 }; } },
+    };
+    const postbox: any = { callbackKey: 'k' };
+    const agent: any = { onContactReply: async () => {} };
+    return { ctrl: new PostboxCallbackController(prisma, postbox, agent), updates };
+  }
+
+  it('advances an outbound message to read, only from lower ranks', async () => {
+    const { ctrl, updates } = setupStatus();
+    await ctrl.callback({ kind: 'status', wamid: 'w1', status: 'read' }, 'k');
+    expect(updates[0].data.status).toBe('read');
+    expect(updates[0].where).toMatchObject({ wamid: 'w1', direction: 'out' });
+    expect(updates[0].where.OR).toEqual([{ status: null }, { status: { in: ['sent', 'delivered'] } }]); // won't downgrade a 'read'
+  });
+
+  it('failed always applies (no rank guard) and records the error', async () => {
+    const { ctrl, updates } = setupStatus();
+    await ctrl.callback({ kind: 'status', wamid: 'w2', status: 'failed', error: 'bad number' }, 'k');
+    expect(updates[0].where.OR).toBeUndefined();
+    expect(updates[0].data).toMatchObject({ status: 'failed', error: 'bad number' });
+  });
+});

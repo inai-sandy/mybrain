@@ -886,10 +886,13 @@ model ReminderMessage {
   direction  String // out | in
   body       String
   wamid      String?
+  status     String? // out: sent | delivered | read | failed (WhatsApp receipts, BEA-916); in: null
+  error      String? // provider error when status=failed
   createdAt  DateTime  @default(now())
 
   @@index([contactId])
   @@index([reminderId])
+  @@index([wamid])
 }
 
 /// A third-party OAuth client that registered (Dynamic Client Registration) to reach the public MCP. (BEA-758)

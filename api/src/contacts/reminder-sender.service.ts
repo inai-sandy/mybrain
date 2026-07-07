@@ -151,7 +151,7 @@ export class ReminderSenderService implements OnModuleInit {
       // chat window can never show a message different from what actually went out. (BEA-753)
       const rendered = this.postbox.renderReminderTemplate(firstName, combined);
       await this.prisma.reminderMessage
-        .create({ data: { contactId, reminderId: [...g.reminders.keys()][0], direction: 'out', body: rendered, wamid: res.wamid || null } })
+        .create({ data: { contactId, reminderId: [...g.reminders.keys()][0], direction: 'out', body: rendered, wamid: res.wamid || null, status: 'sent' } })
         .catch(() => undefined);
     }
     this.log.log(`processed ${due.length} due send(s) across ${groups.size} contact(s)`);

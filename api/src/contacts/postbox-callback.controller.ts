@@ -27,10 +27,22 @@ export class PostboxCallbackController {
       throw new ForbiddenException('Bad Postbox key.');
     }
     if (body?.kind === 'status' && body.wamid) {
+      const st = String(body.status || '');
+      // The scheduled send row (existing behaviour).
       const send = await this.prisma.reminderSend.findFirst({ where: { providerId: body.wamid } });
-      if (send && ['delivered', 'read', 'failed'].includes(body.status)) {
+      if (send && ['delivered', 'read', 'failed'].includes(st)) {
         await this.prisma.reminderSend
-          .update({ where: { id: send.id }, data: { status: body.status, error: body.error || undefined } })
+          .update({ where: { id: send.id }, data: { status: st, error: body.error || undefined } })
+          .catch(() => undefined);
+      }
+      // The chat message row — light up delivery ticks (BEA-916). Only advance forward
+      // (sent→delivered→read) so an out-of-order 'delivered' can't downgrade a 'read'; 'failed' always wins.
+      const RANK: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+      if (RANK[st]) {
+        const lower = Object.keys(RANK).filter((k) => RANK[k] < RANK[st]);
+        const where: any = st === 'failed' ? { wamid: body.wamid, direction: 'out' } : { wamid: body.wamid, direction: 'out', OR: [{ status: null }, { status: { in: lower } }] };
+        await this.prisma.reminderMessage
+          .updateMany({ where, data: { status: st, error: st === 'failed' ? body.error || 'failed' : undefined } })
           .catch(() => undefined);
       }
     } else if (body?.kind === 'message') {
