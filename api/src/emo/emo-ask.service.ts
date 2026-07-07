@@ -53,9 +53,10 @@ export class EmoAskService {
     const userTurns = [...history.filter((t) => t.role === 'user').map((t) => t.text), userText].filter(Boolean);
     const baseQ = userTurns.length > 1 ? `${userTurns[0]} — specifically: ${userTurns.slice(1).join('; ')}` : userTurns[0] || userText;
     const retrievalQ = sessionCtx ? `${baseQ}\n\n(Earlier context: ${sessionCtx})` : baseQ;
-    const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto' }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false }));
+    const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto', withSummary: true }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false, summary: undefined as string | undefined }));
     const answer = (ans.answer || '').trim() || "I couldn't find anything about that in your brain yet.";
-    const summary = await this.summarize(answer);
+    // one call already gave us the spoken summary; fall back to the first sentence (no extra model call).
+    const summary = ((ans as any).summary || '').trim() || (answer.split(/(?<=[.!?])\s/)[0] || answer).slice(0, 200);
     // A COMPLETE card: the question + the full answer (inline [n] citations become tappable chips),
     // with the cited sources stored STRUCTURED on the card so app + web render them as accordions.
     const sources = (ans.sources || []) as any[];
