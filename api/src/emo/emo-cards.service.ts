@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type EmoLane = 'search' | 'story' | 'reminder' | 'task' | 'meeting' | 'research' | 'note';
+export type EmoLane = 'search' | 'story' | 'reminder' | 'task' | 'meeting' | 'research' | 'note' | 'talk';
 export type EmoStatus = 'done' | 'cooking' | 'needs_you';
 export type EmoLink = { kind: string; id: string; label?: string };
 
@@ -119,7 +119,7 @@ export class EmoCardsService {
     return this.shape(r);
   }
 
-  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null }>) {
+  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null; rawTranscript: string | null }>) {
     const exists = await this.prisma.emoCard.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException('Card not found');
     const data: any = {};
@@ -127,6 +127,7 @@ export class EmoCardsService {
     if (patch.title !== undefined) data.title = patch.title;
     if (patch.summary !== undefined) data.summary = patch.summary;
     if (patch.detail !== undefined) data.detail = patch.detail;
+    if (patch.rawTranscript !== undefined) data.rawTranscript = patch.rawTranscript;
     if (patch.links !== undefined) data.links = JSON.stringify(patch.links);
     if (patch.needsQuestion !== undefined) data.needsQuestion = patch.needsQuestion;
     if (patch.needsOptions !== undefined) data.needsOptions = JSON.stringify(patch.needsOptions);

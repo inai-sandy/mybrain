@@ -9,6 +9,7 @@ import { EmoReminderService } from './emo-reminder.service';
 import { EmoStoryService } from './emo-story.service';
 import { EmoResearchService } from './emo-research.service';
 import { EmoAskService, AskTurn } from './emo-ask.service';
+import { EmoTalkService } from './emo-talk.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -23,12 +24,19 @@ export class EmoController {
     private readonly story: EmoStoryService,
     private readonly researchLane: EmoResearchService,
     private readonly askSvc: EmoAskService,
+    private readonly talkSvc: EmoTalkService,
   ) {}
 
   // Interactive voice Ask (EMO Ask): one turn — clarify (>=1) or answer + file a Search card.
   @Post('ask')
   ask(@Body() body: { question?: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto' }) {
     return this.askSvc.ask({ question: (body?.question || '').toString(), history: Array.isArray(body?.history) ? body!.history! : [], sessionContext: (body?.sessionContext || '').toString(), web: body?.web });
+  }
+
+  // EMO Talk (BEA-905): a multi-turn conversation on Haiku, saved as ONE card per conversation.
+  @Post('talk')
+  talk(@Body() body: { message?: string; conversationId?: string; web?: 'on' | 'off' | 'auto' }) {
+    return this.talkSvc.talk({ message: (body?.message || '').toString(), conversationId: body?.conversationId, web: body?.web });
   }
 
   // Story lane (EMO 5): append today's captures into the Day Story (user-initiated; never closes the day).

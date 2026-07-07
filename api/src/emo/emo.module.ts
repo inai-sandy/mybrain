@@ -16,6 +16,7 @@ import { EmoStoryService } from './emo-story.service';
 import { EmoMeetingService } from './emo-meeting.service';
 import { EmoResearchService } from './emo-research.service';
 import { EmoAskService } from './emo-ask.service';
+import { EmoTalkService } from './emo-talk.service';
 import { ExploreModule } from '../explore/explore.module';
 import { MemoryModule } from '../memory/memory.module';
 import { EmoController } from './emo.controller';
@@ -24,7 +25,7 @@ import { EmoController } from './emo.controller';
 @Module({
   imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule],
   controllers: [EmoController],
-  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService],
+  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService],
   exports: [EmoCardsService, EmoRouterService],
 })
 export class EmoModule {}

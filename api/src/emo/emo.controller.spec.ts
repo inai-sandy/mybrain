@@ -17,7 +17,8 @@ describe('EmoController (BEA-862)', () => {
   const storyLane: any = { mergeToday: jest.fn(async () => ({ merged: 0, storyDay: "2026-07-04" })) };
   const researchLane: any = { handle: jest.fn(async () => undefined) };
   const askSvc: any = { ask: jest.fn(async () => ({ mode: 'answer', summary: 'ok', cardId: 'c1' })) };
-  const ctrl = new EmoController(svc, router, capture, search, taskLane, reminderLane, storyLane, researchLane, askSvc);
+  const talkSvc: any = { talk: jest.fn(async () => ({ conversationId: 'c1', reply: 'hi', sources: [], usedWeb: false })) };
+  const ctrl = new EmoController(svc, router, capture, search, taskLane, reminderLane, storyLane, researchLane, askSvc, talkSvc);
 
   it('uploads a recording to the capture pipeline, and rejects an empty upload', async () => {
     await ctrl.upload({ buffer: Buffer.from('audio'), originalname: 'r.webm', mimetype: 'audio/webm' });
