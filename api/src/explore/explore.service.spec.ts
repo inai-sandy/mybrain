@@ -67,7 +67,7 @@ describe('ExploreService saved answers (BEA-339)', () => {
         },
       },
     };
-    return { s: new ExploreService(prisma, {} as any, {} as any), rows };
+    return { s: new ExploreService(prisma, {} as any, {} as any, { get: async () => null } as any), rows };
   }
 
   it('saves and lists newest-first, parsing sources', async () => {
