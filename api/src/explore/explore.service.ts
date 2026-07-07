@@ -38,10 +38,13 @@ export class ExploreService {
     const key = cfg?.apiKey;
     if (!key) return [];
     try {
+      // Recency-aware: for news/current queries, use Tavily's news topic + a recent window so
+      // "latest" returns fresh results, not stale ones.
+      const newsy = /\b(news|latest|breaking|today|recent|update|now|happening|current)\b/i.test(q);
       const r = await fetch('https://api.tavily.com/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ api_key: key, query: q, max_results: Math.min(max, 8), include_answer: false, search_depth: 'basic' }),
+        body: JSON.stringify({ api_key: key, query: q, max_results: Math.min(max, 8), include_answer: false, search_depth: 'basic', topic: newsy ? 'news' : 'general', ...(newsy ? { days: 21 } : {}) }),
       });
       if (!r.ok) return [];
       const j: any = await r.json().catch(() => ({}));
@@ -64,6 +67,15 @@ export class ExploreService {
   /** Cheap heuristic: does this question likely need current/web info? */
   needsWeb(q: string): boolean {
     return /\b(latest|newest|recent|today|tonight|yesterday|this week|current(ly)?|right now|news|update on|price of|stock|share price|weather|forecast|who won|release date|launch(ed)?|202[4-9]|20[3-9]\d)\b/i.test(q || '');
+  }
+
+  /** Today's date in the owner's timezone — so answers know "now" and interpret "latest" correctly. */
+  today(): string {
+    try {
+      return new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
   }
 
   /** The model that writes Explore answers (configurable in Settings → Models). */
@@ -172,6 +184,8 @@ export class ExploreService {
       ? `You are the owner's second brain. Some sources below are from their own saved notes, others (marked "web") are current results from the internet. Answer using these sources.`
       : SYSTEM;
     const prompt = `${sys}
+
+Today's date is ${this.today()}. When the question is about "latest"/"recent"/"current" things, prefer the most recent sources and say how recent they are.
 
 The owner asked:
 """${q}"""
