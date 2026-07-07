@@ -593,8 +593,8 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-zinc-900">
       <div className="flex h-full w-full flex-col" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800">
+        {/* Header — clear the iOS/Android status bar / notch (BEA-919) */}
+        <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-3 dark:border-zinc-800" style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}>
           <button onClick={onClose} className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
           <div className="min-w-0 flex-1">
             <div className="truncate font-semibold">{data?.contactName || reminder.contact?.name || 'Contact'}</div>
@@ -650,7 +650,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
               <span>💬 You can reply freely for ~{Math.max(1, Math.ceil(hoursLeft))}h</span>
               <button onClick={resendTemplate} disabled={resending} className="font-medium text-emerald-600 hover:underline disabled:opacity-50">{resending ? 'Sending…' : 'Resend template'}</button>
             </div>
-            <div className="flex items-end gap-2 border-t border-zinc-100 p-2 dark:border-zinc-800">
+            <div className="flex items-end gap-2 border-t border-zinc-100 p-2 dark:border-zinc-800" style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
               <textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -665,7 +665,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
             </div>
           </>
         ) : (
-          <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+          <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800" style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}>
             <p className="text-xs text-zinc-500">
               {data?.lastInboundAt
                 ? 'The 24-hour window to free-text has closed (WhatsApp only allows free replies within 24h of their last message).'
