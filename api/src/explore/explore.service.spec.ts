@@ -33,7 +33,7 @@ describe('ExploreService.ask', () => {
   it('handles an empty question without calling the model', async () => {
     const { svc, memory, llm } = make([]);
     const out = await svc.ask('   ');
-    expect(out).toEqual({ answer: '', sources: [], matches: 0 });
+    expect(out).toEqual({ answer: '', sources: [], matches: 0, usedWeb: false });
     expect(memory.searchBrain).not.toHaveBeenCalled();
     expect(llm.completeWith).not.toHaveBeenCalled();
   });
