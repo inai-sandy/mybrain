@@ -1446,11 +1446,14 @@ function EmoSettingsSection() {
   const [ears, setEars] = useState('');
   const [earsEngines, setEarsEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [brain, setBrain] = useState('');
+  const [talk, setTalk] = useState('');
+  const [search, setSearch] = useState('auto');
   useEffect(() => {
     fetch('/api/auth/device-token').then((r) => r.json()).then((d) => setToken(d.token || '')).catch(() => undefined);
     fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setTtsVoice(d.voice || 'nova'); setTtsVoices(d.voices || []); }).catch(() => undefined);
     fetch('/api/voice/config').then((r) => r.json()).then((d) => { setEars(d.engine || ''); setEarsEngines(d.engines || []); }).catch(() => undefined);
     fetch('/api/explore/model').then((r) => r.json()).then((d) => setBrain(d.model || '')).catch(() => undefined);
+    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setSearch(d.searchDefault || 'auto'); }).catch(() => undefined);
   }, []);
   async function regen() {
     if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
@@ -1474,9 +1477,20 @@ function EmoSettingsSection() {
     await fetch('/api/explore/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: m.startsWith('anthropic/') || m.startsWith('openai/') ? 'openrouter' : 'openrouter', model: m }) }).catch(() => undefined);
     toast('success', 'EMO brain updated');
   }
+  async function pickTalk(m: string) {
+    setTalk(m);
+    await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ talkModel: m }) }).catch(() => undefined);
+    toast('success', 'Talk model updated');
+  }
+  async function pickSearch(o: string) {
+    setSearch(o);
+    await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchDefault: o }) }).catch(() => undefined);
+    toast('success', 'Internet search updated');
+  }
   const masked = token ? token.slice(0, 7) + '••••••••••••••' + token.slice(-4) : '';
   const sel = 'w-full max-w-[20rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900';
   const brainOpts = brain && !EMO_BRAINS.some((b) => b.id === brain) ? [...EMO_BRAINS, { id: brain, name: brain }] : EMO_BRAINS;
+  const talkOpts = talk && !EMO_BRAINS.some((b) => b.id === talk) ? [...EMO_BRAINS, { id: talk, name: talk }] : EMO_BRAINS;
   return (
     <div className="space-y-5">
       <div>
@@ -1519,6 +1533,24 @@ function EmoSettingsSection() {
         <select value={brain} onChange={(e) => pickBrain(e.target.value)} className={sel}>
           {brainOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+      </AccordionCard>
+
+      <AccordionCard title="Talk — how EMO converses" icon={MessageSquare}>
+        <p className="mb-3 text-sm text-zinc-500">The model behind Talk (the hands‑free back‑and‑forth). Haiku is fast and cheap — great for conversation; Sonnet is more capable.</p>
+        <select value={talk} onChange={(e) => pickTalk(e.target.value)} className={sel}>
+          {talkOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </AccordionCard>
+
+      <AccordionCard title="Internet search" icon={Globe}>
+        <p className="mb-3 text-sm text-zinc-500">Whether Ask &amp; Talk can reach the web (Tavily). <b>Auto</b> searches only when a question clearly needs current info; <b>Always</b> searches every time; <b>Off</b> never does. You can still flip it per‑question in the app.</p>
+        <div className="flex gap-2">
+          {(['off', 'auto', 'on'] as const).map((o) => (
+            <button key={o} onClick={() => pickSearch(o)} className={'rounded-lg border px-4 py-1.5 text-sm font-medium ' + (search === o ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>
+              {o === 'off' ? 'Off' : o === 'auto' ? 'Auto' : 'Always'}
+            </button>
+          ))}
+        </div>
       </AccordionCard>
     </div>
   );
