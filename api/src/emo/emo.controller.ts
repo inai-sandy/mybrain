@@ -27,8 +27,8 @@ export class EmoController {
 
   // Interactive voice Ask (EMO Ask): one turn — clarify (>=1) or answer + file a Search card.
   @Post('ask')
-  ask(@Body() body: { question?: string; history?: AskTurn[]; sessionContext?: string }) {
-    return this.askSvc.ask({ question: (body?.question || '').toString(), history: Array.isArray(body?.history) ? body!.history! : [], sessionContext: (body?.sessionContext || '').toString() });
+  ask(@Body() body: { question?: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto' }) {
+    return this.askSvc.ask({ question: (body?.question || '').toString(), history: Array.isArray(body?.history) ? body!.history! : [], sessionContext: (body?.sessionContext || '').toString(), web: body?.web });
   }
 
   // Story lane (EMO 5): append today's captures into the Day Story (user-initiated; never closes the day).

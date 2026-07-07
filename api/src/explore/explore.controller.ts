@@ -35,10 +35,10 @@ export class ExploreController {
     return { models: await this.explore.listModels() };
   }
 
-  /** Ask the brain a plain-English question → synthesised answer + sources. */
+  /** Ask the brain a plain-English question → synthesised answer + sources. `web`: on|off|auto. */
   @Post('ask')
-  async ask(@Body() body: { question?: string }) {
-    return this.explore.ask(body?.question || '');
+  async ask(@Body() body: { question?: string; web?: 'on' | 'off' | 'auto' }) {
+    return this.explore.ask(body?.question || '', { web: body?.web });
   }
 
   /** Index manager: per-section status (counts, last-indexed, enabled). (BEA-335) */

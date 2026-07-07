@@ -49,6 +49,6 @@ describe('EmoAskService (BEA-890)', () => {
   it('folds clarifying answers into the refined question sent to the brain', async () => {
     const { svc, explore } = make({ answer: 'done' });
     await svc.ask({ question: 'pending ones', history: [{ role: 'user', text: 'tasks for Srikar' }, { role: 'emo', text: 'Done or pending?' }] });
-    expect(explore.ask).toHaveBeenCalledWith(expect.stringMatching(/tasks for Srikar.*pending ones/));
+    expect(explore.ask).toHaveBeenCalledWith(expect.stringMatching(/tasks for Srikar.*pending ones/), expect.anything());
   });
 });
