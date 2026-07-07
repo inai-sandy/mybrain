@@ -17,7 +17,7 @@ export type EmoSettings = {
 
 /**
  * EMO settings (BEA-908) — the single source of truth shared by the web app and the mobile app.
- * Backed by the key/value Setting table (reuses the existing voice.*/explore.llm keys + new emo.*).
+ * Backed by the key/value Setting table (reuses the existing voice and explore.llm keys + new emo keys).
  */
 @Injectable()
 export class EmoSettingsService {
