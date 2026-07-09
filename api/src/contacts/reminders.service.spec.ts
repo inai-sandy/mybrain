@@ -431,3 +431,42 @@ describe('conversations (BEA-921)', () => {
     expect(conversations[1].times).toEqual(['09:00']); // parsed from JSON
   });
 });
+
+describe('conversations unread + markRead (BEA-922)', () => {
+  it('counts inbound messages after lastReadAt as unread', async () => {
+    const t0 = Date.now();
+    const prisma: any = {
+      reminderMessage: {
+        findMany: async () => [
+          { contactId: 'k1', body: 'new', direction: 'in', createdAt: new Date(t0) }, // after read
+          { contactId: 'k1', body: 'old', direction: 'in', createdAt: new Date(t0 - 200000) }, // before read
+        ],
+      },
+      reminder: { findMany: async () => [{ id: 'r1', contactId: 'k1', status: 'active', times: '[]', needsOwner: false }] },
+      contact: { findMany: async () => [{ id: 'k1', name: 'Alpha', whatsappNumber: '91', lastReadAt: new Date(t0 - 100000) }] },
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    const { conversations } = await svc.conversations();
+    expect(conversations[0].unread).toBe(1); // only the message after lastReadAt
+  });
+
+  it('unread counts all inbound when never read', async () => {
+    const prisma: any = {
+      reminderMessage: { findMany: async () => [{ contactId: 'k1', body: 'hi', direction: 'in', createdAt: new Date() }] },
+      reminder: { findMany: async () => [{ id: 'r1', contactId: 'k1', status: 'active', times: '[]', needsOwner: false }] },
+      contact: { findMany: async () => [{ id: 'k1', name: 'A', whatsappNumber: '9', lastReadAt: null }] },
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    const { conversations } = await svc.conversations();
+    expect(conversations[0].unread).toBe(1);
+  });
+
+  it('markRead stamps the contact lastReadAt', async () => {
+    let updated: any = null;
+    const prisma: any = { contact: { update: async ({ where, data }: any) => { updated = { id: where.id, ...data }; return {}; } } };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    expect(await svc.markRead('k1')).toEqual({ ok: true });
+    expect(updated.id).toBe('k1');
+    expect(updated.lastReadAt instanceof Date).toBe(true);
+  });
+});

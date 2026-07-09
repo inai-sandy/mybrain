@@ -828,6 +828,7 @@ model Contact {
   notes          String?
   tags           String     @default("[]") // JSON string array
   aliases        String     @default("[]") // JSON array of other spellings/names for this same person (BEA-763)
+  lastReadAt     DateTime? // when the owner last opened this contact's chat — powers unread badges (BEA-922)
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]

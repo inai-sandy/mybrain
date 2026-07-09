@@ -78,6 +78,12 @@ export class RemindersController {
     return this.reminders.contactThread(contactId);
   }
 
+  /** Mark a contact's chat as read — clears its unread badge (BEA-922). */
+  @Post('contact/:contactId/read')
+  markRead(@Param('contactId') contactId: string) {
+    return this.reminders.markRead(contactId);
+  }
+
   /** The reminder's WhatsApp conversation + captured outcome (BEA-730). */
   @Get(':id/thread')
   thread(@Param('id') id: string) {

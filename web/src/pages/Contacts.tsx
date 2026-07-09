@@ -7,7 +7,7 @@ type Contact = { id: string; name: string; whatsappNumber: string | null; notes:
 type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
 
 /** One row in the WhatsApp-style conversation inbox (BEA-921). */
-type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsOwner: boolean };
+type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsOwner: boolean; unread: number };
 
 /** Short "when" for a conversation row: time today, weekday this week, else date. */
 function fmtRel(s?: string | null): string {
@@ -418,10 +418,20 @@ function RemindersTab() {
     loadConvos();
   }
   useEffect(() => { load(); }, []);
+  // Keep the inbox fresh so new replies bubble up + unread updates while it's open. (BEA-922)
+  useEffect(() => {
+    if (view !== 'chats') return;
+    const t = setInterval(loadConvos, 20000);
+    return () => clearInterval(t);
+  }, [view]);
 
-  /** Open the full chat for a conversation — build a minimal reminder to drive ReminderChat. */
+  /** Open the full chat for a conversation — build a minimal reminder to drive ReminderChat, and mark read. */
   function openConversation(c: Conversation) {
     setChatReminder({ id: c.reminderId, contactId: c.contactId, taskId: null, subject: null, message: '', notes: null, count: 0, times: c.times || [], status: 'active', contact: { id: c.contactId, name: c.name, whatsappNumber: c.whatsappNumber, notes: null, tags: [] } });
+    if (c.unread > 0) {
+      setConvos((xs) => (xs ? xs.map((x) => (x.contactId === c.contactId ? { ...x, unread: 0 } : x)) : xs)); // optimistic clear
+      fetch(`/api/reminders/contact/${c.contactId}/read`, { method: 'POST' }).catch(() => undefined);
+    }
   }
 
   async function act(id: string, kind: 'pause' | 'resume' | 'delete') {
@@ -470,13 +480,15 @@ function RemindersTab() {
     if (r?.ok) toast('success', 'Cleared all suggestions'); else { setSuggestions(prev); toast('error', 'Could not clear'); }
   }
 
+  const totalUnread = (convos || []).reduce((n, c) => n + (c.unread || 0), 0);
   return (
     <div className="space-y-4">
-      {/* Chats (conversations-first) | Reminders (management) — BEA-921 */}
+      {/* Chats (conversations-first) | Reminders (management) — BEA-921/922 */}
       <div className="flex items-center gap-1 rounded-xl bg-zinc-100 p-1 text-sm dark:bg-zinc-800/60">
         {(['chats', 'manage'] as const).map((v) => (
-          <button key={v} onClick={() => setView(v)} className={'flex-1 rounded-lg px-3 py-1.5 font-medium transition-colors ' + (view === v ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}>
+          <button key={v} onClick={() => setView(v)} className={'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-colors ' + (view === v ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}>
             {v === 'chats' ? 'Chats' : 'Reminders'}
+            {v === 'chats' && totalUnread > 0 && <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">{totalUnread}</span>}
           </button>
         ))}
       </div>
@@ -494,11 +506,14 @@ function RemindersTab() {
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{(c.name || '?').trim().charAt(0).toUpperCase()}</div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate font-medium">{c.name}</span>
+                      <span className={'truncate ' + (c.unread > 0 ? 'font-semibold text-zinc-900 dark:text-white' : 'font-medium')}>{c.name}</span>
                       {c.needsOwner && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
-                      <span className="ml-auto shrink-0 text-[11px] text-zinc-400">{fmtRel(c.lastAt)}</span>
+                      <span className={'ml-auto shrink-0 text-[11px] ' + (c.unread > 0 ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-zinc-400')}>{fmtRel(c.lastAt)}</span>
                     </div>
-                    <p className="mt-0.5 truncate text-sm text-zinc-500 dark:text-zinc-400">{c.lastMessage ? (c.lastMessage.direction === 'out' ? 'You: ' : '') + c.lastMessage.body : c.activeReminderCount > 0 ? 'Reminder scheduled — no messages yet' : 'No messages yet'}</p>
+                    <div className="mt-0.5 flex items-center gap-2">
+                      <p className={'truncate text-sm ' + (c.unread > 0 ? 'text-zinc-700 dark:text-zinc-200' : 'text-zinc-500 dark:text-zinc-400')}>{c.lastMessage ? (c.lastMessage.direction === 'out' ? 'You: ' : '') + c.lastMessage.body : c.activeReminderCount > 0 ? 'Reminder scheduled — no messages yet' : 'No messages yet'}</p>
+                      {c.unread > 0 && <span className="ml-auto shrink-0 rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">{c.unread}</span>}
+                    </div>
                   </div>
                 </button>
               </li>

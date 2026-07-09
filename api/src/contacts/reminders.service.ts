@@ -444,9 +444,19 @@ export class RemindersService {
       }),
     ]);
 
-    // Latest message per contact (messages are newest-first, so the first hit wins).
+    // Latest message per contact (messages are newest-first, so the first hit wins) + inbound
+    // timestamps per contact for the unread count (BEA-922).
     const lastByContact = new Map<string, { body: string; direction: string; createdAt: Date }>();
-    for (const m of messages) if (m.contactId && !lastByContact.has(m.contactId)) lastByContact.set(m.contactId, m as any);
+    const inboundByContact = new Map<string, Date[]>();
+    for (const m of messages) {
+      if (!m.contactId) continue;
+      if (!lastByContact.has(m.contactId)) lastByContact.set(m.contactId, m as any);
+      if (m.direction === 'in') {
+        const arr = inboundByContact.get(m.contactId) || [];
+        arr.push(m.createdAt);
+        inboundByContact.set(m.contactId, arr);
+      }
+    }
 
     // Per contact: a representative reminder (prefer an active one), active count, times, needs-you.
     const remByContact = new Map<string, { reminderId: string; times: string; activeCount: number; needsOwner: boolean }>();
@@ -468,7 +478,7 @@ export class RemindersService {
 
     const ids = new Set<string>([...lastByContact.keys(), ...remByContact.keys()]);
     const contacts = ids.size
-      ? await this.prisma.contact.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true, whatsappNumber: true } })
+      ? await this.prisma.contact.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true, whatsappNumber: true, lastReadAt: true } })
       : [];
     const cmap = new Map(contacts.map((c) => [c.id, c]));
 
@@ -477,6 +487,8 @@ export class RemindersService {
         const c = cmap.get(id);
         const last = lastByContact.get(id);
         const rem = remByContact.get(id);
+        const lastRead = c?.lastReadAt ? new Date(c.lastReadAt).getTime() : 0;
+        const unread = (inboundByContact.get(id) || []).filter((t) => new Date(t).getTime() > lastRead).length;
         return {
           contactId: id,
           name: c?.name || 'Contact',
@@ -487,12 +499,20 @@ export class RemindersService {
           times: rem ? this.parse(rem.times) : [],
           activeReminderCount: rem?.activeCount || 0,
           needsOwner: rem?.needsOwner || false,
+          unread,
         };
       })
       .filter((r) => r.reminderId); // need a reminder to open the chat against
 
     rows.sort((a, b) => (b.lastAt ? new Date(b.lastAt).getTime() : 0) - (a.lastAt ? new Date(a.lastAt).getTime() : 0));
     return { conversations: rows };
+  }
+
+  /** Mark a contact's chat as read (owner opened it) — clears its unread badge. (BEA-922) */
+  async markRead(contactId: string) {
+    if (!contactId) return { ok: false };
+    await this.prisma.contact.update({ where: { id: contactId }, data: { lastReadAt: new Date() } }).catch(() => undefined);
+    return { ok: true };
   }
 
   /** The user's local day key (YYYY-MM-DD) — reminders live for exactly one such day. (BEA-764) */
