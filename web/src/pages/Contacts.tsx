@@ -690,7 +690,12 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
   const [message, setMessage] = useState(reminder?.message || prefill?.message || '');
   const [notes, setNotes] = useState(reminder?.notes || '');
   const [slots, setSlots] = useState<Slot[]>(() => timesToSlots(reminder?.times));
-  const times = slots.filter((s) => s.on).map((s) => s.time).sort();
+  // Any saved time not captured by the three presets loads as a custom time. (BEA-920)
+  const [custom, setCustom] = useState<string[]>(() => {
+    const slotTimes = new Set(timesToSlots(reminder?.times).filter((s) => s.on).map((s) => s.time));
+    return (reminder?.times || []).filter((t) => !slotTimes.has(t));
+  });
+  const times = Array.from(new Set([...slots.filter((s) => s.on).map((s) => s.time), ...custom.filter(Boolean)])).sort();
   // BEA-881/883: pick a send day (create) or reschedule (edit) — pre-fill from the reminder's current day.
   const [sendDay, setSendDay] = useState(reminder?.armedDay && reminder.armedDay > todayIstKey() ? reminder.armedDay : todayIstKey());
   const isFuture = sendDay > todayIstKey();
@@ -778,8 +783,19 @@ function NewReminderForm({ reminder, prefill, onClose, onSaved }: { reminder: Re
                 <input type="time" value={s.time} disabled={!s.on} onChange={(e) => setSlots((xs) => xs.map((x, j) => (j === i ? { ...x, time: e.target.value || x.time } : x)))} className="rounded-md border border-zinc-200 bg-transparent px-2 py-1 text-sm outline-none focus:border-emerald-400 disabled:opacity-40 dark:border-zinc-700" />
               </div>
             ))}
+            {/* Custom times — set any exact time you want, add as many as you need (BEA-920) */}
+            {custom.map((t, i) => (
+              <div key={'custom-' + i} className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+                <span className="flex-1 text-sm font-medium text-zinc-700 dark:text-zinc-100">Custom time</span>
+                <input type="time" value={t} onChange={(e) => setCustom((xs) => xs.map((x, j) => (j === i ? e.target.value || x : x)))} className="rounded-md border border-zinc-200 bg-transparent px-2 py-1 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
+                <button type="button" onClick={() => setCustom((xs) => xs.filter((_, j) => j !== i))} aria-label="Remove this time" className="shrink-0 rounded-md p-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><X className="h-4 w-4" /></button>
+              </div>
+            ))}
           </div>
-          <p className="mt-1.5 text-[10px] text-zinc-400">Turn on the times you want. Any that already passed today roll to the next day, until each goes out (or they reply).</p>
+          {custom.length + slots.filter((s) => s.on).length < 8 && (
+            <button type="button" onClick={() => setCustom((xs) => [...xs, '12:00'])} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-600 dark:text-zinc-300 dark:hover:border-emerald-500"><Plus className="h-3.5 w-3.5" /> Add time</button>
+          )}
+          <p className="mt-1.5 text-[10px] text-zinc-400">Turn on the presets you want, or add your own exact times. Any that already passed today roll to the next day, until each goes out (or they reply).</p>
         </div>
         <button onClick={save} disabled={saving} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{reminder ? 'Save' : 'Create reminder'}</button>
       </div>

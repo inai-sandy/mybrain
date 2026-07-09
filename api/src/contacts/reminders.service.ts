@@ -66,7 +66,7 @@ export function sanitizeTimes(times: unknown): string[] {
     if (h > 23 || mi > 59) continue;
     seen.add(`${String(h).padStart(2, '0')}:${m[2]}`);
   }
-  return [...seen].sort().slice(0, 5);
+  return [...seen].sort().slice(0, 8); // up to 8 send times a day (3 presets + custom, BEA-920)
 }
 
 /** The user's timezone offset in minutes east of UTC (IST = +330). Configurable. (BEA-734) */

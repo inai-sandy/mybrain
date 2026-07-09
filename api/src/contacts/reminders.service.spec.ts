@@ -107,7 +107,7 @@ describe('sanitizeTimes — user-chosen send slots (BEA-755)', () => {
   it('keeps valid times, zero-pads, dedupes, sorts, caps at 5', () => {
     expect(sanitizeTimes(['9:00', '17:00', '13:00'])).toEqual(['09:00', '13:00', '17:00']); // padded + sorted
     expect(sanitizeTimes(['09:00', '09:00'])).toEqual(['09:00']); // deduped
-    expect(sanitizeTimes(['08:00', '09:00', '10:00', '11:00', '12:00', '13:00'])).toHaveLength(5); // capped
+    expect(sanitizeTimes(['06:00', '07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00'])).toHaveLength(8); // capped at 8 (BEA-920)
   });
   it('drops invalid entries and non-arrays → [] (caller then rejects/falls back)', () => {
     expect(sanitizeTimes(['25:00', '09:61', 'lunch', ''])).toEqual([]);
