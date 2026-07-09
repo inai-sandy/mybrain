@@ -1,5 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, Res, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Request, Response } from 'express';
 import { EmoCardsService, EmoLane, EmoStatus } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
@@ -11,6 +12,7 @@ import { EmoResearchService } from './emo-research.service';
 import { EmoAskService, AskTurn } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
 import { EmoSettingsService, EmoSettings } from './emo-settings.service';
+import { EmoDeviceService } from './emo-device.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -27,6 +29,7 @@ export class EmoController {
     private readonly askSvc: EmoAskService,
     private readonly talkSvc: EmoTalkService,
     private readonly settingsSvc: EmoSettingsService,
+    private readonly deviceSvc: EmoDeviceService,
   ) {}
 
   // Shared EMO settings (BEA-908) — same source of truth for web + app.
@@ -71,6 +74,47 @@ export class EmoController {
     if (!transcript) throw new BadRequestException('transcript is required');
     // `lane` forces a mode (Meeting/Research from the app) — skips the router's guessing.
     return this.router.route(transcript, { source: body?.source, audioPath: body?.audioPath, lane: body?.lane as any });
+  }
+
+  // EMO hardware (BEA-926): one streamed voice turn — raw 16k mono PCM in, routed reply out.
+  // The device streams while recording, so a capture never stops until the user stops it.
+  @Post('device/turn')
+  async deviceTurn(
+    @Req() req: Request,
+    @Query('mode') mode?: string,
+    @Query('conversationId') conversationId?: string,
+    @Query('sr') sr?: string,
+  ) {
+    const MAX = 60 * 1024 * 1024; // ~30 min at 16 kHz mono
+    const chunks: Buffer[] = [];
+    let total = 0;
+    await new Promise<void>((resolve, reject) => {
+      req.on('data', (c: Buffer) => {
+        total += c.length;
+        if (total > MAX) {
+          reject(new BadRequestException('Recording too large'));
+          try { req.destroy(); } catch { /* closing */ }
+          return;
+        }
+        chunks.push(c);
+      });
+      req.on('end', () => resolve());
+      req.on('error', (e) => reject(e));
+    });
+    return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000 });
+  }
+
+  // EMO hardware: speech as 16 kHz mono WAV (the device has no mp3 decoder).
+  @Get('device/tts')
+  async deviceTts(@Query('text') text: string, @Query('voice') voice: string, @Res() res: Response) {
+    const wav = await this.deviceSvc.ttsWav16k(text || '', voice || undefined);
+    if (!wav) {
+      res.status(400).json({ error: 'TTS unavailable' });
+      return;
+    }
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(wav);
   }
 
   // Browser capture (EMO 4): upload a recording → transcribe in memory → router → cards (audio not kept).

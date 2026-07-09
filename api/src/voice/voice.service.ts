@@ -97,6 +97,23 @@ export class VoiceService {
     await this.prisma.usageLog.create({ data: { feature: 'voice-tts', model: 'gpt-4o-mini-tts', cost: null } }).catch(() => undefined);
     return buf;
   }
+  /** Raw 24 kHz 16-bit mono PCM speech (BEA-926: the EMO device resamples + WAV-wraps it). */
+  async ttsPcm(text: string, voice?: string): Promise<Buffer | null> {
+    const t = (text || '').trim().slice(0, 800);
+    if (!t) return null;
+    const v = (voice || (await this.ttsVoice())).trim();
+    const c = await this.connectors.get<{ apiKey: string }>('openai');
+    if (!c?.apiKey) return null;
+    const r = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice: v, input: t, response_format: 'pcm' }),
+    }).catch(() => null);
+    if (!r || !r.ok) return null;
+    const buf = Buffer.from(await r.arrayBuffer());
+    await this.prisma.usageLog.create({ data: { feature: 'voice-tts', model: 'gpt-4o-mini-tts', cost: null } }).catch(() => undefined);
+    return buf;
+  }
   /** A short context hint biasing transcription toward the user's real names + terms (BEA-888). */
   private async promptHint(): Promise<string> {
     try {
