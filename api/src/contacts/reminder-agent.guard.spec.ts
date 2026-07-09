@@ -1,4 +1,4 @@
-import { fixOwnerVocative, needsFirstAck } from './reminder-agent.service';
+import { fixOwnerVocative, needsFirstAck, needsAck, ackLine } from './reminder-agent.service';
 
 describe('needsFirstAck — never leave a first "yes/ok" on read (BEA-902)', () => {
   const reminder = { direction: 'out', body: 'Hi Rakesh, a gentle reminder about the production update.' };
@@ -48,5 +48,33 @@ describe('fixOwnerVocative — never address the contact by the owner name (BEA-
   it('leaves normal replies untouched', () => {
     expect(fix('Sounds good, go ahead and upload them.')).toBe('Sounds good, go ahead and upload them.');
     expect(fix('')).toBe('');
+  });
+});
+
+describe('needsAck — acknowledge every reply, never leave on read (BEA-923)', () => {
+  it('owes an ack whenever the contact wrote the most recent message', () => {
+    expect(needsAck([{ direction: 'out', body: 'reminder' }, { direction: 'in', body: 'perfect' }])).toBe(true);
+    expect(needsAck([{ direction: 'out', body: 'r' }, { direction: 'in', body: 'please find the update sheet' }])).toBe(true);
+  });
+  it('does not owe an ack once the agent has replied after them', () => {
+    expect(needsAck([{ direction: 'in', body: 'ok' }, { direction: 'out', body: 'Great, thanks!' }])).toBe(false);
+  });
+  it('ignores an empty last message / empty thread', () => {
+    expect(needsAck([{ direction: 'in', body: '   ' }])).toBe(false);
+    expect(needsAck([])).toBe(false);
+  });
+});
+
+describe('ackLine — short varied acknowledgment (BEA-923)', () => {
+  it('recognises a delivered file/link', () => {
+    expect(ackLine('Rakesh', 'Good morning sir, please find update sheet')).toMatch(/pass this on to Sandeep/i);
+    expect(ackLine('Rakesh', 'https://youtube.com/@x')).toMatch(/pass this on to Sandeep/i);
+  });
+  it('recognises "done"', () => {
+    expect(ackLine('Swathi', "it's done")).toMatch(/noted that it's done/i);
+  });
+  it('falls back to a plain thanks and uses the contact name', () => {
+    expect(ackLine('Deepthi', 'ok')).toBe('Great, thanks Deepthi!');
+    expect(ackLine('', 'ok')).toBe('Great, thanks there!');
   });
 });

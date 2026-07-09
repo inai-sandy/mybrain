@@ -43,6 +43,26 @@ export function needsFirstAck(messages: { direction: string; body: string }[]): 
 }
 
 /**
+ * Reliability backstop (BEA-923): the owner wants EVERY reply acknowledged — never leave a contact
+ * on read. True when the contact wrote the most recent (non-empty) message and the agent hasn't
+ * replied after it. The identical-reply suppression downstream stops repeated acks from spamming.
+ */
+export function needsAck(messages: { direction: string; body: string }[]): boolean {
+  if (!messages.length) return false;
+  const last = messages[messages.length - 1];
+  return last.direction === 'in' && !!(last.body || '').trim();
+}
+
+/** A short, varied, context-aware acknowledgment used when the model returns nothing to send. */
+export function ackLine(name: string, lastIn: string): string {
+  const who = (name || '').trim() || 'there';
+  const b = (lastIn || '').toLowerCase();
+  if (/\b(find|attach|shar(e|ing)|sheet|sent|sending|here'?s|link)\b|https?:\/\//.test(b)) return `Thanks ${who}, got it — I'll pass this on to Sandeep.`;
+  if (/\b(done|completed|finished|closed|sorted|resolved)\b/.test(b)) return `Great, thanks ${who} — noted that it's done!`;
+  return `Great, thanks ${who}!`;
+}
+
+/**
  * The two-way "replies like you" reminder agent (BEA-730 / Postbox C2). When a contact
  * replies (stored by the Postbox callback), it reads the whole thread, answers back in the
  * user's voice (Indian English), and — when the matter is clearly resolved — records the
@@ -129,8 +149,8 @@ Rules:
 - Short — 1-2 sentences, ONE message even if there are several items.
 - Use the context Sandeep gave (above) to answer their questions when you can.
 - If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
-- ALWAYS acknowledge their reply with a short, warm line — never leave them on read. A "yes"/"ok"/"sure" right after your reminder is their FIRST response: reply with a brief thanks (e.g. "Great, thanks — I'll wait for the update whenever you have it.").
-- Only stay silent (set "send": false) if your OWN previous message in this thread was ALREADY a short acknowledgment (not the reminder itself) AND their new message adds nothing new — then you'd just be repeating yourself.
+- ALWAYS reply to their message — set "send": true and give at least a short, warm acknowledgment. NEVER leave them on read. This applies to everything: a plain "yes"/"ok"/"perfect"/"thanks", a link, or "please find the update sheet" all get a brief reply (e.g. "Great, thanks — I'll wait for the update whenever you have it." / "Thanks, got it — I'll pass this on to Sandeep.").
+- Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
 
 For EACH numbered item, decide if it's now resolved — ONLY if they clearly addressed THAT item (said it's done / gave its final status). Give a one-line outcome for resolved items.
 
@@ -141,12 +161,13 @@ Reply with ONLY this JSON, nothing else:
     const parsed: any = this.parseJson(raw) || {};
     // Never let a reply go out addressing the contact by the owner's name (BEA-899).
     let replyText = fixOwnerVocative((parsed.reply || '').trim(), 'Sandeep', name);
+    const lastInBody = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
 
-    // Safety net (BEA-902): never leave a contact on read on their FIRST reply. If the agent chose
-    // to stay quiet but it has NEVER replied to this contact and their latest message is a bare
-    // affirmation ("yes/ok/sure/done…"), send a short acknowledgment instead of nothing.
-    if ((parsed.send === false || !replyText) && needsFirstAck(messages)) {
-      replyText = `Great, thanks ${name}! I'll wait for the update whenever you have it.`;
+    // Reliability backstop (BEA-923): the owner wants every reply acknowledged — never leave a
+    // contact on read. If the model still returned nothing but the contact wrote last, send a short
+    // context-aware ack. The identical-reply suppression below keeps repeated acks from spamming.
+    if ((parsed.send === false || !replyText) && needsAck(messages)) {
+      replyText = ackLine(name.split(/\s+/)[0] || name, lastInBody);
       parsed.send = true;
     }
 
@@ -167,8 +188,7 @@ Reply with ONLY this JSON, nothing else:
     // The agent couldn't answer → flag the contact's reminders ("needs you") AND WhatsApp Sandeep. (BEA-766/767)
     if (parsed.needsSandeep) {
       await this.prisma.reminder.updateMany({ where: { contactId, status: 'active' }, data: { needsOwner: true } }).catch(() => undefined);
-      const lastIn = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
-      await this.notifyOwner(name, lastIn);
+      await this.notifyOwner(name, lastInBody);
       this.log.log(`agent: flagged contact ${contactId} — needs Sandeep`);
     } else {
       // The agent handled this exchange without getting stuck — clear any prior "needs you" flag so

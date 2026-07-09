@@ -42,10 +42,18 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     expect(state.flagged).toMatchObject({ needsOwner: false }); // prior flag cleared, not left stuck
   });
 
-  it('stays quiet when the agent decides not to reply (send:false)', async () => {
-    const { svc, state } = setup('{"send":false,"reply":"","items":[]}');
+  it('acknowledges even when the model returns send:false — never leaves them on read (BEA-923)', async () => {
+    const { svc, state } = setup('{"send":false,"reply":"","items":[]}'); // contact wrote last ("update")
     await svc.onContactReply('c1');
-    expect(state.sent).toBe(0);
+    expect(state.sent).toBe(1); // a brief ack still goes out
+    expect(state.out[0].body).toBe('Great, thanks Srikar!');
+  });
+
+  it('stays quiet only when the agent already replied after them (BEA-923)', async () => {
+    const messages = [{ direction: 'in', body: 'ok' }, { direction: 'out', body: 'Great, thanks!' }];
+    const { svc, state } = setup('{"send":false,"reply":"","items":[]}', { messages });
+    await svc.onContactReply('c1');
+    expect(state.sent).toBe(0); // nothing new from the contact → no double-ack
     expect(state.out).toHaveLength(0);
   });
 
