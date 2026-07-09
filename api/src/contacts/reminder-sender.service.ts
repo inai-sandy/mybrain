@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
-import { REMINDER_TZ_OFFSET } from './reminders.service';
+import { REMINDER_TZ_OFFSET, topicFromMessage } from './reminders.service';
 
 /** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
 export function joinSubjects(subjects: string[]): string {
@@ -54,9 +54,7 @@ export class ReminderSenderService implements OnModuleInit {
       const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true } }).catch(() => null);
       if (t?.title?.trim()) return t.title.trim();
     }
-    const msg = (r.message || '').trim();
-    if (msg) return msg.length > 60 ? msg.slice(0, 57) + '…' : msg;
-    return 'this';
+    return topicFromMessage(r.message);
   }
 
   /** One-day lifecycle: at each new local day, auto-pause reminders armed on an earlier day so

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
-import { RemindersService } from './reminders.service';
+import { RemindersService, topicFromMessage } from './reminders.service';
 
 /**
  * Safety net (BEA-899): the reply is SENT TO the contact, so it must never address them by the
@@ -85,7 +85,7 @@ export class ReminderAgentService {
       const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true } }).catch(() => null);
       if (t?.title?.trim()) return t.title.trim();
     }
-    return (r.message || 'this').trim();
+    return topicFromMessage(r.message);
   }
 
   private parseJson(raw: string): any {

@@ -1,4 +1,4 @@
-import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes } from './reminders.service';
+import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes, topicFromMessage } from './reminders.service';
 
 describe('update() reschedule (BEA-883)', () => {
   const todayIST = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
@@ -468,5 +468,24 @@ describe('conversations unread + markRead (BEA-922)', () => {
     expect(await svc.markRead('k1')).toEqual({ ok: true });
     expect(updated.id).toBe('k1');
     expect(updated.lastReadAt instanceof Date).toBe(true);
+  });
+});
+
+describe('topicFromMessage — clean nudge subject from a blank-subject message (BEA-924)', () => {
+  it('strips a greeting + lead-in to the core topic', () => {
+    expect(topicFromMessage('Hi Deepthi, can you please update me on the status of the PCB samples')).toBe('the status of the PCB samples');
+    expect(topicFromMessage('Hello Raja - please share the install videos')).toBe('the install videos');
+    expect(topicFromMessage('Hey Swathi, could you confirm the salary expectations')).toBe('the salary expectations');
+  });
+  it('leaves an already-clean topic alone', () => {
+    expect(topicFromMessage('the socket pins report')).toBe('the socket pins report');
+  });
+  it('takes only the first clause and caps length', () => {
+    expect(topicFromMessage('the Q3 order. Also ping me about pricing')).toBe('the Q3 order');
+    expect(topicFromMessage('x'.repeat(80)).endsWith('…')).toBe(true);
+  });
+  it('never returns empty', () => {
+    expect(topicFromMessage('')).toBe('this');
+    expect(topicFromMessage('Hi Deepthi,')).toBe('this');
   });
 });

@@ -51,6 +51,26 @@ export function spreadTimes(count: number): string[] {
 }
 
 /**
+ * Turn a full reminder message into a SHORT topic that reads cleanly in
+ * "…following up about ___" — strip a leading greeting ("Hi Deepthi,"), common
+ * lead-ins ("can you please update me on"), keep the core noun phrase, cap length.
+ * The safe fallback for when no subject was given, so we never dump the whole
+ * message into the nudge. (BEA-924)
+ */
+export function topicFromMessage(msg?: string | null): string {
+  let s = (msg || '').trim();
+  if (!s) return 'this';
+  s = s.replace(/^(hi|hello|hey|dear)\b[^,–—-]*[,–—-]\s*/i, ''); // "Hi Deepthi, " / "Hello X - "
+  s = s.replace(/^(can|could|would|will)\s+you(\s+please|\s+kindly)?\s+/i, '');
+  s = s.replace(/^(please|kindly|just)\s+/i, '');
+  s = s.replace(/^(update me on|update me about|let me know( about| on)?|share|send( me)?|give me|check on|confirm|provide( me)?( with)?)\s+/i, '');
+  s = s.split(/[.\n?!]/)[0].trim(); // first clause only
+  s = s.replace(/[?.!,;:]+$/, '').trim();
+  if (!s) return 'this';
+  return s.length > 60 ? s.slice(0, 57).trim() + '…' : s;
+}
+
+/**
  * Clean a user-chosen list of "HH:MM" send times: keep only valid 24h times,
  * zero-pad, de-duplicate, sort ascending, cap at 5. Returns [] if none valid
  * (caller then falls back to spreadTimes). (BEA-755)
@@ -562,7 +582,8 @@ export class RemindersService {
     const startDay = /^\d{4}-\d{2}-\d{2}$/.test(input.startDay || '') && (input.startDay as string) > this.todayKey() ? input.startDay : undefined;
     // Clean a command-like subject ("Ask Srikar to …") into a topic ("the …") so the
     // nudge reads "a gentle reminder about the …", not "about Ask Srikar to …". (BEA-754)
-    const subject = (await this.cleanSubject(input.subject, contact.name)) || null;
+    // When left blank, derive a short topic FROM the message instead of dumping it. (BEA-924)
+    const subject = (await this.cleanSubject(input.subject, contact.name)) || topicFromMessage(input.message);
     const r = await this.prisma.reminder.create({
       data: {
         contactId: input.contactId,
@@ -590,7 +611,7 @@ export class RemindersService {
     const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
-    if (patch.subject !== undefined) data.subject = (await this.cleanSubject(patch.subject, cur.contact?.name)) || null;
+    if (patch.subject !== undefined) data.subject = (await this.cleanSubject(patch.subject, cur.contact?.name)) || topicFromMessage(patch.message ?? cur.message);
     if (patch.notes !== undefined) data.notes = patch.notes?.trim() || null;
     if (patch.message !== undefined) {
       if (!patch.message.trim()) throw new BadRequestException('The message cannot be empty');
