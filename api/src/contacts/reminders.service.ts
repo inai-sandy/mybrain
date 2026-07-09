@@ -427,6 +427,74 @@ export class RemindersService {
     return { reminders: rows.map((r) => ({ ...this.shape(r), task: r.taskId ? taskMap.get(r.taskId) || null : null })) };
   }
 
+  /**
+   * WhatsApp-style conversation list (BEA-921): one row per contact who has a thread or a reminder,
+   * newest message on top, with the last message preview + a representative reminder to open the chat.
+   */
+  async conversations() {
+    const [messages, reminders] = await Promise.all([
+      this.prisma.reminderMessage.findMany({
+        where: { contactId: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        select: { contactId: true, body: true, direction: true, createdAt: true },
+      }),
+      this.prisma.reminder.findMany({
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, contactId: true, status: true, times: true, needsOwner: true },
+      }),
+    ]);
+
+    // Latest message per contact (messages are newest-first, so the first hit wins).
+    const lastByContact = new Map<string, { body: string; direction: string; createdAt: Date }>();
+    for (const m of messages) if (m.contactId && !lastByContact.has(m.contactId)) lastByContact.set(m.contactId, m as any);
+
+    // Per contact: a representative reminder (prefer an active one), active count, times, needs-you.
+    const remByContact = new Map<string, { reminderId: string; times: string; activeCount: number; needsOwner: boolean }>();
+    for (const r of reminders) {
+      if (!r.contactId) continue;
+      const cur = remByContact.get(r.contactId);
+      const active = r.status === 'active';
+      if (!cur) {
+        remByContact.set(r.contactId, { reminderId: r.id, times: r.times, activeCount: active ? 1 : 0, needsOwner: active && !!r.needsOwner });
+      } else {
+        if (active) {
+          cur.activeCount += 1;
+          if (r.needsOwner) cur.needsOwner = true;
+          // Prefer an active reminder as the one the chat opens against (for manual sends).
+          if (!cur.reminderId) cur.reminderId = r.id;
+        }
+      }
+    }
+
+    const ids = new Set<string>([...lastByContact.keys(), ...remByContact.keys()]);
+    const contacts = ids.size
+      ? await this.prisma.contact.findMany({ where: { id: { in: [...ids] } }, select: { id: true, name: true, whatsappNumber: true } })
+      : [];
+    const cmap = new Map(contacts.map((c) => [c.id, c]));
+
+    const rows = [...ids]
+      .map((id) => {
+        const c = cmap.get(id);
+        const last = lastByContact.get(id);
+        const rem = remByContact.get(id);
+        return {
+          contactId: id,
+          name: c?.name || 'Contact',
+          whatsappNumber: c?.whatsappNumber || null,
+          lastMessage: last ? { body: last.body, direction: last.direction, at: last.createdAt } : null,
+          lastAt: last?.createdAt || null,
+          reminderId: rem?.reminderId || null,
+          times: rem ? this.parse(rem.times) : [],
+          activeReminderCount: rem?.activeCount || 0,
+          needsOwner: rem?.needsOwner || false,
+        };
+      })
+      .filter((r) => r.reminderId); // need a reminder to open the chat against
+
+    rows.sort((a, b) => (b.lastAt ? new Date(b.lastAt).getTime() : 0) - (a.lastAt ? new Date(a.lastAt).getTime() : 0));
+    return { conversations: rows };
+  }
+
   /** The user's local day key (YYYY-MM-DD) — reminders live for exactly one such day. (BEA-764) */
   todayKey(): string {
     return new Date(Date.now() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);

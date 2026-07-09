@@ -404,3 +404,30 @@ describe('resendTemplate (BEA-917)', () => {
     expect(created[0].body).toContain('following up on behalf of Sandeep about the update');
   });
 });
+
+describe('conversations (BEA-921)', () => {
+  it('lists contacts newest-message-first with last message + a representative reminder', async () => {
+    const now = Date.now();
+    const prisma: any = {
+      reminderMessage: {
+        findMany: async () => [
+          { contactId: 'k2', body: 'latest from k2', direction: 'in', createdAt: new Date(now) },
+          { contactId: 'k1', body: 'older from k1', direction: 'out', createdAt: new Date(now - 100000) },
+        ],
+      },
+      reminder: {
+        findMany: async () => [
+          { id: 'r1', contactId: 'k1', status: 'active', times: '["09:00"]', needsOwner: false },
+          { id: 'r2', contactId: 'k2', status: 'active', times: '["10:00"]', needsOwner: true },
+        ],
+      },
+      contact: { findMany: async () => [{ id: 'k1', name: 'Alpha', whatsappNumber: '91' }, { id: 'k2', name: 'Beta', whatsappNumber: '92' }] },
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, {} as any);
+    const { conversations } = await svc.conversations();
+    expect(conversations.map((c: any) => c.name)).toEqual(['Beta', 'Alpha']); // newest message on top
+    expect(conversations[0]).toMatchObject({ contactId: 'k2', reminderId: 'r2', needsOwner: true, activeReminderCount: 1 });
+    expect(conversations[0].lastMessage).toMatchObject({ body: 'latest from k2', direction: 'in' });
+    expect(conversations[1].times).toEqual(['09:00']); // parsed from JSON
+  });
+});

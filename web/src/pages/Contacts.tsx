@@ -6,6 +6,20 @@ import { useToast } from '../ui/Toast';
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
 type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
 
+/** One row in the WhatsApp-style conversation inbox (BEA-921). */
+type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsOwner: boolean };
+
+/** Short "when" for a conversation row: time today, weekday this week, else date. */
+function fmtRel(s?: string | null): string {
+  if (!s) return '';
+  const d = new Date(s), now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  const days = Math.floor((now.getTime() - d.getTime()) / 86400000);
+  if (days < 7) return d.toLocaleDateString(undefined, { weekday: 'short' });
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
 /** Today's date key in IST (matches the reminder engine). */
 const todayIstKey = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
 /** A reminder is scheduled for a FUTURE day (BEA-881/876). */
@@ -380,7 +394,9 @@ function RemindersTab() {
   const [editing, setEditing] = useState<Reminder | null>(null);
   const [prefill, setPrefill] = useState<{ contactId: string; contactName: string; message: string; taskId?: string; subject?: string } | null>(null);
   const [addNumberFor, setAddNumberFor] = useState<string | null>(null);
-  const [openThread, setOpenThread] = useState<string | null>(null);
+  const [chatReminder, setChatReminder] = useState<Reminder | null>(null);
+  const [view, setView] = useState<'chats' | 'manage'>('chats'); // conversations-first (BEA-921)
+  const [convos, setConvos] = useState<Conversation[] | null>(null);
   const [drafting, setDrafting] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
 
@@ -393,11 +409,20 @@ function RemindersTab() {
     } catch { toast('error', 'Could not scan tasks'); } finally { setScanning(false); }
   }
 
+  function loadConvos() {
+    fetch('/api/reminders/conversations').then((r) => r.json()).then((d) => setConvos(d.conversations || [])).catch(() => setConvos([]));
+  }
   function load() {
     fetch('/api/reminders').then((r) => r.json()).then((d) => setReminders(d.reminders || [])).catch(() => setReminders([]));
     fetch('/api/reminders/suggestions').then((r) => r.json()).then((d) => setSuggestions((d.suggestions || []).filter((s: Suggestion) => !s.hasActiveReminder))).catch(() => setSuggestions([]));
+    loadConvos();
   }
   useEffect(() => { load(); }, []);
+
+  /** Open the full chat for a conversation — build a minimal reminder to drive ReminderChat. */
+  function openConversation(c: Conversation) {
+    setChatReminder({ id: c.reminderId, contactId: c.contactId, taskId: null, subject: null, message: '', notes: null, count: 0, times: c.times || [], status: 'active', contact: { id: c.contactId, name: c.name, whatsappNumber: c.whatsappNumber, notes: null, tags: [] } });
+  }
 
   async function act(id: string, kind: 'pause' | 'resume' | 'delete') {
     if (kind === 'delete' && !window.confirm('Delete this reminder?')) return;
@@ -447,6 +472,41 @@ function RemindersTab() {
 
   return (
     <div className="space-y-4">
+      {/* Chats (conversations-first) | Reminders (management) — BEA-921 */}
+      <div className="flex items-center gap-1 rounded-xl bg-zinc-100 p-1 text-sm dark:bg-zinc-800/60">
+        {(['chats', 'manage'] as const).map((v) => (
+          <button key={v} onClick={() => setView(v)} className={'flex-1 rounded-lg px-3 py-1.5 font-medium transition-colors ' + (view === v ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300')}>
+            {v === 'chats' ? 'Chats' : 'Reminders'}
+          </button>
+        ))}
+      </div>
+
+      {view === 'chats' &&
+        (convos === null ? (
+          <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+        ) : convos.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No conversations yet. Create a reminder — your WhatsApp chats show up here, newest reply on top.</div>
+        ) : (
+          <ul className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
+            {convos.map((c) => (
+              <li key={c.contactId}>
+                <button onClick={() => openConversation(c)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{(c.name || '?').trim().charAt(0).toUpperCase()}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium">{c.name}</span>
+                      {c.needsOwner && <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+                      <span className="ml-auto shrink-0 text-[11px] text-zinc-400">{fmtRel(c.lastAt)}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-sm text-zinc-500 dark:text-zinc-400">{c.lastMessage ? (c.lastMessage.direction === 'out' ? 'You: ' : '') + c.lastMessage.body : c.activeReminderCount > 0 ? 'Reminder scheduled — no messages yet' : 'No messages yet'}</p>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
+
+      {view === 'manage' && (<>
       <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">WhatsApp sending is live — active reminders go out automatically at their scheduled times, and replies get handled for you. Open a reminder's 💬 to see the conversation.</p>
 
       <div className="flex items-center justify-between">
@@ -497,7 +557,7 @@ function RemindersTab() {
             return (
               <li key={rm.id} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="flex items-start gap-2">
-                  <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
+                  <button onClick={() => setChatReminder(rm)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
                       <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
@@ -510,7 +570,7 @@ function RemindersTab() {
                     </div>
                   </button>
                   <div className="flex shrink-0 items-center">
-                    <button onClick={() => setOpenThread(rm.id)} title="Open chat" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><MessageCircle className="h-4 w-4" /></button>
+                    <button onClick={() => setChatReminder(rm)} title="Open chat" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><MessageCircle className="h-4 w-4" /></button>
                     {(rm.status === 'active' || rm.status === 'paused') && <button onClick={() => { setEditing(rm); setShowForm(true); }} title="Edit" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
                     {rm.status === 'active' && <button onClick={() => act(rm.id, 'pause')} title="Pause" className="rounded-lg p-1.5 text-zinc-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-500/10"><Pause className="h-4 w-4" /></button>}
                     {rm.status === 'paused' && <button onClick={() => act(rm.id, 'resume')} title="Resume" className="rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><Play className="h-4 w-4" /></button>}
@@ -522,8 +582,9 @@ function RemindersTab() {
           })}
         </ul>
       )}
+      </>)}
       <button onClick={() => { setEditing(null); setPrefill(null); setShowForm(true); }} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"><Plus className="h-4 w-4" />New reminder</button>
-      {openThread && (() => { const r = reminders.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}
+      {chatReminder && <ReminderChat reminder={chatReminder} onClose={() => { setChatReminder(null); load(); }} />}
       {showForm && <NewReminderForm reminder={editing} prefill={prefill} onClose={() => { setShowForm(false); setPrefill(null); }} onSaved={() => { setShowForm(false); setPrefill(null); load(); }} />}
       {addNumberFor !== null && <ContactForm contact={null} initialName={addNumberFor} onClose={() => setAddNumberFor(null)} onSaved={() => { setAddNumberFor(null); load(); }} />}
     </div>

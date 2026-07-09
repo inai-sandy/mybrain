@@ -33,6 +33,12 @@ export class RemindersController {
     return this.reminders.suggestions();
   }
 
+  /** WhatsApp-style conversation list — newest reply on top (BEA-921). */
+  @Get('conversations')
+  conversations() {
+    return this.reminders.conversations();
+  }
+
   // Clear suggested reminders so they stop piling up (BEA-882).
   @Post('suggestions/dismiss')
   dismissSuggestion(@Body() body: { taskId?: string }) {
