@@ -1,0 +1,107 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { VoiceService } from '../voice/voice.service';
+import { EmoRouterService } from './emo-router.service';
+import { EmoAskService } from './emo-ask.service';
+import { EmoTalkService } from './emo-talk.service';
+
+/** Wrap raw 16-bit mono PCM in a minimal WAV container (what the transcriber + device speak). */
+export function wavWrap(pcm: Buffer, sampleRate = 16000, channels = 1): Buffer {
+  const byteRate = sampleRate * channels * 2;
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0);
+  h.writeUInt32LE(36 + pcm.length, 4);
+  h.write('WAVE', 8);
+  h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16); // PCM chunk size
+  h.writeUInt16LE(1, 20); // PCM format
+  h.writeUInt16LE(channels, 22);
+  h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(byteRate, 28);
+  h.writeUInt16LE(channels * 2, 32); // block align
+  h.writeUInt16LE(16, 34); // bits per sample
+  h.write('data', 36);
+  h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
+
+/** Linear-interpolation resample of 24 kHz 16-bit mono PCM down to 16 kHz (OpenAI TTS → device rate). */
+export function resample24to16(pcm24: Buffer): Buffer {
+  const inSamples = Math.floor(pcm24.length / 2);
+  const outSamples = Math.floor((inSamples * 2) / 3);
+  const out = Buffer.alloc(outSamples * 2);
+  for (let i = 0; i < outSamples; i++) {
+    const src = i * 1.5;
+    const i0 = Math.floor(src);
+    const frac = src - i0;
+    const s0 = pcm24.readInt16LE(i0 * 2);
+    const s1 = i0 + 1 < inSamples ? pcm24.readInt16LE((i0 + 1) * 2) : s0;
+    out.writeInt16LE(Math.round(s0 * (1 - frac) + s1 * frac), i * 2);
+  }
+  return out;
+}
+
+export type DeviceMode = 'capture' | 'ask' | 'story' | 'meeting' | 'research' | 'talk';
+const MODES: DeviceMode[] = ['capture', 'ask', 'story', 'meeting', 'research', 'talk'];
+
+export type DeviceTurn = {
+  ok: boolean;
+  mode: DeviceMode;
+  heard: string;
+  reply: string; // shown on the round display
+  say: string; // spoken through the speaker
+  cardId?: string;
+  conversationId?: string;
+};
+
+/**
+ * EMO hardware (BEA-926) — one streamed voice turn from the device:
+ * raw PCM in → transcribe → route per mode → short reply text + speakable sentence out.
+ */
+@Injectable()
+export class EmoDeviceService {
+  constructor(
+    private readonly voice: VoiceService,
+    private readonly router: EmoRouterService,
+    private readonly ask: EmoAskService,
+    private readonly talk: EmoTalkService,
+  ) {}
+
+  async turn(pcm: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number } = {}): Promise<DeviceTurn> {
+    if (!pcm?.length) throw new BadRequestException('No audio received');
+    const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
+    const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
+    const heard = (await this.voice.transcribe(wavWrap(pcm, sr), 'device-turn.wav', 'audio/wav')).trim();
+    if (!heard) {
+      return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
+    }
+
+    if (mode === 'ask') {
+      const r = await this.ask.ask({ question: heard, web: 'auto' });
+      if (r.mode === 'clarify') return { ok: true, mode, heard, reply: r.question, say: r.question };
+      const s = (r.summary || '').trim() || 'Done.';
+      return { ok: true, mode, heard, reply: s, say: s, cardId: r.cardId };
+    }
+
+    if (mode === 'talk') {
+      const r = await this.talk.talk({ message: heard, conversationId: opts.conversationId || undefined, web: 'auto' });
+      const s = (r.reply || '').trim() || 'Okay.';
+      return { ok: true, mode, heard, reply: s, say: s.slice(0, 600), conversationId: r.conversationId };
+    }
+
+    // capture routes freely; story/meeting/research force their lane
+    const lane = mode === 'capture' ? undefined : mode;
+    const { cards } = await this.router.route(heard, { source: 'emo-device', lane: lane as any });
+    const n = cards?.length || 0;
+    const first = n ? String((cards[0] as any)?.summary || '').trim() : '';
+    const reply = n ? cards.map((c: any) => `• ${c.summary || ''}`).join('\n') : 'Nothing captured.';
+    const say = n === 0 ? 'Hmm, nothing captured. Try again.' : n === 1 ? `Got it. ${first}` : `Got it — saved ${n} cards.`;
+    return { ok: n > 0, mode, heard, reply, say, cardId: n ? (cards[0] as any).id : undefined };
+  }
+
+  /** Speech for the device: 16 kHz mono WAV (its codec plays raw PCM — no decoder onboard). */
+  async ttsWav16k(text: string, voice?: string): Promise<Buffer | null> {
+    const pcm24 = await this.voice.ttsPcm(text, voice);
+    if (!pcm24?.length) return null;
+    return wavWrap(resample24to16(pcm24), 16000);
+  }
+}

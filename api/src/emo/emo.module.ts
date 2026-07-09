@@ -20,13 +20,14 @@ import { EmoTalkService } from './emo-talk.service';
 import { EmoSettingsService } from './emo-settings.service';
 import { ExploreModule } from '../explore/explore.module';
 import { MemoryModule } from '../memory/memory.module';
+import { EmoDeviceService } from './emo-device.service';
 import { EmoController } from './emo.controller';
 
 /** EMO — Voice → Cards. Storage/feed/router/capture + lanes: Search, Tasks, Reminders, Story, Meetings, Research. */
 @Module({
   imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule],
   controllers: [EmoController],
-  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService],
+  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
   exports: [EmoCardsService, EmoRouterService],
 })
 export class EmoModule {}
