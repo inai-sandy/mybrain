@@ -17,10 +17,18 @@ type Card = {
   day: string; rawTranscript?: string | null; audioPath?: string | null; error?: string | null; createdAt: string;
 };
 
-const LANE: Record<string, { icon: string; label: string }> = {
-  search: { icon: '🔎', label: 'Search' }, story: { icon: '🎙', label: 'Story' }, reminder: { icon: '⏰', label: 'Reminder' },
-  task: { icon: '✅', label: 'Task' }, meeting: { icon: '🎧', label: 'Meeting' }, research: { icon: '🧪', label: 'Research' }, note: { icon: '📝', label: 'Note' },
+// Each lane gets a colour (a left bar + tinted icon chip) so the feed is scannable by type. (BEA-940)
+type LaneStyle = { icon: string; label: string; bar: string; chip: string };
+const LANE: Record<string, LaneStyle> = {
+  search: { icon: '🔎', label: 'Search', bar: 'bg-sky-400', chip: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' },
+  story: { icon: '🎙', label: 'Story', bar: 'bg-violet-400', chip: 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300' },
+  reminder: { icon: '⏰', label: 'Reminder', bar: 'bg-amber-400', chip: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' },
+  task: { icon: '✅', label: 'Task', bar: 'bg-emerald-400', chip: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
+  meeting: { icon: '🎧', label: 'Meeting', bar: 'bg-teal-400', chip: 'bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300' },
+  research: { icon: '🧪', label: 'Research', bar: 'bg-indigo-400', chip: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300' },
+  note: { icon: '📝', label: 'Note', bar: 'bg-slate-400', chip: 'bg-slate-100 text-slate-600 dark:bg-slate-500/15 dark:text-slate-300' },
 };
+const LANE_FALLBACK = (k: string): LaneStyle => ({ icon: '•', label: k, bar: 'bg-zinc-400', chip: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' });
 const STATUS: Record<string, { label: string; cls: string }> = {
   done: { label: 'Done', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
   cooking: { label: 'Cooking', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' },
@@ -150,12 +158,16 @@ export default function Emo() {
     return list.filter((c) => [c.summary, c.title, c.rawTranscript, c.detail].some((s) => (s || '').toLowerCase().includes(term)));
   }, [cards, q]);
 
+  // Attention strip: Needs-you + Cooking float to the top (only when not already filtering by status). (BEA-940)
+  const attention = useMemo(() => (status ? [] : filtered.filter((c) => c.status === 'needs_you' || c.status === 'cooking')), [filtered, status]);
+  const attnIds = useMemo(() => new Set(attention.map((c) => c.id)), [attention]);
+
   // group by day (newest first), and inside Today split out Story = "Today's Captures"
   const groups = useMemo(() => {
     const byDay = new Map<string, Card[]>();
-    for (const c of filtered) { (byDay.get(c.day) || byDay.set(c.day, []).get(c.day)!).push(c); }
+    for (const c of filtered) { if (attnIds.has(c.id)) continue; (byDay.get(c.day) || byDay.set(c.day, []).get(c.day)!).push(c); }
     return [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [filtered]);
+  }, [filtered, attnIds]);
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -223,6 +235,12 @@ export default function Emo() {
         </div>
       ) : (
         <>
+        {attention.length > 0 && (
+          <div className="mb-4 space-y-1.5 rounded-2xl border border-rose-200 bg-rose-50/40 p-3 dark:border-rose-500/20 dark:bg-rose-500/[0.04]">
+            <h2 className="px-0.5 text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-300">⚡ Needs your attention</h2>
+            {attention.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
+          </div>
+        )}
         <div className="space-y-6">
           {groups.map(([day, dayCards]) => {
             const captures = day === istToday() ? dayCards.filter((c) => c.lane === 'story') : [];
@@ -259,14 +277,28 @@ export default function Emo() {
 }
 
 function CardRow({ c, onOpen }: { c: Card; onOpen: () => void }) {
-  const lane = LANE[c.lane] || { icon: '•', label: c.lane };
-  const st = STATUS[c.status] || { label: c.status, cls: 'bg-zinc-100 text-zinc-600' };
+  const lane = LANE[c.lane] || LANE_FALLBACK(c.lane);
+  const needs = c.status === 'needs_you';
+  const cooking = c.status === 'cooking';
+  // Done cards look calm (no badge); only Needs-you / Cooking carry a status pill. (BEA-940)
   return (
-    <button onClick={onOpen} className="flex w-full items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left transition hover:border-emerald-500/40 dark:border-zinc-800 dark:bg-zinc-900">
-      <span className="text-lg" title={lane.label}>{lane.icon}</span>
-      <span className="min-w-0 flex-1 truncate text-sm">{c.summary || c.title || <span className="text-zinc-400">Untitled</span>}</span>
-      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${st.cls}`}>{st.label}</span>
-      <span className="shrink-0 text-[11px] text-zinc-400">{hhmm(c.createdAt)}</span>
+    <button
+      onClick={onOpen}
+      className={`flex w-full items-stretch overflow-hidden rounded-xl border text-left transition hover:border-emerald-500/40 ${needs ? 'border-rose-300 bg-rose-50/50 dark:border-rose-500/30 dark:bg-rose-500/5' : 'border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900'}`}
+    >
+      <span className={`w-1 shrink-0 ${needs ? 'bg-rose-400' : lane.bar}`} aria-hidden />
+      <span className="flex min-w-0 flex-1 items-start gap-3 px-3 py-3">
+        <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-base ${lane.chip}`} title={lane.label}>{lane.icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm leading-snug line-clamp-2">{c.summary || c.title || <span className="text-zinc-400">Untitled</span>}</span>
+          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400">
+            <span className="font-medium text-zinc-500 dark:text-zinc-400">{lane.label}</span>
+            <span>· {hhmm(c.createdAt)}</span>
+            {needs && <span className="rounded-full bg-rose-500/15 px-1.5 py-0.5 font-semibold text-rose-600 dark:text-rose-300">Needs you</span>}
+            {cooking && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 font-semibold text-amber-600 dark:text-amber-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />Cooking</span>}
+          </span>
+        </span>
+      </span>
     </button>
   );
 }
@@ -274,7 +306,7 @@ function CardRow({ c, onOpen }: { c: Card; onOpen: () => void }) {
 function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => void; onChanged: () => void }) {
   const toast = useToast();
   const navigate = useNavigate();
-  const lane = LANE[card.lane] || { icon: '•', label: card.lane };
+  const lane = LANE[card.lane] || LANE_FALLBACK(card.lane);
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
