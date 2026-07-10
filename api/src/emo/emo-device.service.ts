@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { VoiceService } from '../voice/voice.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
@@ -70,7 +72,10 @@ export class EmoDeviceService {
     if (!pcm?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
-    const heard = (await this.voice.transcribe(wavWrap(pcm, sr), 'device-turn.wav', 'audio/wav')).trim();
+    const wav = wavWrap(pcm, sr);
+    let audioPath: string | undefined;
+    try { audioPath = this.saveRecording(wav); } catch { /* keep the turn alive without audio */ }
+    const heard = (await this.voice.transcribe(wav, 'device-turn.wav', 'audio/wav')).trim();
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
     }
@@ -90,12 +95,35 @@ export class EmoDeviceService {
 
     // capture routes freely; story/meeting/research force their lane
     const lane = mode === 'capture' ? undefined : mode;
-    const { cards } = await this.router.route(heard, { source: 'emo-device', lane: lane as any });
+    const { cards } = await this.router.route(heard, { source: 'emo-device', lane: lane as any, audioPath });
     const n = cards?.length || 0;
     const first = n ? String((cards[0] as any)?.summary || '').trim() : '';
     const reply = n ? cards.map((c: any) => `• ${c.summary || ''}`).join('\n') : 'Nothing captured.';
     const say = n === 0 ? 'Hmm, nothing captured. Try again.' : n === 1 ? `Got it. ${first}` : `Got it — saved ${n} cards.`;
     return { ok: n > 0, mode, heard, reply, say, cardId: n ? (cards[0] as any).id : undefined };
+  }
+
+  /** Save the device recording so the owner can LISTEN to what EMO heard (BEA-927). Keeps newest 50. */
+  private saveRecording(wav: Buffer): string {
+    const dir = process.env.EMO_DEVICE_AUDIO_DIR || '/app/data/emo/recordings';
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `turn-${Date.now()}.wav`;
+    fs.writeFileSync(path.join(dir, name), wav);
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.wav')).sort();
+    while (files.length > 50) {
+      const old = files.shift();
+      if (old) fs.unlinkSync(path.join(dir, old));
+    }
+    return name;
+  }
+
+  /** Read a kept recording by its stored name (path-traversal safe). */
+  readAudio(name: string): Buffer | null {
+    const safe = path.basename(name || '');
+    if (!safe.endsWith('.wav')) return null;
+    const dir = process.env.EMO_DEVICE_AUDIO_DIR || '/app/data/emo/recordings';
+    const p = path.join(dir, safe);
+    try { return fs.readFileSync(p); } catch { return null; }
   }
 
   /** Speech for the device: 16 kHz mono WAV (its codec plays raw PCM — no decoder onboard). */

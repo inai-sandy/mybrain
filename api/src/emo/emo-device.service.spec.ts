@@ -1,4 +1,9 @@
 import { EmoDeviceService, wavWrap, resample24to16 } from './emo-device.service';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+process.env.EMO_DEVICE_AUDIO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-audio-'));
 
 describe('EmoDeviceService (BEA-926)', () => {
   const voice: any = {
@@ -45,7 +50,7 @@ describe('EmoDeviceService (BEA-926)', () => {
   it('capture mode routes the transcript and answers with a confirmation', async () => {
     const r = await svc.turn(pcm, { mode: 'capture' });
     expect(voice.transcribe).toHaveBeenCalled();
-    expect(router.route).toHaveBeenCalledWith('call the supplier tomorrow', { source: 'emo-device', lane: undefined });
+    expect(router.route).toHaveBeenCalledWith('call the supplier tomorrow', { source: 'emo-device', lane: undefined, audioPath: expect.stringMatching(/^turn-.*\.wav$/) });
     expect(r.ok).toBe(true);
     expect(r.say).toContain('Got it');
     expect(r.cardId).toBe('c1');
@@ -53,7 +58,18 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('story mode forces the story lane', async () => {
     await svc.turn(pcm, { mode: 'story' });
-    expect(router.route).toHaveBeenCalledWith(expect.any(String), { source: 'emo-device', lane: 'story' });
+    expect(router.route).toHaveBeenCalledWith(expect.any(String), { source: 'emo-device', lane: 'story', audioPath: expect.any(String) });
+  });
+
+  it('keeps the recording on disk and reads it back safely', async () => {
+    await svc.turn(pcm, { mode: 'capture' });
+    const dir = process.env.EMO_DEVICE_AUDIO_DIR!;
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.wav'));
+    expect(files.length).toBeGreaterThan(0);
+    const buf = svc.readAudio(files[0]);
+    expect(buf).not.toBeNull();
+    expect(buf!.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(svc.readAudio('../../etc/passwd')).toBeNull(); // traversal-safe
   });
 
   it('unknown mode falls back to capture', async () => {
