@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const OpusScript = require('opusscript');
 import * as fs from 'fs';
 import * as path from 'path';
 import { VoiceService } from '../voice/voice.service';
@@ -42,6 +44,45 @@ export function resample24to16(pcm24: Buffer): Buffer {
   return out;
 }
 
+/** Length-prefixed raw Opus packets (2-byte LE per frame) -> 16k mono PCM. */
+export function decodeOpusStream(body: Buffer): Buffer {
+  const opus = new OpusScript(16000, 1, OpusScript.Application.VOIP);
+  const parts: Buffer[] = [];
+  let off = 0;
+  while (off + 2 <= body.length) {
+    const len = body.readUInt16LE(off);
+    off += 2;
+    if (!len || off + len > body.length) break;
+    try {
+      parts.push(Buffer.from(opus.decode(body.subarray(off, off + len))));
+    } catch { /* skip a bad frame rather than losing the turn */ }
+    off += len;
+  }
+  try { opus.delete(); } catch { /* wasm cleanup */ }
+  return Buffer.concat(parts);
+}
+
+/** Peak-normalize 16-bit PCM toward -3 dBFS (gain capped at 8x) — device mics run quiet. */
+export function normalizePcm(pcm: Buffer): Buffer {
+  const n = Math.floor(pcm.length / 2);
+  let peak = 1;
+  for (let i = 0; i < n; i++) {
+    const v = Math.abs(pcm.readInt16LE(i * 2));
+    if (v > peak) peak = v;
+  }
+  let gain = (32767 * 0.7) / peak;
+  if (gain > 8) gain = 8;
+  if (gain <= 1.05) return pcm;
+  const out = Buffer.alloc(pcm.length);
+  for (let i = 0; i < n; i++) {
+    let v = Math.round(pcm.readInt16LE(i * 2) * gain);
+    if (v > 32767) v = 32767;
+    if (v < -32768) v = -32768;
+    out.writeInt16LE(v, i * 2);
+  }
+  return out;
+}
+
 export type DeviceMode = 'capture' | 'ask' | 'story' | 'meeting' | 'research' | 'talk';
 const MODES: DeviceMode[] = ['capture', 'ask', 'story', 'meeting', 'research', 'talk'];
 
@@ -68,14 +109,17 @@ export class EmoDeviceService {
     private readonly talk: EmoTalkService,
   ) {}
 
-  async turn(pcm: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number } = {}): Promise<DeviceTurn> {
-    if (!pcm?.length) throw new BadRequestException('No audio received');
+  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string } = {}): Promise<DeviceTurn> {
+    if (!body?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
+    let pcm = opts.codec === 'opus' ? decodeOpusStream(body) : body;
+    if (!pcm.length) throw new BadRequestException('Could not decode the audio');
+    pcm = normalizePcm(pcm);
     const wav = wavWrap(pcm, sr);
     let audioPath: string | undefined;
     try { audioPath = this.saveRecording(wav); } catch { /* keep the turn alive without audio */ }
-    const heard = (await this.voice.transcribe(wav, 'device-turn.wav', 'audio/wav')).trim();
+    const heard = (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
     }
