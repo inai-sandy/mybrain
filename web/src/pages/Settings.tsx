@@ -1448,12 +1448,13 @@ function EmoSettingsSection() {
   const [brain, setBrain] = useState('');
   const [talk, setTalk] = useState('');
   const [search, setSearch] = useState('auto');
+  const [devVol, setDevVol] = useState(60);
   useEffect(() => {
     fetch('/api/auth/device-token').then((r) => r.json()).then((d) => setToken(d.token || '')).catch(() => undefined);
     fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setTtsVoice(d.voice || 'nova'); setTtsVoices(d.voices || []); }).catch(() => undefined);
     fetch('/api/voice/config').then((r) => r.json()).then((d) => { setEars(d.engine || ''); setEarsEngines(d.engines || []); }).catch(() => undefined);
     fetch('/api/explore/model').then((r) => r.json()).then((d) => setBrain(d.model || '')).catch(() => undefined);
-    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setSearch(d.searchDefault || 'auto'); }).catch(() => undefined);
+    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setSearch(d.searchDefault || 'auto'); setDevVol(typeof d.deviceVolume === 'number' ? d.deviceVolume : 60); }).catch(() => undefined);
   }, []);
   async function regen() {
     if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
@@ -1540,6 +1541,20 @@ function EmoSettingsSection() {
         <select value={talk} onChange={(e) => pickTalk(e.target.value)} className={sel}>
           {talkOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+      </AccordionCard>
+
+      <AccordionCard title="Device speaker volume" icon={Mic}>
+        <p className="mb-3 text-sm text-zinc-500">How loud the EMO device speaks (chimes, acks and replies). The device picks this up on its next restart.</p>
+        <div className="flex items-center gap-3">
+          <input
+            type="range" min={0} max={100} step={5} value={devVol}
+            onChange={(e) => setDevVol(Number(e.target.value))}
+            onMouseUp={async () => { await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceVolume: devVol }) }).catch(() => undefined); toast('success', `Device volume: ${devVol}%`); }}
+            onTouchEnd={async () => { await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceVolume: devVol }) }).catch(() => undefined); toast('success', `Device volume: ${devVol}%`); }}
+            className="w-full max-w-[20rem] accent-emerald-500"
+          />
+          <span className="w-12 text-sm tabular-nums text-zinc-500">{devVol}%</span>
+        </div>
       </AccordionCard>
 
       <AccordionCard title="Internet search" icon={Globe}>

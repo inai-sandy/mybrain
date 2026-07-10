@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { EmoCardsService, EmoLane } from './emo-cards.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
@@ -46,6 +47,7 @@ Reply with ONLY JSON, no prose:
 export class EmoRouterService {
   private readonly log = new Logger('EmoRouter');
   constructor(
+    private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly cards: EmoCardsService,
     private readonly search: EmoSearchService,
@@ -70,6 +72,13 @@ export class EmoRouterService {
   }
 
   /** Route a transcript into cards. `audioPath`/`source` are threaded onto every card (the receipt). */
+    /** Fast brain for routing — Haiku by default; overridable via `emo.router.model`. */
+  private async routerModel() {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'emo.router.model' } }).catch(() => null);
+    if (row) { try { const v = JSON.parse(row.value); if (v?.provider && v?.model) return v; } catch { /* default */ } }
+    return { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
+  }
+
   async route(transcript: string, opts: { audioPath?: string | null; source?: string; lane?: EmoLane } = {}): Promise<{ cards: any[] }> {
     const text = (transcript || '').trim();
     if (!text) return { cards: [] };
@@ -79,7 +88,8 @@ export class EmoRouterService {
       // Forced mode (Meeting/Research from the app) — exactly one card in that lane, no guessing.
       segments = [{ lane: opts.lane, summary: text.replace(/\s+/g, ' ').slice(0, 120), text }];
     } else {
-      const raw = await this.llm.complete(`${PROMPT}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
+      // Routing is a tiny classification job — a heavyweight default model made 5s captures take 15s+ (BEA-929).
+      const raw = await this.llm.completeWith(await this.routerModel(), `${PROMPT}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
       segments = this.parseSegments(raw, text);
       // Nothing is lost: if the router couldn't make sense of it, keep the whole thing as a note.
       if (!segments.length) {
