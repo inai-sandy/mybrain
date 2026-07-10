@@ -10,7 +10,7 @@ function makeCards() {
 }
 
 const prismaStub: any = { setting: { findUnique: jest.fn(async () => null) } };
-const searchStub: any = { clarify: jest.fn(async () => undefined) };
+const searchStub: any = { clarify: jest.fn(async () => undefined), run: jest.fn(async () => undefined) };
 const taskStub: any = { handle: jest.fn(async () => undefined) };
 const reminderStub: any = { handle: jest.fn(async () => undefined) };
 const meetingStub: any = { handle: jest.fn(async () => undefined) };
@@ -51,6 +51,18 @@ describe('EmoRouterService (BEA-863)', () => {
     expect(out.cards).toHaveLength(1);
     expect(created[0].lane).toBe('note');
     expect(created[0].rawTranscript).toBe('some rambling voice note'); // the whole thing kept
+  });
+
+  it('device search runs immediately — no clarify questions from the EMO device (BEA-938)', async () => {
+    const llm: any = { completeWith: async () => JSON.stringify({ segments: [
+      { lane: 'search', summary: 'Search: CCTV market', text: 'what do we have on the cctv market' },
+    ] }) };
+    searchStub.clarify.mockClear();
+    searchStub.run.mockClear();
+    const { svc } = makeCards();
+    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, reminderStub, meetingStub, researchStub).route('cctv market', { source: 'emo-device' });
+    expect(searchStub.run).toHaveBeenCalled();
+    expect(searchStub.clarify).not.toHaveBeenCalled();
   });
 
   it('returns nothing for an empty transcript', async () => {

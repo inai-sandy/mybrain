@@ -34,6 +34,13 @@ describe('EmoAskService (BEA-890)', () => {
     expect(r.summary).toBe('Short summary.'); // voice speaks the summary, not the detail
   });
 
+  it('direct mode (EMO device, BEA-938) never clarifies — answers immediately on the first turn', async () => {
+    const { svc, explore } = make({ clarify: 'Which project — trading or panels?' });
+    const r: any = await svc.ask({ question: 'what about Dharmendra', direct: true });
+    expect(r.mode).toBe('answer');
+    expect(explore.ask).toHaveBeenCalled();
+  });
+
   it('caps clarifying at 3 and then answers even if the model still wants to clarify', async () => {
     const { svc, explore } = make({ clarify: 'another?' });
     const history: any = [

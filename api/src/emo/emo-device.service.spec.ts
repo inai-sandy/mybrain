@@ -83,14 +83,14 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('ask mode returns the summary as the spoken reply', async () => {
     const r = await svc.turn(pcm, { mode: 'ask' });
-    expect(ask.ask).toHaveBeenCalledWith({ question: 'call the supplier tomorrow', web: 'auto' });
+    expect(ask.ask).toHaveBeenCalledWith({ question: 'call the supplier tomorrow', web: 'auto', direct: true }); // device never clarifies (938)
     expect(r.say).toBe('Short answer.');
     expect(r.cardId).toBe('a1');
   });
 
   it('talk mode carries the conversation id both ways', async () => {
     const r = await svc.turn(pcm, { mode: 'talk', conversationId: 'prev' });
-    expect(talk.talk).toHaveBeenCalledWith({ message: expect.any(String), conversationId: 'prev', web: 'auto' });
+    expect(talk.talk).toHaveBeenCalledWith({ message: expect.any(String), conversationId: 'prev', web: 'auto', noQuestions: true });
     expect(r.conversationId).toBe('t1');
     expect(r.say).toBe('Sure thing.');
   });

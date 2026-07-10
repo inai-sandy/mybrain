@@ -25,7 +25,7 @@ export class EmoAskService {
     private readonly cards: EmoCardsService,
   ) {}
 
-  async ask(input: { question: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto' }): Promise<AskResult> {
+  async ask(input: { question: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto'; direct?: boolean }): Promise<AskResult> {
     const history = (input.history || []).filter((t) => t && t.text && (t.role === 'user' || t.role === 'emo'));
     const userText = (input.question || '').trim();
     if (!userText && !history.length) return { mode: 'clarify', question: 'What would you like to know, Sandy?' };
@@ -44,7 +44,8 @@ export class EmoAskService {
       : '(nothing found yet)';
 
     // Always clarify at least once; after that only if still broad; hard cap at 3.
-    if (clarifyCount < 3) {
+    // `direct` (the EMO device) skips clarifying entirely — answer on the best guess.
+    if (clarifyCount < 3 && !input.direct) {
       const q = await this.decideClarify(convo + ctxBlock, topics, clarifyCount === 0);
       if (q) return { mode: 'clarify', question: q };
     }

@@ -126,14 +126,15 @@ export class EmoDeviceService {
     }
 
     if (mode === 'ask') {
-      const r = await this.ask.ask({ question: heard, web: 'auto' });
+      // direct: the device never asks counter-questions (938) — best-guess answer immediately
+      const r = await this.ask.ask({ question: heard, web: 'auto', direct: true });
       if (r.mode === 'clarify') return { ok: true, mode, heard, reply: r.question, say: r.question };
       const s = (r.summary || '').trim() || 'Done.';
       return { ok: true, mode, heard, reply: s, say: s, cardId: r.cardId };
     }
 
     if (mode === 'talk') {
-      const r = await this.talk.talk({ message: heard, conversationId: opts.conversationId || undefined, web: 'auto' });
+      const r = await this.talk.talk({ message: heard, conversationId: opts.conversationId || undefined, web: 'auto', noQuestions: true });
       const s = (r.reply || '').trim() || 'Okay.';
       return { ok: true, mode, heard, reply: s, say: s.slice(0, 600), conversationId: r.conversationId };
     }

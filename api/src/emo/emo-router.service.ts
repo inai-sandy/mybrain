@@ -111,8 +111,12 @@ export class EmoRouterService {
       }).catch((e) => { this.log.warn(`card create failed (${s.lane}): ${e?.message || e}`); return null; });
       if (card) {
         cards.push(card);
-        // Hand each card to its lane. Search always clarifies first (869); Tasks creates real tasks (866).
-        if (card.lane === 'search') void this.search.clarify(card.id).catch(() => undefined);
+        // Hand each card to its lane. Search clarifies first (869) — except from the EMO
+        // device, which never asks questions (938): there the search runs immediately.
+        if (card.lane === 'search') {
+          if (opts.source === 'emo-device') void this.search.run(card.id).catch(() => undefined);
+          else void this.search.clarify(card.id).catch(() => undefined);
+        }
         else if (card.lane === 'task') void this.taskLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'reminder') void this.reminderLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'meeting') void this.meetingLane.handle(card.id).catch(() => undefined);

@@ -32,7 +32,7 @@ export class EmoTalkService {
     return DEFAULT_TALK_MODEL;
   }
 
-  async talk(input: { message: string; conversationId?: string; web?: 'on' | 'off' | 'auto' }): Promise<TalkResult> {
+  async talk(input: { message: string; conversationId?: string; web?: 'on' | 'off' | 'auto'; noQuestions?: boolean }): Promise<TalkResult> {
     const msg = (input.message || '').trim();
     if (!msg) return { conversationId: input.conversationId || '', reply: '', sources: [], usedWeb: false };
 
@@ -54,7 +54,7 @@ export class EmoTalkService {
     const webCtx = webSources.length ? webSources.map((s) => `[w${s.n}] ${s.title}: ${s.snippet}`).join('\n') : '';
 
     const convo = turns.slice(-10).map((t) => `${t.role === 'user' ? 'Sandy' : 'Emo'}: ${t.text}`).join('\n');
-    const prompt = `You are Emo, Sandy's warm, concise personal voice assistant having a spoken back-and-forth conversation. Reply in 1-3 short, natural sentences — like talking out loud, not writing. Use his name (Sandy) only occasionally, where it flows. Today is ${this.explore.today()} — when he asks about "latest"/"news"/"recent", use the freshest web results below and mention roughly when they're from. ${brainCtx || webCtx ? 'Use the context below (his brain + current web results) when relevant.' : ''}
+    const prompt = `You are Emo, Sandy's warm, concise personal voice assistant having a spoken back-and-forth conversation. Reply in 1-3 short, natural sentences — like talking out loud, not writing. Use his name (Sandy) only occasionally, where it flows. Today is ${this.explore.today()} — when he asks about "latest"/"news"/"recent", use the freshest web results below and mention roughly when they're from. ${input.noQuestions ? 'Never ask Sandy a question back — if something is unclear, make the most reasonable assumption and briefly say what you assumed. ' : ''}${brainCtx || webCtx ? 'Use the context below (his brain + current web results) when relevant.' : ''}
 
 ${brainCtx ? `From his brain:\n${brainCtx}\n\n` : ''}${webCtx ? `From the web:\n${webCtx}\n\n` : ''}Conversation so far:
 ${convo || '(this is the first message)'}
