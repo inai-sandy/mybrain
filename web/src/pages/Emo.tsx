@@ -379,6 +379,13 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
             </button>
           )}
 
+          {card.audioPath && (
+            <div className="text-sm">
+              <p className="mb-1 text-xs font-medium text-zinc-500">Recording (what EMO heard)</p>
+              <audio controls preload="none" className="h-9 w-full" src={`/api/emo/cards/${card.id}/audio`} />
+            </div>
+          )}
+
           {card.rawTranscript && (
             <details className="text-sm">
               <summary className="cursor-pointer text-xs font-medium text-zinc-500">What you said (transcript)</summary>

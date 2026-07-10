@@ -104,6 +104,20 @@ export class EmoController {
     return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000 });
   }
 
+  // Listen to what the device recorded for a card (BEA-927).
+  @Get('cards/:id/audio')
+  async cardAudio(@Param('id') id: string, @Res() res: Response) {
+    const card = await this.cards.get(id);
+    const buf = (card as any)?.audioPath ? this.deviceSvc.readAudio((card as any).audioPath) : null;
+    if (!buf) {
+      res.status(404).json({ error: 'No recording kept for this card' });
+      return;
+    }
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(buf);
+  }
+
   // EMO hardware: speech as 16 kHz mono WAV (the device has no mp3 decoder).
   @Get('device/tts')
   async deviceTts(@Query('text') text: string, @Query('voice') voice: string, @Res() res: Response) {
