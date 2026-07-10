@@ -161,7 +161,7 @@ export function Dashboard() {
         <h2 className={label + ' mb-2'}>At a glance</h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-2.5">
           <Kpi icon={Flame} tint="text-amber-500" label="Streak" value={String(d?.insights.streak ?? '—')} context="days in a row" />
-          <Kpi icon={Target} tint="text-emerald-500" label="Follow-through" value={ft && ft.week !== null ? `${ft.week}%` : d ? `${d.insights.followThrough}%` : '—'} trend={ftDelta} context={ftDelta !== null ? 'this week vs last' : 'this week'} />
+          <Kpi icon={Target} tint="text-emerald-500" label="Follow-through" value={d ? `${d.insights.followThrough}%` : '—'} trend={ftDelta} context="last 30 days" />
           <Kpi icon={Timer} tint="text-sky-500" label="Time spent" value={d ? mins(d.insights.minutesToday ?? 0) : '—'} context="today" />
           <Kpi icon={Coins} tint="text-violet-500" label="AI cost" value={aiWeek === null ? '—' : fmtUsd(aiWeek)} context="this week (Mon–Sun)" />
         </div>
