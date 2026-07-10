@@ -13,6 +13,7 @@ export type EmoSettings = {
   talkModel: string;
   searchDefault: 'on' | 'off' | 'auto';
   vocabulary: string;
+  deviceVolume: number;
 };
 
 /**
@@ -43,6 +44,7 @@ export class EmoSettingsService {
       talkModel: this.modelOf(await this.g('emo.talk.model'), 'anthropic/claude-haiku-4.5'),
       searchDefault: ['on', 'off', 'auto'].includes(searchDefault) ? searchDefault : 'auto',
       vocabulary: (await this.g('voice.vocabulary')) || '',
+      deviceVolume: Math.min(100, Math.max(0, Number(await this.g('emo.device.volume')) || 60)),
       voices: EMO_VOICES,
       models: EMO_MODELS,
       sttEngines: STT_ENGINES,
@@ -56,6 +58,7 @@ export class EmoSettingsService {
     if (patch.talkModel) await this.s('emo.talk.model', JSON.stringify({ provider: 'openrouter', model: patch.talkModel }));
     if (patch.searchDefault && ['on', 'off', 'auto'].includes(patch.searchDefault)) await this.s('emo.search.default', patch.searchDefault);
     if (patch.vocabulary !== undefined) await this.s('voice.vocabulary', String(patch.vocabulary).slice(0, 2000));
+    if (patch.deviceVolume !== undefined) await this.s('emo.device.volume', String(Math.min(100, Math.max(0, Number(patch.deviceVolume) || 0))));
     return this.get();
   }
 }
