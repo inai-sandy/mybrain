@@ -80,6 +80,13 @@ export class HomeService {
     for (const r of remindersNeed as any[]) needsYou.push({ kind: 'reminder', icon: '⏰', title: `${r.contact?.name || 'A contact'} needs a reply`, sub: (r.subject ? `about ${r.subject}` : 'Their WhatsApp reply is waiting'), href: '/contacts', action: 'Read' });
     for (const t of overdue as any[]) needsYou.push({ kind: 'task', icon: '⚠️', title: (t.title || 'Task').slice(0, 90), sub: 'Overdue', href: '/tasks', action: 'Do' });
 
+    // Rank by urgency (most time-sensitive first) and drop duplicates. (BEA-939)
+    const NEED_RANK: Record<string, number> = { reminder: 0, task: 1, agent: 2, flow: 3, meeting: 4, emo: 5 };
+    const seenNeed = new Set<string>();
+    const rankedNeedsYou = needsYou
+      .filter((x) => { const k = `${x.kind}|${x.href}|${x.title}`; if (seenNeed.has(k)) return false; seenNeed.add(k); return true; })
+      .sort((a, b) => (NEED_RANK[a.kind] ?? 9) - (NEED_RANK[b.kind] ?? 9));
+
     // ---- COOKING — what's running in the background ----
     const [agentRunning, flowRunning, emoCooking, remQueuedToday, meetTranscribing] = await Promise.all([
       this.prisma.agentRun.count({ where: { status: 'running' } }),
@@ -124,7 +131,7 @@ export class HomeService {
       personality: { unlocked: personality.unlocked, summary: personality.summary, daysCovered: personality.daysCovered, minDays: personality.minDays },
       counts: { documents, bookmarks, ideas, skills, notes, contacts, meetings, emoCards },
       countsNew: { documents: nDocs, bookmarks: nBook, ideas: nIdeas, skills: nSkills, notes: nNotes, contacts: nCont, meetings: nMeet, emoCards: nEmo },
-      needsYou,
+      needsYou: rankedNeedsYou,
       cooking,
       recent: recentRows.map((r) => ({ id: r.id, title: r.title || 'Untitled', source: r.source, createdAt: r.createdAt })),
     };
