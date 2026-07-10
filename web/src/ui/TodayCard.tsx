@@ -21,7 +21,7 @@ export function TodayCard() {
     let tries = 0;
     let timer: ReturnType<typeof setTimeout>;
     const load = () =>
-      fetch('/api/daily/today')
+      fetch('/api/daily/today-card')
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           setD(data);

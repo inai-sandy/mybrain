@@ -217,8 +217,9 @@ export class DailyController {
     return { models: await this.daily.listModels() };
   }
 
-  /** Home "Today" card — focus + top suggested action + key lever. (BEA-518) */
-  @Get('today')
+  /** Home "Today" card — focus + top suggested action + key lever. (BEA-518)
+   *  Distinct path so it isn't shadowed by @Get('today') above (which returns story/notes). (BEA-936) */
+  @Get('today-card')
   async todayCard() {
     return this.daily.todayCard();
   }
