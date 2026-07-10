@@ -91,7 +91,7 @@ export class DailyController {
 
   /** Add the to-dos spotted in the story as open tasks (today). (BEA-513) */
   @Post('add-todos')
-  async addTodos(@Body() body: { todos?: { title?: string; category?: string | null }[] }) {
+  async addTodos(@Body() body: { todos?: { title?: string; category?: string | null; note?: string | null; priority?: string }[] }) {
     return this.daily.addStoryTodos(body?.todos || []);
   }
 

@@ -29,7 +29,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
   const [step, setStep] = useState<'story' | 'wrap'>('story');
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [openTasks, setOpenTasks] = useState<{ id: string; title: string }[]>([]);
-  const [todos, setTodos] = useState<{ title: string; category: string | null }[] | null>(null); // forward to-dos from the story (BEA-513)
+  const [todos, setTodos] = useState<{ title: string; category: string | null; note?: string | null; priority?: string }[] | null>(null); // forward to-dos from the story (BEA-513/934)
   const [todoSel, setTodoSel] = useState<Record<number, boolean>>({});
   const [todosAdded, setTodosAdded] = useState(false);
   const [carry, setCarry] = useState<Record<string, 'roll' | 'drop' | undefined>>({});
@@ -153,7 +153,8 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
                       <button onClick={() => setTodoSel((s) => ({ ...s, [i]: !s[i] }))} aria-label="Toggle" className={'shrink-0 grid place-items-center h-5 w-5 rounded border ' + (todoSel[i] ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-zinc-300 dark:border-zinc-600')}>{todoSel[i] && <Check size={13} />}</button>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium truncate">{t.title}</div>
-                        {t.category && <div className="text-[11px] text-zinc-400">{t.category}</div>}
+                        {t.note && <div className="text-[11px] text-zinc-500 line-clamp-2">{t.note}</div>}
+                        {t.category && <div className="text-[11px] text-zinc-400">{t.category}{t.priority && t.priority !== 'medium' ? ` · ${t.priority}` : ''}</div>}
                       </div>
                     </li>
                   ))}

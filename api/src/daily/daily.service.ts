@@ -232,7 +232,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Forward to-dos the user mentioned in their story (things still TO DO), to add to the tasks sheet in the flow. (BEA-513) */
-  async todoCandidates(dayInput?: string): Promise<{ day: string; todos: { title: string; category: string | null }[] }> {
+  async todoCandidates(dayInput?: string): Promise<{ day: string; todos: { title: string; category: string | null; note: string | null; priority: string }[] }> {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
     const today = this.dayKey(tz);
@@ -244,12 +244,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const existingTitles = existing.map((e) => e.title);
     const prompt =
       `From the user's diary entry below, extract the concrete things they still NEED or PLAN to do — open to-dos, follow-ups and next actions they mention for the days ahead.\n` +
-      `Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket"}]}.\n` +
-      `Rules: only real forward actions (things to do next) — NOT things they already finished, NOT feelings/reflections; short imperative titles; {"tasks":[]} if none.\n` +
+      `Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket","note":"one line of concrete context or deadline from the diary — omit if none","priority":"high | medium | low"}]}.\n` +
+      `Rules: only real forward actions (things to do next) — NOT things they already finished, NOT feelings/reflections; short imperative titles; keep the note to the useful detail the diary gives (who/what/when); {"tasks":[]} if none.\n` +
       `Do NOT include anything already in this open list:\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
       `DIARY:\n${text.slice(0, 4000)}`;
     const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 500, 'todo-extract'))?.trim() || '';
-    let list: { title?: string; category?: string }[] = [];
+    let list: { title?: string; category?: string; note?: string; priority?: string }[] = [];
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
       if (Array.isArray(json?.tasks)) list = json.tasks;
@@ -269,17 +269,22 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     };
     const seen = new Set<string>();
     const todos = list
-      .map((t) => ({ title: String(t?.title || '').trim().slice(0, 160), category: t?.category ? String(t.category).trim().slice(0, 40) : null }))
+      .map((t) => ({
+        title: String(t?.title || '').trim().slice(0, 160),
+        category: t?.category ? String(t.category).trim().slice(0, 40) : null,
+        note: t?.note ? String(t.note).trim().slice(0, 500) : null,
+        priority: /^(high|medium|low)$/i.test(String(t?.priority)) ? String(t?.priority).toLowerCase() : 'medium',
+      }))
       .filter((t) => t.title && !isDup(t.title) && !seen.has(t.title.toLowerCase()) && seen.add(t.title.toLowerCase()))
       .slice(0, 12);
     return { day, todos };
   }
 
   /** Add the user-approved story to-dos as OPEN tasks (default to today). (BEA-513) */
-  async addStoryTodos(todos: { title?: string; category?: string | null }[]): Promise<{ created: number }> {
+  async addStoryTodos(todos: { title?: string; category?: string | null; note?: string | null; priority?: string }[]): Promise<{ created: number }> {
     let created = 0;
     for (const t of (todos || []).slice(0, 20)) {
-      const r = await this.tasks.create({ title: t.title, category: t.category || undefined, priority: 'medium' });
+      const r = await this.tasks.create({ title: t.title, category: t.category || undefined, note: t.note || undefined, priority: t.priority || 'medium' });
       if (r) created++;
     }
     return { created };
