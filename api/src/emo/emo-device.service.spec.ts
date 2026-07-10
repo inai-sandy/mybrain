@@ -1,4 +1,6 @@
-import { EmoDeviceService, wavWrap, resample24to16 } from './emo-device.service';
+import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, normalizePcm } from './emo-device.service';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const OpusScript = require('opusscript');
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -8,6 +10,7 @@ process.env.EMO_DEVICE_AUDIO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'emo-au
 describe('EmoDeviceService (BEA-926)', () => {
   const voice: any = {
     transcribe: jest.fn(async () => 'call the supplier tomorrow'),
+    transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
     ttsPcm: jest.fn(async () => {
       // 24 samples of a ramp at "24kHz" -> expect 16 samples out
       const b = Buffer.alloc(24 * 2);
@@ -49,7 +52,7 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('capture mode routes the transcript and answers with a confirmation', async () => {
     const r = await svc.turn(pcm, { mode: 'capture' });
-    expect(voice.transcribe).toHaveBeenCalled();
+    expect(voice.transcribeWith).toHaveBeenCalledWith('deepgram', expect.any(Buffer), 'device-turn.wav', 'audio/wav');
     expect(router.route).toHaveBeenCalledWith('call the supplier tomorrow', { source: 'emo-device', lane: undefined, audioPath: expect.stringMatching(/^turn-.*\.wav$/) });
     expect(r.ok).toBe(true);
     expect(r.say).toContain('Got it');
@@ -92,10 +95,34 @@ describe('EmoDeviceService (BEA-926)', () => {
   });
 
   it('empty transcription returns a friendly retry, not a crash', async () => {
-    voice.transcribe.mockResolvedValueOnce('   ');
+    voice.transcribeWith.mockResolvedValueOnce('   ');
     const r = await svc.turn(pcm, { mode: 'capture' });
     expect(r.ok).toBe(false);
     expect(r.say).toContain('Try again');
+  });
+
+  it('decodes a length-prefixed opus stream back to PCM (roundtrip)', () => {
+    const opus = new OpusScript(16000, 1, OpusScript.Application.VOIP);
+    const frames: Buffer[] = [];
+    for (let f = 0; f < 5; f++) {
+      const pcmIn = Buffer.alloc(960 * 2);
+      for (let i = 0; i < 960; i++) pcmIn.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * (f * 960 + i)) / 16000)), i * 2);
+      const pkt = Buffer.from(opus.encode(pcmIn, 960));
+      const head = Buffer.alloc(2);
+      head.writeUInt16LE(pkt.length, 0);
+      frames.push(head, pkt);
+    }
+    const pcm = decodeOpusStream(Buffer.concat(frames));
+    expect(pcm.length).toBe(5 * 960 * 2);   // 5 frames x 60ms
+  });
+
+  it('normalizePcm boosts quiet audio without clipping', () => {
+    const quiet = Buffer.alloc(200);
+    for (let i = 0; i < 100; i++) quiet.writeInt16LE(i % 2 ? 1000 : -1000, i * 2);
+    const loud = normalizePcm(quiet);
+    const v = Math.abs(loud.readInt16LE(2));
+    expect(v).toBeGreaterThan(6000);        // gained
+    expect(v).toBeLessThanOrEqual(8000);    // capped at 8x
   });
 
   it('ttsWav16k resamples the PCM and wraps it as a 16k WAV', async () => {

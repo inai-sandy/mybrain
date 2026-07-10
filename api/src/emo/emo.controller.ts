@@ -84,6 +84,7 @@ export class EmoController {
     @Query('mode') mode?: string,
     @Query('conversationId') conversationId?: string,
     @Query('sr') sr?: string,
+    @Query('codec') codec?: string,
   ) {
     const MAX = 60 * 1024 * 1024; // ~30 min at 16 kHz mono
     const chunks: Buffer[] = [];
@@ -101,7 +102,7 @@ export class EmoController {
       req.on('end', () => resolve());
       req.on('error', (e) => reject(e));
     });
-    return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000 });
+    return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000, codec });
   }
 
   // Listen to what the device recorded for a card (BEA-927).
