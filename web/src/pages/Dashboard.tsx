@@ -37,6 +37,12 @@ function mins(n: number): string {
   return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
 }
 function fmtUsd(n: number): string { return '$' + (n > 0 && n < 0.01 ? n.toFixed(4) : n.toFixed(2)); }
+/** This week's Monday (YYYY-MM-DD) in IST — the reminder/day engine's timezone. AI cost = Mon–Sun. (BEA-932) */
+function mondayIstKey(): string {
+  const ist = new Date(Date.now() + 330 * 60000);
+  const daysSinceMon = (ist.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  return new Date(ist.getTime() - daysSinceMon * 86400000).toISOString().slice(0, 10);
+}
 type Phase = 'morning' | 'midday' | 'evening';
 function phaseOf(h: number): Phase { return h < 12 ? 'morning' : h >= 18 ? 'evening' : 'midday'; }
 
@@ -52,7 +58,7 @@ export function Dashboard() {
   }
   useEffect(() => {
     load();
-    fetch('/api/usage/features?days=7').then((r) => (r.ok ? r.json() : null)).then((u) => u && setAiWeek(u.totalCost ?? 0)).catch(() => undefined);
+    fetch('/api/usage/features?from=' + mondayIstKey()).then((r) => (r.ok ? r.json() : null)).then((u) => u && setAiWeek(u.totalCost ?? 0)).catch(() => undefined);
     // keep the "cooking / needs you" surface fresh while things are in flight
     const t = setInterval(load, 20000);
     return () => clearInterval(t);
@@ -157,7 +163,7 @@ export function Dashboard() {
           <Kpi icon={Flame} tint="text-amber-500" label="Streak" value={String(d?.insights.streak ?? '—')} context="days in a row" />
           <Kpi icon={Target} tint="text-emerald-500" label="Follow-through" value={ft && ft.week !== null ? `${ft.week}%` : d ? `${d.insights.followThrough}%` : '—'} trend={ftDelta} context={ftDelta !== null ? 'this week vs last' : 'this week'} />
           <Kpi icon={Timer} tint="text-sky-500" label="Time spent" value={d ? mins(d.insights.minutesToday ?? 0) : '—'} context="today" />
-          <Kpi icon={Coins} tint="text-violet-500" label="AI cost" value={aiWeek === null ? '—' : fmtUsd(aiWeek)} context="last 7 days" />
+          <Kpi icon={Coins} tint="text-violet-500" label="AI cost" value={aiWeek === null ? '—' : fmtUsd(aiWeek)} context="this week (Mon–Sun)" />
         </div>
         <div className={card + ' grid grid-cols-4 sm:grid-cols-8 overflow-hidden'}>
           {tiles.length === 0
