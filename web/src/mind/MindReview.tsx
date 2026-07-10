@@ -91,8 +91,10 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
       </div>
     );
 
-  const Card = ({ f, fading }: { f: Finding; fading?: boolean }) => (
-    <div className={'rounded-xl border p-3 ' + (fading ? 'border-amber-300/60 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20' : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900')}>
+  // Inline render function, NOT a nested component — a nested component would be a new type each
+  // render and remount the textarea, throwing the caret to the start on every keystroke. (BEA-931)
+  const card = (f: Finding, fading?: boolean) => (
+    <div key={f.id} className={'rounded-xl border p-3 ' + (fading ? 'border-amber-300/60 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20' : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900')}>
       {editing === f.id ? (
         <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-emerald-500 mb-2" />
       ) : (
@@ -135,13 +137,13 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
       {Object.entries(groups).map(([label, items]) => (
         <div key={label}>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{KIND_GROUP[Object.keys(KIND_GROUP).find((k) => KIND_GROUP[k].label === label) || '']?.emoji} {label}</div>
-          <div className="space-y-2">{items.map((f) => <Card key={f.id} f={f} />)}</div>
+          <div className="space-y-2">{items.map((f) => card(f))}</div>
         </div>
       ))}
       {data.fading.length > 0 && (
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-500 mb-1.5 flex items-center gap-1"><HelpCircle size={12} /> Still you? (fading)</div>
-          <div className="space-y-2">{data.fading.map((f) => <Card key={f.id} f={f} fading />)}</div>
+          <div className="space-y-2">{data.fading.map((f) => card(f, true))}</div>
         </div>
       )}
     </div>
