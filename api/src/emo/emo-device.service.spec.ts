@@ -18,7 +18,7 @@ describe('EmoDeviceService (BEA-926)', () => {
       return b;
     }),
   };
-  const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1', summary: 'Call the supplier' }] })) };
+  const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1', lane: 'reminder', summary: 'Call the supplier' }] })) };
   const ask: any = { ask: jest.fn(async () => ({ mode: 'answer', summary: 'Short answer.', cardId: 'a1' })) };
   const talk: any = { talk: jest.fn(async () => ({ conversationId: 't1', reply: 'Sure thing.', sources: [], usedWeb: false })) };
   const svc = new EmoDeviceService(voice, router, ask, talk);
@@ -57,6 +57,7 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(r.ok).toBe(true);
     expect(r.say).toContain('Got it');
     expect(r.cardId).toBe('c1');
+    expect(r.lane).toBeDefined();
   });
 
   it('story mode forces the story lane', async () => {

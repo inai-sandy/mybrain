@@ -92,6 +92,7 @@ export type DeviceTurn = {
   heard: string;
   reply: string; // shown on the round display
   say: string; // spoken through the speaker
+  lane?: string; // first card's lane — the device picks its per-lane voice clip (BEA-930)
   cardId?: string;
   conversationId?: string;
 };
@@ -144,7 +145,7 @@ export class EmoDeviceService {
     const first = n ? String((cards[0] as any)?.summary || '').trim() : '';
     const reply = n ? cards.map((c: any) => `• ${c.summary || ''}`).join('\n') : 'Nothing captured.';
     const say = n === 0 ? 'Hmm, nothing captured. Try again.' : n === 1 ? `Got it. ${first}` : `Got it — saved ${n} cards.`;
-    return { ok: n > 0, mode, heard, reply, say, cardId: n ? (cards[0] as any).id : undefined };
+    return { ok: n > 0, mode, heard, reply, say, lane: n ? String((cards[0] as any).lane || '') : undefined, cardId: n ? (cards[0] as any).id : undefined };
   }
 
   /** Save the device recording so the owner can LISTEN to what EMO heard (BEA-927). Keeps newest 50. */
