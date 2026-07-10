@@ -1,4 +1,4 @@
-import { TasksService } from './tasks.service';
+import { TasksService, normTitleKey } from './tasks.service';
 
 function makeService(llmText: string | null) {
   const settings: Record<string, string> = {};
@@ -239,5 +239,19 @@ describe('TasksService', () => {
     await svc.update(created!.id, { title: 'Wire the panel v2' });
     expect(after.title).toBe('Wire the panel v2');
     expect(after.category).toBeNull(); // untouched
+  });
+});
+
+describe('normTitleKey — dedupe key for dump tasks (BEA-933)', () => {
+  it('ignores case, punctuation, and extra whitespace', () => {
+    expect(normTitleKey('Fix the screen problem')).toBe(normTitleKey('fix the  screen problem!'));
+    expect(normTitleKey('Get production updates from Madhuri.')).toBe('get production updates from madhuri');
+  });
+  it('keeps genuinely different titles distinct', () => {
+    expect(normTitleKey('Get updates from Madhuri')).not.toBe(normTitleKey('Get updates from Karthik'));
+  });
+  it('handles null/empty', () => {
+    expect(normTitleKey(null)).toBe('');
+    expect(normTitleKey('   ')).toBe('');
   });
 });

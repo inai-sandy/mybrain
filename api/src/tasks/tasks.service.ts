@@ -7,6 +7,11 @@ import { matchContact, contactSpellings } from '../contacts/person-identity';
 
 const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 
+/** Normalized title key for dedupe — lowercase, punctuation-stripped, whitespace-collapsed. (BEA-933) */
+export function normTitleKey(title?: string | null): string {
+  return String(title || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const DEFAULT_TASKS_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 const DEFAULT_TZ = 'Asia/Kolkata';
@@ -271,10 +276,18 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
 
     const pinnedSeen = { n: 0 };
     const d = await this.prisma.brainDump.create({ data: { day, rawText: clean, source, taskCount: crafted.tasks.length } });
+    // Don't re-create tasks that already exist as open ones — re-dumping the same thing was piling
+    // up duplicates. Skip a new task whose normalized title already exists (open, or added just now). (BEA-933)
+    const existingOpen = await this.prisma.task.findMany({ where: { status: 'open' }, select: { title: true } });
+    const seenTitles = new Set(existingOpen.map((t) => normTitleKey(t.title)));
     const created = [];
+    let skipped = 0;
     for (const c of crafted.tasks) {
       const title = String(c.title || '').trim().slice(0, 160);
       if (!title) continue;
+      const key = normTitleKey(title);
+      if (key && seenTitles.has(key)) { skipped++; continue; } // duplicate of an existing open task
+      seenTitles.add(key);
       const pinned = !!c.pinned && pinnedSeen.n < 3;
       if (pinned) pinnedSeen.n++;
       const t = await this.prisma.task.create({
@@ -294,7 +307,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       this.indexTask(t);
       created.push(this.shape(t));
     }
-    return { dumpId: d.id, question: undefined, tasks: created };
+    return { dumpId: d.id, question: undefined, tasks: created, skipped };
   }
 
   // ---- task CRUD ----
