@@ -113,7 +113,9 @@ export class HomeService {
         followThrough: dash.totals.followThrough,
         followTrend: dash.followTrend,
         minutesSpent: dash.minutesSpent,
-        minutesToday: activity.stats?.minutesSpent ?? 0,
+        // Prefer the user's stated close-day minutes (the truth — they do plenty they never log as
+        // tasks); fall back to auto-counted only when they haven't closed the day yet. (BEA-937)
+        minutesToday: activity.stats?.workedMinutes ?? activity.stats?.minutesSpent ?? 0,
         daySummary: summaryText ? summaryText.replace(/\s+/g, ' ').trim().slice(0, 600) : null,
         daySummaryFor: summaryFor,
         guidance: guidanceRow?.guidance || null,

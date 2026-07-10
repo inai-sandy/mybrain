@@ -298,9 +298,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     ]);
     const taskLines = doneTasks.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''}`).join('\n');
     const prompt =
-      `The user worked ${wm} minutes today. Split that time across 3–6 simple work categories based on what they actually did. ` +
+      `The user worked ${wm} minutes today. Split that time across 3–6 simple work categories based on what they actually did.\n` +
+      `Base this PRIMARILY on their own Story of the day below (what they describe doing) — that is the source of truth, because they do plenty of work they never log as tasks. Use the finished-task list only as a supporting hint, never as the main basis.\n` +
       `Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where the minutes sum to about ${wm}.\n\n` +
-      `Finished tasks:\n${taskLines || '(none logged)'}\n\nStory of the day:\n${(story?.rawText || '').slice(0, 3000)}`;
+      `Story of the day (primary source):\n${(story?.rawText || '').slice(0, 3000)}\n\nFinished tasks (supporting hints only):\n${taskLines || '(none logged)'}`;
     const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 400, 'worked-breakdown'))?.trim() || '';
     let list: { category?: string; minutes?: number }[] = [];
     try {
