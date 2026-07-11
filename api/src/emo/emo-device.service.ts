@@ -4,6 +4,7 @@ const OpusScript = require('opusscript');
 import * as fs from 'fs';
 import * as path from 'path';
 import { VoiceService } from '../voice/voice.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
@@ -108,7 +109,26 @@ export class EmoDeviceService {
     private readonly router: EmoRouterService,
     private readonly ask: EmoAskService,
     private readonly talk: EmoTalkService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /** Personal reminders the device should ring (next 48h, oldest first). */
+  async listDeviceReminders(): Promise<{ reminders: { id: string; text: string; dueAt: number }[] }> {
+    const until = new Date(Date.now() + 48 * 3600 * 1000);
+    const rows = await this.prisma.emoDeviceReminder.findMany({
+      where: { status: 'active', dueAt: { lte: until } },
+      orderBy: { dueAt: 'asc' },
+      take: 20,
+    });
+    return { reminders: rows.map((r: any) => ({ id: r.id, text: r.text, dueAt: r.dueAt.getTime() })) };
+  }
+
+  /** The device rang (done) or gave up (missed). */
+  async ackDeviceReminder(id: string, status: string): Promise<{ ok: boolean }> {
+    const st = status === 'missed' ? 'missed' : 'done';
+    await this.prisma.emoDeviceReminder.update({ where: { id }, data: { status: st } }).catch(() => undefined);
+    return { ok: true };
+  }
 
   async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string } = {}): Promise<DeviceTurn> {
     if (!body?.length) throw new BadRequestException('No audio received');

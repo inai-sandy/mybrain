@@ -1,5 +1,7 @@
 import { EmoReminderService } from './emo-reminder.service';
 
+const prismaStub: any = { emoDeviceReminder: { create: jest.fn(async ({ data }: any) => ({ id: 'dr1', ...data })) } };
+
 function make(opts: { extract: any; contacts?: any[]; card?: any }) {
   const updates: any[] = [];
   const card = opts.card ?? { id: 'c1', lane: 'reminder', rawTranscript: 'remind Dharmendra about the socket pins', summary: 'Reminder: Dharmendra', needsAnswer: null };
@@ -8,7 +10,7 @@ function make(opts: { extract: any; contacts?: any[]; card?: any }) {
   const list = opts.contacts ?? [];
   const contacts: any = { findAllByName: jest.fn(async () => list) };
   const reminders: any = { draftMessage: jest.fn(async () => ({ message: 'Hi Dharmendra, quick nudge on the socket pins.' })), create: jest.fn(async () => ({ id: 'rem1' })) };
-  return { svc: new EmoReminderService(llm, cards, contacts, reminders), cards, contacts, reminders, updates };
+  return { svc: new EmoReminderService(prismaStub, llm, cards, contacts, reminders), cards, contacts, reminders, updates, prismaStub };
 }
 
 const futureIstDay = (daysAhead: number) => new Date(Date.now() + 330 * 60000 + daysAhead * 86400000).toISOString().slice(0, 10);
@@ -85,11 +87,27 @@ describe('EmoReminderService (BEA-867 / BEA-875 / BEA-876)', () => {
     expect(reminders.create).toHaveBeenCalled();
   });
 
-  it('gates on Needs-you when there is no clear person', async () => {
-    const { svc, updates } = make({ extract: { who: '', what: 'call the bank', when: '' } });
+  it('no person named = a PERSONAL reminder that rings on EMO (BEA-944) — never a question', async () => {
+    prismaStub.emoDeviceReminder.create.mockClear();
+    const { svc, updates } = make({ extract: { who: '', what: 'call the bank', when: '', time: '17:00' } });
     await svc.handle('c1');
-    expect(updates[0]).toMatchObject({ status: 'needs_you' });
-    expect(updates[0].needsQuestion).toMatch(/who should i remind/i);
+    expect(prismaStub.emoDeviceReminder.create).toHaveBeenCalled();
+    const data = prismaStub.emoDeviceReminder.create.mock.calls[0][0].data;
+    expect(data.text).toBe('call the bank');
+    expect(data.dueAt.getTime()).toBeGreaterThan(Date.now());   // never scheduled in the past
+    expect(updates[0].status).toBe('done');
+    expect(updates[0].summary).toMatch(/remind you/i);
+  });
+
+  it('personal reminder without a time: best-guess +2h and SAYS the assumption', async () => {
+    prismaStub.emoDeviceReminder.create.mockClear();
+    const { svc, updates } = make({ extract: { who: '', what: 'drink water', when: '' } });
+    await svc.handle('c1');
+    const data = prismaStub.emoDeviceReminder.create.mock.calls[0][0].data;
+    const delta = data.dueAt.getTime() - Date.now();
+    expect(delta).toBeGreaterThan(1.9 * 3600 * 1000);
+    expect(delta).toBeLessThan(2.1 * 3600 * 1000);
+    expect(updates[0].summary).toMatch(/no time given/i);
   });
 
   it('uses the answered name to resolve the contact on retry', async () => {
