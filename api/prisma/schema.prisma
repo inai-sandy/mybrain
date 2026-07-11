@@ -863,6 +863,16 @@ model Reminder {
 }
 
 /// One scheduled send of a reminder (BEA-720). Fired by the outbound scheduler in P4.
+model EmoDeviceReminder {
+  id        String   @id @default(uuid())
+  text      String // what to say/show when it rings
+  dueAt     DateTime
+  status    String   @default("active") // active | done | missed
+  createdAt DateTime @default(now())
+
+  @@index([status, dueAt])
+}
+
 model ReminderSend {
   id         String   @id @default(uuid())
   reminderId String

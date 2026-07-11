@@ -105,6 +105,16 @@ export class EmoController {
     return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000, codec });
   }
 
+  // Personal reminders that ring on the device (BEA-944).
+  @Get('device/reminders')
+  deviceReminders() {
+    return this.deviceSvc.listDeviceReminders();
+  }
+  @Post('device/reminders/:id/ack')
+  deviceReminderAck(@Param('id') id: string, @Body() body: { status?: string }) {
+    return this.deviceSvc.ackDeviceReminder(id, String(body?.status || 'done'));
+  }
+
   // Listen to what the device recorded for a card (BEA-927).
   @Get('cards/:id/audio')
   async cardAudio(@Param('id') id: string, @Res() res: Response) {

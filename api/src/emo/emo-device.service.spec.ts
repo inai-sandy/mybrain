@@ -22,7 +22,13 @@ describe('EmoDeviceService (BEA-926)', () => {
   const router: any = { route: jest.fn(async () => ({ cards: [{ id: 'c1', lane: 'reminder', summary: 'Call the supplier' }] })) };
   const ask: any = { ask: jest.fn(async () => ({ mode: 'answer', summary: 'Short answer.', cardId: 'a1' })) };
   const talk: any = { talk: jest.fn(async () => ({ conversationId: 't1', reply: 'Sure thing.', sources: [], usedWeb: false })) };
-  const svc = new EmoDeviceService(voice, router, ask, talk);
+  const prisma: any = {
+    emoDeviceReminder: {
+      findMany: jest.fn(async () => [{ id: 'dr1', text: 'call the vendor', dueAt: new Date(1760000000000), status: 'active' }]),
+      update: jest.fn(async () => ({})),
+    },
+  };
+  const svc = new EmoDeviceService(voice, router, ask, talk, prisma);
   const pcm = Buffer.alloc(3200); // 100ms of 16k mono silence
 
   beforeEach(() => jest.clearAllMocks());
@@ -45,6 +51,13 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(out.readInt16LE(0)).toBe(0);
     expect(out.readInt16LE(2)).toBe(450); // 1.5 -> midway between 300 and 600
     expect(out.readInt16LE(4)).toBe(900); // 3.0 -> exact sample
+  });
+
+  it('lists upcoming device reminders with epoch dueAt and acks them (BEA-944)', async () => {
+    const r = await svc.listDeviceReminders();
+    expect(r.reminders).toEqual([{ id: 'dr1', text: 'call the vendor', dueAt: 1760000000000 }]);
+    await svc.ackDeviceReminder('dr1', 'done');
+    expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'done' } });
   });
 
   it('rejects empty audio', async () => {

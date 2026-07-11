@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { RemindersService } from '../contacts/reminders.service';
@@ -14,6 +15,7 @@ import { EmoCardsService } from './emo-cards.service';
 export class EmoReminderService {
   private readonly log = new Logger('EmoReminder');
   constructor(
+    private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly cards: EmoCardsService,
     private readonly contacts: ContactsService,
@@ -63,13 +65,38 @@ export class EmoReminderService {
       const { who, what, when, startDay, time } = await this.extract(text);
       const person = (card.needsAnswer && !who ? card.needsAnswer : who).trim();
 
+      // No person named -> the user means THEMSELVES: a personal reminder that
+      // rings on the EMO device (BEA-944). Best-guess timing, never a question.
+      if (!person) {
+        const now = Date.now();
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(startDay) ? startDay : this.todayKey();
+        let dueMs: number;
+        let assumed = '';
+        if (/^\d{1,2}:\d{2}$/.test(time)) {
+          dueMs = Date.parse(`${day}T${time.padStart(5, '0')}:00+05:30`);
+          if (!Number.isFinite(dueMs)) dueMs = now + 2 * 3600 * 1000;
+          if (dueMs <= now) dueMs += 24 * 3600 * 1000;   // that time already passed -> tomorrow
+        } else {
+          dueMs = now + 2 * 3600 * 1000;                 // no time said -> 2h from now, say so
+          assumed = ' (no time given — set for 2 hours from now)';
+        }
+        const say = (what || text).trim();
+        const rem = await this.prisma.emoDeviceReminder.create({ data: { text: say, dueAt: new Date(dueMs) } });
+        const ist = new Date(dueMs + 330 * 60000).toISOString();
+        const dayLabel = ist.slice(0, 10) === this.todayKey() ? 'today' : this.humanDay(ist.slice(0, 10));
+        await this.cards.update(cardId, {
+          summary: `I'll remind you ${dayLabel} at ${ist.slice(11, 16)} — ${say}${assumed}`,
+          links: [{ kind: 'device-reminder', id: rem.id, label: 'rings on EMO' }],
+          status: 'done',
+        });
+        return;
+      }
+
       // Confidence gate — resolve the contact, but NEVER guess on ambiguity. (BEA-875)
-      const matches = person ? await this.contacts.findAllByName(person) : [];
+      const matches = await this.contacts.findAllByName(person);
       if (matches.length === 0) {
         await this.cards.update(cardId, {
-          needsQuestion: person
-            ? `I couldn't find "${person}" in your contacts. Who should I remind — and are they saved in Contacts?`
-            : 'Who should I remind? (Reminders nudge a person on WhatsApp.)',
+          needsQuestion: `I couldn't find "${person}" in your contacts. Who should I remind — and are they saved in Contacts?`,
           needsOptions: [],
           status: 'needs_you',
         });
