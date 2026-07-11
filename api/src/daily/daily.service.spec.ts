@@ -242,6 +242,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const tasksSvc: any = {
     getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }),
     listModels: async () => [],
+    create: async (data: any) => { const row = { id: `t${tasks.length + 1}`, status: 'open', ...data }; tasks.push(row); return row; },
     rollDayForward: async (fromDay: string, toDay: string) => {
       rolledCalls.push({ fromDay, toDay });
       const open = tasks.filter((t) => t.status === 'open' && t.day === fromDay);

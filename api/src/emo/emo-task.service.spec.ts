@@ -14,7 +14,7 @@ describe('EmoTaskService (BEA-947: ONE task per utterance)', () => {
     const { svc, tasks, updates } = make({ title: 'Finish the BOM by Friday' });
     await svc.handle('c1');
     expect(tasks.create).toHaveBeenCalledTimes(1);
-    expect(tasks.create).toHaveBeenCalledWith({ title: 'Finish the BOM by Friday', category: 'Emo' });
+    expect(tasks.create).toHaveBeenCalledWith(expect.objectContaining({ title: 'Finish the BOM by Friday', category: 'Emo', auto: true }));
     const done = updates[updates.length - 1];
     expect(done.status).toBe('done');
     expect(done.summary).toBe('Task added: Finish the BOM by Friday');
