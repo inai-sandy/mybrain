@@ -255,3 +255,23 @@ describe('normTitleKey — dedupe key for dump tasks (BEA-933)', () => {
     expect(normTitleKey('   ')).toBe('');
   });
 });
+
+describe('create() note guarantee (BEA-955)', () => {
+  it('auto tasks always get a note (AI backstop); caller context wins; manual stays optional', async () => {
+    const { svc, tasks } = makeService('Screen issue reported; needs a fix');
+    await (svc as any).create({ title: 'Fix screen', category: 'Tech', auto: true });
+    expect(tasks[tasks.length - 1].note).toBe('Screen issue reported; needs a fix'); // AI backstop filled it
+
+    await (svc as any).create({ title: 'Ship it', auto: true, note: 'Deploy after tests pass' });
+    expect(tasks[tasks.length - 1].note).toBe('Deploy after tests pass'); // real context wins over AI
+
+    await (svc as any).create({ title: 'Buy milk' }); // manual (no auto), no note
+    expect(tasks[tasks.length - 1].note).toBeNull(); // stays optional
+  });
+
+  it('honours an explicit day (for suggestion-approve on its forDay)', async () => {
+    const { svc, tasks } = makeService(null);
+    await (svc as any).create({ title: 'Prep deck', auto: true, note: 'for the review', day: '2026-08-01' });
+    expect(tasks[tasks.length - 1].day).toBe('2026-08-01');
+  });
+});

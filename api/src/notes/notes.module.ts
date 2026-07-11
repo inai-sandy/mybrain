@@ -7,5 +7,6 @@ import { MemoryModule } from '../memory/memory.module';
   imports: [MemoryModule],
   controllers: [NotesController],
   providers: [NotesService],
+  exports: [NotesService],
 })
 export class NotesModule {}

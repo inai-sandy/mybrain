@@ -1223,11 +1223,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async addSuggestion(id: string) {
     const s = await this.prisma.suggestedTask.findUnique({ where: { id } });
     if (!s || s.status !== 'pending') return null;
-    const task = await this.prisma.task.create({
-      data: { title: s.title, category: s.category, priority: 'medium', day: s.forDay },
-    });
+    // Route through the one door so it's indexed + carries a note (the suggestion's own reason). (BEA-955)
+    const task = await this.tasks.create({ title: s.title, category: s.category || undefined, priority: 'medium', day: s.forDay, note: s.reason || undefined, auto: true });
+    if (!task) return null;
     await this.prisma.suggestedTask.update({ where: { id }, data: { status: 'added' } });
-    return { ok: true, taskId: task.id, forDay: s.forDay };
+    return { ok: true, taskId: (task as any).id, forDay: s.forDay };
   }
 
   async dismissSuggestion(id: string) {
