@@ -26,16 +26,16 @@ export class EmoReminderService {
     return new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
   }
 
-  private async extract(text: string): Promise<{ who: string; what: string; when: string; startDay: string; time: string }> {
+  private async extract(text: string): Promise<{ who: string; what: string; when: string; startDay: string; time: string; inMinutes: number }> {
     try {
       const raw = await this.llm.complete(
-        `Today is ${this.todayKey()} (IST). From this spoken reminder, extract JSON {"who":"…","what":"…","when":"…","startDay":"…","time":"…"}.\n- who = the person to nudge on WhatsApp (their name), or "" if the user means themselves.\n- what = the thing to remind about, as a short topic (strip the verb and the name).\n- when = the timing words as said ("Friday", "tomorrow 10am"), or "".\n- startDay = if a day OTHER than today is meant, resolve it to a concrete FUTURE date YYYY-MM-DD; else "".\n- time = a specific clock time as HH:mm (24h) if one was said, else "".\nRequest: "${text}"\nReply ONLY JSON.`,
+        `Today is ${this.todayKey()} (IST). From this spoken reminder, extract JSON {"who":"…","what":"…","when":"…","startDay":"…","time":"…","inMinutes":0}.\n- who = the person to nudge on WhatsApp (their name), or "" if the user means themselves.\n- what = the thing to remind about, as a short topic (strip the verb and the name).\n- when = the timing words as said ("Friday", "tomorrow 10am"), or "".\n- startDay = if a day OTHER than today is meant, resolve it to a concrete FUTURE date YYYY-MM-DD; else "".\n- time = a specific clock time as HH:mm (24h) if one was said, else "".\n- inMinutes = if a RELATIVE delay was said ("in 10 minutes", "after 2 mins", "in an hour", "in half an hour"), the total minutes as a number; else 0.\nRequest: "${text}"\nReply ONLY JSON.`,
         240, 'emo-reminder-extract',
       );
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
-      return { who: String(j.who || '').trim(), what: String(j.what || '').trim(), when: String(j.when || '').trim(), startDay: String(j.startDay || '').trim(), time: String(j.time || '').trim() };
+      return { who: String(j.who || '').trim(), what: String(j.what || '').trim(), when: String(j.when || '').trim(), startDay: String(j.startDay || '').trim(), time: String(j.time || '').trim(), inMinutes: Number.isFinite(j.inMinutes) ? Math.max(0, Math.round(Number(j.inMinutes))) : 0 };
     } catch {
-      return { who: '', what: '', when: '', startDay: '', time: '' };
+      return { who: '', what: '', when: '', startDay: '', time: '', inMinutes: 0 };
     }
   }
 
@@ -62,7 +62,7 @@ export class EmoReminderService {
     if (!card || card.lane !== 'reminder') return;
     const text = [card.rawTranscript || card.summary || '', card.needsAnswer].filter(Boolean).join('. ').trim();
     try {
-      const { who, what, when, startDay, time } = await this.extract(text);
+      const { who, what, when, startDay, time, inMinutes } = await this.extract(text);
       const person = (card.needsAnswer && !who ? card.needsAnswer : who).trim();
 
       // No person named -> the user means THEMSELVES: a personal reminder that
@@ -72,7 +72,9 @@ export class EmoReminderService {
         const day = /^\d{4}-\d{2}-\d{2}$/.test(startDay) ? startDay : this.todayKey();
         let dueMs: number;
         let assumed = '';
-        if (/^\d{1,2}:\d{2}$/.test(time)) {
+        if (inMinutes > 0) {
+          dueMs = now + Math.min(inMinutes, 7 * 24 * 60) * 60000;   /* relative delay wins */
+        } else if (/^\d{1,2}:\d{2}$/.test(time)) {
           dueMs = Date.parse(`${day}T${time.padStart(5, '0')}:00+05:30`);
           if (!Number.isFinite(dueMs)) dueMs = now + 2 * 3600 * 1000;
           if (dueMs <= now) dueMs += 24 * 3600 * 1000;   // that time already passed -> tomorrow
@@ -84,8 +86,9 @@ export class EmoReminderService {
         const rem = await this.prisma.emoDeviceReminder.create({ data: { text: say, dueAt: new Date(dueMs) } });
         const ist = new Date(dueMs + 330 * 60000).toISOString();
         const dayLabel = ist.slice(0, 10) === this.todayKey() ? 'today' : this.humanDay(ist.slice(0, 10));
+        const lead = inMinutes > 0 ? `in ${inMinutes} minute${inMinutes === 1 ? '' : 's'} (${ist.slice(11, 16)})` : `${dayLabel} at ${ist.slice(11, 16)}`;
         await this.cards.update(cardId, {
-          summary: `I'll remind you ${dayLabel} at ${ist.slice(11, 16)} — ${say}${assumed}`,
+          summary: `I'll remind you ${lead} — ${say}${assumed}`,
           links: [{ kind: 'device-reminder', id: rem.id, label: 'rings on EMO' }],
           status: 'done',
         });
