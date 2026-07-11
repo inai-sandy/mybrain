@@ -1555,6 +1555,18 @@ function EmoSettingsSection() {
           />
           <span className="w-12 text-sm tabular-nums text-zinc-500">{devVol}%</span>
         </div>
+        <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+          <p className="mb-2 text-sm text-zinc-500">Fresh memory card in the device? This makes EMO re‑download everything onto it (voice pack now; more later). It picks the request up within a minute.</p>
+          <button
+            onClick={async () => {
+              await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardSync: true }) }).catch(() => undefined);
+              toast('success', 'Sync requested — EMO will refresh its card within a minute.');
+            }}
+            className="rounded-lg border border-emerald-500 bg-emerald-500/10 px-4 py-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400"
+          >
+            Sync device card
+          </button>
+        </div>
       </AccordionCard>
 
       <AccordionCard title="Internet search" icon={Globe}>
