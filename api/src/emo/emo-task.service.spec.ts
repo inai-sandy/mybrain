@@ -1,55 +1,46 @@
 import { EmoTaskService } from './emo-task.service';
 
-function make(dumpResult: any, card: any = { id: 'c1', lane: 'task', rawTranscript: 'finish the BOM by friday', summary: 'Task: finish the BOM', needsAnswer: null }) {
+function make(opts: { title?: string; llmFail?: boolean; card?: any } = {}) {
+  const card = opts.card ?? { id: 'c1', lane: 'task', rawTranscript: 'finish the BOM by friday', summary: 'Task: finish the BOM', needsAnswer: null };
   const updates: any[] = [];
   const cards: any = { get: jest.fn(async () => card), update: jest.fn(async (_id: string, p: any) => { updates.push(p); return { ...card, ...p }; }) };
-  const tasks: any = {
-    dump: jest.fn(async () => dumpResult),
-    create: jest.fn(async (t: any) => ({ id: 'best1', title: t.title })),
-  };
-  return { svc: new EmoTaskService(tasks, cards), tasks, updates };
+  const llm: any = { complete: jest.fn(async () => { if (opts.llmFail) throw new Error('down'); return opts.title ?? 'Finish the BOM'; }) };
+  const tasks: any = { create: jest.fn(async (t: any) => ({ id: 't1', title: t.title })) };
+  return { svc: new EmoTaskService(llm, tasks, cards), llm, tasks, updates };
 }
 
-describe('EmoTaskService (BEA-866 / BEA-877)', () => {
-  it('creates real tasks from the recording and links them on the card', async () => {
-    const { svc, tasks, updates } = make({ tasks: [{ id: 't1', title: 'finish the BOM' }] });
+describe('EmoTaskService (BEA-947: ONE task per utterance)', () => {
+  it('creates exactly one task with a cleaned title', async () => {
+    const { svc, tasks, updates } = make({ title: 'Finish the BOM by Friday' });
     await svc.handle('c1');
-    expect(tasks.dump).toHaveBeenCalledWith(expect.stringContaining('BOM'), 'emo');
+    expect(tasks.create).toHaveBeenCalledTimes(1);
+    expect(tasks.create).toHaveBeenCalledWith({ title: 'Finish the BOM by Friday', category: 'Emo' });
     const done = updates[updates.length - 1];
     expect(done.status).toBe('done');
-    expect(done.summary).toBe('Task added: finish the BOM');
-    expect(done.links).toEqual([{ kind: 'task', id: 't1', label: 'finish the BOM' }]);
+    expect(done.summary).toBe('Task added: Finish the BOM by Friday');
+    expect(done.links).toHaveLength(1);
   });
 
-  it('auto-splits one recording into several task cards-links', async () => {
-    const { svc, updates } = make({ tasks: [{ id: 't1', title: 'A' }, { id: 't2', title: 'B' }, { id: 't3', title: 'C' }] });
+  it('NEVER splits: a multi-item dump still becomes one task', async () => {
+    const { svc, tasks } = make({
+      title: 'Call Ravi and send the invoice',
+      card: { id: 'c1', lane: 'task', rawTranscript: 'call ravi and also send the invoice and buy milk', summary: '', needsAnswer: null },
+    });
     await svc.handle('c1');
-    const done = updates[updates.length - 1];
-    expect(done.summary).toBe('3 tasks added');
-    expect(done.links).toHaveLength(3);
+    expect(tasks.create).toHaveBeenCalledTimes(1);
   });
 
-  it('surfaces the dump clarity question on the card (Needs-you) the FIRST time it is vague', async () => {
-    const { svc, tasks, updates } = make({ question: 'What is “stuff”?', tasks: [] });
+  it('LLM down: falls back to the raw words, still one task, nothing lost', async () => {
+    const { svc, tasks, updates } = make({ llmFail: true });
     await svc.handle('c1');
-    expect(tasks.create).not.toHaveBeenCalled();
-    expect(updates[0]).toMatchObject({ status: 'needs_you', needsQuestion: 'What is “stuff”?' });
-  });
-
-  it('does NOT discard a still-vague 2nd answer — captures a best-effort task (BEA-877)', async () => {
-    const card = { id: 'c1', lane: 'task', rawTranscript: 'do the thing for the launch', summary: 'Task', needsAnswer: 'the launch thing' };
-    const { svc, tasks, updates } = make({ question: 'still unclear — what thing?', tasks: [] }, card);
-    await svc.handle('c1');
-    expect(tasks.create).toHaveBeenCalled(); // captured, not dropped as "Nothing to add"
-    const done = updates[updates.length - 1];
-    expect(done.status).toBe('done');
-    expect(done.summary).toMatch(/Task added/);
-    expect(done.links[0]).toMatchObject({ kind: 'task', id: 'best1' });
+    expect(tasks.create).toHaveBeenCalledTimes(1);
+    expect(tasks.create.mock.calls[0][0].title).toContain('finish the BOM');
+    expect(updates[updates.length - 1].status).toBe('done');
   });
 
   it('ignores a non-task card', async () => {
-    const { svc, tasks } = make({ tasks: [] }, { id: 'c1', lane: 'search' });
+    const { svc, tasks } = make({ card: { id: 'c1', lane: 'note', rawTranscript: 'x' } });
     await svc.handle('c1');
-    expect(tasks.dump).not.toHaveBeenCalled();
+    expect(tasks.create).not.toHaveBeenCalled();
   });
 });
