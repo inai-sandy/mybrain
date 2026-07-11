@@ -1,4 +1,4 @@
-import { matchContact, contactSpellings, spellingsForName, similarity, norm } from './person-identity';
+import { matchContact, matchContactsAll, editDistance, contactSpellings, spellingsForName, similarity, norm } from './person-identity';
 
 const C = [
   { id: 'c1', name: 'Vijaya Durga', aliases: ['Vijay', 'Vijay Durga'] },
@@ -35,5 +35,21 @@ describe('person-identity matcher (BEA-763)', () => {
 
   it('norm trims, lowercases, collapses spaces', () => {
     expect(norm('  Vijaya   Durga ')).toBe('vijaya durga');
+  });
+});
+
+describe('fuzzy contact matching (BEA-949)', () => {
+  const contacts = [{ id: '1', name: 'Srikar' }, { id: '2', name: 'Swathi' }];
+  it('rescues a one-letter mishear: Shrikar -> Srikar', () => {
+    expect(matchContactsAll(contacts, 'Shrikar').map((c) => c.name)).toEqual(['Srikar']);
+  });
+  it('exact matches still win', () => {
+    expect(matchContactsAll(contacts, 'srikar').map((c) => c.name)).toEqual(['Srikar']);
+  });
+  it('does not match wildly different names', () => {
+    expect(matchContactsAll(contacts, 'Dharmendra')).toEqual([]);
+  });
+  it('editDistance basics', () => {
+    expect(editDistance('shrikar', 'srikar')).toBe(1);
   });
 });

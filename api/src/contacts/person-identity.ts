@@ -33,7 +33,31 @@ export function matchContact<T extends PersonContact>(contacts: T[], name: strin
 export function matchContactsAll<T extends PersonContact>(contacts: T[], name: string): T[] {
   const n = norm(name);
   if (!n) return [];
-  return contacts.filter((c) => contactSpellings(c).some((s) => norm(s) === n));
+  const exact = contacts.filter((c) => contactSpellings(c).some((s) => norm(s) === n));
+  if (exact.length) return exact;
+  // Voice mishears one letter all the time ("Shrikar" for "Srikar") — a small
+  // edit-distance pass rescues those instead of bouncing the card back. (BEA-949)
+  const tol = n.length >= 6 ? 2 : 1;
+  return contacts.filter((c) => contactSpellings(c).some((s) => {
+    const m = norm(s);
+    return Math.abs(m.length - n.length) <= tol && editDistance(m, n) <= tol;
+  }));
+}
+
+/** Plain Levenshtein distance (small strings only). */
+export function editDistance(a: string, b: string): number {
+  const la = a.length;
+  const lb = b.length;
+  if (!la) return lb;
+  if (!lb) return la;
+  let prev = Array.from({ length: lb + 1 }, (_, j) => j);
+  for (let i = 1; i <= la; i++) {
+    const cur = [i];
+    for (let j = 1; j <= lb; j++)
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[lb];
 }
 
 /** Names to search for given a query: the matching contact's full spelling set, else just the name. */
