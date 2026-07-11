@@ -119,8 +119,14 @@ export class EmoDeviceService {
     pcm = normalizePcm(pcm);
     const wav = wavWrap(pcm, sr);
     let audioPath: string | undefined;
-    try { audioPath = this.saveRecording(wav); } catch { /* keep the turn alive without audio */ }
-    const heard = (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
+    // disk guard (941): an hour-long meeting decodes to >100MB of WAV — don't hoard those
+    if (wav.length <= 15 * 1024 * 1024) {
+      try { audioPath = this.saveRecording(wav); } catch { /* keep the turn alive without audio */ }
+    }
+    // meetings get speaker labels (Speaker 1/2…) via diarization (941)
+    const heard = mode === 'meeting'
+      ? (await this.voice.transcribeMeeting(wav, 'audio/wav')).trim()
+      : (await this.voice.transcribeWith('deepgram', wav, 'device-turn.wav', 'audio/wav')).trim();
     if (!heard) {
       return { ok: false, mode, heard: '', reply: "I couldn't hear anything.", say: "Sorry, I couldn't hear that. Try again." };
     }
