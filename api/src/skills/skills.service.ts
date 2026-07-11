@@ -243,34 +243,35 @@ export class SkillsService {
     const exists = async (p: string) => { try { await fs.stat(p); return true; } catch { return false; } };
     const deployments = this.effectiveDeployments(s); // keep every target already deployed to
     let slug = baseSlug;
-    let renamed = false;
+    let adopted = false; // a skill of this name is already installed here → just use it, don't duplicate
     if (deployments[target] && (await exists(join(baseDir, deployments[target])))) {
       slug = deployments[target]; // this skill already lives here for this target — update it in place
     } else if (s.slug && s.source === baseDir && (await exists(join(baseDir, s.slug)))) {
       slug = s.slug; // legacy deploy (before the per-target map) — keep its folder
-    } else {
-      let n = 1;
-      while (await exists(join(baseDir, slug))) {
-        n += 1;
-        slug = `${baseSlug.slice(0, 76)}-${n}`;
-        renamed = true;
-      }
+    } else if (await exists(join(baseDir, baseSlug))) {
+      // A skill with this name is ALREADY installed here (e.g. a built-in). Don't duplicate it or
+      // rename to "-2" — adopt it and use it as-is under its clean name. (BEA-959, user: "just use it")
+      slug = baseSlug;
+      adopted = true;
     }
     const destDir = join(baseDir, slug);
     try {
-      await fs.mkdir(destDir, { recursive: true });
-      if (s.filePath && s.filePath.toLowerCase().endsWith('.zip')) {
-        new AdmZip(s.filePath).extractAllTo(destDir, true);
-      } else if (s.content) {
-        await fs.writeFile(join(destDir, 'SKILL.md'), s.content, 'utf8');
-      } else if (s.filePath) {
-        await fs.writeFile(join(destDir, 'SKILL.md'), await fs.readFile(s.filePath));
-      } else {
-        return { ok: false, message: 'Nothing to deploy — add the skill file or paste its content first.' };
+      if (!adopted) {
+        // Only write when the skill isn't already there — an adopted skill is used as-is, untouched.
+        await fs.mkdir(destDir, { recursive: true });
+        if (s.filePath && s.filePath.toLowerCase().endsWith('.zip')) {
+          new AdmZip(s.filePath).extractAllTo(destDir, true);
+        } else if (s.content) {
+          await fs.writeFile(join(destDir, 'SKILL.md'), s.content, 'utf8');
+        } else if (s.filePath) {
+          await fs.writeFile(join(destDir, 'SKILL.md'), await fs.readFile(s.filePath));
+        } else {
+          return { ok: false, message: 'Nothing to deploy — add the skill file or paste its content first.' };
+        }
       }
       deployments[target] = slug;
       await this.prisma.skill.update({ where: { id }, data: { installed: true, slug, source: baseDir, deployments: JSON.stringify(deployments) } });
-      const note = renamed ? ` (a skill named “${baseSlug}” already existed there, so this was saved as “${slug}” — the old one is untouched)` : '';
+      const note = adopted ? ' (already installed here — using the existing one)' : '';
       return { ok: true, message: `Deployed to ${target} → ${slug}${note}` };
     } catch (e: any) {
       return { ok: false, message: 'Deploy failed: ' + (e?.message || 'error') };

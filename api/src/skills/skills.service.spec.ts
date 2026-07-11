@@ -98,12 +98,14 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     expect(by.sandy).toBe(true);
   });
 
-  it('never clobbers a DIFFERENT skill already in the target (renames to -2)', async () => {
+  it('adopts an already-installed skill of the same name — no "-2", existing folder untouched (BEA-959)', async () => {
+    // A skill with this name already lives in the sandy target (e.g. a built-in). Adopt + use it.
     await fs.mkdir(join(dirs[0], 'deep-research'), { recursive: true });
-    await fs.writeFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'a pre-existing different skill', 'utf8');
+    await fs.writeFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'BUILT-IN', 'utf8');
     const r = await svc.deploy('s1', 'sandy');
     expect(r.ok).toBe(true);
-    expect(await fs.readFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'utf8')).toBe('a pre-existing different skill'); // untouched
-    expect(JSON.parse(skill.deployments).sandy).toBe('deep-research-2');
+    expect(JSON.parse(skill.deployments).sandy).toBe('deep-research'); // clean name, no "-2"
+    expect(await fs.readFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'utf8')).toBe('BUILT-IN'); // adopted, untouched
+    await expect(fs.stat(join(dirs[0], 'deep-research-2'))).rejects.toBeDefined(); // no duplicate folder
   });
 });
