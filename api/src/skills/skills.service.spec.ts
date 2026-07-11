@@ -109,3 +109,42 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     await expect(fs.stat(join(dirs[0], 'deep-research-2'))).rejects.toBeDefined(); // no duplicate folder
   });
 });
+
+describe('SkillsService.scan — dedup + re-entrancy (BEA-961)', () => {
+  function scanFakes(existing: any[]) {
+    const skills = [...existing];
+    const prisma: any = {
+      skill: {
+        findMany: async () => skills,
+        create: async ({ data }: any) => { const r = { id: 'n' + (skills.length + 1), ...data }; skills.push(r); return r; },
+        update: async ({ where, data }: any) => { const s = skills.find((x) => x.id === where.id); Object.assign(s, data); return s; },
+      },
+      setting: { findUnique: async () => null, upsert: async () => ({}) },
+    };
+    const svc = new SkillsService(prisma as any, { enqueue: async () => undefined } as any, { complete: async () => 'desc' } as any, { get: async () => 'tmpl' } as any);
+    jest.spyOn(svc as any, 'zipFolder').mockResolvedValue(true);
+    jest.spyOn(svc as any, 'applyUsage').mockResolvedValue(undefined);
+    return { svc, skills };
+  }
+
+  it('matches an existing skill by NAME (not slug/origin) — updates, never duplicates', async () => {
+    const base = await fs.mkdtemp(join(tmpdir(), 'scan-'));
+    await fs.mkdir(join(base, 'design-2'), { recursive: true }); // folder name differs from the tracked slug
+    await fs.writeFile(join(base, 'design-2', 'SKILL.md'), '---\nname: design\ndescription: d\n---\nbody', 'utf8');
+    process.env.SKILLS_SCAN_DIRS = base;
+    process.env.DATA_DIR = base;
+    // an imported skill (origin=downloaded, clean slug) — the OLD match (origin:'created', slug) would MISS this
+    const { svc, skills } = scanFakes([{ id: 'x1', title: 'design', slug: 'design', origin: 'downloaded', content: 'old', description: 'old' }]);
+    const r = await svc.scan();
+    expect(r.created).toBe(0);
+    expect(r.updated).toBe(1);
+    expect(skills.length).toBe(1); // still ONE 'design' record — no duplicate
+  });
+
+  it('skips when a scan is already running (re-entrancy guard)', async () => {
+    const { svc } = scanFakes([]);
+    (svc as any).scanning = true;
+    const r = await svc.scan();
+    expect(r).toMatchObject({ created: 0, updated: 0, total: 0 });
+  });
+});

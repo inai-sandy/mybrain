@@ -45,6 +45,8 @@ type CreateInput = { title?: string; description?: string; content?: string; ori
 
 @Injectable()
 export class SkillsService {
+  private scanning = false; // re-entrancy guard: a slow scan clicked twice must not run concurrently (BEA-961)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
@@ -458,7 +460,19 @@ export class SkillsService {
 
   /** Scan the mounted server skill dirs, AI-describe + zip each, upsert (deduped by skill name). */
   async scan(): Promise<{ created: number; updated: number; total: number; lastScan: string }> {
+    if (this.scanning) {
+      // A scan is already running (a slow scan clicked twice) — don't race and duplicate. (BEA-961)
+      const last = (await this.prisma.setting.findUnique({ where: { key: 'skills.lastScan' } }))?.value || new Date().toISOString();
+      return { created: 0, updated: 0, total: 0, lastScan: last };
+    }
+    this.scanning = true;
+    try {
     const dirs = (process.env.SKILLS_SCAN_DIRS || '').split(',').map((s) => s.trim()).filter(Boolean);
+    // Match existing skills by NAME (their stable identity) — NOT by folder-slug or origin — so a re-scan
+    // updates in place instead of duplicating imported skills or "-2"-suffixed folders. Preloaded once. (BEA-961)
+    const norm = (x: string) => (x || '').trim().toLowerCase();
+    const byName = new Map<string, any>();
+    for (const sk of await this.prisma.skill.findMany()) if (!byName.has(norm(sk.title))) byName.set(norm(sk.title), sk);
     const zipDir = skillsDir();
     await fs.mkdir(zipDir, { recursive: true });
     const seen = new Set<string>();
@@ -487,7 +501,7 @@ export class SkillsService {
         total++;
         const parsed = parseSkillMd(md);
         const title = (parsed.name || slug).slice(0, 120);
-        const existing = await this.prisma.skill.findFirst({ where: { origin: 'created', slug } });
+        const existing = byName.get(norm(title)) || null; // match by name, not folder-slug/origin (BEA-961)
         // Re-describe only when the skill is new OR its SKILL.md changed since last scan
         // (keeps existing descriptions on unchanged skills → no needless LLM calls).
         const changed = !existing || (existing.content || '') !== md || !existing.description?.trim();
@@ -505,6 +519,7 @@ export class SkillsService {
             data: { title, description, content: md, origin: 'created', platform: 'code', slug, source: base, installed: true, filePath: zipped ? zipPath : null },
           });
           await this.memory.enqueue(`${title}\n\n${description}`, { itemId: undefined, title, tags: ['skill', 'created'] });
+          byName.set(norm(title), skill); // so a second folder of the same name in this scan updates, not duplicates
           created++;
         }
       }
@@ -514,5 +529,8 @@ export class SkillsService {
     const lastScan = new Date().toISOString();
     await this.prisma.setting.upsert({ where: { key: 'skills.lastScan' }, create: { key: 'skills.lastScan', value: lastScan }, update: { value: lastScan } }).catch(() => undefined);
     return { created, updated, total, lastScan };
+    } finally {
+      this.scanning = false;
+    }
   }
 }
