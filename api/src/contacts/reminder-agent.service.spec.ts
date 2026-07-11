@@ -22,18 +22,27 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
 }
 
 describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
-  it('replies once and closes ONLY the item the contact addressed (partial reply)', async () => {
+  it('replies but no longer auto-closes reminders from the chat (BEA-948)', async () => {
     const reminders = [
       { id: 'r1', status: 'active', subject: 'the Zigbee testing', taskId: null },
       { id: 'r2', status: 'active', subject: 'the socket pins report', taskId: null },
     ];
-    const voice = '{"send":true,"reply":"Great, thanks! Will wait for the socket pins.","items":[{"n":1,"resolved":true,"outcome":"Zigbee testing done"},{"n":2,"resolved":false}]}';
+    const voice = '{"send":true,"reply":"Great, thanks! Will wait for the socket pins.","needsSandeep":false}';
     const { svc, state } = setup(voice, { reminders });
     await svc.onContactReply('c1');
     expect(state.sent).toBe(1);
     expect(state.out[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
-    expect(state.updated['r1']).toMatchObject({ status: 'done', needsOwner: false, feedback: 'Zigbee testing done' }); // resolved item closed + flag cleared
-    expect(state.updated['r2']).toBeUndefined(); // other item stays open
+    expect(state.updated['r1']).toBeUndefined(); // agent no longer marks reminders done — only the user closes them
+    expect(state.updated['r2']).toBeUndefined();
+  });
+
+  it('still replies when the reminder is done or paused — the conversation never dies (BEA-948)', async () => {
+    const { svc, state } = setup('{"send":true,"reply":"Thanks Jayanth, noted the 400 qty for today.","needsSandeep":false}', {
+      reminders: [{ id: 'r1', status: 'done', subject: 'the production update', taskId: null }],
+    });
+    await svc.onContactReply('c1');
+    expect(state.sent).toBe(1); // a done reminder must STILL get a reply
+    expect(state.out[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
   });
 
   it('clears a stuck "needs you" flag once the agent handles the conversation (BEA-786)', async () => {

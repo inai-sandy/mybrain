@@ -122,20 +122,28 @@ export class ReminderAgentService {
     const number = (contact.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number || !this.postbox.isConfigured()) return;
 
-    const reminders: any[] = await this.prisma.reminder.findMany({ where: { contactId, status: 'active' }, orderBy: { createdAt: 'asc' } });
-    if (!reminders.length) return;
+    // Process a reply for ANY reminder relationship — active, paused, OR done. The conversation must
+    // never die just because a reminder was closed or paused. We ALWAYS read + reply; a reminder's
+    // status only governs whether WE send scheduled nudges, never whether we answer THEM. (BEA-948)
+    const allReminders: any[] = await this.prisma.reminder.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } });
+    if (!allReminders.length) return; // no relationship at all → nothing to do
+    const reminders: any[] = allReminders.filter((r) => r.status === 'active' || r.status === 'paused'); // open items to chase
+    const anchorReminderId: string = (reminders[0] || allReminders[allReminders.length - 1]).id; // where to attach our outbound
     const messages: any[] = await this.prisma.reminderMessage.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } });
     const name = (contact.name || 'them').trim();
     const thread = messages.map((m) => `${m.direction === 'out' ? 'Me' : name}: ${m.body}`).join('\n');
 
     const items: { n: number; reminderId: string; subject: string }[] = [];
     for (let i = 0; i < reminders.length; i++) items.push({ n: i + 1, reminderId: reminders[i].id, subject: await this.subjectFor(reminders[i]) });
-    const itemList = items.map((it, i) => `${it.n}. ${it.subject}${reminders[i].notes?.trim() ? ` — context Sandeep gave: ${reminders[i].notes.trim()}` : ''}`).join('\n');
+    const itemList = items.length
+      ? items.map((it, i) => `${it.n}. ${it.subject}${reminders[i].notes?.trim() ? ` — context Sandeep gave: ${reminders[i].notes.trim()}` : ''}`).join('\n')
+      : '(no open reminders right now — this is an ongoing conversation; keep it warm, acknowledge what they share, and pass anything important to Sandeep)';
 
     // Sandeep's transparent AI assistant — identifies itself, uses the notes as context, and
     // escalates to Sandeep when it can't answer, instead of impersonating him. (BEA-765/766)
     const prompt = `You are the AI assistant for Sandeep (your boss — the person you represent, and NOT the person you are texting).
-You are texting ${name} on WhatsApp on Sandeep's behalf. In THIS chat, the person you are replying to is ${name}; Sandeep is not here. Following up on ${items.length === 1 ? 'this open item' : 'these open items'}:
+You are texting ${name} on WhatsApp on Sandeep's behalf. In THIS chat, the person you are replying to is ${name}; Sandeep is not here.
+${items.length ? `Open item(s) you're following up on:` : `There are no open reminders right now — this is an ongoing WhatsApp conversation with ${name}:`}
 ${itemList}
 
 Conversation so far:
@@ -146,16 +154,15 @@ Rules:
 - If you address them by name at all, use "${name}" — NEVER call them "Sandeep". Sandeep is your boss, not the person in this chat. Using no name is better than the wrong one. (You may still mention Sandeep in the third person, e.g. "I'll check with Sandeep".)
 - Warm, natural, plain Indian English. You ARE Sandeep's AI assistant — do NOT pretend to be Sandeep. If they ask who you are, tell them you're Sandeep's AI assistant helping him keep track, and he'll jump in when needed.
 - Warmly invite them to reply or ask anything they want to discuss.
-- Short — 1-2 sentences, ONE message even if there are several items.
+- ENGAGE with what they actually said. When ${name} shares concrete details — quantities, hours, numbers, a status, a problem or a blocker — acknowledge the SPECIFICS: reflect the real figures/facts back so they know you truly read it, and ask ONE useful follow-up or offer help. NEVER reply to a detailed update with just "Perfect!" or "Got it".
+- Concise and natural — usually 1 to 3 sentences, ONE message.
 - Use the context Sandeep gave (above) to answer their questions when you can.
 - If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
-- ALWAYS reply to their message — set "send": true and give at least a short, warm acknowledgment. NEVER leave them on read. This applies to everything: a plain "yes"/"ok"/"perfect"/"thanks", a link, or "please find the update sheet" all get a brief reply (e.g. "Great, thanks — I'll wait for the update whenever you have it." / "Thanks, got it — I'll pass this on to Sandeep.").
+- ALWAYS reply to their message — set "send": true. NEVER leave them on read; a plain "yes"/"ok"/"thanks" or a shared file/link still gets a brief warm reply.
 - Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
 
-For EACH numbered item, decide if it's now resolved — ONLY if they clearly addressed THAT item (said it's done / gave its final status). Give a one-line outcome for resolved items.
-
 Reply with ONLY this JSON, nothing else:
-{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "items": [{"n": <number>, "resolved": true or false, "outcome": "<one line if resolved>"}]}`;
+{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false}`;
 
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 700);
     const parsed: any = this.parseJson(raw) || {};
@@ -181,7 +188,7 @@ Reply with ONLY this JSON, nothing else:
     } else {
       const res = await this.postbox.sendText(number, replyText);
       await this.prisma.reminderMessage
-        .create({ data: { contactId, reminderId: reminders[0].id, direction: 'out', body: replyText, wamid: res.wamid || null, status: 'sent' } })
+        .create({ data: { contactId, reminderId: anchorReminderId, direction: 'out', body: replyText, wamid: res.wamid || null, status: 'sent' } })
         .catch(() => undefined);
     }
 
@@ -196,17 +203,9 @@ Reply with ONLY this JSON, nothing else:
       await this.prisma.reminder.updateMany({ where: { contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
     }
 
-    // Close only the items the contact actually resolved.
-    const byN = new Map(items.map((it) => [it.n, it.reminderId]));
-    for (const it of Array.isArray(parsed.items) ? parsed.items : []) {
-      if (it?.resolved && byN.has(it.n)) {
-        const rid = byN.get(it.n)!;
-        await this.prisma.reminder
-          .update({ where: { id: rid }, data: { status: 'done', needsOwner: false, feedback: (it.outcome || 'Resolved').trim() } })
-          .catch(() => undefined);
-        this.log.log(`reminder ${rid} resolved: ${it.outcome || ''}`);
-      }
-    }
+    // NOTE: the agent no longer auto-closes reminders from a chat (BEA-948). These are often ongoing
+    // reporting relationships (e.g. daily production updates) that are never really "done" — closing
+    // them silenced the conversation. Only the user closes a reminder now, from the app.
   }
 
   /** WhatsApp Sandeep when the agent is stuck: nice free-text in-window, template fallback cold. (BEA-767) */
