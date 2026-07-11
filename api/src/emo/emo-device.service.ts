@@ -160,7 +160,8 @@ export class EmoDeviceService {
     }
 
     if (mode === 'talk') {
-      const r = await this.talk.talk({ message: heard, conversationId: opts.conversationId || undefined, web: 'auto', noQuestions: true });
+      // search-first Talk (952): the device always brings fresh web results to the answer
+      const r = await this.talk.talk({ message: heard, conversationId: opts.conversationId || undefined, web: 'on', noQuestions: true });
       const s = (r.reply || '').trim() || 'Okay.';
       return { ok: true, mode, heard, reply: s, say: s.slice(0, 600), conversationId: r.conversationId };
     }

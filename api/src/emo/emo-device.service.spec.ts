@@ -111,7 +111,7 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('talk mode carries the conversation id both ways', async () => {
     const r = await svc.turn(pcm, { mode: 'talk', conversationId: 'prev' });
-    expect(talk.talk).toHaveBeenCalledWith({ message: expect.any(String), conversationId: 'prev', web: 'auto', noQuestions: true });
+    expect(talk.talk).toHaveBeenCalledWith({ message: expect.any(String), conversationId: 'prev', web: 'on', noQuestions: true }); // search-first (952)
     expect(r.conversationId).toBe('t1');
     expect(r.say).toBe('Sure thing.');
   });
