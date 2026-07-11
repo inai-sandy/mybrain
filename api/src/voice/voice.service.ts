@@ -192,7 +192,7 @@ export class VoiceService {
       try {
         const model = await this.getDeepgramModel();
         const r = await fetch(
-          `https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true&diarize=true&utterances=true`,
+          `https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true&diarize=true&utterances=true${await this.keytermQuery(model)}`,
           { method: 'POST', headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime }, body: new Uint8Array(buf) },
         );
         if (r.ok) {
@@ -334,11 +334,19 @@ export class VoiceService {
     return (await this.clean(raw).catch(() => raw)).trim();
   }
 
+  /** &keyterm=… boosts for the user's dictionary (names!) — nova-3 only. (BEA-949) */
+  private async keytermQuery(model: string): Promise<string> {
+    if (!model.startsWith('nova-3')) return '';
+    const vocab = (await this.getSetting('voice.vocabulary')) || '';
+    return vocab.split(',').map((w) => w.trim()).filter(Boolean).slice(0, 40)
+      .map((w) => `&keyterm=${encodeURIComponent(w)}`).join('');
+  }
+
   private async deepgram(buf: Buffer, mime: string): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('deepgram');
     if (!c?.apiKey) return null;
     const model = await this.getDeepgramModel();
-    const r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true`, {
+    const r = await fetch(`https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true${await this.keytermQuery(model)}`, {
       method: 'POST',
       headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime || 'audio/webm' },
       body: new Uint8Array(buf),

@@ -134,3 +134,17 @@ describe('EmoReminderService (BEA-867 / BEA-875 / BEA-876)', () => {
     expect(contacts.findAllByName).not.toHaveBeenCalled();
   });
 });
+
+describe('misheard names (BEA-949)', () => {
+  it('typed answer overrides the misheard transcript name', async () => {
+    const { svc, contacts } = make({
+      extract: { who: 'Shrikar', what: 'the pins', when: '' },
+      contacts: [{ id: 'k1', name: 'Srikar' }],
+      card: { id: 'c1', lane: 'reminder', rawTranscript: 'remind shrikar about the pins', summary: 'Reminder',
+              needsQuestion: 'I couldn\'t find "Shrikar" in your contacts. Who should I remind — and are they saved in Contacts?',
+              needsAnswer: 'Srikar' },
+    });
+    await svc.handle('c1');
+    expect(contacts.findAllByName).toHaveBeenCalledWith('Srikar');
+  });
+});

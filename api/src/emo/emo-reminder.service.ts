@@ -63,7 +63,9 @@ export class EmoReminderService {
     const text = [card.rawTranscript || card.summary || '', card.needsAnswer].filter(Boolean).join('. ').trim();
     try {
       const { who, what, when, startDay, time, inMinutes } = await this.extract(text);
-      const person = (card.needsAnswer && !who ? card.needsAnswer : who).trim();
+      // If the question we asked was about WHO, the typed answer beats the misheard transcript. (BEA-949)
+      const askedWho = /who should i remind|couldn't find/i.test(String(card.needsQuestion || ''));
+      const person = ((card.needsAnswer && (askedWho || !who)) ? card.needsAnswer : who).trim();
 
       // No person named -> the user means THEMSELVES: a personal reminder that
       // rings on the EMO device (BEA-944). Best-guess timing, never a question.
