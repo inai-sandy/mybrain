@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { VoiceService } from '../voice/voice.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotesService } from '../notes/notes.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
@@ -110,6 +111,7 @@ export class EmoDeviceService {
     private readonly ask: EmoAskService,
     private readonly talk: EmoTalkService,
     private readonly prisma: PrismaService,
+    private readonly notes: NotesService,
   ) {}
 
   /** Personal reminders the device should ring (next 48h, oldest first). */
@@ -169,6 +171,21 @@ export class EmoDeviceService {
     // capture routes freely; story/meeting/research force their lane
     const lane = mode === 'capture' ? undefined : mode;
     const { cards } = await this.router.route(heard, { source: 'emo-device', lane: lane as any, audioPath });
+    // NOTE mode creates a REAL Note in My Brain, not just a card (BEA-957)
+    if (mode === 'note' && cards?.length) {
+      try {
+        const note: any = await this.notes.create({
+          title: heard.split('\n')[0].slice(0, 80),
+          content: heard,
+          tags: JSON.stringify(['emo', 'note']),
+        });
+        if (note?.id) {
+          const c0: any = cards[0];
+          const links = Array.isArray(c0.links) ? c0.links : [];
+          await this.prisma.emoCard.update({ where: { id: c0.id }, data: { links: JSON.stringify([...links, { kind: 'note', id: note.id, label: 'in Notes' }]) } }).catch(() => undefined);
+        }
+      } catch { /* the card still holds the words */ }
+    }
     const n = cards?.length || 0;
     const first = n ? String((cards[0] as any)?.summary || '').trim() : '';
     const reply = n ? cards.map((c: any) => `• ${c.summary || ''}`).join('\n') : 'Nothing captured.';

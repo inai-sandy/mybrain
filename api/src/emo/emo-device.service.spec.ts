@@ -28,7 +28,8 @@ describe('EmoDeviceService (BEA-926)', () => {
       update: jest.fn(async () => ({})),
     },
   };
-  const svc = new EmoDeviceService(voice, router, ask, talk, prisma);
+  const notes: any = { create: jest.fn(async () => ({ id: 'n1' })) };
+  const svc = new EmoDeviceService(voice, router, ask, talk, prisma, notes);
   const pcm = Buffer.alloc(3200); // 100ms of 16k mono silence
 
   beforeEach(() => jest.clearAllMocks());
@@ -58,6 +59,12 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(r.reminders).toEqual([{ id: 'dr1', text: 'call the vendor', dueAt: 1760000000000 }]);
     await svc.ackDeviceReminder('dr1', 'done');
     expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'done' } });
+  });
+
+  it('note mode also creates a REAL Note (BEA-957)', async () => {
+    prisma.emoCard = { update: jest.fn(async () => ({})) } as any;
+    await svc.turn(pcm, { mode: 'note' });
+    expect(notes.create).toHaveBeenCalledWith(expect.objectContaining({ content: expect.any(String) }));
   });
 
   it('rejects empty audio', async () => {
