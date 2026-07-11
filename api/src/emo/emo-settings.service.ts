@@ -14,6 +14,7 @@ export type EmoSettings = {
   searchDefault: 'on' | 'off' | 'auto';
   vocabulary: string;
   deviceVolume: number;
+  cardSyncRequested: number;   // epoch ms of the last "Sync device card" press (0 = never)
 };
 
 /**
@@ -45,6 +46,7 @@ export class EmoSettingsService {
       searchDefault: ['on', 'off', 'auto'].includes(searchDefault) ? searchDefault : 'auto',
       vocabulary: (await this.g('voice.vocabulary')) || '',
       deviceVolume: Math.min(100, Math.max(0, Number(await this.g('emo.device.volume')) || 60)),
+      cardSyncRequested: Number(await this.g('emo.device.cardSync')) || 0,
       voices: EMO_VOICES,
       models: EMO_MODELS,
       sttEngines: STT_ENGINES,
@@ -59,6 +61,7 @@ export class EmoSettingsService {
     if (patch.searchDefault && ['on', 'off', 'auto'].includes(patch.searchDefault)) await this.s('emo.search.default', patch.searchDefault);
     if (patch.vocabulary !== undefined) await this.s('voice.vocabulary', String(patch.vocabulary).slice(0, 2000));
     if (patch.deviceVolume !== undefined) await this.s('emo.device.volume', String(Math.min(100, Math.max(0, Number(patch.deviceVolume) || 0))));
+    if ((patch as any).cardSync) await this.s('emo.device.cardSync', String(Date.now()));
     return this.get();
   }
 }
