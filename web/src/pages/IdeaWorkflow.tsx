@@ -13,14 +13,17 @@ function kebab(s: string) {
 /** Compile the built workflow into a Claude Code prompt the user can paste & run by hand. */
 // The workflow prompt IS the idea's deep-research prompt, verbatim — then any extra workflow steps
 // are appended below. The base must stay identical to what the idea's Deep-research prompt shows. (BEA-957)
-function buildPrompt(researchPrompt: string, nodes: Node[]): string {
+function buildPrompt(researchPrompt: string, nodes: Node[], skills: SkillT[]): string {
   const base = (researchPrompt || '').trim();
   if (!nodes.length) return base || '(No deep-research prompt for this idea yet.)';
+  // Render each skill command from the skill's CURRENT slug (by title) so a renamed/adopted skill
+  // never shows a stale suffixed slug like /deep-research-2. (BEA-960)
+  const liveSlug = (title?: string) => skills.find((s) => s.title === title)?.slug || null;
   const out: string[] = [base, '', '---', '', '## Additional workflow steps', "After the research above, continue with these steps, carrying each step's output into the next:"];
   nodes.forEach((n, i) => {
     const where = i === 0 ? 'the research result above' : "the previous step's result";
     if (n.type === 'skill') {
-      const cmd = n.slug || kebab(n.skill || '');
+      const cmd = liveSlug(n.skill) || n.slug || kebab(n.skill || '');
       out.push(`${i + 1}. Use the \`/${cmd}\` skill (${n.skill}) on ${where}.`);
     } else {
       out.push(`${i + 1}. ${(n.text || '').trim() || '(instruction)'}`);
@@ -46,7 +49,7 @@ export function IdeaWorkflow({ ideaId, ideaTitle, researchPrompt }: { ideaId: st
   const [editedPrompt, setEditedPrompt] = useState<string | null>(null); // null = use the auto-generated prompt
   const toast = useToast();
 
-  const autoPrompt = useMemo(() => buildPrompt(researchPrompt || '', nodes), [researchPrompt, nodes]);
+  const autoPrompt = useMemo(() => buildPrompt(researchPrompt || '', nodes, skills), [researchPrompt, nodes, skills]);
   const prompt = editedPrompt ?? autoPrompt; // what's shown / copied / saved
   async function copyPrompt() {
     try {
