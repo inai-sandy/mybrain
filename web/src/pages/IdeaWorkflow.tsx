@@ -11,20 +11,14 @@ function kebab(s: string) {
 }
 
 /** Compile the built workflow into a Claude Code prompt the user can paste & run by hand. */
-function buildPrompt(ideaTitle: string, ideaContent: string, nodes: Node[]): string {
-  const out: string[] = [];
-  out.push("I'm working on the idea below. Run the workflow step by step, carrying each step's output into the next.");
-  out.push('');
-  out.push(`## Idea: ${ideaTitle}`);
-  if (ideaContent?.trim()) out.push(ideaContent.trim());
-  out.push('');
-  if (!nodes.length) {
-    out.push('## Workflow\n(Add steps above to build the workflow.)');
-    return out.join('\n');
-  }
-  out.push('## Workflow');
+// The workflow prompt IS the idea's deep-research prompt, verbatim — then any extra workflow steps
+// are appended below. The base must stay identical to what the idea's Deep-research prompt shows. (BEA-957)
+function buildPrompt(researchPrompt: string, nodes: Node[]): string {
+  const base = (researchPrompt || '').trim();
+  if (!nodes.length) return base || '(No deep-research prompt for this idea yet.)';
+  const out: string[] = [base, '', '---', '', '## Additional workflow steps', "After the research above, continue with these steps, carrying each step's output into the next:"];
   nodes.forEach((n, i) => {
-    const where = i === 0 ? 'the idea above' : "the previous step's result";
+    const where = i === 0 ? 'the research result above' : "the previous step's result";
     if (n.type === 'skill') {
       const cmd = n.slug || kebab(n.skill || '');
       out.push(`${i + 1}. Use the \`/${cmd}\` skill (${n.skill}) on ${where}.`);
@@ -32,8 +26,7 @@ function buildPrompt(ideaTitle: string, ideaContent: string, nodes: Node[]): str
       out.push(`${i + 1}. ${(n.text || '').trim() || '(instruction)'}`);
     }
   });
-  out.push('');
-  out.push('When finished, share the final result.');
+  out.push('', 'When finished, share the final result.');
   return out.join('\n');
 }
 
@@ -43,7 +36,7 @@ function uid() {
 
 /** The agentic workflow builder for an idea — a phone-friendly draggable card stack
  *  (Idea → skills + text steps → finish). Execution is wired in a later phase. */
-export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: string; ideaTitle: string; ideaContent?: string }) {
+export function IdeaWorkflow({ ideaId, ideaTitle, researchPrompt }: { ideaId: string; ideaTitle: string; researchPrompt?: string }) {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [skills, setSkills] = useState<SkillT[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -53,7 +46,7 @@ export function IdeaWorkflow({ ideaId, ideaTitle, ideaContent }: { ideaId: strin
   const [editedPrompt, setEditedPrompt] = useState<string | null>(null); // null = use the auto-generated prompt
   const toast = useToast();
 
-  const autoPrompt = useMemo(() => buildPrompt(ideaTitle, ideaContent || '', nodes), [ideaTitle, ideaContent, nodes]);
+  const autoPrompt = useMemo(() => buildPrompt(researchPrompt || '', nodes), [researchPrompt, nodes]);
   const prompt = editedPrompt ?? autoPrompt; // what's shown / copied / saved
   async function copyPrompt() {
     try {

@@ -227,7 +227,7 @@ export function IdeaDetail() {
             </>
           )}
 
-          {tab === 'workflow' && <IdeaWorkflow ideaId={id!} ideaTitle={d.title} ideaContent={d.content} />}
+          {tab === 'workflow' && <IdeaWorkflow ideaId={id!} ideaTitle={d.title} researchPrompt={d.researchPrompt} />}
         </>
       )}
       {!d && !err && <p className="text-zinc-400">Loading…</p>}
