@@ -1,4 +1,4 @@
-import { fixOwnerVocative, needsFirstAck, needsAck, ackLine } from './reminder-agent.service';
+import { fixOwnerVocative, needsFirstAck, needsAck, ackLine, watchdogAction } from './reminder-agent.service';
 
 describe('needsFirstAck — never leave a first "yes/ok" on read (BEA-902)', () => {
   const reminder = { direction: 'out', body: 'Hi Rakesh, a gentle reminder about the production update.' };
@@ -76,5 +76,17 @@ describe('ackLine — short varied acknowledgment (BEA-923)', () => {
   it('falls back to a plain thanks and uses the contact name', () => {
     expect(ackLine('Deepthi', 'ok')).toBe('Great, thanks Deepthi!');
     expect(ackLine('', 'ok')).toBe('Great, thanks there!');
+  });
+});
+
+describe('watchdogAction — self-healing decision (BEA-953)', () => {
+  it('skips fresh replies, retries mid-age, escalates long-stuck', () => {
+    expect(watchdogAction(2 * 60_000)).toBe('skip'); // 2 min — live path still has time
+    expect(watchdogAction(20 * 60_000)).toBe('retry'); // 20 min — self-heal
+    expect(watchdogAction(60 * 60_000)).toBe('escalate'); // 60 min — tell the owner
+  });
+  it('honours the grace/escalate thresholds', () => {
+    expect(watchdogAction(8 * 60_000)).toBe('retry'); // exactly grace
+    expect(watchdogAction(45 * 60_000)).toBe('escalate'); // exactly escalate
   });
 });

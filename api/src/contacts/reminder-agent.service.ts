@@ -1,7 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { RemindersService, topicFromMessage } from './reminders.service';
+
+/** Watchdog decision for an unanswered inbound of a given age. Pure + unit-tested. (BEA-953) */
+export function watchdogAction(ageMs: number, graceMs = 8 * 60_000, escalateMs = 45 * 60_000): 'skip' | 'retry' | 'escalate' {
+  if (ageMs < graceMs) return 'skip'; // give the live reply path time
+  if (ageMs < escalateMs) return 'retry'; // self-heal
+  return 'escalate'; // still stuck after retries → tell the owner
+}
 
 /**
  * Safety net (BEA-899): the reply is SENT TO the contact, so it must never address them by the
@@ -70,14 +77,62 @@ export function ackLine(name: string, lastIn: string): string {
  * conversation lives in ReminderMessage, so it survives restarts and is naturally multi-turn.
  */
 @Injectable()
-export class ReminderAgentService {
+export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('ReminderAgent');
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private watchdogRunning = false;
+  private readonly escalated = new Set<string>(); // contacts already escalated this stuck-episode (deduped in-memory)
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
     private readonly reminders: RemindersService,
   ) {}
+
+  // Self-healing watchdog (BEA-953): every 10 min, catch any contact reply we haven't answered —
+  // auto-retry it (heals transient failures), and if it's still stuck, flag it loudly + ping the owner.
+  onModuleInit() {
+    this.watchdogTimer = setInterval(() => {
+      this.watchdogTick().catch((e) => this.log.warn(`watchdog: ${e?.message}`));
+    }, 10 * 60_000);
+  }
+  onModuleDestroy() {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+  }
+
+  /** Find replies we owe, retry them, and escalate the ones that stay stuck. */
+  async watchdogTick(): Promise<void> {
+    if (this.watchdogRunning || !this.postbox.isConfigured()) return;
+    this.watchdogRunning = true;
+    try {
+      const now = Date.now();
+      const since = new Date(now - 24 * 60 * 60 * 1000); // WhatsApp free-window is 24h anyway
+      const inbound = await this.prisma.reminderMessage.findMany({
+        where: { direction: 'in', createdAt: { gte: since }, contactId: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        select: { contactId: true, createdAt: true },
+      });
+      const latestInByContact = new Map<string, Date>();
+      for (const m of inbound) if (m.contactId && !latestInByContact.has(m.contactId)) latestInByContact.set(m.contactId, m.createdAt);
+
+      for (const [contactId, inAt] of latestInByContact) {
+        const answered = await this.prisma.reminderMessage.count({ where: { contactId, direction: 'out', createdAt: { gt: inAt } } });
+        if (answered > 0) { this.escalated.delete(contactId); continue; } // we replied → clear any escalation state
+        const action = watchdogAction(now - new Date(inAt).getTime());
+        if (action === 'skip') continue;
+        this.log.warn(`watchdog: unanswered reply for contact ${contactId} → ${action}`);
+        await this.onContactReply(contactId).catch(() => undefined); // retry either way
+        if (action === 'escalate' && !this.escalated.has(contactId)) {
+          this.escalated.add(contactId);
+          await this.prisma.reminder.updateMany({ where: { contactId, status: { in: ['active', 'paused'] }, needsOwner: false }, data: { needsOwner: true } }).catch(() => undefined);
+          const contact = await this.prisma.contact.findUnique({ where: { id: contactId } }).catch(() => null);
+          await this.notifyOwner(contact?.name || 'A contact', 'their reply is waiting and I have not been able to answer').catch(() => undefined);
+        }
+      }
+    } finally {
+      this.watchdogRunning = false;
+    }
+  }
 
   private async subjectFor(r: any): Promise<string> {
     if (r.subject?.trim()) return r.subject.trim();
