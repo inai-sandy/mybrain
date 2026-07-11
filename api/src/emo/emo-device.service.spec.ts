@@ -11,6 +11,7 @@ describe('EmoDeviceService (BEA-926)', () => {
   const voice: any = {
     transcribe: jest.fn(async () => 'call the supplier tomorrow'),
     transcribeWith: jest.fn(async () => 'call the supplier tomorrow'),
+    transcribeMeeting: jest.fn(async () => 'Speaker 1: shall we ship friday?\nSpeaker 2: yes, agreed.'),
     ttsPcm: jest.fn(async () => {
       // 24 samples of a ramp at "24kHz" -> expect 16 samples out
       const b = Buffer.alloc(24 * 2);
@@ -63,6 +64,13 @@ describe('EmoDeviceService (BEA-926)', () => {
   it('story mode forces the story lane', async () => {
     await svc.turn(pcm, { mode: 'story' });
     expect(router.route).toHaveBeenCalledWith(expect.any(String), { source: 'emo-device', lane: 'story', audioPath: expect.any(String) });
+  });
+
+  it('meeting mode transcribes with speaker labels (BEA-941)', async () => {
+    await svc.turn(pcm, { mode: 'meeting' });
+    expect(voice.transcribeMeeting).toHaveBeenCalled();
+    expect(voice.transcribeWith).not.toHaveBeenCalled();
+    expect(router.route).toHaveBeenCalledWith(expect.stringContaining('Speaker 1:'), expect.objectContaining({ lane: 'meeting' }));
   });
 
   it('keeps the recording on disk and reads it back safely', async () => {

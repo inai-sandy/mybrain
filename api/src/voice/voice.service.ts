@@ -182,6 +182,45 @@ export class VoiceService {
     return (text || '').trim();
   }
 
+  /** Meeting transcription with speaker labels (BEA-941): Deepgram diarization →
+   *  "Speaker 1: …" lines (consecutive same-speaker utterances merged).
+   *  Falls back to the plain engine path when diarization isn't available. */
+  async transcribeMeeting(buf: Buffer, mime = 'audio/wav'): Promise<string> {
+    if (!buf?.length) return '';
+    const c = await this.connectors.get<{ apiKey: string }>('deepgram').catch(() => null);
+    if (c?.apiKey) {
+      try {
+        const model = await this.getDeepgramModel();
+        const r = await fetch(
+          `https://api.deepgram.com/v1/listen?model=${encodeURIComponent(model)}&smart_format=true&punctuate=true&diarize=true&utterances=true`,
+          { method: 'POST', headers: { Authorization: `Token ${c.apiKey}`, 'Content-Type': mime }, body: new Uint8Array(buf) },
+        );
+        if (r.ok) {
+          const d: any = await r.json();
+          const utts: any[] = Array.isArray(d?.results?.utterances) ? d.results.utterances : [];
+          const lines: string[] = [];
+          let curSpeaker = -1;
+          for (const u of utts) {
+            const sp = Number.isFinite(u.speaker) ? Number(u.speaker) : 0;
+            const text = String(u.transcript || '').trim();
+            if (!text) continue;
+            if (sp !== curSpeaker) {
+              lines.push(`Speaker ${sp + 1}: ${text}`);
+              curSpeaker = sp;
+            } else {
+              lines[lines.length - 1] += ` ${text}`;
+            }
+          }
+          if (lines.length) {
+            await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model: `${model}+diarize`, cost: null } }).catch(() => undefined);
+            return lines.join('\n');
+          }
+        }
+      } catch { /* fall through to the plain path */ }
+    }
+    return this.transcribeWith('deepgram', buf, 'meeting.wav', mime);
+  }
+
   private async run(engine: Engine, buf: Buffer, filename: string, mime: string): Promise<string | null> {
     switch (engine) {
       case 'elevenlabs':

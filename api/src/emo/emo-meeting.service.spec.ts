@@ -44,4 +44,25 @@ describe('EmoMeetingService (BEA-868)', () => {
     await svc.handle('c1');
     expect(tasks.create).not.toHaveBeenCalled();
   });
+
+  it('long meetings (BEA-941): summarised in chunks then merged — the tail of the meeting makes the minutes', async () => {
+    const long = Array.from({ length: 40 }, (_, i) => `Speaker ${(i % 2) + 1}: paragraph ${i} ${'x'.repeat(700)}`).join('\n');
+    expect(long.length).toBeGreaterThan(12000);
+    const updates: any[] = [];
+    const cards: any = { get: jest.fn(async () => ({ id: 'c1', lane: 'meeting', rawTranscript: long })), update: jest.fn(async (_id: string, p: any) => { updates.push(p); return {}; }) };
+    const llm: any = { complete: jest.fn(async (_p: string, _m: number, tag: string) => {
+      if (tag === 'emo-meeting-chunk') return JSON.stringify({ points: ['a point'], decisions: [], actionItems: ['Do the thing'] });
+      if (tag === 'emo-meeting-merge') return JSON.stringify({ summary: '**Key points**\n- merged minutes', actionItems: ['Do the thing'], attendees: null });
+      return '{}';
+    }) };
+    const tasks: any = { create: jest.fn(async (d: any) => ({ id: 't1', ...d })) };
+    await new EmoMeetingService(llm, tasks, cards).handle('c1');
+    const chunkCalls = llm.complete.mock.calls.filter((c: any[]) => c[2] === 'emo-meeting-chunk').length;
+    expect(chunkCalls).toBeGreaterThan(1);                       // more than one chunk was read
+    expect(llm.complete.mock.calls.some((c: any[]) => c[2] === 'emo-meeting-merge')).toBe(true);
+    const done = updates[updates.length - 1];
+    expect(done.status).toBe('done');
+    expect(done.detail).toContain('merged minutes');
+    expect(done.detail).toContain('_Attendees: 2_');             // real count from Speaker labels, not approx
+  });
 });
