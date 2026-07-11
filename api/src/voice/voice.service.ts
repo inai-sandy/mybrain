@@ -338,7 +338,7 @@ export class VoiceService {
   private async keytermQuery(model: string): Promise<string> {
     if (!model.startsWith('nova-3')) return '';
     const vocab = (await this.getSetting('voice.vocabulary')) || '';
-    return vocab.split(',').map((w) => w.trim()).filter(Boolean).slice(0, 40)
+    return vocab.split(',').map((w) => w.trim()).filter(Boolean).slice(0, 80)
       .map((w) => `&keyterm=${encodeURIComponent(w)}`).join('');
   }
 
