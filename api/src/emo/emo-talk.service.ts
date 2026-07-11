@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmService, LlmConfig } from '../llm/llm.service';
-import { MemoryService } from '../memory/memory.service';
 import { ExploreService } from '../explore/explore.service';
 import { EmoCardsService } from './emo-cards.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,7 +20,6 @@ export class EmoTalkService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
-    private readonly memory: MemoryService,
     private readonly explore: ExploreService,
     private readonly cards: EmoCardsService,
   ) {}
@@ -45,18 +43,16 @@ export class EmoTalkService {
       if (!row) cardId = null;
     }
 
-    // Ground the reply in his brain + (optionally) the web.
-    const brainHits = await this.memory.searchBrain(msg, 6).catch(() => [] as any[]);
-    const brainCtx = brainHits.length ? brainHits.map((h: any, i: number) => `[b${i + 1}] ${h.title || ''}: ${String(h.content || '').replace(/\s+/g, ' ').slice(0, 300)}`).join('\n') : '';
+    // Talk = the world: the LLM's own knowledge + the live web. The brain is Ask's job. (BEA-951)
     const web = input.web || 'off';
     const wantWeb = web === 'on' || (web === 'auto' && this.explore.needsWeb(msg));
     const webSources = wantWeb ? await this.explore.searchWeb(msg, 4) : [];
     const webCtx = webSources.length ? webSources.map((s) => `[w${s.n}] ${s.title}: ${s.snippet}`).join('\n') : '';
 
     const convo = turns.slice(-10).map((t) => `${t.role === 'user' ? 'Sandy' : 'Emo'}: ${t.text}`).join('\n');
-    const prompt = `You are Emo, Sandy's warm, concise personal voice assistant having a spoken back-and-forth conversation. Reply in 1-3 short, natural sentences — like talking out loud, not writing. Use his name (Sandy) only occasionally, where it flows. Today is ${this.explore.today()} — when he asks about "latest"/"news"/"recent", use the freshest web results below and mention roughly when they're from. ${input.noQuestions ? 'Never ask Sandy a question back — if something is unclear, make the most reasonable assumption and briefly say what you assumed. ' : ''}${brainCtx || webCtx ? 'Use the context below (his brain + current web results) when relevant.' : ''}
+    const prompt = `You are Emo, Sandy's warm, concise personal voice assistant having a spoken back-and-forth conversation. Reply in 1-3 short, natural sentences — like talking out loud, not writing. Use his name (Sandy) only occasionally, where it flows. Today is ${this.explore.today()} — when he asks about "latest"/"news"/"recent", use the freshest web results below and mention roughly when they're from. ${input.noQuestions ? 'Never ask Sandy a question back — if something is unclear, make the most reasonable assumption and briefly say what you assumed. ' : ''}${webCtx ? 'Use the current web results below when relevant.' : ''}
 
-${brainCtx ? `From his brain:\n${brainCtx}\n\n` : ''}${webCtx ? `From the web:\n${webCtx}\n\n` : ''}Conversation so far:
+${webCtx ? `From the web:\n${webCtx}\n\n` : ''}Conversation so far:
 ${convo || '(this is the first message)'}
 Sandy: ${msg}
 
@@ -71,10 +67,11 @@ Emo:`;
     const summary = `Talk · ${title}`;
     const raw = JSON.stringify(turns);
     try {
+      const extra: any = webSources.length ? { sources: webSources } : {};   /* complete card: cited web results too */
       if (cardId) {
-        await this.cards.update(cardId, { summary, detail, rawTranscript: raw });
+        await this.cards.update(cardId, { summary, detail, rawTranscript: raw, ...extra });
       } else {
-        const card = await this.cards.create({ lane: 'talk', status: 'done', summary, detail, rawTranscript: raw, source: 'emo-talk' });
+        const card = await this.cards.create({ lane: 'talk', status: 'done', summary, detail, rawTranscript: raw, source: 'emo-talk', ...extra });
         cardId = (card as any).id;
       }
     } catch (e: any) {
