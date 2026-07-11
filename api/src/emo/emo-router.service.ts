@@ -4,13 +4,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EmoCardsService, EmoLane } from './emo-cards.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
+import { EmoIdeaService } from './emo-idea.service';
 import { EmoReminderService } from './emo-reminder.service';
 import { EmoMeetingService } from './emo-meeting.service';
 import { EmoResearchService } from './emo-research.service';
 
 type Segment = { lane: EmoLane; summary: string; text: string };
 
-const LANES: EmoLane[] = ['task', 'reminder', 'story', 'meeting', 'search', 'research', 'note'];
+const LANES: EmoLane[] = ['task', 'reminder', 'story', 'meeting', 'search', 'research', 'note', 'idea'];
 // Which lanes are terminal (the card itself IS the result) vs need a lane to process them.
 const TERMINAL = new Set<EmoLane>(['story', 'note']);
 
@@ -23,6 +24,7 @@ Lanes:
 - search — "search / find / what do we have on / look into…" (a question to answer).
 - research — "research / deep research / quick research on…".
 - meeting — a long multi-speaker meeting recording.
+- idea — a concept/spark to keep and develop ("I have an idea…", "what if we…").
 - note — anything else worth keeping.
 
 IMPORTANT — be CONSERVATIVE. Output the FEWEST segments possible:
@@ -52,6 +54,7 @@ export class EmoRouterService {
     private readonly cards: EmoCardsService,
     private readonly search: EmoSearchService,
     private readonly taskLane: EmoTaskService,
+    private readonly ideaLane: EmoIdeaService,
     private readonly reminderLane: EmoReminderService,
     private readonly meetingLane: EmoMeetingService,
     private readonly researchLane: EmoResearchService,
@@ -118,6 +121,7 @@ export class EmoRouterService {
           else void this.search.clarify(card.id).catch(() => undefined);
         }
         else if (card.lane === 'task') void this.taskLane.handle(card.id).catch(() => undefined);
+        else if (card.lane === 'idea') void this.ideaLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'reminder') void this.reminderLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'meeting') void this.meetingLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'research') void this.researchLane.handle(card.id).catch(() => undefined);
