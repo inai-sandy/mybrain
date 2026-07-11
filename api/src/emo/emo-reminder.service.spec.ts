@@ -99,6 +99,18 @@ describe('EmoReminderService (BEA-867 / BEA-875 / BEA-876)', () => {
     expect(updates[0].summary).toMatch(/remind you/i);
   });
 
+  it('relative delays: "after 2 mins" rings in 2 minutes, not +2h (BEA-945)', async () => {
+    prismaStub.emoDeviceReminder.create.mockClear();
+    const { svc, updates } = make({ extract: { who: '', what: 'emo voice', when: 'after 2 mins', inMinutes: 2 } });
+    await svc.handle('c1');
+    const data = prismaStub.emoDeviceReminder.create.mock.calls[0][0].data;
+    const delta = data.dueAt.getTime() - Date.now();
+    expect(delta).toBeGreaterThan(1.5 * 60000);
+    expect(delta).toBeLessThan(2.5 * 60000);
+    expect(updates[0].summary).toMatch(/in 2 minutes/);
+    expect(updates[0].summary).not.toMatch(/no time given/);
+  });
+
   it('personal reminder without a time: best-guess +2h and SAYS the assumption', async () => {
     prismaStub.emoDeviceReminder.create.mockClear();
     const { svc, updates } = make({ extract: { who: '', what: 'drink water', when: '' } });
