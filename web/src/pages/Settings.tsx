@@ -1566,6 +1566,15 @@ function EmoSettingsSection() {
           >
             Sync device card
           </button>
+          <button
+            onClick={async () => {
+              await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ otaCheck: true }) }).catch(() => undefined);
+              toast('success', 'Update push sent — EMO checks for new firmware within a minute.');
+            }}
+            className="ml-2 rounded-lg border border-indigo-500 bg-indigo-500/10 px-4 py-1.5 text-sm font-medium text-indigo-600 dark:text-indigo-400"
+          >
+            Update device now
+          </button>
         </div>
       </AccordionCard>
 
