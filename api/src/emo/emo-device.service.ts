@@ -203,6 +203,8 @@ export class EmoDeviceService {
   async ttsWav16k(text: string, voice?: string): Promise<Buffer | null> {
     const pcm24 = await this.voice.ttsPcm(text, voice);
     if (!pcm24?.length) return null;
-    return wavWrap(resample24to16(pcm24), 16000);
+    // TTS comes out quiet next to the loudness-mastered clip pack — normalize it
+    // to the same ceiling so spoken answers match the voice pack. (BEA-953)
+    return wavWrap(normalizePcm(resample24to16(pcm24)), 16000);
   }
 }
