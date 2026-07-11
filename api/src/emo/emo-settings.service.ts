@@ -15,6 +15,7 @@ export type EmoSettings = {
   vocabulary: string;
   deviceVolume: number;
   cardSyncRequested: number;   // epoch ms of the last "Sync device card" press (0 = never)
+  otaCheckRequested: number;   // epoch ms of the last "Update device now" press (0 = never)
 };
 
 /**
@@ -47,6 +48,7 @@ export class EmoSettingsService {
       vocabulary: (await this.g('voice.vocabulary')) || '',
       deviceVolume: Math.min(100, Math.max(0, Number(await this.g('emo.device.volume')) || 60)),
       cardSyncRequested: Number(await this.g('emo.device.cardSync')) || 0,
+      otaCheckRequested: Number(await this.g('emo.device.otaCheck')) || 0,
       voices: EMO_VOICES,
       models: EMO_MODELS,
       sttEngines: STT_ENGINES,
@@ -62,6 +64,7 @@ export class EmoSettingsService {
     if (patch.vocabulary !== undefined) await this.s('voice.vocabulary', String(patch.vocabulary).slice(0, 2000));
     if (patch.deviceVolume !== undefined) await this.s('emo.device.volume', String(Math.min(100, Math.max(0, Number(patch.deviceVolume) || 0))));
     if ((patch as any).cardSync) await this.s('emo.device.cardSync', String(Date.now()));
+    if ((patch as any).otaCheck) await this.s('emo.device.otaCheck', String(Date.now()));
     return this.get();
   }
 }
