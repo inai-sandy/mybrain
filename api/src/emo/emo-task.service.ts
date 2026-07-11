@@ -34,7 +34,7 @@ export class EmoTaskService {
         await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I couldn\u2019t hear a task in that \u2014 say it as a clear to-do?' });
         return;
       }
-      const t: any = await this.tasks.create({ title, category: 'Emo' });
+      const t: any = await this.tasks.create({ title, category: 'Emo', note: (text || '').trim().slice(0, 500) || undefined, auto: true });
       await this.cards.update(cardId, {
         summary: `Task added: ${title}`,
         links: [{ kind: 'task', id: t.id, label: title.slice(0, 60) }],

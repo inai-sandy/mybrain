@@ -402,7 +402,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
@@ -410,6 +410,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const sphere = this.normSphere(data.sphere);
     const reminderCount = Number.isFinite(data.reminderCount as any) ? Math.max(0, Math.min(4, Math.round(Number(data.reminderCount)))) : 0;
     const reminders = this.computeReminders(reminderCount, priority);
+    // Every AUTO-generated task must carry a note. Use the caller's context if given, else write a
+    // short AI one-liner so it's never empty. Manually-created tasks stay note-optional. (BEA-955)
+    let note = data.note ? String(data.note).trim().slice(0, 500) : null;
+    if (!note && data.auto) note = await this.autoNote(title, data.category);
     const t = await this.prisma.task.create({
       data: {
         title,
@@ -418,13 +422,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         priority,
         sphere,
         estimateMin: Number.isFinite(data.estimateMin as any) ? Math.max(1, Math.round(Number(data.estimateMin))) : null,
-        note: data.note ? String(data.note).trim().slice(0, 500) : null,
+        note,
         pinned: !!data.pinned,
         reminderCount,
         reminders: reminders.length ? JSON.stringify(reminders) : null,
         party: data.party ? String(data.party).trim().slice(0, 80) : null,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
-        day: this.dayKey(tz),
+        day: /^\d{4}-\d{2}-\d{2}$/.test(data.day || '') ? (data.day as string) : this.dayKey(tz),
       },
     });
     this.indexTask(t);
@@ -432,6 +436,20 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Create a task that's already DONE on a given day (used by the daily wrap-up to log work done "in the flow"). */
+  /** Guarantee auto-generated tasks always carry a note: a short AI one-liner of context. (BEA-955) */
+  private async autoNote(title: string, category?: string): Promise<string> {
+    const fallback = `Auto-added${category ? ` under ${category}` : ''} — add any details here.`;
+    try {
+      const model = await this.getModel();
+      const prompt = `Write ONE short line (max 12 words) giving context for this task — what it is about or why it matters. No preamble, no quotes.\nTask: "${title}"${category ? `\nArea: ${category}` : ''}`;
+      const text = await this.llm.completeWith(model, prompt, 40, 'task-autonote').catch(() => '');
+      const line = (text || '').split('\n')[0].replace(/^["']+|["'.]+$/g, '').trim();
+      return line || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   async createDoneTask(title: string, category: string | null, day: string) {
     const t = String(title || '').trim().slice(0, 160);
     if (!t) return null;

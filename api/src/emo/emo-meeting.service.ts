@@ -54,7 +54,7 @@ export class EmoMeetingService {
 
       const links: any[] = [];
       for (const item of actionItems) {
-        const t = await this.tasks.create({ title: item, category: 'Meeting' }).catch(() => null);
+        const t = await this.tasks.create({ title: item, category: 'Meeting', note: `Action item from a meeting${attendees ? ` (~${attendees} people)` : ''}.`, auto: true }).catch(() => null);
         if (t) links.push({ kind: 'task', id: t.id, label: item.slice(0, 60) });
       }
 

@@ -13,6 +13,7 @@ import { EmoAskService, AskTurn } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
 import { EmoSettingsService, EmoSettings } from './emo-settings.service';
 import { EmoDeviceService } from './emo-device.service';
+import { NotesService } from '../notes/notes.service';
 
 /** EMO section API — feed, transcript router, capture upload, and lane dispatch on answer. */
 @Controller('emo')
@@ -30,6 +31,7 @@ export class EmoController {
     private readonly talkSvc: EmoTalkService,
     private readonly settingsSvc: EmoSettingsService,
     private readonly deviceSvc: EmoDeviceService,
+    private readonly notesSvc: NotesService,
   ) {}
 
   // Shared EMO settings (BEA-908) — same source of truth for web + app.
@@ -103,6 +105,27 @@ export class EmoController {
       req.on('error', (e) => reject(e));
     });
     return this.deviceSvc.turn(Buffer.concat(chunks), { mode, conversationId, sampleRate: Number(sr) || 16000, codec });
+  }
+
+  // Save any card as a Note in My Brain (BEA-955). Full detail: body + your words.
+  @Post('cards/:id/save-note')
+  async saveCardToNote(@Param('id') id: string) {
+    const card: any = await this.cards.get(id);
+    if (!card) throw new BadRequestException('Card not found');
+    const parts: string[] = [];
+    if (card.detail) parts.push(String(card.detail));
+    else if (card.summary) parts.push(String(card.summary));
+    if (card.rawTranscript && card.lane !== 'talk' && card.rawTranscript !== card.detail)
+      parts.push(`---\nWhat I said:\n${card.rawTranscript}`);
+    const note: any = await this.notesSvc.create({
+      title: (card.summary || card.title || 'EMO card').slice(0, 140),
+      content: parts.join('\n\n').slice(0, 20000),
+      tags: JSON.stringify(['emo', card.lane].filter(Boolean)),
+    });
+    if (!note) throw new BadRequestException('Nothing to save');
+    const links = Array.isArray(card.links) ? card.links : [];
+    await this.cards.update(id, { links: [...links, { kind: 'note', id: note.id, label: 'saved to notes' }] }).catch(() => undefined);
+    return { ok: true, noteId: note.id };
   }
 
   // Personal reminders that ring on the device (BEA-944).

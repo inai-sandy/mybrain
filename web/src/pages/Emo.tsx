@@ -418,12 +418,32 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
             </div>
           )}
 
-          {card.rawTranscript && (
+          {card.rawTranscript && card.lane !== 'talk' && (
             <details className="text-sm">
               <summary className="cursor-pointer text-xs font-medium text-zinc-500">What you said (transcript)</summary>
               <p className="mt-2 whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">{card.rawTranscript}</p>
             </details>
           )}
+
+          <div className="pt-2">
+            {card.links?.some((l) => l.kind === 'note') ? (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300">✓ Saved to notes</span>
+            ) : (
+              <button
+                onClick={async () => {
+                  setBusy(true);
+                  const r = await fetch(`/api/emo/cards/${card.id}/save-note`, { method: 'POST' }).catch(() => null);
+                  setBusy(false);
+                  if (r?.ok) { toast('success', 'Saved to your Notes.'); onChanged(); }
+                  else toast('error', 'Could not save the note.');
+                }}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                📝 Save to notes
+              </button>
+            )}
+          </div>
         </div>
       )}
     </Sheet>

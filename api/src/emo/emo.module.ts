@@ -7,6 +7,7 @@ import { ContactsModule } from '../contacts/contacts.module';
 import { DailyModule } from '../daily/daily.module';
 import { FlowsModule } from '../flows/flows.module';
 import { IdeasModule } from '../ideas/ideas.module';
+import { NotesModule } from '../notes/notes.module';
 import { EmoCardsService } from './emo-cards.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
@@ -27,7 +28,7 @@ import { EmoController } from './emo.controller';
 
 /** EMO — Voice → Cards. Storage/feed/router/capture + lanes: Search, Tasks, Reminders, Story, Meetings, Research. */
 @Module({
-  imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule],
+  imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule],
   controllers: [EmoController],
   providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
   exports: [EmoCardsService, EmoRouterService],

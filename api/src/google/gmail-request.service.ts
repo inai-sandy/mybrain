@@ -224,7 +224,7 @@ export class GmailRequestService {
     }
     const created = [];
     for (const title of titles.slice(0, 8)) {
-      const task = await this.tasks.create({ title, category: 'Email', sphere: 'work', tags: ['email'] }).catch(() => null);
+      const task = await this.tasks.create({ title, category: 'Email', sphere: 'work', tags: ['email'], note: (r.summary || '').trim().slice(0, 300) || undefined, auto: true }).catch(() => null);
       if (task) created.push({ id: (task as any).id, title: (task as any).title });
     }
     return { created };
