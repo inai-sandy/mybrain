@@ -1,16 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { LlmService } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { EmoCardsService } from './emo-cards.service';
 
 /**
- * EMO (BEA-866) — the Tasks lane. A "task" card → real Task(s) in My Brain Tasks, reusing the
- * hardened brain-dump splitter (auto-split: one recording → several tasks, with title/category/
- * due/estimate). If the dump is too vague the built-in clarity check surfaces on the card (Needs-you).
+ * EMO (BEA-866 / BEA-947) — the Tasks lane. One utterance = exactly ONE task (the user's rule).
+ * The LLM only cleans the phrasing into a short imperative title; it never splits.
  */
 @Injectable()
 export class EmoTaskService {
   private readonly log = new Logger('EmoTask');
   constructor(
+    private readonly llm: LlmService,
     private readonly tasks: TasksService,
     private readonly cards: EmoCardsService,
   ) {}
@@ -20,31 +21,28 @@ export class EmoTaskService {
     if (!card || card.lane !== 'task') return;
     const text = [card.rawTranscript || card.summary || '', card.needsAnswer].filter(Boolean).join('. ').trim();
     try {
-      const res: any = await this.tasks.dump(text, 'emo');
-      const created: any[] = Array.isArray(res?.tasks) ? res.tasks : [];
-      // Vague FIRST time → ask once on the card (reuses the dump clarity check).
-      if (res?.question && !created.length && !card.needsAnswer) {
-        await this.cards.update(cardId, { needsQuestion: res.question, status: 'needs_you' });
+      let title = '';
+      try {
+        const raw = await this.llm.complete(
+          `Turn this spoken request into ONE short imperative task title (max 12 words). Keep names and specifics. Reply ONLY the title.\n"${text}"`,
+          60, 'emo-task-title',
+        );
+        title = (raw || '').trim().replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').slice(0, 140);
+      } catch { /* fall back to the raw words */ }
+      if (!title) title = text.slice(0, 140);
+      if (!title) {
+        await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I couldn\u2019t hear a task in that \u2014 say it as a clear to-do?' });
         return;
       }
-      if (!created.length) {
-        // Already asked (or nothing parsed) and STILL no task — never discard the user's words. (BEA-877)
-        // Capture one best-effort task from the raw text so it's saved and editable.
-        const raw = (card.rawTranscript || card.needsAnswer || card.summary || '').trim();
-        const t: any = raw ? await this.tasks.create({ title: raw.slice(0, 140), category: 'Emo' }).catch(() => null) : null;
-        if (t?.id) {
-          await this.cards.update(cardId, { summary: `Task added: ${t.title}`, links: [{ kind: 'task', id: t.id, label: (t.title || '').slice(0, 60) }], status: 'done' });
-        } else {
-          await this.cards.update(cardId, { status: 'needs_you', needsQuestion: res?.question || 'I couldn’t turn that into a task — can you say it as a clear to-do?' });
-        }
-        return;
-      }
-      const links = created.map((t) => ({ kind: 'task', id: t.id, label: (t.title || '').slice(0, 60) }));
-      const summary = created.length === 1 ? `Task added: ${created[0].title}` : `${created.length} tasks added`;
-      await this.cards.update(cardId, { summary, links, status: 'done' });
+      const t: any = await this.tasks.create({ title, category: 'Emo' });
+      await this.cards.update(cardId, {
+        summary: `Task added: ${title}`,
+        links: [{ kind: 'task', id: t.id, label: title.slice(0, 60) }],
+        status: 'done',
+      });
     } catch (e: any) {
       this.log.warn(`task lane failed (${cardId}): ${e?.message || e}`);
-      await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I couldn’t add that task — reword it and try again?', error: String(e?.message || e) }).catch(() => undefined);
+      await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I couldn\u2019t add that task \u2014 reword it and try again?', error: String(e?.message || e) }).catch(() => undefined);
     }
   }
 }
