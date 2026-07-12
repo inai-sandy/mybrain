@@ -25,7 +25,7 @@ export class EmoAskService {
     private readonly cards: EmoCardsService,
   ) {}
 
-  async ask(input: { question: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto'; direct?: boolean }): Promise<AskResult> {
+  async ask(input: { question: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto'; direct?: boolean; ragOnly?: boolean }): Promise<AskResult> {
     const history = (input.history || []).filter((t) => t && t.text && (t.role === 'user' || t.role === 'emo'));
     const userText = (input.question || '').trim();
     if (!userText && !history.length) return { mode: 'clarify', question: 'What would you like to know, Sandy?' };
@@ -54,7 +54,7 @@ export class EmoAskService {
     const userTurns = [...history.filter((t) => t.role === 'user').map((t) => t.text), userText].filter(Boolean);
     const baseQ = userTurns.length > 1 ? `${userTurns[0]} — specifically: ${userTurns.slice(1).join('; ')}` : userTurns[0] || userText;
     const retrievalQ = sessionCtx ? `${baseQ}\n\n(Earlier context: ${sessionCtx})` : baseQ;
-    const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto', withSummary: true }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false, summary: undefined as string | undefined }));
+    const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto', withSummary: true, ragOnly: input.ragOnly }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false, summary: undefined as string | undefined }));
     const answer = (ans.answer || '').trim() || "I couldn't find anything about that in your brain yet.";
     // one call already gave us the spoken summary; fall back to the first sentence (no extra model call).
     const summary = ((ans as any).summary || '').trim() || (answer.split(/(?<=[.!?])\s/)[0] || answer).slice(0, 200);

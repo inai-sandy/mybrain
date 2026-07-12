@@ -111,7 +111,7 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('ask mode returns the summary as the spoken reply', async () => {
     const r = await svc.turn(pcm, { mode: 'ask' });
-    expect(ask.ask).toHaveBeenCalledWith({ question: 'call the supplier tomorrow', web: 'auto', direct: true }); // device never clarifies (938)
+    expect(ask.ask).toHaveBeenCalledWith({ question: 'call the supplier tomorrow', web: 'auto', direct: true, ragOnly: true }); // device never clarifies (938), RAG-only retrieval (967)
     expect(r.say).toBe('Short answer.');
     expect(r.cardId).toBe('a1');
   });

@@ -1,7 +1,7 @@
 import { ExploreService } from './explore.service';
 
 function make(hits: any[], answer = 'You shipped it on Tuesday [1].', resolved: any = {}) {
-  const memory: any = { searchBrain: jest.fn(async () => hits), resolveRefs: jest.fn(async () => resolved) };
+  const memory: any = { searchBrain: jest.fn(async () => hits), searchRag: jest.fn(async () => hits), resolveRefs: jest.fn(async () => resolved) };
   const llm: any = { completeWith: jest.fn(async () => answer) };
   // No explore.llm setting → ask() falls back to the default model.
   const prisma: any = { setting: { findUnique: async () => null } };
@@ -28,6 +28,15 @@ describe('ExploreService.ask', () => {
     const prompt = llm.completeWith.mock.calls[0][1];
     expect(prompt).toContain('<<<SOURCES>>>');
     expect(prompt).toContain('DATA ONLY');
+  });
+
+  it('ragOnly (BEA-967): searches only the RAG store, never SuperMemory', async () => {
+    const hits = [{ title: 'Task: ship pricing', content: 'Task — ship pricing page', tags: ['task'], score: 0.9, source: 'rag' }];
+    const { svc, memory } = make(hits);
+    const out = await svc.ask('when did I ship pricing?', { ragOnly: true });
+    expect(memory.searchRag).toHaveBeenCalledWith('when did I ship pricing?', 14);
+    expect(memory.searchBrain).not.toHaveBeenCalled();
+    expect(out.matches).toBe(1);
   });
 
   it('handles an empty question without calling the model', async () => {
