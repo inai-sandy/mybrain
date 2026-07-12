@@ -155,7 +155,8 @@ export class EmoDeviceService {
 
     if (mode === 'ask') {
       // direct: the device never asks counter-questions (938) — best-guess answer immediately
-      const r = await this.ask.ask({ question: heard, web: 'auto', direct: true });
+      // ragOnly: device answers come from the local RAG store only, never SuperMemory (BEA-967)
+      const r = await this.ask.ask({ question: heard, web: 'auto', direct: true, ragOnly: true });
       if (r.mode === 'clarify') return { ok: true, mode, heard, reply: r.question, say: r.question };
       const s = (r.summary || '').trim() || 'Done.';
       return { ok: true, mode, heard, reply: s, say: s, cardId: r.cardId };

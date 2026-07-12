@@ -147,11 +147,13 @@ export class ExploreService {
    * grounded in the retrieved passages, with inline [n] citations. Injection-safe: passages are
    * fenced and explicitly treated as data, never as instructions.
    */
-  async ask(question: string, opts: { web?: WebMode; model?: LlmConfig; withSummary?: boolean } = {}): Promise<{ answer: string; sources: Source[]; matches: number; usedWeb: boolean; summary?: string }> {
+  async ask(question: string, opts: { web?: WebMode; model?: LlmConfig; withSummary?: boolean; ragOnly?: boolean } = {}): Promise<{ answer: string; sources: Source[]; matches: number; usedWeb: boolean; summary?: string }> {
     const q = (question || '').trim().slice(0, 1000);
     if (!q) return { answer: '', sources: [], matches: 0, usedWeb: false };
 
-    const hits: MemHit[] = await this.memory.searchBrain(q, 14);
+    // ragOnly (BEA-967): the EMO device asks against the local RAG store only — SuperMemory's
+    // high-scored off-topic hits were polluting device answers. Web/app ask keeps both stores.
+    const hits: MemHit[] = opts.ragOnly ? await this.memory.searchRag(q, 14) : await this.memory.searchBrain(q, 14);
 
     // Resolve brain hits to real app rows, so sources deep-link to the actual item.
     const resolved = hits.length ? await this.memory.resolveRefs(hits.map((h) => h.memId).filter(Boolean) as string[]) : {};
