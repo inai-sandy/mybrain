@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2, Star } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2, Star, Save, X } from 'lucide-react';
 import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DocumentShareDialog } from '../ui/DocumentShareDialog';
@@ -24,7 +24,11 @@ export function DocumentView() {
   }
   const [doc, setDoc] = useState<FullDoc | null>(null);
   const [error, setError] = useState('');
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(false); // DocEditor popup — non-text kinds only
+  const [inline, setInline] = useState(false); // in-place edit for text/markdown docs (BEA-965)
+  const [eTitle, setETitle] = useState('');
+  const [eContent, setEContent] = useState('');
+  const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [del, setDel] = useState(false);
 
@@ -58,6 +62,17 @@ export function DocumentView() {
     else toast('error', d.message || 'Could not add to memory');
   }
 
+  // In-place editing for text/markdown docs (BEA-965) — no cramped popup.
+  const isText = !!doc && !['pdf', 'image', 'html', 'site'].includes(doc.kind);
+  function startInline() { if (!doc) return; setETitle(doc.title); setEContent(doc.contentText || ''); setInline(true); }
+  async function saveInline() {
+    if (!doc) return;
+    setSaving(true);
+    const r = await fetch(`/api/documents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: eTitle.trim() || doc.title, contentText: eContent }) });
+    setSaving(false);
+    if (r.ok) { toast('success', 'Saved'); setInline(false); load(); } else toast('error', 'Could not save');
+  }
+
   async function toggleStar() {
     if (!doc) return;
     const next = !doc.starred;
@@ -80,22 +95,35 @@ export function DocumentView() {
       {doc && (
         <>
           <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-extrabold">{doc.title}</h1>
+            <div className="min-w-0 flex-1">
+              {inline ? (
+                <input value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="Title" className="w-full text-2xl font-extrabold bg-transparent border-b border-zinc-300 dark:border-zinc-700 focus:border-emerald-500 outline-none pb-1" />
+              ) : (
+                <h1 className="text-2xl font-extrabold">{doc.title}</h1>
+              )}
               <p className="mt-1 text-xs text-zinc-400">{doc.kind.toUpperCase()}{doc.shared && <> · <span className="text-emerald-600">shared</span></>}</p>
-              {doc.tags?.length > 0 && (
+              {!inline && doc.tags?.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {doc.tags.map((t) => <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">{t}</span>)}
                 </div>
               )}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <button onClick={toggleStar} className={btn + (doc.starred ? ' text-amber-500 border-amber-300 dark:border-amber-500/40' : ' hover:text-amber-500')}><Star size={15} fill={doc.starred ? 'currentColor' : 'none'} /> {doc.starred ? 'Starred' : 'Star'}</button>
-              <button onClick={() => setEditing(true)} className={btn}><Pencil size={15} /> Edit</button>
-              <a href={`/api/documents/${doc.id}/download`} className={btn}><Download size={15} /> Download</a>
-              <button onClick={() => setSharing(true)} className={btn}><Share2 size={15} /> Share</button>
-              {doc.kind !== 'image' && <button onClick={toMemory} className={btn} title="Copy into Capture / memory"><Brain size={15} /> To Memory</button>}
-              <button onClick={() => setDel(true)} className={btn + ' hover:text-red-500'}><Trash2 size={15} /> Delete</button>
+              {inline ? (
+                <>
+                  <button onClick={saveInline} disabled={saving} className={btn + ' bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-500 disabled:opacity-50'}>{saving ? '…' : <><Save size={15} /> Save</>}</button>
+                  <button onClick={() => setInline(false)} className={btn}><X size={15} /> Cancel</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={toggleStar} className={btn + (doc.starred ? ' text-amber-500 border-amber-300 dark:border-amber-500/40' : ' hover:text-amber-500')}><Star size={15} fill={doc.starred ? 'currentColor' : 'none'} /> {doc.starred ? 'Starred' : 'Star'}</button>
+                  <button onClick={() => (isText ? startInline() : setEditing(true))} className={btn}><Pencil size={15} /> Edit</button>
+                  <a href={`/api/documents/${doc.id}/download`} className={btn}><Download size={15} /> Download</a>
+                  <button onClick={() => setSharing(true)} className={btn}><Share2 size={15} /> Share</button>
+                  {doc.kind !== 'image' && <button onClick={toMemory} className={btn} title="Copy into Capture / memory"><Brain size={15} /> To Memory</button>}
+                  <button onClick={() => setDel(true)} className={btn + ' hover:text-red-500'}><Trash2 size={15} /> Delete</button>
+                </>
+              )}
             </div>
           </div>
 
@@ -115,6 +143,8 @@ export function DocumentView() {
                 sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-forms"
               />
             </div>
+          ) : inline ? (
+            <textarea value={eContent} onChange={(e) => setEContent(e.target.value)} placeholder="Write your document…" className="w-full min-h-[65vh] rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 p-4 text-sm leading-relaxed font-mono outline-none focus:border-emerald-500 resize-y" />
           ) : (
             <OutlineLayout headings={extractHeadings(doc.contentText || '')}>
               <article className="prose prose-zinc dark:prose-invert max-w-none border-t border-zinc-200 dark:border-zinc-800 pt-5">
