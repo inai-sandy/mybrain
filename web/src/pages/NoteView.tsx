@@ -116,8 +116,8 @@ export function NoteView() {
         <>
           {note.color !== 'default' && <div style={{ height: 4, borderRadius: 4, background: strip }} />}
 
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
+          <div className="space-y-4">
+            <div className="min-w-0">
               {inline ? (
                 <input value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="Title" className="w-full text-2xl font-extrabold bg-transparent border-b border-zinc-300 dark:border-zinc-700 focus:border-amber-500 outline-none pb-1" />
               ) : (
