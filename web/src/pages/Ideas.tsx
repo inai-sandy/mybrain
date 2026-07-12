@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lightbulb, Plus, X, Sparkles, Check, Circle, Link2 } from 'lucide-react';
+import { Lightbulb, Plus, X, Sparkles, Check, Circle, Link2, Trash2 } from 'lucide-react';
 import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 
@@ -128,6 +128,13 @@ export function Ideas() {
     { label: 'Title A–Z', key: 'title', dir: 1 },
   ];
 
+  async function remove(it: Idea) {
+    if (!window.confirm(`Delete "${it.title}"? This permanently removes the idea, its research docs, its workflow, and its memory (RAG + SuperMemory). This can't be undone.`)) return;
+    const r = await fetch(`/api/ideas/${it.id}`, { method: 'DELETE' });
+    if (r.ok) { setIdeas((prev) => prev.filter((x) => x.id !== it.id)); toast('success', 'Idea deleted'); }
+    else toast('error', 'Could not delete');
+  }
+
   function card(it: Idea) {
     return (
       <div className={'group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 flex flex-col transition-all hover:border-emerald-500/40 hover:shadow-md ' + (it.status === 'done' ? 'opacity-70' : '')}>
@@ -153,6 +160,9 @@ export function Ideas() {
               className={'p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (it.status === 'done' ? 'text-emerald-600' : 'text-zinc-400 hover:text-emerald-600')}
             >
               {it.status === 'done' ? <Check size={16} /> : <Circle size={16} />}
+            </button>
+            <button onClick={() => remove(it)} title="Delete idea" className="p-1.5 rounded-md text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10">
+              <Trash2 size={16} />
             </button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { IdeasService } from './ideas.service';
 
@@ -64,5 +64,11 @@ export class IdeasController {
     const r = await this.ideas.addDoc(id, content, title);
     if (!r) throw new BadRequestException('Idea not found');
     return r;
+  }
+
+  /** Full delete — the idea + linked docs + RAG + SuperMemory + workflow + file. (BEA-963) */
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    return this.ideas.remove(id);
   }
 }

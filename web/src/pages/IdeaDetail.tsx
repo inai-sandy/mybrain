@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Copy, Check, Circle, Pencil, Upload, FileText, Link2 } from 'lucide-react';
+import { ArrowLeft, Copy, Check, Circle, Pencil, Upload, FileText, Link2, Trash2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { IdeaWorkflow } from './IdeaWorkflow';
 
@@ -48,6 +48,13 @@ export function IdeaDetail() {
     const next = d.status === 'done' ? 'open' : 'done';
     const r = await fetch(`/api/ideas/${id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: next }) });
     if (r.ok) setD({ ...d, status: next });
+  }
+
+  async function remove() {
+    if (!window.confirm(`Delete "${d.title}"? This permanently removes the idea, its research docs, its workflow, and its memory (RAG + SuperMemory). This can't be undone.`)) return;
+    const r = await fetch(`/api/ideas/${id}`, { method: 'DELETE' });
+    if (r.ok) { toast('success', 'Idea deleted'); navigate('/ideas'); }
+    else toast('error', 'Could not delete');
   }
 
   function startEdit() {
@@ -131,6 +138,9 @@ export function IdeaDetail() {
                       <Circle size={15} /> Mark as done
                     </>
                   )}
+                </button>
+                <button onClick={remove} title="Delete idea" className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:text-red-600 hover:border-red-500">
+                  <Trash2 size={15} />
                 </button>
               </div>
             </div>

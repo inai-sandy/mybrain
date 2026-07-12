@@ -122,6 +122,25 @@ export class IdeasService {
     }));
   }
 
+  /** Full delete (BEA-963): the idea + every linked research doc (record + RAG + SuperMemory + file),
+   *  the idea's own RAG + SuperMemory entries, its workflow, and its .md file on disk. */
+  async remove(id: string): Promise<{ ok: boolean; deletedDocs: number }> {
+    const idea: any = await this.prisma.idea.findUnique({ where: { id } });
+    if (!idea) return { ok: false, deletedDocs: 0 };
+    // 1. Linked research docs — wipe each fully (record + RAG + SuperMemory + file) via ItemsService.
+    const linked = await this.prisma.item.findMany({ where: { ideaId: id }, select: { id: true } });
+    for (const it of linked) await this.items.remove(it.id).catch(() => undefined);
+    // 2. The idea's own RAG + SuperMemory entries.
+    await this.memory.deleteDoc(idea.supermemoryId, idea.ragId).catch(() => undefined);
+    // 3. Its workflow.
+    await this.prisma.ideaWorkflow.deleteMany({ where: { ideaId: id } }).catch(() => undefined);
+    // 4. Its .md file on disk.
+    await fs.unlink(join(this.ideasDir(), `${this.slugify(idea.title)}-${idea.id.slice(0, 8)}.md`)).catch(() => undefined);
+    // 5. The idea record.
+    await this.prisma.idea.delete({ where: { id } });
+    return { ok: true, deletedDocs: linked.length };
+  }
+
   async get(id: string) {
     const i = await this.prisma.idea.findUnique({ where: { id } });
     if (!i) return null;
