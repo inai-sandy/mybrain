@@ -24,6 +24,14 @@ export class NotesController {
     return n;
   }
 
+  /** AI clean-up + Markdown formatting for a note (BEA-964). Returns previous content for Undo. */
+  @Post(':id/format')
+  async format(@Param('id') id: string) {
+    const r = await this.notes.aiFormat(id);
+    if (!r.ok) throw new BadRequestException('Nothing to format yet — add some text first.');
+    return r;
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string) {
     return this.notes.remove(id);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, Pin, Archive, ArchiveRestore, Trash2, X, Mic, ListChecks, Tag as TagIcon, StickyNote, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Plus, Search, Pin, Archive, ArchiveRestore, Trash2, X, Mic, ListChecks, Tag as TagIcon, StickyNote, Sparkles, Loader2, RotateCcw } from 'lucide-react';
+import { Markdown } from '../ui/markdown';
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
@@ -41,13 +42,8 @@ export function Notes() {
   const [color, setColor] = useState('');
   const [tag, setTag] = useState('');
   const [editing, setEditing] = useState<Note | 'new' | null>(null);
-  const [view, setView] = useState<'grid' | 'list'>(() => {
-    try { return (localStorage.getItem('notes-view') as 'grid' | 'list') || 'grid'; } catch { return 'grid'; }
-  });
-  function chooseView(v: 'grid' | 'list') {
-    setView(v);
-    try { localStorage.setItem('notes-view', v); } catch { /* ignore */ }
-  }
+  const [formatting, setFormatting] = useState<string | null>(null); // note id being AI-formatted
+  const [undo, setUndo] = useState<{ id: string; prev: string } | null>(null); // one-tap undo after a clean-up
   const toast = useToast();
 
   async function load() {
@@ -90,19 +86,38 @@ export function Notes() {
     setNotes((ns) => ns.map((x) => (x.id === n.id ? { ...x, checklist } : x))); // optimistic
     patch(n.id, { checklist } as any);
   }
+  async function aiFormat(n: Note) {
+    if (formatting) return;
+    setFormatting(n.id);
+    try {
+      const r = await fetch(`/api/notes/${n.id}/format`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { toast('error', d.message || 'Could not clean up'); return; }
+      const prev = (d.previous ?? n.content) as string;
+      const next = d.note?.content ?? n.content;
+      setNotes((ns) => ns.map((x) => (x.id === n.id ? { ...x, content: next } : x)));
+      setUndo({ id: n.id, prev });
+      toast('success', 'Cleaned up ✨');
+    } catch { toast('error', 'Could not clean up'); }
+    finally { setFormatting(null); }
+  }
+  async function undoFormat() {
+    if (!undo) return;
+    const { id, prev } = undo;
+    setUndo(null);
+    const r = await fetch(`/api/notes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: prev }) });
+    if (r.ok) { setNotes((ns) => ns.map((x) => (x.id === id ? { ...x, content: prev } : x))); toast('success', 'Restored the original'); }
+    else toast('error', 'Could not undo');
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><StickyNote className="text-amber-500" /> Notes</h1>
-          <p className="text-zinc-500 text-sm">Quick capture — colors &amp; tags, kept on your device only.</p>
+          <p className="text-zinc-500 text-sm">Your notes as documents — tap ✨ to clean up &amp; format any note.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <div className="inline-flex rounded-lg border border-zinc-200 dark:border-zinc-800 p-0.5">
-            <button onClick={() => chooseView('grid')} title="Grid" className={'p-1.5 rounded-md ' + (view === 'grid' ? 'bg-amber-500/15 text-amber-600' : 'text-zinc-400')}><LayoutGrid size={16} /></button>
-            <button onClick={() => chooseView('list')} title="List" className={'p-1.5 rounded-md ' + (view === 'list' ? 'bg-amber-500/15 text-amber-600' : 'text-zinc-400')}><ListIcon size={16} /></button>
-          </div>
           <button onClick={() => setArchived((a) => !a)} title={archived ? 'Archived notes' : 'Show archived'} className={'text-xs inline-flex items-center gap-1 rounded-lg px-2.5 py-2 border ' + (archived ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
             <Archive size={14} />
           </button>
@@ -147,10 +162,17 @@ export function Notes() {
           {archived ? 'No archived notes.' : q || color || tag ? 'No notes match.' : 'No notes yet — tap “Take a note…” to add one.'}
         </div>
       ) : (
-        <div className={view === 'grid' ? 'columns-2 md:columns-3 xl:columns-4 gap-2.5' : 'columns-1 gap-2.5 max-w-2xl'}>
+        <div className="space-y-3 max-w-3xl mx-auto">
           {filtered.map((n) => (
-            <NoteCard key={n.id} n={n} compact={view === 'grid'} onOpen={() => setEditing(n)} onPin={() => patch(n.id, { pinned: !n.pinned } as any)} onArchive={() => patch(n.id, { archived: !n.archived } as any)} onDelete={() => remove(n.id)} onToggleCheck={(i) => toggleCheck(n, i)} />
+            <NoteCard key={n.id} n={n} formatting={formatting === n.id} onOpen={() => setEditing(n)} onAI={() => aiFormat(n)} onPin={() => patch(n.id, { pinned: !n.pinned } as any)} onArchive={() => patch(n.id, { archived: !n.archived } as any)} onDelete={() => remove(n.id)} onToggleCheck={(i) => toggleCheck(n, i)} />
           ))}
+        </div>
+      )}
+
+      {undo && (
+        <div className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full bg-zinc-900 px-4 py-2 text-sm text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900">
+          <Sparkles size={14} className="text-violet-400" /> Note cleaned up
+          <button onClick={undoFormat} className="inline-flex items-center gap-1 font-semibold underline"><RotateCcw size={13} /> Undo</button>
         </div>
       )}
 
@@ -161,43 +183,50 @@ export function Notes() {
   );
 }
 
-function NoteCard({ n, compact, onOpen, onPin, onArchive, onDelete, onToggleCheck }: { n: Note; compact: boolean; onOpen: () => void; onPin: () => void; onArchive: () => void; onDelete: () => void; onToggleCheck: (i: number) => void }) {
+function NoteCard({ n, formatting, onOpen, onAI, onPin, onArchive, onDelete, onToggleCheck }: { n: Note; formatting: boolean; onOpen: () => void; onAI: () => void; onPin: () => void; onArchive: () => void; onDelete: () => void; onToggleCheck: (i: number) => void }) {
   const strip = COLORS[n.color] || 'transparent';
   return (
-    <div className="break-inside-avoid mb-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden group">
-      {n.color !== 'default' && <div style={{ height: 5, background: strip }} />}
-      <div className={'cursor-pointer ' + (compact ? 'p-2.5' : 'p-3.5')} onClick={onOpen}>
-        <div className="flex items-start gap-1.5">
-          {n.title && <h3 className={'font-semibold flex-1 min-w-0 break-words ' + (compact ? 'text-[13px]' : 'text-sm')}>{n.title}</h3>}
-          <button onClick={(e) => { e.stopPropagation(); onPin(); }} title={n.pinned ? 'Unpin' : 'Pin'} className={'shrink-0 -mt-0.5 ' + (n.pinned ? 'text-amber-500' : 'text-zinc-300 dark:text-zinc-600 opacity-60 sm:opacity-0 sm:group-hover:opacity-100')}>
-            <Pin size={15} className={n.pinned ? 'fill-amber-500' : ''} />
+    <article className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden group shadow-sm">
+      {n.color !== 'default' && <div style={{ height: 4, background: strip }} />}
+      <div className="p-5">
+        {/* Title + document actions */}
+        <div className="flex items-start gap-2">
+          <button onClick={onOpen} className="min-w-0 flex-1 text-left">
+            {n.title ? <h2 className="text-lg font-bold leading-snug break-words">{n.title}</h2> : <span className="text-sm text-zinc-400">Untitled note</span>}
           </button>
+          <div className="flex shrink-0 items-center gap-0.5 -mt-0.5">
+            <button onClick={onAI} disabled={formatting} title="Clean up & format with AI" className="rounded-lg p-1.5 text-violet-500 hover:bg-violet-500/10 disabled:opacity-50">
+              {formatting ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            </button>
+            <button onClick={onPin} title={n.pinned ? 'Unpin' : 'Pin'} className={'rounded-lg p-1.5 ' + (n.pinned ? 'text-amber-500' : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-500')}><Pin size={16} className={n.pinned ? 'fill-amber-500' : ''} /></button>
+            <button onClick={onArchive} title={n.archived ? 'Unarchive' : 'Archive'} className="rounded-lg p-1.5 text-zinc-400 hover:text-emerald-600">{n.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
+            <button onClick={onDelete} title="Delete" className="rounded-lg p-1.5 text-zinc-400 hover:text-rose-600"><Trash2 size={16} /></button>
+          </div>
         </div>
-        {n.content && <p className={'text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap break-words mt-1 ' + (compact ? 'text-[13px] line-clamp-[10]' : 'text-sm line-clamp-[14]')}>{n.content}</p>}
-        {n.checklist.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {n.checklist.slice(0, 8).map((c, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
-                <button onClick={(e) => { e.stopPropagation(); onToggleCheck(i); }} className={'mt-0.5 shrink-0 h-4 w-4 rounded border flex items-center justify-center ' + (c.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-zinc-300 dark:border-zinc-600')}>
-                  {c.done && <span className="text-[10px] leading-none">✓</span>}
-                </button>
-                <span className={'min-w-0 break-words ' + (c.done ? 'line-through text-zinc-400' : 'text-zinc-600 dark:text-zinc-300')}>{c.text}</span>
-              </li>
-            ))}
-            {n.checklist.length > 8 && <li className="text-xs text-zinc-400">+{n.checklist.length - 8} more</li>}
-          </ul>
-        )}
-        {n.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {n.tags.map((t) => <span key={t} className="text-[11px] text-zinc-400">#{t}</span>)}
+        {/* Body — rendered as a document (Markdown) */}
+        {n.content && (
+          <div className="mt-2 cursor-pointer break-words" onClick={onOpen}>
+            <Markdown className="text-sm">{n.content}</Markdown>
           </div>
         )}
+        {n.checklist.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {n.checklist.map((c, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm">
+                <button onClick={() => onToggleCheck(i)} className={'mt-0.5 shrink-0 h-4 w-4 rounded border flex items-center justify-center ' + (c.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-zinc-300 dark:border-zinc-600')}>
+                  {c.done && <span className="text-[10px] leading-none">✓</span>}
+                </button>
+                <span className={'min-w-0 break-words ' + (c.done ? 'line-through text-zinc-400' : 'text-zinc-700 dark:text-zinc-200')}>{c.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+          <span>{new Date(n.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+          {n.tags.map((t) => <span key={t}>#{t}</span>)}
+        </div>
       </div>
-      <div className="flex items-center justify-end gap-0.5 px-1.5 pb-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-        <button onClick={onArchive} title={n.archived ? 'Unarchive' : 'Archive'} className="p-1.5 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800">{n.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
-        <button onClick={onDelete} title="Delete" className="p-1.5 rounded text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Trash2 size={14} /></button>
-      </div>
-    </div>
+    </article>
   );
 }
 

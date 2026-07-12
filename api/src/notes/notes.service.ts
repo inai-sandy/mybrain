@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
+import { LlmService } from '../llm/llm.service';
 
 export type ChecklistItem = { text: string; done: boolean };
 
@@ -13,7 +14,30 @@ export class NotesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
+    private readonly llm: LlmService,
   ) {}
+
+  /** AI clean-up (BEA-964): reformat a note's raw text into clear, structured Markdown, save it, and
+   *  return the previous content so the caller can offer a one-tap Undo. */
+  async aiFormat(id: string): Promise<{ ok: boolean; note?: any; previous?: string }> {
+    const n = await this.prisma.note.findUnique({ where: { id } });
+    if (!n) return { ok: false };
+    let checklist = '';
+    try { checklist = (JSON.parse(n.checklist || '[]') as ChecklistItem[]).map((c) => `- [${c.done ? 'x' : ' '}] ${c.text}`).join('\n'); } catch { /* ignore */ }
+    const raw = [n.content || '', checklist].filter(Boolean).join('\n\n').trim();
+    if (!raw) return { ok: false };
+    const prompt =
+      `Clean up and structure the note below into clear, well-formatted Markdown that is easy to read. ` +
+      `Tighten rambling parts, use short headings and bullet points where they help, bold the key points, and fix grammar and spacing. ` +
+      `KEEP all of the user's information and intent — never invent facts or drop details. Do NOT add a title (it is shown separately). ` +
+      `Return ONLY the formatted Markdown.\n\nNOTE:\n${raw.slice(0, 6000)}`;
+    const out = (await this.llm.complete(prompt, 1500, 'note-format'))?.trim();
+    if (!out) return { ok: false };
+    const previous = n.content || '';
+    const updated = await this.prisma.note.update({ where: { id }, data: { content: out.slice(0, 20000) } });
+    this.indexNote(updated);
+    return { ok: true, note: this.shape(updated), previous };
+  }
 
   /** (Re)index a note into the brain — no-op when the Notes section is disabled (gated downstream). */
   private indexNote(row: any): void {

@@ -28,7 +28,7 @@ function make() {
     },
   };
   const memory: any = { indexEntity: async () => undefined, deleteDoc: async () => undefined };
-  return { svc: new NotesService(prisma, memory), rows };
+  return { svc: new NotesService(prisma, memory, { complete: async () => "x" } as any), rows };
 }
 
 describe('NotesService', () => {
@@ -75,5 +75,30 @@ describe('NotesService', () => {
     await svc.update(n!.id, { archived: true });
     expect((await svc.list(false)).count).toBe(0);
     expect((await svc.list(true)).count).toBe(1);
+  });
+});
+
+describe('NotesService.aiFormat (BEA-964)', () => {
+  it('formats the note into markdown, saves it, and returns the previous content for undo', async () => {
+    const note = { id: 'n1', title: 'T', content: 'messy raw note', checklist: '[]', supermemoryId: null, ragId: null };
+    let saved: any = null;
+    const prisma: any = {
+      note: {
+        findUnique: async () => note,
+        update: async ({ data }: any) => { saved = data; return { ...note, ...data, updatedAt: new Date(), createdAt: new Date(), color: 'default', tags: '[]' }; },
+      },
+    };
+    const svc = new NotesService(prisma, { indexEntity: async () => undefined } as any, { complete: async () => '## Clean\n- point one\n- point two' } as any);
+    const r = await svc.aiFormat('n1');
+    expect(r.ok).toBe(true);
+    expect(saved.content).toBe('## Clean\n- point one\n- point two'); // saved the formatted markdown
+    expect(r.previous).toBe('messy raw note'); // original returned for undo
+    expect(r.note.content).toBe('## Clean\n- point one\n- point two');
+  });
+
+  it('is a no-op when there is nothing to format', async () => {
+    const prisma: any = { note: { findUnique: async () => ({ id: 'n2', content: '', checklist: '[]' }) } };
+    const svc = new NotesService(prisma, {} as any, {} as any);
+    expect(await svc.aiFormat('n2')).toEqual({ ok: false });
   });
 });
