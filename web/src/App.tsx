@@ -15,6 +15,7 @@ import { Tasks } from './pages/Tasks';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
 import { Notes } from './pages/Notes';
+import { NoteView } from './pages/NoteView';
 import { Chat } from './pages/Chat';
 import { Settings } from './pages/Settings';
 import { Viewer } from './pages/Viewer';
@@ -149,6 +150,7 @@ function AuthedApp() {
         {/* Mentor now lives inside the Lab — keep the old URL working (BEA-465) */}
         <Route path="mentor" element={<Navigate to="/lab?tab=mentor" replace />} />
         <Route path="notes" element={<Notes />} />
+        <Route path="notes/:id" element={<NoteView />} />
         <Route path="documents" element={<Documents />} />
         <Route path="documents/:id" element={<DocumentView />} />
         <Route path="vault" element={<Vault />} />

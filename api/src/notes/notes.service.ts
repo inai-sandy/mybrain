@@ -39,6 +39,12 @@ export class NotesService {
     return { ok: true, note: this.shape(updated), previous };
   }
 
+  /** One note by id — for the full-page note view. (BEA-966) */
+  async get(id: string) {
+    const n = await this.prisma.note.findUnique({ where: { id } });
+    return n ? this.shape(n) : null;
+  }
+
   /** (Re)index a note into the brain — no-op when the Notes section is disabled (gated downstream). */
   private indexNote(row: any): void {
     if (!row?.id) return;

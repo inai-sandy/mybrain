@@ -102,3 +102,18 @@ describe('NotesService.aiFormat (BEA-964)', () => {
     expect(await svc.aiFormat('n2')).toEqual({ ok: false });
   });
 });
+
+describe('NotesService.get (BEA-966)', () => {
+  it('returns the shaped note for the full-page view', async () => {
+    const { svc } = make();
+    const n = await svc.create({ title: 'Hello', content: 'body', tags: ['x'] });
+    const got = await svc.get(n!.id);
+    expect(got?.id).toBe(n!.id);
+    expect(got?.title).toBe('Hello');
+    expect(got?.tags).toEqual(['x']);
+  });
+  it('returns null for an unknown id', async () => {
+    const { svc } = make();
+    expect(await svc.get('nope')).toBeNull();
+  });
+});

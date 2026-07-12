@@ -10,6 +10,13 @@ export class NotesController {
     return this.notes.list(archived === '1' || archived === 'true');
   }
 
+  @Get(':id')
+  async get(@Param('id') id: string) {
+    const n = await this.notes.get(id);
+    if (!n) throw new BadRequestException('Note not found');
+    return n;
+  }
+
   @Post()
   async create(@Body() body: any) {
     const n = await this.notes.create(body || {});
