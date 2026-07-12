@@ -243,21 +243,19 @@ export default function Emo() {
         )}
         <div className="space-y-6">
           {groups.map(([day, dayCards]) => {
-            const captures = day === istToday() ? dayCards.filter((c) => c.lane === 'story') : [];
-            const rest = day === istToday() ? dayCards.filter((c) => c.lane !== 'story') : dayCards;
+            // Story cards stay INLINE in the timeline (BEA-962) — pulling them into a bottom box made
+            // them look missing/skipped. Merge lives in a slim strip on top when today has 2+ stories.
+            const storiesToday = day === istToday() ? dayCards.filter((c) => c.lane === 'story').length : 0;
             return (
               <div key={day} className="space-y-1.5">
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{dayLabel(day)}</h2>
-                {rest.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
-                {captures.length > 0 && (
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-900/40">
-                    <div className="mb-1 flex items-center justify-between px-1">
-                      <span className="text-xs font-medium text-zinc-500">Today's Captures ({captures.length})</span>
-                      <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
-                    </div>
-                    {captures.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
+                {storiesToday >= 2 && (
+                  <div className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-500/20 dark:bg-violet-500/[0.06]">
+                    <span className="text-xs font-medium text-violet-600 dark:text-violet-300">🎙 {storiesToday} story captures today</span>
+                    <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
                   </div>
                 )}
+                {dayCards.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
               </div>
             );
           })}
