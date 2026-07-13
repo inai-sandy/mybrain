@@ -256,6 +256,18 @@ export class DocumentsController {
     res.send(png);
   }
 
+  /** Public raw markdown of a shared doc — no JS, no login, so Claude/curl can read it. (BEA-970) */
+  @Public()
+  @Get('public/:slug/raw')
+  async publicRaw(@Param('slug') slug: string, @Res() res: Response) {
+    const r = await this.docs.sharedRaw(slug);
+    if (!r) throw new NotFoundException('No plain-text version is available for this link.');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('X-Robots-Tag', 'noindex');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(r.content);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const d = await this.docs.get(id);

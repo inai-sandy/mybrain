@@ -46,6 +46,24 @@ async function bootstrap() {
     // A shared document link (/d/:slug) is served as the SPA shell WITH link-preview tags injected,
     // so WhatsApp/social show a real card while humans still get the viewer. (BEA-900)
     const docs = app.get(DocumentsService);
+
+    // Direct raw-markdown links so Claude/curl can read a shared doc without JS: any share
+    // link + ".md". Registered BEFORE /d/:slug so the .md suffix isn't swallowed by it. (BEA-970)
+    const sendRaw = async (slug: string | null | undefined, res: express.Response) => {
+      const r = slug ? await docs.sharedRaw(slug) : null;
+      if (!r) { res.status(404).type('text/plain; charset=utf-8').send('Not found or not shared.'); return; }
+      res.setHeader('X-Robots-Tag', 'noindex');
+      res.setHeader('Cache-Control', 'no-store');
+      res.type('text/plain; charset=utf-8').send(r.content);
+    };
+    server.get('/d/:slug.md', async (req: express.Request, res: express.Response) => {
+      try { await sendRaw(req.params.slug, res); } catch { res.status(404).type('text/plain').send('Not found.'); }
+    });
+    server.get('/s/:code.md', async (req: express.Request, res: express.Response) => {
+      try { const d = await docs.resolveShortCode(req.params.code); await sendRaw(d?.slug, res); }
+      catch { res.status(404).type('text/plain').send('Not found.'); }
+    });
+
     server.get('/d/:slug', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
       try {
         const meta = await docs.ogMeta(req.params.slug, oauth.origin(req));

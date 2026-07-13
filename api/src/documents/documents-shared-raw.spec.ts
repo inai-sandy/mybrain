@@ -1,0 +1,55 @@
+import { DocumentsService } from './documents.service';
+
+// Rows keyed by slug, covering each gate the raw share link must honour. (BEA-970)
+const ROWS: Record<string, any> = {
+  'md-doc': { id: '1', slug: 'md-doc', kind: 'md', shared: true, contentText: '# Hello\n\nplain **md**', sharePassword: null, expiresAt: null },
+  'html-doc': { id: '2', slug: 'html-doc', kind: 'html', shared: true, contentText: '<h1>Title</h1><p>a <b>bold</b> word</p>', sharePassword: null, expiresAt: null },
+  'not-shared': { id: '3', slug: 'not-shared', kind: 'md', shared: false, contentText: 'secret', sharePassword: null, expiresAt: null },
+  'expired': { id: '4', slug: 'expired', kind: 'md', shared: true, contentText: 'gone', sharePassword: null, expiresAt: new Date(Date.now() - 1000) },
+  'pw-doc': { id: '5', slug: 'pw-doc', kind: 'md', shared: true, contentText: 'locked', sharePassword: '$2a$hash', expiresAt: null },
+  'pdf-doc': { id: '6', slug: 'pdf-doc', kind: 'pdf', shared: true, contentText: '', sharePassword: null, expiresAt: null },
+};
+
+function makeSvc() {
+  const prisma: any = {
+    document: {
+      findUnique: async ({ where }: any) => ROWS[where.slug] ?? null,
+      update: async () => ({}),
+    },
+  };
+  return new DocumentsService(prisma, null as any, null as any);
+}
+
+describe('DocumentsService.sharedRaw — raw markdown share link (BEA-970)', () => {
+  it('returns markdown as-is for a shared md doc', async () => {
+    const r = await makeSvc().sharedRaw('md-doc');
+    expect(r?.content).toBe('# Hello\n\nplain **md**');
+  });
+
+  it('converts a shared html doc to markdown', async () => {
+    const r = await makeSvc().sharedRaw('html-doc');
+    expect(r?.content).toContain('# Title');
+    expect(r?.content).toContain('**bold**');
+    expect(r?.content).not.toContain('<b>');
+  });
+
+  it('returns null when the doc is not shared', async () => {
+    expect(await makeSvc().sharedRaw('not-shared')).toBeNull();
+  });
+
+  it('returns null when the share has expired', async () => {
+    expect(await makeSvc().sharedRaw('expired')).toBeNull();
+  });
+
+  it('returns null for a password-protected share (no plain-text bypass)', async () => {
+    expect(await makeSvc().sharedRaw('pw-doc')).toBeNull();
+  });
+
+  it('returns null for a non-text doc (pdf/image)', async () => {
+    expect(await makeSvc().sharedRaw('pdf-doc')).toBeNull();
+  });
+
+  it('returns null for an unknown slug', async () => {
+    expect(await makeSvc().sharedRaw('nope')).toBeNull();
+  });
+});

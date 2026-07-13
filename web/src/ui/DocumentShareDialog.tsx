@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, Check, Share2, X, Globe, Lock, Pencil, KeyRound, Clock, Eye, Download } from 'lucide-react';
+import { Copy, Check, Share2, X, Globe, Lock, Pencil, KeyRound, Clock, Eye, Download, Bot } from 'lucide-react';
 import { useToast } from './Toast';
 
 function toLocalInput(iso: string): string {
@@ -19,6 +19,7 @@ export function DocumentShareDialog({
   title,
   slug: initialSlug,
   shortCode: initialShortCode,
+  kind,
   initialShared,
   hasPassword: initialHasPassword,
   expiresAt: initialExpiresAt,
@@ -31,6 +32,7 @@ export function DocumentShareDialog({
   title: string;
   slug: string;
   shortCode?: string | null;
+  kind?: string;
   initialShared: boolean;
   hasPassword?: boolean;
   expiresAt?: string | null;
@@ -46,7 +48,7 @@ export function DocumentShareDialog({
   const [editingSlug, setEditingSlug] = useState(false);
   const [slugDraft, setSlugDraft] = useState(initialSlug);
   const [savingSlug, setSavingSlug] = useState(false);
-  const [copied, setCopied] = useState<'pretty' | 'short' | null>(null);
+  const [copied, setCopied] = useState<'pretty' | 'short' | 'raw' | null>(null);
   const [hasPassword, setHasPassword] = useState(!!initialHasPassword);
   const [pwInput, setPwInput] = useState('');
   const [expiry, setExpiry] = useState(initialExpiresAt ? toLocalInput(initialExpiresAt) : '');
@@ -57,6 +59,10 @@ export function DocumentShareDialog({
 
   const prettyUrl = `${location.origin}/d/${slug}`;
   const shortUrl = shortCode ? `${location.origin}/s/${shortCode}` : '';
+  // Direct plain-text link Claude/curl can read (no JS). Only text docs, and not when password-locked. (BEA-970)
+  const isText = kind === 'md' || kind === 'html' || kind == null;
+  const rawUrl = `${prettyUrl}.md`;
+  const showRaw = isText && !hasPassword;
 
   // Generate the QR code client-side (qrcode is loaded on demand to stay out of the main bundle). (BEA-586)
   useEffect(() => {
@@ -149,7 +155,7 @@ export function DocumentShareDialog({
     }
   }
 
-  async function copy(text: string, which: 'pretty' | 'short') {
+  async function copy(text: string, which: 'pretty' | 'short' | 'raw') {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(which);
@@ -170,7 +176,7 @@ export function DocumentShareDialog({
     } else copy(prettyUrl, 'pretty');
   }
 
-  const linkRow = (value: string, which: 'pretty' | 'short') => (
+  const linkRow = (value: string, which: 'pretty' | 'short' | 'raw') => (
     <div className="flex gap-2">
       <input readOnly value={value} onFocus={(e) => e.currentTarget.select()} className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm" />
       <button onClick={() => copy(value, which)} className="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm inline-flex items-center gap-1.5">
@@ -231,6 +237,14 @@ export function DocumentShareDialog({
               <div>
                 <p className="text-xs font-medium text-zinc-500 mb-1">Short link</p>
                 {linkRow(shortUrl, 'short')}
+              </div>
+            )}
+
+            {showRaw && (
+              <div>
+                <p className="text-xs font-medium text-zinc-500 mb-1 flex items-center gap-1.5"><Bot size={13} /> Direct link (Markdown — for AI / Claude)</p>
+                {linkRow(rawUrl, 'raw')}
+                <p className="mt-1 text-[11px] text-zinc-400">Plain-text version. Opens with no login or JavaScript, so Claude/ChatGPT and tools can read it.</p>
               </div>
             )}
 

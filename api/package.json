@@ -20,6 +20,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "@types/adm-zip": "^0.5.8",
     "@types/archiver": "^6.0.4",
+    "@types/turndown": "^5.0.6",
     "adm-zip": "^0.5.17",
     "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
@@ -32,7 +33,8 @@
     "pdf-parse": "^1.1.1",
     "prisma": "^5.20.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@nestjs/testing": "^10.4.4",
