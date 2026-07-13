@@ -112,7 +112,7 @@ export default function RecordingView() {
           <button onClick={() => navigate(-1)} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><ArrowLeft size={18} /></button>
           <div className="min-w-0">
             <h1 className="truncate text-lg font-semibold">{rec.title || `Recording · ${rec.day}`}</h1>
-            <p className="text-xs text-zinc-500">{fmtDur(rec.seconds)} · {(rec.bytes / 1048576).toFixed(1)} MB · {rec.marks.length} marks{rec.status === 'archived' ? ' · audio on the home server' : ''}</p>
+            <p className="text-xs text-zinc-500">{fmtDur(rec.seconds)} · {(rec.bytes / 1048576).toFixed(1)} MB · {rec.marks.length} mark{rec.marks.length === 1 ? '' : 's'}{rec.status === 'archived' ? ' · audio on the home server' : ''}</p>
           </div>
         </div>
         {confirmDel ? (

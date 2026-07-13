@@ -65,7 +65,7 @@ export default function Recordings() {
                 <span className="block truncate text-sm font-medium">{r.title || `Recording · ${r.day}`}</span>
                 <span className="mt-0.5 flex items-center gap-3 text-[11px] text-zinc-400">
                   <span className="inline-flex items-center gap-1"><Clock size={11} />{fmtDur(r.seconds)}</span>
-                  <span className="inline-flex items-center gap-1"><Bookmark size={11} />{r._count?.marks ?? 0} marks</span>
+                  <span className="inline-flex items-center gap-1"><Bookmark size={11} />{r._count?.marks ?? 0} mark{(r._count?.marks ?? 0) === 1 ? '' : 's'}</span>
                   <span>{(r.bytes / 1048576).toFixed(1)} MB</span>
                   {r.status === 'recording' && <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/15 px-1.5 py-0.5 font-semibold text-rose-600 dark:text-rose-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />Live</span>}
                   {r.status === 'archived' && <span className="rounded-full bg-zinc-500/15 px-1.5 py-0.5 font-semibold text-zinc-500">On home server</span>}
