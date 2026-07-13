@@ -959,3 +959,56 @@ model EmoCard {
   @@index([status])
   @@index([lane])
 }
+
+/// Recordings (BEA-973) — long ambient sessions (3-4h meetings) stored WITHOUT transcription.
+/// Chunks are the device's raw opus-packet files on disk; marks are tap-to-transcribe windows
+/// carrying wall-clock times. Only marks/ranges ever hit the STT bill.
+model Recording {
+  id        String    @id @default(uuid())
+  title     String?
+  startedAt DateTime // device wall clock, sanity-checked against server time
+  endedAt   DateTime?
+  seconds   Int       @default(0) // total audio seconds received
+  status    String    @default("recording") // recording | done | archived
+  source    String    @default("emo-cam")
+  bytes     Int       @default(0)
+  day       String // IST day key YYYY-MM-DD
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  chunks    RecordingChunk[]
+  marks     RecordingMark[]
+
+  @@index([day])
+  @@index([status])
+}
+
+model RecordingChunk {
+  id          String    @id @default(uuid())
+  recordingId String
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  seq         Int
+  seconds     Int       @default(0)
+  bytes       Int       @default(0)
+  path        String // file under RECORDINGS_DIR
+  startSec    Int       @default(0) // offset of this chunk's start within the session
+  createdAt   DateTime  @default(now())
+
+  @@unique([recordingId, seq])
+}
+
+model RecordingMark {
+  id          String    @id @default(uuid())
+  recordingId String
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  atSeconds   Int // session offset of the tap (window end)
+  windowSec   Int       @default(120) // how far back the transcription window reaches
+  kind        String    @default("tap") // tap | manual
+  wallTime    DateTime // absolute moment of atSeconds
+  status      String    @default("pending") // pending | done | failed
+  transcript  String?
+  cardId      String?
+  createdAt   DateTime  @default(now())
+
+  @@index([recordingId])
+  @@index([status])
+}
