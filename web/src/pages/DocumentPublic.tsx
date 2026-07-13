@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { KeyRound, Clock, Download } from 'lucide-react';
+import { KeyRound, Clock, Download, Bot } from 'lucide-react';
 import { Logo } from '../ui/Logo';
 import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { FullScreenHtml } from '../ui/FullScreenHtml';
@@ -70,9 +70,11 @@ export function DocumentPublic() {
 
   const downloadUrl = `/api/documents/public/${slug}/download${token ? `?t=${encodeURIComponent(token)}` : ''}`;
   const fileSrc = `/api/documents/public/${slug}/file${token ? `?t=${encodeURIComponent(token)}` : ''}`;
+  // Raw plain-text link, so recipients (and AI tools) can grab the markdown version. md/html only. (BEA-972)
+  const markdownUrl = `/d/${slug}.md`;
 
   // HTML + ZIP sites get the chrome-free, full-screen live page — exactly like a tiiny.host link. (BEA-582/587)
-  if (gate === 'open' && doc && doc.kind === 'html') return <FullScreenHtml html={doc.contentText || ''} title={doc.title} downloadHref={doc.allowDownload ? downloadUrl : undefined} />;
+  if (gate === 'open' && doc && doc.kind === 'html') return <FullScreenHtml html={doc.contentText || ''} title={doc.title} downloadHref={doc.allowDownload ? downloadUrl : undefined} markdownHref={markdownUrl} />;
   if (gate === 'open' && doc && doc.kind === 'site') return <FullScreenHtml src={`/api/documents/public/${slug}/site/${encodeURI(doc.siteEntry || 'index.html')}`} title={doc.title} downloadHref={doc.allowDownload ? downloadUrl : undefined} />;
 
   return (
@@ -80,8 +82,13 @@ export function DocumentPublic() {
       <header className="sticky top-0 z-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur">
         <div className="max-w-3xl mx-auto px-5 h-12 flex items-center gap-2 font-bold">
           <Logo size={28} /> My Brain
+          {gate === 'open' && doc?.kind === 'md' && (
+            <a href={markdownUrl} target="_blank" rel="noreferrer" title="Open the plain-text markdown — readable by Claude/ChatGPT and tools" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <Bot size={15} /> Markdown
+            </a>
+          )}
           {gate === 'open' && doc?.allowDownload && (
-            <a href={downloadUrl} download title="Download" className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <a href={downloadUrl} download title="Download" className={`${doc?.kind === 'md' ? '' : 'ml-auto'} inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800`}>
               <Download size={15} /> Download
             </a>
           )}
