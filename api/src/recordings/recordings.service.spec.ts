@@ -144,6 +144,20 @@ describe('RecordingsService', () => {
     expect(created.source).toBe('recording');
   });
 
+  it('retention archives 90-day-old sessions and removes their local audio (BEA-976)', async () => {
+    const t = Date.now() - 91 * 86_400_000;
+    const { id } = await svc.start(Date.now()); // start() clamps old clocks — backdate manually
+    recs.get(id).startedAt = new Date(t);
+    recs.get(id).status = 'done';
+    fs.mkdirSync(path.join(tmp, id), { recursive: true });
+    fs.writeFileSync(path.join(tmp, id, 'chunk-0.opus'), Buffer.alloc(10));
+    db.recording.findMany = jest.fn(async ({ where }: any) =>
+      [...recs.values()].filter((r) => r.status === where.status && r.startedAt < where.startedAt.lt));
+    await svc.retentionTick();
+    expect(fs.existsSync(path.join(tmp, id))).toBe(false);
+    expect(recs.get(id).status).toBe('archived');
+  });
+
   it('end sets a human span title and finishes the session', async () => {
     const { id } = await svc.start(Date.now());
     await svc.addChunk(id, 0, fakeStream(3000)); // 3 minutes

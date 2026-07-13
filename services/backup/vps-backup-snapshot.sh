@@ -22,15 +22,31 @@ docker exec rag-postgres pg_dump -U rag rag | gzip > "$OUT/rag.sql.gz"
   docker inspect rag-mcp --format '{{range .Config.Env}}{{.}}{{"\n"}}{{end}}'
 } > "$OUT/restore-secrets.txt"
 
-# 4. Manifest with checksums (lets the home server verify the transfer)
-( cd "$OUT" && sha256sum mybrain.db.gz rag.sql.gz restore-secrets.txt > MANIFEST.sha256 )
+# 4. Recordings audio (BEA-976): chunks written in the last 2 days ride each day's snapshot.
+#    Chunk files are immutable once written, so the home server's day archive accumulates the
+#    complete history even though the VPS prunes chunks after 90 days.
+REC=/var/lib/docker/volumes/mybrain-data/_data/recordings
+if [ -d "$REC" ] && find "$REC" -type f -mtime -2 | grep -q .; then
+  mkdir -p "$OUT/recordings"
+  ( cd "$REC" && find . -type f -mtime -2 -print0 | rsync -a --files-from=- --from0 . "$OUT/recordings/" )
+fi
 
-# 5. Readable by the pull user, writable by nobody but root
+# 5. Manifest with checksums (lets the home server verify the transfer)
+( cd "$OUT" && sha256sum mybrain.db.gz rag.sql.gz restore-secrets.txt > MANIFEST.sha256 )
+if [ -d "$OUT/recordings" ]; then
+  ( cd "$OUT" && find recordings -type f -exec sha256sum {} + >> MANIFEST.sha256 )
+fi
+
+# 6. Readable by the pull user, writable by nobody but root
 chown -R root:vpsbackup "$OUT"
 chmod 750 "$OUT"
 chmod 640 "$OUT"/*
+if [ -d "$OUT/recordings" ]; then
+  find "$OUT/recordings" -type d -exec chmod 750 {} +
+  find "$OUT/recordings" -type f -exec chmod 640 {} +
+fi
 
-# 6. Keep only 3 days locally (the home server holds the real history)
+# 7. Keep only 3 days locally (the home server holds the real history)
 find "$DEST" -maxdepth 1 -type d -name '20*' -mtime +3 -exec rm -rf {} +
 
 /usr/local/bin/vps-backup-status.sh

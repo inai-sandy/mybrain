@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { VoiceService } from '../voice/voice.service';
 import { decodeOpusStream, normalizePcm, wavWrap } from '../emo/emo-device.service';
@@ -44,11 +44,29 @@ export function sliceOpusPackets(buf: Buffer, fromPkt: number, toPkt: number): B
 }
 
 @Injectable()
-export class RecordingsService {
+export class RecordingsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly voice: VoiceService,
   ) {}
+
+  onModuleInit() {
+    // 90-day VPS retention (BEA-976): old sessions lose their local audio files and flip to
+    // 'archived' — rows, marks and transcripts stay; the home server keeps the audio forever.
+    setInterval(() => this.retentionTick().catch(() => undefined), 3600_000);
+  }
+
+  async retentionTick(): Promise<void> {
+    const cutoff = new Date(Date.now() - 90 * 86_400_000);
+    const old = await this.prisma.recording.findMany({
+      where: { status: 'done', startedAt: { lt: cutoff } },
+      select: { id: true },
+    });
+    for (const r of old) {
+      fs.rmSync(path.join(this.dir(), r.id), { recursive: true, force: true });
+      await this.prisma.recording.update({ where: { id: r.id }, data: { status: 'archived' } });
+    }
+  }
 
   private dir(): string {
     return process.env.RECORDINGS_DIR || '/app/data/recordings';
