@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2, Volume2 } from 'lucide-react';
+import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2, Volume2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AskEmo } from './AskEmo';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
@@ -47,16 +47,17 @@ function dayLabel(day: string) {
   return new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 function hhmm(iso: string) { return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+function addDays(day: string, n: number): string { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function fullDate(day: string) { return new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); }
 
 export default function Emo() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [cards, setCards] = useState<Card[] | null>(null);
-  const [counts, setCounts] = useState<{ needsYou: number; cooking: number }>({ needsYou: 0, cooking: 0 });
+  const [day, setDay] = useState<string>(istToday()); // the day being viewed; ‹ › steps it (BEA-968)
+  const [cards, setCards] = useState<Card[] | null>(null); // the viewed day's cards
+  const [needsYou, setNeedsYou] = useState<Card[]>([]); // global Needs-you, pinned across all days
   const [status, setStatus] = useState<'' | 'needs_you' | 'cooking' | 'done'>('');
   const [lane, setLane] = useState('');
-  const [limit, setLimit] = useState(200);
-  const [total, setTotal] = useState(0);
   const [q, setQ] = useState('');
   const [dictated, setDictated] = useState('');
   const [sending, setSending] = useState(false);
@@ -131,43 +132,48 @@ export default function Emo() {
     } else toast('error', 'Could not process that.');
   }
 
+  // The viewed day's cards + the global Needs-you list (pinned across all days). (BEA-968)
   async function load() {
-    const url = `/api/emo/cards?take=${limit}` + (status ? `&status=${status}` : '') + (lane ? `&lane=${lane}` : '');
-    const [c, k] = await Promise.all([
-      fetch(url).then((r) => (r.ok ? r.json() : { cards: [], total: 0 })).catch(() => ({ cards: [], total: 0 })),
-      fetch('/api/emo/counts').then((r) => (r.ok ? r.json() : { needsYou: 0, cooking: 0 })).catch(() => ({ needsYou: 0, cooking: 0 })),
+    const [c, n] = await Promise.all([
+      fetch(`/api/emo/cards?day=${day}&take=500`).then((r) => (r.ok ? r.json() : { cards: [] })).catch(() => ({ cards: [] })),
+      fetch('/api/emo/cards?status=needs_you&take=100').then((r) => (r.ok ? r.json() : { cards: [] })).catch(() => ({ cards: [] })),
     ]);
     setCards(c.cards || []);
-    setTotal(c.total ?? (c.cards || []).length);
-    setCounts(k);
+    setNeedsYou(n.cards || []);
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [status, lane, limit]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [day]);
 
-  // Keep cooking cards fresh — poll while anything is still cooking (no manual reload needed). (BEA-880)
+  // Keep cooking cards fresh — poll while anything on this day (or a pinned card) is still cooking. (BEA-880)
   useEffect(() => {
-    if (counts.cooking <= 0) return;
+    const anyCooking = (cards || []).some((c) => c.status === 'cooking') || needsYou.some((c) => c.status === 'cooking');
+    if (!anyCooking) return;
     const t = setInterval(() => { load(); }, 6000);
     return () => clearInterval(t);
     // eslint-disable-next-line
-  }, [counts.cooking, status, lane, limit]);
+  }, [cards, needsYou, day]);
 
+  // Day-scoped counts for the status pills.
+  const dayCounts = useMemo(() => {
+    const list = cards || [];
+    return { needsYou: list.filter((c) => c.status === 'needs_you').length, cooking: list.filter((c) => c.status === 'cooking').length };
+  }, [cards]);
+
+  // The deck = this day's cards, filtered by lane/status/search.
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const list = cards || [];
-    if (!term) return list;
-    return list.filter((c) => [c.summary, c.title, c.rawTranscript, c.detail].some((s) => (s || '').toLowerCase().includes(term)));
-  }, [cards, q]);
+    let list = cards || [];
+    if (lane) list = list.filter((c) => c.lane === lane);
+    if (status) list = list.filter((c) => c.status === status);
+    if (term) list = list.filter((c) => [c.summary, c.title, c.rawTranscript, c.detail].some((s) => (s || '').toLowerCase().includes(term)));
+    return list;
+  }, [cards, q, lane, status]);
 
-  // Attention strip: Needs-you + Cooking float to the top (only when not already filtering by status). (BEA-940)
-  const attention = useMemo(() => (status ? [] : filtered.filter((c) => c.status === 'needs_you' || c.status === 'cooking')), [filtered, status]);
-  const attnIds = useMemo(() => new Set(attention.map((c) => c.id)), [attention]);
-
-  // group by day (newest first), and inside Today split out Story = "Today's Captures"
-  const groups = useMemo(() => {
-    const byDay = new Map<string, Card[]>();
-    for (const c of filtered) { if (attnIds.has(c.id)) continue; (byDay.get(c.day) || byDay.set(c.day, []).get(c.day)!).push(c); }
-    return [...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0]));
-  }, [filtered, attnIds]);
+  // Pinned "Needs your attention" (global) shows unless you're actively filtering the deck; when it
+  // shows, drop those cards from the deck so they don't appear twice. (BEA-968)
+  const needsYouIds = useMemo(() => new Set(needsYou.map((c) => c.id)), [needsYou]);
+  const showPinned = !status && !q.trim();
+  const deck = useMemo(() => (showPinned ? filtered.filter((c) => !needsYouIds.has(c.id)) : filtered), [filtered, showPinned, needsYouIds]);
+  const storiesToday = day === istToday() ? (cards || []).filter((c) => c.lane === 'story').length : 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -209,10 +215,20 @@ export default function Emo() {
         </div>
       </div>
 
-      {/* attention strip */}
+      {/* Day pager — one day at a time; ‹ = previous day (BEA-968) */}
+      <div className="flex items-center justify-center gap-4 py-1">
+        <button onClick={() => setDay((d) => addDays(d, -1))} aria-label="Previous day" title="Previous day" className="grid h-9 w-9 place-items-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-800"><ChevronLeft size={18} /></button>
+        <div className="min-w-[9rem] text-center">
+          <div className="text-sm font-semibold">{dayLabel(day)}</div>
+          <div className="text-[11px] text-zinc-400">{fullDate(day)}</div>
+        </div>
+        <button onClick={() => setDay((d) => addDays(d, 1))} disabled={day >= istToday()} aria-label="Next day" title="Next day" className="grid h-9 w-9 place-items-center rounded-lg border border-zinc-200 text-zinc-500 enabled:hover:border-emerald-500 enabled:hover:text-emerald-600 disabled:opacity-30 dark:border-zinc-800"><ChevronRight size={18} /></button>
+      </div>
+
+      {/* filters (scoped to the viewed day) */}
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={() => setStatus(status === 'needs_you' ? '' : 'needs_you')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'needs_you' ? 'ring-2 ring-rose-400' : ''} ${STATUS.needs_you.cls}`}>⚠ Needs you {counts.needsYou}</button>
-        <button onClick={() => setStatus(status === 'cooking' ? '' : 'cooking')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'cooking' ? 'ring-2 ring-amber-400' : ''} ${STATUS.cooking.cls}`}>⏳ Cooking {counts.cooking}</button>
+        <button onClick={() => setStatus(status === 'needs_you' ? '' : 'needs_you')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'needs_you' ? 'ring-2 ring-rose-400' : ''} ${STATUS.needs_you.cls}`}>⚠ Needs you {dayCounts.needsYou}</button>
+        <button onClick={() => setStatus(status === 'cooking' ? '' : 'cooking')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'cooking' ? 'ring-2 ring-amber-400' : ''} ${STATUS.cooking.cls}`}>⏳ Cooking {dayCounts.cooking}</button>
         <button onClick={() => setStatus(status === 'done' ? '' : 'done')} className={`rounded-full px-3 py-1 text-xs font-medium ${status === 'done' ? 'ring-2 ring-emerald-400' : ''} ${STATUS.done.cls}`}>✓ Done</button>
         {status && <button onClick={() => setStatus('')} className="rounded-full px-3 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">All</button>}
         <select value={lane} onChange={(e) => setLane(e.target.value)} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
@@ -225,47 +241,38 @@ export default function Emo() {
         </div>
       </div>
 
-      {/* feed */}
+      {/* Pinned "Needs your attention" — global, across ALL days, so an old ask never gets buried. (BEA-968) */}
+      {showPinned && needsYou.length > 0 && (
+        <div className="space-y-1.5 rounded-2xl border border-rose-200 bg-rose-50/40 p-3 dark:border-rose-500/20 dark:bg-rose-500/[0.04]">
+          <h2 className="px-0.5 text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-300">⚡ Needs your attention</h2>
+          {needsYou.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
+        </div>
+      )}
+
+      {/* Story-captures merge strip — today only, when 2+ stories are waiting. */}
+      {storiesToday >= 2 && (
+        <div className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-500/20 dark:bg-violet-500/[0.06]">
+          <span className="text-xs font-medium text-violet-600 dark:text-violet-300">🎙 {storiesToday} story captures today</span>
+          <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
+        </div>
+      )}
+
+      {/* This day's deck */}
       {cards === null ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
-      ) : filtered.length === 0 ? (
+      ) : deck.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-200 py-16 text-center text-sm text-zinc-400 dark:border-zinc-700">
           <div className="mb-2 text-2xl">🎙</div>
-          {q || status ? 'No cards match.' : 'No cards yet — your voice captures will land here.'}
+          {q || status || lane
+            ? 'No cards match.'
+            : day === istToday()
+              ? 'No cards yet today — your voice captures will land here.'
+              : `Nothing captured on ${dayLabel(day)}.`}
         </div>
       ) : (
-        <>
-        {attention.length > 0 && (
-          <div className="mb-4 space-y-1.5 rounded-2xl border border-rose-200 bg-rose-50/40 p-3 dark:border-rose-500/20 dark:bg-rose-500/[0.04]">
-            <h2 className="px-0.5 text-xs font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-300">⚡ Needs your attention</h2>
-            {attention.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
-          </div>
-        )}
-        <div className="space-y-6">
-          {groups.map(([day, dayCards]) => {
-            // Story cards stay INLINE in the timeline (BEA-962) — pulling them into a bottom box made
-            // them look missing/skipped. Merge lives in a slim strip on top when today has 2+ stories.
-            const storiesToday = day === istToday() ? dayCards.filter((c) => c.lane === 'story').length : 0;
-            return (
-              <div key={day} className="space-y-1.5">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{dayLabel(day)}</h2>
-                {storiesToday >= 2 && (
-                  <div className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-500/20 dark:bg-violet-500/[0.06]">
-                    <span className="text-xs font-medium text-violet-600 dark:text-violet-300">🎙 {storiesToday} story captures today</span>
-                    <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
-                  </div>
-                )}
-                {dayCards.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
-              </div>
-            );
-          })}
+        <div className="space-y-1.5">
+          {deck.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
         </div>
-        {!q && total > (cards?.length || 0) && (
-          <div className="pt-3 text-center">
-            <button onClick={() => setLimit((l) => l + 200)} className="rounded-full border border-zinc-200 px-4 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800">Load more · {cards?.length || 0} of {total}</button>
-          </div>
-        )}
-        </>
       )}
 
       {open && <CardDetail card={open} onClose={() => setOpen(null)} onChanged={() => { load(); }} />}
