@@ -279,7 +279,7 @@ export function DocumentShareDialog({
                     disabled={savingProt}
                     className={'relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ' + (allowDownload ? 'bg-emerald-600' : 'bg-zinc-300 dark:bg-zinc-700')}
                   >
-                    <span className={'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ' + (allowDownload ? 'translate-x-4' : 'translate-x-0.5')} />
+                    <span className={'absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ' + (allowDownload ? 'left-[18px]' : 'left-0.5')} />
                   </button>
                 </div>
                 <p className="mt-1 text-[11px] text-zinc-400">When on, the shared page shows a download button.</p>
