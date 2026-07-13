@@ -38,8 +38,7 @@ import { DocumentFull } from './pages/DocumentFull';
 import { ShortLink } from './pages/ShortLink';
 import { Agents } from './pages/Agents';
 import Emo from './pages/Emo';
-import Recordings from './pages/Recordings';
-import RecordingView from './pages/RecordingView';
+
 import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
 import { SavedByAgents } from './pages/SavedByAgents';
@@ -49,6 +48,8 @@ import { FlowRunView } from './pages/FlowRunView';
 import { FlowRunsList } from './pages/FlowRunsList';
 // React Flow is heavy — lazy-load the editor so it splits into its own chunk (keeps the main bundle small).
 const FlowEditor = lazy(() => import('./pages/FlowEditor').then((m) => ({ default: m.FlowEditor })));
+const Recordings = lazy(() => import('./pages/Recordings'));
+const RecordingView = lazy(() => import('./pages/RecordingView'));
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -122,8 +123,8 @@ function AuthedApp() {
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
         <Route path="emo" element={<Emo />} />
-        <Route path="recordings" element={<Recordings />} />
-        <Route path="recordings/:id" element={<RecordingView />} />
+        <Route path="recordings" element={<Suspense fallback={null}><Recordings /></Suspense>} />
+        <Route path="recordings/:id" element={<Suspense fallback={null}><RecordingView /></Suspense>} />
         <Route path="agent" element={<Agents />} />
         <Route path="agent/history" element={<AgentHistory />} />
         <Route path="agent/saved" element={<SavedByAgents />} />
