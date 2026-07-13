@@ -8,6 +8,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
 import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
+import TurndownService from 'turndown';
+
+// Shared HTML→Markdown converter for the raw share link (BEA-970). ATX headings + fenced code.
+// Full-page docs carry <head>/<style>/<script>; strip them so CSS/JS text never leaks into the markdown.
+const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
+turndown.remove(['style', 'script', 'noscript', 'head', 'meta', 'link', 'title', 'template']);
+const htmlToMarkdown = (html: string): string => {
+  try { return turndown.turndown(html || '').replace(/\n{3,}/g, '\n\n').trim(); } catch { return html || ''; }
+};
 
 // pdf-parse v1 has no types; the /lib import avoids its debug-mode file read on require.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -758,6 +767,23 @@ export class DocumentsService {
     void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
     if (row.sharePassword) return { locked: true, title: row.title, kind: row.kind, allowDownload: !!row.allowDownload };
     return { title: row.title, description: row.description || null, kind: row.kind, contentText: row.contentText || '', siteEntry: row.siteEntry || null, allowDownload: !!row.allowDownload, updatedAt: row.updatedAt };
+  }
+
+  /**
+   * Raw markdown of a shared doc, for the direct AI/Claude-readable link (BEA-970).
+   * Mirrors the share gates: null (→404) when not shared, expired, password-protected,
+   * or not a text doc. HTML docs are converted to markdown; md docs served as-is.
+   */
+  async sharedRaw(slug: string): Promise<{ content: string } | null> {
+    const row = await this.prisma.document.findUnique({ where: { slug } });
+    if (!row || !row.shared) return null;
+    if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return null;
+    if (row.sharePassword) return null; // password-protected shares get no plain-text bypass
+    if (row.kind !== 'md' && row.kind !== 'html') return null; // only text docs have a markdown form
+    // Count the open, best-effort — consistent with getShared(). (BEA-586)
+    void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
+    const src = row.contentText || '';
+    return { content: row.kind === 'html' ? htmlToMarkdown(src) : src };
   }
 
   /** Link-preview meta for a shared doc (BEA-900). Null when not shared/live. */
