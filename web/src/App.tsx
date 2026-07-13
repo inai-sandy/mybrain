@@ -38,6 +38,8 @@ import { DocumentFull } from './pages/DocumentFull';
 import { ShortLink } from './pages/ShortLink';
 import { Agents } from './pages/Agents';
 import Emo from './pages/Emo';
+import Recordings from './pages/Recordings';
+import RecordingView from './pages/RecordingView';
 import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
 import { SavedByAgents } from './pages/SavedByAgents';
@@ -120,6 +122,8 @@ function AuthedApp() {
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
         <Route path="emo" element={<Emo />} />
+        <Route path="recordings" element={<Recordings />} />
+        <Route path="recordings/:id" element={<RecordingView />} />
         <Route path="agent" element={<Agents />} />
         <Route path="agent/history" element={<AgentHistory />} />
         <Route path="agent/saved" element={<SavedByAgents />} />
