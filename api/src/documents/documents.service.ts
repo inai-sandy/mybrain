@@ -11,9 +11,11 @@ import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
 import TurndownService from 'turndown';
 
 // Shared HTML→Markdown converter for the raw share link (BEA-970). ATX headings + fenced code.
+// Full-page docs carry <head>/<style>/<script>; strip them so CSS/JS text never leaks into the markdown.
 const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', bulletListMarker: '-' });
+turndown.remove(['style', 'script', 'noscript', 'head', 'meta', 'link', 'title', 'template']);
 const htmlToMarkdown = (html: string): string => {
-  try { return turndown.turndown(html || ''); } catch { return html || ''; }
+  try { return turndown.turndown(html || '').replace(/\n{3,}/g, '\n\n').trim(); } catch { return html || ''; }
 };
 
 // pdf-parse v1 has no types; the /lib import avoids its debug-mode file read on require.

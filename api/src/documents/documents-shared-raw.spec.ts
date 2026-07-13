@@ -4,6 +4,8 @@ import { DocumentsService } from './documents.service';
 const ROWS: Record<string, any> = {
   'md-doc': { id: '1', slug: 'md-doc', kind: 'md', shared: true, contentText: '# Hello\n\nplain **md**', sharePassword: null, expiresAt: null },
   'html-doc': { id: '2', slug: 'html-doc', kind: 'html', shared: true, contentText: '<h1>Title</h1><p>a <b>bold</b> word</p>', sharePassword: null, expiresAt: null },
+  'html-page': { id: '7', slug: 'html-page', kind: 'html', shared: true, sharePassword: null, expiresAt: null,
+    contentText: '<!doctype html><html><head><title>Doc Title</title><style>:root{--bg:#0B0B0F}</style><script>var x=1;</script></head><body><h1>Real Heading</h1><p>Body text.</p></body></html>' },
   'not-shared': { id: '3', slug: 'not-shared', kind: 'md', shared: false, contentText: 'secret', sharePassword: null, expiresAt: null },
   'expired': { id: '4', slug: 'expired', kind: 'md', shared: true, contentText: 'gone', sharePassword: null, expiresAt: new Date(Date.now() - 1000) },
   'pw-doc': { id: '5', slug: 'pw-doc', kind: 'md', shared: true, contentText: 'locked', sharePassword: '$2a$hash', expiresAt: null },
@@ -31,6 +33,16 @@ describe('DocumentsService.sharedRaw — raw markdown share link (BEA-970)', () 
     expect(r?.content).toContain('# Title');
     expect(r?.content).toContain('**bold**');
     expect(r?.content).not.toContain('<b>');
+  });
+
+  it('strips head/style/script from a full HTML page — no CSS or JS leaks into the markdown', async () => {
+    const r = await makeSvc().sharedRaw('html-page');
+    expect(r?.content).toContain('# Real Heading');
+    expect(r?.content).toContain('Body text.');
+    expect(r?.content).not.toContain('--bg');       // no CSS
+    expect(r?.content).not.toContain('var x');       // no JS
+    expect(r?.content).not.toContain('Doc Title');   // no <title>
+    expect(r?.content).not.toMatch(/<[a-z]/i);       // no raw tags
   });
 
   it('returns null when the doc is not shared', async () => {
