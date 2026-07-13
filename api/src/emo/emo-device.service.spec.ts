@@ -81,6 +81,12 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(r.lane).toBeDefined();
   });
 
+  it('capped=1 appends the 3-minute notice to reply and say (BEA-971)', async () => {
+    const r = await svc.turn(pcm, { mode: 'task', capped: true });
+    expect(r.reply).toContain('3-minute limit');
+    expect(r.say).toContain('three minute limit');
+  });
+
   it('story mode forces the story lane', async () => {
     await svc.turn(pcm, { mode: 'story' });
     expect(router.route).toHaveBeenCalledWith(expect.any(String), { source: 'emo-device', lane: 'story', audioPath: expect.any(String) });

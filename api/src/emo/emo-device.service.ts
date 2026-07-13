@@ -132,7 +132,7 @@ export class EmoDeviceService {
     return { ok: true };
   }
 
-  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string } = {}): Promise<DeviceTurn> {
+  async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
     if (!body?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
@@ -189,8 +189,13 @@ export class EmoDeviceService {
     }
     const n = cards?.length || 0;
     const first = n ? String((cards[0] as any)?.summary || '').trim() : '';
-    const reply = n ? cards.map((c: any) => `• ${c.summary || ''}`).join('\n') : 'Nothing captured.';
-    const say = n === 0 ? 'Hmm, nothing captured. Try again.' : n === 1 ? `Got it. ${first}` : `Got it — saved ${n} cards.`;
+    let reply = n ? cards.map((c: any) => `• ${c.summary || ''}`).join('\n') : 'Nothing captured.';
+    let say = n === 0 ? 'Hmm, nothing captured. Try again.' : n === 1 ? `Got it. ${first}` : `Got it — saved ${n} cards.`;
+    if (opts.capped) {
+      // the device auto-stopped at its 3-minute cap — the cut must never be silent (BEA-971)
+      reply += '\n⏱ Recording stopped at the 3-minute limit — only the first 3 minutes were saved.';
+      say += ' Heads up — the recording stopped at the three minute limit.';
+    }
     return { ok: n > 0, mode, heard, reply, say, lane: n ? String((cards[0] as any).lane || '') : undefined, cardId: n ? (cards[0] as any).id : undefined };
   }
 
