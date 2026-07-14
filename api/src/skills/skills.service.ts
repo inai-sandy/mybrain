@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { promises as fs, createWriteStream } from 'fs';
+import { createHash } from 'crypto';
 import { join } from 'path';
 // archiver's runtime is callable as archiver('zip', …); @types/archiver v8 omits that signature, so type it loosely.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -416,16 +417,28 @@ export class SkillsService {
    */
   async cleanupScan(): Promise<{ duplicates: { keep: string; remove: string[]; label: string }[]; broken: { id: string; title: string }[] }> {
     const rows = await this.prisma.skill.findMany({ orderBy: { createdAt: 'asc' } });
-    const dupMap = new Map<string, any[]>();
+    // Two rows are duplicates if they share ANY of: the same GitHub source, the same SKILL.md content
+    // (catches "deep-research" vs "deep-research-2" renames), or the same title. Merge overlapping
+    // matches into one group so a pair matched by two signals isn't double-reported (BEA-978).
+    const keysOf = (s: any): string[] => {
+      const ks: string[] = [];
+      if (s.sourceRepo && s.skillPath) ks.push(`src:${s.sourceRepo}#${s.skillPath}`);
+      if (s.content?.trim()) ks.push(`content:${createHash('sha1').update(s.content.trim()).digest('hex')}`);
+      ks.push(`title:${s.title.trim().toLowerCase()}`);
+      return ks;
+    };
+    const groups: { rows: any[]; keys: Set<string> }[] = [];
     for (const s of rows) {
-      const key = s.sourceRepo && s.skillPath ? `src:${s.sourceRepo}#${s.skillPath}` : `title:${s.title.trim().toLowerCase()}`;
-      const arr = dupMap.get(key) || []; arr.push(s); dupMap.set(key, arr);
+      const ks = keysOf(s);
+      let g = groups.find((gr) => ks.some((k) => gr.keys.has(k)));
+      if (!g) { g = { rows: [], keys: new Set() }; groups.push(g); }
+      g.rows.push(s); ks.forEach((k) => g.keys.add(k));
     }
     const duplicates: { keep: string; remove: string[]; label: string }[] = [];
-    for (const [, arr] of dupMap) {
-      if (arr.length < 2) continue;
+    for (const g of groups) {
+      if (g.rows.length < 2) continue;
       // Keep the one that is deployed / oldest; remove the rest.
-      const sorted = [...arr].sort((a, b) => (Object.keys(this.parseJson(b.deployments)).length - Object.keys(this.parseJson(a.deployments)).length) || (a.createdAt < b.createdAt ? -1 : 1));
+      const sorted = [...g.rows].sort((a, b) => (Object.keys(this.parseJson(b.deployments)).length - Object.keys(this.parseJson(a.deployments)).length) || (a.createdAt < b.createdAt ? -1 : 1));
       duplicates.push({ keep: sorted[0].id, remove: sorted.slice(1).map((x) => x.id), label: sorted[0].title });
     }
     const broken: { id: string; title: string }[] = [];

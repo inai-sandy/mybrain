@@ -46,6 +46,17 @@ describe('SkillsService.cleanupScan (BEA-977)', () => {
     expect(rep.duplicates[0].remove).toEqual(['b']);
     expect(rep.broken.map((x) => x.id)).toContain('c');
   });
+  it('catches a content-identical "-2" rename even when titles differ (BEA-978)', async () => {
+    const body = '---\nname: deep-research\ndescription: d\n---\nthe same body';
+    const svc = svcWith([
+      { id: 'dr', title: 'deep-research', deployments: '{"sandy":"deep-research"}', content: body, createdAt: new Date('2020-01-01') },
+      { id: 'dr2', title: 'deep-research-2', deployments: '{}', content: body, createdAt: new Date('2020-02-01') },
+    ]);
+    const rep = await svc.cleanupScan();
+    expect(rep.duplicates).toHaveLength(1);
+    expect(rep.duplicates[0].keep).toBe('dr');
+    expect(rep.duplicates[0].remove).toEqual(['dr2']);
+  });
   it('reports nothing when every skill is unique and well-formed', async () => {
     const svc = svcWith([{ id: 'a', title: 'One', deployments: '{}', content: '---\nname: one\ndescription: d\n---\nx', createdAt: new Date() }]);
     const rep = await svc.cleanupScan();
