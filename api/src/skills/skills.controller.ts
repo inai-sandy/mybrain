@@ -50,6 +50,30 @@ export class SkillsController {
     return { targets: Object.keys(this.skills.deployTargets()) };
   }
 
+  /** Doctor — list duplicates + broken skills (BEA-977). */
+  @Get('cleanup')
+  async cleanupScan() {
+    return this.skills.cleanupScan();
+  }
+
+  /** Doctor — apply fixes: repair headers + delete duplicate copies. */
+  @Post('cleanup')
+  async cleanupApply() {
+    return this.skills.cleanupApply();
+  }
+
+  /** Update every skill in a pack from its GitHub source (BEA-977). */
+  @Post('pack/:packId/update')
+  async updatePack(@Param('packId') packId: string) {
+    return this.importer.updatePack(packId);
+  }
+
+  /** Remove a whole pack (library + deploy folders). */
+  @Delete('pack/:packId')
+  async removePack(@Param('packId') packId: string) {
+    return this.skills.removePack(packId, true);
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const s = await this.skills.get(id);
@@ -85,6 +109,18 @@ export class SkillsController {
     const r = await this.skills.addFile(id, file.buffer, String(file.originalname || 'skill.md'));
     if (!r) throw new BadRequestException('Skill not found');
     return r;
+  }
+
+  /** Update ONE skill from its recorded GitHub source (no duplicate) (BEA-977). */
+  @Post(':id/update')
+  async updateFromSource(@Param('id') id: string) {
+    return this.importer.updateFromSource(id);
+  }
+
+  /** Repair a skill's missing/blank SKILL.md header (BEA-977). */
+  @Post(':id/repair')
+  async repair(@Param('id') id: string) {
+    return this.skills.repairSkill(id);
   }
 
   @Post(':id/deploy')

@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { SkillsService, parseSkillMd } from './skills.service';
+import { SkillsService, parseSkillMd, repairSkillMd } from './skills.service';
 
 describe('parseSkillMd (BEA-635 block-scalar fix)', () => {
   it('reads a plain single-line description', () => {
@@ -10,6 +10,47 @@ describe('parseSkillMd (BEA-635 block-scalar fix)', () => {
   it('reads a YAML block-scalar (|-) description instead of the marker', () => {
     const md = '---\nname: claude-api\ndescription: |-\n  Build apps on the Claude API.\n  Covers tool use and streaming.\n---\nbody';
     expect(parseSkillMd(md)).toEqual({ name: 'claude-api', description: 'Build apps on the Claude API. Covers tool use and streaming.' });
+  });
+});
+
+describe('repairSkillMd (BEA-977)', () => {
+  it('adds a full header when none exists, preserving the body', () => {
+    const { content, changed } = repairSkillMd('# My Skill\n\nbody text', 'my-skill');
+    expect(changed).toBe(true);
+    expect(content).toContain('name: my-skill');
+    expect(content).toContain('description: "My Skill"');
+    expect(content).toContain('body text');
+  });
+  it('leaves a valid header untouched', () => {
+    const md = '---\nname: x\ndescription: y\n---\nbody';
+    expect(repairSkillMd(md, 'fallback')).toEqual({ content: md, changed: false });
+  });
+  it('fills a missing description from the first body line', () => {
+    const { content, changed } = repairSkillMd('---\nname: x\n---\nDoes the thing.\nmore', 'x');
+    expect(changed).toBe(true);
+    expect(content).toContain('description: "Does the thing."');
+  });
+});
+
+describe('SkillsService.cleanupScan (BEA-977)', () => {
+  const svcWith = (rows: any[]) => new SkillsService({ skill: { findMany: async () => rows } } as any, {} as any, {} as any, {} as any);
+  it('flags source-duplicates (keeping the deployed one) and broken headers', async () => {
+    const svc = svcWith([
+      { id: 'a', title: 'Soft', sourceRepo: 'o/r', skillPath: 'skills/soft', deployments: '{"sandy":"soft"}', content: '---\nname: soft\ndescription: d\n---\nx', createdAt: new Date('2020-01-01') },
+      { id: 'b', title: 'Soft', sourceRepo: 'o/r', skillPath: 'skills/soft', deployments: '{}', content: '---\nname: soft\ndescription: d\n---\nx', createdAt: new Date('2020-02-01') },
+      { id: 'c', title: 'Bare', deployments: '{}', content: '# no frontmatter here', createdAt: new Date('2020-01-01') },
+    ]);
+    const rep = await svc.cleanupScan();
+    expect(rep.duplicates).toHaveLength(1);
+    expect(rep.duplicates[0].keep).toBe('a');
+    expect(rep.duplicates[0].remove).toEqual(['b']);
+    expect(rep.broken.map((x) => x.id)).toContain('c');
+  });
+  it('reports nothing when every skill is unique and well-formed', async () => {
+    const svc = svcWith([{ id: 'a', title: 'One', deployments: '{}', content: '---\nname: one\ndescription: d\n---\nx', createdAt: new Date() }]);
+    const rep = await svc.cleanupScan();
+    expect(rep.duplicates).toHaveLength(0);
+    expect(rep.broken).toHaveLength(0);
   });
 });
 

@@ -37,11 +37,38 @@ export function parseSkillMd(md: string): { name?: string; description?: string 
   return { name, description };
 }
 
+/**
+ * Ensure a SKILL.md has a valid `name` + `description` frontmatter so Claude Code registers it (BEA-977).
+ * Returns the (possibly rewritten) content and whether anything was changed. Additive only — the body is
+ * preserved byte-for-byte; we only add/fill the header. Mirrors the terminal tool's repair.
+ */
+export function repairSkillMd(md: string, fallbackName: string): { content: string; changed: boolean } {
+  const text = md || '';
+  const { name, description } = parseSkillMd(text);
+  if (name && description) return { content: text, changed: false };
+  // Split off any existing frontmatter so we can rebuild it cleanly.
+  let body = text;
+  const fm = text.match(/^\s*---\s*([\s\S]*?)\s*---\s*/);
+  if (fm) body = text.slice(fm[0].length);
+  const nm = (name || fallbackName || 'skill').trim();
+  let desc = (description || '').trim();
+  if (!desc) {
+    for (const line of body.split('\n')) {
+      const t = line.trim().replace(/^#+\s*/, '').trim();
+      if (t) { desc = t.slice(0, 200); break; }
+    }
+    if (!desc) desc = `Imported skill: ${nm}`;
+  }
+  desc = desc.replace(/"/g, "'");
+  return { content: `---\nname: ${nm}\ndescription: "${desc}"\n---\n\n${body.replace(/^\n+/, '')}`, changed: true };
+}
+
 function skillsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'skills');
 }
 
-type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string; aiDescribe?: boolean };
+type SourceMeta = { sourceRepo?: string; sourceRef?: string; skillPath?: string; sourceUrl?: string; folderHash?: string; packId?: string; packName?: string };
+type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string; aiDescribe?: boolean; source?: SourceMeta; allowDuplicateTitle?: boolean };
 
 @Injectable()
 export class SkillsService {
@@ -80,6 +107,14 @@ export class SkillsService {
       lastUsedAt: s.lastUsedAt,
       usageCount: s.usageCount,
       shared: s.shared,
+      // Source tracking / pack grouping (BEA-977)
+      sourceRepo: s.sourceRepo || null,
+      skillPath: s.skillPath || null,
+      sourceUrl: s.sourceUrl || null,
+      packId: s.packId || null,
+      packName: s.packName || null,
+      fromSource: !!s.sourceRepo,
+      sourceUpdatedAt: s.sourceUpdatedAt || null,
       createdAt: s.createdAt,
     };
   }
@@ -89,9 +124,14 @@ export class SkillsService {
     const title = (input.title?.trim() || parsed.name || 'Untitled skill').slice(0, 120);
     // Block duplicate names in the list (case-insensitive). Keeps the tracker clean and avoids the
     // confusion of two same-named cards. The filesystem scan has its own upsert and is unaffected.
-    const norm = title.trim().toLowerCase();
-    const dup = (await this.prisma.skill.findMany({ select: { id: true, title: true } })).find((x) => x.title.trim().toLowerCase() === norm);
-    if (dup) throw new BadRequestException(`A skill named “${title}” already exists — open it to update it instead.`);
+    // Skills imported from a GitHub source are de-duplicated by their SOURCE identity (repo + skillPath),
+    // handled by the importer, so two skills from different repos may legitimately share a name — skip the
+    // name block for those (BEA-977). Hand-created skills still can't collide by name.
+    if (!input.allowDuplicateTitle) {
+      const norm = title.trim().toLowerCase();
+      const dup = (await this.prisma.skill.findMany({ select: { id: true, title: true } })).find((x) => x.title.trim().toLowerCase() === norm);
+      if (dup) throw new BadRequestException(`A skill named “${title}” already exists — open it to update it instead.`);
+    }
     // AI-generated description (from the SKILL.md content); fall back to provided/frontmatter text.
     // GitHub import passes aiDescribe:false to skip the per-skill LLM call (the import bottleneck) and
     // use the SKILL.md's own frontmatter description instead (BEA-639).
@@ -101,8 +141,14 @@ export class SkillsService {
       : await this.aiDescribe(input.content || '', fallbackDesc || undefined);
     const origin = input.origin === 'downloaded' ? 'downloaded' : 'created';
     const platform = input.platform === 'chat' ? 'chat' : 'code';
+    const src = input.source || {};
     const skill = await this.prisma.skill.create({
-      data: { title, description, content: input.content || null, origin, platform, downloadUrl: input.downloadUrl?.trim() || null },
+      data: {
+        title, description, content: input.content || null, origin, platform, downloadUrl: input.downloadUrl?.trim() || null,
+        sourceRepo: src.sourceRepo || null, sourceRef: src.sourceRef || null, skillPath: src.skillPath || null,
+        sourceUrl: src.sourceUrl || null, folderHash: src.folderHash || null, packId: src.packId || null, packName: src.packName || null,
+        sourceUpdatedAt: src.sourceRepo ? new Date() : null,
+      },
     });
     await this.memory.enqueue(`${title}\n\n${description}`, { title, tags: ['skill', origin] });
     return this.shape(skill);
@@ -313,6 +359,91 @@ export class SkillsService {
     const norm = title.trim().toLowerCase();
     const rows = await this.prisma.skill.findMany({ select: { title: true } });
     return rows.some((x) => x.title.trim().toLowerCase() === norm);
+  }
+
+  /** Find an already-imported skill by its SOURCE identity (repo + path within it) — the update key (BEA-977). */
+  async findBySource(sourceRepo: string, skillPath: string): Promise<any | null> {
+    if (!sourceRepo || !skillPath) return null;
+    return this.prisma.skill.findFirst({ where: { sourceRepo, skillPath } });
+  }
+
+  /** Refresh an existing skill's files + metadata from a freshly-pulled source folder, then redeploy (BEA-977). */
+  async refreshFromSource(id: string, opts: { content: string; folderHash: string; sourceRef?: string; zipPath?: string; redeploy?: boolean }): Promise<void> {
+    const parsed = parseSkillMd(opts.content);
+    const data: any = {
+      content: opts.content,
+      folderHash: opts.folderHash,
+      sourceUpdatedAt: new Date(),
+    };
+    if (opts.sourceRef) data.sourceRef = opts.sourceRef;
+    if (parsed.description?.trim()) data.description = parsed.description.trim().slice(0, 600);
+    if (opts.zipPath) data.filePath = opts.zipPath;
+    await this.prisma.skill.update({ where: { id }, data });
+    if (opts.redeploy) await this.deployAll(id).catch(() => undefined);
+  }
+
+  /** Repair a skill's missing/blank frontmatter header in place, then redeploy so the fix reaches disk (BEA-977). */
+  async repairSkill(id: string): Promise<{ ok: boolean; changed: boolean; message: string }> {
+    const s = await this.prisma.skill.findUnique({ where: { id } });
+    if (!s) return { ok: false, changed: false, message: 'Skill not found' };
+    if (!s.content?.trim()) return { ok: false, changed: false, message: 'This skill has no SKILL.md text to repair.' };
+    const { content, changed } = repairSkillMd(s.content, s.slug || s.title);
+    if (!changed) return { ok: true, changed: false, message: 'Header already looks good.' };
+    const parsed = parseSkillMd(content);
+    await this.prisma.skill.update({ where: { id }, data: { content, description: parsed.description?.trim() ? parsed.description.trim().slice(0, 600) : s.description } });
+    if (Object.keys(this.effectiveDeployments(s)).length) await this.deployAll(id).catch(() => undefined);
+    return { ok: true, changed: true, message: 'Repaired the header.' };
+  }
+
+  /** All skills belonging to one imported pack (a multi-skill repo), newest first. */
+  async listPack(packId: string): Promise<any[]> {
+    if (!packId) return [];
+    return this.prisma.skill.findMany({ where: { packId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  /** Remove every skill in a pack (library + deploy folders). */
+  async removePack(packId: string, uninstall = true): Promise<{ removed: number }> {
+    const rows = await this.listPack(packId);
+    for (const s of rows) await this.remove(s.id, uninstall).catch(() => undefined);
+    return { removed: rows.length };
+  }
+
+  /**
+   * Doctor — scan the library for problems (BEA-977):
+   *  - duplicates: >1 row sharing the same source identity, OR the same title
+   *  - broken: SKILL.md content missing a name/description header
+   * Returns a report; applyCleanup() fixes them (repair headers, delete the extra duplicate copies).
+   */
+  async cleanupScan(): Promise<{ duplicates: { keep: string; remove: string[]; label: string }[]; broken: { id: string; title: string }[] }> {
+    const rows = await this.prisma.skill.findMany({ orderBy: { createdAt: 'asc' } });
+    const dupMap = new Map<string, any[]>();
+    for (const s of rows) {
+      const key = s.sourceRepo && s.skillPath ? `src:${s.sourceRepo}#${s.skillPath}` : `title:${s.title.trim().toLowerCase()}`;
+      const arr = dupMap.get(key) || []; arr.push(s); dupMap.set(key, arr);
+    }
+    const duplicates: { keep: string; remove: string[]; label: string }[] = [];
+    for (const [, arr] of dupMap) {
+      if (arr.length < 2) continue;
+      // Keep the one that is deployed / oldest; remove the rest.
+      const sorted = [...arr].sort((a, b) => (Object.keys(this.parseJson(b.deployments)).length - Object.keys(this.parseJson(a.deployments)).length) || (a.createdAt < b.createdAt ? -1 : 1));
+      duplicates.push({ keep: sorted[0].id, remove: sorted.slice(1).map((x) => x.id), label: sorted[0].title });
+    }
+    const broken: { id: string; title: string }[] = [];
+    for (const s of rows) {
+      if (!s.content?.trim()) continue;
+      const p = parseSkillMd(s.content);
+      if (!p.name || !p.description) broken.push({ id: s.id, title: s.title });
+    }
+    return { duplicates, broken };
+  }
+
+  /** Apply the doctor fixes: repair broken headers, delete duplicate copies. */
+  async cleanupApply(): Promise<{ repaired: number; removed: number }> {
+    const { duplicates, broken } = await this.cleanupScan();
+    let repaired = 0; let removed = 0;
+    for (const b of broken) { const r = await this.repairSkill(b.id).catch(() => null); if (r?.changed) repaired++; }
+    for (const d of duplicates) for (const id of d.remove) { await this.remove(id, true).catch(() => undefined); removed++; }
+    return { repaired, removed };
   }
 
   /** Deploy to ALL targets at once — one-click "install everywhere" incl. the Hermes agent (BEA-634). */

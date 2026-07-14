@@ -24,13 +24,12 @@ run_container() {
     -v /home/sandy/.claude/skills:/scan/sandy/skills \
     -v /home/beakn/.claude/skills:/scan/beakn/skills \
     -v /root/.claude/skills:/scan/root/skills:ro \
-    -v /home/sandy/.hermes/skills:/scan/hermes/skills \
     -v /home/sandy/.claude/projects:/scan/sandy/projects:ro \
     -v /home/beakn/.claude/projects:/scan/beakn/projects:ro \
     -v /root/.claude/projects:/scan/root/projects:ro \
     -e SKILLS_SCAN_DIRS="/scan/sandy/skills,/scan/beakn/skills,/scan/root/skills" \
     -e TRANSCRIPT_SCAN_DIRS="/scan/sandy/projects,/scan/beakn/projects,/scan/root/projects" \
-    -e DEPLOY_SKILLS_DIRS="sandy:/scan/sandy/skills,beakn:/scan/beakn/skills,hermes:/scan/hermes/skills" \
+    -e DEPLOY_SKILLS_DIRS="sandy:/scan/sandy/skills,beakn:/scan/beakn/skills" \
     -e NODE_ENV=production -e PORT="$PORT" \
     -e IDEAS_MD_DIR="/var/www/ideas" \
     -e GWS_RUNNER_URL="http://172.18.0.1:8766" \
