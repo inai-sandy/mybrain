@@ -19,8 +19,8 @@ export class SkillsController {
 
   /** Step 2: import the chosen skills (and optionally deploy everywhere). */
   @Post('import/github/confirm')
-  async importConfirm(@Body() body: { token?: string; paths?: string[]; deploy?: boolean; sourceUrl?: string }) {
-    return this.importer.confirm(body?.token || '', body?.paths || [], !!body?.deploy, body?.sourceUrl);
+  async importConfirm(@Body() body: { token?: string; paths?: string[]; deploy?: boolean; sourceUrl?: string; bundle?: boolean }) {
+    return this.importer.confirm(body?.token || '', body?.paths || [], !!body?.deploy, body?.sourceUrl, !!body?.bundle);
   }
 
   @Post()

@@ -68,7 +68,7 @@ function skillsDir() {
   return join(process.env.DATA_DIR || '/app/data', 'skills');
 }
 
-type SourceMeta = { sourceRepo?: string; sourceRef?: string; skillPath?: string; sourceUrl?: string; folderHash?: string; packId?: string; packName?: string };
+type SourceMeta = { sourceRepo?: string; sourceRef?: string; skillPath?: string; sourceUrl?: string; folderHash?: string; packId?: string; packName?: string; bundlePaths?: string[] };
 type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string; aiDescribe?: boolean; source?: SourceMeta; allowDuplicateTitle?: boolean };
 
 @Injectable()
@@ -115,6 +115,7 @@ export class SkillsService {
       packId: s.packId || null,
       packName: s.packName || null,
       fromSource: !!s.sourceRepo,
+      bundleCount: (() => { try { return s.bundlePaths ? (JSON.parse(s.bundlePaths) as any[]).length : 0; } catch { return 0; } })(),
       sourceUpdatedAt: s.sourceUpdatedAt || null,
       createdAt: s.createdAt,
     };
@@ -148,6 +149,7 @@ export class SkillsService {
         title, description, content: input.content || null, origin, platform, downloadUrl: input.downloadUrl?.trim() || null,
         sourceRepo: src.sourceRepo || null, sourceRef: src.sourceRef || null, skillPath: src.skillPath || null,
         sourceUrl: src.sourceUrl || null, folderHash: src.folderHash || null, packId: src.packId || null, packName: src.packName || null,
+        bundlePaths: src.bundlePaths?.length ? JSON.stringify(src.bundlePaths) : null,
         sourceUpdatedAt: src.sourceRepo ? new Date() : null,
       },
     });
@@ -366,6 +368,13 @@ export class SkillsService {
   async findBySource(sourceRepo: string, skillPath: string): Promise<any | null> {
     if (!sourceRepo || !skillPath) return null;
     return this.prisma.skill.findFirst({ where: { sourceRepo, skillPath } });
+  }
+
+  /** Find an existing BUNDLE skill for a repo (one row that holds many sub-skills) — the update/dedup key (BEA-979). */
+  async findBundleBySource(sourceRepo: string): Promise<any | null> {
+    if (!sourceRepo) return null;
+    const rows = await this.prisma.skill.findMany({ where: { sourceRepo } });
+    return rows.find((r) => !!r.bundlePaths) || null;
   }
 
   /** Refresh an existing skill's files + metadata from a freshly-pulled source folder, then redeploy (BEA-977). */

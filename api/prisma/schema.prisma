@@ -115,6 +115,7 @@ model Skill {
   folderHash    String? // content hash of the installed folder — "changed since import?" check
   packId        String? // grouping id (slug of owner/repo) — a multi-skill repo is one Pack in the UI
   packName      String? // human name for the pack (the repo name)
+  bundlePaths   String? // JSON array of sub-skill paths when this row is a "bundle" (one skill, styles inside) (BEA-979)
   sourceUpdatedAt DateTime? // last time we refreshed this skill from its source
   supermemoryId String?
   ragId         String?

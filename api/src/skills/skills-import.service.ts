@@ -196,16 +196,87 @@ export class SkillsImportService {
    * never hangs the request past the proxy timeout (BEA-639). The skills appear in the list as they
    * finish; the frontend refreshes to show them.
    */
-  async confirm(token: string, paths: string[], deploy: boolean, sourceUrl?: string): Promise<{ started: number }> {
+  async confirm(token: string, paths: string[], deploy: boolean, sourceUrl?: string, bundle = false): Promise<{ started: number }> {
     if (!token || /[^a-f0-9]/i.test(token)) throw new BadRequestException('Bad import token.');
     const tokenDir = join(importsDir(), token);
     await fs.readdir(tokenDir).catch(() => { throw new BadRequestException('This import expired — fetch the URL again.'); });
     const list = (paths || []).map(String).filter(Boolean);
-    void this.runImport(tokenDir, list, deploy, sourceUrl).catch((e) => this.log.error(`import run failed: ${e?.message || e}`));
-    return { started: list.length };
+    void this.runImport(tokenDir, list, deploy, sourceUrl, bundle).catch((e) => this.log.error(`import run failed: ${e?.message || e}`));
+    return { started: bundle ? 1 : list.length };
   }
 
-  private async runImport(tokenDir: string, paths: string[], deploy: boolean, sourceUrl?: string): Promise<void> {
+  /** Build a "bundle" skill folder: one router SKILL.md + each picked sub-skill under styles/<name>/ (BEA-979). */
+  private async buildBundleFolder(root: string, paths: string[], bundleName: string, repo: string): Promise<{ dir: string; router: string; count: number }> {
+    const dir = join(skillsDir(), `bundle-build-${randomBytes(6).toString('hex')}`);
+    await fs.mkdir(join(dir, 'styles'), { recursive: true });
+    const entries: { name: string; desc: string; folder: string }[] = [];
+    for (const rel of paths) {
+      const safe = rel.replace(/\.\.+/g, '').replace(/^\/+/, '');
+      const src = safe === '.' ? root : join(root, safe);
+      if (!src.startsWith(root)) continue;
+      const raw = await fs.readFile(join(src, 'SKILL.md'), 'utf8').catch(() => null);
+      if (raw == null) continue;
+      const sub = basename(src) || 'skill';
+      const { content } = repairSkillMd(raw, sub);
+      const fm = parseSkillMd(content);
+      const dest = join(dir, 'styles', sub);
+      await fs.cp(src, dest, { recursive: true }).catch(() => undefined);
+      await fs.writeFile(join(dest, 'SKILL.md'), content, 'utf8').catch(() => undefined); // ensure repaired header
+      entries.push({ name: fm.name || sub, desc: (fm.description || '').replace(/\s+/g, ' ').slice(0, 200), folder: sub });
+    }
+    const list = entries.map((e) => `- **${e.name}** — ${e.desc || 'no description'}  → \`styles/${e.folder}/SKILL.md\``).join('\n');
+    const names = entries.map((e) => e.name).join(', ');
+    const router = `---
+name: ${bundleName}
+description: "A bundle of ${entries.length} skills from ${repo}: ${names.slice(0, 300)}. Name one, or describe what you want and use the closest match."
+---
+
+# ${bundleName} — a bundle of ${entries.length} skills
+
+This one skill bundles several related skills from \`${repo}\`. Each lives under \`styles/\`. To use one:
+
+## Available skills
+${list}
+
+## How to use
+1. If the user **names** one of the skills above, open its \`styles/<folder>/SKILL.md\` and follow it fully.
+2. If the user only **describes** what they want, pick the closest match from the list and follow that skill.
+3. If it's unclear, briefly list the options above and ask which to use.
+`;
+    await fs.writeFile(join(dir, 'SKILL.md'), router, 'utf8');
+    return { dir, router, count: entries.length };
+  }
+
+  /** Import a multi-skill repo as ONE bundle skill (BEA-979). Dedups by repo — updates an existing bundle in place. */
+  private async importBundle(root: string, paths: string[], deploy: boolean, sourceUrl: string | undefined, meta: { owner: string; repo: string; ref: string; sourceUrl?: string }): Promise<void> {
+    const sourceRepo = `${meta.owner}/${meta.repo}`;
+    const bundleName = meta.repo.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 80) || 'bundle';
+    let built: { dir: string; router: string; count: number } | null = null;
+    try {
+      built = await this.buildBundleFolder(root, paths, bundleName, sourceRepo);
+      const folderHash = await hashFolder(built.dir);
+      const existing = await this.skills.findBundleBySource(sourceRepo);
+      if (existing) {
+        const zipPath = join(skillsDir(), `import-${existing.id}.zip`);
+        const zip = new AdmZip(); zip.addLocalFolder(built.dir); zip.writeZip(zipPath);
+        await this.skills.refreshFromSource(existing.id, { content: built.router, folderHash, sourceRef: meta.ref, zipPath, redeploy: deploy });
+      } else {
+        const skill = await this.skills.create({
+          title: bundleName, content: built.router, origin: 'downloaded', platform: 'code', downloadUrl: sourceUrl || meta.sourceUrl, aiDescribe: false,
+          source: { sourceRepo, sourceRef: meta.ref, sourceUrl: sourceUrl || meta.sourceUrl, folderHash, packName: meta.repo, bundlePaths: paths },
+          allowDuplicateTitle: true,
+        });
+        const zipPath = join(skillsDir(), `import-${skill.id}.zip`);
+        const zip = new AdmZip(); zip.addLocalFolder(built.dir); zip.writeZip(zipPath);
+        await this.skills.attachZip(skill.id, zipPath);
+        if (deploy) await this.skills.deployAll(skill.id);
+      }
+    } finally {
+      if (built?.dir) await fs.rm(built.dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private async runImport(tokenDir: string, paths: string[], deploy: boolean, sourceUrl?: string, bundle = false): Promise<void> {
     try {
       const top = await fs.readdir(tokenDir, { withFileTypes: true });
       const rootName = top.find((e) => e.isDirectory())?.name;
@@ -215,6 +286,8 @@ export class SkillsImportService {
       const packId = meta ? packSlug(meta.owner, meta.repo) : undefined;
       const isPack = paths.length > 1;
       await fs.mkdir(skillsDir(), { recursive: true });
+      // Bundle mode: combine the whole repo into ONE skill (menu + styles/ inside). (BEA-979)
+      if (bundle && meta && paths.length >= 2) { await this.importBundle(root, paths, deploy, sourceUrl, meta); return; }
       for (const rel of paths) {
         const safe = rel.replace(/\.\.+/g, '').replace(/^\/+/, '');
         const folder = safe === '.' ? root : join(root, safe);
@@ -267,7 +340,9 @@ export class SkillsImportService {
   async updateFromSource(skillId: string): Promise<{ ok: boolean; updated: boolean; message: string; newSkills?: { path: string; name: string }[] }> {
     const s: any = await this.skills.get(skillId);
     if (!s) return { ok: false, updated: false, message: 'Skill not found' };
-    if (!s.sourceRepo || !s.skillPath) return { ok: false, updated: false, message: 'This skill has no GitHub source to update from.' };
+    if (!s.sourceRepo) return { ok: false, updated: false, message: 'This skill has no GitHub source to update from.' };
+    if (s.bundleCount && s.bundleCount > 0) return this.updateBundle(skillId, s);
+    if (!s.skillPath) return { ok: false, updated: false, message: 'This skill has no GitHub source to update from.' };
     const [owner, repo] = String(s.sourceRepo).split('/');
     const row: any = await this.skills.findBySource(s.sourceRepo, s.skillPath);
     const { buf, ref } = await this.downloadZip(owner, repo, row?.sourceRef || undefined);
@@ -308,6 +383,36 @@ export class SkillsImportService {
     } finally {
       await fs.rm(tokenDir, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  /** Update a BUNDLE skill (one row holding many sub-skills) — re-pull the repo, rebuild, refresh in place (BEA-979). */
+  private async updateBundle(skillId: string, s: any): Promise<{ ok: boolean; updated: boolean; message: string }> {
+    const row: any = await this.skills.findBundleBySource(s.sourceRepo);
+    let paths: string[] = [];
+    try { paths = JSON.parse(row?.bundlePaths || '[]'); } catch { paths = []; }
+    if (!paths.length) return { ok: false, updated: false, message: 'This bundle has no recorded skills.' };
+    const [owner, repo] = String(s.sourceRepo).split('/');
+    const { buf, ref } = await this.downloadZip(owner, repo, row?.sourceRef || undefined);
+    const token = randomBytes(12).toString('hex');
+    const tokenDir = join(importsDir(), token);
+    await fs.mkdir(tokenDir, { recursive: true });
+    try {
+      new AdmZip(buf).extractAllTo(tokenDir, true);
+      const top = (await fs.readdir(tokenDir, { withFileTypes: true })).find((e) => e.isDirectory());
+      const rootD = top ? join(tokenDir, top.name) : tokenDir;
+      const built = await this.buildBundleFolder(rootD, paths, row.title, String(s.sourceRepo));
+      try {
+        const folderHash = await hashFolder(built.dir);
+        if (folderHash === row.folderHash) {
+          await this.skills.refreshFromSource(skillId, { content: row.content || built.router, folderHash, sourceRef: ref, redeploy: false });
+          return { ok: true, updated: false, message: 'Already up to date.' };
+        }
+        const zipPath = join(skillsDir(), `import-${skillId}.zip`);
+        const zip = new AdmZip(); zip.addLocalFolder(built.dir); zip.writeZip(zipPath);
+        await this.skills.refreshFromSource(skillId, { content: built.router, folderHash, sourceRef: ref, zipPath, redeploy: true });
+        return { ok: true, updated: true, message: 'Bundle updated to the latest version.' };
+      } finally { await fs.rm(built.dir, { recursive: true, force: true }).catch(() => undefined); }
+    } finally { await fs.rm(tokenDir, { recursive: true, force: true }).catch(() => undefined); }
   }
 
   /** Update every skill in a pack from its source; returns a per-skill summary + any new skills found. */

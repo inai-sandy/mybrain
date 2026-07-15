@@ -29,11 +29,12 @@ type Skill = {
   packId?: string | null;
   packName?: string | null;
   fromSource?: boolean;
+  bundleCount?: number;
   sourceUpdatedAt?: string | null;
 };
 
 
-type Found = { token: string; repo: string; skills: { path: string; name: string; description: string; alreadyInLibrary: boolean }[] };
+type Found = { token: string; repo: string; pack?: { id: string; name: string; isPack: boolean }; skills: { path: string; name: string; description: string; alreadyInLibrary: boolean }[] };
 
 function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [mode, setMode] = useState<'github' | 'paste'>('github');
@@ -50,6 +51,7 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [found, setFound] = useState<Found | null>(null);
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [deployAfter, setDeployAfter] = useState(true);
+  const [installMode, setInstallMode] = useState<'separate' | 'bundle'>('separate');
   const [importing, setImporting] = useState(false);
   const toast = useToast();
 
@@ -71,11 +73,12 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     if (!paths.length) { toast('error', 'Pick at least one skill'); return; }
     setImporting(true);
     try {
-      const r = await fetch('/api/skills/import/github/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: found!.token, paths, deploy: deployAfter, sourceUrl: url }) });
+      const bundle = installMode === 'bundle' && paths.length > 1;
+      const r = await fetch('/api/skills/import/github/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: found!.token, paths, deploy: deployAfter, sourceUrl: url, bundle }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { toast('error', d.message || 'Import failed'); return; }
       const n = d.started ?? paths.length;
-      toast('success', `Importing ${n} skill${n !== 1 ? 's' : ''}${deployAfter ? ' + deploying' : ''} — they'll appear in a moment.`);
+      toast('success', bundle ? `Bundling ${paths.length} skills into one — it'll appear in a moment.` : `Importing ${n} skill${n !== 1 ? 's' : ''}${deployAfter ? ' + deploying' : ''} — they'll appear in a moment.`);
       onCreated(); onClose();
     } catch { toast('error', 'Import failed'); } finally { setImporting(false); }
   }
@@ -160,6 +163,19 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
                     </li>
                   ))}
                 </ul>
+                {found.pack?.isPack && (
+                  <div className="mt-3">
+                    <div className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">How to install these {found.skills.filter((s) => sel[s.path]).length || found.skills.length}:</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([['separate', 'Separately', 'Each is its own skill (/name), grouped as a Pack'], ['bundle', 'As one bundle', 'One skill; pick a style by name inside it']] as const).map(([m, label, hint]) => (
+                        <button key={m} type="button" onClick={() => setInstallMode(m)} className={'rounded-lg border p-2 text-left transition-colors ' + (installMode === m ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400')}>
+                          <div className="flex items-center gap-1.5 text-sm font-medium">{m === 'bundle' ? <Package size={14} className="text-amber-600" /> : <Wand2 size={14} className="text-violet-500" />}{label}</div>
+                          <div className="mt-0.5 text-[11px] text-zinc-500 leading-snug">{hint}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <label className="mt-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
                   <input type="checkbox" checked={deployAfter} onChange={(e) => setDeployAfter(e.target.checked)} className="accent-emerald-600" />
                   <Rocket size={13} className="text-emerald-600" /> Install everywhere after import (all your Claude Code folders)
@@ -407,7 +423,10 @@ export function Skills() {
         <div className="flex items-start gap-3">
           <div className={'shrink-0 rounded-lg p-2 ' + (s.origin === 'downloaded' ? 'bg-blue-500/10 text-blue-500' : 'bg-violet-500/10 text-violet-500')}><Wand2 size={18} /></div>
           <button onClick={() => navigate(`/skills/${s.id}`)} className="min-w-0 flex-1 text-left">
-            <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600">{s.title}</h3>
+            <h3 className="font-semibold leading-snug line-clamp-2 group-hover:text-emerald-600 flex items-center gap-1.5">
+              {s.title}
+              {!!s.bundleCount && s.bundleCount > 0 && <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">bundle · {s.bundleCount}</span>}
+            </h3>
             <p className="mt-0.5 text-xs text-zinc-400 capitalize">{s.origin} · {s.platform === 'chat' ? 'Claude Chat' : 'Claude Code'}</p>
           </button>
           {skillActions(s)}
