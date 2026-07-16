@@ -51,12 +51,15 @@ fi
 # 7. Readable by the pull user, writable by nobody but root
 chown -R root:vpsbackup "$OUT"
 chmod 750 "$OUT"
-chmod 640 "$OUT"/*
-# Directories need 750 (traversable) — the blanket 640 above would otherwise make them unreadable.
+find "$OUT" -maxdepth 1 -type f -exec chmod 640 {} +   # top-level files only — never blanket-chmod the sub-dirs
 for sub in recordings skills; do
   if [ -d "$OUT/$sub" ]; then
+    chmod 750 "$OUT/$sub"
     find "$OUT/$sub" -type d -exec chmod 750 {} +
-    find "$OUT/$sub" -type f -exec chmod 640 {} +
+    # Keep the executable bit on scripts. The home server mirrors these into its live ~/.claude/skills,
+    # and a flat 640 breaks any skill whose SKILL.md runs ./scripts/*.sh (BEA-982 follow-up).
+    find "$OUT/$sub" -type f -perm -u+x -exec chmod 750 {} +
+    find "$OUT/$sub" -type f ! -perm -u+x -exec chmod 640 {} +
   fi
 done
 

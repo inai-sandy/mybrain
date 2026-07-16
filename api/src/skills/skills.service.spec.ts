@@ -97,6 +97,27 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     expect(JSON.parse(skill.deployments)).toEqual({ sandy: 'deep-research', hermes: 'deep-research' });
   });
 
+  it('a zip-backed skill writes the DB content as SKILL.md — a repaired header reaches disk (BEA-983)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AdmZip = require('adm-zip');
+    const base = await fs.mkdtemp(join(tmpdir(), 'zipskill-'));
+    const src = join(base, 'folder');
+    await fs.mkdir(src, { recursive: true });
+    await fs.writeFile(join(src, 'SKILL.md'), '# original, no header', 'utf8'); // the STALE file inside the zip
+    await fs.writeFile(join(src, 'extra.txt'), 'support file', 'utf8');
+    const zipPath = join(base, 's.zip');
+    const z = new AdmZip(); z.addLocalFolder(src); z.writeZip(zipPath);
+    skill.filePath = zipPath;
+    skill.content = '---\nname: deep-research\ndescription: "repaired"\n---\n\n# original, no header';
+
+    await svc.deploy('s1', 'sandy');
+    const onDisk = await fs.readFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'utf8');
+    expect(onDisk).toContain('name: deep-research'); // the repair reached disk (the zip's stale copy did NOT win)
+    expect(onDisk).toContain('description: "repaired"');
+    // the zip still supplies the support files
+    expect(await fs.readFile(join(dirs[0], 'deep-research', 'extra.txt'), 'utf8')).toBe('support file');
+  });
+
   it('deployStatus reflects on-disk reality; undeploy removes one target only', async () => {
     await svc.deployAll('s1');
     let st = await svc.deployStatus('s1');

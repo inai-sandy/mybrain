@@ -312,6 +312,10 @@ export class SkillsService {
         await fs.mkdir(destDir, { recursive: true });
         if (s.filePath && s.filePath.toLowerCase().endsWith('.zip')) {
           new AdmZip(s.filePath).extractAllTo(destDir, true);
+          // The DB's `content` is the source of truth for SKILL.md; the zip only supplies the support
+          // files. Without this, a Repair (or any content edit) never reaches disk because the zip still
+          // holds the original, broken SKILL.md — and re-deploying would undo an on-disk fix. (BEA-983)
+          if (s.content?.trim()) await fs.writeFile(join(destDir, 'SKILL.md'), s.content, 'utf8');
         } else if (s.content) {
           await fs.writeFile(join(destDir, 'SKILL.md'), s.content, 'utf8');
         } else if (s.filePath) {
