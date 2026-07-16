@@ -22,6 +22,25 @@ export class EmoStoryService {
     return (card.links || []).some((l: any) => l.kind === 'story');
   }
 
+  /** Add ONE story capture to its day's story — the per-card button (BEA-985). Idempotent. */
+  async addCard(id: string): Promise<{ ok: boolean; storyDay?: string; message?: string }> {
+    const c = await this.cards.get(id);
+    if (c.lane !== 'story') return { ok: false, message: 'Only story captures can be added to a story.' };
+    if (this.mergedAlready(c)) return { ok: true, storyDay: c.day, message: 'Already in the story.' };
+    const today = await this.cards.todayKey();
+    const day = c.day || today;
+    // Emo never touches a day that is already closed.
+    if (day !== today && (await this.daily.isClosed(day).catch(() => false))) return { ok: false, message: 'That day is already closed.' };
+    const line = (c.rawTranscript || c.summary || '').trim();
+    if (!line) return { ok: false, message: 'This capture has no text to add.' };
+    const existing = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+    const combined = [existing?.rawText?.trim(), `- ${line}`].filter(Boolean).join('\n');
+    // noWrap: Emo NEVER closes the day — the 10:00 check wraps it once the story is in.
+    await this.daily.submitStory(combined, 'emo-captures', undefined, day, true);
+    await this.cards.update(id, { links: [...(c.links || []), { kind: 'story', id: day, label: 'In Day Story' }] }).catch(() => undefined);
+    return { ok: true, storyDay: day };
+  }
+
   async mergeToday(): Promise<{ merged: number; storyDay: string; days: string[] }> {
     const today = await this.cards.todayKey();
     // Each card already carries the day it belongs to — a morning story carries the still-open

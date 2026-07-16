@@ -47,11 +47,12 @@ function dayLabel(day: string) {
   return new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 function hhmm(iso: string) { return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+// Which story a capture goes to, in words — day-aware since a morning story belongs to yesterday (BEA-981).
+function storyTarget(day: string) { const l = dayLabel(day); return l === 'Today' ? "today's story" : l === 'Yesterday' ? "yesterday's story" : `the story for ${l}`; }
 function addDays(day: string, n: number): string { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 function fullDate(day: string) { return new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); }
 
 export default function Emo() {
-  const navigate = useNavigate();
   const toast = useToast();
   const [day, setDay] = useState<string>(istToday()); // the day being viewed; ‹ › steps it (BEA-968)
   const [cards, setCards] = useState<Card[] | null>(null); // the viewed day's cards
@@ -102,8 +103,15 @@ export default function Emo() {
         toast('success', `${d.merged} moment${d.merged === 1 ? '' : 's'} added to ${where}`); load();
       }
       else toast('success', 'Nothing new to merge');
-      navigate('/today');
     } else toast('error', 'Could not merge into the story.');
+  }
+
+  // The per-card "Add to story" (BEA-985) — one capture into its day's story.
+  async function addCardToStory(c: Card) {
+    const r = await fetch(`/api/emo/cards/${c.id}/add-to-story`, { method: 'POST' }).catch(() => null);
+    const d = r?.ok ? await r.json().catch(() => null) : null;
+    if (d?.ok) { toast('success', `Added to ${storyTarget(d.storyDay || c.day)}`); load(); }
+    else toast('error', d?.message || 'Could not add that to the story.');
   }
 
   async function uploadBlob(blob: Blob) {
@@ -258,7 +266,7 @@ export default function Emo() {
       {storiesToday >= 2 && (
         <div className="flex items-center justify-between rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 dark:border-violet-500/20 dark:bg-violet-500/[0.06]">
           <span className="text-xs font-medium text-violet-600 dark:text-violet-300">🎙 {storiesToday} story captures today</span>
-          <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Merge into Story →</button>
+          <button onClick={mergeStory} className="text-xs font-medium text-emerald-600 hover:underline">Add all to story →</button>
         </div>
       )}
 
@@ -276,7 +284,7 @@ export default function Emo() {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {deck.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} />)}
+          {deck.map((c) => <CardRow key={c.id} c={c} onOpen={() => setOpen(c)} onAddToStory={() => addCardToStory(c)} />)}
         </div>
       )}
 
@@ -286,10 +294,11 @@ export default function Emo() {
   );
 }
 
-function CardRow({ c, onOpen }: { c: Card; onOpen: () => void }) {
+function CardRow({ c, onOpen, onAddToStory }: { c: Card; onOpen: () => void; onAddToStory?: () => void }) {
   const lane = LANE[c.lane] || LANE_FALLBACK(c.lane);
   const needs = c.status === 'needs_you';
   const cooking = c.status === 'cooking';
+  const inStory = c.lane === 'story' && (c.links || []).some((l) => l.kind === 'story');
   // Done cards look calm (no badge); only Needs-you / Cooking carry a status pill. (BEA-940)
   return (
     <button
@@ -308,6 +317,22 @@ function CardRow({ c, onOpen }: { c: Card; onOpen: () => void }) {
             {cooking && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 font-semibold text-amber-600 dark:text-amber-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />Cooking</span>}
           </span>
         </span>
+        {/* Story captures carry their own one-tap "Add to story" (BEA-985). */}
+        {c.lane === 'story' && (
+          <span className="flex shrink-0 items-center self-center">
+            {inStory ? (
+              <span className="text-[11px] font-medium text-violet-500 dark:text-violet-300">✓ In story</span>
+            ) : onAddToStory ? (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); onAddToStory(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onAddToStory(); } }}
+                className="rounded-full border border-violet-300 px-2.5 py-1 text-[11px] font-semibold text-violet-600 transition hover:bg-violet-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10"
+              >＋ Add to story</span>
+            ) : null}
+          </span>
+        )}
       </span>
     </button>
   );
@@ -320,6 +345,17 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
   const [answer, setAnswer] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+  // Local so the sheet flips to ✓ immediately (the feed reloads behind it). (BEA-985)
+  const [inStory, setInStory] = useState((card.links || []).some((l) => l.kind === 'story'));
+
+  async function addToStory() {
+    setBusy(true);
+    const r = await fetch(`/api/emo/cards/${card.id}/add-to-story`, { method: 'POST' }).catch(() => null);
+    const d = r?.ok ? await r.json().catch(() => null) : null;
+    setBusy(false);
+    if (d?.ok) { setInStory(true); toast('success', `Added to ${storyTarget(d.storyDay || card.day)}`); onChanged(); }
+    else toast('error', d?.message || 'Could not add that to the story.');
+  }
 
   async function del(close: () => void) {
     setBusy(true);
@@ -433,6 +469,23 @@ function CardDetail({ card, onClose, onChanged }: { card: Card; onClose: () => v
               <summary className="cursor-pointer text-xs font-medium text-zinc-500">What you said (transcript)</summary>
               <p className="mt-2 whitespace-pre-wrap text-zinc-600 dark:text-zinc-300">{card.rawTranscript}</p>
             </details>
+          )}
+
+          {/* Story capture → its day's story, one tap (BEA-985). */}
+          {card.lane === 'story' && (
+            <div className="pt-2">
+              {inStory ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-3 py-1.5 text-xs font-medium text-violet-700 dark:border-violet-500/40 dark:text-violet-300">✓ In {storyTarget(card.day)}</span>
+              ) : (
+                <button
+                  onClick={addToStory}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10"
+                >
+                  🎙 Add to {storyTarget(card.day)}
+                </button>
+              )}
+            </div>
           )}
 
           <div className="pt-2">

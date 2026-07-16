@@ -6,6 +6,7 @@ function make(opts: { cards: any[]; existingStory?: string | null; closedDays?: 
   const cards: any = {
     todayKey: () => opts.today ?? '2026-07-04',
     list: jest.fn(async () => ({ cards: opts.cards, total: opts.cards.length })),
+    get: jest.fn(async (id: string) => opts.cards.find((c) => c.id === id)),
     update: jest.fn(async (id: string, p: any) => { updates.push({ id, ...p }); return {}; }),
   };
   const prisma: any = { story: { findFirst: jest.fn(async () => (opts.existingStory != null ? { rawText: opts.existingStory } : null)) } };
@@ -63,6 +64,33 @@ describe('EmoStoryService (BEA-865)', () => {
     expect(res.merged).toBe(0);
     expect(h.daily.submitStory).not.toHaveBeenCalled();
     expect(h.updates).toHaveLength(0); // no story link — still visible as unmerged
+  });
+
+  // BEA-985 — the per-card "Add to story" button.
+  it('addCard puts one capture into its day\'s story with noWrap and a story link', async () => {
+    const h = make({ cards: [{ id: 'c1', lane: 'story', day: '2026-07-03', rawTranscript: 'one moment', links: [] }], today: '2026-07-04' });
+    const r = await h.svc.addCard('c1');
+    expect(r.ok).toBe(true);
+    expect(r.storyDay).toBe('2026-07-03');
+    expect(h.submissions[0]).toEqual({ text: '- one moment', day: '2026-07-03', noWrap: true });
+    expect(h.updates[0].links).toEqual([{ kind: 'story', id: '2026-07-03', label: 'In Day Story' }]);
+  });
+
+  it('addCard is idempotent — an already-merged card is not added twice', async () => {
+    const h = make({ cards: [{ id: 'c1', lane: 'story', day: '2026-07-04', rawTranscript: 'in already', links: [{ kind: 'story', id: '2026-07-04' }] }] });
+    const r = await h.svc.addCard('c1');
+    expect(r.ok).toBe(true);
+    expect(h.daily.submitStory).not.toHaveBeenCalled();
+  });
+
+  it('addCard refuses non-story cards and closed days', async () => {
+    const h = make({ cards: [
+      { id: 'c1', lane: 'task', day: '2026-07-04', rawTranscript: 'a task', links: [] },
+      { id: 'c2', lane: 'story', day: '2026-07-03', rawTranscript: 'too late', links: [] },
+    ], today: '2026-07-04', closedDays: ['2026-07-03'] });
+    expect((await h.svc.addCard('c1')).ok).toBe(false);
+    expect((await h.svc.addCard('c2')).ok).toBe(false);
+    expect(h.daily.submitStory).not.toHaveBeenCalled();
   });
 
   it("merges each day's captures into its own story", async () => {

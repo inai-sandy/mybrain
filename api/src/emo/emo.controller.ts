@@ -62,6 +62,12 @@ export class EmoController {
     return this.story.mergeToday();
   }
 
+  // Story lane (BEA-985): the per-card "Add to story" button — one capture into its day's story.
+  @Post('cards/:id/add-to-story')
+  addToStory(@Param('id') id: string) {
+    return this.story.addCard(id);
+  }
+
   // Quick Research (EMO 11): "Go deeper" → turn a quick card into a saved deep-research flow.
   @Post('cards/:id/go-deeper')
   async goDeeper(@Param('id') id: string) {
