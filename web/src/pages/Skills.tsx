@@ -66,6 +66,8 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       const init: Record<string, boolean> = {};
       for (const s of d.skills) init[s.path] = !s.alreadyInLibrary; // pre-pick the new ones
       setSel(init);
+      // A multi-skill repo defaults to ONE bundle — installing 13 loose skills should be a deliberate choice, not the default (BEA-980).
+      setInstallMode(d.pack?.isPack ? 'bundle' : 'separate');
     } catch { toast('error', 'Could not read that repo'); } finally { setFetching(false); }
   }
   async function doImport() {
@@ -147,6 +149,20 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
                     {found.skills.every((s) => sel[s.path]) ? 'Clear all' : 'Select all'}
                   </button>
                 </div>
+                {/* The choice comes FIRST — burying it under the list made people import 13 flat skills by accident (BEA-980). */}
+                {found.pack?.isPack && (
+                  <div className="mb-3">
+                    <div className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">This repo has {found.skills.length} skills — how do you want them?</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([['bundle', 'As one bundle', 'ONE skill. Pick a style by name inside it. No clutter.'], ['separate', 'Separately', `Each becomes its own skill (/name) — ${found.skills.length} entries.`]] as const).map(([m, label, hint]) => (
+                        <button key={m} type="button" onClick={() => setInstallMode(m)} className={'rounded-lg border p-2 text-left transition-colors ' + (installMode === m ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400')}>
+                          <div className="flex items-center gap-1.5 text-sm font-medium">{m === 'bundle' ? <Package size={14} className="text-amber-600" /> : <Wand2 size={14} className="text-violet-500" />}{label}</div>
+                          <div className="mt-0.5 text-[11px] text-zinc-500 leading-snug">{hint}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <ul className="max-h-64 space-y-1.5 overflow-auto rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
                   {found.skills.map((s) => (
                     <li key={s.path}>
@@ -163,19 +179,6 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
                     </li>
                   ))}
                 </ul>
-                {found.pack?.isPack && (
-                  <div className="mt-3">
-                    <div className="mb-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">How to install these {found.skills.filter((s) => sel[s.path]).length || found.skills.length}:</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {([['separate', 'Separately', 'Each is its own skill (/name), grouped as a Pack'], ['bundle', 'As one bundle', 'One skill; pick a style by name inside it']] as const).map(([m, label, hint]) => (
-                        <button key={m} type="button" onClick={() => setInstallMode(m)} className={'rounded-lg border p-2 text-left transition-colors ' + (installMode === m ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400')}>
-                          <div className="flex items-center gap-1.5 text-sm font-medium">{m === 'bundle' ? <Package size={14} className="text-amber-600" /> : <Wand2 size={14} className="text-violet-500" />}{label}</div>
-                          <div className="mt-0.5 text-[11px] text-zinc-500 leading-snug">{hint}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
                 <label className="mt-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
                   <input type="checkbox" checked={deployAfter} onChange={(e) => setDeployAfter(e.target.checked)} className="accent-emerald-600" />
                   <Rocket size={13} className="text-emerald-600" /> Install everywhere after import (all your Claude Code folders)
@@ -223,7 +226,13 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
           <button onClick={onClose} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
           {mode === 'github' ? (
             <button onClick={doImport} disabled={importing || !found} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50">
-              {importing ? <><Loader2 size={15} className="animate-spin" /> Importing…</> : `Import${found ? ` ${found.skills.filter((s) => sel[s.path]).length}` : ''}`}
+              {importing ? <><Loader2 size={15} className="animate-spin" /> Importing…</> : (() => {
+                const n = found ? found.skills.filter((s) => sel[s.path]).length : 0;
+                // Say exactly what will happen — no guessing which mode you're in (BEA-980).
+                if (found?.pack?.isPack && installMode === 'bundle' && n > 1) return `Bundle ${n} into one skill`;
+                if (found?.pack?.isPack && n > 1) return `Import ${n} separately`;
+                return `Import${found ? ` ${n}` : ''}`;
+              })()}
             </button>
           ) : (
             <button onClick={submit} disabled={busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
