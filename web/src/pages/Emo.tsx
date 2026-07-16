@@ -95,7 +95,12 @@ export default function Emo() {
     const r = await fetch('/api/emo/story/merge', { method: 'POST' }).catch(() => null);
     if (r?.ok) {
       const d = await r.json().catch(() => ({ merged: 0 }));
-      if (d.merged > 0) { toast('success', `${d.merged} moment${d.merged === 1 ? '' : 's'} added to today's story`); load(); }
+      if (d.merged > 0) {
+        // A morning story merges into the still-open previous day (BEA-981) — say where it went.
+        const today = new Date().toLocaleDateString('en-CA');
+        const where = (d.days?.length || 0) > 1 ? 'your stories' : d.storyDay && d.storyDay < today ? "yesterday's story" : "today's story";
+        toast('success', `${d.merged} moment${d.merged === 1 ? '' : 's'} added to ${where}`); load();
+      }
       else toast('success', 'Nothing new to merge');
       navigate('/today');
     } else toast('error', 'Could not merge into the story.');

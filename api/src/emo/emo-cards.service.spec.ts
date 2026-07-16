@@ -84,3 +84,35 @@ describe('EmoCardsService (BEA-861)', () => {
     await expect(svc.get(card.id)).rejects.toThrow();
   });
 });
+
+// BEA-981 — which day a STORY belongs to: before noon a still-open yesterday, else today.
+describe('EmoCardsService.storyDay (BEA-981)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  function withClock(iso: string, yesterdayClosed: boolean) {
+    jest.useFakeTimers().setSystemTime(new Date(iso));
+    const { prisma } = makePrisma();
+    prisma.dayClose = { findUnique: async () => (yesterdayClosed ? { day: 'x' } : null) };
+    return new EmoCardsService(prisma);
+  }
+
+  it('a story told in the morning goes to the still-open yesterday', async () => {
+    const svc = withClock('2026-07-16T03:00:00Z', false); // 08:30 IST
+    expect(await svc.storyDay()).toBe('2026-07-15');
+  });
+
+  it('once yesterday is closed, a morning story is today’s', async () => {
+    const svc = withClock('2026-07-16T03:00:00Z', true); // 08:30 IST, yesterday closed
+    expect(await svc.storyDay()).toBe('2026-07-16');
+  });
+
+  it('after noon a story is today’s even if yesterday is still open', async () => {
+    const svc = withClock('2026-07-16T09:00:00Z', false); // 14:30 IST
+    expect(await svc.storyDay()).toBe('2026-07-16');
+  });
+
+  it('crosses month boundaries correctly', async () => {
+    const svc = withClock('2026-07-01T03:00:00Z', false); // 08:30 IST on the 1st
+    expect(await svc.storyDay()).toBe('2026-06-30');
+  });
+});

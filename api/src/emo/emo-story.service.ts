@@ -22,27 +22,40 @@ export class EmoStoryService {
     return (card.links || []).some((l: any) => l.kind === 'story');
   }
 
-  async mergeToday(): Promise<{ merged: number; storyDay: string }> {
-    const day = await this.cards.todayKey();
-    const { cards: list } = await this.cards.list({ lane: 'story', day, take: 200 });
-    const unmerged = list.filter((c) => !this.mergedAlready(c));
-    if (!unmerged.length) return { merged: 0, storyDay: day };
+  async mergeToday(): Promise<{ merged: number; storyDay: string; days: string[] }> {
+    const today = await this.cards.todayKey();
+    // Each card already carries the day it belongs to — a morning story carries the still-open
+    // yesterday (BEA-981). Merge every unmerged capture into ITS day's story, newest day last.
+    const { cards: list } = await this.cards.list({ lane: 'story', take: 200 });
+    const unmerged = list.filter((c) => c.day && !this.mergedAlready(c));
+    const byDay = new Map<string, any[]>();
+    for (const c of unmerged) byDay.set(c.day, [...(byDay.get(c.day) || []), c]);
 
-    // Append to the existing raw story (read it first) so nothing the user wrote is lost.
-    const existing = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }).catch(() => null);
-    const captureLines = unmerged
-      .map((c) => (c.rawTranscript || c.summary || '').trim())
-      .filter(Boolean)
-      .map((t) => `- ${t}`)
-      .join('\n');
-    const combined = [existing?.rawText?.trim(), captureLines].filter(Boolean).join('\n');
+    let merged = 0;
+    const days: string[] = [];
+    for (const day of [...byDay.keys()].sort()) {
+      // Emo never touches a day that is already closed — those captures stay as cards.
+      if (day !== today && (await this.daily.isClosed(day).catch(() => false))) continue;
+      const group = byDay.get(day)!;
 
-    // submitStory on TODAY only updates the raw story — it does NOT close the day.
-    await this.daily.submitStory(combined, 'emo-captures', undefined, day);
+      // Append to the existing raw story (read it first) so nothing the user wrote is lost.
+      const existing = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }).catch(() => null);
+      const captureLines = group
+        .map((c) => (c.rawTranscript || c.summary || '').trim())
+        .filter(Boolean)
+        .map((t) => `- ${t}`)
+        .join('\n');
+      const combined = [existing?.rawText?.trim(), captureLines].filter(Boolean).join('\n');
 
-    for (const c of unmerged) {
-      await this.cards.update(c.id, { links: [...(c.links || []), { kind: 'story', id: day, label: 'In Day Story' }] }).catch(() => undefined);
+      // noWrap: Emo NEVER closes the day — even a past one. The 10:00 check wraps it once the story is in.
+      await this.daily.submitStory(combined, 'emo-captures', undefined, day, true);
+
+      for (const c of group) {
+        await this.cards.update(c.id, { links: [...(c.links || []), { kind: 'story', id: day, label: 'In Day Story' }] }).catch(() => undefined);
+      }
+      merged += group.length;
+      days.push(day);
     }
-    return { merged: unmerged.length, storyDay: day };
+    return { merged, storyDay: days[days.length - 1] || today, days };
   }
 }

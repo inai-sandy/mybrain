@@ -120,7 +120,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
   // ---- nightly story (one per day) ----
 
-  async submitStory(rawText: string, source = 'app', mood?: string, forDay?: string) {
+  async submitStory(rawText: string, source = 'app', mood?: string, forDay?: string, noWrap = false) {
     const text = (rawText || '').trim();
     if (!text) return null;
     const today = this.dayKey(await this.tz());
@@ -143,8 +143,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
         prevRagId: (existing as any)?.ragId,
       })
       .catch(() => undefined);
-    // If you tell a PAST day's story (the morning after), wrap that day up NOW — don't wait for the 10:00 job. (BEA-469)
-    const wrapping = day < today && !(await this.isClosed(day));
+    // If you tell a PAST day's story (the morning after), wrap that day up NOW — don't wait for the
+    // 10:00 job. (BEA-469) noWrap (the EMO merge, BEA-981): Emo never closes a day — you do.
+    const wrapping = !noWrap && day < today && !(await this.isClosed(day));
     if (wrapping) void this.wrapDayNow(day).catch(() => undefined); // fire-and-forget: closeDay runs Mentor + Lab (~a minute)
     // If that day's Story of the Day was already written, rewrite it around the user's own words (skip if wrapping — closeDay re-weaves).
     const woven = await this.prisma.dayStory.findUnique({ where: { day } });

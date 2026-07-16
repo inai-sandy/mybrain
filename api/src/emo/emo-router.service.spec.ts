@@ -81,3 +81,18 @@ describe('EmoRouterService (BEA-863)', () => {
     expect((await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub).route('   ')).cards).toHaveLength(0);
   });
 });
+
+// BEA-981 — story cards are filed under storyDay() (a morning story carries the open yesterday).
+describe('EmoRouterService story day (BEA-981)', () => {
+  it('story cards get the story day; other lanes keep the real day', async () => {
+    const llm: any = { completeWith: async () => JSON.stringify({ segments: [
+      { lane: 'story', summary: 'Met the vendor', text: 'met the vendor, felt good' },
+      { lane: 'task', summary: 'Task: finish the BOM', text: 'finish the BOM' },
+    ] }) };
+    const { svc, created } = makeCards();
+    jest.spyOn(svc, 'storyDay').mockResolvedValue('2026-07-15');
+    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub).route('dump');
+    expect(created.find((c) => c.lane === 'story').day).toBe('2026-07-15');
+    expect(created.find((c) => c.lane === 'task').day).toBe(await svc.todayKey());
+  });
+});

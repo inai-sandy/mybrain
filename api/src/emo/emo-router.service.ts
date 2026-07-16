@@ -101,10 +101,14 @@ export class EmoRouterService {
       }
     }
 
+    // A story told before noon belongs to a still-open yesterday (BEA-981); every other lane keeps the real day.
+    const storyDay = segments.some((s) => s.lane === 'story') ? await this.cards.storyDay().catch(() => undefined) : undefined;
+
     const cards: any[] = [];
     for (const s of segments) {
       const card = await this.cards.create({
         lane: s.lane,
+        day: s.lane === 'story' ? storyDay : undefined,
         // story/note are terminal (the card is the result); actionable lanes wait for their handler.
         status: TERMINAL.has(s.lane) ? 'done' : 'cooking',
         summary: s.summary || null,

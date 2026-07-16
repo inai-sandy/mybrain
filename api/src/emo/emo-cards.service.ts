@@ -44,6 +44,20 @@ export class EmoCardsService {
     return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   }
 
+  /** Which day a STORY belongs to (BEA-981): before noon, a still-open yesterday — the "told the
+   *  next morning" case. After noon, or once yesterday is closed, it's today's. Capped at exactly
+   *  one day back so an older stale open day never attracts a fresh story. Story lane only. */
+  async storyDay(): Promise<string> {
+    const today = await this.todayKey();
+    const tz = await this.tz();
+    const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+    if (!(hour >= 0 && hour < 12)) return today;
+    const [y, m, d] = today.split('-').map(Number);
+    const yesterday = new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
+    const closed = await this.prisma.dayClose.findUnique({ where: { day: yesterday } }).catch(() => null);
+    return closed ? today : yesterday;
+  }
+
   private parse<T>(s: string | null | undefined, fallback: T): T {
     try { return s ? (JSON.parse(s) as T) : fallback; } catch { return fallback; }
   }
