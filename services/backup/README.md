@@ -10,6 +10,18 @@ Nightly pipeline protecting the My Brain + RAG data:
    the snapshot to `/mnt/hdd/backups/vps/daily/<date>/`, verifies checksums + gzip + sqlite
    integrity EVERY night, keeps 30 daily + first-of-month forever, then touches
    `.last-pull-ok` on the VPS.
+   - **Connects via the `vps-backup` ssh ALIAS**, never `vpsbackup@<ip>` — the alias in the home
+     box's `~/.ssh/config` supplies the IdentityFile. Using the raw user@ip fails with
+     "Permission denied (publickey)". Keep this file in sync with what's deployed at
+     `~/bin/pull-vps-backup.sh` on the home server.
+
+**Claude Code skills sync (BEA-982).** The snapshot also carries `/home/sandy/.claude/skills`
+(the managed skill set) into `<date>/skills/`. After a verified pull, the home server **mirrors**
+it into its own `~/.claude/skills` with `rsync --delete`, so installing a skill in My Brain puts it
+on the home server by the next 3 AM pull, and removals propagate (no drift, no duplicate build-up).
+The mirror is **guarded**: it only runs when the snapshot actually carried a non-empty `skills/`,
+so a missing or failed snapshot can never wipe the home server's skills. Skills unique to the home
+server would be deleted by the mirror — put them in the VPS set (`~/.claude/skills`) first.
 3. **10:00 AM IST, app watchdog** (`TelegramService.backupAlertText`): `vps-backup-status.sh`
    (4:00 UTC root cron) mirrors snapshot/pull freshness into `/app/data/backup-status.json`;
    the app telegrams the owner if the last pull is missing or older than 36h.

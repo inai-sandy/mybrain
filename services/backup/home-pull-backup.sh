@@ -2,7 +2,10 @@
 # Runs on the HOME SERVER (server489 VM) — pulls last night's VPS snapshot, verifies it, keeps history.
 # Cron: 3:00 AM IST daily. Pull direction on purpose: a compromised VPS cannot reach these backups.
 set -euo pipefail
-VPS=vpsbackup@31.97.226.201
+# MUST be the ssh alias, not vpsbackup@<ip> — the alias in this box's ~/.ssh/config is what supplies
+# the IdentityFile (~/.ssh/id_ed25519_vpsbackup). Using the raw user@ip authenticates with no key and
+# fails "Permission denied (publickey)". (BEA-982 — the repo copy had drifted from the deployed one.)
+VPS=vps-backup
 BASE=/mnt/hdd/backups/vps
 DAY=$(TZ=Asia/Kolkata date +%F)
 DEST=$BASE/daily/$DAY
@@ -28,6 +31,17 @@ TMP=$(mktemp)
 gunzip -c mybrain.db.gz > "$TMP"
 [ "$(sqlite3 "$TMP" 'PRAGMA integrity_check;')" = "ok" ]
 rm -f "$TMP"
+
+# Mirror the VPS's managed Claude Code skill set into THIS machine's skills folder (BEA-982).
+# True mirror (--delete) so removals propagate and this box never drifts or collects duplicates.
+# GUARD: only ever mirror when the snapshot actually carried a non-empty skills dir — a missing or
+# empty snapshot must never be able to wipe the local skills.
+SKILLS_SRC="$DEST/skills"
+if [ -d "$SKILLS_SRC" ] && [ -n "$(ls -A "$SKILLS_SRC" 2>/dev/null)" ]; then
+  mkdir -p "$HOME/.claude/skills"
+  rsync -a --delete "$SKILLS_SRC/" "$HOME/.claude/skills/"
+  echo "$(date -u +%FT%TZ) skills mirrored ($(ls -1 "$HOME/.claude/skills" | wc -l) skills)"
+fi
 
 # First pull of each month is kept forever
 M=$(TZ=Asia/Kolkata date +%Y-%m)

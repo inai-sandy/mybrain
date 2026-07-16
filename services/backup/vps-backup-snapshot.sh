@@ -31,22 +31,36 @@ if [ -d "$REC" ] && find "$REC" -type f -mtime -2 | grep -q .; then
   ( cd "$REC" && find . -type f -mtime -2 -print0 | rsync -a --files-from=- --from0 . "$OUT/recordings/" )
 fi
 
-# 5. Manifest with checksums (lets the home server verify the transfer)
+# 5. Claude Code skills (BEA-982) — the managed skill set. Rides the snapshot so it is both backed up
+#    off-server AND available for the home server to mirror into its own ~/.claude/skills.
+SKILLS=/home/sandy/.claude/skills
+if [ -d "$SKILLS" ] && [ -n "$(ls -A "$SKILLS" 2>/dev/null)" ]; then
+  mkdir -p "$OUT/skills"
+  rsync -a --delete "$SKILLS/" "$OUT/skills/"
+fi
+
+# 6. Manifest with checksums (lets the home server verify the transfer)
 ( cd "$OUT" && sha256sum mybrain.db.gz rag.sql.gz restore-secrets.txt > MANIFEST.sha256 )
 if [ -d "$OUT/recordings" ]; then
   ( cd "$OUT" && find recordings -type f -exec sha256sum {} + >> MANIFEST.sha256 )
 fi
+if [ -d "$OUT/skills" ]; then
+  ( cd "$OUT" && find skills -type f -exec sha256sum {} + >> MANIFEST.sha256 )
+fi
 
-# 6. Readable by the pull user, writable by nobody but root
+# 7. Readable by the pull user, writable by nobody but root
 chown -R root:vpsbackup "$OUT"
 chmod 750 "$OUT"
 chmod 640 "$OUT"/*
-if [ -d "$OUT/recordings" ]; then
-  find "$OUT/recordings" -type d -exec chmod 750 {} +
-  find "$OUT/recordings" -type f -exec chmod 640 {} +
-fi
+# Directories need 750 (traversable) — the blanket 640 above would otherwise make them unreadable.
+for sub in recordings skills; do
+  if [ -d "$OUT/$sub" ]; then
+    find "$OUT/$sub" -type d -exec chmod 750 {} +
+    find "$OUT/$sub" -type f -exec chmod 640 {} +
+  fi
+done
 
-# 7. Keep only 3 days locally (the home server holds the real history)
+# 8. Keep only 3 days locally (the home server holds the real history)
 find "$DEST" -maxdepth 1 -type d -name '20*' -mtime +3 -exec rm -rf {} +
 
 /usr/local/bin/vps-backup-status.sh
