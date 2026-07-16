@@ -323,11 +323,13 @@ export class SkillsService {
           const zip = new AdmZip(s.filePath);
           zip.extractAllTo(destDir, true);
           // AdmZip does NOT apply the Unix modes stored in the zip: everything lands 666 (world-writable)
-          // and executables lose +x, which breaks any skill whose SKILL.md runs ./scripts/*.sh. Re-apply
-          // the recorded modes. (BEA-986)
+          // and executables lose +x, which breaks any skill whose SKILL.md runs ./scripts/*.sh.
+          // Normalise instead of copying the recorded mode verbatim: GitHub downloads are themselves
+          // unzipped by AdmZip, so the zips often have 666 baked in — replaying that would leave every
+          // deployed skill world-writable. Keep only the EXECUTABLE intent. (BEA-986)
           for (const e of zip.getEntries()) {
-            const mode = (e.header.attr >>> 16) & 0o7777;
-            if (!mode) continue;
+            const recorded = (e.header.attr >>> 16) & 0o7777;
+            const mode = e.isDirectory ? 0o755 : (recorded & 0o111 ? 0o755 : 0o644);
             await fs.chmod(join(destDir, e.entryName), mode).catch(() => undefined);
           }
           // The DB's `content` is the source of truth for SKILL.md; the zip only supplies the support

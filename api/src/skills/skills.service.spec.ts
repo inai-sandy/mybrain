@@ -137,15 +137,20 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     await fs.writeFile(join(src, 'SKILL.md'), '---\nname: deep-research\ndescription: d\n---\nbody', 'utf8');
     await fs.writeFile(join(src, 'scripts', 'run.sh'), '#!/bin/sh\necho hi\n', 'utf8');
     await fs.chmod(join(src, 'scripts', 'run.sh'), 0o755); // executable BEFORE zipping
+    await fs.writeFile(join(src, 'notes.md'), 'plain', 'utf8');
+    await fs.chmod(join(src, 'notes.md'), 0o666); // a world-writable non-exec file (what GitHub zips give us)
     const zipPath = join(base, 's.zip');
     const z = new AdmZip(); z.addLocalFolder(src); z.writeZip(zipPath);
     skill.filePath = zipPath;
     skill.content = '---\nname: deep-research\ndescription: d\n---\nbody';
 
     await svc.deploy('s1', 'sandy');
-    const st = await fs.stat(join(dirs[0], 'deep-research', 'scripts', 'run.sh'));
-    expect(st.mode & 0o111).toBeTruthy();       // still executable — the skill can actually run it
-    expect(st.mode & 0o002).toBeFalsy();        // and not world-writable (AdmZip's 666 default)
+    const script = await fs.stat(join(dirs[0], 'deep-research', 'scripts', 'run.sh'));
+    expect(script.mode & 0o111).toBeTruthy();  // still executable — the skill can actually run it
+    expect(script.mode & 0o022).toBeFalsy();   // but not group/world writable
+    const plain = await fs.stat(join(dirs[0], 'deep-research', 'notes.md'));
+    expect(plain.mode & 0o111).toBeFalsy();    // a plain file must NOT become executable
+    expect(plain.mode & 0o022).toBeFalsy();    // and 666 from the zip is normalised away, not replayed
   });
 
   it('deployStatus reflects on-disk reality; undeploy removes one target only', async () => {
