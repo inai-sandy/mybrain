@@ -320,7 +320,16 @@ export class SkillsService {
         // Only write when the skill isn't already there — an adopted skill is used as-is, untouched.
         await fs.mkdir(destDir, { recursive: true });
         if (s.filePath && s.filePath.toLowerCase().endsWith('.zip')) {
-          new AdmZip(s.filePath).extractAllTo(destDir, true);
+          const zip = new AdmZip(s.filePath);
+          zip.extractAllTo(destDir, true);
+          // AdmZip does NOT apply the Unix modes stored in the zip: everything lands 666 (world-writable)
+          // and executables lose +x, which breaks any skill whose SKILL.md runs ./scripts/*.sh. Re-apply
+          // the recorded modes. (BEA-986)
+          for (const e of zip.getEntries()) {
+            const mode = (e.header.attr >>> 16) & 0o7777;
+            if (!mode) continue;
+            await fs.chmod(join(destDir, e.entryName), mode).catch(() => undefined);
+          }
           // The DB's `content` is the source of truth for SKILL.md; the zip only supplies the support
           // files. Without this, a Repair (or any content edit) never reaches disk because the zip still
           // holds the original, broken SKILL.md — and re-deploying would undo an on-disk fix. (BEA-983)

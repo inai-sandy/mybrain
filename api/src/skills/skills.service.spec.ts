@@ -128,6 +128,26 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     expect(await fs.readFile(join(dirs[0], 'deep-research', 'extra.txt'), 'utf8')).toBe('support file');
   });
 
+  it('keeps a script executable through deploy — AdmZip drops modes otherwise (BEA-986)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AdmZip = require('adm-zip');
+    const base = await fs.mkdtemp(join(tmpdir(), 'perm-'));
+    const src = join(base, 'folder');
+    await fs.mkdir(join(src, 'scripts'), { recursive: true });
+    await fs.writeFile(join(src, 'SKILL.md'), '---\nname: deep-research\ndescription: d\n---\nbody', 'utf8');
+    await fs.writeFile(join(src, 'scripts', 'run.sh'), '#!/bin/sh\necho hi\n', 'utf8');
+    await fs.chmod(join(src, 'scripts', 'run.sh'), 0o755); // executable BEFORE zipping
+    const zipPath = join(base, 's.zip');
+    const z = new AdmZip(); z.addLocalFolder(src); z.writeZip(zipPath);
+    skill.filePath = zipPath;
+    skill.content = '---\nname: deep-research\ndescription: d\n---\nbody';
+
+    await svc.deploy('s1', 'sandy');
+    const st = await fs.stat(join(dirs[0], 'deep-research', 'scripts', 'run.sh'));
+    expect(st.mode & 0o111).toBeTruthy();       // still executable — the skill can actually run it
+    expect(st.mode & 0o002).toBeFalsy();        // and not world-writable (AdmZip's 666 default)
+  });
+
   it('deployStatus reflects on-disk reality; undeploy removes one target only', async () => {
     await svc.deployAll('s1');
     let st = await svc.deployStatus('s1');

@@ -46,6 +46,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // The main bundle crossed workbox's 2 MiB default (build hard-fails); keep precaching it.
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
         navigateFallback: '/index.html',
         // SPA routes fall back to index.html, but API + public pages must NOT.
