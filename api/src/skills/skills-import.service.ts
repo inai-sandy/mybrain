@@ -210,13 +210,19 @@ export class SkillsImportService {
     const dir = join(skillsDir(), `bundle-build-${randomBytes(6).toString('hex')}`);
     await fs.mkdir(join(dir, 'styles'), { recursive: true });
     const entries: { name: string; desc: string; folder: string }[] = [];
+    const used = new Set<string>();
     for (const rel of paths) {
       const safe = rel.replace(/\.\.+/g, '').replace(/^\/+/, '');
       const src = safe === '.' ? root : join(root, safe);
       if (!src.startsWith(root)) continue;
       const raw = await fs.readFile(join(src, 'SKILL.md'), 'utf8').catch(() => null);
       if (raw == null) continue;
-      const sub = basename(src) || 'skill';
+      // Two picked skills can share a folder basename (e.g. styles/soft + templates/soft). Without a
+      // unique destination they'd overlay each other under styles/soft and only the last SKILL.md would
+      // survive, while the router advertised both. Give each a distinct folder. (BEA-984)
+      let sub = basename(src) || 'skill';
+      if (used.has(sub)) { let i = 2; while (used.has(`${sub}-${i}`)) i++; sub = `${sub}-${i}`; }
+      used.add(sub);
       const { content } = repairSkillMd(raw, sub);
       const fm = parseSkillMd(content);
       const dest = join(dir, 'styles', sub);
@@ -361,8 +367,15 @@ ${list}
       if (repaired) await fs.writeFile(join(folder, 'SKILL.md'), content, 'utf8').catch(() => undefined);
       const folderHash = await hashFolder(folder);
       // Any NEW skills the repo has gained since import (flag only — never auto-add).
+      // "Known" = everything already installed from this repo, however it arrived (single, pack, or
+      // inside a bundle). Using the pack alone reported every sibling as "new" on a standalone
+      // import, because listPack('') returns []. (BEA-984)
       const allMds = await this.findSkillMds(root);
-      const knownPaths = new Set((await this.skills.listPack(s.packId || '')).map((x: any) => x.skillPath).filter(Boolean));
+      const knownPaths = new Set<string>();
+      for (const r of await this.skills.listBySourceRepo(String(s.sourceRepo))) {
+        if (r.skillPath) knownPaths.add(r.skillPath);
+        try { for (const p of JSON.parse(r.bundlePaths || '[]')) knownPaths.add(p); } catch { /* ignore */ }
+      }
       knownPaths.add(s.skillPath);
       const newSkills: { path: string; name: string }[] = [];
       for (const md of allMds) {

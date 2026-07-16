@@ -300,10 +300,19 @@ export class SkillsService {
     } else if (s.slug && s.source === baseDir && (await exists(join(baseDir, s.slug)))) {
       slug = s.slug; // legacy deploy (before the per-target map) — keep its folder
     } else if (await exists(join(baseDir, baseSlug))) {
-      // A skill with this name is ALREADY installed here (e.g. a built-in). Don't duplicate it or
-      // rename to "-2" — adopt it and use it as-is under its clean name. (BEA-959, user: "just use it")
-      slug = baseSlug;
-      adopted = true;
+      // A skill with this name is ALREADY installed here. If it's an UNTRACKED folder (e.g. a built-in),
+      // adopt it and use it as-is. (BEA-959, user: "just use it")
+      // But if another tracked skill owns that folder, adopting would point two rows at one folder —
+      // this skill's content would never be written, and removing either would delete the other's live
+      // skill. In that case take the next free name instead. (BEA-984)
+      if (await this.slugOwnedByOther(id, target, baseSlug)) {
+        let i = 2;
+        while (await exists(join(baseDir, `${baseSlug}-${i}`))) i++;
+        slug = `${baseSlug}-${i}`;
+      } else {
+        slug = baseSlug;
+        adopted = true;
+      }
     }
     const destDir = join(baseDir, slug);
     try {
@@ -335,6 +344,12 @@ export class SkillsService {
 
   private parseJson(v?: string | null): Record<string, string> {
     try { return v ? JSON.parse(v) : {}; } catch { return {}; }
+  }
+
+  /** Does a DIFFERENT tracked skill already occupy this folder name on this target? (BEA-984) */
+  private async slugOwnedByOther(id: string, target: string, slug: string): Promise<boolean> {
+    const rows = await this.prisma.skill.findMany({ where: { NOT: { id } } });
+    return rows.some((r) => this.effectiveDeployments(r)[target] === slug);
   }
 
   /**
@@ -415,6 +430,12 @@ export class SkillsService {
     return this.prisma.skill.findMany({ where: { packId }, orderBy: { createdAt: 'desc' } });
   }
 
+  /** Every skill imported from a given repo — however it was installed (single, pack, or bundle). (BEA-984) */
+  async listBySourceRepo(sourceRepo: string): Promise<any[]> {
+    if (!sourceRepo) return [];
+    return this.prisma.skill.findMany({ where: { sourceRepo } });
+  }
+
   /** Remove every skill in a pack (library + deploy folders). */
   async removePack(packId: string, uninstall = true): Promise<{ removed: number }> {
     const rows = await this.listPack(packId);
@@ -437,7 +458,11 @@ export class SkillsService {
       const ks: string[] = [];
       if (s.sourceRepo && s.skillPath) ks.push(`src:${s.sourceRepo}#${s.skillPath}`);
       if (s.content?.trim()) ks.push(`content:${createHash('sha1').update(s.content.trim()).digest('hex')}`);
-      ks.push(`title:${s.title.trim().toLowerCase()}`);
+      // Title matching is ONLY safe for hand-created skills. Imported skills from DIFFERENT repos may
+      // legitimately share a generic name ("design", "pdf") — create() deliberately allows that — and
+      // grouping those by title alone would make Clean up delete a real, unrelated skill. Imported
+      // skills are deduped by their source identity and content instead. (BEA-984)
+      if (!s.sourceRepo) ks.push(`title:${s.title.trim().toLowerCase()}`);
       return ks;
     };
     const groups: { rows: any[]; keys: Set<string> }[] = [];

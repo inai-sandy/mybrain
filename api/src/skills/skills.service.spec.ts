@@ -57,6 +57,14 @@ describe('SkillsService.cleanupScan (BEA-977)', () => {
     expect(rep.duplicates[0].keep).toBe('dr');
     expect(rep.duplicates[0].remove).toEqual(['dr2']);
   });
+  it('does NOT group two different imported skills that merely share a name (BEA-984 — would have deleted a real skill)', async () => {
+    const svc = svcWith([
+      { id: 'a', title: 'design', sourceRepo: 'owner/one', skillPath: 'skills/design', deployments: '{}', content: '---\nname: design\ndescription: a\n---\nAAA', createdAt: new Date('2020-01-01') },
+      { id: 'b', title: 'design', sourceRepo: 'owner/two', skillPath: 'skills/design', deployments: '{}', content: '---\nname: design\ndescription: b\n---\nBBB', createdAt: new Date('2020-02-01') },
+    ]);
+    const rep = await svc.cleanupScan();
+    expect(rep.duplicates).toHaveLength(0); // different repos, different content → two real skills, not duplicates
+  });
   it('reports nothing when every skill is unique and well-formed', async () => {
     const svc = svcWith([{ id: 'a', title: 'One', deployments: '{}', content: '---\nname: one\ndescription: d\n---\nx', createdAt: new Date() }]);
     const rep = await svc.cleanupScan();
@@ -69,6 +77,8 @@ function fakePrisma(skill: any) {
   return {
     skill: {
       findUnique: async ({ where }: any) => (where.id === skill.id ? skill : null),
+      // deploy()'s slugOwnedByOther check needs this (BEA-984)
+      findMany: async ({ where }: any = {}) => (where?.NOT?.id ? [skill].filter((s) => s.id !== where.NOT.id) : [skill]),
       update: async ({ data }: any) => { Object.assign(skill, data); return skill; },
       delete: async () => { skill._deleted = true; return skill; },
     },
@@ -169,6 +179,27 @@ describe('SkillsService — multi-target deploy (BEA-634)', () => {
     const by = Object.fromEntries((await svc.deployStatus('s1')).map((t) => [t.target, t.installed]));
     expect(by.hermes).toBe(true); // the bug made this false (deselected the already-installed one)
     expect(by.sandy).toBe(true);
+  });
+
+  it('does NOT adopt a folder another tracked skill owns — takes the next free name (BEA-984)', async () => {
+    // Another skill of ours is already deployed to sandy as "deep-research".
+    const other = { id: 'other', title: 'Deep Research', slug: 'deep-research', source: null, content: 'OTHER', filePath: null, deployments: JSON.stringify({ sandy: 'deep-research' }) };
+    const me: any = { id: 's2', title: 'Deep Research', slug: null, source: null, content: 'MINE', filePath: null, deployments: '{}' };
+    const rows = [other, me];
+    const prisma: any = { skill: {
+      findUnique: async ({ where }: any) => rows.find((r) => r.id === where.id) || null,
+      findMany: async ({ where }: any = {}) => (where?.NOT?.id ? rows.filter((r) => r.id !== where.NOT.id) : rows),
+      update: async ({ where, data }: any) => { Object.assign(rows.find((r) => r.id === where.id)!, data); return null; },
+    } };
+    const svc2 = new SkillsService(prisma, fakeMem as any, {} as any, {} as any);
+    await fs.mkdir(join(dirs[0], 'deep-research'), { recursive: true });
+    await fs.writeFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'OTHER', 'utf8');
+
+    const r = await svc2.deploy('s2', 'sandy');
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(me.deployments).sandy).toBe('deep-research-2'); // did NOT steal the other skill's folder
+    expect(await fs.readFile(join(dirs[0], 'deep-research', 'SKILL.md'), 'utf8')).toBe('OTHER'); // untouched
+    expect(await fs.readFile(join(dirs[0], 'deep-research-2', 'SKILL.md'), 'utf8')).toBe('MINE'); // own content written
   });
 
   it('adopts an already-installed skill of the same name — no "-2", existing folder untouched (BEA-959)', async () => {

@@ -120,6 +120,12 @@ model Skill {
   supermemoryId String?
   ragId         String?
   createdAt     DateTime  @default(now())
+
+  /// One row per imported source. Backs the "never duplicate" promise at the DB level — import's
+  /// findBySource→create is check-then-act and runs detached, so two concurrent imports of the same
+  /// repo could both create. NULLs are distinct in SQLite, so hand-created and bundle rows
+  /// (skillPath = NULL) are unaffected. (BEA-984)
+  @@unique([sourceRepo, skillPath])
 }
 
 /// A morning brain-dump: the raw multi-sentence text the LLM turns into tasks.
