@@ -56,6 +56,15 @@ import { UpdatePrompt } from './ui/UpdatePrompt';
 
 type AuthState = 'loading' | 'anon' | 'authed';
 
+// A calm skeleton for lazy-loaded routes so going back to them doesn't flash blank (BEA-1002).
+const RouteSkeleton = () => (
+  <div className="space-y-4 p-1 animate-pulse">
+    <div className="h-8 w-40 rounded-lg bg-zinc-100 dark:bg-zinc-800" />
+    <div className="h-40 rounded-xl bg-zinc-100 dark:bg-zinc-800" />
+    <div className="h-40 rounded-xl bg-zinc-100 dark:bg-zinc-800" />
+  </div>
+);
+
 export default function App() {
   return (
     <ToastProvider>
@@ -124,8 +133,8 @@ function AuthedApp() {
         <Route element={<AppShell email={email} onSignOut={logout} />}>
           <Route index element={<Dashboard />} />
         <Route path="emo" element={<Emo />} />
-        <Route path="recordings" element={<Suspense fallback={null}><Recordings /></Suspense>} />
-        <Route path="recordings/:id" element={<Suspense fallback={null}><RecordingView /></Suspense>} />
+        <Route path="recordings" element={<Suspense fallback={<RouteSkeleton />}><Recordings /></Suspense>} />
+        <Route path="recordings/:id" element={<Suspense fallback={<RouteSkeleton />}><RecordingView /></Suspense>} />
         <Route path="agent" element={<Agents />} />
         <Route path="agent/history" element={<AgentHistory />} />
         <Route path="agent/saved" element={<SavedByAgents />} />
@@ -134,7 +143,7 @@ function AuthedApp() {
         <Route path="flows" element={<FlowsList />} />
         <Route path="flows/runs/:id" element={<FlowRunView />} />
         <Route path="flows/:id/runs" element={<FlowRunsList />} />
-        <Route path="flows/:id" element={<Suspense fallback={<div className="p-6 text-sm text-zinc-500">Loading editor…</div>}><FlowEditor /></Suspense>} />
+        <Route path="flows/:id" element={<Suspense fallback={<RouteSkeleton />}><FlowEditor /></Suspense>} />
         <Route path="explore" element={<Explore />} />
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />

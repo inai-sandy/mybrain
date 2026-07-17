@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
@@ -50,7 +50,9 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const isChat = location.pathname === '/chat';
   useVisualViewport(isChat); // keeps --vvh synced (used by the chat height calc) + pins iOS on focus
   // Left-edge swipe-back for the installed app (disabled while the mobile drawer is open). (BEA-593)
-  useEdgeSwipeBack(!drawer);
+  // The content column slides under the finger as you drag (BEA-1002).
+  const slideRef = useRef<HTMLDivElement>(null);
+  useEdgeSwipeBack(!drawer, slideRef);
   // Desktop sidebar collapse (icon-only rail), remembered per device. (BEA-440)
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar.collapsed') === '1');
   useEffect(() => { localStorage.setItem('sidebar.collapsed', collapsed ? '1' : '0'); }, [collapsed]);
@@ -126,7 +128,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
       )}
 
       {/* Main column */}
-      <div className={'transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
+      <div ref={slideRef} className={'transition-all duration-200 ' + (collapsed ? 'md:pl-16' : 'md:pl-60')}>
         <header className="sticky top-0 z-20 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 md:bg-white/80 md:dark:bg-zinc-950/80 md:backdrop-blur" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="flex items-center justify-between gap-3 px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2 min-w-0">
@@ -216,7 +218,8 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           {isChat ? (
             <Outlet />
           ) : (
-            <motion.div key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: 'easeOut' }}>
+            // A quick opacity-only fade — no y-slide, which felt jumpy and fought scroll restoration (BEA-1002).
+            <motion.div key={location.pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14, ease: 'easeOut' }}>
               <Outlet />
             </motion.div>
           )}
