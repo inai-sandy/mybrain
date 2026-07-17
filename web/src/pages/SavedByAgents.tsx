@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, Trash2, FileText, Brain } from 'lucide-react';
 import { DataTable, Column } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
@@ -8,6 +9,7 @@ import { timeAgo } from './Agents';
 /** "Saved by agents" (BEA-700) — see and undo everything agents wrote to your brain / Documents. */
 export function SavedByAgents() {
   const nav = useNavigate();
+  const goBack = useGoBack('/agent');
   const toast = useToast();
   const [data, setData] = useState<{ documents: any[]; brainLearnings: any[] } | null>(null);
 
@@ -40,7 +42,7 @@ export function SavedByAgents() {
 
   return (
     <div>
-      <button onClick={() => nav('/agent')} className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Agents</button>
+      <button onClick={goBack} className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Back</button>
       <h1 className="mb-1 text-xl font-bold">Saved by agents</h1>
       <p className="mb-4 text-sm text-zinc-500">Everything your agents wrote — review and undo anything you don't want kept.</p>
 

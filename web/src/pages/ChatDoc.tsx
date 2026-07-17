@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, MessageCircle, Send, Mic, Sparkles } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
@@ -12,6 +13,7 @@ const STARTERS = ['Summarize this document', 'What are the key points?', 'What s
 
 export function ChatDoc() {
   const { id } = useParams();
+  const goBack = useGoBack(`/doc/${id}`);
   const [session, setSession] = useState<DocSession | null>(null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -75,9 +77,9 @@ export function ChatDoc() {
 
   return (
     <div className="space-y-3">
-      <Link to={`/doc/${id}`} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-        <ArrowLeft size={16} /> Back to document
-      </Link>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+        <ArrowLeft size={16} /> Back
+      </button>
 
       <div className="flex flex-col h-[calc(100vh-11rem)] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-800 shrink-0">

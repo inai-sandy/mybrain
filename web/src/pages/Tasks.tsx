@@ -3,6 +3,7 @@ import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Sta
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
+import { useUrlState, useUrlBool } from '../ui/useUrlState';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday, mins, sortTasksBy } from './taskShared';
 
 export function Tasks() {
@@ -15,15 +16,17 @@ export function Tasks() {
   const [review, setReview] = useState<Task[] | null>(null);
 
   const [finished, setFinished] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
+  // Open the search box if we arrived with a search already in the URL (e.g. via Back) so it isn't hidden.
+  const [showSearch, setShowSearch] = useState(() => new URLSearchParams(window.location.search).has('q'));
   const [history, setHistory] = useState(false);
   const [dedup, setDedup] = useState(false);
-  const [q, setQ] = useState('');
-  const [fPriority, setFPriority] = useState('');
-  const [fCategory, setFCategory] = useState('');
-  const [fSphere, setFSphere] = useState('');
-  const [fPerson, setFPerson] = useState('');
-  const [promisesOnly, setPromisesOnly] = useState(false);
+  // The list filters live in the URL so leaving Tasks and pressing Back returns to the same filtered view (BEA-1001).
+  const [q, setQ] = useUrlState('q');
+  const [fPriority, setFPriority] = useUrlState('priority');
+  const [fCategory, setFCategory] = useUrlState('category');
+  const [fSphere, setFSphere] = useUrlState('sphere');
+  const [fPerson, setFPerson] = useUrlState('person');
+  const [promisesOnly, setPromisesOnly] = useUrlBool('promises');
   const [people, setPeople] = useState<string[]>([]);
   const [personTasks, setPersonTasks] = useState<Task[] | null>(null); // all tasks involving the picked person
   const [sort, setSortRaw] = useState<string>(() => localStorage.getItem('tasks-sort') || 'newest');
@@ -180,7 +183,7 @@ export function Tasks() {
           <option value="oldest">Oldest</option>
           <option value="priority">By priority</option>
         </select>
-        <button onClick={() => setPromisesOnly((v) => !v)} aria-pressed={promisesOnly} className={'inline-flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs ' + (promisesOnly ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>🤝 Promises</button>
+        <button onClick={() => setPromisesOnly(!promisesOnly)} aria-pressed={promisesOnly} className={'inline-flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs ' + (promisesOnly ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>🤝 Promises</button>
         {hasFilters && (
           <button onClick={() => { setQ(''); setFPriority(''); setFCategory(''); setFSphere(''); setFPerson(''); setPromisesOnly(false); setShowSearch(false); }} className="inline-flex items-center justify-center gap-1 text-xs text-zinc-500 hover:text-rose-600 rounded-lg border border-zinc-200 dark:border-zinc-800 px-2 py-1.5 w-full sm:w-auto sm:border-0"><X size={12} /> Clear</button>
         )}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, Mic, Clock, Pencil, Check, FileText, ListChecks, Sparkles, Lightbulb, Loader2, Share2, Brain, Plus, Trash2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
@@ -35,6 +36,7 @@ function fmtDur(sec: number) {
 
 export function MeetingDetail() {
   const { id } = useParams();
+  const goBack = useGoBack('/meetings');
   const [d, setD] = useState<Meeting | null>(null);
   const [err, setErr] = useState('');
   const [editing, setEditing] = useState(false);
@@ -134,9 +136,9 @@ export function MeetingDetail() {
 
   return (
     <div className="space-y-5 max-w-3xl mx-auto">
-      <Link to="/meetings" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-        <ArrowLeft size={16} /> Back to meetings
-      </Link>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+        <ArrowLeft size={16} /> Back
+      </button>
 
       {err && <p className="text-amber-500">{err}</p>}
 

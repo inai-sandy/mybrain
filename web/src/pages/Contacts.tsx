@@ -40,7 +40,7 @@ export function Contacts() {
         <h1 className="text-2xl font-extrabold">Contacts</h1>
         <p className="text-sm text-zinc-500">People you chase, and the WhatsApp reminders you send them.</p>
       </header>
-      <ContactsTab onOpen={(id) => setParams({ contact: id })} />
+      <ContactsTab onOpen={(id) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('contact', id); return n; })} />
     </div>
   );
 }
@@ -218,12 +218,25 @@ function ContactDetail({ contactId }: { contactId: string }) {
 
 function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const [contacts, setContacts] = useState<Contact[] | null>(null);
   const [total, setTotal] = useState(0);
-  const [q, setQ] = useState('');
-  const [page, setPage] = useState(1);
+  // Seed search + page from the URL so opening a contact and pressing Back restores the same view (BEA-1001).
+  const [q, setQ] = useState(() => params.get('q') || '');
+  const [page, setPage] = useState(() => Math.max(1, parseInt(params.get('page') || '1', 10) || 1));
   const [editing, setEditing] = useState<Contact | null>(null);
   const [showForm, setShowForm] = useState(false);
+
+  // Mirror q + page back into the URL (replace, so typing doesn't stack history).
+  useEffect(() => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (q) next.set('q', q); else next.delete('q');
+      if (page > 1) next.set('page', String(page)); else next.delete('page');
+      return next;
+    }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, page]);
 
   const reqId = useRef(0);
   function load() {

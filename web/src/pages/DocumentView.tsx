@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2, Star, Save, X } from 'lucide-react';
@@ -7,6 +7,7 @@ import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DocumentShareDialog } from '../ui/DocumentShareDialog';
 import { useToast } from '../ui/Toast';
+import { useGoBack } from '../ui/useGoBack';
 import { DocEditor, type DocItem } from './Documents';
 
 type FullDoc = DocItem & { contentText: string };
@@ -14,14 +15,9 @@ type FullDoc = DocItem & { contentText: string };
 export function DocumentView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
-
-  // True "back": return to wherever you came from (the folder/search). Deep-links fall back to the library. (BEA-592)
-  function goBack() {
-    if (location.key && location.key !== 'default') navigate(-1);
-    else navigate('/documents');
-  }
+  // True back: return where you came from; deep links fall back to the library (BEA-592, shared BEA-1001).
+  const goBack = useGoBack('/documents');
   const [doc, setDoc] = useState<FullDoc | null>(null);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false); // DocEditor popup — non-text kinds only

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, ExternalLink, Share2, Lightbulb, MessageCircle } from 'lucide-react';
@@ -18,6 +19,7 @@ const SRC: Record<string, { label: string; cls: string }> = {
 export function DocDetail() {
   const { id } = useParams();
   const [d, setD] = useState<any>(null);
+  const goBack = useGoBack('/capture');
   const [err, setErr] = useState('');
   const [sharing, setSharing] = useState(false);
 
@@ -39,9 +41,9 @@ export function DocDetail() {
     <div className="space-y-5">
       {/* Top bar: back + (if linked) the idea it belongs to */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Link to={d?.source === 'raindrop' ? '/bookmarks' : '/capture'} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-          <ArrowLeft size={16} /> Back to {d?.source === 'raindrop' ? 'bookmarks' : 'documents'}
-        </Link>
+        <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+          <ArrowLeft size={16} /> Back
+        </button>
         {d?.idea && (
           <Link to={`/ideas/${d.idea.id}`} className="inline-flex items-center gap-1.5 max-w-full text-sm rounded-full bg-amber-500/10 text-amber-600 px-3 py-1 hover:bg-amber-500/20 transition-colors">
             <Lightbulb size={14} className="shrink-0" /> From idea:

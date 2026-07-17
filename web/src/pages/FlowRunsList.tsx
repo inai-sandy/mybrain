@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, CheckCircle2, AlertCircle, Loader2, FileText, ChevronRight } from 'lucide-react';
 
 function when(s?: string) {
@@ -11,6 +12,7 @@ function when(s?: string) {
 export function FlowRunsList() {
   const { id } = useParams();
   const nav = useNavigate();
+  const goBack = useGoBack(`/flows/${id}`);
   const [runs, setRuns] = useState<any[] | null>(null);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function FlowRunsList() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-      <button onClick={() => nav(`/flows/${id}`)} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Editor</button>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Back</button>
       <h1 className="text-lg font-bold">Run history</h1>
 
       {runs.length === 0 ? (

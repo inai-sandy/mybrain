@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { FlowProcess } from '../ui/FlowProcess';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, Handle, Position,
@@ -104,6 +105,7 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
   const params = useParams();
   const id = flowId ?? params.id;
   const nav = useNavigate();
+  const goBack = useGoBack('/flows');
   const toast = useToast();
   const { screenToFlowPosition } = useReactFlow();
   const wrap = useRef<HTMLDivElement>(null);
@@ -291,7 +293,7 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
   return (
     <div className="flex flex-col" style={{ height: embedded ? '100%' : 'calc(100dvh - 1px)' }}>
       <header className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
-        {!embedded && <button onClick={() => nav('/flows')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /></button>}
+        {!embedded && <button onClick={goBack} title="Back" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /></button>}
         {embedded ? <div className="min-w-0 flex-1" /> : <input value={name} onChange={(e) => setName(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none hover:border-zinc-200 focus:border-emerald-400 dark:hover:border-zinc-700" />}
         {agentId && !embedded && <button onClick={() => nav(`/agent/agents/${agentId}`)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-violet-300 px-3 py-1.5 text-sm text-violet-700 hover:bg-violet-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10"><Bot className="h-4 w-4" />Open agent</button>}
         <button onClick={openToolbarPicker} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" />Add block</button>

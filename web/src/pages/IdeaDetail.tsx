@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ArrowLeft, Copy, Check, Circle, Pencil, Upload, FileText, Link2, Trash2 } from 'lucide-react';
@@ -9,6 +10,7 @@ import { IdeaWorkflow } from './IdeaWorkflow';
 export function IdeaDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const goBack = useGoBack('/ideas');
   const [d, setD] = useState<any>(null);
   const [tab, setTab] = useState<'idea' | 'workflow'>('idea');
   const [err, setErr] = useState('');
@@ -93,9 +95,9 @@ export function IdeaDetail() {
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
-      <Link to="/ideas" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-        <ArrowLeft size={16} /> Back to ideas
-      </Link>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+        <ArrowLeft size={16} /> Back
+      </button>
 
       {err && <p className="text-amber-500">{err}</p>}
 

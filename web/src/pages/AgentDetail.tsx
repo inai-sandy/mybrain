@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, Save, Plus, Trash2, Loader2, Play, CheckCircle2, Sparkles, Check, X, Workflow, Clock, FileText, AlertCircle, Circle } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { FlowProcess } from '../ui/FlowProcess';
@@ -30,6 +31,7 @@ type Tab = 'Build' | 'Flow' | 'Evals' | 'Runs';
 export function AgentDetail() {
   const { id } = useParams();
   const nav = useNavigate();
+  const goBack = useGoBack('/agent');
   const toast = useToast();
   const [a, setA] = useState<any>(null);
   const [task, setTask] = useState('');
@@ -155,7 +157,7 @@ export function AgentDetail() {
 
   return (
     <div>
-      <button onClick={() => nav('/agent')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /> Agents</button>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" /> Back</button>
 
       {/* Header: identity + status pills + Run */}
       <header className="mt-3 flex flex-wrap items-start justify-between gap-3">

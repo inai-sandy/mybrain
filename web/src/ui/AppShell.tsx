@@ -10,6 +10,7 @@ import { DictationIndicator } from './DictationIndicator';
 import { forceUpdate } from './forceUpdate';
 import { SearchOverlay, openSearch } from './SearchOverlay';
 import { useEdgeSwipeBack } from './useSwipeBack';
+import { ScrollMemory } from './ScrollMemory';
 import { useTheme } from './theme';
 
 /** Keep --vvh synced to the visible viewport height (shrinks when the keyboard opens) and report
@@ -65,6 +66,8 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {/* App-wide scroll save/restore so Back returns you to where you were (BEA-1001) */}
+      <ScrollMemory />
       {/* Desktop sidebar (collapsible to an icon-only rail) */}
       <aside className={'hidden md:flex md:flex-col md:fixed md:inset-y-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-4 transition-all duration-200 ' + (collapsed ? 'md:w-16' : 'md:w-60')}>
         <div className={'flex items-center gap-2 mb-6 font-bold text-lg ' + (collapsed ? 'justify-center px-0' : 'px-2')}>

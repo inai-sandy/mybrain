@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, Wand2, Check, Circle, Pencil, Download, Share2, Upload, Rocket, Loader2, Trash2, X } from 'lucide-react';
 import { ShareDialog } from '../ui/ShareDialog';
 import { useToast } from '../ui/Toast';
@@ -7,6 +8,7 @@ import { useToast } from '../ui/Toast';
 export function SkillDetail() {
   const { id } = useParams();
   const nav = useNavigate();
+  const goBack = useGoBack('/skills');
   const [d, setD] = useState<any>(null);
   const [err, setErr] = useState('');
   const [editing, setEditing] = useState(false);
@@ -128,9 +130,9 @@ export function SkillDetail() {
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
-      <Link to="/skills" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-        <ArrowLeft size={16} /> Back to skills
-      </Link>
+      <button onClick={goBack} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+        <ArrowLeft size={16} /> Back
+      </button>
 
       {err && <p className="text-amber-500">{err}</p>}
 

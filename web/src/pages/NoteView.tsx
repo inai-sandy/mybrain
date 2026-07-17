@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Trash2, Pencil, Save, X, Pin, Archive, ArchiveRestore, Sparkles, Loader2, RotateCcw } from 'lucide-react';
 import { Markdown } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/Toast';
+import { useGoBack } from '../ui/useGoBack';
 
 type Check = { text: string; done: boolean };
 type Note = {
@@ -29,13 +30,8 @@ const COLORS: Record<string, string> = {
 export function NoteView() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
-
-  function goBack() {
-    if (location.key && location.key !== 'default') navigate(-1);
-    else navigate('/notes');
-  }
+  const goBack = useGoBack('/notes');
 
   const [note, setNote] = useState<Note | null>(null);
   const [error, setError] = useState('');
