@@ -7,6 +7,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Capture } from './pages/Capture';
 import { Bookmarks } from './pages/Bookmarks';
 import { Contacts } from './pages/Contacts';
+import { Reminders } from './pages/Reminders';
 import { Ideas } from './pages/Ideas';
 import { IdeaDetail } from './pages/IdeaDetail';
 import { Skills } from './pages/Skills';
@@ -138,6 +139,7 @@ function AuthedApp() {
         <Route path="capture" element={<Capture />} />
         <Route path="bookmarks" element={<Bookmarks />} />
         <Route path="contacts" element={<Contacts />} />
+        <Route path="reminders" element={<Reminders />} />
         <Route path="ideas" element={<Ideas />} />
         <Route path="ideas/:id" element={<IdeaDetail />} />
         <Route path="skills" element={<Skills />} />

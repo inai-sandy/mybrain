@@ -30,22 +30,17 @@ const fmtDayKey = (d?: string | null) => { try { return d ? new Date(d + 'T12:00
 const PAGE_SIZE = 20;
 
 export function Contacts() {
-  const [tab, setTab] = useState<'contacts' | 'reminders'>('contacts');
   const [params, setParams] = useSearchParams();
   const openContactId = params.get('contact');
   if (openContactId) return <ContactDetail contactId={openContactId} />;
+  // Reminders moved to their own page (/reminders, BEA-1000) — Contacts is just people now.
   return (
     <div className="space-y-5">
       <header>
         <h1 className="text-2xl font-extrabold">Contacts</h1>
         <p className="text-sm text-zinc-500">People you chase, and the WhatsApp reminders you send them.</p>
       </header>
-      <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {(['contacts', 'reminders'] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={'-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize transition-colors ' + (tab === t ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{t}</button>
-        ))}
-      </div>
-      {tab === 'contacts' ? <ContactsTab onOpen={(id) => setParams({ contact: id })} /> : <RemindersTab />}
+      <ContactsTab onOpen={(id) => setParams({ contact: id })} />
     </div>
   );
 }
@@ -386,7 +381,7 @@ function timesToSlots(times?: string[]): Slot[] {
 
 type Suggestion = { task: { id: string; title: string; party: string }; contact: Contact | null; noNumber: boolean; hasActiveReminder: boolean };
 
-function RemindersTab() {
+export function RemindersTab() {
   const toast = useToast();
   const [reminders, setReminders] = useState<Reminder[] | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);

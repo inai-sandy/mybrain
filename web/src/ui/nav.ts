@@ -1,4 +1,4 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, StickyNote, Mic, Mail, Sparkles, Lock, FlaskConical, FileText, Bot, Workflow, Users, AudioLines, Disc3, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, StickyNote, Mic, Mail, Sparkles, Lock, FlaskConical, FileText, Bot, Workflow, Users, BellRing, AudioLines, Disc3, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -19,6 +19,7 @@ export const NAV: NavItem[] = [
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/contacts', label: 'Contacts', icon: Users },
+  { to: '/reminders', label: 'Reminders', icon: BellRing },
   { to: '/lab', label: 'The Lab', icon: FlaskConical },
   { to: '/meetings', label: 'Meetings', icon: Mic },
   { to: '/google', label: 'Google', icon: Mail },
