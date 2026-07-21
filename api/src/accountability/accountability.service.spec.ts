@@ -1,4 +1,20 @@
+import { whereForDayRule, matchesWhere } from '../tasks/day-rule';
 import { AccountabilityService } from './accountability.service';
+
+// Stands in for TasksService using the REAL day rule, so this double can't drift from it. (BEA-1018)
+const IST_MIN = 330;
+const dayWin = (d: string) => { const start = new Date(Date.parse(`${d}T00:00:00Z`) - IST_MIN * 60000); return { start, end: new Date(start.getTime() + 86400000) }; };
+const makeTasksSvc = (rows: any[]): any => ({
+  timezone: async () => 'Asia/Kolkata',
+  dayWindow: async (d: string) => dayWin(d),
+  dayKeyOf: (x: any) => new Date(new Date(x).getTime() + IST_MIN * 60000).toISOString().slice(0, 10),
+  whereForDay: async (d: string) => { const { start, end } = dayWin(d); return whereForDayRule(d, start, end); },
+  forDay: async (d: string) => {
+    const { start, end } = dayWin(d);
+    return rows.filter((t: any) => matchesWhere(t, whereForDayRule(d, start, end)))
+      .map((t: any) => (t.status === 'done' && t.completedAt && new Date(t.completedAt) >= end ? { ...t, status: 'open', progress: 0 } : t));
+  },
+});
 
 function makePrisma() {
   const commitments: any[] = [];
@@ -40,7 +56,7 @@ describe('AccountabilityService.extractForDay', () => {
   it('extracts a commitment + decision and de-dups on re-run', async () => {
     const prisma = makePrisma();
     const llm: any = { completeWith: jest.fn(async () => answer) };
-    const svc = new AccountabilityService(prisma, llm);
+    const svc = new AccountabilityService(prisma, llm, makeTasksSvc([]));
 
     const r1 = await svc.extractForDay('2026-06-19');
     expect(r1.commitments).toBe(1);
@@ -55,7 +71,7 @@ describe('AccountabilityService.extractForDay', () => {
 
   it('mark-done sets completedAt', async () => {
     const prisma = makePrisma();
-    const svc = new AccountabilityService(prisma, { completeWith: jest.fn(async () => answer) } as any);
+    const svc = new AccountabilityService(prisma, { completeWith: jest.fn(async () => answer) } as any, makeTasksSvc([]));
     await svc.extractForDay('2026-06-19');
     await svc.setStatus('1', 'done');
     expect(prisma._commitments[0].status).toBe('done');

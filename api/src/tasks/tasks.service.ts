@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { whereForDayRule } from './day-rule';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { MemoryService } from '../memory/memory.service';
@@ -432,15 +433,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   async today() {
     const tz = await this.tz();
     const day = this.dayKey(tz);
-    const rows = await this.prisma.task.findMany({
-      where: {
-        OR: [
-          { status: 'open', day: { lte: day } }, // still open, from today or any earlier day
-          { day }, // anything belonging to today (incl. tasks added and finished today)
-          { status: 'done', completedAt: { gte: this.dayStart(day, tz) } }, // finished today, added whenever
-        ],
-      },
-    });
+    // Same definition the history calendar uses, so the two screens can never disagree. (BEA-1018)
+    const rows = await this.prisma.task.findMany({ where: await this.whereForDay(day, tz) });
     const dump = await this.prisma.brainDump.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const tasks = this.sortTasks(rows).map((t) => this.shape(t));
     return {
@@ -458,10 +452,65 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return rows.map((t) => this.shape(t));
   }
 
-  /** All tasks planned/finished on one day (for the history calendar). */
+  /**
+   * The ONE definition of what belongs to a given day, shared by every screen and every AI prompt so
+   * they can never drift apart again. A day's record is:
+   *
+   *   - everything FINISHED that day, judged by completedAt — a task added on the 1st and finished on
+   *     the 20th is the 20th's work, not the 1st's; and
+   *   - everything that was STILL OPEN at the end of that day (added on or before it, and either still
+   *     open now or not finished until later).
+   *
+   * `day` alone can't answer this: since BEA-1014 it is frozen at the day the task was ADDED, so every
+   * query keyed to it credited finished work to the wrong date (207 of 290 live tasks) and hid carried
+   * tasks completely (Today showed 41 open, History-on-today showed 0). (BEA-1018)
+   */
+  async whereForDay(day: string, tz?: string): Promise<any> {
+    const zone = tz || (await this.tz());
+    const start = this.dayStart(day, zone);
+    const end = this.dayStart(this.dayAdd(day, 1), zone);
+    return whereForDayRule(day, start, end);
+  }
+
+  /** The [start, end) UTC window of a local day — for callers that bucket rows themselves. */
+  async dayWindow(day: string, tz?: string): Promise<{ start: Date; end: Date }> {
+    const zone = tz || (await this.tz());
+    return { start: this.dayStart(day, zone), end: this.dayStart(this.dayAdd(day, 1), zone) };
+  }
+
+  /** Local day key for an instant — so callers can bucket a completedAt into the right calendar day. */
+  dayKeyOf(d: Date | string, tz: string): string {
+    return this.dayKey(tz, new Date(d));
+  }
+
+  /** The user's timezone (defaults to India). */
+  timezone(): Promise<string> {
+    return this.tz();
+  }
+
+  /** Add days to a YYYY-MM-DD key. */
+  private dayAdd(day: string, n: number): string {
+    const d = new Date(`${day}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /**
+   * All tasks belonging to one day (for the history calendar), presented AS OF that day: a task that was
+   * not finished until later reads as open here, with `finishedLater` set so the UI can say when it was
+   * actually done. `status` alone is the state TODAY, which would report a task as done on a day it was
+   * still sitting open. (BEA-1018)
+   */
   async forDay(day: string) {
-    const rows = await this.prisma.task.findMany({ where: { day } });
-    return this.sortTasks(rows).map((t) => this.shape(t));
+    const tz = await this.tz();
+    const { end } = await this.dayWindow(day, tz);
+    const rows = await this.prisma.task.findMany({ where: await this.whereForDay(day, tz) });
+    return this.sortTasks(rows).map((t) => {
+      const later = t.status === 'done' && t.completedAt && new Date(t.completedAt) >= end;
+      const shaped: any = this.shape(t);
+      if (!later) return shaped;
+      return { ...shaped, status: 'open', progress: 0, finishedLater: this.dayKeyOf(t.completedAt as Date, tz) };
+    });
   }
 
   /** Every task (any day/status) that names a person — matched against the canonical name and any

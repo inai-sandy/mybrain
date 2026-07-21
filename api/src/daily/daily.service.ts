@@ -84,6 +84,16 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Local day key (YYYY-MM-DD) in the user's timezone. */
+  /**
+   * The day a task counts on: the day it was FINISHED, or — for anything still open — the day it was
+   * added. `day` alone is frozen at creation (BEA-1014), so bucketing by it credited finished work to
+   * the wrong date: 207 of 290 live tasks showed as done on a day they were still sitting open. (BEA-1018)
+   */
+  private bucketDay(t: { status?: string; completedAt?: Date | null; day?: string | null }, tz: string): string {
+    if (t.status === 'done' && t.completedAt) return this.dayKey(tz, new Date(t.completedAt));
+    return t.day || '';
+  }
+
   private dayKey(tz: string, d = new Date()): string {
     try {
       return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
@@ -195,7 +205,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const text = (story?.rawText || '').trim();
     if (text.length < 15) return { day, candidates: [] };
 
-    const existing = await this.prisma.task.findMany({ where: { day }, select: { title: true } });
+    // Everything already on that day's record, carried tasks included — keyed to `day` this missed
+    // anything added earlier, so the AI re-suggested work already logged. (BEA-1018)
+    const existing = await this.prisma.task.findMany({ where: await this.tasks.whereForDay(day), select: { title: true } });
     const existingTitles = existing.map((e) => e.title);
     const prompt =
       `From the user's diary entry below, extract the concrete tasks/work they say they DID or FINISHED today.\n` +
@@ -241,7 +253,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const text = (story?.rawText || '').trim();
     if (text.length < 15) return { day, todos: [] };
 
-    const existing = await this.prisma.task.findMany({ where: { OR: [{ day }, { day: today }], status: { not: 'done' } }, select: { title: true } });
+    // Every still-open task, not just the ones added on these two days. (BEA-1018)
+    const existing = await this.prisma.task.findMany({ where: { status: { not: 'done' }, day: { lte: today } }, select: { title: true } });
     const existingTitles = existing.map((e) => e.title);
     const prompt =
       `From the user's diary entry below, extract the concrete things they still NEED or PLAN to do — open to-dos, follow-ups and next actions they mention for the days ahead.\n` +
@@ -293,9 +306,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
   /** AI split of the stated working minutes across 3–6 topics, from the story + that day's finished tasks. */
   private async computeWorkedBreakdown(day: string, wm: number): Promise<{ category: string; minutes: number }[] | null> {
+    // Tasks FINISHED that day, whenever they were added — keyed to `day` this ignored the carried work
+    // that makes up most of a real day. (BEA-1018)
+    const { start, end } = await this.tasks.dayWindow(day);
     const [story, doneTasks] = await Promise.all([
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
-      this.prisma.task.findMany({ where: { day, status: 'done' }, select: { title: true, category: true } }),
+      this.prisma.task.findMany({ where: { status: 'done', completedAt: { gte: start, lt: end } }, select: { title: true, category: true } }),
     ]);
     const taskLines = doneTasks.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''}`).join('\n');
     const prompt =
@@ -329,7 +345,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.doneCandidates(day),
       this.todoCandidates(day),
       this.feed(day, tz),
-      this.prisma.task.findMany({ where: { day, status: { not: 'done' } }, orderBy: { createdAt: 'asc' }, select: { id: true, title: true } }),
+      // Everything still open by that day — keyed to `day` a task carried two or more nights could
+      // never be rolled or dropped from Wrap-up again. (BEA-1018)
+      this.prisma.task.findMany({ where: { status: { not: 'done' }, day: { lte: day } }, orderBy: { createdAt: 'asc' }, select: { id: true, title: true } }),
     ]);
     // Suggest hours from the span between the first and last thing the user did in the app that day.
     let suggestedMinutes: number | null = null;
@@ -416,12 +434,14 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async feed(day: string, tz: string): Promise<TimelineEvent[]> {
     const onDay = (d: Date | string | null) => !!d && this.dayKey(tz, new Date(d)) === day;
     const ev: TimelineEvent[] = [];
+    // Tasks land on the timeline on the day they were FINISHED, whenever they were added. (BEA-1018)
+    const feedWindow = await this.tasks.dayWindow(day, tz).then((w) => ({ gte: w.start, lt: w.end }));
 
     const [items, ideas, skills, doneTasks, dumps, story, notes] = await Promise.all([
       this.prisma.item.findMany({ orderBy: { createdAt: 'desc' }, take: 800 }),
       this.prisma.idea.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
       this.prisma.skill.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
-      this.prisma.task.findMany({ where: { status: 'done', day }, orderBy: { completedAt: 'desc' } }),
+      this.prisma.task.findMany({ where: { status: 'done', completedAt: feedWindow }, orderBy: { completedAt: 'desc' } }),
       this.prisma.brainDump.findMany({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.dayNote.findMany({ where: { day }, orderBy: { createdAt: 'desc' } }),
@@ -443,8 +463,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   }
 
   async stats(day: string) {
+    // The day's real record: finished that day, plus what was still open then. `forDay` presents each
+    // task AS OF that day, so `status === 'done'` here means "done by then", not "done by now". (BEA-1018)
     const [dayTasks, story] = await Promise.all([
-      this.prisma.task.findMany({ where: { day } }),
+      this.tasks.forDay(day),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { workedMinutes: true } }),
     ]);
     const done = dayTasks.filter((t) => t.status === 'done');
@@ -484,7 +506,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.feed(day, tz),
       this.stats(day),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
-      this.prisma.task.findMany({ where: { day } }),
+      this.tasks.forDay(day), // the day's true record, carried work included (BEA-1018)
     ]);
 
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
@@ -581,7 +603,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       if (await this.prisma.dayStory.findUnique({ where: { day: y } })) return;
       const [told, taskCount] = await Promise.all([
         this.prisma.story.findFirst({ where: { day: y } }),
-        this.prisma.task.count({ where: { day: y } }),
+        this.prisma.task.count({ where: await this.tasks.whereForDay(y) }),
       ]);
       if (!told && !taskCount) return; // nothing happened that day — nothing to backfill
       await this.generateDayStory(y).catch(() => undefined);
@@ -716,7 +738,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.feed(day, tz),
       this.stats(day),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
-      this.prisma.task.findMany({ where: { day } }),
+      this.tasks.forDay(day), // the day's true record, carried work included (BEA-1018)
     ]);
 
     const doneList = dayTasks
@@ -1244,10 +1266,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const [dumps, stories, doneTasks] = await Promise.all([
       this.prisma.brainDump.findMany({ select: { day: true } }),
       this.prisma.story.findMany({ select: { day: true } }),
-      this.prisma.task.findMany({ where: { status: 'done' }, select: { day: true } }),
+      this.prisma.task.findMany({ where: { status: 'done' }, select: { day: true, status: true, completedAt: true } }),
     ]);
+    const tz = await this.tz();
     const set = new Set<string>();
-    for (const r of [...dumps, ...stories, ...doneTasks]) if (r.day) set.add(r.day);
+    for (const r of [...dumps, ...stories]) if (r.day) set.add(r.day);
+    for (const t of doneTasks) { const k = this.bucketDay(t, tz); if (k) set.add(k); } // the day it was finished (BEA-1018)
     return set.size;
   }
 
@@ -1393,8 +1417,12 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const today = this.dayKey(tz);
     const span = Math.max(1, Math.min(365, days));
     const start = this.dayAdd(today, -(span - 1));
-    const tasks = await this.prisma.task.findMany({ where: { day: { gte: start } } });
+    // Also pull tasks added BEFORE the window but finished inside it — they are this window's work.
+    // Each task is then bucketed by the day it was finished, not the day it was added. (BEA-1018)
+    const { start: startAt } = await this.tasks.dayWindow(start, tz);
+    const tasks = await this.prisma.task.findMany({ where: { OR: [{ day: { gte: start } }, { completedAt: { gte: startAt } }] } });
     const done = tasks.filter((t) => t.status === 'done');
+    const bucket = new Map(tasks.map((t) => [t.id, this.bucketDay(t, tz)]));
 
     // time by category (actual where known, else estimate)
     const catMap: Record<string, number> = {};
@@ -1437,7 +1465,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const perDay: { day: string; done: number; total: number; worked: number }[] = [];
     for (let i = span - 1; i >= 0; i--) {
       const d = this.dayAdd(today, -i);
-      perDay.push({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length, worked: workedByDay[d] || 0 });
+      perDay.push({ day: d, done: done.filter((t) => bucket.get(t.id) === d).length, total: tasks.filter((t) => bucket.get(t.id) === d).length, worked: workedByDay[d] || 0 });
     }
 
     // brain-dump streak (consecutive days ending today or yesterday)
@@ -1451,7 +1479,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     // follow-through trend: last 7 days vs the 7 before (drives the home KPI arrow)
     const ftBetween = (from: string, to: string) => {
-      const win = tasks.filter((t) => t.day && t.day >= from && t.day <= to);
+      const win = tasks.filter((t) => { const b = bucket.get(t.id); return !!b && b >= from && b <= to; });
       return win.length ? this.avgProg(win) : null; // weighted: part-done counts (BEA-761)
     };
 
@@ -1483,7 +1511,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const today = this.dayKey(tz);
     const span = Math.max(28, Math.min(370, Math.round(months * 31)));
     const start = this.dayAdd(today, -(span - 1));
-    const tasks = await this.prisma.task.findMany({ where: { day: { gte: start } } });
+    const { start: startAt } = await this.tasks.dayWindow(start, tz);
+    const tasks = await this.prisma.task.findMany({ where: { OR: [{ day: { gte: start } }, { completedAt: { gte: startAt } }] } });
     const dumps = new Set((await this.prisma.brainDump.findMany({ where: { day: { gte: start } }, select: { day: true } })).map((d) => d.day));
     const stories = new Set((await this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true } })).map((d) => d.day));
     // Pending suggested tasks land on FUTURE days (e.g. tomorrow) — count them per day so the calendar can flag them.
@@ -1492,7 +1521,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     for (const s of suggRows) suggested[s.forDay] = (suggested[s.forDay] || 0) + 1;
     const byDay: Record<string, { done: number; total: number }> = {};
     for (const t of tasks) {
-      const k = t.day || '';
+      // Credited to the day it was FINISHED (or, while still open, the day it was added). (BEA-1018)
+      const k = this.bucketDay(t, tz);
       if (!k) continue;
       byDay[k] = byDay[k] || { done: 0, total: 0 };
       byDay[k].total++;
@@ -1525,7 +1555,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.prisma.daySummary.findUnique({ where: { day } }),
       this.prisma.dayStory.findUnique({ where: { day } }),
       this.prisma.dayClose.findUnique({ where: { day } }),
-      this.prisma.task.count({ where: { day, status: 'open' } }),
+      // Same rule as the Today tab, which counted 41 open while this counted 0. (BEA-1018)
+      this.prisma.task.count({ where: { status: 'open', day: { lte: day } } }),
     ]);
     const closed = !!closeRow;
     const isToday = day === this.dayKey(tz);

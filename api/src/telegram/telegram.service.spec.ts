@@ -13,6 +13,7 @@ function make() {
     task: {
       findUnique: async ({ where }: any) => ({ id: where.id, title: 'Finish proposal', note: null, status: 'open' }),
       create: jest.fn(async ({ data }: any) => ({ id: 'tr', ...data })),
+      update: jest.fn(async ({ where, data }: any) => ({ id: where.id, ...data })),
     },
     brainDump: { findFirst: async () => null },
     story: { findFirst: async () => null },
@@ -203,14 +204,16 @@ describe('TelegramService', () => {
     expect(items.store.mock.calls[0][3]).toBe('https://example.com/great-article'); // sourceUrl
   });
 
-  it('"remind me … at 5pm" creates a task with that reminder time', async () => {
-    const { svc, prisma } = make();
+  it('"remind me … at 5pm" creates the task THROUGH TasksService so it reaches the brain (BEA-1018)', async () => {
+    const { svc, prisma, tasks } = make();
     await svc.handleUpdate({ update_id: 1, message: { chat: { id: 5 }, text: '/start' } });
     await svc.handleUpdate({ update_id: 2, message: { chat: { id: 5 }, text: 'remind me to call Sam at 5pm' } });
-    expect(prisma.task.create).toHaveBeenCalled();
-    const data = prisma.task.create.mock.calls[0][0].data;
-    expect(data.title).toBe('call Sam');
-    expect(data.reminders).toContain('17:00');
+    // Created straight on Prisma it was never indexed, so a Telegram reminder stayed invisible to EMO.
+    expect(tasks.create).toHaveBeenCalled();
+    expect(prisma.task.create).not.toHaveBeenCalled();
+    expect(tasks.create.mock.calls[0][0].title).toBe('call Sam');
+    // …and the exact time asked for is kept (create computes its own smart times).
+    expect(prisma.task.update.mock.calls[0][0].data.reminders).toContain('17:00');
   });
 
   it('offers a destination after saving, and "Bookmarks" reclassifies the item', async () => {

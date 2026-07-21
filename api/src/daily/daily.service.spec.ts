@@ -1,3 +1,4 @@
+import { whereForDayRule, matchesWhere } from '../tasks/day-rule';
 import { DailyService } from './daily.service';
 
 // The service computes "today" in the user's timezone (Asia/Kolkata), so tests must too —
@@ -239,14 +240,35 @@ function makeService(opts: { llmText?: string | null } = {}) {
     deleteDoc: async () => undefined,
   };
   const rolledCalls: any[] = [];
+  const IST_MIN = 330;
+  const dayWin = (d: string) => {
+    const start = new Date(Date.parse(`${d}T00:00:00Z`) - IST_MIN * 60000);
+    return { start, end: new Date(start.getTime() + 86400000) };
+  };
+  const dayKeyOfIst = (x: any) => new Date(new Date(x).getTime() + IST_MIN * 60000).toISOString().slice(0, 10);
+  // The REAL day rule (BEA-1018), so these doubles can't drift from the service they stand in for.
+  const taskDayApi = {
+    timezone: async () => 'Asia/Kolkata',
+    dayWindow: async (d: string) => dayWin(d),
+    dayKeyOf: (x: any) => dayKeyOfIst(x),
+    whereForDay: async (d: string) => { const { start, end } = dayWin(d); return whereForDayRule(d, start, end); },
+    forDay: async (d: string) => {
+      const { start, end } = dayWin(d);
+      return tasks
+        .filter((t) => matchesWhere(t, whereForDayRule(d, start, end)))
+        .map((t) => (t.status === 'done' && t.completedAt && new Date(t.completedAt) >= end ? { ...t, status: 'open', progress: 0 } : t));
+    },
+  };
   const tasksSvc: any = {
+    ...taskDayApi,
     getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }),
     listModels: async () => [],
     create: async (data: any) => { const row = { id: `t${tasks.length + 1}`, status: 'open', ...data }; tasks.push(row); return row; },
     rollDayForward: async (fromDay: string, toDay: string) => {
       rolledCalls.push({ fromDay, toDay });
-      const open = tasks.filter((t) => t.status === 'open' && t.day === fromDay);
-      open.forEach((t) => { t.day = toDay; t.rolloverCount = (t.rolloverCount || 0) + 1; });
+      // Matches the real rule: everything still open by then is carried, and the date NEVER moves.
+      const open = tasks.filter((t) => t.status === 'open' && (t.day || '') <= fromDay);
+      open.forEach((t) => { t.rolloverCount = (t.rolloverCount || 0) + 1; });
       return { rolled: open.length };
     },
   };
@@ -406,7 +428,10 @@ describe('DailyService', () => {
       expect(mentorCalls.some((m) => m.day === past && m.force)).toBe(true); // mentor re-ran for that day
       expect(mindCalls).toContain(past); // The Lab learns from the day once it's closed (BEA-458)
       expect(rolledCalls.some((c) => c.fromDay === past && c.toDay === today)).toBe(true);
-      expect(tasks.find((t) => t.id === 'a').day).toBe(today); // leftover rolled forward
+      // The leftover is carried by COUNT, never by moving its date — re-stamping it made every open
+      // task claim it was created today and destroyed the record of what each day produced. (BEA-1014)
+      expect(tasks.find((t) => t.id === 'a').day).toBe(past);
+      expect(tasks.find((t) => t.id === 'a').rolloverCount).toBe(1);
       expect(tasks.find((t) => t.id === 'b').day).toBe(past); // finished task stays on its real day
       expect(await svc.isClosed(past)).toBe(true);
     });
@@ -414,11 +439,11 @@ describe('DailyService', () => {
     it('closing TODAY with leftover open tasks rolls them to TOMORROW (not stranded on a sealed day)', async () => {
       const { svc, tasks } = makeService({ llmText: '{"story":"Today, closed early.","moodScore":60}' });
       const today = istToday();
-      const tomorrow = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
       tasks.push({ id: 'tt', day: today, status: 'open', title: 'spillover' });
       const r = await svc.closeDay(today, false);
       expect(r!.rolled).toBe(1);
-      expect(tasks.find((t) => t.id === 'tt').day).toBe(tomorrow);
+      expect(tasks.find((t) => t.id === 'tt').day).toBe(today); // date stays put (BEA-1014)...
+      expect(tasks.find((t) => t.id === 'tt').rolloverCount).toBe(1); // ...the carry is a count
     });
 
     it('repairSealedDays regenerates the story for a sealed day missing it (BEA-827)', async () => {
@@ -732,6 +757,25 @@ describe('DailyService', () => {
     expect(t.total).toBe(2);
     expect(t.dumped).toBe(true);
     expect(t.story).toBe(true);
+  });
+
+  it('credits a task to the day it was FINISHED, not the day it was added (BEA-1018)', async () => {
+    const { svc, tasks } = makeService();
+    const today = istToday();
+    const threeDaysAgo = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 3); return d.toISOString().slice(0, 10); })();
+    // Added three days ago, carried, finished TODAY — the day it was added saw no work on it at all.
+    tasks.push({ id: 'carried', day: threeDaysAgo, status: 'done', completedAt: new Date(), rolloverCount: 3 });
+
+    const c = await svc.calendar(3);
+    const then = c.days.find((x: any) => x.day === threeDaysAgo);
+    const now = c.days.find((x: any) => x.day === today);
+    expect(now.done).toBe(1);            // credited to the day it was actually finished
+    expect(then?.done ?? 0).toBe(0);     // and NOT to the day it was added
+    expect(then?.total ?? 0).toBe(0);
+
+    const d = await svc.dashboard(7);
+    expect(d.perDay.find((p: any) => p.day === today).done).toBe(1);
+    expect(d.perDay.find((p: any) => p.day === threeDaysAgo).done).toBe(0);
   });
 
   describe('morning auto-wrap-up (BEA-467)', () => {

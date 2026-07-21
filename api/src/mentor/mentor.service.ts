@@ -210,7 +210,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     const [dayStory, told, dayTasks, focus, recent] = await Promise.all([
       this.prisma.dayStory.findUnique({ where: { day } }),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
-      this.prisma.task.findMany({ where: { day } }),
+      this.tasks.forDay(day), // the day's real record, carried work included (BEA-1018)
       this.prisma.focusArea.findMany({ where: { status: 'active' }, orderBy: { createdAt: 'asc' } }),
       // strictly PRIOR days, so a re-run never reads its own earlier draft as "yesterday"
       this.prisma.mentorDay.findMany({ where: { day: { lt: day } }, orderBy: { day: 'desc' }, take: 4 }),
@@ -287,14 +287,19 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
   /** Plain-code week numbers — the grounding data for the review and the nightly trend block. */
   private async weekStats(weekStart: string) {
     const days: string[] = Array.from({ length: 7 }, (_, i) => this.dayAdd(weekStart, i));
+    // Also pull tasks added before the week but FINISHED in it — that is this week's follow-through.
+    // Each is then credited to the day it was finished, not the day it was added. (BEA-1018)
+    const tz = await this.tasks.timezone();
+    const { start: weekStartAt } = await this.tasks.dayWindow(days[0], tz);
     const [tasks, mentorDays, dayStories] = await Promise.all([
-      this.prisma.task.findMany({ where: { day: { gte: days[0], lte: days[6] } } }),
+      this.prisma.task.findMany({ where: { OR: [{ day: { gte: days[0], lte: days[6] } }, { completedAt: { gte: weekStartAt } }] } }),
       this.prisma.mentorDay.findMany({ where: { day: { gte: days[0], lte: days[6] } } }),
       this.prisma.dayStory.findMany({ where: { day: { gte: days[0], lte: days[6] } } }),
     ]);
     const done = tasks.filter((t) => t.status === 'done');
     const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((s, x) => s + x, 0) / xs.length) : null);
-    const perDay = days.map((d) => ({ day: d, done: done.filter((t) => t.day === d).length, total: tasks.filter((t) => t.day === d).length }));
+    const bucket = new Map(tasks.map((t) => [t.id, t.status === 'done' && t.completedAt ? this.tasks.dayKeyOf(t.completedAt, tz) : t.day || '']));
+    const perDay = days.map((d) => ({ day: d, done: done.filter((t) => bucket.get(t.id) === d).length, total: tasks.filter((t) => bucket.get(t.id) === d).length }));
     const withTasks = perDay.filter((p) => p.total > 0);
     const best = withTasks.length ? withTasks.reduce((a, b) => (b.done / b.total > a.done / a.total ? b : a)) : null;
     const nums = (xs: any[]) => xs.filter((x): x is number => Number.isFinite(x as number));

@@ -27,6 +27,8 @@ export type Task = {
   progress?: number; // 0 | 30 | 60 | 100
   followUp?: boolean;
   rolloverCount: number;
+  /** History only: this was still open on the day being viewed and only finished on this later date. (BEA-1018) */
+  finishedLater?: string | null;
   createdAt: string;
   completedAt?: string | null;
 };
@@ -117,6 +119,17 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
             );
           })()}
           {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+          {t.finishedLater && (() => {
+            // On a past day this task was still open — it was only ticked off later. Say so, rather than
+            // showing a bare open task with no hint of how it ended. (BEA-1018)
+            const fin = new Date(t.finishedLater + 'T12:00:00Z');
+            const label = isNaN(fin.getTime()) ? t.finishedLater : fin.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+            return (
+              <span title={`Still open on this day — finished on ${label}`} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5">
+                <Check size={10} />finished {label}
+              </span>
+            );
+          })()}
           {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
           {t.party && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 font-medium">🤝 Promise → {t.party}</span>}
           {t.dueDate && (() => {
@@ -282,6 +295,17 @@ export function DumpReviewSheet({ tasks, onClose, onChanged }: { tasks: Task[]; 
                       <div className="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-zinc-400">
                         <span className={'rounded-full px-1.5 py-0.5 ' + p.cls}>{p.label}</span>
                         {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
+          {t.finishedLater && (() => {
+            // On a past day this task was still open — it was only ticked off later. Say so, rather than
+            // showing a bare open task with no hint of how it ended. (BEA-1018)
+            const fin = new Date(t.finishedLater + 'T12:00:00Z');
+            const label = isNaN(fin.getTime()) ? t.finishedLater : fin.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+            return (
+              <span title={`Still open on this day — finished on ${label}`} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5">
+                <Check size={10} />finished {label}
+              </span>
+            );
+          })()}
           {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
                         {t.estimateMin ? <span className="inline-flex items-center gap-1"><Clock size={10} /> {mins(t.estimateMin)}</span> : null}
                       </div>

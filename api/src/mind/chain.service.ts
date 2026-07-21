@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
+import { TasksService } from '../tasks/tasks.service';
 
 // Cheap model for turning a plain sentence into a goal/blocker/lever chain.
 const PARSE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
@@ -11,6 +12,7 @@ export class MindChainService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
+    private readonly tasks: TasksService,
   ) {}
 
   private today() {
@@ -192,7 +194,8 @@ export class MindChainService {
   /** Propose Goal→Blocker→Lever chains grounded ONLY in the day's own story. Saved as source='engine'. (BEA-516/602) */
   async inferFromDay(day: string): Promise<number> {
     const [tasks, story, existing] = await Promise.all([
-      this.prisma.task.findMany({ where: { day }, select: { title: true, status: true, category: true, rolloverCount: true } }),
+      // The day's real record — keyed to `day` this saw only what was created that day. (BEA-1018)
+      this.prisma.task.findMany({ where: await this.tasks.whereForDay(day), select: { title: true, status: true, category: true, rolloverCount: true } }),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { rawText: true } }),
       this.prisma.mindChain.findMany({ where: { status: { not: 'retired' } }, select: { goal: true, blocker: true } }),
     ]);
@@ -255,7 +258,7 @@ export class MindChainService {
         orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
         take: 6,
       }),
-      this.prisma.task.findMany({ where: { day, status: 'done' }, select: { title: true, category: true } }),
+      this.prisma.task.findMany({ where: { status: 'done', completedAt: await this.tasks.dayWindow(day).then((w) => ({ gte: w.start, lt: w.end })) }, select: { title: true, category: true } }),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { rawText: true } }),
     ]);
     if (!chains.length) return { resolved: 0, shifted: 0 };

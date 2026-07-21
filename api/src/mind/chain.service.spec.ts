@@ -1,4 +1,15 @@
+import { whereForDayRule } from '../tasks/day-rule';
 import { MindChainService } from './chain.service';
+
+// Stands in for TasksService using the REAL day rule, so this double can't drift from it. (BEA-1018)
+const IST_MIN = 330;
+const dayWin = (d: string) => { const start = new Date(Date.parse(`${d}T00:00:00Z`) - IST_MIN * 60000); return { start, end: new Date(start.getTime() + 86400000) }; };
+const tasksSvc: any = {
+  timezone: async () => 'Asia/Kolkata',
+  dayWindow: async (d: string) => dayWin(d),
+  dayKeyOf: (x: any) => new Date(new Date(x).getTime() + IST_MIN * 60000).toISOString().slice(0, 10),
+  whereForDay: async (d: string) => { const { start, end } = dayWin(d); return whereForDayRule(d, start, end); },
+};
 
 // Minimal fakes: a story + tasks in, captured mindChain.create calls out.
 function fakePrisma(storyText: string | null, tasks: any[] = []) {
@@ -44,7 +55,7 @@ describe('MindChainService.inferFromDay grounding (BEA-602)', () => {
       }),
     );
     const prisma = fakePrisma(STORY);
-    const svc = new MindChainService(prisma as any, llm as any);
+    const svc = new MindChainService(prisma as any, llm as any, tasksSvc);
     const n = await svc.inferFromDay('2026-06-26');
     expect(n).toBe(1);
     expect(prisma._created).toHaveLength(1);
@@ -66,7 +77,7 @@ describe('MindChainService.inferFromDay grounding (BEA-602)', () => {
       }),
     );
     const prisma = fakePrisma(STORY);
-    const svc = new MindChainService(prisma as any, llm as any);
+    const svc = new MindChainService(prisma as any, llm as any, tasksSvc);
     const n = await svc.inferFromDay('2026-06-26');
     expect(n).toBe(0);
     expect(prisma._created).toHaveLength(0);
@@ -75,7 +86,7 @@ describe('MindChainService.inferFromDay grounding (BEA-602)', () => {
   it('infers nothing when there is no story for the day', async () => {
     const llm = fakeLlm('{"chains":[]}');
     const prisma = fakePrisma(null, [{ title: 'x', status: 'todo', rolloverCount: 3 }]);
-    const svc = new MindChainService(prisma as any, llm as any);
+    const svc = new MindChainService(prisma as any, llm as any, tasksSvc);
     expect(await svc.inferFromDay('2026-06-26')).toBe(0);
   });
 });

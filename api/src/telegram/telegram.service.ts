@@ -973,7 +973,12 @@ export class TelegramService implements OnModuleInit {
 
     let title = body.replace(/^to\s+/i, '').replace(/[\s,]+$/, '').trim().slice(0, 160) || 'Reminder';
     const day = tomorrow ? this.dayAdd(this.dayKey(tz), 1) : this.dayKey(tz);
-    await this.prisma.task.create({ data: { title, day, reminderCount: 1, reminders: JSON.stringify([hm]), priority: 'medium' } });
+    // Go through TasksService so the task is INDEXED — created straight on Prisma it never reached the
+    // brain and stayed invisible to EMO until someone ran the manual reindex. `create` computes its own
+    // smart reminder times, so pin the exact time asked for afterwards (not part of the indexed text).
+    // (BEA-1018)
+    const created = await this.tasks.create({ title, day, reminderCount: 1, priority: 'medium' });
+    if (created?.id) await this.prisma.task.update({ where: { id: created.id }, data: { reminders: JSON.stringify([hm]) } }).catch(() => undefined);
     return { title, hm, tomorrow };
   }
 

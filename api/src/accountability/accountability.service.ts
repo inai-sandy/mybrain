@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
+import { TasksService } from '../tasks/tasks.service';
 
 const EXTRACT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
 const DEFAULT_TZ = 'Asia/Kolkata';
@@ -26,6 +27,7 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
+    private readonly tasks: TasksService,
   ) {}
 
   onModuleInit() {
@@ -85,7 +87,7 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.daySummary.findUnique({ where: { day } }).catch(() => null),
       this.prisma.dayStory.findUnique({ where: { day } }).catch(() => null),
-      this.prisma.task.findMany({ where: { day } }),
+      this.tasks.forDay(day), // the day's real record, carried work included (BEA-1018)
     ]);
     const material = [
       (story?.rawText || dayStory?.text) && `His story:\n${(story?.rawText || dayStory?.text || '').slice(0, 4000)}`,

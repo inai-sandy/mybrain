@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Star, StickyNote, ChevronDown, Copy, Loader2, Check } from 'lucide-react';
+import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Circle, Star, StickyNote, ChevronDown, Copy, Loader2, Check } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
@@ -486,7 +486,8 @@ function TaskHistory() {
   }
 
   const finished = (dayTasks || []).filter((t) => t.status === 'done');
-  const openCount = (dayTasks || []).filter((t) => t.status !== 'done').length;
+  const stillOpen = (dayTasks || []).filter((t) => t.status !== 'done');
+  const openCount = stillOpen.length;
   const minutes = finished.reduce((s, t) => s + (t.actualMin || 0), 0);
 
   return (
@@ -574,6 +575,36 @@ function TaskHistory() {
           </ul>
         ) : (
           <p className="text-sm text-zinc-400">Nothing finished on this day.</p>
+        )}
+
+        {/* What was still open at the end of that day. The header counted these but never showed them,
+            so a day's record only ever told half the story — what got done, never what was left. (BEA-1018) */}
+        {stillOpen.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+            <h3 className="text-xs font-medium text-zinc-500 mb-2 flex items-center gap-1.5">
+              <Circle size={12} className="text-amber-500" /> Still open that day · {stillOpen.length}
+            </h3>
+            <ul className="space-y-1.5">
+              {stillOpen.map((t) => (
+                <li key={t.id} className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                  <Circle size={13} className="mt-0.5 shrink-0 text-zinc-400" />
+                  <span className="min-w-0 flex-1 break-words">
+                    {t.title}
+                    {t.category && <span className="ml-1.5 text-[11px] text-zinc-400">{t.category}</span>}
+                  </span>
+                  {(t as any).finishedLater && (() => {
+                    const fin = new Date((t as any).finishedLater + 'T12:00:00Z');
+                    const label = isNaN(fin.getTime()) ? (t as any).finishedLater : fin.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+                    return (
+                      <span title={`Finished on ${label}`} className="shrink-0 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 text-[11px]">
+                        finished {label}
+                      </span>
+                    );
+                  })()}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </section>
     </div>

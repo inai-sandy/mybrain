@@ -1,3 +1,4 @@
+import { whereForDayRule, matchesWhere } from '../tasks/day-rule';
 import { MentorService } from './mentor.service';
 
 function makeService(llmText: string | null) {
@@ -88,7 +89,26 @@ function makeService(llmText: string | null) {
   };
   const llm: any = { completeWith: jest.fn(async () => llmText) };
   const prompts: any = { get: async (k: string) => `[${k}]` };
-  const tasksSvc: any = { listModels: async () => [] };
+  const IST_MIN = 330;
+  const dayWin = (d: string) => {
+    const start = new Date(Date.parse(`${d}T00:00:00Z`) - IST_MIN * 60000);
+    return { start, end: new Date(start.getTime() + 86400000) };
+  };
+  const dayKeyOfIst = (x: any) => new Date(new Date(x).getTime() + IST_MIN * 60000).toISOString().slice(0, 10);
+  // The REAL day rule (BEA-1018), so these doubles can't drift from the service they stand in for.
+  const taskDayApi = {
+    timezone: async () => 'Asia/Kolkata',
+    dayWindow: async (d: string) => dayWin(d),
+    dayKeyOf: (x: any) => dayKeyOfIst(x),
+    whereForDay: async (d: string) => { const { start, end } = dayWin(d); return whereForDayRule(d, start, end); },
+    forDay: async (d: string) => {
+      const { start, end } = dayWin(d);
+      return tasks
+        .filter((t) => matchesWhere(t, whereForDayRule(d, start, end)))
+        .map((t) => (t.status === 'done' && t.completedAt && new Date(t.completedAt) >= end ? { ...t, status: 'open', progress: 0 } : t));
+    },
+  };
+  const tasksSvc: any = { listModels: async () => [], ...taskDayApi };
   const mind: any = { summaryForMentor: async () => '' }; // The Lab grounding stub (BEA-454)
   return { svc: new MentorService(prisma, llm, prompts, tasksSvc, mind), llm, focus, mentorDays, dayStories, stories, tasks, summaries, weeklies, settings };
 }

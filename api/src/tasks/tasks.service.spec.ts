@@ -1,4 +1,5 @@
 import { TasksService, normTitleKey } from './tasks.service';
+import { matchesWhere } from './day-rule';
 
 function makeService(llmText: string | null) {
   const settings: Record<string, string> = {};
@@ -28,21 +29,7 @@ function makeService(llmText: string | null) {
         tasks.push(row);
         return row;
       },
-      findMany: async ({ where }: any = {}) =>
-        tasks.filter((t) => {
-          if (where?.status && t.status !== where.status) return false;
-          const d = where?.day;
-          if (d !== undefined) {
-            if (typeof d === 'string') {
-              if (t.day !== d) return false;
-            } else {
-              if (d.not === null && (t.day === null || t.day === undefined)) return false;
-              if (d.lt && !(t.day && t.day < d.lt)) return false;
-              if (d.lte && !(t.day && t.day <= d.lte)) return false;
-            }
-          }
-          return true;
-        }),
+      findMany: async ({ where }: any = {}) => tasks.filter((t) => matchesWhere(t, where)),
       findUnique: async ({ where }: any) => tasks.find((t) => t.id === where.id) || null,
       update: async ({ where, data }: any) => {
         const t = tasks.find((x) => x.id === where.id);
@@ -160,14 +147,28 @@ describe('TasksService', () => {
     expect(tasks.filter((t) => t.followUp)).toHaveLength(0);
   });
 
-  it('forDay returns only that day\'s tasks, done and open', async () => {
+  it('forDay credits work to the day it was FINISHED, and shows what was still open then (BEA-1018)', async () => {
     const { svc, tasks } = makeService(null);
-    tasks.push({ id: 'a', day: '2026-06-01', status: 'done', title: 'Old win', priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() });
-    tasks.push({ id: 'b', day: '2026-06-01', status: 'open', title: 'Old open', priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() });
-    tasks.push({ id: 'c', day: '2026-06-02', status: 'done', title: 'Other day', priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() });
-    const list = await svc.forDay('2026-06-01');
-    expect(list).toHaveLength(2);
-    expect(list.map((t) => t.id).sort()).toEqual(['a', 'b']);
+    const base = { priority: 'medium', pinned: false, rolloverCount: 0, createdAt: new Date() };
+    // Finished on 1 June (IST: 00:00 on the 1st is 2026-05-31T18:30Z).
+    tasks.push({ id: 'a', day: '2026-06-01', status: 'done', title: 'Old win', completedAt: new Date('2026-06-01T06:00:00Z'), ...base });
+    // Added 1 June, still open — belongs to the 1st and to every day since.
+    tasks.push({ id: 'b', day: '2026-06-01', status: 'open', title: 'Old open', ...base });
+    // Finished the NEXT day: must not be credited to the 1st...
+    tasks.push({ id: 'c', day: '2026-06-01', status: 'done', title: 'Spilled over', completedAt: new Date('2026-06-02T06:00:00Z'), ...base });
+    // ...and a task added later belongs to neither.
+    tasks.push({ id: 'd', day: '2026-06-02', status: 'done', title: 'Other day', completedAt: new Date('2026-06-02T07:00:00Z'), ...base });
+    // A finished task with no completedAt still falls back to the day it holds.
+    tasks.push({ id: 'e', day: '2026-06-01', status: 'done', title: 'Legacy row', completedAt: null, ...base });
+
+    const first = await svc.forDay('2026-06-01');
+    // 'c' appears because it was still open at the end of the 1st — and reads as OPEN then, not done.
+    expect(first.map((t) => t.id).sort()).toEqual(['a', 'b', 'c', 'e']);
+    expect(first.filter((t: any) => t.status === 'done').map((t) => t.id).sort()).toEqual(['a', 'e']);
+    expect((first.find((t) => t.id === 'c') as any).finishedLater).toBe('2026-06-02');
+
+    const second = await svc.forDay('2026-06-02');
+    expect(second.map((t) => t.id).sort()).toEqual(['b', 'c', 'd']); // 'b' still open, 'c' finished today
   });
 
   it('falls back to a single task if the LLM is unavailable so nothing is lost', async () => {
@@ -360,16 +361,7 @@ describe('today() — carried tasks stay visible without faking their date (BEA-
       setting: { findUnique: async () => ({ value: IST }) },
       brainDump: { findFirst: async () => null },
       task: {
-        findMany: async ({ where }: any) => rows.filter((t) => {
-          const or = where?.OR || [];
-          return or.some((c: any) => {
-            if (c.status && c.status !== t.status) return false;
-            if (c.day && typeof c.day === 'string' && c.day !== t.day) return false;
-            if (c.day?.lte && !(t.day <= c.day.lte)) return false;
-            if (c.completedAt?.gte && !(t.completedAt && new Date(t.completedAt) >= c.completedAt.gte)) return false;
-            return true;
-          });
-        }),
+        findMany: async ({ where }: any) => rows.filter((t) => matchesWhere(t, where)),
       },
     };
     return new TasksService(prisma, {} as any, {} as any, { indexEntity: async () => undefined, deleteDoc: async () => undefined } as any);

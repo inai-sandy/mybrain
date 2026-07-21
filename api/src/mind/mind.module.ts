@@ -9,8 +9,10 @@ import { MindChainService } from './chain.service';
 import { MindController } from './mind.controller';
 
 // "The Lab" — the mini mental model. Ingestion + engine + lifecycle + review + stats + situation chains.
+import { TasksModule } from '../tasks/tasks.module';
+
 @Module({
-  imports: [LlmModule],
+  imports: [TasksModule, LlmModule],
   providers: [MindIngestionService, MentalModelService, MindLifecycleService, MindReviewService, MindStatsService, MindChainService],
   controllers: [MindController],
   exports: [MindIngestionService, MentalModelService, MindLifecycleService, MindReviewService, MindStatsService, MindChainService],
