@@ -5,6 +5,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { VoiceService } from '../voice/voice.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ClaimsService } from '../tasks/claims.service';
+import { TasksService } from '../tasks/tasks.service';
 import { NotesService } from '../notes/notes.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoAskService } from './emo-ask.service';
@@ -112,22 +114,62 @@ export class EmoDeviceService {
     private readonly talk: EmoTalkService,
     private readonly prisma: PrismaService,
     private readonly notes: NotesService,
+    private readonly claims: ClaimsService, // last on purpose: keeps positional wiring stable
+    private readonly tasks: TasksService,
   ) {}
 
-  /** Personal reminders the device should ring (next 48h, oldest first). */
-  async listDeviceReminders(): Promise<{ reminders: { id: string; text: string; dueAt: number }[] }> {
+  /**
+   * What is waiting for the owner on the device. (BEA-1035)
+   *
+   * This started as a reminder feed and is now a "needs you" queue, because the devices ALREADY
+   * poll it, render it, ring on it and can answer it — widening what ships beats inventing a new
+   * protocol for hardware that is already flashed and in daily use.
+   *
+   * Every item keeps the exact original shape ({id, text, dueAt}) and simply gains a `kind`. Old
+   * firmware ignores the field it does not know and behaves precisely as before, so shipping this
+   * cannot break the devices in the owner's hand.
+   */
+  async listDeviceReminders(): Promise<{ reminders: { id: string; text: string; dueAt: number; kind: string }[]; needsYou: number }> {
     const until = new Date(Date.now() + 48 * 3600 * 1000);
-    const rows = await this.prisma.emoDeviceReminder.findMany({
-      where: { status: 'active', dueAt: { lte: until } },
-      orderBy: { dueAt: 'asc' },
-      take: 20,
-    });
-    return { reminders: rows.map((r: any) => ({ id: r.id, text: r.text, dueAt: r.dueAt.getTime() })) };
+    const [rems, claims] = await Promise.all([
+      this.prisma.emoDeviceReminder.findMany({ where: { status: 'active', dueAt: { lte: until } }, orderBy: { dueAt: 'asc' }, take: 12 }),
+      this.prisma.taskClaim.findMany({
+        where: { status: 'pending' },
+        orderBy: { createdAt: 'asc' },
+        take: 12,
+        include: { contact: { select: { name: true } }, task: { select: { title: true } } },
+      }),
+    ]);
+
+    const reminders = rems.map((r: any) => ({ id: r.id, text: r.text, dueAt: r.dueAt.getTime(), kind: 'reminder' }));
+    // Short enough to read on a small screen — the device holds 160 characters per line.
+    const confirms = claims
+      .filter((c: any) => c.task)
+      .map((c: any) => ({
+        id: `claim:${c.id}`,
+        text: `${(c.contact?.name || 'Someone').split(/\s+/)[0]} says done: ${c.task.title}`.slice(0, 155),
+        dueAt: new Date(c.createdAt).getTime(),
+        kind: 'confirm',
+      }));
+
+    return { reminders: [...reminders, ...confirms].slice(0, 12), needsYou: confirms.length };
   }
 
-  /** The device rang (done) or gave up (missed). */
+  /**
+   * The device answered. Reminders keep their original done/missed. A confirmation accepts
+   * confirm/reject (and treats the old "done"/"missed" words the same way, so a device that has
+   * not been updated still does the right thing). (BEA-1035)
+   */
   async ackDeviceReminder(id: string, status: string): Promise<{ ok: boolean }> {
-    const st = status === 'missed' ? 'missed' : 'done';
+    const raw = String(status || '').toLowerCase();
+    if (id.startsWith('claim:')) {
+      const claimId = id.slice('claim:'.length);
+      const confirm = !(raw === 'reject' || raw === 'missed' || raw === 'no');
+      const r = await this.claims.decide(claimId, confirm).catch(() => ({ ok: false }) as any);
+      if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
+      return { ok: !!r.ok };
+    }
+    const st = raw === 'missed' ? 'missed' : 'done';
     await this.prisma.emoDeviceReminder.update({ where: { id }, data: { status: st } }).catch(() => undefined);
     return { ok: true };
   }

@@ -23,13 +23,15 @@ describe('EmoDeviceService (BEA-926)', () => {
   const ask: any = { ask: jest.fn(async () => ({ mode: 'answer', summary: 'Short answer.', cardId: 'a1' })) };
   const talk: any = { talk: jest.fn(async () => ({ conversationId: 't1', reply: 'Sure thing.', sources: [], usedWeb: false })) };
   const prisma: any = {
+    // Claims waiting on the owner also ride this feed now (BEA-1035). None in this fixture.
+    taskClaim: { findMany: jest.fn(async () => []) },
     emoDeviceReminder: {
       findMany: jest.fn(async () => [{ id: 'dr1', text: 'call the vendor', dueAt: new Date(1760000000000), status: 'active' }]),
       update: jest.fn(async () => ({})),
     },
   };
   const notes: any = { create: jest.fn(async () => ({ id: 'n1' })) };
-  const svc = new EmoDeviceService(voice, router, ask, talk, prisma, notes);
+  const svc = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any);
   const pcm = Buffer.alloc(3200); // 100ms of 16k mono silence
 
   beforeEach(() => jest.clearAllMocks());
@@ -56,7 +58,8 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('lists upcoming device reminders with epoch dueAt and acks them (BEA-944)', async () => {
     const r = await svc.listDeviceReminders();
-    expect(r.reminders).toEqual([{ id: 'dr1', text: 'call the vendor', dueAt: 1760000000000 }]);
+    // `kind` is additive — old firmware ignores it and behaves exactly as before. (BEA-1035)
+    expect(r.reminders).toEqual([{ id: 'dr1', text: 'call the vendor', dueAt: 1760000000000, kind: 'reminder' }]);
     await svc.ackDeviceReminder('dr1', 'done');
     expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'done' } });
   });
@@ -166,5 +169,43 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(wav!.toString('ascii', 0, 4)).toBe('RIFF');
     expect(wav!.readUInt32LE(24)).toBe(16000);
     expect(wav!.readUInt32LE(40)).toBe(16 * 2); // 24 samples in -> 16 samples out
+  });
+
+  /**
+   * The queue must stay backwards-compatible: a device that has never been updated keeps working.
+   * (BEA-1035)
+   */
+  it('carries confirmations alongside reminders, and counts them', async () => {
+    prisma.taskClaim.findMany = jest.fn(async () => [
+      { id: 'k1', createdAt: new Date(1760000001000), contact: { name: 'Ramesh Kumar' }, task: { title: 'Send the vendor list' } },
+    ]) as any;
+    const r = await svc.listDeviceReminders();
+    expect(r.needsYou).toBe(1);
+    const confirm = r.reminders.find((x: any) => x.kind === 'confirm')!;
+    expect(confirm.id).toBe('claim:k1');
+    expect(confirm.text).toBe('Ramesh says done: Send the vendor list');
+  });
+
+  it('a confirmation answered on the device decides the claim', async () => {
+    const decide = jest.fn(async () => ({ ok: true, taskId: 't1', confirmed: true }));
+    const setDone = jest.fn(async () => undefined);
+    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone } as any);
+    await s2.ackDeviceReminder('claim:k1', 'done');
+    expect(decide).toHaveBeenCalledWith('k1', true);
+    expect(setDone).toHaveBeenCalledWith('t1', true);
+  });
+
+  it('"reject" from the device sends it back instead of closing it', async () => {
+    const decide = jest.fn(async () => ({ ok: true, taskId: 't1', confirmed: false }));
+    const setDone = jest.fn(async () => undefined);
+    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone } as any);
+    await s2.ackDeviceReminder('claim:k1', 'reject');
+    expect(decide).toHaveBeenCalledWith('k1', false);
+    expect(setDone).toHaveBeenCalledWith('t1', false);
+  });
+
+  it('a plain reminder still acks exactly as before', async () => {
+    await svc.ackDeviceReminder('dr1', 'missed');
+    expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'missed' } });
   });
 });
