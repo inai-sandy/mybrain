@@ -8,6 +8,7 @@ import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
 import { EmoReminderService } from './emo-reminder.service';
 import { EmoStoryService } from './emo-story.service';
+import { EmoCloseService } from './emo-close.service';
 import { EmoResearchService } from './emo-research.service';
 import { EmoAskService, AskTurn } from './emo-ask.service';
 import { EmoTalkService } from './emo-talk.service';
@@ -32,6 +33,7 @@ export class EmoController {
     private readonly settingsSvc: EmoSettingsService,
     private readonly deviceSvc: EmoDeviceService,
     private readonly notesSvc: NotesService,
+    private readonly closeLane: EmoCloseService, // last on purpose: keeps positional wiring stable
   ) {}
 
   // Shared EMO settings (BEA-908) — same source of truth for web + app.
@@ -211,6 +213,7 @@ export class EmoController {
     else if (res.ok && res.card?.lane === 'task') void this.taskLane.handle(id).catch(() => undefined);
     else if (res.ok && res.card?.lane === 'reminder') void this.reminderLane.handle(id).catch(() => undefined);
     else if (res.ok && res.card?.lane === 'research') void this.researchLane.handle(id).catch(() => undefined);
+    else if (res.ok && res.card?.lane === 'close') void this.closeLane.handle(id).catch(() => undefined); // "which one?" (BEA-1033)
     return res;
   }
 

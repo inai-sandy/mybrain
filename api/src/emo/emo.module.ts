@@ -9,6 +9,7 @@ import { FlowsModule } from '../flows/flows.module';
 import { IdeasModule } from '../ideas/ideas.module';
 import { NotesModule } from '../notes/notes.module';
 import { EmoCardsService } from './emo-cards.service';
+import { EmoCloseService } from './emo-close.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
@@ -30,7 +31,8 @@ import { EmoController } from './emo.controller';
 @Module({
   imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule],
   controllers: [EmoController],
-  providers: [EmoCardsService, EmoRouterService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
+  providers: [EmoCardsService, EmoRouterService,
+    EmoCloseService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
   exports: [EmoCardsService, EmoRouterService],
 })
 export class EmoModule {}
