@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Clock, Loader2, CircleAlert, CheckCircle2 } from 'lucide-react';
+import { Check, Clock, Loader2, CircleAlert, CheckCircle2, Undo2 } from 'lucide-react';
 
 type Item = {
   id: string;
@@ -63,7 +63,7 @@ export function TaskShare() {
 
       {open.length > 0 && (
         <ul className="space-y-3">
-          {open.map((t) => <OpenRow key={t.id} item={t} />)}
+          {open.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
         </ul>
       )}
 
@@ -99,8 +99,26 @@ export function TaskShare() {
   );
 }
 
-function OpenRow({ item }: { item: Item }) {
+function OpenRow({ item, slug, onChanged }: { item: Item; slug: string; onChanged: () => void }) {
   const overdue = item.dueDate && new Date(item.dueDate) < new Date();
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function send(done: boolean, withNote = '') {
+    setBusy(true); setFailed(false);
+    try {
+      const r = await fetch(`/api/t/${encodeURIComponent(slug)}/tick`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: item.id, note: withNote, done }),
+      });
+      if (!r.ok) { setFailed(true); return; }
+      setAsking(false); setNote('');
+      await onChanged();
+    } catch { setFailed(true); } finally { setBusy(false); }
+  }
+
   return (
     <li className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <p className="font-medium leading-snug">{item.title}</p>
@@ -115,11 +133,41 @@ function OpenRow({ item }: { item: Item }) {
           </span>
         )}
       </div>
-      {item.claimed && (
-        <p className="mt-3 rounded-xl bg-violet-500/10 px-3 py-2 text-xs text-violet-700 dark:text-violet-300">
-          Sent to Sandeep for his check on {day(item.claimed.at)}.
-        </p>
+      {item.claimed ? (
+        <div className="mt-3 rounded-xl bg-violet-500/10 px-3 py-2.5">
+          <p className="text-xs text-violet-700 dark:text-violet-300">
+            ✓ Sent to Sandeep for his check on {day(item.claimed.at)}.
+          </p>
+          {item.claimed.note && item.claimed.note !== 'Ticked it off on their page' && (
+            <p className="mt-1 text-xs italic text-violet-600/80 dark:text-violet-400/80">“{item.claimed.note}”</p>
+          )}
+          <button onClick={() => send(false)} disabled={busy} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 underline underline-offset-2 disabled:opacity-50 dark:text-violet-300">
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Undo
+          </button>
+        </div>
+      ) : asking ? (
+        <div className="mt-3">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={2}
+            autoFocus
+            placeholder="Anything to add? e.g. sent it to the CA yesterday (optional)"
+            className="w-full resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+          />
+          <div className="mt-2 flex gap-2">
+            <button onClick={() => send(true, note)} disabled={busy} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white disabled:opacity-50">
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Send it
+            </button>
+            <button onClick={() => { setAsking(false); setNote(''); }} className="rounded-xl border border-zinc-300 px-4 py-3 text-sm dark:border-zinc-700">Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAsking(true)} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-emerald-500/50 bg-emerald-500/5 px-4 py-3 text-sm font-medium text-emerald-700 active:bg-emerald-500/15 dark:text-emerald-400">
+          <Check size={15} /> I've done this
+        </button>
       )}
+      {failed && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">That didn't go through — check your connection and try again.</p>}
     </li>
   );
 }

@@ -224,6 +224,19 @@ export class ContactsService {
     return { enabled: !!enabled };
   }
 
+  /** Resolve a share link to its contact, refusing a bad or turned-off one. (BEA-1028) */
+  async contactForShare(slug: string) {
+    const c = await this.prisma.contact.findUnique({ where: { shareSlug: String(slug || '') } });
+    if (!c || c.shareEnabled === false) throw new NotFoundException('This link is not valid');
+    return c;
+  }
+
+  /** Does this task actually belong to this contact? Nobody may tick someone else's work. */
+  async ownsTask(contactId: string, taskId: string): Promise<boolean> {
+    const t = await this.prisma.task.findUnique({ where: { id: String(taskId || '') }, select: { ownerContactId: true, status: true } });
+    return !!t && t.ownerContactId === contactId && t.status !== 'done';
+  }
+
   /**
    * What the contact sees. PUBLIC — no login — so it returns only what they already know: their
    * own work. Never the owner's private notes, never anyone else's tasks. (BEA-1027)
