@@ -104,12 +104,13 @@ export function Delegated() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between gap-3">
+      {/* Stacked on a phone so the heading isn't squeezed by the button. (BEA-1029) */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Users className="text-amber-500" /> Delegated</h1>
           <p className="text-sm text-zinc-500">Everything you're waiting on other people for.</p>
         </div>
-        <button onClick={() => setAdding(true)} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500">
+        <button onClick={() => setAdding(true)} className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 sm:w-auto sm:py-2">
           <Plus size={15} /> Give someone a task
         </button>
       </div>
