@@ -594,6 +594,9 @@ export class RemindersService {
         count,
         times: JSON.stringify(times),
         status: 'active',
+        // "daily" = a real chase that repeats until the work is confirmed done. Anything else stays
+        // on the old one-day lifecycle. (BEA-1021)
+        repeat: input.repeat === 'daily' ? 'daily' : 'none',
       },
     });
     await this.reseed(r.id, times, startDay);
@@ -611,6 +614,7 @@ export class RemindersService {
     const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};
+    if (patch.repeat !== undefined) data.repeat = patch.repeat === 'daily' ? 'daily' : 'none'; // (BEA-1021)
     if (patch.subject !== undefined) data.subject = (await this.cleanSubject(patch.subject, cur.contact?.name)) || topicFromMessage(patch.message ?? cur.message);
     if (patch.notes !== undefined) data.notes = patch.notes?.trim() || null;
     if (patch.message !== undefined) {

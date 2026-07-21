@@ -489,3 +489,43 @@ describe('topicFromMessage — clean nudge subject from a blank-subject message 
     expect(topicFromMessage('Hi Deepthi,')).toBe('this');
   });
 });
+
+/**
+ * A chase that quietly does not repeat is worse than no chase — you think someone is being
+ * followed up and nobody is. This asserts the flag actually reaches the database. (BEA-1021)
+ */
+describe('create/update persist the repeat mode (BEA-1021)', () => {
+  function makeCreateSvc() {
+    const rows: any[] = [];
+    const prisma: any = {
+      contact: { findUnique: async () => ({ id: 'c1', name: 'Ramesh' }) },
+      setting: { findUnique: async () => null },
+      reminder: {
+        create: async ({ data }: any) => { const r = { id: 'r1', ...data }; rows.push(r); return r; },
+        findUnique: async () => ({ ...rows[0], contact: { name: 'Ramesh' }, sends: [] }),
+        update: async ({ data }: any) => { Object.assign(rows[0], data); return rows[0]; },
+      },
+      reminderSend: { deleteMany: async () => ({}), createMany: async () => ({}) },
+      task: { findUnique: async () => null },
+    };
+    return { svc: new RemindersService(prisma, {} as any, {} as any, {} as any) as any, rows };
+  }
+
+  it('saves repeat="daily" when a chase is created', async () => {
+    const { svc, rows } = makeCreateSvc();
+    await svc.create({ contactId: 'c1', message: 'chase him', times: ['09:00'], repeat: 'daily' });
+    expect(rows[0].repeat).toBe('daily');
+  });
+
+  it('defaults to the old one-day behaviour when nothing is asked for', async () => {
+    const { svc, rows } = makeCreateSvc();
+    await svc.create({ contactId: 'c1', message: 'just once', times: ['09:00'] });
+    expect(rows[0].repeat).toBe('none');
+  });
+
+  it('never accepts an unknown repeat value', async () => {
+    const { svc, rows } = makeCreateSvc();
+    await svc.create({ contactId: 'c1', message: 'x', times: ['09:00'], repeat: 'hourly-forever' });
+    expect(rows[0].repeat).toBe('none');
+  });
+});
