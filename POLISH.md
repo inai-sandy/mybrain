@@ -9,7 +9,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 
 | # | Module | What it covers | Status | Issues | Date |
 |---|--------|----------------|--------|--------|------|
-| 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | filed | BEA-1019, 1038 (delegation half) | 2026-07-21 |
+| 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | building | BEA-1019✅ 1038 | 2026-07-21 |
 | 2 | EMO | `/emo` · `emo/` · ask/talk/capture router, 6 card lanes, device turn + TTS | — | | |
 | 3 | Activity, Day Close & Story | `/activity`, CloseDay, DailyStory · `daily/` · day summary, story, month/year, personality | — | | |
 | 4 | Capture & Items | `/capture`, `/doc/:id`, `/view/:id` · `items/` · upload, URL, Notion, Supermemory import, share | — | | |
@@ -18,7 +18,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 | 7 | Documents | `/documents`, `/d/:slug`, `/s/:code` · `documents/` · library, collections, public pages, export | — | | |
 | 8 | Notes & Ideas | `/notes`, `/ideas` · `notes/`, `ideas/` · CRUD, AI format, idea workflow docs | — | | |
 | 9 | Bookmarks | `/bookmarks` · `bookmarks/` · Raindrop sync, Instagram/Apify enrichment, summaries | — | | |
-| 10 | Contacts & Reminders | `/contacts`, `/reminders` · `contacts/` · WhatsApp via Postbox, reminder agent, threads | filed | BEA-1019 → 1038 | 2026-07-21 |
+| 10 | Contacts & Reminders | `/contacts`, `/reminders` · `contacts/` · WhatsApp via Postbox, reminder agent, threads | building | 1019✅1020✅1021✅1024✅1025✅ · 1022 1023 1026-1038 open | 2026-07-21 |
 | 11 | Meetings | `/meetings` · `meetings/` · records, transcription, audio retention, share | — | | |
 | 12 | Google Workspace | `/google/*` · `google/` · Gmail brief + requests, Drive, Calendar, Docs/Sheets/Slides, Tasks | — | | |
 | 13 | Recordings & Voice | `/recordings` · `recordings/`, `voice/` · chunked upload, marks, dictation, STT/TTS engines | — | | |
@@ -45,11 +45,11 @@ contact-tagged brain indexing, EMO briefing/closing by voice, and confirm/reject
 
 Build order (dependencies first):
 
-1. `BEA-1019` real task↔person links + `@` mentions  ← everything depends on this
-2. `BEA-1020` briefings
-3. `BEA-1021` chases belong to a task, repeat until confirmed
-4. `BEA-1024` agent marks the claimed task
-5. `BEA-1025` review list (confirm / reject)
+1. ✅ `BEA-1019` real task↔person links + `@` mentions — SHIPPED 2026-07-21
+2. ✅ `BEA-1020` briefings — SHIPPED 2026-07-21
+3. ✅ `BEA-1021` chases belong to a task, repeat until confirmed — SHIPPED 2026-07-21
+4. ✅ `BEA-1024` agent marks the claimed task — SHIPPED 2026-07-21
+5. ✅ `BEA-1025` review list (confirm / reject) — SHIPPED 2026-07-21
 6. `BEA-1027` + `BEA-1028` the contact's shared short link, tick + note → review
 7. `BEA-1029` delegated view · `BEA-1037` contact workspace
 8. `BEA-1022` promised dates · `BEA-1030` stalling digest · `BEA-1023` agent context
