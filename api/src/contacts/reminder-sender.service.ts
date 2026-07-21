@@ -76,6 +76,13 @@ export class ReminderSenderService implements OnModuleInit {
     let times: string[] = [];
     try { const a = JSON.parse(r.times || '[]'); if (Array.isArray(a)) times = a.filter((t) => typeof t === 'string'); } catch { /* fall through */ }
     if (!times.length) times = ['09:00'];
+    // They promised a date. Ease off to ONE nudge a day until then — but never go silent, because
+    // the owner still has to hear about it if nothing happens. Full rhythm returns on the day
+    // itself, with no one needing to do anything. (BEA-1022)
+    if (r.taskId) {
+      const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { promisedFor: true } }).catch(() => null);
+      if (t?.promisedFor && t.promisedFor > dayKey) times = [times.slice().sort()[0]];
+    }
     await this.prisma.reminderSend.deleteMany({ where: { reminderId: r.id, status: 'queued' } }).catch(() => undefined);
     const at = scheduleOnDay(times, dayKey, now);
     for (const when of at) {

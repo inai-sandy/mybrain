@@ -18,7 +18,7 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
   };
   const postbox: any = { isConfigured: () => true, sendText: async (to: string, body: string) => { state.texts.push({ to, body }); state.sent++; return { wamid: 'w1' }; } };
   const remindersSvc: any = { voiceComplete: async () => voice };
-  return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any), state };
+  return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any), state };
 }
 
 describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
@@ -95,7 +95,7 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
     // the LLM turn tracks how many run at once
     const remindersSvc: any = { voiceComplete: async () => { active++; maxActive = Math.max(maxActive, active); await new Promise((r) => setTimeout(r, 20)); active--; return '{"send":true,"reply":"ok","items":[]}'; } };
-    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any);
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any);
     await Promise.all([svc.onContactReply('c1'), svc.onContactReply('c1')]);
     expect(maxActive).toBe(1); // the two turns never overlapped
   });

@@ -9,6 +9,7 @@ type Item = {
   givenAt: string;
   dueDate?: string | null;
   completedAt?: string | null;
+  promisedFor?: string | null;
   claimed?: { at: string; note: string } | null;
 };
 type Board = { off: boolean; name: string; open?: Item[]; done?: Item[] };
@@ -127,6 +128,9 @@ function OpenRow({ item, slug, onChanged }: { item: Item; slug: string; onChange
         <span className="inline-flex items-center gap-1 rounded-full bg-zinc-500/10 px-2 py-0.5 text-zinc-500">
           <Clock className="h-3 w-3" /> asked {day(item.givenAt)}
         </span>
+        {item.promisedFor && (
+          <span className="rounded-full bg-sky-500/10 px-2 py-0.5 text-sky-700 dark:text-sky-400">you said {day(item.promisedFor)}</span>
+        )}
         {item.dueDate && (
           <span className={'rounded-full px-2 py-0.5 ' + (overdue ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' : 'bg-zinc-500/10 text-zinc-500')}>
             {overdue ? 'was due' : 'by'} {day(item.dueDate)}

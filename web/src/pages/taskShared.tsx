@@ -29,6 +29,9 @@ export type Task = {
   people?: { id: string; name: string }[]; // everyone @mentioned on this task (BEA-1019)
   /** Someone says this is finished and it's waiting on you. NOT done. (BEA-1024) */
   claim?: { id: string; quote: string; source: string; at: string; by?: { id: string; name: string } | null } | null;
+  /** The date they promised. Slows the chase to once a day until then. (BEA-1022) */
+  promisedFor?: string | null;
+  promiseSlips?: number;
   dueDate?: string | null; // ISO due date
   status: 'open' | 'done';
   progress?: number; // 0 | 30 | 60 | 100
@@ -148,6 +151,13 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
               title={t.ownerContactId ? `Linked to ${t.party} in your contacts` : `"${t.party}" isn't linked to a contact`}
             >
               🤝 Promise → {t.party}
+            </span>
+          )}
+          {/* What they promised — and how many times they've re-promised. (BEA-1022) */}
+          {t.promisedFor && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-1.5 py-0.5 font-medium text-sky-600 dark:text-sky-400" title={t.promiseSlips ? `Re-promised ${t.promiseSlips} time(s)` : 'They promised this date'}>
+              🗓 promised {new Date(t.promisedFor + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+              {!!t.promiseSlips && <span className="text-rose-500">·{t.promiseSlips}</span>}
             </span>
           )}
           {/* They say it's finished — a claim, not a completion. Waiting on you. (BEA-1024) */}

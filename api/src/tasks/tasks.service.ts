@@ -472,6 +472,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       reminderCount: t.reminderCount,
       reminders: t.reminders ? (() => { try { return JSON.parse(t.reminders); } catch { return []; } })() : [],
       day: t.day,
+      promisedFor: t.promisedFor || null,
+      promiseSlips: t.promiseSlips || 0,
       // `party` stays the display text so nothing on screen changes. `owner` is the real link — when
       // one exists its name wins, so renaming a contact renames it everywhere. (BEA-1019)
       party: t.ownerContact?.name || t.party || null,
@@ -595,6 +597,30 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       if (!later) return shaped;
       return { ...shaped, status: 'open', progress: 0, finishedLater: this.dayKeyOf(t.completedAt as Date, tz) };
     });
+  }
+
+  /**
+   * They promised a date. The chase drops to once a day until then — it never pauses, because
+   * silence has to keep reaching the owner. Re-promising counts as a slip. (BEA-1022)
+   */
+  async recordPromise(taskId: string, day: string): Promise<{ ok: boolean; slip?: boolean }> {
+    // Shape AND reality: "2026-13-45" matches the pattern but is not a day that exists. A model
+    // hallucinating a date must not set a promise. (BEA-1022)
+    const d = String(day || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false };
+    const parsed = new Date(`${d}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== d) return { ok: false };
+    const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { promisedFor: true, status: true } });
+    if (!t || t.status === 'done') return { ok: false };
+    const today = this.dayKey(await this.tz());
+    if (d < today) return { ok: false }; // a date in the past is not a promise
+    const slip = !!t.promisedFor && t.promisedFor !== d;
+    await this.prisma.task.update({
+      where: { id: taskId },
+      data: { promisedFor: d, promisedAt: new Date(), ...(slip ? { promiseSlips: { increment: 1 } } : {}) },
+    });
+    this.log.log(`promise on task ${taskId}: ${d}${slip ? ' (re-promised — counted as a slip)' : ''}`);
+    return { ok: true, slip };
   }
 
   /** Contacts in the shape the matchers want. (BEA-1019) */

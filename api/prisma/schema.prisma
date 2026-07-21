@@ -411,6 +411,11 @@ model Task {
   chases        Reminder[]
   /// Times someone said this was finished. A claim is NOT done — the owner confirms. (BEA-1024)
   claims        TaskClaim[]
+  /// The date they promised. Slows the chase to once a day until then — never pauses it, because
+  /// silence must always still reach the owner. (BEA-1022)
+  promisedFor   String? // local day key YYYY-MM-DD
+  promisedAt    DateTime? // when they said it
+  promiseSlips  Int       @default(0) // how many times they've re-promised — feeds the neglect digest
   /// The briefing that produced this task, if it came from one. (BEA-1020)
   briefingId    String?
   briefing      Briefing? @relation(fields: [briefingId], references: [id], onDelete: SetNull)

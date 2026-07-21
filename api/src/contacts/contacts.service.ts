@@ -280,7 +280,7 @@ export class ContactsService {
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       take: 300,
       select: {
-        id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true,
+        id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true, promisedFor: true,
         claims: { where: { status: 'pending' }, take: 1, select: { id: true, quote: true, createdAt: true } },
       },
     });
@@ -290,6 +290,7 @@ export class ContactsService {
       note: t.note,
       givenAt: t.createdAt,
       dueDate: t.dueDate,
+      promisedFor: t.promisedFor,
       completedAt: t.completedAt,
       claimed: t.claims?.[0] ? { at: t.claims[0].createdAt, note: t.claims[0].quote } : null,
     });
