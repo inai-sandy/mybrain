@@ -253,16 +253,41 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    * rather than by the (no longer re-stamped) day field. (BEA-1014)
    */
   private dayStart(day: string, tz: string): Date {
-    // Find the UTC instant whose local date in `tz` is `day` at 00:00. Probe midday UTC and correct.
-    const probe = new Date(`${day}T12:00:00Z`);
-    const localOfProbe = this.dayKey(tz, probe);
-    const shiftDays = localOfProbe === day ? 0 : localOfProbe < day ? 1 : -1;
-    const base = new Date(probe.getTime() + shiftDays * 86400000);
-    // Walk back to local midnight (at most 24h of hourly steps — cheap and timezone-safe).
-    let t = new Date(base.getTime());
-    while (this.dayKey(tz, new Date(t.getTime() - 3600000)) === day) t = new Date(t.getTime() - 3600000);
-    while (this.dayKey(tz, t) !== day) t = new Date(t.getTime() + 3600000);
-    return new Date(t.getTime() - (t.getTime() % 3600000));
+    // Derive the boundary from the zone's real offset, to the MINUTE. This used to walk in whole hours
+    // and floor to the hour, which cannot represent India's +05:30: local midnight 18:30Z was reported
+    // as 19:00Z, so anything finished in the first 30 minutes after midnight failed the
+    // `completedAt >= dayStart` test and silently vanished from Today. (BEA-1017)
+    const midnightUtc = Date.parse(`${day}T00:00:00Z`);
+    const off = this.tzOffsetMinutes(tz, new Date(midnightUtc));
+    const t = new Date(midnightUtc - off * 60000);
+    // The offset in force AT that instant can differ from the one at the UTC probe (a DST change lands
+    // between them), so resolve once more against the real instant.
+    const off2 = this.tzOffsetMinutes(tz, t);
+    return off2 === off ? t : new Date(midnightUtc - off2 * 60000);
+  }
+
+  /** Minutes `tz` is ahead of UTC at a given instant (IST = 330). Falls back to UTC if the zone is bad. */
+  private tzOffsetMinutes(tz: string, at: Date): number {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }).formatToParts(at);
+      const p: Record<string, string> = {};
+      for (const { type, value } of parts) p[type] = value;
+      const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+      // Compare on whole seconds — formatToParts has no milliseconds, so the raw difference would
+      // otherwise carry `at`'s millisecond remainder into the offset.
+      return Math.round((asUtc - Math.floor(at.getTime() / 1000) * 1000) / 60000);
+    } catch {
+      return 0;
+    }
   }
 
   /** Local day key (YYYY-MM-DD) in the user's timezone. */

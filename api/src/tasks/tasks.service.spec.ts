@@ -397,4 +397,35 @@ describe('today() — carried tasks stay visible without faking their date (BEA-
     const out: any = await svc.today();
     expect(out.tasks.map((t: any) => t.id)).not.toContain('oldDone');
   });
+
+  // The boundary used to be walked in whole hours and floored to the hour, so it could not represent
+  // India's +05:30 and landed 30 minutes late. Anything finished in the first half hour after midnight
+  // failed `completedAt >= dayStart` and vanished from Today. (BEA-1017)
+  describe('dayStart lands on the exact local midnight, to the minute (BEA-1017)', () => {
+    const start = (day: string, tz: string) => (svcWith([]) as any).dayStart(day, tz) as Date;
+
+    it('handles half- and quarter-hour offsets', () => {
+      expect(start('2026-07-21', 'Asia/Kolkata').toISOString()).toBe('2026-07-20T18:30:00.000Z'); // +05:30
+      expect(start('2026-07-21', 'Asia/Kathmandu').toISOString()).toBe('2026-07-20T18:15:00.000Z'); // +05:45
+      expect(start('2026-07-21', 'UTC').toISOString()).toBe('2026-07-21T00:00:00.000Z');
+      expect(start('2026-07-21', 'America/New_York').toISOString()).toBe('2026-07-21T04:00:00.000Z'); // -04:00 DST
+    });
+
+    it('uses the offset in force on that date, not today\'s', () => {
+      // New York is -05:00 in January and -04:00 in July: a fixed offset would be an hour out.
+      expect(start('2026-01-15', 'America/New_York').toISOString()).toBe('2026-01-15T05:00:00.000Z');
+      // Southern hemisphere, the other way round.
+      expect(start('2026-01-15', 'Australia/Sydney').toISOString()).toBe('2026-01-14T13:00:00.000Z'); // +11:00
+      expect(start('2026-07-15', 'Australia/Sydney').toISOString()).toBe('2026-07-14T14:00:00.000Z'); // +10:00
+    });
+
+    it('a task finished 10 minutes after local midnight still counts as today', async () => {
+      const svc = svcWith([]);
+      const boundary = (svc as any).dayStart(istToday(), IST) as Date;
+      const justAfterMidnight = new Date(boundary.getTime() + 10 * 60000);
+      const s2 = svcWith([{ id: 'lateNight', title: 'Finished at 00:10', status: 'done', day: '2026-06-09', completedAt: justAfterMidnight, tags: null }]);
+      const out: any = await s2.today();
+      expect(out.tasks.map((t: any) => t.id)).toContain('lateNight');
+    });
+  });
 });
