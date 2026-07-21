@@ -99,11 +99,23 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
         {t.note && <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2">{t.note}</p>}
         <div className="flex items-center flex-wrap gap-1.5 mt-2 text-[11px]">
           <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + p.cls}><span className={'h-1.5 w-1.5 rounded-full ' + p.dot} />{p.label}</span>
-          {!done && t.rolloverCount > 0 && (
-            <span title={`Carried forward ${t.rolloverCount} day${t.rolloverCount === 1 ? '' : 's'}`} className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + (t.rolloverCount >= 2 ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}>
-              <RotateCcw size={10} /> {t.rolloverCount >= 2 ? `carried ${t.rolloverCount}d` : 'carried'}
-            </span>
-          )}
+          {!done && t.rolloverCount > 0 && (() => {
+            // A carried task keeps the day it was ADDED (BEA-1014) — show that honestly next to the
+            // carry count, so "still open since 12 Jul" is visible instead of it looking brand new.
+            const added = t.day ? new Date(t.day + 'T12:00:00Z') : null;
+            const addedLabel = added && !isNaN(added.getTime())
+              ? added.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+              : '';
+            return (
+              <span
+                title={`Added ${addedLabel || 'earlier'} · carried forward ${t.rolloverCount} day${t.rolloverCount === 1 ? '' : 's'}`}
+                className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + (t.rolloverCount >= 2 ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-medium' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500')}
+              >
+                <RotateCcw size={10} />
+                {addedLabel ? `added ${addedLabel} · ${t.rolloverCount}d` : (t.rolloverCount >= 2 ? `carried ${t.rolloverCount}d` : 'carried')}
+              </span>
+            );
+          })()}
           {t.category && <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-zinc-500">{t.category}</span>}
           {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
           {t.party && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 font-medium">🤝 Promise → {t.party}</span>}

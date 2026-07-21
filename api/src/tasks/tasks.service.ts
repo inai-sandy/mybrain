@@ -173,13 +173,20 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     if (this.tick) clearInterval(this.tick);
   }
 
-  /** Carry a closed day's still-open tasks forward to `toDay` (flagged via rolloverCount). Called by closeDay. */
+  /**
+   * A closed day's still-open tasks stay ON THE DAY THEY WERE ADDED — we only count the carry. (BEA-1014)
+   *
+   * This used to re-stamp `day` to the new day, which made every open task claim it was created today
+   * (a task added 42 days ago read as "added today"), destroyed the record of what each day actually
+   * produced, and — because a task's indexed text changed every night — created the duplicate churn
+   * that forced open tasks out of memory entirely. Open tasks are carried forward by the QUERY
+   * (`day <= today`) instead, so nothing moves and the history stays true.
+   */
   async rollDayForward(fromDay: string, toDay: string): Promise<{ rolled: number }> {
     if (!fromDay || !toDay || fromDay >= toDay) return { rolled: 0 };
     const open = await this.prisma.task.findMany({ where: { status: 'open', day: fromDay } });
     for (const t of open) {
-      const upd = await this.prisma.task.update({ where: { id: t.id }, data: { day: toDay, rolloverCount: (t.rolloverCount || 0) + 1 } });
-      this.indexTask(upd);
+      await this.prisma.task.update({ where: { id: t.id }, data: { rolloverCount: (t.rolloverCount || 0) + 1 } });
     }
     return { rolled: open.length };
   }
@@ -223,6 +230,23 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   private async tz(): Promise<string> {
     const row = await this.prisma.setting.findUnique({ where: { key: 'tasks.tz' } });
     return row?.value || DEFAULT_TZ;
+  }
+
+  /**
+   * The instant a local day begins, as a UTC Date — so "finished today" can be judged by completedAt
+   * rather than by the (no longer re-stamped) day field. (BEA-1014)
+   */
+  private dayStart(day: string, tz: string): Date {
+    // Find the UTC instant whose local date in `tz` is `day` at 00:00. Probe midday UTC and correct.
+    const probe = new Date(`${day}T12:00:00Z`);
+    const localOfProbe = this.dayKey(tz, probe);
+    const shiftDays = localOfProbe === day ? 0 : localOfProbe < day ? 1 : -1;
+    const base = new Date(probe.getTime() + shiftDays * 86400000);
+    // Walk back to local midnight (at most 24h of hourly steps — cheap and timezone-safe).
+    let t = new Date(base.getTime());
+    while (this.dayKey(tz, new Date(t.getTime() - 3600000)) === day) t = new Date(t.getTime() - 3600000);
+    while (this.dayKey(tz, t) !== day) t = new Date(t.getTime() + 3600000);
+    return new Date(t.getTime() - (t.getTime() % 3600000));
   }
 
   /** Local day key (YYYY-MM-DD) in the user's timezone. */
@@ -356,11 +380,26 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** Today's tasks + the day's dump status (for the Today screen). */
+  /**
+   * Today's tasks + the day's dump status (for the Today screen).
+   *
+   * Open tasks are carried forward by this QUERY, not by re-stamping their date (BEA-1014): anything
+   * still open from today or earlier belongs on Today, while keeping the day it was actually added so
+   * the UI can show "added 12 Jul · carried 9 days". Finished tasks are counted on the day they were
+   * COMPLETED — otherwise finishing a carried task would silently vanish from today's record.
+   */
   async today() {
     const tz = await this.tz();
     const day = this.dayKey(tz);
-    const rows = await this.prisma.task.findMany({ where: { day } });
+    const rows = await this.prisma.task.findMany({
+      where: {
+        OR: [
+          { status: 'open', day: { lte: day } }, // still open, from today or any earlier day
+          { day }, // anything belonging to today (incl. tasks added and finished today)
+          { status: 'done', completedAt: { gte: this.dayStart(day, tz) } }, // finished today, added whenever
+        ],
+      },
+    });
     const dump = await this.prisma.brainDump.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const tasks = this.sortTasks(rows).map((t) => this.shape(t));
     return {

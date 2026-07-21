@@ -203,7 +203,7 @@ describe('TasksService', () => {
     expect(alisan.map((t: any) => t.id)).toEqual(['2']);
   });
 
-  it('rollDayForward carries a closed day\'s open tasks forward; finished tasks stay on their day', async () => {
+  it('rollDayForward counts the carry but NEVER moves the date (BEA-1014)', async () => {
     const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Carry me' }, { title: 'Already done' }] }));
     const { tasks: made } = await svc.dump('two');
     const open = tasks.find((x) => x.id === made[0].id);
@@ -214,9 +214,12 @@ describe('TasksService', () => {
     done.status = 'done';
 
     const r = await svc.rollDayForward('2026-06-12', '2026-06-13');
-    expect(r.rolled).toBe(1); // only the open task moves
-    expect(open.day).toBe('2026-06-13');
-    expect(open.rolloverCount).toBe(1);
+    expect(r.rolled).toBe(1); // only the open task is carried
+    // The task KEEPS the day it was added — re-stamping it made every open task claim it was
+    // created today, and destroyed the record of what each day produced. Today picks it up by
+    // querying `day <= today` instead. (BEA-1014)
+    expect(open.day).toBe('2026-06-12');
+    expect(open.rolloverCount).toBe(1); // but we do count how long it has been carried
     expect(done.day).toBe('2026-06-12'); // a finished task stays credited to its real day
 
     // never rolls same-day or backwards
@@ -304,5 +307,53 @@ describe('indexTask — the dates EMO reads (BEA-1013)', () => {
       createdAt: new Date('2026-07-12T20:40:00Z'), completedAt: null, rolloverCount: 9, day: '2026-07-21',
     });
     expect(content).toBe(''); // nothing sent to the brain for an open task
+  });
+});
+
+describe('today() — carried tasks stay visible without faking their date (BEA-1014)', () => {
+  const IST = 'Asia/Kolkata';
+  const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: IST, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+
+  function svcWith(rows: any[]) {
+    const prisma: any = {
+      setting: { findUnique: async () => ({ value: IST }) },
+      brainDump: { findFirst: async () => null },
+      task: {
+        findMany: async ({ where }: any) => rows.filter((t) => {
+          const or = where?.OR || [];
+          return or.some((c: any) => {
+            if (c.status && c.status !== t.status) return false;
+            if (c.day && typeof c.day === 'string' && c.day !== t.day) return false;
+            if (c.day?.lte && !(t.day <= c.day.lte)) return false;
+            if (c.completedAt?.gte && !(t.completedAt && new Date(t.completedAt) >= c.completedAt.gte)) return false;
+            return true;
+          });
+        }),
+      },
+    };
+    return new TasksService(prisma, {} as any, {} as any, { indexEntity: async () => undefined, deleteDoc: async () => undefined } as any);
+  }
+
+  it('shows an OLD still-open task on Today, still dated the day it was added', async () => {
+    const today = istToday();
+    const svc = svcWith([{ id: 'old', title: 'Installation charges', status: 'open', day: '2026-06-09', rolloverCount: 42, tags: null }]);
+    const out: any = await svc.today();
+    expect(out.tasks.map((t: any) => t.id)).toContain('old'); // visible today...
+    expect(out.tasks[0].day).toBe('2026-06-09');              // ...but honest about its real date
+    expect(out.tasks[0].rolloverCount).toBe(42);              // so the UI can say "carried 42 days"
+    expect(out.day).toBe(today);
+  });
+
+  it('counts a carried task FINISHED today in today\'s record', async () => {
+    const svc = svcWith([{ id: 'fin', title: 'Old thing', status: 'done', day: '2026-06-09', completedAt: new Date(), tags: null }]);
+    const out: any = await svc.today();
+    expect(out.tasks.map((t: any) => t.id)).toContain('fin'); // finishing it today must not vanish
+    expect(out.counts.done).toBe(1);
+  });
+
+  it('does NOT show a task that was finished on an earlier day', async () => {
+    const svc = svcWith([{ id: 'oldDone', title: 'Long done', status: 'done', day: '2026-06-09', completedAt: new Date('2026-06-09T10:00:00Z'), tags: null }]);
+    const out: any = await svc.today();
+    expect(out.tasks.map((t: any) => t.id)).not.toContain('oldDone');
   });
 });

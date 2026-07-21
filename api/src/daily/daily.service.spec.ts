@@ -451,24 +451,32 @@ describe('DailyService', () => {
       expect(setSpy).not.toHaveBeenCalledWith('daily.lastMorningWrap', '2026-07-02'); // guard NOT set → will retry
     });
 
-    it('wrapUp of an OLD day rolls tasks to today, not onto the sealed day+1 (BEA-781)', async () => {
+    // BEA-781's goal was that a carried task is never stranded (still visible + workable). That still
+    // holds, but it is now achieved by the Today QUERY (`open && day <= today`) rather than by
+    // re-stamping the date — which used to make every open task claim it was created today. (BEA-1014)
+    it('wrapUp of an OLD day keeps the task on its own day, open and counted (BEA-1014, was BEA-781)', async () => {
       const { svc, tasks } = makeService({ llmText: '{}' });
       const today = istToday();
       const oldDay = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 5); return d.toISOString().slice(0, 10); })();
       tasks.push({ id: 'old1', day: oldDay, status: 'open', title: 'left over', rolloverCount: 0 });
       const r = await svc.wrapUp(oldDay, [], undefined, ['old1'], []);
       expect(r.rolled).toBe(1);
-      expect(tasks.find((t) => t.id === 'old1').day).toBe(today); // NOT oldDay+1 (which is sealed/past)
+      const t = tasks.find((x) => x.id === 'old1');
+      expect(t.day).toBe(oldDay);        // the date it was added is preserved
+      expect(t.status).toBe('open');     // still open, so Today's `day <= today` query picks it up
+      expect(t.rolloverCount).toBe(1);   // and we record that it has been carried
     });
 
-    it('wrapUp of TODAY still rolls tasks to tomorrow (BEA-781)', async () => {
+    it('wrapUp of TODAY leaves the task on today, open and counted (BEA-1014, was BEA-781)', async () => {
       const { svc, tasks } = makeService({ llmText: '{}' });
       const today = istToday();
-      const tomorrow = (() => { const d = new Date(today + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
       tasks.push({ id: 'tdy', day: today, status: 'open', title: 'carry', rolloverCount: 0 });
       const r = await svc.wrapUp(today, [], undefined, ['tdy'], []);
       expect(r.rolled).toBe(1);
-      expect(tasks.find((t) => t.id === 'tdy').day).toBe(tomorrow);
+      const t = tasks.find((x) => x.id === 'tdy');
+      expect(t.day).toBe(today);
+      expect(t.status).toBe('open');
+      expect(t.rolloverCount).toBe(1);
     });
 
     it('activity() reports provisional for an un-sealed written day and final once closed', async () => {
