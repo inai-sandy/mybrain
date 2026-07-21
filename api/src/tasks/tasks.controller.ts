@@ -48,6 +48,18 @@ export class TasksController {
   }
 
   /** Every task involving a given person (across all days/statuses). */
+  /** What the `@names` in some text resolve to — so the form can show it as you type. (BEA-1019) */
+  @Post('mentions/resolve')
+  async resolveMentions(@Body() body: { text?: string }) {
+    return { mentions: await this.tasks.resolveMentionText(String(body?.text || '')) };
+  }
+
+  /** Person names on old tasks that could NOT be linked to one contact — for the owner to fix. (BEA-1019) */
+  @Get('people/unlinked')
+  async unlinkedParties() {
+    return { unmatched: await this.tasks.unlinkedParties() };
+  }
+
   @Get('by-person')
   async byPerson(@Query('name') name?: string) {
     return { tasks: await this.tasks.byPerson(name || '') };

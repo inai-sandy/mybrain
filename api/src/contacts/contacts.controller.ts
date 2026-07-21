@@ -10,6 +10,14 @@ export class ContactsController {
     return this.contacts.list(q || undefined, Number(page) || 1, Number(pageSize) || 20);
   }
 
+  /** Every contact, name + spellings only — for pickers and @mention matching. Must come before
+   *  ':id' so "all" isn't read as an id. Uncapped on purpose: a picker that silently stops at 100
+   *  would quietly hide people. (BEA-1019) */
+  @Get('all')
+  all() {
+    return this.contacts.allForPicker();
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.contacts.get(id);

@@ -8,6 +8,13 @@ function makeService(llmText: string | null) {
   let seq = 0;
   const prisma: any = {
     contact: { findMany: async () => [] },
+    // @mention links between a task and a contact (BEA-1019). No contacts in this fixture, so
+    // nothing ever links — but update() still reconciles, so the table has to exist.
+    taskPerson: {
+      findMany: async () => [],
+      create: async ({ data }: any) => data,
+      deleteMany: async () => ({ count: 0 }),
+    },
     setting: {
       findUnique: async ({ where }: any) => (settings[where.key] ? { key: where.key, value: settings[where.key] } : null),
       upsert: async ({ where, create, update }: any) => {

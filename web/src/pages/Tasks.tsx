@@ -5,6 +5,7 @@ import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { useUrlState, useUrlBool } from '../ui/useUrlState';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday, mins, sortTasksBy } from './taskShared';
+import { UnlinkedPeople } from '../ui/UnlinkedPeople';
 
 export function Tasks() {
   const { data, loading, load } = useToday();
@@ -118,6 +119,8 @@ export function Tasks() {
 
   return (
     <div className="space-y-3">
+      {/* Names on tasks we refused to guess at — shown only when there are any. (BEA-1019) */}
+      <UnlinkedPeople />
       {/* Header: title + count + search/done toggles */}
       <div className="flex items-center justify-between gap-3">
         <div>

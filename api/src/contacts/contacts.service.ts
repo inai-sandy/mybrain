@@ -45,6 +45,18 @@ export class ContactsService {
     return { contacts: rows.map((r) => this.shape(r)), total, page: p, pageSize: ps };
   }
 
+  /** Every contact as {id, name, aliases} — the small payload pickers and @mentions need. (BEA-1019) */
+  async allForPicker() {
+    const rows = await this.prisma.contact.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, aliases: true } });
+    return {
+      contacts: rows.map((r) => {
+        let aliases: string[] = [];
+        try { const a = JSON.parse((r as any).aliases || '[]'); if (Array.isArray(a)) aliases = a; } catch { /* a corrupt row must not break the picker */ }
+        return { id: r.id, name: r.name, aliases };
+      }),
+    };
+  }
+
   async get(id: string) {
     const c = await this.prisma.contact.findUnique({ where: { id } });
     if (!c) throw new NotFoundException('Contact not found');
@@ -82,6 +94,14 @@ export class ContactsService {
       data.aliases = JSON.stringify(this.cleanNames(patch.aliases).filter((a) => norm(a) !== name));
     }
     const c = await this.prisma.contact.update({ where: { id }, data });
+    // Renaming a person carries their work with them: the tasks they own keep showing the current
+    // name, not the one typed months ago. The link is what matters — this just keeps the stored
+    // display text honest for anything that still reads it. (BEA-1019)
+    if (data.name && data.name !== cur.name) {
+      await this.prisma.task
+        .updateMany({ where: { ownerContactId: id }, data: { party: String(data.name).slice(0, 80) } })
+        .catch(() => undefined);
+    }
     return this.shape(c);
   }
 

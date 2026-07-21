@@ -400,7 +400,13 @@ model Task {
   reminders     String? // JSON array of ISO datetimes (AI-scheduled)
   day           String? // local day key YYYY-MM-DD this task is planned for
   dumpId        String? // the BrainDump this task was extracted from
-  party         String? // who this task is a promise TO / with — folded in from Commitments (BEA-604)
+  party         String? // display text for the person — kept in sync with ownerContact when linked (BEA-604)
+  /// The person this task really belongs to. null = it's mine. A real link, so renaming a contact
+  /// carries every task with it and nothing is lost to a typo or a nickname. (BEA-1019)
+  ownerContactId String?
+  ownerContact   Contact? @relation("TaskOwner", fields: [ownerContactId], references: [id], onDelete: SetNull)
+  /// Everyone else this task touches — the @mentions. (BEA-1019)
+  people        TaskPerson[]
   reminderSuggestDismissed Boolean @default(false) // user cleared this from "Suggested reminders" (BEA-882)
   dueDate       DateTime?
   status        String    @default("open") // open | done
@@ -411,6 +417,22 @@ model Task {
   ragId         String?
   createdAt     DateTime  @default(now())
   completedAt   DateTime?
+
+  @@index([ownerContactId])
+}
+
+/// One person linked to one task by an @mention — the cross-contact link, visible from both sides.
+/// The task's OWNER is Task.ownerContactId; this is everyone else it touches. (BEA-1019)
+model TaskPerson {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, contactId])
+  @@index([contactId])
 }
 
 /// Outbox: every memory write is queued here, then a worker drains it to both stores with retries.
@@ -848,6 +870,8 @@ model Contact {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]
+  ownedTasks     Task[]       @relation("TaskOwner") // work this person owns (BEA-1019)
+  taskLinks      TaskPerson[] // tasks they're @mentioned on (BEA-1019)
 
   @@index([name])
 }

@@ -6,6 +6,8 @@ import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
 import { loadDraft, clearDraft, useDraftPersist } from '../ui/useDraft';
 import { motion } from 'framer-motion';
+import { PersonPicker } from '../ui/PersonPicker';
+import { MentionChips, useMentions } from '../ui/Mentions';
 
 export type Task = {
   id: string;
@@ -21,7 +23,10 @@ export type Task = {
   reminderCount?: number;
   reminders?: string[];
   day?: string | null;
-  party?: string | null; // who this task is a promise TO (folded in from Commitments)
+  party?: string | null; // display text for the person
+  ownerContactId?: string | null; // the REAL owner link — null means it's yours (BEA-1019)
+  owner?: { id: string; name: string } | null;
+  people?: { id: string; name: string }[]; // everyone @mentioned on this task (BEA-1019)
   dueDate?: string | null; // ISO due date
   status: 'open' | 'done';
   progress?: number; // 0 | 30 | 60 | 100
@@ -131,7 +136,24 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
             );
           })()}
           {t.sphere === 'personal' && <span className="rounded-full bg-violet-500/10 text-violet-600 dark:text-violet-300 px-1.5 py-0.5">🏠 personal</span>}
-          {t.party && <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 font-medium">🤝 Promise → {t.party}</span>}
+          {t.party && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${
+                t.ownerContactId
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                  : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400'
+              }`}
+              title={t.ownerContactId ? `Linked to ${t.party} in your contacts` : `"${t.party}" isn't linked to a contact`}
+            >
+              🤝 Promise → {t.party}
+            </span>
+          )}
+          {/* Everyone else this task touches — the @mentions, real links both ways. (BEA-1019) */}
+          {(t.people || []).map((p) => (
+            <span key={p.id} className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-400 px-1.5 py-0.5 font-medium" title={`Also involves ${p.name}`}>
+              @{p.name}
+            </span>
+          ))}
           {t.dueDate && (() => {
             const due = new Date(t.dueDate);
             const overdue = !done && due < new Date(new Date().toDateString());
@@ -346,6 +368,8 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
   const [sphere, setSphere] = useState<'work' | 'personal'>(task?.sphere === 'personal' ? 'personal' : 'work');
   const [reminders, setReminders] = useState(task?.reminderCount ?? 0);
   const [party, setParty] = useState(task?.party || '');
+  const [partyId, setPartyId] = useState<string | null>(task?.ownerContactId || null);
+  const mentions = useMentions(`${title}\n${note}`);
   const [due, setDue] = useState(task?.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : '');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -366,6 +390,8 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
       sphere,
       reminderCount: reminders,
       party: party.trim() || null,
+      // The REAL link. Sent alongside `party` so the display text and the link never disagree. (BEA-1019)
+      ownerContactId: partyId,
       dueDate: due || null,
     };
     try {
@@ -422,8 +448,14 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
           </div>
           <p className="text-[11px] text-zinc-400 mt-1">The AI picks smart times based on priority. Reminders are delivered via Telegram.</p>
           <div className="grid grid-cols-2 gap-3 mt-3">
-            <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Promise to (who)
-              <input value={party} onChange={(e) => setParty(e.target.value)} className={inp} placeholder="e.g. Rakesh — optional" />
+            <label className="text-sm text-zinc-600 dark:text-zinc-400 block" htmlFor="task-party">Promise to (who)
+              <PersonPicker
+                id="task-party"
+                contactId={partyId}
+                name={party}
+                onChange={(v) => { setPartyId(v.contactId); setParty(v.name); }}
+                placeholder="e.g. Rakesh — optional"
+              />
             </label>
             <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Due date
               <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={inp} />
@@ -440,8 +472,10 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
             <input value={tags} onChange={(e) => setTags(e.target.value)} className={inp} placeholder="comma, separated" />
           </label>
           <label className="text-sm text-zinc-600 dark:text-zinc-400 block mt-3">Notes
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className={inp} placeholder="Any extra context…" />
+            <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} className={inp} placeholder="Any extra context… type @name to link someone" />
           </label>
+          {/* Who the @names in the title/notes turned out to be — linked, ambiguous, or unknown. (BEA-1019) */}
+          <MentionChips mentions={mentions} className="mt-2" />
           <label className="flex items-center gap-2 mt-3 text-sm cursor-pointer">
             <input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
             <Star size={14} className="text-amber-500" /> Pin as a must-do today

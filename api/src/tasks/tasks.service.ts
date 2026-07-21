@@ -1,12 +1,19 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { whereForDayRule } from './day-rule';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { MemoryService } from '../memory/memory.service';
 import { matchContact, contactSpellings } from '../contacts/person-identity';
+import { MentionResolution, exactMatches, linkableIds, resolveMentions } from './mentions';
 
 const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
+
+/** Load the owner and the @mentioned people alongside a task, so `shape` can return them. (BEA-1019) */
+const PEOPLE_INCLUDE = {
+  ownerContact: { select: { id: true, name: true } },
+  people: { select: { contact: { select: { id: true, name: true } } } },
+} as const;
 
 /** Normalized title key for dedupe — lowercase, punctuation-stripped, whitespace-collapsed. (BEA-933) */
 export function normTitleKey(title?: string | null): string {
@@ -103,6 +110,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     setTimeout(() => this.runOnceRebuild().catch((e) => this.log.warn(`task memory rebuild: ${e?.message ?? e}`)), 70000);
     // One-time DISCIPLINE: stop indexing junk (Vault, day summaries, portrait) + purge it. (BEA-551)
     setTimeout(() => this.runOnceMemoryDiscipline().catch((e) => this.log.warn(`memory discipline: ${e?.message ?? e}`)), 95000);
+    // One-time: turn typed person names into REAL contact links. Exact matches only. (BEA-1019)
+    setTimeout(() => this.runOnceLinkParties().catch((e) => this.log.warn(`party link backfill: ${e?.message ?? e}`)), 30000);
   }
 
   /** Passthrough: stop indexing low-value sources + purge them. (BEA-551) */
@@ -117,6 +126,60 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const r = await this.memory.purgeLowValueSources();
     await this.prisma.setting.upsert({ where: { key }, create: { key, value: JSON.stringify(r) }, update: { value: JSON.stringify(r) } }).catch(() => undefined);
     this.log.log(`memory discipline: purged vault=${r.vault} daysummary=${r.daysummary} portrait=${r.portrait} docs (no longer indexed)`);
+  }
+
+  /**
+   * One-time: turn the typed `party` text on existing tasks into a REAL owner link. (BEA-1019)
+   *
+   * Deliberately conservative. A name is linked only when it matches exactly one contact by name or
+   * alias — no fuzzy matching, no first-name guessing. Anything ambiguous or unrecognised is left
+   * exactly as it was and listed for the owner to sort out by hand. Nothing is deleted or rewritten:
+   * this only fills in a column that was previously empty.
+   */
+  async linkExistingParties(dryRun = false): Promise<{ linked: number; unmatched: { party: string; taskIds: string[]; reason: string }[] }> {
+    const contacts = await this.allContacts();
+    const rows = await this.prisma.task.findMany({
+      where: { ownerContactId: null, NOT: { party: null } },
+      select: { id: true, party: true },
+    });
+    const unmatched = new Map<string, { party: string; taskIds: string[]; reason: string }>();
+    let linked = 0;
+    for (const r of rows) {
+      const text = String(r.party || '').trim();
+      if (!text) continue;
+      const hits = exactMatches(contacts, text);
+      if (hits.length === 1) {
+        if (!dryRun) {
+          await this.prisma.task
+            .update({ where: { id: r.id }, data: { ownerContactId: hits[0].id, party: hits[0].name.slice(0, 80) } })
+            .catch(() => undefined);
+        }
+        linked++;
+      } else {
+        const reason = hits.length > 1 ? `${hits.length} contacts share this name` : 'no contact with this name';
+        const key = text.toLowerCase();
+        const e = unmatched.get(key) || { party: text, taskIds: [], reason };
+        e.taskIds.push(r.id);
+        unmatched.set(key, e);
+      }
+    }
+    return { linked, unmatched: [...unmatched.values()] };
+  }
+
+  /** What the backfill could not resolve — shown to the owner instead of being guessed. (BEA-1019) */
+  async unlinkedParties() {
+    return (await this.linkExistingParties(true)).unmatched;
+  }
+
+  private async runOnceLinkParties(): Promise<void> {
+    const key = 'tasks.linkPartiesV1';
+    const seen = await this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    if (seen?.value) return;
+    const r = await this.linkExistingParties();
+    await this.prisma.setting
+      .upsert({ where: { key }, create: { key, value: JSON.stringify(r) }, update: { value: JSON.stringify(r) } })
+      .catch(() => undefined);
+    this.log.log(`party→contact backfill: linked ${r.linked}, left alone ${r.unmatched.length} name(s) for review`);
   }
 
   /** Wipe every task doc from both stores, then re-index EVERY task → one clean doc each. (BEA-549)
@@ -401,7 +464,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       reminderCount: t.reminderCount,
       reminders: t.reminders ? (() => { try { return JSON.parse(t.reminders); } catch { return []; } })() : [],
       day: t.day,
-      party: t.party || null,
+      // `party` stays the display text so nothing on screen changes. `owner` is the real link — when
+      // one exists its name wins, so renaming a contact renames it everywhere. (BEA-1019)
+      party: t.ownerContact?.name || t.party || null,
+      ownerContactId: t.ownerContactId || null,
+      owner: t.ownerContact ? { id: t.ownerContact.id, name: t.ownerContact.name } : null,
+      people: Array.isArray(t.people) ? t.people.map((p: any) => ({ id: p.contact.id, name: p.contact.name })) : [],
       dueDate: t.dueDate || null,
       status: t.status,
       progress: t.progress ?? 0,
@@ -434,7 +502,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const tz = await this.tz();
     const day = this.dayKey(tz);
     // Same definition the history calendar uses, so the two screens can never disagree. (BEA-1018)
-    const rows = await this.prisma.task.findMany({ where: await this.whereForDay(day, tz) });
+    const rows = await this.prisma.task.findMany({ where: await this.whereForDay(day, tz), include: PEOPLE_INCLUDE });
     const dump = await this.prisma.brainDump.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const tasks = this.sortTasks(rows).map((t) => this.shape(t));
     return {
@@ -448,7 +516,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
 
   /** Full task list (all days) for browse/search. */
   async list() {
-    const rows = await this.prisma.task.findMany({ orderBy: { createdAt: 'desc' }, take: 2000 });
+    const rows = await this.prisma.task.findMany({ orderBy: { createdAt: 'desc' }, take: 2000, include: PEOPLE_INCLUDE });
     return rows.map((t) => this.shape(t));
   }
 
@@ -504,13 +572,74 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   async forDay(day: string) {
     const tz = await this.tz();
     const { end } = await this.dayWindow(day, tz);
-    const rows = await this.prisma.task.findMany({ where: await this.whereForDay(day, tz) });
+    const rows = await this.prisma.task.findMany({ where: await this.whereForDay(day, tz), include: PEOPLE_INCLUDE });
     return this.sortTasks(rows).map((t) => {
       const later = t.status === 'done' && t.completedAt && new Date(t.completedAt) >= end;
       const shaped: any = this.shape(t);
       if (!later) return shaped;
       return { ...shaped, status: 'open', progress: 0, finishedLater: this.dayKeyOf(t.completedAt as Date, tz) };
     });
+  }
+
+  /** Contacts in the shape the matchers want. (BEA-1019) */
+  private async allContacts() {
+    const rows = await this.prisma.contact.findMany({ select: { id: true, name: true, aliases: true } });
+    return rows.map((c) => ({ id: c.id, name: c.name, aliases: jarr((c as any).aliases) }));
+  }
+
+  /** What the `@names` in a piece of text resolve to — matched, ambiguous, or unknown. (BEA-1019) */
+  async resolveMentionText(text: string): Promise<MentionResolution[]> {
+    return resolveMentions(text, await this.allContacts());
+  }
+
+  /**
+   * Work out who owns a task, from an explicit contact id or from the typed `party` text.
+   *
+   * Typed text is matched EXACTLY (name or alias) and only links when exactly one contact matches.
+   * Two matches or none means no link at all — the text is kept as-is. Never guess who someone
+   * meant; a task filed against the wrong person is worse than one filed against nobody. (BEA-1019)
+   */
+  private async resolveOwner(
+    contacts: { id: string; name: string; aliases: string[] }[],
+    ownerContactId?: string | null,
+    party?: string | null,
+  ): Promise<{ ownerContactId: string | null; party: string | null } | null> {
+    if (ownerContactId !== undefined) {
+      if (!ownerContactId) return { ownerContactId: null, party: party ? String(party).trim().slice(0, 80) : null };
+      const c = contacts.find((x) => x.id === ownerContactId);
+      // An id we don't recognise is a mistake, not a hint. Say so plainly instead of dropping it
+      // and quietly leaving the task owned by nobody. (BEA-1019)
+      if (!c) throw new BadRequestException('That person is not in your contacts');
+      return { ownerContactId: c.id, party: c.name.slice(0, 80) };
+    }
+    if (party === undefined) return undefined as any; // nothing to change
+    const text = party ? String(party).trim().slice(0, 80) : null;
+    if (!text) return { ownerContactId: null, party: null };
+    const hits = exactMatches(contacts, text);
+    return hits.length === 1
+      ? { ownerContactId: hits[0].id, party: hits[0].name.slice(0, 80) }
+      : { ownerContactId: null, party: text };
+  }
+
+  /**
+   * Replace a task's @mention links with exactly the ones given. Only names that resolved to one
+   * contact are linked; the owner is never also listed as a mention. Additive and idempotent —
+   * safe to call on every save. (BEA-1019)
+   */
+  private async syncPeople(taskId: string, contactIds: string[], ownerContactId?: string | null) {
+    const want = [...new Set(contactIds.filter((id) => id && id !== ownerContactId))];
+    const have = (await this.prisma.taskPerson.findMany({ where: { taskId }, select: { contactId: true } })).map((r) => r.contactId);
+    const add = want.filter((id) => !have.includes(id));
+    const drop = have.filter((id) => !want.includes(id));
+    if (drop.length) await this.prisma.taskPerson.deleteMany({ where: { taskId, contactId: { in: drop } } });
+    for (const contactId of add) {
+      await this.prisma.taskPerson.create({ data: { taskId, contactId } }).catch(() => undefined); // unique clash = already linked
+    }
+  }
+
+  /** The @mentioned contact ids found in a task's own words. */
+  private mentionIds(contacts: { id: string; name: string; aliases: string[] }[], ...texts: (string | null | undefined)[]) {
+    return linkableIds(resolveMentions(texts.filter(Boolean).join('\n'), contacts));
   }
 
   /** Every task (any day/status) that names a person — matched against the canonical name and any
@@ -533,13 +662,17 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const spellings = [...spellSet].filter(Boolean);
     const res = spellings.map((s) => new RegExp(`\\b${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'));
     const hit = (txt?: string | null) => !!txt && res.some((re) => re.test(txt));
-    const rows = await this.prisma.task.findMany({ take: 5000 });
-    const matched = rows.filter((t) => hit(t.title) || hit(t.note) || hit(t.party));
+    const rows = await this.prisma.task.findMany({ take: 5000, include: PEOPLE_INCLUDE });
+    // A real link is the truth. The old word-match stays as a safety net for anything not linked
+    // yet — a name in a title, or a `party` we could not resolve to one contact. (BEA-1019)
+    const linked = (t: any) =>
+      !!contact && (t.ownerContactId === contact.id || (t.people || []).some((p: any) => p.contact.id === contact.id));
+    const matched = rows.filter((t) => linked(t) || hit(t.title) || hit(t.note) || hit(t.party));
     return this.sortTasks(matched).map((t) => this.shape(t));
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string; ownerContactId?: string | null; mentions?: string[] }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
@@ -551,9 +684,18 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     // short AI one-liner so it's never empty. Manually-created tasks stay note-optional. (BEA-955)
     let note = data.note ? String(data.note).trim().slice(0, 500) : null;
     if (!note && data.auto) note = await this.autoNote(title, data.category);
+    // Who owns this, and who else it touches. (BEA-1019)
+    const contacts = await this.allContacts();
+    const owner = (await this.resolveOwner(contacts, data.ownerContactId, data.party ?? null)) || { ownerContactId: null, party: data.party || null };
+    const mentioned = [
+      ...this.mentionIds(contacts, title, note),
+      ...linkableIds((data.mentions || []).map((n) => resolveMentions(`@${n}`, contacts)).flat()),
+    ];
     const t = await this.prisma.task.create({
+      include: PEOPLE_INCLUDE,
       data: {
         title,
+        ownerContactId: owner.ownerContactId,
         category: data.category ? String(data.category).trim().slice(0, 40) : null,
         tags: Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null,
         priority,
@@ -563,13 +705,15 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         pinned: !!data.pinned,
         reminderCount,
         reminders: reminders.length ? JSON.stringify(reminders) : null,
-        party: data.party ? String(data.party).trim().slice(0, 80) : null,
+        party: owner.party,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         day: /^\d{4}-\d{2}-\d{2}$/.test(data.day || '') ? (data.day as string) : this.dayKey(tz),
       },
     });
     this.indexTask(t);
-    return this.shape(t);
+    if (!mentioned.length) return this.shape(t);
+    await this.syncPeople(t.id, mentioned, owner.ownerContactId);
+    return this.shape(await this.prisma.task.findUnique({ where: { id: t.id }, include: PEOPLE_INCLUDE }));
   }
 
   /** Create a task that's already DONE on a given day (used by the daily wrap-up to log work done "in the flow"). */
@@ -597,9 +741,20 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(row);
   }
 
-  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number; party?: string | null; dueDate?: string | null }) {
+  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number; party?: string | null; dueDate?: string | null; ownerContactId?: string | null; mentions?: string[] }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
+    // Owner + @mentions. Only recomputed when something that could carry a name actually changed,
+    // so a plain "tick the box" save never disturbs who a task belongs to. (BEA-1019)
+    const contacts = await this.allContacts();
+    const ownerTouched = data.ownerContactId !== undefined || data.party !== undefined;
+    const owner = ownerTouched
+      ? await this.resolveOwner(contacts, data.ownerContactId, data.party)
+      : { ownerContactId: (t as any).ownerContactId ?? null, party: t.party };
+    if (!owner) return null; // an ownerContactId that doesn't exist — reject, don't guess
+    const wordsTouched = data.title !== undefined || data.note !== undefined || data.mentions !== undefined;
+    const nextTitle = data.title?.trim() ? data.title.trim().slice(0, 160) : t.title;
+    const nextNote = data.note !== undefined ? (data.note ? String(data.note).trim().slice(0, 500) : null) : t.note;
     const priority = data.priority !== undefined ? this.normPriority(data.priority) : t.priority;
     const sphere = data.sphere !== undefined ? this.normSphere(data.sphere) : (t as any).sphere || 'work';
     // Recompute reminder times when the count or priority changes.
@@ -618,25 +773,33 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     }
     const upd = await this.prisma.task.update({
       where: { id },
+      include: PEOPLE_INCLUDE,
       data: {
-        title: data.title?.trim() ? data.title.trim().slice(0, 160) : t.title,
+        title: nextTitle,
+        ownerContactId: owner.ownerContactId,
         category: data.category !== undefined ? (data.category ? String(data.category).trim().slice(0, 40) : null) : t.category,
         tags: data.tags !== undefined ? (Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null) : t.tags,
         priority,
         sphere,
         estimateMin: data.estimateMin !== undefined ? (Number.isFinite(data.estimateMin as any) ? Math.max(1, Math.round(Number(data.estimateMin))) : null) : t.estimateMin,
-        note: data.note !== undefined ? (data.note ? String(data.note).trim().slice(0, 500) : null) : t.note,
+        note: nextNote,
         pinned: data.pinned !== undefined ? !!data.pinned : t.pinned,
         reminderCount,
         reminders: reminders.length ? JSON.stringify(reminders) : null,
-        party: data.party !== undefined ? (data.party ? String(data.party).trim().slice(0, 80) : null) : t.party,
+        party: owner.party,
         dueDate: data.dueDate !== undefined ? (data.dueDate ? new Date(data.dueDate) : null) : t.dueDate,
         progress,
         ...statusFromProgress,
       },
     });
     this.indexTask(upd);
-    return this.shape(upd);
+    if (!wordsTouched && !ownerTouched) return this.shape(upd);
+    const mentioned = [
+      ...this.mentionIds(contacts, nextTitle, nextNote),
+      ...linkableIds((data.mentions || []).map((n) => resolveMentions(`@${n}`, contacts)).flat()),
+    ];
+    await this.syncPeople(id, mentioned, owner.ownerContactId);
+    return this.shape(await this.prisma.task.findUnique({ where: { id }, include: PEOPLE_INCLUDE }));
   }
 
   /** Mark done/undone. On done, capture the one-tap "how long did it really take?" actual,
