@@ -63,6 +63,7 @@ export class ExploreService {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ api_key: key, query: q, max_results: Math.min(max, 8), include_answer: false, search_depth: 'basic', topic: newsy ? 'news' : 'general', ...(newsy ? { days: 21 } : {}) }),
+        signal: AbortSignal.timeout(8000), // never let the web hold up an answer from his own brain (BEA-1012)
       });
       if (!r.ok) return [];
       const j: any = await r.json().catch(() => ({}));

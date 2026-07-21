@@ -470,16 +470,22 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     const uniq = [...new Set((ids || []).filter(Boolean))];
     const out: Record<string, { type: string; id: string; day?: string }> = {};
     if (!uniq.length) return out;
-    for (const type of ALL_SOURCES) {
-      const pk = this.pkOf(type);
-      const select: any = { [pk]: true, supermemoryId: true, ragId: true };
-      if (type === 'story') select.day = true; // story has a separate `day` column
-      let rows: any[] = [];
-      try {
-        rows = await this.modelOf(type).findMany({ where: { OR: [{ supermemoryId: { in: uniq } }, { ragId: { in: uniq } }] }, select });
-      } catch {
-        continue;
-      }
+    // One query per source table, ALL AT ONCE. These are independent, and running the 15 in sequence
+    // added a needless chunk of wait to every answer (BEA-1012).
+    const perType = await Promise.all(
+      ALL_SOURCES.map(async (type) => {
+        const pk = this.pkOf(type);
+        const select: any = { [pk]: true, supermemoryId: true, ragId: true };
+        if (type === 'story') select.day = true; // story has a separate `day` column
+        try {
+          const rows: any[] = await this.modelOf(type).findMany({ where: { OR: [{ supermemoryId: { in: uniq } }, { ragId: { in: uniq } }] }, select });
+          return { type, pk, rows };
+        } catch {
+          return { type, pk, rows: [] as any[] };
+        }
+      }),
+    );
+    for (const { type, pk, rows } of perType) {
       for (const r of rows) {
         const entity = { type, id: String(r[pk]), day: type === 'gmailbrief' ? String(r[pk]) : r.day };
         if (r.supermemoryId) out[r.supermemoryId] = entity;

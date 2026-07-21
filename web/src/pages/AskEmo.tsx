@@ -217,12 +217,18 @@ export function AskEmo({ onClose, onCardCreated }: { onClose: () => void; onCard
       history.current = [];
       push({ role: 'emo', text: summary, cardId: res.cardId });
       onCardCreated?.();
+      // Ask for the follow-up offer WHILE we're speaking the answer, so its round trip costs no
+      // waiting (it used to be computed before the response came back at all). (BEA-1012)
+      const offerP: Promise<any> = res.cardId
+        ? fetch('/api/emo/ask/offer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cardId: res.cardId }) }).then((r) => r.json()).catch(() => ({}))
+        : Promise.resolve({});
       setPh('speaking'); await speak(summary + ' ' + pick(CLOSINGS, 'closing'));
       // Offer a next action if there is one.
-      if (res.offer?.spoken && res.offer?.action) {
-        pendingOffer.current = res.offer.action;
-        push({ role: 'emo', text: res.offer.spoken });
-        setPh('speaking'); await speak(res.offer.spoken);
+      const offer = (res.offer || (await offerP)?.offer) as { spoken?: string; action?: string } | undefined;
+      if (offer?.spoken && offer?.action) {
+        pendingOffer.current = offer.action;
+        push({ role: 'emo', text: offer.spoken });
+        setPh('speaking'); await speak(offer.spoken);
         startRec(); // listen for yes/no
         return;
       }

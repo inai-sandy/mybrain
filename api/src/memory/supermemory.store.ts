@@ -91,10 +91,13 @@ export class SuperMemoryStore {
   async search(q: string, limit = 5, tags: string[] = []): Promise<any[]> {
     const { apiKey, project } = await this.creds();
     const containerTags = [project, ...tags.map(safeContainerTag).filter(Boolean)];
+    // Bounded: a hung cloud search must never own the whole answer turn (BEA-1012). The caller runs
+    // this via allSettled, so a timeout just means "no SuperMemory hits this time".
     const res = await fetch(`${BASE}/v3/search`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ q, limit, containerTags }),
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) throw new Error(`SuperMemory search ${res.status}`);
     const d: any = await res.json();

@@ -12,15 +12,25 @@ function make(opts: { clarify?: string; answer?: string } = {}) {
   const memory: any = { searchBrain: jest.fn(async () => [{ title: 'Trading docs', content: 'notes' }]) };
   const explore: any = { ask: jest.fn(async () => ({ answer: opts.answer ?? 'Full answer.', sources: [], matches: 3, summary: 'Short summary.' })) };
   const cards: any = { create: jest.fn(async (c: any) => { created.push(c); return { id: 'card1', ...c }; }) };
-  return { svc: new EmoAskService(llm, memory, explore, cards), llm, explore, cards, created };
+  return { svc: new EmoAskService(llm, memory, explore, cards), llm, memory, explore, cards, created };
 }
 
 describe('EmoAskService (BEA-890)', () => {
-  it('ALWAYS asks a clarifying question on the first turn, never answers yet', async () => {
-    const { svc, explore } = make({ clarify: 'Which project — trading or panels?' });
-    const r = await svc.ask({ question: 'what about Dharmendra' });
-    expect(r).toEqual({ mode: 'clarify', question: 'Which project — trading or panels?' });
-    expect(explore.ask).not.toHaveBeenCalled();
+  it('answers on the FIRST turn — no clarifying round, no grounding search (BEA-1012)', async () => {
+    const { svc, explore, memory, llm } = make({ clarify: 'Which project — trading or panels?' });
+    const r: any = await svc.ask({ question: 'what about Dharmendra' });
+    expect(r.mode).toBe('answer');
+    expect(explore.ask).toHaveBeenCalled();
+    // the extra brain search that only fed the clarifying prompt is gone
+    expect(memory.searchBrain).not.toHaveBeenCalled();
+    // and no clarify/offer model round trips block the answer
+    expect(llm.completeWith).not.toHaveBeenCalled();
+  });
+
+  it('does not make the owner wait for the follow-up offer (fetched separately) (BEA-1012)', async () => {
+    const { svc } = make({ answer: 'You have 3 trading tasks.' });
+    const r: any = await svc.ask({ question: 'the trading products' });
+    expect(r.offer).toBeUndefined();
   });
 
   it('answers + files a Search card (voice gets the summary, card gets the detail)', async () => {
@@ -41,7 +51,7 @@ describe('EmoAskService (BEA-890)', () => {
     expect(explore.ask).toHaveBeenCalled();
   });
 
-  it('caps clarifying at 3 and then answers even if the model still wants to clarify', async () => {
+  it('answers regardless of how much history there is', async () => {
     const { svc, explore } = make({ clarify: 'another?' });
     const history: any = [
       { role: 'user', text: 'q' }, { role: 'emo', text: 'c1' },
@@ -53,7 +63,7 @@ describe('EmoAskService (BEA-890)', () => {
     expect(explore.ask).toHaveBeenCalled();
   });
 
-  it('folds clarifying answers into the refined question sent to the brain', async () => {
+  it('folds earlier turns into the refined question sent to the brain', async () => {
     const { svc, explore } = make({ answer: 'done' });
     await svc.ask({ question: 'pending ones', history: [{ role: 'user', text: 'tasks for Srikar' }, { role: 'emo', text: 'Done or pending?' }] });
     expect(explore.ask).toHaveBeenCalledWith(expect.stringMatching(/tasks for Srikar.*pending ones/), expect.anything());

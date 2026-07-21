@@ -44,10 +44,16 @@ export class EmoController {
     return this.settingsSvc.set(body || {});
   }
 
-  // Interactive voice Ask (EMO Ask): one turn — clarify (>=1) or answer + file a Search card.
+  // Interactive voice Ask (EMO Ask): ONE turn — answer straight away + file a Search card (BEA-1012).
   @Post('ask')
   ask(@Body() body: { question?: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto' }) {
     return this.askSvc.ask({ question: (body?.question || '').toString(), history: Array.isArray(body?.history) ? body!.history! : [], sessionContext: (body?.sessionContext || '').toString(), web: body?.web });
+  }
+
+  // The follow-up "want me to do X?" offer, fetched WHILE the voice speaks so it costs no wait (BEA-1012).
+  @Post('ask/offer')
+  askOffer(@Body() body: { cardId?: string }) {
+    return this.askSvc.offerFor((body?.cardId || '').toString());
   }
 
   // EMO Talk (BEA-905): a multi-turn conversation on Haiku, saved as ONE card per conversation.

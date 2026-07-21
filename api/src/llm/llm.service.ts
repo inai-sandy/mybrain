@@ -5,6 +5,9 @@ import { PrismaService } from '../prisma/prisma.service';
 export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini'; model: string };
 
 // Host-side agent runners (subscription-based engines). The container reaches them on the Docker gateway.
+/** Ceiling for a single chat completion. Generous enough for a long answer, short enough that a
+ *  stalled provider fails fast instead of holding a voice turn open forever. (BEA-1012) */
+const LLM_TIMEOUT_MS = 60_000;
 const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
 const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
 
@@ -144,6 +147,8 @@ export class LlmService {
           method: 'POST',
           headers: { 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
           body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+          // Bounded so one stalled model call can't own the whole turn (BEA-1012).
+          signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
         });
         if (!r.ok) return null;
         const d: any = await r.json();
@@ -158,6 +163,8 @@ export class LlmService {
           headers: { Authorization: `Bearer ${c.apiKey}`, 'content-type': 'application/json' },
           // usage.include → OpenRouter returns the exact cost of THIS request in the response
           body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, usage: { include: true }, messages: [{ role: 'user', content: prompt }] }),
+          // Bounded so one stalled model call can't own the whole turn (BEA-1012).
+          signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
         });
         if (!r.ok) return null;
         const d: any = await r.json();
