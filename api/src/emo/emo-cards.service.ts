@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type EmoLane = 'search' | 'story' | 'reminder' | 'task' | 'meeting' | 'research' | 'note' | 'talk' | 'close' | 'idea';
+export type EmoLane = 'search' | 'story' | 'reminder' | 'task' | 'meeting' | 'research' | 'note' | 'talk' | 'close' | 'brief' | 'idea';
 export type EmoStatus = 'done' | 'cooking' | 'needs_you';
 export type EmoLink = { kind: string; id: string; label?: string };
 

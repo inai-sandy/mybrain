@@ -10,6 +10,8 @@ import { IdeasModule } from '../ideas/ideas.module';
 import { NotesModule } from '../notes/notes.module';
 import { EmoCardsService } from './emo-cards.service';
 import { EmoCloseService } from './emo-close.service';
+import { EmoBriefService } from './emo-brief.service';
+import { BriefingsModule } from '../briefings/briefings.module';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
@@ -29,10 +31,10 @@ import { EmoController } from './emo.controller';
 
 /** EMO — Voice → Cards. Storage/feed/router/capture + lanes: Search, Tasks, Reminders, Story, Meetings, Research. */
 @Module({
-  imports: [VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule],
+  imports: [BriefingsModule, VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule],
   controllers: [EmoController],
   providers: [EmoCardsService, EmoRouterService,
-    EmoCloseService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
+    EmoCloseService, EmoBriefService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
   exports: [EmoCardsService, EmoRouterService],
 })
 export class EmoModule {}
