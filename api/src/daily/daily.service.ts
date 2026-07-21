@@ -608,7 +608,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     //    the request before the seal, leaving the day un-closed.)
     // Snapshot the day's still-open tasks BEFORE the rollover moves them off the day — this is the
     // Lab's "skipped" signal, which was always empty because rollDayForward ran first. (BEA-808)
-    const skippedSnapshot = day < today ? await this.prisma.task.findMany({ where: { day, status: { not: 'done' } } }) : [];
+    // `day <= day` (not `day === day`): open tasks keep the day they were ADDED (BEA-1014), so keying to
+    // the exact day closed captured only what was created that day and the Lab's "skipped" signal went
+    // empty again for every carried task — the very thing BEA-808 fixed. (BEA-1016)
+    const skippedSnapshot = day < today ? await this.prisma.task.findMany({ where: { day: { lte: day }, status: { not: 'done' } } }) : [];
     // Roll the day's genuine leftovers forward: a past day → today; closing today → tomorrow.
     const target = day < today ? today : this.dayAdd(day, 1);
     const rolled = (await this.tasks.rollDayForward(day, target)).rolled;

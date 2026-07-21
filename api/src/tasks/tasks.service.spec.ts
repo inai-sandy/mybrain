@@ -38,6 +38,7 @@ function makeService(llmText: string | null) {
             } else {
               if (d.not === null && (t.day === null || t.day === undefined)) return false;
               if (d.lt && !(t.day && t.day < d.lt)) return false;
+              if (d.lte && !(t.day && t.day <= d.lte)) return false;
             }
           }
           return true;
@@ -224,6 +225,33 @@ describe('TasksService', () => {
 
     // never rolls same-day or backwards
     expect((await svc.rollDayForward('2026-06-13', '2026-06-13')).rolled).toBe(0);
+  });
+
+  it('keeps counting the carry on EVERY later night, not just the night it was added (BEA-1016)', async () => {
+    const { svc, tasks } = makeService(JSON.stringify({ tasks: [{ title: 'Chase Kishore for funds' }] }));
+    const { tasks: made } = await svc.dump('one');
+    const t = tasks.find((x) => x.id === made[0].id);
+    t.day = '2026-06-12';
+    t.status = 'open';
+
+    // Four consecutive nights close. The task keeps `day: 2026-06-12` (BEA-1014), so a query keyed to
+    // the exact day being closed matched it only on the first night and its carry froze at 1 while the
+    // task kept ageing — the badge and the brain both said "1d" forever.
+    for (const [from, to] of [
+      ['2026-06-12', '2026-06-13'],
+      ['2026-06-13', '2026-06-14'],
+      ['2026-06-14', '2026-06-15'],
+      ['2026-06-15', '2026-06-16'],
+    ]) {
+      expect((await svc.rollDayForward(from, to)).rolled).toBe(1);
+    }
+    expect(t.rolloverCount).toBe(4);
+    expect(t.day).toBe('2026-06-12'); // still never moves
+
+    // A task finished before the night closes is not carried.
+    t.status = 'done';
+    expect((await svc.rollDayForward('2026-06-16', '2026-06-17')).rolled).toBe(0);
+    expect(t.rolloverCount).toBe(4);
   });
 
   it('clears category / estimate / note when the edit sends null (BEA-782)', async () => {

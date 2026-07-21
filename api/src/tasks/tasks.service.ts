@@ -189,9 +189,20 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    */
   async rollDayForward(fromDay: string, toDay: string): Promise<{ rolled: number }> {
     if (!fromDay || !toDay || fromDay >= toDay) return { rolled: 0 };
-    const open = await this.prisma.task.findMany({ where: { status: 'open', day: fromDay } });
+    // Everything still open when the day closes has been carried — not only what was ADDED that day.
+    // `day: fromDay` was right while the rollover re-stamped `day` to today (every open task matched
+    // every night), but BEA-1014 stopped the re-stamping so a task keeps the day it was added. The
+    // query then matched only that single day: on live data 42 of 44 open tasks were skipped and their
+    // carried number froze while the task kept ageing. (BEA-1016)
+    const open = await this.prisma.task.findMany({ where: { status: 'open', day: { lte: fromDay } } });
     for (const t of open) {
-      await this.prisma.task.update({ where: { id: t.id }, data: { rolloverCount: (t.rolloverCount || 0) + 1 } });
+      const rolloverCount = (t.rolloverCount || 0) + 1;
+      await this.prisma.task.update({ where: { id: t.id }, data: { rolloverCount } });
+      // Re-index so the brain's "carried forward N times" stays true. The count changes every night and
+      // nothing else touches a task that is merely being carried, so without this the brain keeps
+      // whatever number was written the last time the task happened to be edited. One doc per task is
+      // guaranteed (BEA-1015), so this updates in place instead of piling up.
+      this.indexTask({ ...t, rolloverCount });
     }
     return { rolled: open.length };
   }
