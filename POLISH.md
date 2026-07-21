@@ -9,7 +9,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 
 | # | Module | What it covers | Status | Issues | Date |
 |---|--------|----------------|--------|--------|------|
-| 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | building | BEA-1019✅ 1038 | 2026-07-21 |
+| 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | built | BEA-1019✅ 1029✅ 1038✅ | 2026-07-21 |
 | 2 | EMO | `/emo` · `emo/` · ask/talk/capture router, 6 card lanes, device turn + TTS | — | | |
 | 3 | Activity, Day Close & Story | `/activity`, CloseDay, DailyStory · `daily/` · day summary, story, month/year, personality | — | | |
 | 4 | Capture & Items | `/capture`, `/doc/:id`, `/view/:id` · `items/` · upload, URL, Notion, Supermemory import, share | — | | |
@@ -18,7 +18,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 | 7 | Documents | `/documents`, `/d/:slug`, `/s/:code` · `documents/` · library, collections, public pages, export | — | | |
 | 8 | Notes & Ideas | `/notes`, `/ideas` · `notes/`, `ideas/` · CRUD, AI format, idea workflow docs | — | | |
 | 9 | Bookmarks | `/bookmarks` · `bookmarks/` · Raindrop sync, Instagram/Apify enrichment, summaries | — | | |
-| 10 | Contacts & Reminders | `/contacts`, `/reminders` · `contacts/` · WhatsApp via Postbox, reminder agent, threads | building | 1019✅1020✅1021✅1024✅1025✅ · 1022 1023 1026-1038 open | 2026-07-21 |
+| 10 | Contacts & Reminders | `/contacts`, `/reminders` · `contacts/` · WhatsApp via Postbox, reminder agent, threads | built | BEA-1019 → 1038 (19/20; 1036 firmware parked) | 2026-07-21 |
 | 11 | Meetings | `/meetings` · `meetings/` · records, transcription, audio retention, share | — | | |
 | 12 | Google Workspace | `/google/*` · `google/` · Gmail brief + requests, Drive, Calendar, Docs/Sheets/Slides, Tasks | — | | |
 | 13 | Recordings & Voice | `/recordings` · `recordings/`, `voice/` · chunked upload, marks, dictation, STT/TTS engines | — | | |
@@ -51,12 +51,16 @@ Build order (dependencies first):
 4. ✅ `BEA-1024` agent marks the claimed task — SHIPPED 2026-07-21
 5. ✅ `BEA-1025` review list (confirm / reject) — SHIPPED 2026-07-21
 6. ✅ `BEA-1027` + `BEA-1028` the contact's shared short link, tick + note → review — SHIPPED 2026-07-21
-7. `BEA-1029` delegated view · `BEA-1037` contact workspace
-8. `BEA-1022` promised dates · `BEA-1030` stalling digest · `BEA-1023` agent context
-9. `BEA-1031` brain indexing by contact
-10. `BEA-1032` EMO brief lane · `BEA-1033` EMO closing intent · `BEA-1034` cards by person
-11. `BEA-1035` device needs-you feed (server) → then `BEA-1036` firmware
-12. `BEA-1026` + `BEA-1038` honesty fixes (promise ordering, the Telegram lie, dead columns)
+7. ✅ `BEA-1029` delegated view · ✅ `BEA-1037` contact workspace — SHIPPED
+8. ✅ `BEA-1022` promised dates · ✅ `BEA-1030` stalling digest · ✅ `BEA-1023` agent context — SHIPPED
+9. ✅ `BEA-1031` brain indexing by contact — SHIPPED
+10. ✅ `BEA-1032` EMO brief lane · ✅ `BEA-1033` EMO closing intent · ✅ `BEA-1034` cards by person — SHIPPED
+11. ✅ `BEA-1035` device needs-you feed (server) — SHIPPED · ⏸ `BEA-1036` firmware — NOT STARTED, needs the owner present
+12. ✅ `BEA-1026` promise ordering — SHIPPED · ✅ `BEA-1038` closed as a CORRECTION (the premise was wrong)
+
+**19 of 20 shipped on 2026-07-21.** Only the firmware is left, and it is now optional:
+BEA-1035's live test proved the CURRENTLY FLASHED firmware can already receive a confirmation and
+close a task. BEA-1036 is cosmetic (DONE/NOT DONE chips, a count on the home face, a Brief tile).
 
 Owner's recorded decisions: one owner + `@`others · briefings stack per contact · review inbox ·
 chase repeats until confirmed · delegated work off the personal board · neglect = 3 chases with no
