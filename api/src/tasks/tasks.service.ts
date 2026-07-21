@@ -545,11 +545,15 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    * query keyed to it credited finished work to the wrong date (207 of 290 live tasks) and hid carried
    * tasks completely (Today showed 41 open, History-on-today showed 0). (BEA-1018)
    */
+  /**
+   * The owner's OWN board. Work handed to someone else lives in /delegated, not here — his task
+   * list must stay what HE has to do, or the two get mixed up and neither is trustworthy. (BEA-1029)
+   */
   async whereForDay(day: string, tz?: string): Promise<any> {
     const zone = tz || (await this.tz());
     const start = this.dayStart(day, zone);
     const end = this.dayStart(this.dayAdd(day, 1), zone);
-    return whereForDayRule(day, start, end);
+    return { AND: [whereForDayRule(day, start, end), { ownerContactId: null }] };
   }
 
   /** The [start, end) UTC window of a local day — for callers that bucket rows themselves. */
@@ -681,6 +685,44 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       !!contact && (t.ownerContactId === contact.id || (t.people || []).some((p: any) => p.contact.id === contact.id));
     const matched = rows.filter((t) => linked(t) || hit(t.title) || hit(t.note) || hit(t.party));
     return this.sortTasks(matched).map((t) => this.shape(t));
+  }
+
+  /**
+   * Everything handed to someone else. Kept OFF the personal board on purpose — the owner's Tasks
+   * screen stays what HE has to do; this is what he is waiting on. (BEA-1029)
+   */
+  async delegated() {
+    const rows = await this.prisma.task.findMany({
+      where: { NOT: { ownerContactId: null } },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      take: 2000,
+      include: {
+        ...PEOPLE_INCLUDE,
+        chases: { select: { id: true, status: true, repeat: true, times: true, _count: { select: { sends: true } } } },
+      },
+    });
+    const now = Date.now();
+    const shaped = rows.map((t: any) => {
+      const chase = (t.chases || []).find((c: any) => c.status === 'active') || (t.chases || [])[0] || null;
+      const base = this.shape(t);
+      return {
+        ...base,
+        who: t.ownerContact?.name || t.party || 'Someone',
+        openDays: Math.max(0, Math.floor((now - new Date(t.createdAt).getTime()) / 86400000)),
+        chaseStatus: chase ? chase.status : 'none',
+        chaseRepeats: chase?.repeat === 'daily',
+        chaseCount: (t.chases || []).reduce((n: number, c: any) => n + (c._count?.sends || 0), 0),
+        chaseId: chase?.id || null,
+      };
+    });
+    return {
+      rows: shaped,
+      summary: {
+        open: shaped.filter((t) => t.status !== 'done').length,
+        awaitingYou: shaped.filter((t) => !!t.claim).length,
+        chasing: shaped.filter((t) => t.status !== 'done' && t.chaseStatus === 'active').length,
+      },
+    };
   }
 
   /** Manually add a single task (no dump). */

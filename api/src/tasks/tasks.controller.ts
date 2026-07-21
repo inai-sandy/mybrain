@@ -91,6 +91,12 @@ export class TasksController {
     return { unmatched: await this.tasks.unlinkedParties() };
   }
 
+  /** Everything you've given other people. (BEA-1029) */
+  @Get('delegated')
+  delegated() {
+    return this.tasks.delegated();
+  }
+
   @Get('by-person')
   async byPerson(@Query('name') name?: string) {
     return { tasks: await this.tasks.byPerson(name || '') };

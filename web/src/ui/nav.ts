@@ -18,6 +18,7 @@ export const NAV: NavItem[] = [
   { to: '/today', label: 'Today', icon: Sun },
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
+  { to: '/delegated', label: 'Delegated', icon: Users }, // work given to other people (BEA-1029)
   { to: '/review', label: 'To review', icon: Hand }, // work others say is finished (BEA-1025)
   { to: '/contacts', label: 'Contacts', icon: Users },
   { to: '/reminders', label: 'Reminders', icon: BellRing },

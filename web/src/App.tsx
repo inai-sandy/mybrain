@@ -14,6 +14,7 @@ import { Skills } from './pages/Skills';
 import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
 import { Review } from './pages/Review';
+import { Delegated } from './pages/Delegated';
 import { TaskShare } from './pages/TaskShare';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
@@ -161,6 +162,7 @@ function AuthedApp() {
         <Route path="today" element={<Today />} />
         <Route path="tasks" element={<Tasks />} />
         <Route path="review" element={<Review />} />
+        <Route path="delegated" element={<Delegated />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="meeting/:id" element={<MeetingDetail />} />
         <Route path="google" element={<GoogleHome />} />

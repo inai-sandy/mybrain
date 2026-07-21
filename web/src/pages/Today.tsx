@@ -6,6 +6,27 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { StorySection } from './DailyStory';
 import { CloseDaySheet, OpenDaysBanner } from './CloseDay';
 
+/** One quiet line: what's out with other people, and what's waiting on you. (BEA-1029) */
+function DelegatedLine() {
+  const [s, setS] = useState<{ open: number; awaitingYou: number } | null>(null);
+  useEffect(() => {
+    fetch('/api/tasks/delegated')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setS(d?.summary || null))
+      .catch(() => setS(null));
+  }, []);
+  if (!s || (!s.open && !s.awaitingYou)) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+      <span className="text-zinc-500">With other people:</span>
+      <Link to="/delegated" className="font-medium hover:text-emerald-600">{s.open} open</Link>
+      {s.awaitingYou > 0 && (
+        <Link to="/review" className="font-medium text-violet-600 hover:underline dark:text-violet-400">{s.awaitingYou} waiting on you</Link>
+      )}
+    </div>
+  );
+}
+
 export function Today() {
   const { data, loading, load } = useToday();
   const [dumping, setDumping] = useState(false);
@@ -66,6 +87,7 @@ export function Today() {
 
       {/* Finish an earlier un-closed day (the morning-after catch-up) */}
       <OpenDaysBanner key={bannerKey} onPick={setCloseDay} />
+      <DelegatedLine />
 
       {/* Brain-dump hero (until you've dumped) */}
       {!loading && !data?.dumped && (
