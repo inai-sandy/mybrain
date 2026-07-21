@@ -28,6 +28,9 @@ export function BriefModal({ contactId, contactName, onClose, onSaved }: { conta
   const [tasks, setTasks] = useState<DraftTask[] | null>(null);
   const [summary, setSummary] = useState('');
   const [dropped, setDropped] = useState<Set<number>>(new Set());
+  // How often they get chased is the owner's call, never the AI's. (BEA-1021)
+  const [chaseOn, setChaseOn] = useState(true);
+  const [chaseTimes, setChaseTimes] = useState<string[]>(['09:00', '17:30']);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const mentions = useMentions(text);
@@ -56,7 +59,7 @@ export function BriefModal({ contactId, contactName, onClose, onSaved }: { conta
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, summary, tasks: keep }),
       });
       if (!r.ok) { toast('error', (await r.json().catch(() => ({}))).message || 'Could not save'); return; }
-      toast('success', `${keep.length} task${keep.length === 1 ? '' : 's'} added for ${contactName}`);
+      toast('success', `${keep.length} task${keep.length === 1 ? '' : 's'} added for ${contactName}${chaseOn && chaseTimes.length ? ` — chasing ${chaseTimes.length}× a day` : ''}`);
       onSaved();
       onClose();
     } catch { toast('error', 'Could not reach the server'); } finally { setBusy(false); }
@@ -130,11 +133,40 @@ export function BriefModal({ contactId, contactName, onClose, onSaved }: { conta
                   })}
                 </ul>
               )}
+              {/* The chase. Set here so work handed out is work being followed up. (BEA-1021) */}
+              <div className="mt-4 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={chaseOn} onChange={(e) => setChaseOn(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                  Chase {contactName} until it's done
+                </label>
+                {chaseOn && (
+                  <>
+                    <p className="mt-1 text-[11px] text-zinc-500">One WhatsApp message a day at these times, every day, until you confirm it finished.</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {([['09:00', 'Morning'], ['13:00', 'Afternoon'], ['17:30', 'Evening'], ['20:30', 'Night']] as const).map(([t, label]) => {
+                        const on = chaseTimes.includes(t);
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setChaseTimes((v) => (on ? v.filter((x) => x !== t) : [...v, t]))}
+                            className={'rounded-full border px-2.5 py-1 text-xs transition-colors ' + (on ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}
+                          >
+                            {label} · {t}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!chaseTimes.length && <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">Pick at least one time, or turn the chase off.</p>}
+                  </>
+                )}
+              </div>
+
               <div className="mt-4 flex items-center justify-between gap-2">
                 <button onClick={() => setTasks(null)} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">← Reword</button>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-zinc-500">{kept} of {tasks.length} kept</span>
-                  <button onClick={save} disabled={busy || !kept} className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50">
+                  <button onClick={save} disabled={busy || !kept || (chaseOn && !chaseTimes.length)} className="rounded-lg bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50">
                     {busy ? 'Saving…' : `Add ${kept} task${kept === 1 ? '' : 's'}`}
                   </button>
                 </div>

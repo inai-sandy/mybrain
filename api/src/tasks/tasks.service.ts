@@ -821,8 +821,32 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       },
     });
     this.indexTask(upd);
+    await this.syncChases(id, done);
     if (done) await this.spawnFollowUp(t, followUpDate);
     return this.shape(upd);
+  }
+
+  /**
+   * A chase exists to get one piece of work finished, so confirming the work stops the chase — and
+   * re-opening it starts the chase again. Done here with plain queries rather than by injecting the
+   * reminders service, which would make tasks and contacts depend on each other. (BEA-1021)
+   */
+  private async syncChases(taskId: string, done: boolean) {
+    try {
+      if (done) {
+        const stopped = await this.prisma.reminder.updateMany({ where: { taskId, status: { in: ['active', 'paused'] } }, data: { status: 'done' } });
+        if (stopped.count) {
+          await this.prisma.reminderSend.deleteMany({ where: { reminder: { taskId }, status: 'queued' } });
+          this.log.log(`task ${taskId} confirmed done — stopped ${stopped.count} chase(s)`);
+        }
+        return;
+      }
+      // Re-opened: bring a repeating chase back to life. The day rollover re-arms it within a minute.
+      const back = await this.prisma.reminder.updateMany({ where: { taskId, status: 'done', repeat: 'daily' }, data: { status: 'active', armedDay: null } });
+      if (back.count) this.log.log(`task ${taskId} re-opened — resumed ${back.count} chase(s)`);
+    } catch (e: any) {
+      this.log.warn(`chase sync for ${taskId}: ${e?.message ?? e}`);
+    }
   }
 
   /** Create a "Follow up: <task>" task dated to the chosen day. The morning Telegram nudge announces it. */

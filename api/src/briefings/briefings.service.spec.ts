@@ -27,7 +27,9 @@ function make(llmReply: string | null | Error) {
   };
   const prompts: any = { get: async () => 'PROMPT' };
   const tasks: any = { create: async (d: any) => { const t = { id: `t${++seq}`, status: 'open', ...d }; created.push(t); return t; } };
-  return { svc: new BriefingsService(prisma, llm, prompts, tasks), briefings, created };
+  const chases: any[] = [];
+  const reminders: any = { create: async (d: any) => { chases.push(d); return d; } };
+  return { svc: new BriefingsService(prisma, llm, prompts, tasks, reminders), briefings, created, chases };
 }
 
 const GOOD = JSON.stringify({
@@ -140,5 +142,34 @@ describe('contextFor — what the agent reads (BEA-1020)', () => {
     expect(ctx).toContain('first story');
     expect(ctx).toContain('second story');
     expect(ctx).toMatch(/^\[\d{4}-\d{2}-\d{2}\]/);
+  });
+});
+
+describe('the chase is set in the same step (BEA-1021)', () => {
+  it('starts a daily chase per task when times are given', async () => {
+    const { svc, chases } = make(GOOD);
+    await svc.create('c1', { text: 'story', tasks: [{ title: 'one' }, { title: 'two' }], chase: { times: ['09:00', '17:30'] } });
+    expect(chases).toHaveLength(2);
+    expect(chases[0]).toMatchObject({ contactId: 'c1', repeat: 'daily', times: ['09:00', '17:30'] });
+    expect(chases[0].taskId).toBeTruthy(); // the chase is attached to real work
+  });
+
+  it('creates no chase when the owner did not ask for one', async () => {
+    const { svc, chases } = make(GOOD);
+    await svc.create('c1', { text: 'story', tasks: [{ title: 'one' }] });
+    expect(chases).toHaveLength(0);
+  });
+
+  it('ignores rubbish times rather than scheduling nonsense', async () => {
+    const { svc, chases } = make(GOOD);
+    await svc.create('c1', { text: 'story', tasks: [{ title: 'one' }], chase: { times: ['25:99', 'later', '09:00'] } });
+    expect(chases[0].times).toEqual(['09:00']);
+  });
+
+  it('a failing chase never loses the task', async () => {
+    const { svc, created } = make(GOOD);
+    (svc as any).reminders.create = async () => { throw new Error('postbox down'); };
+    await svc.create('c1', { text: 'story', tasks: [{ title: 'one' }], chase: { times: ['09:00'] } });
+    expect(created).toHaveLength(1);
   });
 });

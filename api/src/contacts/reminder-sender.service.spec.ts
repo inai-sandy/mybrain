@@ -186,3 +186,63 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     expect(state.updates[0]).toMatchObject({ id: 's1', status: 'failed' });
   });
 });
+
+/**
+ * A real chase must not die at midnight, and must never message someone about work they have
+ * already finished. These are the two failures the old one-day lifecycle caused. (BEA-1021)
+ */
+describe('rollDay — a daily chase repeats instead of pausing (BEA-1021)', () => {
+  function harness(reminders: any[], task: any | null) {
+    const updates: any[] = [];
+    const created: any[] = [];
+    let deleted = 0;
+    const prisma: any = {
+      reminder: {
+        findMany: async () => reminders,
+        update: async ({ where, data }: any) => { updates.push({ id: where.id, ...data }); return {}; },
+      },
+      reminderSend: {
+        count: async () => 0,
+        deleteMany: async () => { deleted++; return {}; },
+        create: async ({ data }: any) => { created.push(data); return data; },
+      },
+      task: { findUnique: async () => task },
+    };
+    return { svc: new ReminderSenderService(prisma, { isConfigured: () => false } as any), updates, created, get deleted() { return deleted; } };
+  }
+
+  it('re-arms a daily chase for the new day instead of pausing it', async () => {
+    const h = harness([{ id: 'c1', status: 'active', armedDay: '2000-01-01', repeat: 'daily', times: '["09:00","17:00"]', taskId: 't1' }], { status: 'open', title: 'x' });
+    await h.svc.rollDay();
+    expect(h.updates.some((u) => u.status === 'paused')).toBe(false);
+    const armed = h.updates.find((u) => u.armedDay);
+    expect(armed).toBeTruthy();
+    expect(armed.pausedAuto).toBe(false);
+    expect(h.created.length).toBeGreaterThan(0); // today's sends put on the board
+  });
+
+  it('STOPS a daily chase once the task is done — no more messages', async () => {
+    const h = harness([{ id: 'c1', status: 'active', armedDay: '2000-01-01', repeat: 'daily', times: '["09:00"]', taskId: 't1' }], { status: 'done', title: 'x' });
+    await h.svc.rollDay();
+    expect(h.updates).toEqual([{ id: 'c1', status: 'done' }]);
+    expect(h.created).toHaveLength(0);
+  });
+
+  it('stops a chase whose task was deleted rather than chasing about nothing', async () => {
+    const h = harness([{ id: 'c1', status: 'active', armedDay: '2000-01-01', repeat: 'daily', times: '["09:00"]', taskId: 'gone' }], null);
+    await h.svc.rollDay();
+    expect(h.updates).toEqual([{ id: 'c1', status: 'done' }]);
+  });
+
+  it('leaves ordinary reminders on the old one-day behaviour', async () => {
+    const h = harness([{ id: 'r1', status: 'active', armedDay: '2000-01-01', repeat: 'none', times: '["09:00"]', taskId: null }], null);
+    await h.svc.rollDay();
+    expect(h.updates).toEqual([{ id: 'r1', status: 'paused', pausedAuto: true }]);
+  });
+
+  it('a chase with no usable times still gets a daily slot rather than going silent', async () => {
+    const h = harness([{ id: 'c1', status: 'active', armedDay: '2000-01-01', repeat: 'daily', times: 'not json', taskId: 't1' }], { status: 'open', title: 'x' });
+    await h.svc.rollDay();
+    expect(h.created.length).toBeGreaterThan(0);
+  });
+});

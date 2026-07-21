@@ -567,7 +567,7 @@ export class RemindersService {
     return { armed };
   }
 
-  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string }) {
+  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string; repeat?: string }) {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
@@ -607,7 +607,7 @@ export class RemindersService {
     return { ...this.shape(r), task };
   }
 
-  async update(id: string, patch: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[]; startDay?: string }) {
+  async update(id: string, patch: { subject?: string; message?: string; notes?: string; count?: number; status?: string; times?: string[]; startDay?: string; repeat?: string }) {
     const cur = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { name: true } } } });
     if (!cur) throw new NotFoundException('Reminder not found');
     const data: any = {};

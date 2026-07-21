@@ -14,7 +14,7 @@ export class BriefingsController {
 
   /** Save the briefing plus exactly the tasks the owner kept. */
   @Post('contacts/:id/briefings')
-  create(@Param('id') id: string, @Body() body: { text?: string; summary?: string; tasks?: DraftTask[] }) {
+  create(@Param('id') id: string, @Body() body: { text?: string; summary?: string; tasks?: DraftTask[]; chase?: { times?: string[] } | null }) {
     return this.briefings.create(id, body || {});
   }
 

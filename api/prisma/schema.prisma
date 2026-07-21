@@ -407,6 +407,8 @@ model Task {
   ownerContact   Contact? @relation("TaskOwner", fields: [ownerContactId], references: [id], onDelete: SetNull)
   /// Everyone else this task touches — the @mentions. (BEA-1019)
   people        TaskPerson[]
+  /// The chases running on this task. (BEA-1021)
+  chases        Reminder[]
   /// The briefing that produced this task, if it came from one. (BEA-1020)
   briefingId    String?
   briefing      Briefing? @relation(fields: [briefingId], references: [id], onDelete: SetNull)
@@ -902,7 +904,12 @@ model Reminder {
   id           String            @id @default(uuid())
   contactId    String
   contact      Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  taskId       String? // the Task this chases (status stays the user's to close)
+  taskId       String? // the Task this chases
+  task         Task?             @relation(fields: [taskId], references: [id], onDelete: Cascade) // delete the work, the chase goes too (BEA-1021)
+  /// none = the old one-day lifecycle (a fixed number of nudges, then it auto-pauses).
+  /// daily = a real chase: repeats every day at `times` until the task is confirmed done, or you
+  /// stop it. Existing reminders stay on "none" so nothing changes underneath you. (BEA-1021)
+  repeat       String            @default("none")
   subject      String? // short "what you're chasing" for the template {{2}} (task title if linked)
   message      String // the free-text we send in the 24h window (in the user's voice)
   notes        String? // standing context Sandeep adds; fed into the agent's replies (BEA-765)

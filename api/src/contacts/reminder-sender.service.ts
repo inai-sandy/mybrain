@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
-import { REMINDER_TZ_OFFSET, topicFromMessage } from './reminders.service';
+import { REMINDER_TZ_OFFSET, scheduleOnDay, topicFromMessage } from './reminders.service';
 
 /** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
 export function joinSubjects(subjects: string[]): string {
@@ -49,12 +49,46 @@ export class ReminderSenderService implements OnModuleInit {
 
   /** Short subject for the template {{2}}: the reminder's own subject, else the linked task title, else a trimmed message, else "this". */
   private async subjectFor(r: any): Promise<string> {
-    if (r.subject?.trim()) return r.subject.trim();
+    // A chase attached to a task always says what the task says NOW. The subject used to be a
+    // snapshot taken when the reminder was created, so editing the task left the message saying
+    // the old thing forever. The live title wins. (BEA-1021)
     if (r.taskId) {
       const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true } }).catch(() => null);
       if (t?.title?.trim()) return t.title.trim();
     }
+    if (r.subject?.trim()) return r.subject.trim();
     return topicFromMessage(r.message);
+  }
+
+  /** Is the work behind this chase finished? Returns why, or null if it is still open. (BEA-1021) */
+  private async chaseFinished(r: any): Promise<string | null> {
+    if (!r.taskId) return null;
+    const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { status: true } }).catch(() => null);
+    if (!t) return 'the task was deleted';
+    return t.status === 'done' ? 'you confirmed it done' : null;
+  }
+
+  /**
+   * Put today's sends on the board for a repeating chase. Clears anything still queued from
+   * yesterday first, so a missed day can never pile up and fire twice. (BEA-1021)
+   */
+  private async rearmChase(r: any, dayKey: string, now: Date) {
+    let times: string[] = [];
+    try { const a = JSON.parse(r.times || '[]'); if (Array.isArray(a)) times = a.filter((t) => typeof t === 'string'); } catch { /* fall through */ }
+    if (!times.length) times = ['09:00'];
+    await this.prisma.reminderSend.deleteMany({ where: { reminderId: r.id, status: 'queued' } }).catch(() => undefined);
+    const at = scheduleOnDay(times, dayKey, now);
+    for (const when of at) {
+      await this.prisma.reminderSend.create({ data: { reminderId: r.id, at: when, status: 'queued' } }).catch(() => undefined);
+    }
+    await this.prisma.reminder.update({ where: { id: r.id }, data: { armedDay: dayKey, pausedAuto: false } }).catch(() => undefined);
+  }
+
+  /** Stop a chase for good and clear anything still queued. */
+  private async stopChase(id: string, why: string) {
+    await this.prisma.reminder.update({ where: { id }, data: { status: 'done' } }).catch(() => undefined);
+    await this.prisma.reminderSend.deleteMany({ where: { reminderId: id, status: 'queued' } }).catch(() => undefined);
+    this.log.log(`chase ${id} stopped — ${why}`);
   }
 
   /** One-day lifecycle: at each new local day, auto-pause reminders armed on an earlier day so
@@ -64,7 +98,17 @@ export class ReminderSenderService implements OnModuleInit {
     const todayKey = new Date(now.getTime() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);
     const stale = await this.prisma.reminder.findMany({ where: { status: 'active', OR: [{ armedDay: null }, { armedDay: { lt: todayKey } }] } });
     let paused = 0;
+    let rearmed = 0;
     for (const r of stale) {
+      // A real chase does not die at midnight — that was the whole problem. Re-arm it for the new
+      // day and keep going until the work is confirmed done or the owner stops it. (BEA-1021)
+      if (r.repeat === 'daily') {
+        const done = await this.chaseFinished(r);
+        if (done) { await this.stopChase(r.id, done); continue; }
+        await this.rearmChase(r, todayKey, now);
+        rearmed++;
+        continue;
+      }
       // Never pause a reminder that still has a FUTURE send queued — it's mid-lifecycle (just armed,
       // or spilling to a later day). This also protects a freshly-created reminder whose armedDay write
       // was swallowed (null), which used to get auto-paused within 60s and its sends deleted. (BEA-790)
@@ -75,6 +119,7 @@ export class ReminderSenderService implements OnModuleInit {
       paused++;
     }
     if (paused) this.log.log(`auto-paused ${paused} reminder(s) at day rollover`);
+    if (rearmed) this.log.log(`re-armed ${rearmed} daily chase(s) for ${todayKey}`);
   }
 
   async tick() {
@@ -112,6 +157,16 @@ export class ReminderSenderService implements OnModuleInit {
       const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
       if (!number || !r.contactId) {
         await this.mark(send.id, 'failed', null, 'contact has no WhatsApp number');
+        continue;
+      }
+      // Last line of defence: never chase someone about work that is already finished. The day
+      // rollover stops a chase, but the task can be confirmed done between rollovers — and sending
+      // "where is this?" about something they completed this morning is the worst possible bug in a
+      // chasing system. (BEA-1021)
+      const finished = await this.chaseFinished(r);
+      if (finished) {
+        await this.mark(send.id, 'skipped', null, `not sent — ${finished}`);
+        await this.stopChase(r.id, finished);
         continue;
       }
       let g = groups.get(r.contactId);

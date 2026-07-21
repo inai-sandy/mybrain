@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { TasksService } from '../tasks/tasks.service';
+import { RemindersService } from '../contacts/reminders.service';
 import { looseJsonParse } from '../common/llm-json';
 
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -32,6 +33,7 @@ export class BriefingsService {
     private readonly llm: LlmService,
     private readonly prompts: PromptsService,
     private readonly tasks: TasksService,
+    private readonly reminders: RemindersService,
   ) {}
 
   private async model(): Promise<LlmConfig> {
@@ -90,12 +92,15 @@ export class BriefingsService {
   }
 
   /** Save the briefing and create exactly the tasks the owner approved. */
-  async create(contactId: string, input: { text?: string; summary?: string; tasks?: DraftTask[] }) {
+  async create(contactId: string, input: { text?: string; summary?: string; tasks?: DraftTask[]; chase?: { times?: string[] } | null }) {
     const contact = await this.contactOrThrow(contactId);
     const raw = String(input?.text || '').trim();
     if (!raw) throw new BadRequestException('Tell me what is going on with them first');
     const approved = (input?.tasks || []).map((t) => ({ ...t, title: String(t?.title || '').trim().slice(0, 160) })).filter((t) => t.title);
     if (!approved.length) throw new BadRequestException('Keep at least one task, or cancel');
+
+    // Chase times are the owner's call — he said the frequency stays his decision.
+    const chaseTimes = (input?.chase?.times || []).filter((t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(t))).slice(0, 8);
 
     const briefing = await this.prisma.briefing.create({
       data: { contactId, rawText: raw.slice(0, 8000), summary: (input?.summary || '').trim().slice(0, 200) || null },
@@ -113,9 +118,17 @@ export class BriefingsService {
         briefingId: briefing.id,
         auto: true,
       });
-      if (row) created.push(row);
+      if (!row) continue;
+      created.push(row);
+      // Set the chase in the same step, so work handed out is work being followed up. A chase
+      // repeats every day until you confirm the task done. (BEA-1021)
+      if (chaseTimes.length) {
+        await this.reminders
+          .create({ contactId, taskId: row.id, subject: row.title, message: `Following up on: ${row.title}`, times: chaseTimes, repeat: 'daily' })
+          .catch((e: any) => this.log.warn(`chase for "${row.title}" not created: ${e?.message ?? e}`));
+      }
     }
-    this.log.log(`briefing for ${contact.name}: ${created.length} task(s) created`);
+    this.log.log(`briefing for ${contact.name}: ${created.length} task(s) created${chaseTimes.length ? `, chased at ${chaseTimes.join(', ')}` : ''}`);
     return this.shape(await this.prisma.briefing.findUnique({ where: { id: briefing.id }, include: { tasks: true } }));
   }
 
