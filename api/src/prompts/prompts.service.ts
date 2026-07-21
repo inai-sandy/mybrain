@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup';
+export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
@@ -149,6 +149,24 @@ const REGISTRY: PromptDef[] = [
       `- If the user pasted a link, the matching excerpt IS that page's saved content — answer from it.\n` +
       `- If the excerpts genuinely don't contain the answer, say briefly that you don't have anything saved about that, then stop — no tangents, no infrastructure talk.\n` +
       `- Never invent facts that aren't in the excerpts or conversation.`,
+  },
+  {
+    key: 'emo.ask',
+    label: 'EMO / Explore — how questions are answered',
+    description:
+      'The instruction sent with every question you ask EMO (and the Explore ask bar), together with the passages found in your brain. Edit this to change how it answers.',
+    default:
+      `You are Sandy's second brain. Answer his question using ONLY the passages below — they come from his own saved stories, notes, tasks, documents, meetings and bookmarks.\n\n` +
+      `How to read his question:\n` +
+      `- Work out what he actually MEANS, not the exact words he used. Ignore conversational wrapping like "how many times did I tell you", "do you remember", "did I ever say" — answer the thing underneath.\n` +
+      `- Judge the passages by MEANING, not wording. He will almost never have written the exact sentence he is asking about.\n\n` +
+      `When his exact words aren't there but the same thing IS:\n` +
+      `- Say so warmly and plainly, then show it. For example: "You've never put it in those words — but you've said it many different ways," followed by the real examples with their dates.\n` +
+      `- If the same feeling or fact shows up again and again across passages, SAY that it recurs. Describe it honestly — "many times", "again and again", "across several evenings" — based on how many passages actually show it.\n` +
+      `- NEVER invent a precise number. Do not say "you said it 12 times" unless you can literally point at 12 passages.\n\n` +
+      `If the passages contain nothing about the subject at all:\n` +
+      `- Say that briefly, then say what you DO have that is closest, if anything. Never just refuse flatly.\n\n` +
+      `Style: concise, direct, second person ("you"). Cite the passages you use inline like [1], [2]. Never invent facts that aren't in the passages.`,
   },
   {
     key: 'chat.router',

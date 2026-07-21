@@ -6,7 +6,7 @@ function make(hits: any[], answer = 'You shipped it on Tuesday [1].', resolved: 
   // No explore.llm setting → ask() falls back to the default model.
   const prisma: any = { setting: { findUnique: async () => null } };
   const connectors: any = { get: jest.fn(async () => null) }; // no Tavily key → web search off
-  return { svc: new ExploreService(prisma, memory, llm, connectors), memory, llm };
+  return { svc: new ExploreService(prisma, memory, llm, connectors, { get: async () => 'SYS' } as any), memory, llm };
 }
 
 describe('ExploreService.ask', () => {
@@ -34,7 +34,9 @@ describe('ExploreService.ask', () => {
     const hits = [{ title: 'Task: ship pricing', content: 'Task — ship pricing page', tags: ['task'], score: 0.9, source: 'rag' }];
     const { svc, memory } = make(hits);
     const out = await svc.ask('when did I ship pricing?', { ragOnly: true });
-    expect(memory.searchRag).toHaveBeenCalledWith('when did I ship pricing?', 14);
+    // The question is understood before searching (BEA-1011): the asking-wrapper/punctuation is
+    // stripped, so the SEARCH text is the content, not the raw sentence.
+    expect(memory.searchRag).toHaveBeenCalledWith('when did I ship pricing', 14);
     expect(memory.searchBrain).not.toHaveBeenCalled();
     expect(out.matches).toBe(1);
   });
@@ -52,7 +54,8 @@ describe('ExploreService.ask', () => {
     const out = await svc.ask('something never recorded');
     expect(out.matches).toBe(0);
     expect(out.sources).toHaveLength(0);
-    expect(out.answer).toMatch(/couldn't find/i);
+    // Honest empty answer (BEA-1011) — states the gap rather than a flat "couldn't find".
+    expect(out.answer).toMatch(/don't have anything saved/i);
     expect(llm.completeWith).not.toHaveBeenCalled();
   });
 });
@@ -76,7 +79,7 @@ describe('ExploreService saved answers (BEA-339)', () => {
         },
       },
     };
-    return { s: new ExploreService(prisma, {} as any, {} as any, { get: async () => null } as any), rows };
+    return { s: new ExploreService(prisma, {} as any, {} as any, { get: async () => null } as any, { get: async () => 'SYS' } as any), rows };
   }
 
   it('saves and lists newest-first, parsing sources', async () => {

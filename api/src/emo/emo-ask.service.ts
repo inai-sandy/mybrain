@@ -53,8 +53,13 @@ export class EmoAskService {
     // Answer from the whole brain, then file the Search card.
     const userTurns = [...history.filter((t) => t.role === 'user').map((t) => t.text), userText].filter(Boolean);
     const baseQ = userTurns.length > 1 ? `${userTurns[0]} — specifically: ${userTurns.slice(1).join('; ')}` : userTurns[0] || userText;
-    const retrievalQ = sessionCtx ? `${baseQ}\n\n(Earlier context: ${sessionCtx})` : baseQ;
-    const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto', withSummary: true, ragOnly: input.ragOnly }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false, summary: undefined as string | undefined }));
+    // Send the QUESTION only. Appending the earlier-session text used to drag the search embedding
+    // away from what he actually asked (BEA-1011); Explore now does its own understanding step.
+    const retrievalQ = baseQ;
+    // EMO answers from the local RAG store only (BEA-1011, owner's call) — SuperMemory's off-topic
+    // hits were polluting answers and adding a slow cloud round-trip. Callers can still opt out.
+    const ragOnly = input.ragOnly !== false;
+    const ans = await this.explore.ask(retrievalQ, { web: input.web || 'auto', withSummary: true, ragOnly }).catch(() => ({ answer: '', sources: [] as any[], matches: 0, usedWeb: false, summary: undefined as string | undefined }));
     const answer = (ans.answer || '').trim() || "I couldn't find anything about that in your brain yet.";
     // one call already gave us the spoken summary; fall back to the first sentence (no extra model call).
     const summary = ((ans as any).summary || '').trim() || (answer.split(/(?<=[.!?])\s/)[0] || answer).slice(0, 200);
