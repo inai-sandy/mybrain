@@ -954,8 +954,14 @@ model Reminder {
   count        Int               @default(1) // how many times today (1-5)
   times        String            @default("[]") // JSON array of ISO datetimes to send at
   status       String            @default("active") // active | done | stopped
-  feedback     String? // captured result once the contact says it's done
-  lastFiredKey String? // dedup key for the daily scheduler
+  /// Captured outcome from an earlier build. NOTHING writes this any more (the agent stopped
+  /// auto-closing reminders in BEA-948) but it IS still read and shown, and 4 live rows hold real
+  /// text — so it is kept, not dropped. Verified 2026-07-21. (BEA-1038)
+  feedback     String?
+  /// Dead: the daily scheduler no longer uses it and every live row is null. Left in place because
+  /// removing one empty column would mean rebuilding a live table for no benefit — the risk is
+  /// larger than the tidiness. Do not start writing it. Verified 2026-07-21. (BEA-1038)
+  lastFiredKey String?
   armedDay     String? // local day (YYYY-MM-DD) this reminder was armed/seeded for — one-day lifecycle (BEA-764)
   pausedAuto   Boolean           @default(false) // true when auto-paused at day rollover (vs paused by the user)
   needsOwner   Boolean           @default(false) // agent couldn't answer → flagged for Sandeep to reply (BEA-766)
