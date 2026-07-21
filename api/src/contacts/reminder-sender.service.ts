@@ -169,6 +169,13 @@ export class ReminderSenderService implements OnModuleInit {
         await this.stopChase(r.id, finished);
         continue;
       }
+      // They say it's done and it's sitting in the owner's review list. Go quiet — nagging someone
+      // about work they have already reported finished is how you lose them — but do NOT stop the
+      // chase: if the owner rejects the claim it must pick straight back up. (BEA-1024)
+      if (r.taskId && (await this.prisma.taskClaim.count({ where: { taskId: r.taskId, status: 'pending' } })) > 0) {
+        await this.mark(send.id, 'skipped', null, 'they reported it done — waiting on your review');
+        continue;
+      }
       let g = groups.get(r.contactId);
       if (!g) {
         g = { number, name: r.contact?.name || 'there', sends: [], reminders: new Map() };

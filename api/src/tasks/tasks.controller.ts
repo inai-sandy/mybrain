@@ -1,9 +1,13 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { TasksService } from './tasks.service';
+import { ClaimsService } from './claims.service';
 
 @Controller('tasks')
 export class TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(
+    private readonly tasks: TasksService,
+    private readonly claims: ClaimsService,
+  ) {}
 
   /** Morning brain-dump -> tasks. */
   @Post('dump')
@@ -48,6 +52,20 @@ export class TasksController {
   }
 
   /** Every task involving a given person (across all days/statuses). */
+  /** Everything someone says is finished, waiting on your decision. (BEA-1024) */
+  @Get('claims')
+  async listClaims() {
+    return { claims: await this.claims.pending() };
+  }
+
+  /** Confirm or reject one claim. Confirming is the ONLY way a claim becomes a completion. */
+  @Post('claims/:id/decide')
+  async decideClaim(@Param('id') id: string, @Body() body: { confirm?: boolean; reason?: string }) {
+    const r = await this.claims.decide(id, body?.confirm !== false, body?.reason);
+    if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
+    return r;
+  }
+
   /** What the `@names` in some text resolve to — so the form can show it as you type. (BEA-1019) */
   @Post('mentions/resolve')
   async resolveMentions(@Body() body: { text?: string }) {

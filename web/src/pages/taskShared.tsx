@@ -27,6 +27,8 @@ export type Task = {
   ownerContactId?: string | null; // the REAL owner link — null means it's yours (BEA-1019)
   owner?: { id: string; name: string } | null;
   people?: { id: string; name: string }[]; // everyone @mentioned on this task (BEA-1019)
+  /** Someone says this is finished and it's waiting on you. NOT done. (BEA-1024) */
+  claim?: { id: string; quote: string; source: string; at: string; by?: { id: string; name: string } | null } | null;
   dueDate?: string | null; // ISO due date
   status: 'open' | 'done';
   progress?: number; // 0 | 30 | 60 | 100
@@ -146,6 +148,15 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
               title={t.ownerContactId ? `Linked to ${t.party} in your contacts` : `"${t.party}" isn't linked to a contact`}
             >
               🤝 Promise → {t.party}
+            </span>
+          )}
+          {/* They say it's finished — a claim, not a completion. Waiting on you. (BEA-1024) */}
+          {t.claim && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-1.5 py-0.5 font-medium text-violet-600 dark:text-violet-400"
+              title={`${t.claim.by?.name || 'They'} said: "${t.claim.quote}" — waiting for you to confirm`}
+            >
+              ✋ {t.claim.by?.name || 'They'} say{t.claim.by ? 's' : ''} it's done
             </span>
           )}
           {/* Everyone else this task touches — the @mentions, real links both ways. (BEA-1019) */}

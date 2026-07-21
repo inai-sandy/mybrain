@@ -13,6 +13,14 @@ const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || 
 const PEOPLE_INCLUDE = {
   ownerContact: { select: { id: true, name: true } },
   people: { select: { contact: { select: { id: true, name: true } } } },
+  // The claim waiting on the owner, if any — so "they say it's done" shows wherever tasks
+  // are listed, not only in the review list. (BEA-1024)
+  claims: {
+    where: { status: 'pending' },
+    take: 1,
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, quote: true, source: true, createdAt: true, contact: { select: { id: true, name: true } } },
+  },
 } as const;
 
 /** Normalized title key for dedupe — lowercase, punctuation-stripped, whitespace-collapsed. (BEA-933) */
@@ -470,6 +478,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       ownerContactId: t.ownerContactId || null,
       owner: t.ownerContact ? { id: t.ownerContact.id, name: t.ownerContact.name } : null,
       people: Array.isArray(t.people) ? t.people.map((p: any) => ({ id: p.contact.id, name: p.contact.name })) : [],
+      // Someone says this is finished and it is waiting on you. NOT done. (BEA-1024)
+      claim: Array.isArray(t.claims) && t.claims[0]
+        ? { id: t.claims[0].id, quote: t.claims[0].quote, source: t.claims[0].source, at: t.claims[0].createdAt, by: t.claims[0].contact ? { id: t.claims[0].contact.id, name: t.claims[0].contact.name } : null }
+        : null,
       dueDate: t.dueDate || null,
       status: t.status,
       progress: t.progress ?? 0,

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
+import { ClaimsService } from '../tasks/claims.service';
 import { RemindersService, topicFromMessage } from './reminders.service';
 
 /** Watchdog decision for an unanswered inbound of a given age. Pure + unit-tested. (BEA-953) */
@@ -87,6 +88,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
     private readonly reminders: RemindersService,
+    private readonly claims: ClaimsService,
   ) {}
 
   // Self-healing watchdog (BEA-953): every 10 min, catch any contact reply we haven't answered —
@@ -188,8 +190,8 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const name = (contact.name || 'them').trim();
     const thread = messages.map((m) => `${m.direction === 'out' ? 'Me' : name}: ${m.body}`).join('\n');
 
-    const items: { n: number; reminderId: string; subject: string }[] = [];
-    for (let i = 0; i < reminders.length; i++) items.push({ n: i + 1, reminderId: reminders[i].id, subject: await this.subjectFor(reminders[i]) });
+    const items: { n: number; reminderId: string; taskId: string | null; subject: string }[] = [];
+    for (let i = 0; i < reminders.length; i++) items.push({ n: i + 1, reminderId: reminders[i].id, taskId: reminders[i].taskId || null, subject: await this.subjectFor(reminders[i]) });
     const itemList = items.length
       ? items.map((it, i) => `${it.n}. ${it.subject}${reminders[i].notes?.trim() ? ` — context Sandeep gave: ${reminders[i].notes.trim()}` : ''}`).join('\n')
       : '(no open reminders right now — this is an ongoing conversation; keep it warm, acknowledge what they share, and pass anything important to Sandeep)';
@@ -215,12 +217,29 @@ Rules:
 - If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
 - ALWAYS reply to their message — set "send": true. NEVER leave them on read; a plain "yes"/"ok"/"thanks" or a shared file/link still gets a brief warm reply.
 - Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
+- FINISHED WORK: if ${name}'s LATEST message clearly says one of the numbered items above is COMPLETE, list those numbers in "done". Be strict — only when they plainly state it is finished/sent/paid/submitted/handed over. A promise ("I'll do it tomorrow"), a partial update ("almost there", "working on it") or a question is NOT finished, so leave "done" empty. If it is not obvious WHICH numbered item they mean, put nothing in "done" and ASK them which one in your reply — never guess.
+- Never tell them the work is closed. Sandeep confirms it himself; you can say you have passed it to him to check.
 
 Reply with ONLY this JSON, nothing else:
-{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false}`;
+{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "done": [<numbers of items they say are finished, or empty>]}`;
 
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 700);
     const parsed: any = this.parseJson(raw) || {};
+    // Someone saying "done" is a CLAIM, not a completion. Record it against the exact task, with
+    // their own words as the evidence, and leave the task open until the owner confirms. Only the
+    // numbers the model was sure about arrive here; anything ambiguous it asks about instead. (BEA-1024)
+    const lastIn = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
+    const claimed: string[] = [];
+    if (Array.isArray(parsed.done) && parsed.done.length && lastIn) {
+      for (const n of parsed.done) {
+        const item = items.find((it) => it.n === Number(n));
+        if (!item?.taskId) continue; // a chase with no task behind it has nothing to claim
+        const row = await this.claims.claim({ taskId: item.taskId, contactId, quote: lastIn, source: 'whatsapp' }).catch(() => null);
+        if (row) claimed.push(item.subject);
+      }
+      if (claimed.length) this.log.log(`agent: ${name} says done — ${claimed.join('; ')} (waiting on Sandeep)`);
+    }
+
     // Never let a reply go out addressing the contact by the owner's name (BEA-899).
     let replyText = fixOwnerVocative((parsed.reply || '').trim(), 'Sandeep', name);
     const lastInBody = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';

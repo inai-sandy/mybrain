@@ -409,6 +409,8 @@ model Task {
   people        TaskPerson[]
   /// The chases running on this task. (BEA-1021)
   chases        Reminder[]
+  /// Times someone said this was finished. A claim is NOT done — the owner confirms. (BEA-1024)
+  claims        TaskClaim[]
   /// The briefing that produced this task, if it came from one. (BEA-1020)
   briefingId    String?
   briefing      Briefing? @relation(fields: [briefingId], references: [id], onDelete: SetNull)
@@ -440,6 +442,26 @@ model Briefing {
   updatedAt DateTime @updatedAt
   tasks     Task[]
 
+  @@index([contactId])
+}
+
+/// Someone said a task is finished. That is a CLAIM, never a completion: the work is only done
+/// when the owner confirms it. Keeps their exact words as the evidence he decides on. (BEA-1024)
+model TaskClaim {
+  id        String    @id @default(uuid())
+  taskId    String
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  contactId String? // who said it (null if the owner's own voice closed it)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  source    String    @default("whatsapp") // whatsapp | page | owner
+  quote     String // their exact words — what the owner reads before deciding
+  status    String    @default("pending") // pending | confirmed | rejected
+  reason    String? // why the owner rejected it
+  createdAt DateTime  @default(now())
+  decidedAt DateTime?
+
+  @@index([status])
+  @@index([taskId])
   @@index([contactId])
 }
 
@@ -895,6 +917,7 @@ model Contact {
   ownedTasks     Task[]       @relation("TaskOwner") // work this person owns (BEA-1019)
   taskLinks      TaskPerson[] // tasks they're @mentioned on (BEA-1019)
   briefings      Briefing[] // the situations you've told me about them (BEA-1020)
+  claims         TaskClaim[] // work they say they've finished, waiting on you (BEA-1024)
 
   @@index([name])
 }
