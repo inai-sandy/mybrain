@@ -22,6 +22,8 @@ function makeSvc() {
     reminderSend: { count: async () => 2 },
     task: { findMany: async () => [] },
     mentorDay: { findFirst: async () => ({ day: '2026-07-06', guidance: 'Do more Saturdays like this one.' }) },
+    // Work someone says is finished, waiting on the owner (BEA-1025). None in this fixture.
+    taskClaim: { findMany: async () => [] },
     daySummary: { findUnique: async () => null },
   };
   const tasks: any = { today: async () => ({ tasks: [{ status: 'open', title: 'A' }], dumped: true, counts: { done: 5, total: 22 } }) };

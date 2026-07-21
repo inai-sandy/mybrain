@@ -66,6 +66,19 @@ export class TasksController {
     return r;
   }
 
+  /** Confirm several obviously-fine claims at once. (BEA-1025) */
+  @Post('claims/decide-many')
+  async decideMany(@Body() body: { ids?: string[]; confirm?: boolean }) {
+    const ids = (body?.ids || []).filter((x) => typeof x === 'string').slice(0, 100);
+    const confirm = body?.confirm !== false;
+    let done = 0;
+    for (const id of ids) {
+      const r = await this.claims.decide(id, confirm).catch(() => ({ ok: false }) as any);
+      if (r.ok && r.taskId) { await this.tasks.setDone(r.taskId, !!r.confirmed); done++; }
+    }
+    return { ok: true, decided: done, of: ids.length };
+  }
+
   /** What the `@names` in some text resolve to — so the form can show it as you type. (BEA-1019) */
   @Post('mentions/resolve')
   async resolveMentions(@Body() body: { text?: string }) {

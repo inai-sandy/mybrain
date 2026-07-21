@@ -13,6 +13,7 @@ import { IdeaDetail } from './pages/IdeaDetail';
 import { Skills } from './pages/Skills';
 import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
+import { Review } from './pages/Review';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
 import { Notes } from './pages/Notes';
@@ -157,6 +158,7 @@ function AuthedApp() {
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="today" element={<Today />} />
         <Route path="tasks" element={<Tasks />} />
+        <Route path="review" element={<Review />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="meeting/:id" element={<MeetingDetail />} />
         <Route path="google" element={<GoogleHome />} />

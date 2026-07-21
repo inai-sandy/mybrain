@@ -56,7 +56,13 @@ export class ClaimsService {
       orderBy: { createdAt: 'asc' },
       include: {
         contact: { select: { id: true, name: true } },
-        task: { select: { id: true, title: true, note: true, status: true, createdAt: true, ownerContactId: true } },
+        task: {
+          select: {
+            id: true, title: true, note: true, status: true, createdAt: true, ownerContactId: true,
+            // the live chase, so a rejection can be sent straight back on the same thread
+            chases: { where: { status: { in: ['active', 'paused'] } }, take: 1, select: { id: true } },
+          },
+        },
       },
     });
     // A task deleted under a claim leaves nothing to decide on.
@@ -78,12 +84,14 @@ export class ClaimsService {
       id: r.id,
       taskId: r.taskId,
       task: r.task ? { id: r.task.id, title: r.task.title, note: r.task.note, openedAt: r.task.createdAt } : undefined,
+      chaseId: r.task?.chases?.[0]?.id || null,
       contact: r.contact ? { id: r.contact.id, name: r.contact.name } : null,
       source: r.source,
       quote: r.quote,
       status: r.status,
       reason: r.reason,
       createdAt: r.createdAt,
+      openDays: r.task?.createdAt ? Math.max(0, Math.floor((Date.now() - new Date(r.task.createdAt).getTime()) / 86400000)) : null,
     };
   }
 

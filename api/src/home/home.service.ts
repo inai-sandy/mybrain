@@ -64,13 +64,20 @@ export class HomeService {
     const mustDos = (today.tasks || []).filter((t: any) => t.status === 'open').slice(0, 3);
 
     // ---- NEEDS YOU — everything waiting on the user, across the app ----
-    const [emoNeeds, agentWaiting, flowWaiting, remindersNeed, overdue, guidanceRow] = await Promise.all([
+    const [emoNeeds, agentWaiting, flowWaiting, remindersNeed, overdue, guidanceRow, claimsWaiting] = await Promise.all([
       this.prisma.emoCard.findMany({ where: { status: 'needs_you' }, orderBy: { createdAt: 'desc' }, take: 6 }),
       this.prisma.agentRun.findMany({ where: { status: 'awaiting_input' }, orderBy: { startedAt: 'desc' }, take: 4 }),
       this.prisma.flowRun.findMany({ where: { status: 'running', waitQuestion: { not: null } }, orderBy: { startedAt: 'desc' }, take: 4 }),
       this.prisma.reminder.findMany({ where: { needsOwner: true, status: 'active' }, include: { contact: true }, take: 5 }),
       this.prisma.task.findMany({ where: { status: 'open', dueDate: { lt: todayStart } }, orderBy: { dueDate: 'asc' }, take: 3 }),
       this.prisma.mentorDay.findFirst({ orderBy: { day: 'desc' } }),
+      // Work someone says they've finished, waiting on your yes or no. (BEA-1025)
+      this.prisma.taskClaim.findMany({
+        where: { status: 'pending' },
+        orderBy: { createdAt: 'asc' },
+        take: 5,
+        include: { contact: { select: { name: true } }, task: { select: { title: true } } },
+      }),
     ]);
 
     const needsYou: NeedItem[] = [];
@@ -79,9 +86,10 @@ export class HomeService {
     for (const f of flowWaiting) needsYou.push({ kind: 'flow', icon: '🌊', title: 'A flow needs your input', sub: (f.waitQuestion || '').slice(0, 120), href: `/flows/runs/${f.id}`, action: 'Reply' });
     for (const r of remindersNeed as any[]) needsYou.push({ kind: 'reminder', icon: '⏰', title: `${r.contact?.name || 'A contact'} needs a reply`, sub: (r.subject ? `about ${r.subject}` : 'Their WhatsApp reply is waiting'), href: '/contacts', action: 'Read' });
     for (const t of overdue as any[]) needsYou.push({ kind: 'task', icon: '⚠️', title: (t.title || 'Task').slice(0, 90), sub: 'Overdue', href: '/tasks', action: 'Do' });
+    for (const c of claimsWaiting as any[]) needsYou.push({ kind: 'claim', icon: '✋', title: `${c.contact?.name || 'Someone'} says it's done`, sub: (c.task?.title || '').slice(0, 120), href: '/review', action: 'Review' });
 
     // Rank by urgency (most time-sensitive first) and drop duplicates. (BEA-939)
-    const NEED_RANK: Record<string, number> = { reminder: 0, task: 1, agent: 2, flow: 3, meeting: 4, emo: 5 };
+    const NEED_RANK: Record<string, number> = { claim: 0, reminder: 1, task: 2, agent: 3, flow: 4, meeting: 5, emo: 6 };
     const seenNeed = new Set<string>();
     const rankedNeedsYou = needsYou
       .filter((x) => { const k = `${x.kind}|${x.href}|${x.title}`; if (seenNeed.has(k)) return false; seenNeed.add(k); return true; })
