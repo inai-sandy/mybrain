@@ -100,6 +100,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       .catch(() => undefined);
   }
 
+  /** Keep the person's rolling brain doc current when their work changes. (BEA-1031) */
+  private touchPerson(contactId?: string | null): void {
+    if (!contactId) return;
+    this.memory.reindexContact(contactId).catch(() => undefined);
+  }
+
   /** Remove a task's docs from the brain (best-effort) before/around deletion. */
   private unindexTask(t: any): void {
     if (!t) return;
@@ -856,6 +862,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       },
     });
     this.indexTask(t);
+    this.touchPerson(owner.ownerContactId);
     if (!mentioned.length) return this.shape(t);
     await this.syncPeople(t.id, mentioned, owner.ownerContactId);
     return this.shape(await this.prisma.task.findUnique({ where: { id: t.id }, include: PEOPLE_INCLUDE }));
@@ -938,6 +945,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       },
     });
     this.indexTask(upd);
+    this.touchPerson((upd as any).ownerContactId);
     if (!wordsTouched && !ownerTouched) return this.shape(upd);
     const mentioned = [
       ...this.mentionIds(contacts, nextTitle, nextNote),
@@ -965,6 +973,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       },
     });
     this.indexTask(upd);
+    this.touchPerson((upd as any).ownerContactId);
     await this.syncChases(id, done);
     if (done) await this.spawnFollowUp(t, followUpDate);
     return this.shape(upd);

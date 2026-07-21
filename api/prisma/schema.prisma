@@ -446,6 +446,9 @@ model Briefing {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tasks     Task[]
+  /// Brain doc ids, so a re-index REPLACES rather than piling up duplicates. (BEA-1031)
+  supermemoryId String?
+  ragId         String?
 
   @@index([contactId])
 }
@@ -923,6 +926,9 @@ model Contact {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]
+  /// Brain doc ids for this person's rolling "where things stand" doc. (BEA-1031)
+  supermemoryId  String?
+  ragId          String?
   ownedTasks     Task[]       @relation("TaskOwner") // work this person owns (BEA-1019)
   taskLinks      TaskPerson[] // tasks they're @mentioned on (BEA-1019)
   briefings      Briefing[] // the situations you've told me about them (BEA-1020)

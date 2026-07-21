@@ -4,6 +4,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService } from '../contacts/reminders.service';
+import { MemoryService } from '../memory/memory.service';
 import { looseJsonParse } from '../common/llm-json';
 
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -34,6 +35,7 @@ export class BriefingsService {
     private readonly prompts: PromptsService,
     private readonly tasks: TasksService,
     private readonly reminders: RemindersService,
+    private readonly memory: MemoryService,
   ) {}
 
   private async model(): Promise<LlmConfig> {
@@ -129,6 +131,9 @@ export class BriefingsService {
       }
     }
     this.log.log(`briefing for ${contact.name}: ${created.length} task(s) created${chaseTimes.length ? `, chased at ${chaseTimes.join(', ')}` : ''}`);
+    // Into the brain: the briefing itself, and this person's rolling "where things stand". (BEA-1031)
+    this.memory.indexBriefing(briefing.id).catch(() => undefined);
+    this.memory.reindexContact(contactId).catch(() => undefined);
     return this.shape(await this.prisma.briefing.findUnique({ where: { id: briefing.id }, include: { tasks: true } }));
   }
 
@@ -167,6 +172,7 @@ export class BriefingsService {
     }
     if (patch.summary !== undefined) data.summary = String(patch.summary || '').trim().slice(0, 200) || null;
     const row = await this.prisma.briefing.update({ where: { id }, data, include: { tasks: { select: { id: true, title: true, status: true } } } });
+    this.memory.indexBriefing(id).catch(() => undefined); // edited words, refreshed doc (BEA-1031)
     return this.shape(row);
   }
 
@@ -174,6 +180,7 @@ export class BriefingsService {
   async remove(id: string) {
     const cur = await this.prisma.briefing.findUnique({ where: { id }, include: { tasks: { select: { id: true } } } });
     if (!cur) throw new NotFoundException('Briefing not found');
+    await this.memory.deleteDoc((cur as any).supermemoryId, (cur as any).ragId).catch(() => undefined); // (BEA-1031)
     await this.prisma.briefing.delete({ where: { id } }); // Task.briefingId is cleared, tasks stay
     return { ok: true, keptTasks: cur.tasks.length };
   }

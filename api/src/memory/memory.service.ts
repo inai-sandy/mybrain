@@ -13,13 +13,21 @@ const RECONCILE_INTERVAL_MS = Number(process.env.MEMORY_RECONCILE_MS) || 15 * 60
  */
 // cadence = WHEN it indexes: live (on save) · on-update (re-indexes when it regenerates) · nightly (finalized at night)
 type Cadence = 'live' | 'on-update' | 'nightly';
-type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean; manageable?: boolean; cadence?: Cadence };
+type SourceMeta = { label: string; model: string; pk: string; defaultDisabled?: boolean; mandatory?: boolean; manageable?: boolean; cadence?: Cadence; /** relations the content builder needs (BEA-1031) */ include?: any };
 const SOURCE_META: Record<string, SourceMeta> = {
   task: { label: 'Tasks', model: 'task', pk: 'id', cadence: 'live' },
   story: { label: 'Stories & Daily', model: 'story', pk: 'id', cadence: 'live' },
   item: { label: 'Documents & Bookmarks', model: 'item', pk: 'id', cadence: 'live' },
   idea: { label: 'Ideas', model: 'idea', pk: 'id', cadence: 'live' },
   meeting: { label: 'Meetings', model: 'meeting', pk: 'id', cadence: 'live' },
+  // The delegation layer (BEA-1031). Briefings are the context behind someone's work; one rolling
+  // doc per contact says where they stand. Raw WhatsApp chatter is deliberately NOT indexed — the
+  // agent reads that live, and thousands of "ok"/"thanks" lines would drown everything else out.
+  briefing: { label: 'Briefings (people)', model: 'briefing', pk: 'id', cadence: 'live', include: { contact: { select: { name: true } } } },
+  contact: {
+    label: 'Where each person stands', model: 'contact', pk: 'id', cadence: 'on-update',
+    include: { ownedTasks: { select: { title: true, status: true, createdAt: true, promisedFor: true }, take: 60, orderBy: { createdAt: 'desc' } } },
+  },
   note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true, cadence: 'live' },
   // Vault — LABELS ONLY (BEA-368). Index the searchable metadata so items are findable from the brain;
   // the encrypted secret is NEVER indexed (see buildVaultIndexText). User-toggleable; default on.
@@ -207,6 +215,37 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       await this.deleteDoc(opts.prevSupermemoryId, opts.prevRagId);
     }
     await this.enqueue(text, { refType: opts.refType, refId: opts.refId, title: opts.title, tags: opts.tags });
+  }
+
+  /**
+   * Refresh the one rolling "where things stand with X" doc for a person. Called whenever their
+   * work changes, so the brain's answer is never a week out of date. Best-effort. (BEA-1031)
+   */
+  async reindexContact(contactId: string): Promise<void> {
+    try {
+      if (!contactId || !this.sourceEnabled('contact')) return;
+      const row: any = await this.prisma.contact.findUnique({ where: { id: contactId }, include: SOURCE_META.contact.include });
+      if (!row) return;
+      const built = this.buildContent('contact', row);
+      if (!built) return;
+      await this.indexEntity({ refType: 'contact', refId: row.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: row.supermemoryId, prevRagId: row.ragId });
+    } catch (e) {
+      this.log.warn(`contact reindex failed (${contactId}): ${(e as Error)?.message ?? e}`);
+    }
+  }
+
+  /** Index (or re-index) one briefing. Best-effort. (BEA-1031) */
+  async indexBriefing(id: string): Promise<void> {
+    try {
+      if (!id || !this.sourceEnabled('briefing')) return;
+      const row: any = await this.prisma.briefing.findUnique({ where: { id }, include: SOURCE_META.briefing.include });
+      if (!row) return;
+      const built = this.buildContent('briefing', row);
+      if (!built) return;
+      await this.indexEntity({ refType: 'briefing', refId: row.id, content: built.content, title: built.title, tags: built.tags, prevSupermemoryId: row.supermemoryId, prevRagId: row.ragId });
+    } catch (e) {
+      this.log.warn(`briefing index failed (${id}): ${(e as Error)?.message ?? e}`);
+    }
   }
 
   /**
@@ -658,7 +697,8 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     if (!this.sourceEnabled(type)) return 0;
     if (!this.modelOf(type)) return 0;
     const pk = this.pkOf(type);
-    const rows = await this.modelOf(type).findMany({});
+    const inc = SOURCE_META[type]?.include;
+    const rows = await this.modelOf(type).findMany(inc ? { include: inc } : {});
     let n = 0;
     for (const r of rows) {
       const built = this.buildContent(type, r);
@@ -670,7 +710,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Build searchable text for a row that needs re-indexing (reconcile backstop). */
-  private buildContent(table: string, row: any): { content: string; title: string; tags: string[] } | null {
+  buildContent(table: string, row: any): { content: string; title: string; tags: string[] } | null {
     const parseTags = (s: any) => {
       try {
         const a = JSON.parse(s || '[]');
@@ -691,14 +731,51 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         const when = done
           ? `Completed: ${ymd(row.completedAt) || row.day || 'date unknown'}`
           : [`Still open`, carried > 0 ? `carried forward ${carried} time${carried === 1 ? '' : 's'} since it was added` : ''].filter(Boolean).join(', ');
+        // Who it belongs to, so "what's pending with Ramesh" finds it even when his name is not
+        // in the title. `party` follows the linked contact's current name. (BEA-1031)
+        const owner = row.party ? String(row.party) : '';
         const parts = [
           row.title,
           row.note || '',
           row.category ? `Category: ${row.category}` : '',
+          owner ? `${done ? 'Was with' : 'Waiting on'}: ${owner}` : '',
           added ? `Added: ${added}` : '',
+          row.promisedFor && !done ? `They promised: ${row.promisedFor}` : '',
           when,
         ].filter(Boolean);
-        return { content: `Task — ${parts.join('\n')}`, title: `Task: ${row.title}`.slice(0, 120), tags: ['task', row.sphere || 'work', ...(row.category ? [String(row.category).toLowerCase()] : [])] };
+        const who = owner ? [String(owner).toLowerCase().split(/\s+/)[0]] : [];
+        return { content: `Task — ${parts.join('\n')}`, title: `Task: ${row.title}`.slice(0, 120), tags: ['task', row.sphere || 'work', ...who, ...(row.category ? [String(row.category).toLowerCase()] : [])] };
+      }
+      // The situation he described about one person, in his own words. (BEA-1031)
+      case 'briefing': {
+        const when = (() => { try { return new Date(row.createdAt).toISOString().slice(0, 10); } catch { return ''; } })();
+        const name = row.contact?.name || '';
+        return {
+          content: `Briefing about ${name || 'someone'}${when ? ` on ${when}` : ''} — ${row.summary || ''}\n\n${row.rawText}`,
+          title: `Briefing: ${name || 'someone'}${row.summary ? ` — ${row.summary}` : ''}`.slice(0, 120),
+          tags: ['briefing', 'people', ...(name ? [String(name).toLowerCase().split(/\s+/)[0]] : [])],
+        };
+      }
+      // One rolling doc per person: where things stand with them right now. Rebuilt from live data
+      // on every re-index, so it never goes stale. (BEA-1031)
+      case 'contact': {
+        const name = row.name || 'Someone';
+        const tasks: any[] = row.ownedTasks || [];
+        const open = tasks.filter((t) => t.status !== 'done');
+        const done = tasks.filter((t) => t.status === 'done');
+        const days = (d: any) => { try { return Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)); } catch { return 0; } };
+        const lines = [
+          `Where things stand with ${name}.`,
+          open.length ? `Waiting on ${name} (${open.length}):` : `Nothing is outstanding with ${name}.`,
+          ...open.slice(0, 25).map((t) => `- ${t.title} (open ${days(t.createdAt)} day${days(t.createdAt) === 1 ? '' : 's'}${t.promisedFor ? `, they promised ${t.promisedFor}` : ''})`),
+          done.length ? `\nAlready finished with ${name} (${done.length}):` : '',
+          ...done.slice(0, 15).map((t) => `- ${t.title}`),
+        ].filter(Boolean);
+        return {
+          content: lines.join('\n'),
+          title: `Where things stand with ${name}`.slice(0, 120),
+          tags: ['people', 'delegation', String(name).toLowerCase().split(/\s+/)[0]],
+        };
       }
       case 'story':
         return { content: `His own story — ${row.day}${row.mood ? ` (mood: ${row.mood})` : ''}\n\n${row.rawText}`, title: `Your story ${row.day}`, tags: ['activity', 'story'] };

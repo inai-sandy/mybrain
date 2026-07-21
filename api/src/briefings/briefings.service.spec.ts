@@ -29,7 +29,14 @@ function make(llmReply: string | null | Error) {
   const tasks: any = { create: async (d: any) => { const t = { id: `t${++seq}`, status: 'open', ...d }; created.push(t); return t; } };
   const chases: any[] = [];
   const reminders: any = { create: async (d: any) => { chases.push(d); return d; } };
-  return { svc: new BriefingsService(prisma, llm, prompts, tasks, reminders), briefings, created, chases };
+  // The brain gets the briefing and the person's rolling doc (BEA-1031) — no-ops in tests.
+  const indexed: any[] = [];
+  const memory: any = {
+    indexBriefing: async (id: string) => { indexed.push(id); },
+    reindexContact: async () => undefined,
+    deleteDoc: async () => undefined,
+  };
+  return { svc: new BriefingsService(prisma, llm, prompts, tasks, reminders, memory), briefings, created, chases, indexed };
 }
 
 const GOOD = JSON.stringify({
