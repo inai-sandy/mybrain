@@ -99,7 +99,7 @@ export class EmoCloseService {
   }
 
   /** Open tasks that plausibly match, best first. Narrowed to one person when a name was said. */
-  private async candidates(said: string): Promise<{ id: string; title: string; score: number; who: string | null }[]> {
+  private async candidates(said: string): Promise<{ id: string; title: string; score: number; who: string | null; whoId: string | null }[]> {
     const all = await this.contacts.allForPicker().then((r) => r.contacts).catch(() => [] as any[]);
     // A name in the sentence scopes the search to that person's work.
     let ownerId: string | null = null;
@@ -110,21 +110,22 @@ export class EmoCloseService {
     }
     const rows = await this.prisma.task.findMany({
       where: { status: 'open', ...(ownerId ? { ownerContactId: ownerId } : {}) },
-      select: { id: true, title: true, ownerContact: { select: { name: true } } },
+      select: { id: true, title: true, ownerContactId: true, ownerContact: { select: { name: true } } },
       take: 500,
     });
     return rows
-      .map((t) => ({ id: t.id, title: t.title, who: t.ownerContact?.name || null, score: titleScore(said, t.title) }))
+      .map((t) => ({ id: t.id, title: t.title, who: t.ownerContact?.name || null, whoId: (t as any).ownerContactId || null, score: titleScore(said, t.title) }))
       .filter((t) => t.score > 0.15)
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
   }
 
-  private async close(cardId: string, task: { id: string; title: string; who: string | null }) {
+  private async close(cardId: string, task: { id: string; title: string; who: string | null; whoId?: string | null }) {
     await this.tasks.setDone(task.id, true);
     this.log.log(`closed by voice: "${task.title}"${task.who ? ` (${task.who})` : ''}`);
     await this.cards.update(cardId, {
       status: 'done',
+      contactId: task.whoId || null, // (BEA-1034)
       summary: `Marked done: ${task.title}`.slice(0, 200),
       detail: task.who ? `Confirmed finished — ${task.who}'s chase has stopped.` : 'Marked done.',
       links: [{ kind: 'task', id: task.id, label: task.title.slice(0, 60) }],

@@ -36,8 +36,8 @@ describe('EmoController (BEA-862)', () => {
   });
 
   it('passes feed filters through to the service', async () => {
-    await ctrl.list('needs_you' as any, 'search' as any, '2026-07-04', '20', '0');
-    expect(svc.list).toHaveBeenCalledWith({ status: 'needs_you', lane: 'search', day: '2026-07-04', take: 20, skip: 0 });
+    await ctrl.list('needs_you' as any, 'search' as any, '2026-07-04', undefined, '20', '0');
+    expect(svc.list).toHaveBeenCalledWith({ status: 'needs_you', lane: 'search', day: '2026-07-04', contactId: undefined, take: 20, skip: 0 });
   });
 
   it('runs the search agent after a search card is answered (BEA-869)', async () => {
@@ -53,5 +53,10 @@ describe('EmoController (BEA-862)', () => {
     await ctrl.update('c1', { status: 'done' });
     expect(svc.update).toHaveBeenCalledWith('c1', { status: 'done' });
     expect((await ctrl.remove('c1')).ok).toBe(true);
+  });
+
+  it('filters the feed to one person (BEA-1034)', async () => {
+    await ctrl.list(undefined, undefined, undefined, 'c1', undefined, undefined);
+    expect(svc.list).toHaveBeenCalledWith(expect.objectContaining({ contactId: 'c1' }));
   });
 });

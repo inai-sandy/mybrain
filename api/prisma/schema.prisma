@@ -1059,7 +1059,10 @@ model EmoCard {
   needsQuestion String? // the clarify question shown on the card (durable Needs-you HITL)
   needsOptions  String   @default("[]") // JSON array of suggested answers (optional)
   needsAnswer   String? // the owner's answer once given
-  source        String   @default("emo") // where the capture came from
+  source        String   @default("emo")
+  /// The person this card is about, when there is one — so you can see everything EMO did for
+  /// someone without hoping their name is in the text. (BEA-1034)
+  contactId     String? // where the capture came from
   day           String // IST day key YYYY-MM-DD — powers the "Today's Captures" grouping
   rawTranscript String?
   audioPath     String? // the raw recording file (part of the receipt)

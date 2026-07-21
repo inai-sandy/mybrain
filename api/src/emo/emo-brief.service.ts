@@ -105,6 +105,7 @@ export class EmoBriefService {
 
       await this.cards.update(cardId, {
         status: 'done',
+        contactId: contact.id, // so this card shows on their page (BEA-1034)
         summary: `Briefed ${contact.name} — ${tasks.length} task${tasks.length === 1 ? '' : 's'}`,
         detail: [`**${contact.name}** now owes you:`, ...tasks.map((t: any) => `- ${t.title}`), '', '_Set their chase times on their contact page._'].join('\n'),
         links: [{ kind: 'contact', id: contact.id, label: contact.name }, ...tasks.slice(0, 8).map((t: any) => ({ kind: 'task', id: t.id, label: String(t.title).slice(0, 60) }))],

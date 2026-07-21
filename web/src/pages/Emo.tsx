@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, X, ExternalLink, Mic, Square, Loader2, Trash2, Volume2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { AskEmo } from './AskEmo';
 import { useToast } from '../ui/Toast';
+import { loadContacts, type PersonOption } from '../ui/PersonPicker';
 import { Markdown } from '../ui/markdown';
 import { AnswerWithSources, EmoSource } from '../ui/Sources';
 import { Sheet } from '../ui/Sheet';
@@ -62,6 +63,8 @@ export default function Emo() {
   const [needsYou, setNeedsYou] = useState<Card[]>([]); // global Needs-you, pinned across all days
   const [status, setStatus] = useState<'' | 'needs_you' | 'cooking' | 'done'>('');
   const [lane, setLane] = useState('');
+  const [person, setPerson] = useState('');           // filter to one contact (BEA-1034)
+  const [people, setPeople] = useState<PersonOption[]>([]);
   const [q, setQ] = useState('');
   const [dictated, setDictated] = useState('');
   const [sending, setSending] = useState(false);
@@ -150,14 +153,18 @@ export default function Emo() {
 
   // The viewed day's cards + the global Needs-you list (pinned across all days). (BEA-968)
   async function load() {
+    // Filtering by person is not a one-day question — "everything Emo did about Ramesh" spans
+    // whatever days it happened on, so the day scope drops away while a person is chosen. (BEA-1034)
+    const scope = person ? `contactId=${encodeURIComponent(person)}&take=200` : `day=${day}&take=500`;
     const [c, n] = await Promise.all([
-      fetch(`/api/emo/cards?day=${day}&take=500`).then((r) => (r.ok ? r.json() : { cards: [] })).catch(() => ({ cards: [] })),
+      fetch(`/api/emo/cards?${scope}`).then((r) => (r.ok ? r.json() : { cards: [] })).catch(() => ({ cards: [] })),
       fetch('/api/emo/cards?status=needs_you&take=100').then((r) => (r.ok ? r.json() : { cards: [] })).catch(() => ({ cards: [] })),
     ]);
     setCards(c.cards || []);
     setNeedsYou(n.cards || []);
   }
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [day]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [day, person]);
+  useEffect(() => { loadContacts().then(setPeople); }, []);
 
   // Keep cooking cards fresh — poll while anything on this day (or a pinned card) is still cooking. (BEA-880)
   useEffect(() => {
@@ -250,6 +257,11 @@ export default function Emo() {
         <select value={lane} onChange={(e) => setLane(e.target.value)} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
           <option value="">All lanes</option>
           {Object.entries(LANE).map(([k, v]) => <option key={k} value={k}>{v.icon} {v.label}</option>)}
+        </select>
+        {/* Everything Emo did about one person, across every day. (BEA-1034) */}
+        <select value={person} onChange={(e) => setPerson(e.target.value)} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="">Anyone</option>
+          {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
         <div className="relative ml-auto">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />

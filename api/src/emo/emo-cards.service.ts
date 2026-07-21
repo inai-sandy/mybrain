@@ -77,6 +77,7 @@ export class EmoCardsService {
       needsOptions: this.parse<string[]>(r.needsOptions, []),
       needsAnswer: r.needsAnswer,
       source: r.source,
+      contactId: r.contactId || null,
       day: r.day,
       rawTranscript: r.rawTranscript,
       audioPath: r.audioPath,
@@ -108,11 +109,12 @@ export class EmoCardsService {
   }
 
   /** Feed query — newest first, optional filters. The UI does the day/Today's-Captures grouping. */
-  async list(opts: { status?: EmoStatus; lane?: EmoLane; day?: string; take?: number; skip?: number } = {}) {
+  async list(opts: { status?: EmoStatus; lane?: EmoLane; day?: string; contactId?: string; take?: number; skip?: number } = {}) {
     const where: any = {};
     if (opts.status) where.status = opts.status;
     if (opts.lane) where.lane = opts.lane;
     if (opts.day) where.day = opts.day;
+    if (opts.contactId) where.contactId = opts.contactId; // everything EMO did about one person (BEA-1034)
     const take = Math.min(200, Math.max(1, opts.take ?? 50));
     const [rows, total] = await Promise.all([
       this.prisma.emoCard.findMany({ where, orderBy: { createdAt: 'desc' }, take, skip: Math.max(0, opts.skip ?? 0) }),
@@ -136,11 +138,12 @@ export class EmoCardsService {
     return this.shape(r);
   }
 
-  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; sources: any[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null; rawTranscript: string | null }>) {
+  async update(id: string, patch: Partial<{ status: EmoStatus; title: string | null; summary: string | null; detail: string | null; links: EmoLink[]; sources: any[]; needsQuestion: string | null; needsOptions: string[]; needsAnswer: string | null; error: string | null; rawTranscript: string | null; contactId: string | null }>) {
     const exists = await this.prisma.emoCard.findUnique({ where: { id }, select: { id: true } });
     if (!exists) throw new NotFoundException('Card not found');
     const data: any = {};
     if (patch.status !== undefined) data.status = patch.status;
+    if (patch.contactId !== undefined) data.contactId = patch.contactId; // (BEA-1034)
     if (patch.title !== undefined) data.title = patch.title;
     if (patch.summary !== undefined) data.summary = patch.summary;
     if (patch.detail !== undefined) data.detail = patch.detail;

@@ -142,6 +142,7 @@ export class EmoReminderService {
       await this.cards.update(cardId, {
         summary: futureDay ? `Reminder set: ${contact.name}, ${this.humanDay(futureDay)} — ${what}` : `Reminder set for today: ${contact.name} — ${what}`,
         links: [{ kind: 'reminder', id: rem.id, label: contact.name }],
+        contactId: contact.id, // (BEA-1034)
         status: 'done',
       });
     } catch (e: any) {

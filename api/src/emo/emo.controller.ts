@@ -192,8 +192,8 @@ export class EmoController {
   }
 
   @Get('cards')
-  list(@Query('status') status?: EmoStatus, @Query('lane') lane?: EmoLane, @Query('day') day?: string, @Query('take') take?: string, @Query('skip') skip?: string) {
-    return this.cards.list({ status, lane, day, take: take ? Number(take) : undefined, skip: skip ? Number(skip) : undefined });
+  list(@Query('status') status?: EmoStatus, @Query('lane') lane?: EmoLane, @Query('day') day?: string, @Query('contactId') contactId?: string, @Query('take') take?: string, @Query('skip') skip?: string) {
+    return this.cards.list({ status, lane, day, contactId, take: take ? Number(take) : undefined, skip: skip ? Number(skip) : undefined });
   }
 
   @Get('counts')
