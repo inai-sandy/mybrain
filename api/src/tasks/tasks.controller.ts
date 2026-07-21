@@ -93,8 +93,8 @@ export class TasksController {
 
   /** Everything you've given other people. (BEA-1029) */
   @Get('delegated')
-  delegated() {
-    return this.tasks.delegated();
+  delegated(@Query('contactId') contactId?: string) {
+    return this.tasks.delegated(contactId || undefined);
   }
 
   @Get('by-person')

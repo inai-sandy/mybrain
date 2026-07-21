@@ -18,6 +18,12 @@ export class ContactsController {
     return this.contacts.allForPicker();
   }
 
+  /** How this person stands right now. (BEA-1037) */
+  @Get(':id/state')
+  state(@Param('id') id: string) {
+    return this.contacts.state(id);
+  }
+
   /** The contact's own link — created on first ask. (BEA-1027) */
   @Get(':id/share')
   share(@Param('id') id: string) {

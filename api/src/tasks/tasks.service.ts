@@ -691,9 +691,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    * Everything handed to someone else. Kept OFF the personal board on purpose — the owner's Tasks
    * screen stays what HE has to do; this is what he is waiting on. (BEA-1029)
    */
-  async delegated() {
+  async delegated(contactId?: string) {
     const rows = await this.prisma.task.findMany({
-      where: { NOT: { ownerContactId: null } },
+      where: contactId ? { ownerContactId: contactId } : { NOT: { ownerContactId: null } },
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       take: 2000,
       include: {

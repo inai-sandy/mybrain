@@ -224,6 +224,35 @@ export class ContactsService {
     return { enabled: !!enabled };
   }
 
+  /**
+   * How this person stands right now: what's open, what's waiting on the owner, whether anything
+   * is being chased, and when they were last heard from. One glance at the top of their page.
+   * (BEA-1037)
+   */
+  async state(id: string) {
+    const c = await this.prisma.contact.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException('Contact not found');
+    const [tasks, claims, chasing, lastIn] = await Promise.all([
+      this.prisma.task.findMany({ where: { ownerContactId: id }, select: { status: true, createdAt: true } }),
+      this.prisma.taskClaim.count({ where: { contactId: id, status: 'pending' } }),
+      this.prisma.reminder.count({ where: { contactId: id, status: 'active' } }),
+      this.prisma.reminderMessage.findFirst({ where: { contactId: id, direction: 'in' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+    ]);
+    const open = tasks.filter((t) => t.status !== 'done');
+    const oldest = open.reduce<number | null>((m, t) => {
+      const d = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 86400000);
+      return m === null || d > m ? d : m;
+    }, null);
+    return {
+      open: open.length,
+      done: tasks.length - open.length,
+      awaitingYou: claims,
+      chasing,
+      oldestOpenDays: oldest,
+      lastHeardAt: lastIn?.createdAt || null,
+    };
+  }
+
   /** Resolve a share link to its contact, refusing a bad or turned-off one. (BEA-1028) */
   async contactForShare(slug: string) {
     const c = await this.prisma.contact.findUnique({ where: { shareSlug: String(slug || '') } });

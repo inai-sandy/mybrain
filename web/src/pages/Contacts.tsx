@@ -4,6 +4,7 @@ import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, C
 import { useToast } from '../ui/Toast';
 import { BriefModal, BriefingsTab } from './Briefings';
 import { ContactShareLink } from '../ui/ContactShareLink';
+import { ContactState, ContactTasks } from '../ui/ContactWork';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
 type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
@@ -135,6 +136,9 @@ function ContactDetail({ contactId }: { contactId: string }) {
         </div>
       )}
 
+      {/* How they stand right now — one glance. (BEA-1037) */}
+      {contact && <ContactState contactId={contact.id} reload={briefReload} />}
+
       {/* Their own page — copy it, send it, rotate it, turn it off. (BEA-1027) */}
       {contact && <ContactShareLink contactId={contact.id} contactName={contact.name} chaseId={(reminders || []).find((r) => r.status === 'active' || r.status === 'paused')?.id || null} />}
 
@@ -149,16 +153,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
         <BriefingsTab contactId={contact.id} contactName={contact.name} reload={briefReload} />
       )}
 
-      {tab === 'tasks' && (
-        tasks === null ? <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
-        : tasks.length === 0 ? <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No tasks mention {contact?.name || 'this contact'} yet.</div>
-        : <ul className="space-y-2">{tasks.map((t) => (
-            <li key={t.id} className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-              <CheckCircle2 className={'mt-0.5 h-4 w-4 shrink-0 ' + (t.status === 'done' ? 'text-emerald-500' : 'text-zinc-300 dark:text-zinc-600')} />
-              <span className={'text-sm ' + (t.status === 'done' ? 'text-zinc-400 line-through' : '')}>{t.title}</span>
-            </li>
-          ))}</ul>
-      )}
+      {tab === 'tasks' && contact && <ContactTasks contactId={contact.id} contactName={contact.name} reload={briefReload} legacy={tasks} />}
 
       {tab === 'mentions' && (
         mentions === null ? <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">{contact?.name || 'This contact'} hasn't come up in your stories yet.</div>
