@@ -1,6 +1,6 @@
 import { ReminderAgentService } from './reminder-agent.service';
 
-function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages?: any[] } = {}) {
+function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages?: any[]; work?: any[]; briefings?: any[] } = {}) {
   const contact = opts.contact ?? { id: 'c1', name: 'Srikar Rao', whatsappNumber: '919812345678' };
   const reminders = opts.reminders ?? [{ id: 'r1', status: 'active', subject: 'the Zigbee testing', taskId: null }];
   const messages = opts.messages ?? [{ direction: 'in', body: 'update' }];
@@ -14,7 +14,9 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
     },
     reminderMessage: { findMany: async () => messages, create: async ({ data }: any) => state.out.push(data) },
     setting: { findUnique: async () => ({ value: '919885698665' }) }, // owner.whatsapp
-    task: { findUnique: async () => null },
+    // The agent now reads the person's briefings and their open work before replying (BEA-1023).
+    task: { findUnique: async () => null, findMany: async () => opts.work ?? [] },
+    briefing: { findMany: async () => opts.briefings ?? [] },
   };
   const postbox: any = { isConfigured: () => true, sendText: async (to: string, body: string) => { state.texts.push({ to, body }); state.sent++; return { wamid: 'w1' }; } };
   const remindersSvc: any = { voiceComplete: async () => voice };
@@ -89,8 +91,9 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
       contact: { findUnique: async () => ({ id: 'c1', name: 'X', whatsappNumber: '919' }) },
       reminder: { findMany: async () => [{ id: 'r1', status: 'active', subject: 'x', taskId: null }], update: async () => {}, updateMany: async () => {} },
       reminderMessage: { findMany: async () => [{ direction: 'in', body: 'hi' }], create: async () => {} },
+      task: { findUnique: async () => null, findMany: async () => [] },
+      briefing: { findMany: async () => [] },
       setting: { findUnique: async () => ({ value: '919885698665' }) },
-      task: { findUnique: async () => null },
     };
     const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
     // the LLM turn tracks how many run at once
@@ -105,5 +108,66 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     const { svc, state } = setup('{"send":true,"reply":"Great,  THANKS!","items":[]}', { messages });
     await svc.onContactReply('c1');
     expect(state.sent).toBe(0);
+  });
+});
+
+/**
+ * The agent must answer from the WHOLE picture — Sandeep's briefing, everything they owe, and what
+ * is already finished — not just the reminder subjects. (BEA-1023)
+ */
+describe('the agent reads the whole picture (BEA-1023)', () => {
+  function promptFor(opts: any) {
+    let seen = '';
+    const prisma: any = {
+      contact: { findUnique: async () => ({ id: 'c1', name: 'Ramesh', whatsappNumber: '9199' }) },
+      reminder: { findMany: async () => [{ id: 'r1', status: 'active', subject: 'the vendor list', taskId: 't1' }], update: async () => {}, updateMany: async () => {} },
+      reminderMessage: { findMany: async () => [{ direction: 'in', body: 'where are we?' }], create: async () => {} },
+      setting: { findUnique: async () => ({ value: '9198' }) },
+      task: { findUnique: async () => null, findMany: async () => opts.work || [] },
+      briefing: { findMany: async () => opts.briefings || [] },
+    };
+    const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
+    const remindersSvc: any = { voiceComplete: async (p: string) => { seen = p; return '{"send":true,"reply":"ok","needsSandeep":false,"done":[]}'; } };
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { recordPromise: async () => ({ ok: true }) } as any);
+    return svc.onContactReply('c1').then(() => seen);
+  }
+
+  const day = (n: number) => new Date(Date.now() - n * 86400000);
+
+  it("includes Sandeep's briefing in his own words", async () => {
+    const p = await promptFor({ briefings: [{ rawText: 'He is handling the GST and owes the vendor list', createdAt: day(2) }] });
+    expect(p).toContain('He is handling the GST and owes the vendor list');
+  });
+
+  it('lists everything they owe, with how long it has been open', async () => {
+    const p = await promptFor({ work: [{ id: 't1', title: 'Send the vendor list', status: 'open', createdAt: day(9), claims: [], people: [] }] });
+    expect(p).toContain('Send the vendor list');
+    expect(p).toContain('open 9 day(s)');
+  });
+
+  it('says when they already promised a date', async () => {
+    const p = await promptFor({ work: [{ id: 't1', title: 'x', status: 'open', createdAt: day(1), promisedFor: '2026-08-01', claims: [], people: [] }] });
+    expect(p).toContain('they promised 2026-08-01');
+  });
+
+  it('flags work already waiting on Sandeep so it is not re-asked', async () => {
+    const p = await promptFor({ work: [{ id: 't1', title: 'x', status: 'open', createdAt: day(1), claims: [{ createdAt: day(0) }], people: [] }] });
+    expect(p).toContain('waiting on Sandeep to confirm');
+  });
+
+  it('names the other person when work involves someone else', async () => {
+    const p = await promptFor({ work: [{ id: 't1', title: 'x', status: 'open', createdAt: day(1), claims: [], people: [{ contact: { name: 'Suresh' } }] }] });
+    expect(p).toContain('also involves Suresh');
+  });
+
+  it('tells it NOT to chase recently finished work', async () => {
+    const p = await promptFor({ work: [{ id: 't2', title: 'GST filing', status: 'done', createdAt: day(20), completedAt: day(3), claims: [], people: [] }] });
+    expect(p).toContain('do NOT chase these again');
+    expect(p).toContain('GST filing');
+  });
+
+  it('leaves old finished work out — it is not relevant any more', async () => {
+    const p = await promptFor({ work: [{ id: 't2', title: 'Ancient job', status: 'done', createdAt: day(200), completedAt: day(120), claims: [], people: [] }] });
+    expect(p).not.toContain('Ancient job');
   });
 });

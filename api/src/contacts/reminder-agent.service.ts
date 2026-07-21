@@ -193,6 +193,42 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const thread = messages.map((m) => `${m.direction === 'out' ? 'Me' : name}: ${m.body}`).join('\n');
 
     const todayKey = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); // IST, for date wording
+
+    // The whole picture for this person, not just their reminders. Without this the agent answers
+    // with half the story and cannot tell which piece of work they mean. (BEA-1023)
+    const [briefText, work] = await Promise.all([
+      // Read the briefings directly rather than through BriefingsService — that module already
+      // depends on this one, and a circular dependency would break the app at startup. (BEA-1023)
+      this.prisma.briefing
+        .findMany({ where: { contactId }, orderBy: { createdAt: 'desc' }, take: 3, select: { rawText: true, createdAt: true } })
+        .then((rs) => rs.map((r) => `[${r.createdAt.toISOString().slice(0, 10)}] ${r.rawText}`).join('\n\n'))
+        .catch(() => ''),
+      this.prisma.task.findMany({
+        where: { ownerContactId: contactId },
+        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+        take: 40,
+        select: {
+          id: true, title: true, note: true, status: true, createdAt: true, completedAt: true, promisedFor: true,
+          claims: { where: { status: 'pending' }, take: 1, select: { createdAt: true } },
+          people: { select: { contact: { select: { name: true } } } },
+        },
+      }).catch(() => [] as any[]),
+    ]);
+    const openWork = (work as any[]).filter((t) => t.status !== 'done');
+    const doneRecently = (work as any[])
+      .filter((t) => t.status === 'done' && t.completedAt && Date.now() - new Date(t.completedAt).getTime() < 21 * 86400000)
+      .slice(0, 6);
+    const days = (d: any) => Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000));
+    const workLines = openWork
+      .map((t) => {
+        const bits = [`open ${days(t.createdAt)} day(s)`];
+        if (t.promisedFor) bits.push(`they promised ${t.promisedFor}`);
+        if (t.claims?.length) bits.push('they say it is done — waiting on Sandeep to confirm');
+        const others = (t.people || []).map((p: any) => p.contact.name).filter(Boolean);
+        if (others.length) bits.push(`also involves ${others.join(', ')}`);
+        return `- ${t.title}${t.note ? ` (${t.note})` : ''} [${bits.join('; ')}]`;
+      })
+      .join('\n');
     const items: { n: number; reminderId: string; taskId: string | null; subject: string }[] = [];
     for (let i = 0; i < reminders.length; i++) items.push({ n: i + 1, reminderId: reminders[i].id, taskId: reminders[i].taskId || null, subject: await this.subjectFor(reminders[i]) });
     const itemList = items.length
@@ -205,7 +241,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
 You are texting ${name} on WhatsApp on Sandeep's behalf. In THIS chat, the person you are replying to is ${name}; Sandeep is not here.
 ${items.length ? `Open item(s) you're following up on:` : `There are no open reminders right now — this is an ongoing WhatsApp conversation with ${name}:`}
 ${itemList}
-
+${briefText ? `\nWhat Sandeep told you about ${name} (his own words, most recent first):\n${briefText}\n` : ''}${workLines ? `\nEverything ${name} currently owes Sandeep:\n${workLines}\n` : ''}${doneRecently.length ? `\nRecently finished and confirmed (do NOT chase these again):\n${doneRecently.map((t: any) => `- ${t.title}`).join('\n')}\n` : ''}
 Conversation so far:
 ${thread}
 
@@ -216,7 +252,9 @@ Rules:
 - Warmly invite them to reply or ask anything they want to discuss.
 - ENGAGE with what they actually said. When ${name} shares concrete details — quantities, hours, numbers, a status, a problem or a blocker — acknowledge the SPECIFICS: reflect the real figures/facts back so they know you truly read it, and ask ONE useful follow-up or offer help. NEVER reply to a detailed update with just "Perfect!" or "Got it".
 - Concise and natural — usually 1 to 3 sentences, ONE message.
-- Use the context Sandeep gave (above) to answer their questions when you can.
+- Use ALL the context above — Sandeep's briefing, everything they owe, and what is already finished — to answer their questions.
+- Do NOT chase anything listed as recently finished, and do NOT re-ask about something already marked "waiting on Sandeep to confirm" — acknowledge it instead.
+- If an item says it also involves someone else, you may say it is waiting on that person.
 - If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
 - ALWAYS reply to their message — set "send": true. NEVER leave them on read; a plain "yes"/"ok"/"thanks" or a shared file/link still gets a brief warm reply.
 - Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
