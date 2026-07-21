@@ -303,6 +303,21 @@ Reply with ONLY this JSON, nothing else:
       parsed.send = true;
     }
 
+    // Tell the owner BEFORE anything is promised in his name. It used to reply first and notify
+    // second, so a contact was told "I'll pass this to Sandeep" before Sandeep knew the
+    // conversation existed — and if the notification then failed, they were waiting on something
+    // he never heard about. (BEA-1026)
+    let reachedOwner = true;
+    if (parsed.needsSandeep) {
+      await this.prisma.reminder.updateMany({ where: { contactId, status: 'active' }, data: { needsOwner: true } }).catch(() => undefined);
+      reachedOwner = await this.notifyOwner(name, lastInBody).catch(() => false);
+      this.log.log(`agent: flagged contact ${contactId} — needs Sandeep${reachedOwner ? '' : ' (could NOT reach him)'}`);
+      if (!reachedOwner) {
+        // Do not promise a reply we cannot guarantee. Say something true instead.
+        replyText = `Thanks ${name.split(/\s+/)[0] || ''} — I've noted this down for Sandeep.`.replace(/\s+/g, ' ').trim();
+      }
+    }
+
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
     const alreadySent = messages.some((m) => m.direction === 'out' && norm(m.body) === norm(replyText));
@@ -318,11 +333,7 @@ Reply with ONLY this JSON, nothing else:
     }
 
     // The agent couldn't answer → flag the contact's reminders ("needs you") AND WhatsApp Sandeep. (BEA-766/767)
-    if (parsed.needsSandeep) {
-      await this.prisma.reminder.updateMany({ where: { contactId, status: 'active' }, data: { needsOwner: true } }).catch(() => undefined);
-      await this.notifyOwner(name, lastInBody);
-      this.log.log(`agent: flagged contact ${contactId} — needs Sandeep`);
-    } else {
+    if (!parsed.needsSandeep) {
       // The agent handled this exchange without getting stuck — clear any prior "needs you" flag so
       // the badge doesn't stay stuck until the owner happens to type a manual message. (BEA-786)
       await this.prisma.reminder.updateMany({ where: { contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
@@ -334,14 +345,14 @@ Reply with ONLY this JSON, nothing else:
   }
 
   /** WhatsApp Sandeep when the agent is stuck: nice free-text in-window, template fallback cold. (BEA-767) */
-  private async notifyOwner(contactName: string, lastMsg: string): Promise<void> {
+  private async notifyOwner(contactName: string, lastMsg: string): Promise<boolean> {
     const owner = ((await this.prisma.setting.findUnique({ where: { key: 'owner.whatsapp' } }))?.value || '').replace(/[^\d]/g, '');
-    if (!owner || !this.postbox.isConfigured()) return;
+    if (!owner || !this.postbox.isConfigured()) return false;
     const snippet = lastMsg ? `: "${lastMsg.replace(/\s+/g, ' ').trim().slice(0, 200)}"` : '';
-    const res = await this.postbox.sendText(owner, `⚠ ${contactName} messaged and needs you${snippet}. I said you'll get back to them — open My Brain to reply.`);
-    if (res.error) {
-      // Outside the 24h free-text window → fall back to the approved template so it still lands.
-      await this.postbox.sendReminderTemplate(owner, 'Sandeep', `${contactName}, who needs your reply in My Brain`).catch(() => undefined);
-    }
+    const res = await this.postbox.sendText(owner, `⚠ ${contactName} messaged and needs you${snippet}. Open My Brain to reply.`);
+    if (!res.error) return true;
+    // Outside the 24h free-text window → fall back to the approved template so it still lands.
+    const fb = await this.postbox.sendReminderTemplate(owner, 'Sandeep', `${contactName}, who needs your reply in My Brain`).catch(() => ({ error: 'failed' }) as any);
+    return !fb?.error;
   }
 }

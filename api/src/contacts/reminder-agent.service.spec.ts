@@ -171,3 +171,59 @@ describe('the agent reads the whole picture (BEA-1023)', () => {
     expect(p).not.toContain('Ancient job');
   });
 });
+
+/**
+ * A promise made in Sandeep's name must never go out before he knows about it — and never at all
+ * if we could not reach him. (BEA-1026)
+ */
+describe('the owner is told BEFORE anything is promised for him (BEA-1026)', () => {
+  function run(opts: { ownerReachable: boolean }) {
+    const order: string[] = [];
+    const texts: { to: string; body: string }[] = [];
+    const prisma: any = {
+      contact: { findUnique: async () => ({ id: 'c1', name: 'Ramesh', whatsappNumber: '9199' }) },
+      reminder: { findMany: async () => [{ id: 'r1', status: 'active', subject: 'the vendor list', taskId: null }], update: async () => {}, updateMany: async () => {} },
+      reminderMessage: { findMany: async () => [{ direction: 'in', body: 'can you approve the extra cost?' }], create: async () => { order.push('replied-to-contact'); } },
+      setting: { findUnique: async () => ({ value: '9198' }) }, // owner.whatsapp
+      task: { findUnique: async () => null, findMany: async () => [] },
+      briefing: { findMany: async () => [] },
+    };
+    const postbox: any = {
+      isConfigured: () => true,
+      sendText: async (to: string, body: string) => {
+        texts.push({ to, body });
+        if (to === '9198') { order.push('told-owner'); return opts.ownerReachable ? { wamid: 'w' } : { error: 'window closed' }; }
+        order.push('sent-to-contact');
+        return { wamid: 'w' };
+      },
+      sendReminderTemplate: async () => (opts.ownerReachable ? { wamid: 't' } : { error: 'failed' }),
+    };
+    const remindersSvc: any = { voiceComplete: async () => '{"send":true,"reply":"I\'ll pass this to Sandeep and he\'ll get back to you.","needsSandeep":true,"done":[]}' };
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { recordPromise: async () => ({ ok: true }) } as any);
+    return svc.onContactReply('c1').then(() => ({ order, texts }));
+  }
+
+  it('notifies Sandeep before the contact is answered', async () => {
+    const { order } = await run({ ownerReachable: true });
+    expect(order.indexOf('told-owner')).toBeLessThan(order.indexOf('sent-to-contact'));
+  });
+
+  it('does NOT promise a reply when Sandeep could not be reached', async () => {
+    const { texts } = await run({ ownerReachable: false });
+    const toContact = texts.find((t) => t.to === '9199');
+    expect(toContact).toBeTruthy();
+    expect(toContact!.body).not.toMatch(/get back to you/i);
+    expect(toContact!.body).toMatch(/noted this down/i);
+  });
+
+  it('still answers the contact rather than leaving them on read', async () => {
+    const { texts } = await run({ ownerReachable: false });
+    expect(texts.some((t) => t.to === '9199')).toBe(true);
+  });
+
+  it("the owner's own alert no longer claims a promise was made for him", async () => {
+    const { texts } = await run({ ownerReachable: true });
+    const toOwner = texts.find((t) => t.to === '9198');
+    expect(toOwner!.body).not.toMatch(/I said you'll get back/i);
+  });
+});
