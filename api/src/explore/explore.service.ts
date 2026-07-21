@@ -4,6 +4,7 @@ import { MemoryService, MemHit, deepLinkFor } from '../memory/memory.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ConnectorService } from '../connectors/connector.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { PersonContact } from '../contacts/person-identity';
 import { findPeople, buildSearchQuery } from './query-prep';
 
 export type WebMode = 'on' | 'off' | 'auto';
@@ -33,10 +34,18 @@ export class ExploreService {
     private readonly prompts: PromptsService,
   ) {}
 
-  /** The user's real people (contacts + names seen in tasks) — used to spot who a question is about. */
-  private async knownPeople(): Promise<string[]> {
-    const rows = await this.prisma.contact.findMany({ select: { name: true }, take: 500 }).catch(() => [] as { name: string }[]);
-    return rows.map((r) => r.name).filter(Boolean);
+  /**
+   * The user's people, WITH their alternate spellings — used to spot who a question is about and to
+   * search every spelling of them. Names are written inconsistently across stories ("Preeti" vs
+   * "Preethi"), so aliases are what keep one person's memories together. (BEA-1011)
+   */
+  private async knownPeople(): Promise<PersonContact[]> {
+    const rows = await this.prisma.contact.findMany({ select: { id: true, name: true, aliases: true }, take: 500 }).catch(() => [] as any[]);
+    return rows.map((r: any) => {
+      let aliases: string[] = [];
+      try { aliases = JSON.parse(r.aliases || '[]'); } catch { aliases = []; }
+      return { id: r.id, name: r.name, aliases };
+    });
   }
 
   /** Web search via Tavily (uses the saved connector key). Returns Source-shaped web results. */

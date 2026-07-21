@@ -10,6 +10,8 @@
  * being asked about so we can search for them directly too.
  */
 
+import { PersonContact, matchContactsAll, contactSpellings, norm } from '../contacts/person-identity';
+
 /** Conversational wrapping that is about ASKING, not about the content. Stripped before searching. */
 const META = [
   /^\s*(hey|hi|ok|okay|so|and|also)\b[,\s]*/i,
@@ -38,30 +40,41 @@ export function stripMeta(question: string): string {
   return q || (question || '').trim();
 }
 
+/** Words that look like names but aren't — never treat these as a person. */
+const NOT_A_NAME = new Set([
+  'i', 'you', 'we', 'my', 'me', 'the', 'a', 'an', 'and', 'or', 'but', 'so', 'do', 'did', 'have', 'has',
+  'what', 'when', 'where', 'who', 'why', 'how', 'is', 'was', 'are', 'were', 'about', 'with', 'for',
+  'that', 'this', 'it', 'lot', 'like', 'told', 'tell', 'said', 'say', 'story', 'stories', 'time', 'times',
+]);
+
 /**
- * Which of the user's known people does this question mention? We match against real names from
- * their Contacts/people rather than guessing at capitalisation, because speech-to-text lowercases
- * names and invented "entities" would poison the search.
+ * Which of the user's people is this question about — and EVERY spelling of them (BEA-1011).
+ *
+ * Real names are stored inconsistently ("Preeti" in 56 entries, "Preethi" in 16), so asking with one
+ * spelling used to reach only part of that person's life. We match each word of the question against
+ * the user's Contacts via the shared person-identity helpers, which expand aliases AND tolerate a
+ * small spelling difference — then search EVERY spelling so both halves come back together.
  */
-export function findPeople(question: string, knownNames: string[]): string[] {
-  const q = ` ${(question || '').toLowerCase()} `;
-  const hits: string[] = [];
-  for (const raw of knownNames) {
-    const name = (raw || '').trim();
-    if (name.length < 3) continue; // skip initials/noise
-    const first = name.split(/\s+/)[0].toLowerCase();
-    if (first.length < 3) continue;
-    // word-boundary match on the first name (or the full name)
-    const re = new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-    if (re.test(q) && !hits.includes(name)) hits.push(name);
+export function findPeople(question: string, contacts: PersonContact[]): string[] {
+  const words = (question || '').replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const w of words) {
+    if (w.length < 4 || NOT_A_NAME.has(w.toLowerCase())) continue;
+    for (const c of matchContactsAll(contacts, w)) {
+      for (const s of contactSpellings(c)) {
+        if (!seen.has(norm(s))) { seen.add(norm(s)); out.push(s); }
+      }
+    }
   }
-  return hits.slice(0, 3);
+  return out.slice(0, 6); // a person + their spellings; a couple of people at most
 }
 
 /** The search text: the stripped question, with any named people kept prominent. */
 export function buildSearchQuery(question: string, people: string[]): string {
   const core = stripMeta(question);
   if (!people.length) return core;
-  const missing = people.filter((p) => !core.toLowerCase().includes(p.split(/\s+/)[0].toLowerCase()));
+  const has = (p: string) => core.toLowerCase().includes(p.split(/\s+/)[0].toLowerCase());
+  const missing = people.filter((p) => !has(p));
   return missing.length ? `${core} ${missing.join(' ')}`.trim() : core;
 }
