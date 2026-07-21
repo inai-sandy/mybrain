@@ -672,7 +672,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string; ownerContactId?: string | null; mentions?: string[] }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string; ownerContactId?: string | null; mentions?: string[]; briefingId?: string | null }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
@@ -696,6 +696,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       data: {
         title,
         ownerContactId: owner.ownerContactId,
+        briefingId: data.briefingId || null, // the briefing this came from (BEA-1020)
         category: data.category ? String(data.category).trim().slice(0, 40) : null,
         tags: Array.isArray(data.tags) && data.tags.length ? JSON.stringify(data.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null,
         priority,

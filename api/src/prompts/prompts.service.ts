@@ -2,11 +2,29 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask';
+export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; default: string };
 
 const REGISTRY: PromptDef[] = [
+  {
+    key: 'delegation.brief',
+    label: 'Briefing → tasks for a person',
+    description: 'Turns what you said about a contact into the tasks they owe you. The person\'s name and your words are added automatically. \u26a0\ufe0f Keep the JSON shape intact or briefings can break — use Reset if unsure.',
+    default:
+      `You turn a spoken or typed briefing about ONE person into the concrete things that person owes Sandeep.\n` +
+      `Respond with ONLY JSON, no prose, in this exact shape:\n` +
+      `{"summary":"...","tasks":[{"title":"...","note":"...","category":"...","priority":"high|medium|low","estimateMin":30}]}\n\n` +
+      `Rules:\n` +
+      `- Each task is ONE thing THAT PERSON must do, written as a clear instruction ("Send the vendor list", not "vendor list").\n` +
+      `- Split only where there are genuinely separate deliverables. Do NOT invent work that was not mentioned.\n` +
+      `- Do NOT create tasks for things SANDEEP will do himself — this list is what he is chasing THEM for.\n` +
+      `- note: any detail, deadline or condition he gave for that specific item. Leave it out if there is none.\n` +
+      `- category: a short bucket, 1-2 words. priority: how urgent it sounded.\n` +
+      `- Keep any @names exactly as written — they link other people to the task.\n` +
+      `- summary: one short line describing the whole situation, max 20 words.\n` +
+      `- If nothing actionable was said, return {"summary":"...","tasks":[]}.`,
+  },
   {
     key: 'tasks.dump',
     label: 'Brain-dump → tasks',

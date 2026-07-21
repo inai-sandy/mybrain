@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare } from 'lucide-react';
+import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { BriefModal, BriefingsTab } from './Briefings';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
 type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
@@ -55,7 +56,9 @@ function ContactDetail({ contactId }: { contactId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [editContact, setEditContact] = useState(false);
-  const [tab, setTab] = useState<'reminders' | 'tasks' | 'mentions'>('reminders');
+  const [tab, setTab] = useState<'reminders' | 'briefings' | 'tasks' | 'mentions'>('reminders');
+  const [briefing, setBriefing] = useState(false);
+  const [briefReload, setBriefReload] = useState(0);
   const [tasks, setTasks] = useState<{ id: string; title: string; status: string; day?: string | null }[] | null>(null);
   const [mentions, setMentions] = useState<{ mentions: number; firstSeen: string; lastSeen: string; days: { day: string; items: { type: string; text: string }[] }[] } | null>(null);
   const [sugg, setSugg] = useState<{ name: string; count: number }[]>([]);
@@ -67,7 +70,9 @@ function ContactDetail({ contactId }: { contactId: string }) {
   useEffect(load, [contactId]);
   // Tasks involving this person, story mentions, and fuzzy "same person?" suggestions (BEA-762/763).
   function loadPerson() {
-    fetch(`/api/tasks/by-person?name=${encodeURIComponent(contact?.name || '')}`).then((r) => (r.ok ? r.json() : { tasks: [] })).then((d) => setTasks(d.tasks || [])).catch(() => setTasks([]));
+    // by-person answers {tasks:[…]}; tolerate a bare array too so this tab can't silently empty
+    // itself if the endpoint's shape ever changes. (BEA-1020)
+    fetch(`/api/tasks/by-person?name=${encodeURIComponent(contact?.name || '')}`).then((r) => (r.ok ? r.json() : [])).then((d) => setTasks(Array.isArray(d) ? d : d.tasks || [])).catch(() => setTasks([]));
     fetch(`/api/daily/people/detail?name=${encodeURIComponent(contact?.name || '')}`).then((r) => (r.ok ? r.json() : null)).then(setMentions).catch(() => setMentions(null));
     fetch(`/api/contacts/${contactId}/alias-suggestions`).then((r) => (r.ok ? r.json() : { suggestions: [] })).then((d) => setSugg(d.suggestions || [])).catch(() => setSugg([]));
   }
@@ -131,10 +136,14 @@ function ContactDetail({ contactId }: { contactId: string }) {
 
       {/* Tabs: everything about this person in one place (BEA-762) */}
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {([['reminders', 'Reminders', reminders?.length], ['tasks', 'Tasks', tasks?.length], ['mentions', 'Mentions', mentions?.mentions]] as const).map(([id, label, n]) => (
+        {([['reminders', 'Reminders', reminders?.length], ['briefings', 'Briefings', undefined], ['tasks', 'Tasks', tasks?.length], ['mentions', 'Mentions', mentions?.mentions]] as const).map(([id, label, n]) => (
           <button key={id} onClick={() => setTab(id)} className={'-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{label}{n ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{n}</span> : null}</button>
         ))}
       </div>
+
+      {tab === 'briefings' && contact && (
+        <BriefingsTab contactId={contact.id} contactName={contact.name} reload={briefReload} />
+      )}
 
       {tab === 'tasks' && (
         tasks === null ? <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
@@ -207,6 +216,8 @@ function ContactDetail({ contactId }: { contactId: string }) {
         </div>
       ))}
 
+      {tab === 'briefings' && contact && <button onClick={() => setBriefing(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"><MessageSquareQuote className="h-4 w-4" />Brief me</button>}
+      {briefing && contact && <BriefModal contactId={contact.id} contactName={contact.name} onClose={() => setBriefing(false)} onSaved={() => { setBriefReload((n) => n + 1); loadPerson(); }} />}
       {tab === 'reminders' && <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50"><Plus className="h-4 w-4" />Add reminder</button>}
 
       {openThread && (() => { const r = reminders?.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}

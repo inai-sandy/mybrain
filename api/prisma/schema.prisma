@@ -407,6 +407,9 @@ model Task {
   ownerContact   Contact? @relation("TaskOwner", fields: [ownerContactId], references: [id], onDelete: SetNull)
   /// Everyone else this task touches — the @mentions. (BEA-1019)
   people        TaskPerson[]
+  /// The briefing that produced this task, if it came from one. (BEA-1020)
+  briefingId    String?
+  briefing      Briefing? @relation(fields: [briefingId], references: [id], onDelete: SetNull)
   reminderSuggestDismissed Boolean @default(false) // user cleared this from "Suggested reminders" (BEA-882)
   dueDate       DateTime?
   status        String    @default("open") // open | done
@@ -419,6 +422,23 @@ model Task {
   completedAt   DateTime?
 
   @@index([ownerContactId])
+  @@index([briefingId])
+}
+
+/// The situation you told me about a person, in your own words — and the work it produced.
+/// Standing context: the agent reads a contact's briefings before it replies to them, so a
+/// conversation never starts cold. Many per contact, newest first. (BEA-1020)
+model Briefing {
+  id        String   @id @default(uuid())
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  rawText   String // exactly what the owner said or typed — never rewritten
+  summary   String? // a short AI one-liner, for the list
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
+
+  @@index([contactId])
 }
 
 /// One person linked to one task by an @mention — the cross-contact link, visible from both sides.
@@ -872,6 +892,7 @@ model Contact {
   reminders      Reminder[]
   ownedTasks     Task[]       @relation("TaskOwner") // work this person owns (BEA-1019)
   taskLinks      TaskPerson[] // tasks they're @mentioned on (BEA-1019)
+  briefings      Briefing[] // the situations you've told me about them (BEA-1020)
 
   @@index([name])
 }

@@ -10,6 +10,7 @@ import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { IdeasModule } from './ideas/ideas.module';
 import { SkillsModule } from './skills/skills.module';
 import { TasksModule } from './tasks/tasks.module';
+import { BriefingsModule } from './briefings/briefings.module';
 import { DailyModule } from './daily/daily.module';
 import { MentorModule } from './mentor/mentor.module';
 import { VoiceModule } from './voice/voice.module';
@@ -44,7 +45,7 @@ import { RecordingsModule } from './recordings/recordings.module';
     // Rate-limit config (BEA-829). NOT applied globally — a global guard would throttle the app's own
     // polling; only the sensitive endpoints opt in via @UseGuards(ThrottlerGuard)+@Throttle.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
-    PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule, EmoModule, RecordingsModule],
+    PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, BriefingsModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule, EmoModule, RecordingsModule],
   controllers: [HealthController],
 })
 export class AppModule {}
