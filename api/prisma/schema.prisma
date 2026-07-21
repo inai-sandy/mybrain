@@ -911,6 +911,10 @@ model Contact {
   tags           String     @default("[]") // JSON string array
   aliases        String     @default("[]") // JSON array of other spellings/names for this same person (BEA-763)
   lastReadAt     DateTime? // when the owner last opened this contact's chat — powers unread badges (BEA-922)
+  /// Their own page: name + a short random tail, e.g. "ramesh-k4f9". Short enough to read out,
+  /// not guessable by trying another name. Null until the owner shares it. (BEA-1027)
+  shareSlug      String?      @unique
+  shareEnabled   Boolean      @default(true) // turn the page off without losing the link
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]

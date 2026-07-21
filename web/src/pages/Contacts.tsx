@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { BriefModal, BriefingsTab } from './Briefings';
+import { ContactShareLink } from '../ui/ContactShareLink';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
 type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
@@ -133,6 +134,9 @@ function ContactDetail({ contactId }: { contactId: string }) {
           </div>
         </div>
       )}
+
+      {/* Their own page — copy it, send it, rotate it, turn it off. (BEA-1027) */}
+      {contact && <ContactShareLink contactId={contact.id} contactName={contact.name} chaseId={(reminders || []).find((r) => r.status === 'active' || r.status === 'paused')?.id || null} />}
 
       {/* Tabs: everything about this person in one place (BEA-762) */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">

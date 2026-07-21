@@ -14,6 +14,7 @@ import { Skills } from './pages/Skills';
 import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
 import { Review } from './pages/Review';
+import { TaskShare } from './pages/TaskShare';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
 import { Notes } from './pages/Notes';
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="/skill/:id" element={<SkillViewer />} />
           <Route path="/meeting-view/:id" element={<MeetingViewer />} />
           <Route path="/request-view/:shareId" element={<RequestViewer />} />
+          <Route path="/t/:slug" element={<TaskShare />} />
           <Route path="/d/:slug" element={<DocumentPublic />} />
           <Route path="/s/:code" element={<ShortLink />} />
           {/* Everything else is behind auth. */}

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ContactsController } from './contacts.controller';
+import { ShareController } from './share.controller';
 import { ContactsService } from './contacts.service';
 import { RemindersController } from './reminders.controller';
 import { RemindersService } from './reminders.service';
@@ -12,7 +13,7 @@ import { TasksModule } from '../tasks/tasks.module';
 
 @Module({
   imports: [LlmModule, TasksModule],
-  controllers: [ContactsController, RemindersController, PostboxCallbackController],
+  controllers: [ContactsController, ShareController, RemindersController, PostboxCallbackController],
   providers: [ContactsService, RemindersService, PostboxService, ReminderSenderService, ReminderAgentService],
   exports: [ContactsService, RemindersService, PostboxService],
 })

@@ -18,6 +18,24 @@ export class ContactsController {
     return this.contacts.allForPicker();
   }
 
+  /** The contact's own link — created on first ask. (BEA-1027) */
+  @Get(':id/share')
+  share(@Param('id') id: string) {
+    return this.contacts.share(id);
+  }
+
+  /** Issue a new link and kill the old one. */
+  @Post(':id/share/rotate')
+  rotateShare(@Param('id') id: string) {
+    return this.contacts.rotateShare(id);
+  }
+
+  /** Turn their page off or back on. */
+  @Post(':id/share/enabled')
+  setShareEnabled(@Param('id') id: string, @Body() body: { enabled?: boolean }) {
+    return this.contacts.setShareEnabled(id, body?.enabled !== false);
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.contacts.get(id);
