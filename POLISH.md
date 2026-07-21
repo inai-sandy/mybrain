@@ -50,7 +50,7 @@ Build order (dependencies first):
 3. ✅ `BEA-1021` chases belong to a task, repeat until confirmed — SHIPPED 2026-07-21
 4. ✅ `BEA-1024` agent marks the claimed task — SHIPPED 2026-07-21
 5. ✅ `BEA-1025` review list (confirm / reject) — SHIPPED 2026-07-21
-6. `BEA-1027` + `BEA-1028` the contact's shared short link, tick + note → review
+6. ✅ `BEA-1027` + `BEA-1028` the contact's shared short link, tick + note → review — SHIPPED 2026-07-21
 7. `BEA-1029` delegated view · `BEA-1037` contact workspace
 8. `BEA-1022` promised dates · `BEA-1030` stalling digest · `BEA-1023` agent context
 9. `BEA-1031` brain indexing by contact
