@@ -667,7 +667,23 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     };
     switch (table) {
       case 'task': {
-        const parts = [row.title, row.note || '', row.category ? `Category: ${row.category}` : '', `Status: ${row.status === 'done' ? 'done' : 'open'}`, row.day ? `Day: ${row.day}` : ''].filter(Boolean);
+        // Give the answer model the TRUE dates. It used to see only `day`, which for a still-open task
+        // is re-stamped to today every time a day is closed — so a task added weeks ago read as "created
+        // today" and EMO stated the wrong date for every open task. (BEA-1013)
+        const ymd = (d: any) => { try { return new Date(d).toISOString().slice(0, 10); } catch { return ''; } };
+        const done = row.status === 'done';
+        const added = ymd(row.createdAt);
+        const carried = Number(row.rolloverCount || 0);
+        const when = done
+          ? `Completed: ${ymd(row.completedAt) || row.day || 'date unknown'}`
+          : [`Still open`, carried > 0 ? `carried forward ${carried} time${carried === 1 ? '' : 's'} since it was added` : ''].filter(Boolean).join(', ');
+        const parts = [
+          row.title,
+          row.note || '',
+          row.category ? `Category: ${row.category}` : '',
+          added ? `Added: ${added}` : '',
+          when,
+        ].filter(Boolean);
         return { content: `Task — ${parts.join('\n')}`, title: `Task: ${row.title}`.slice(0, 120), tags: ['task', row.sphere || 'work', ...(row.category ? [String(row.category).toLowerCase()] : [])] };
       }
       case 'story':

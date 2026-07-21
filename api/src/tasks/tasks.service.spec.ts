@@ -275,3 +275,34 @@ describe('create() note guarantee (BEA-955)', () => {
     expect(tasks[tasks.length - 1].day).toBe('2026-08-01');
   });
 });
+
+describe('indexTask — the dates EMO reads (BEA-1013)', () => {
+  /** Capture exactly what gets sent to the brain for one task. */
+  function indexed(task: any): { content: string } {
+    const sent: any[] = [];
+    const memory: any = { indexEntity: async (a: any) => { sent.push(a); }, deleteDoc: async () => undefined, enqueue: async () => undefined };
+    const prisma: any = { task: { update: async () => task } };
+    const svc: any = new TasksService(prisma, {} as any, {} as any, memory);
+    svc.indexTask(task);
+    return sent[0] || { content: '' };
+  }
+
+  it('a finished task carries when it was ADDED and when it was COMPLETED — never the rolled-over day', () => {
+    const { content } = indexed({
+      id: 't1', title: 'Buy jewelry for Arya', status: 'done', tags: '[]',
+      createdAt: new Date('2026-07-12T00:41:00Z'), completedAt: new Date('2026-07-12T09:00:00Z'),
+      day: '2026-07-21', // the misleading rolled day
+    });
+    expect(content).toContain('Added: 2026-07-12');
+    expect(content).toContain('Completed: 2026-07-12');
+    expect(content).not.toContain('2026-07-21'); // the rolled day must NOT be the date it states
+  });
+
+  it('an OPEN task is not indexed here at all — done-only (BEA-546); its text comes from MemoryService', () => {
+    const { content } = indexed({
+      id: 't2', title: "Plan and purchase items for Arya's birthday", status: 'open', tags: '[]',
+      createdAt: new Date('2026-07-12T20:40:00Z'), completedAt: null, rolloverCount: 9, day: '2026-07-21',
+    });
+    expect(content).toBe(''); // nothing sent to the brain for an open task
+  });
+});

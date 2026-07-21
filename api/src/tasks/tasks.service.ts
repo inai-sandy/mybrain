@@ -53,12 +53,20 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     const tags = JSON.parse((t.tags as string) || '[]');
+    // Index the TRUE dates. `day` is re-stamped to today for anything still open, so on its own it made
+    // the answer model state the wrong date for tasks (EMO said "opened on 20 July" for a task added on
+    // 12 July). Give it when the task was added and when it was finished. (BEA-1013)
+    const ymd = (d: any) => { try { return new Date(d).toISOString().slice(0, 10); } catch { return ''; } };
+    const added = ymd(t.createdAt);
+    const carried = Number(t.rolloverCount || 0);
     const parts = [
       t.title,
       t.note || '',
       t.category ? `Category: ${t.category}` : '',
-      `Status: ${t.status === 'done' ? 'done' : 'open'}${t.progress ? ` (${t.progress}%)` : ''}`,
-      t.day ? `Day: ${t.day}` : '',
+      added ? `Added: ${added}` : '',
+      t.status === 'done'
+        ? `Completed: ${ymd(t.completedAt) || t.day || 'date unknown'}`
+        : [`Still open${t.progress ? ` (${t.progress}%)` : ''}`, carried > 0 ? `carried forward ${carried} time${carried === 1 ? '' : 's'} since it was added` : ''].filter(Boolean).join(', '),
     ].filter(Boolean);
     this.memory
       .indexEntity({

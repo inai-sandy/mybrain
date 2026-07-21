@@ -472,3 +472,27 @@ describe('MemoryService.startRechunk (BEA-337)', () => {
     expect(svc.rechunkStatus().running).toBe(false); // status reset cleanly
   });
 });
+
+describe('buildContent task dates — what EMO reads for an OPEN task (BEA-1013)', () => {
+  const build = (row: any) => {
+    const svc: any = new (require('./memory.service').MemoryService)({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    return svc.buildContent('task', row)?.content || '';
+  };
+
+  it('states when it was ADDED and how long carried — never the rolled-over day', () => {
+    const c = build({
+      title: "Plan and purchase items for Arya's birthday", status: 'open', tags: '[]',
+      createdAt: new Date('2026-07-12T20:40:00Z'), rolloverCount: 9,
+      day: '2026-07-21', // the misleading rolled day EMO used to quote
+    });
+    expect(c).toContain('Added: 2026-07-12');
+    expect(c).toContain('carried forward 9 times');
+    expect(c).not.toContain('2026-07-21');
+  });
+
+  it('a done task states its completion date', () => {
+    const c = build({ title: 'Buy jewelry for Arya', status: 'done', tags: '[]', createdAt: new Date('2026-07-12T00:41:00Z'), completedAt: new Date('2026-07-12T09:00:00Z'), day: '2026-07-21' });
+    expect(c).toContain('Completed: 2026-07-12');
+    expect(c).not.toContain('2026-07-21');
+  });
+});
