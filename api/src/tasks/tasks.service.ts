@@ -38,20 +38,23 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     private readonly memory: MemoryService,
   ) {}
 
-  /** Build the searchable text for a task and (re-)index it into the brain. Fire-and-forget:
-   *  indexing must never block or fail a task operation. (BEA-331)
-   *  ONLY finished tasks belong in memory — open tasks are working state and re-indexing them on every
-   *  rollover/progress update was creating endless duplicates. So for a non-done task we instead REMOVE
-   *  any memory docs it has and clear the stored ids. (BEA-546) */
+  /**
+   * Build the searchable text for a task and (re-)index it into the brain. Fire-and-forget:
+   * indexing must never block or fail a task operation. (BEA-331)
+   *
+   * BOTH open and finished tasks are recorded, so "I created 4 today and finished 3" is answerable
+   * for either half. (BEA-1015)
+   *
+   * This used to be done-only: it DELETED an open task's docs on every change (BEA-546), because the
+   * nightly rollover re-stamped `day` and so changed each open task's text every night, producing
+   * endless duplicates. Worse, `MemoryService.reconcile` re-adds any row missing its ids with no status
+   * filter — so open tasks were deleted and re-added in a loop, invisible to search in between, which
+   * made the same question give different answers. BEA-1014 stopped the nightly re-stamping, so the
+   * duplicate risk is gone and both sides can now agree. `indexEntity` replaces the previous doc via
+   * prevSupermemoryId/prevRagId, so a re-index updates in place rather than piling up.
+   */
   private indexTask(t: any): void {
     if (!t?.id) return;
-    if (t.status !== 'done') {
-      if (t.supermemoryId || t.ragId) {
-        this.memory.deleteDoc(t.supermemoryId, t.ragId).catch(() => undefined);
-        this.prisma.task.update({ where: { id: t.id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
-      }
-      return;
-    }
     const tags = JSON.parse((t.tags as string) || '[]');
     // Index the TRUE dates. `day` is re-stamped to today for anything still open, so on its own it made
     // the answer model state the wrong date for tasks (EMO said "opened on 20 July" for a task added on
@@ -115,13 +118,15 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     this.log.log(`memory discipline: purged vault=${r.vault} daysummary=${r.daysummary} portrait=${r.portrait} docs (no longer indexed)`);
   }
 
-  /** Wipe every task doc from both stores, then re-index only the done tasks → one clean doc each. (BEA-549) */
+  /** Wipe every task doc from both stores, then re-index EVERY task → one clean doc each. (BEA-549)
+   *  Open tasks are included since BEA-1015 — rebuilding done-only would silently drop the open half
+   *  of the record back out of the brain. */
   async rebuildTaskMemory(): Promise<{ deleted: { sm: number; rag: number }; reindexed: number }> {
     const deleted = await this.memory.deleteAllTaskDocs();
-    await this.prisma.task.updateMany({ where: { status: 'done' }, data: { supermemoryId: null, ragId: null } });
-    const done = await this.prisma.task.findMany({ where: { status: 'done' } });
-    for (const t of done) this.indexTask(t); // done-only; enqueues a fresh doc, drained async
-    return { deleted, reindexed: done.length };
+    await this.prisma.task.updateMany({ data: { supermemoryId: null, ragId: null } });
+    const all = await this.prisma.task.findMany({});
+    for (const t of all) this.indexTask(t); // enqueues a fresh doc each, drained async
+    return { deleted, reindexed: all.length };
   }
 
   private async runOnceRebuild(): Promise<void> {

@@ -235,13 +235,27 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
 
   /** Write a returned store doc id back onto the right table (by its delegate + primary key). */
   private async writeBackId(refType: string | null | undefined, id: string, target: string, resultId: string) {
+    const field = target === 'supermemory' ? 'supermemoryId' : 'ragId';
     const data = target === 'supermemory' ? { supermemoryId: resultId } : { ragId: resultId };
     const type = refType || 'item';
     const model = this.modelOf(type);
     // Table-less refTypes (e.g. 'agent-learning') have no row to link — skip instead of throwing. (BEA-691)
     if (!model?.update) { this.bumpLastIndexed(refType); return; }
+    const pk = this.pkOf(type);
+    // ONE doc per entity per store, guaranteed here (BEA-1015). Callers pass the prev ids from the row
+    // they hold, but indexing is asynchronous: an edit arriving before the previous write-back sees
+    // `ragId: null`, deletes nothing, and leaves a second doc behind — that's how one task ended up
+    // with five. At THIS point the row's stored id is authoritative and the drain is sequential, so
+    // any id being superseded is a stale doc and is removed before the new id is recorded.
+    const cur = model.findUnique
+      ? await Promise.resolve(model.findUnique({ where: { [pk]: id }, select: { [field]: true } })).catch(() => null)
+      : null;
+    const prev = cur?.[field];
+    if (prev && prev !== resultId) {
+      await this.deleteDoc(target === 'supermemory' ? prev : null, target === 'supermemory' ? null : prev).catch(() => undefined);
+    }
     await model
-      .update({ where: { [this.pkOf(type)]: id }, data })
+      .update({ where: { [pk]: id }, data })
       .catch(() => undefined);
     this.bumpLastIndexed(refType);
   }

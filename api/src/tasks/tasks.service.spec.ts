@@ -301,12 +301,25 @@ describe('indexTask — the dates EMO reads (BEA-1013)', () => {
     expect(content).not.toContain('2026-07-21'); // the rolled day must NOT be the date it states
   });
 
-  it('an OPEN task is not indexed here at all — done-only (BEA-546); its text comes from MemoryService', () => {
+  it('an OPEN task IS recorded too, with how long it has been carried (BEA-1015)', () => {
+    // Open tasks used to be DELETED from the brain here, while a reconcile job kept re-adding them —
+    // so a task flipped in and out of search and the same question gave different answers.
     const { content } = indexed({
       id: 't2', title: "Plan and purchase items for Arya's birthday", status: 'open', tags: '[]',
       createdAt: new Date('2026-07-12T20:40:00Z'), completedAt: null, rolloverCount: 9, day: '2026-07-21',
     });
-    expect(content).toBe(''); // nothing sent to the brain for an open task
+    expect(content).toContain("Plan and purchase items for Arya's birthday");
+    expect(content).toContain('Added: 2026-07-12');
+    expect(content).toContain('carried forward 9 times');
+    expect(content).not.toContain('2026-07-21'); // never the rolled day
+  });
+
+  it('keeps progress in the text so EMO can say how far along it is', () => {
+    const { content } = indexed({
+      id: 't3', title: 'Finish Beakn Portal testing', status: 'open', tags: '[]', progress: 60,
+      createdAt: new Date('2026-07-07T10:00:00Z'), rolloverCount: 14, day: '2026-07-07',
+    });
+    expect(content).toContain('60%');
   });
 });
 

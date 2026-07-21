@@ -475,7 +475,7 @@ describe('MemoryService.startRechunk (BEA-337)', () => {
 
 describe('buildContent task dates — what EMO reads for an OPEN task (BEA-1013)', () => {
   const build = (row: any) => {
-    const svc: any = new (require('./memory.service').MemoryService)({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const svc: any = new (require('./memory.service').MemoryService)({} as any, {} as any, {} as any);
     return svc.buildContent('task', row)?.content || '';
   };
 
@@ -494,5 +494,40 @@ describe('buildContent task dates — what EMO reads for an OPEN task (BEA-1013)
     const c = build({ title: 'Buy jewelry for Arya', status: 'done', tags: '[]', createdAt: new Date('2026-07-12T00:41:00Z'), completedAt: new Date('2026-07-12T09:00:00Z'), day: '2026-07-21' });
     expect(c).toContain('Completed: 2026-07-12');
     expect(c).not.toContain('2026-07-21');
+  });
+});
+
+describe('writeBackId — exactly ONE doc per entity per store (BEA-1015)', () => {
+  it('deletes the superseded doc when a newer one is saved for the same row', async () => {
+    // Reproduces the real failure: indexing is async, so an edit arriving before the previous
+    // write-back passes prevRagId=null, deletes nothing, and leaves an orphan doc behind. One task
+    // ended up with five. The write-back is the point where the stored id IS authoritative.
+    const deleted: any[] = [];
+    const stored: any = { ragId: 'rag-OLD', supermemoryId: null };
+    const prisma: any = {
+      indexSource: { upsert: async () => ({}) }, setting: { upsert: async () => ({}), findUnique: async () => null },
+      task: {
+        findUnique: async () => stored,
+        update: async ({ data }: any) => { Object.assign(stored, data); return stored; },
+      },
+    };
+    const rag: any = { delete: async (id: string) => { deleted.push(id); } };
+    const sm: any = { delete: async (id: string) => { deleted.push(id); } };
+    const svc: any = new (require('./memory.service').MemoryService)(prisma, sm, rag);
+
+    await svc.writeBackId('task', 't1', 'rag', 'rag-NEW');
+
+    expect(deleted).toContain('rag-OLD'); // the stale doc is removed…
+    expect(stored.ragId).toBe('rag-NEW'); // …and only the new one is recorded
+  });
+
+  it('does not delete anything when the id is unchanged', async () => {
+    const deleted: any[] = [];
+    const stored: any = { ragId: 'rag-SAME' };
+    const prisma: any = { indexSource: { upsert: async () => ({}) }, setting: { upsert: async () => ({}), findUnique: async () => null }, task: { findUnique: async () => stored, update: async ({ data }: any) => { Object.assign(stored, data); return stored; } } };
+    const rag: any = { delete: async (id: string) => { deleted.push(id); } };
+    const svc: any = new (require('./memory.service').MemoryService)(prisma, {} as any, rag);
+    await svc.writeBackId('task', 't1', 'rag', 'rag-SAME');
+    expect(deleted).toHaveLength(0);
   });
 });
