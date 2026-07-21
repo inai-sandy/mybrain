@@ -1158,6 +1158,31 @@ export class TelegramService implements OnModuleInit {
     return `⚠️ <b>Backup watchdog</b>: the home server has not pulled a backup recently (last successful pull: ${last}). Check that it is on and connected — your off-server backup is not up to date.`;
   }
 
+  /**
+   * The daily "who's ignoring you" digest. Plain language, grouped by person, with the obvious next
+   * moves. Returns null when nobody is stalling — no message is better than "all clear" every
+   * morning. (BEA-1030)
+   */
+  async stallingDigestText(): Promise<string | null> {
+    const rows = await this.tasks.stalling().catch(() => [] as any[]);
+    if (!rows.length) return null;
+
+    const byPerson = new Map<string, any[]>();
+    for (const r of rows) {
+      const k = r.who || 'Someone';
+      byPerson.set(k, [...(byPerson.get(k) || []), r]);
+    }
+    const parts: string[] = [`⏳ <b>Not moving</b>\n${rows.length} thing${rows.length === 1 ? '' : 's'} across ${byPerson.size} ${byPerson.size === 1 ? 'person' : 'people'}.`];
+    for (const [who, items] of byPerson) {
+      const lines = items
+        .slice(0, 5)
+        .map((i: any) => `• ${this.esc(i.title)}\n   <i>${this.esc(i.why.join(' · '))} · open ${i.openDays}d</i>`);
+      parts.push(`\n<b>${this.esc(who)}</b>\n${lines.join('\n')}${items.length > 5 ? `\n   …and ${items.length - 5} more` : ''}`);
+    }
+    parts.push('\nChase harder, change the date, take it back, or drop it — open Delegated in My Brain.');
+    return parts.join('\n');
+  }
+
   async nudgeTick(): Promise<void> {
     const owner = await this.ownerChatId();
     if (!owner || !(await this.token())) return;
@@ -1175,6 +1200,15 @@ export class TelegramService implements OnModuleInit {
         await this.setSetting('telegram.backupAlertDay', day);
         await this.send(owner, alert);
       }
+    }
+
+    // Who's stalling — once a day, at 09:30 local. One digest, never a stream of pings, and it
+    // goes out before the rest-day check because being ignored by three people is not a nag.
+    // (BEA-1030)
+    if (hm === '09:30' && (await this.getSetting('telegram.stallDay')) !== day) {
+      await this.setSetting('telegram.stallDay', day);
+      const text = await this.stallingDigestText();
+      if (text) await this.send(owner, text);
     }
 
     if ((await this.getSetting('telegram.skipDay')) === day) return; // rest day

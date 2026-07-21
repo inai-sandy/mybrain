@@ -728,6 +728,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       },
     });
     const now = Date.now();
+    const stallBy = new Map<string, string[]>((await this.stalling().catch(() => [])).map((s: any) => [s.taskId, s.why]));
     const shaped = rows.map((t: any) => {
       const chase = (t.chases || []).find((c: any) => c.status === 'active') || (t.chases || [])[0] || null;
       const base = this.shape(t);
@@ -739,6 +740,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         chaseRepeats: chase?.repeat === 'daily',
         chaseCount: (t.chases || []).reduce((n: number, c: any) => n + (c._count?.sends || 0), 0),
         chaseId: chase?.id || null,
+        stalling: stallBy.get(t.id) || null, // why this one isn't moving (BEA-1030)
       };
     });
     return {
@@ -747,8 +749,70 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         open: shaped.filter((t) => t.status !== 'done').length,
         awaitingYou: shaped.filter((t) => !!t.claim).length,
         chasing: shaped.filter((t) => t.status !== 'done' && t.chaseStatus === 'active').length,
+        stalling: shaped.filter((t) => !!t.stalling).length,
       },
     };
+  }
+
+  /**
+   * Who is stalling. The owner's rule: **three chases with no reply**. Plus a promised date that
+   * came and went, and a claim he rejected. Reports only — nothing is ever auto-cancelled. (BEA-1030)
+   */
+  async stalling() {
+    const today = this.dayKey(await this.tz());
+    const rows = await this.prisma.task.findMany({
+      where: { status: 'open', NOT: { ownerContactId: null } },
+      take: 1000,
+      select: {
+        id: true, title: true, createdAt: true, promisedFor: true, promiseSlips: true, ownerContactId: true,
+        ownerContact: { select: { id: true, name: true } },
+        claims: { select: { status: true, decidedAt: true } },
+        chases: { select: { id: true, sends: { where: { status: { in: ['sent', 'delivered', 'read'] } }, select: { at: true } } } },
+      },
+    });
+
+    // One query for every inbound message we care about, rather than one per task.
+    const contactIds = [...new Set(rows.map((r) => r.ownerContactId).filter(Boolean) as string[])];
+    const replies = contactIds.length
+      ? await this.prisma.reminderMessage.findMany({
+          where: { contactId: { in: contactIds }, direction: 'in' },
+          select: { contactId: true, createdAt: true },
+        })
+      : [];
+    const lastReply = new Map<string, number>();
+    for (const m of replies) {
+      const t = new Date(m.createdAt).getTime();
+      const k = m.contactId || '';
+      if (!lastReply.has(k) || t > (lastReply.get(k) as number)) lastReply.set(k, t);
+    }
+
+    const out: any[] = [];
+    for (const r of rows) {
+      const sends = r.chases.flatMap((c) => c.sends).map((s) => new Date(s.at).getTime()).sort((a, b) => a - b);
+      const heard = lastReply.get(r.ownerContactId || '') || 0;
+      // Only chases they have NOT answered since count towards being ignored.
+      const unanswered = sends.filter((t) => t > heard).length;
+      const rejected = r.claims.some((c) => c.status === 'rejected');
+      const missedPromise = !!r.promisedFor && r.promisedFor < today;
+
+      const why: string[] = [];
+      if (unanswered >= 3) why.push(`chased ${unanswered} times with no reply`);
+      if (missedPromise) why.push(`promised ${r.promisedFor} and it passed`);
+      if (rejected) why.push('said it was done, but it wasn\'t');
+      if (!why.length) continue;
+
+      out.push({
+        taskId: r.id,
+        title: r.title,
+        who: r.ownerContact?.name || 'Someone',
+        contactId: r.ownerContactId,
+        openDays: Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000)),
+        unanswered,
+        promiseSlips: r.promiseSlips || 0,
+        why,
+      });
+    }
+    return out.sort((a, b) => b.openDays - a.openDays);
   }
 
   /** Manually add a single task (no dump). */

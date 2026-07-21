@@ -13,6 +13,7 @@ type Row = Task & {
   chaseRepeats: boolean;
   chaseCount: number;
   chaseId: string | null;
+  stalling?: string[] | null;
 };
 
 const CHASE_LABEL: Record<string, string> = { active: 'chasing', paused: 'paused', done: 'stopped', stopped: 'stopped', none: 'no chase' };
@@ -23,7 +24,7 @@ const CHASE_LABEL: Record<string, string> = { active: 'chasing', paused: 'paused
  */
 export function Delegated() {
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [summary, setSummary] = useState({ open: 0, awaitingYou: 0, chasing: 0 });
+  const [summary, setSummary] = useState({ open: 0, awaitingYou: 0, chasing: 0, stalling: 0 });
   const [editing, setEditing] = useState<Task | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<Row | null>(null);
@@ -32,8 +33,8 @@ export function Delegated() {
   const load = useCallback(
     () =>
       fetch('/api/tasks/delegated')
-        .then((r) => (r.ok ? r.json() : { rows: [], summary: { open: 0, awaitingYou: 0, chasing: 0 } }))
-        .then((d) => { setRows(d.rows || []); setSummary(d.summary || { open: 0, awaitingYou: 0, chasing: 0 }); })
+        .then((r) => (r.ok ? r.json() : { rows: [], summary: { open: 0, awaitingYou: 0, chasing: 0, stalling: 0 } }))
+        .then((d) => { setRows(d.rows || []); setSummary(d.summary || { open: 0, awaitingYou: 0, chasing: 0, stalling: 0 }); })
         .catch(() => setRows([])),
     [],
   );
@@ -66,8 +67,13 @@ export function Delegated() {
         { value: 'claim', label: 'Waiting on you' },
         { value: 'chasing', label: 'Being chased' },
         { value: 'quiet', label: 'No chase running' },
+        { value: 'stalling', label: 'Not moving' },
       ],
-      match: (r, v) => (v === 'claim' ? !!r.claim : v === 'chasing' ? r.chaseStatus === 'active' : r.chaseStatus !== 'active' && r.status !== 'done'),
+      match: (r, v) =>
+        v === 'claim' ? !!r.claim
+        : v === 'chasing' ? r.chaseStatus === 'active'
+        : v === 'stalling' ? !!r.stalling
+        : r.chaseStatus !== 'active' && r.status !== 'done',
     },
   ];
 
@@ -75,7 +81,8 @@ export function Delegated() {
     { key: 'title', label: 'What', width: '42%', sortable: true, render: (r) => (
       <div className="min-w-0">
         <span className={'block truncate ' + (r.status === 'done' ? 'text-zinc-400 line-through' : 'font-medium')}>{r.title}</span>
-        {r.claim && <span className="text-[11px] text-violet-600 dark:text-violet-400">✋ says it's done — “{r.claim.quote.slice(0, 60)}”</span>}
+        {r.claim && <span className="block text-[11px] text-violet-600 dark:text-violet-400">✋ says it's done — “{r.claim.quote.slice(0, 60)}”</span>}
+        {r.stalling && <span className="block text-[11px] text-amber-600 dark:text-amber-400">⏳ {r.stalling.join(' · ')}</span>}
       </div>
     ) },
     { key: 'who', label: 'Who', width: '16%', sortable: true },
@@ -93,6 +100,7 @@ export function Delegated() {
       <p className={'font-medium leading-snug ' + (r.status === 'done' ? 'text-zinc-400 line-through' : '')}>{r.title}</p>
       <p className="mt-0.5 text-xs text-zinc-500">{r.who} · {r.status === 'done' ? 'finished' : r.openDays === 0 ? 'given today' : `open ${r.openDays}d`} · chased {r.chaseCount || 0}×</p>
       {r.claim && <p className="mt-2 rounded-lg bg-violet-500/10 px-2.5 py-1.5 text-xs text-violet-700 dark:text-violet-300">✋ says it's done — “{r.claim.quote}”</p>}
+      {r.stalling && <p className="mt-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">⏳ Not moving — {r.stalling.join(' · ')}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <span className={'rounded-full px-2 py-0.5 text-[11px] ' + (r.chaseStatus === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-500/10 text-zinc-500')}>{CHASE_LABEL[r.chaseStatus]}</span>
         <button onClick={() => toggleDone(r)} className="ml-auto rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">{r.status === 'done' ? 'Reopen' : 'Done'}</button>
@@ -115,10 +123,11 @@ export function Delegated() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat icon={<Clock size={14} />} n={summary.open} label="still open" />
         <Link to="/review" className="contents"><Stat icon={<Hand size={14} />} n={summary.awaitingYou} label="waiting on you" tone={summary.awaitingYou ? 'violet' : undefined} /></Link>
         <Stat icon={<Radio size={14} />} n={summary.chasing} label="being chased" />
+        <Stat icon={<Clock size={14} />} n={summary.stalling || 0} label="not moving" tone={summary.stalling ? 'amber' : undefined} />
       </div>
 
       <DataTable<Row>
@@ -154,9 +163,10 @@ export function Delegated() {
   );
 }
 
-function Stat({ icon, n, label, tone }: { icon: React.ReactNode; n: number; label: string; tone?: 'violet' }) {
+function Stat({ icon, n, label, tone }: { icon: React.ReactNode; n: number; label: string; tone?: 'violet' | 'amber' }) {
+  const border = tone === 'violet' && n > 0 ? 'border-violet-400/50 bg-violet-500/5' : tone === 'amber' && n > 0 ? 'border-amber-400/50 bg-amber-500/5' : 'border-zinc-200 dark:border-zinc-800';
   return (
-    <div className={'rounded-xl border p-3 ' + (tone === 'violet' && n > 0 ? 'border-violet-400/50 bg-violet-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
+    <div className={'rounded-xl border p-3 ' + border}>
       <div className="flex items-center gap-1.5 text-zinc-500">{icon}<span className="text-[11px]">{label}</span></div>
       <p className="mt-0.5 text-xl font-bold">{n}</p>
     </div>

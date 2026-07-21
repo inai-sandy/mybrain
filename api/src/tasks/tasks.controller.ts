@@ -97,6 +97,12 @@ export class TasksController {
     return this.tasks.delegated(contactId || undefined);
   }
 
+  /** Who's stalling right now. (BEA-1030) */
+  @Get('stalling')
+  stalling() {
+    return this.tasks.stalling();
+  }
+
   @Get('by-person')
   async byPerson(@Query('name') name?: string) {
     return { tasks: await this.tasks.byPerson(name || '') };
