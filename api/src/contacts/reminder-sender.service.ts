@@ -228,7 +228,7 @@ export class ReminderSenderService implements OnModuleInit {
           + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
         const slug = await this.slugFor(contactId, g.name);
         res = await this.postbox.sendTaskListTemplate(g.number, firstName, subjects.length, shownList, slug);
-        rendered = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList);
+        rendered = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList, slug);
         if (res.error) {
           // Not approved yet, or Meta hiccuped — the single-task template still says something true.
           this.log.warn(`task-list template failed (${res.error}) — falling back to the combined nudge`);

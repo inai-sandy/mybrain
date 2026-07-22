@@ -234,7 +234,7 @@ export class RemindersService {
         + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
       const slug = await this.contacts.share(r.contactId).then((x) => x.slug).catch(() => 'unavailable');
       res = await this.postbox.sendTaskListTemplate(number, firstName, subjects.length, shownList, slug);
-      body = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList);
+      body = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList, slug);
       if (res.error) {
         // The list template failing must not leave the window closed — say the combined old line.
         const combined = subjects.length === 2 ? `${subjects[0]} and ${subjects[1]}` : `${subjects.slice(0, -1).join(', ')} and ${subjects[subjects.length - 1]}`;

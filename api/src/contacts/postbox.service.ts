@@ -83,9 +83,15 @@ export class PostboxService {
     }
   }
 
-  /** What the multi-task template reads like — stored in the chat thread as the outbound body. */
-  renderTaskListTemplate(firstName: string, count: number, list: string): string {
-    return `Hi ${firstName}, following up on behalf of Sandeep — ${count} things are pending with him: ${list}. Just reply here with where things stand.`;
+  /**
+   * What the multi-task template reads like — stored in the chat thread as the outbound body.
+   * The real WhatsApp message carries the page as a BUTTON; buttons don't exist in our thread
+   * mirror, so the link is written out as a line — otherwise the app makes it look like the link
+   * never went. (BEA-1042)
+   */
+  renderTaskListTemplate(firstName: string, count: number, list: string, slug?: string): string {
+    const btn = slug && slug !== 'unavailable' ? `\n🔗 Open my list: https://mybrain.1site.ai/t/${slug}` : '';
+    return `Hi ${firstName}, following up on behalf of Sandeep — ${count} things are pending with him: ${list}. Just reply here with where things stand.${btn}`;
   }
 
   async sendReminderTemplate(to: string, firstName: string, subject: string) {
