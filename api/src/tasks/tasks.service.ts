@@ -40,6 +40,8 @@ type CraftedTask = {
   estimateMin?: number;
   note?: string;
   pinned?: boolean;
+  /** the OTHER person this is clearly for — linked only on an exact, unique contact match (BEA-1040) */
+  who?: string | null;
 };
 
 @Injectable()
@@ -431,6 +433,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     // up duplicates. Skip a new task whose normalized title already exists (open, or added just now). (BEA-933)
     const existingOpen = await this.prisma.task.findMany({ where: { status: 'open' }, select: { title: true } });
     const seenTitles = new Set(existingOpen.map((t) => normTitleKey(t.title)));
+    // Someone else's work goes to that person — the dump learns the same rule as briefings: link
+    // ONLY on an exact, unique contact match; anything unclear stays on the owner's board. (BEA-1040)
+    const contacts = await this.allContacts();
     const created = [];
     let skipped = 0;
     for (const c of crafted.tasks) {
@@ -441,9 +446,14 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       seenTitles.add(key);
       const pinned = !!c.pinned && pinnedSeen.n < 3;
       if (pinned) pinnedSeen.n++;
+      const who = String((c as any).who || '').trim();
+      const hits = who ? exactMatches(contacts, who) : [];
+      const owner = hits.length === 1 ? hits[0] : null;
       const t = await this.prisma.task.create({
         data: {
           title,
+          ownerContactId: owner?.id || null,
+          party: owner ? owner.name.slice(0, 80) : null,
           category: c.category ? String(c.category).trim().slice(0, 40) : null,
           tags: Array.isArray(c.tags) && c.tags.length ? JSON.stringify(c.tags.map((x) => String(x).toLowerCase().trim()).filter(Boolean).slice(0, 5)) : null,
           priority: this.normPriority(c.priority),
@@ -456,7 +466,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         },
       });
       this.indexTask(t);
-      created.push(this.shape(t));
+      if (owner) this.touchPerson(owner.id); // their rolling brain doc stays current (BEA-1031)
+      // shape() reads the relation; a fresh create only has the id, so hand it the name we resolved.
+      created.push(this.shape({ ...t, ownerContact: owner ? { id: owner.id, name: owner.name } : null }));
     }
     return { dumpId: d.id, question: undefined, tasks: created, skipped };
   }

@@ -32,7 +32,7 @@ const REGISTRY: PromptDef[] = [
     default:
       `You are a sharp daily planner. Turn this raw morning brain-dump into clean, actionable tasks for today.\n` +
       `Respond with ONLY JSON, no prose, in this exact shape:\n` +
-      `{"question": null, "tasks": [{"title":"...","category":"...","tags":["..."],"priority":"high|medium|low","sphere":"work|personal","estimateMin": 30,"note":"...","pinned": false}]}\n\n` +
+      `{"question": null, "tasks": [{"title":"...","category":"...","tags":["..."],"priority":"high|medium|low","sphere":"work|personal","estimateMin": 30,"note":"...","pinned": false,"who": null}]}\n\n` +
       `Rules:\n` +
       `- Extract concrete, imperative tasks ("Call the accountant", not "accountant"). Merge duplicates and overlapping items.\n` +
       `- category: a short bucket inferred from the task (e.g. Beakn, Learning, Admin, Health, Personal). 1-2 words.\n` +
@@ -42,6 +42,7 @@ const REGISTRY: PromptDef[] = [
       `- note: optional one-line context pulled from the dump (omit if none).\n` +
       `- pinned: mark ONLY the 1-3 most important "must-do today" tasks as true.\n` +
       `- sphere: "personal" for family/home/health/errands/relationships; "work" for job/business/professional tasks. Every task gets one.\n` +
+      `- who: the OTHER person's name when the task is clearly THEIR work to do ("Ramesh needs to send the vendor list" → "Ramesh"), exactly as said. null when Sandeep will do it himself. "Call Ramesh" is SANDEEP's task (who: null); "Ramesh must call the bank" is Ramesh's (who: "Ramesh").\n` +
       `- If the dump is too vague or empty to extract any real task, return {"question":"<one short clarifying question>","tasks":[]}.`,
   },
   {
