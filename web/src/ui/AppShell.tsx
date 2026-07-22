@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Logo } from './Logo';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, Moon, Sun, Menu, X, Settings as SettingsIcon, UserCircle, HelpCircle, FileText, ExternalLink, MessageCircle, Search, RefreshCw, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
-import { NAV } from './nav';
+import { NAV_GROUPS } from './nav';
 import { HELP_DOCS } from './help';
 import { InstallPrompt } from './InstallPrompt';
 import { DictationIndicator } from './DictationIndicator';
@@ -76,10 +76,19 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           <Logo size={collapsed ? 30 : 34} /> {!collapsed && 'My Brain'}
         </div>
         <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1">
-          {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} title={collapsed ? n.label : undefined} className={deskItemCls}>
-              <n.icon size={18} /> {!collapsed && n.label}
-            </NavLink>
+          {/* Grouped under quiet headers so the eye can skip whole blocks. (BEA-1044) */}
+          {NAV_GROUPS.map((g, gi) => (
+            <div key={g.label || gi} className={gi > 0 ? 'pt-2' : ''}>
+              {g.label && !collapsed && (
+                <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{g.label}</div>
+              )}
+              {g.label && collapsed && <div className="mx-3 my-1.5 border-t border-zinc-100 dark:border-zinc-800" />}
+              {g.items.map((n) => (
+                <NavLink key={n.to} to={n.to} end={n.end} title={collapsed ? n.label : undefined} className={deskItemCls}>
+                  <n.icon size={18} /> {!collapsed && n.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
         <button
@@ -106,10 +115,15 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
               </button>
             </div>
             <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain space-y-1">
-              {NAV.map((n) => (
-                <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setDrawer(false)} className={itemCls}>
-                  <n.icon size={18} /> {n.label}
-                </NavLink>
+              {NAV_GROUPS.map((g, gi) => (
+                <div key={g.label || gi} className={gi > 0 ? 'pt-2' : ''}>
+                  {g.label && <div className="px-3 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{g.label}</div>}
+                  {g.items.map((n) => (
+                    <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setDrawer(false)} className={itemCls}>
+                      <n.icon size={18} /> {n.label}
+                    </NavLink>
+                  ))}
+                </div>
               ))}
               <NavLink to="/settings" onClick={() => setDrawer(false)} className={itemCls}>
                 <SettingsIcon size={18} /> Settings

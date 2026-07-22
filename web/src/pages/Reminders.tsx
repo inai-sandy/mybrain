@@ -9,8 +9,9 @@ export function Reminders() {
   return (
     <div className="space-y-5">
       <header>
-        <h1 className="text-2xl font-extrabold">Reminders</h1>
-        <p className="text-sm text-zinc-500">The WhatsApp nudges you send your contacts — chats, schedules, and replies.</p>
+        {/* Named what it IS: the WhatsApp inbox. Chases live on tasks and contacts. (BEA-1044) */}
+        <h1 className="text-2xl font-extrabold">Chats</h1>
+        <p className="text-sm text-zinc-500">Your WhatsApp conversations — replies, chases going out, and anything that needs you.</p>
       </header>
       <RemindersTab />
     </div>

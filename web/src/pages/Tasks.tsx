@@ -6,9 +6,19 @@ import { useToast } from '../ui/Toast';
 import { useUrlState, useUrlBool } from '../ui/useUrlState';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday, mins, sortTasksBy } from './taskShared';
 import { UnlinkedPeople } from '../ui/UnlinkedPeople';
+import { DelegatedTab } from './Delegated';
+import { Review } from './Review';
 
 export function Tasks() {
   const { data, loading, load } = useToday();
+  // One page, three tabs — Delegated and To review fold in here instead of crowding the sidebar. (BEA-1044)
+  const [tab, setTab] = useUrlState('tab', 'mine');
+  const [delegatedOpen, setDelegatedOpen] = useState<number | null>(null);
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
+  useEffect(() => {
+    fetch('/api/tasks/delegated').then((r) => (r.ok ? r.json() : null)).then((d) => setDelegatedOpen(d?.summary?.open ?? 0)).catch(() => setDelegatedOpen(0));
+    fetch('/api/tasks/claims').then((r) => (r.ok ? r.json() : null)).then((d) => setReviewCount((d?.claims || []).length)).catch(() => setReviewCount(0));
+  }, [tab]);
   const [dumping, setDumping] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -125,9 +135,11 @@ export function Tasks() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><CheckSquare className="text-emerald-500" /> Tasks</h1>
-          <p className="text-zinc-500 text-sm">{openCount} to do{data && data.counts.done ? ` · ${data.counts.done} done today` : ''}</p>
+          <p className="text-zinc-500 text-sm">
+            {tab === 'delegated' ? 'What other people owe you.' : tab === 'review' ? 'What they say is finished — your call.' : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
+          </p>
         </div>
-        <div className="flex items-center gap-1">
+        {tab === 'mine' && (<div className="flex items-center gap-1">
           <button onClick={() => setHistory((v) => !v)} title="Finished-tasks calendar" aria-label="History calendar" className={'p-2 rounded-lg border ' + (history ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
             <CalendarDays size={16} />
           </button>
@@ -144,9 +156,29 @@ export function Tasks() {
               </button>
             </>
           )}
-        </div>
+        </div>)}
       </div>
 
+      {/* The three tabs. Same page, same look — different lists. (BEA-1044) */}
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
+        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['review', 'To review', reviewCount]] as const).map(([id, label, n]) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={'-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
+          >
+            {label}
+            {n !== null && n !== undefined && n > 0 && (
+              <span className={'rounded-full px-1.5 text-[10px] ' + (id === 'review' ? 'bg-violet-500/15 text-violet-600 dark:text-violet-300' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800')}>{n}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'delegated' && <DelegatedTab onCountChange={setDelegatedOpen} />}
+      {tab === 'review' && <Review embedded onCountChange={setReviewCount} />}
+
+      {tab === 'mine' && (<>
       {history && <TaskHistory />}
 
       {/* Optional search box (behind the icon) */}
@@ -235,6 +267,7 @@ export function Tasks() {
           <span className="hidden sm:inline font-medium pr-1">Dump my brain</span>
         </button>
       </div>
+      </>)}
 
       {dumping && <DumpModal onClose={() => setDumping(false)} onDone={load} onCreated={setReview} initialQuestion={data?.question || null} />}
       {review && <DumpReviewSheet tasks={review} onClose={() => setReview(null)} onChanged={load} />}

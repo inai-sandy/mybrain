@@ -33,7 +33,7 @@ const SOURCE_LABEL: Record<string, string> = { whatsapp: 'on WhatsApp', page: 'o
  * Everything someone says they've finished, in one place. Nothing here is done until you say so —
  * that is the entire point of the screen. (BEA-1025)
  */
-export function Review() {
+export function Review({ embedded = false, onCountChange }: { embedded?: boolean; onCountChange?: (n: number) => void } = {}) {
   const [claims, setClaims] = useState<Claim[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useUrlState('q', '');
@@ -46,7 +46,7 @@ export function Review() {
   const load = useCallback(() => {
     return fetch('/api/tasks/claims')
       .then((r) => (r.ok ? r.json() : { claims: [] }))
-      .then((d) => setClaims(d.claims || []))
+      .then((d) => { setClaims(d.claims || []); onCountChange?.((d.claims || []).length); })
       .catch(() => setClaims([]));
   }, []);
 
@@ -97,7 +97,8 @@ export function Review() {
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Hand className="text-violet-500" /> To review</h1>
+          {/* As a Tasks tab the page header is the Tasks header — no second title. (BEA-1044) */}
+          {!embedded && <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Hand className="text-violet-500" /> To review</h1>}
           <p className="text-sm text-zinc-500">
             {claims === null ? 'Loading…' : claims.length === 0 ? 'Nothing waiting on you' : `${claims.length} thing${claims.length === 1 ? '' : 's'} someone says ${claims.length === 1 ? 'is' : 'are'} finished`}
           </p>

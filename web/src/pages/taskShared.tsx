@@ -32,6 +32,9 @@ export type Task = {
   /** The date they promised. Slows the chase to once a day until then. (BEA-1022) */
   promisedFor?: string | null;
   promiseSlips?: number;
+  /** Chase state, present only on delegated rows — renders a small chip on the card. (BEA-1044) */
+  chaseStatus?: 'active' | 'paused' | 'done' | 'stopped' | 'none';
+  chaseCount?: number;
   dueDate?: string | null; // ISO due date
   status: 'open' | 'done';
   progress?: number; // 0 | 30 | 60 | 100
@@ -151,6 +154,12 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
               title={t.ownerContactId ? `Linked to ${t.party} in your contacts` : `"${t.party}" isn't linked to a contact`}
             >
               🤝 Promise → {t.party}
+            </span>
+          )}
+          {/* The chase on a delegated task — running, quiet, or none. (BEA-1044) */}
+          {t.chaseStatus !== undefined && t.status !== 'done' && (
+            <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ' + (t.chaseStatus === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400')} title={t.chaseCount ? `Chased ${t.chaseCount} time(s) so far` : 'Never chased yet'}>
+              ↻ {t.chaseStatus === 'active' ? 'chasing' : 'no chase'}{t.chaseCount ? ` · ${t.chaseCount}×` : ''}
             </span>
           )}
           {/* What they promised — and how many times they've re-promised. (BEA-1022) */}

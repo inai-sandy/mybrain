@@ -19,9 +19,9 @@ function DelegatedLine() {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
       <span className="text-zinc-500">With other people:</span>
-      <Link to="/delegated" className="font-medium hover:text-emerald-600">{s.open} open</Link>
+      <Link to="/tasks?tab=delegated" className="font-medium hover:text-emerald-600">{s.open} open</Link>
       {s.awaitingYou > 0 && (
-        <Link to="/review" className="font-medium text-violet-600 hover:underline dark:text-violet-400">{s.awaitingYou} waiting on you</Link>
+        <Link to="/tasks?tab=review" className="font-medium text-violet-600 hover:underline dark:text-violet-400">{s.awaitingYou} waiting on you</Link>
       )}
     </div>
   );

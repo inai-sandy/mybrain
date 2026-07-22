@@ -33,7 +33,7 @@ export function ContactState({ contactId, reload }: { contactId: string; reload:
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <Cell icon={<Circle size={13} />} n={s.open} label="still open" hint={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? `oldest ${s.oldestOpenDays}d` : undefined} tone={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? 'rose' : undefined} />
-      <Link to="/review" className="contents">
+      <Link to="/tasks?tab=review" className="contents">
         <Cell icon={<Hand size={13} />} n={s.awaitingYou} label="waiting on you" tone={s.awaitingYou ? 'violet' : undefined} />
       </Link>
       <Cell icon={<Radio size={13} />} n={s.chasing} label="being chased" />

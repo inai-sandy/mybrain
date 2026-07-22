@@ -86,7 +86,7 @@ export class HomeService {
     for (const f of flowWaiting) needsYou.push({ kind: 'flow', icon: '🌊', title: 'A flow needs your input', sub: (f.waitQuestion || '').slice(0, 120), href: `/flows/runs/${f.id}`, action: 'Reply' });
     for (const r of remindersNeed as any[]) needsYou.push({ kind: 'reminder', icon: '⏰', title: `${r.contact?.name || 'A contact'} needs a reply`, sub: (r.subject ? `about ${r.subject}` : 'Their WhatsApp reply is waiting'), href: '/contacts', action: 'Read' });
     for (const t of overdue as any[]) needsYou.push({ kind: 'task', icon: '⚠️', title: (t.title || 'Task').slice(0, 90), sub: 'Overdue', href: '/tasks', action: 'Do' });
-    for (const c of claimsWaiting as any[]) needsYou.push({ kind: 'claim', icon: '✋', title: `${c.contact?.name || 'Someone'} says it's done`, sub: (c.task?.title || '').slice(0, 120), href: '/review', action: 'Review' });
+    for (const c of claimsWaiting as any[]) needsYou.push({ kind: 'claim', icon: '✋', title: `${c.contact?.name || 'Someone'} says it's done`, sub: (c.task?.title || '').slice(0, 120), href: '/tasks?tab=review', action: 'Review' });
 
     // Rank by urgency (most time-sensitive first) and drop duplicates. (BEA-939)
     const NEED_RANK: Record<string, number> = { claim: 0, reminder: 1, task: 2, agent: 3, flow: 4, meeting: 5, emo: 6 };

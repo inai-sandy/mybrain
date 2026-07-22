@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Users, Hand, Radio, Check, Clock, Trash2, Pencil, Plus } from 'lucide-react';
-import { DataTable, type Column, type Filter } from '../ui/DataTable';
+import { Hand, Radio, Clock, Plus, Search, Timer } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { TaskFormModal, type Task } from './taskShared';
+import { TaskFormModal, TaskCard, type Task } from './taskShared';
 
 type Row = Task & {
   who: string;
@@ -16,29 +15,61 @@ type Row = Task & {
   stalling?: string[] | null;
 };
 
-const CHASE_LABEL: Record<string, string> = { active: 'chasing', paused: 'paused', done: 'stopped', stopped: 'stopped', none: 'no chase' };
-
 /**
- * Everything handed to someone else. Deliberately NOT on the personal Tasks board — that stays
- * what the owner has to do; this is what he is waiting on. (BEA-1029)
+ * The Delegated tab of the Tasks page (BEA-1044) — everything handed to other people, in the SAME
+ * card look as the owner's own board so the page reads as one thing. Lives as a tab, not a
+ * separate sidebar page: 24 flat sidebar entries had become genuinely confusing.
  */
-export function Delegated() {
+export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number) => void }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [summary, setSummary] = useState({ open: 0, awaitingYou: 0, chasing: 0, stalling: 0 });
   const [editing, setEditing] = useState<Task | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const [q, setQ] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [person, setPerson] = useState('');
+  const [status, setStatus] = useState<'open' | 'done' | ''>('open');
+  const [needs, setNeeds] = useState('');
+  const [shown, setShown] = useState(12);
   const toast = useToast();
 
   const load = useCallback(
     () =>
       fetch('/api/tasks/delegated')
         .then((r) => (r.ok ? r.json() : { rows: [], summary: { open: 0, awaitingYou: 0, chasing: 0, stalling: 0 } }))
-        .then((d) => { setRows(d.rows || []); setSummary(d.summary || { open: 0, awaitingYou: 0, chasing: 0, stalling: 0 }); })
+        .then((d) => {
+          setRows(d.rows || []);
+          setSummary(d.summary || { open: 0, awaitingYou: 0, chasing: 0, stalling: 0 });
+          onCountChange?.(d.summary?.open ?? 0);
+        })
         .catch(() => setRows([])),
-    [],
+    [onCountChange],
   );
   useEffect(() => { load(); }, [load]);
+
+  const people = useMemo(() => [...new Set((rows || []).map((r) => r.who))].sort(), [rows]);
+
+  const filtered = useMemo(() => {
+    let r = rows || [];
+    if (status) r = r.filter((x) => x.status === status);
+    if (person) r = r.filter((x) => x.who === person);
+    if (needs === 'claim') r = r.filter((x) => !!x.claim);
+    else if (needs === 'chasing') r = r.filter((x) => x.chaseStatus === 'active');
+    else if (needs === 'stalling') r = r.filter((x) => !!x.stalling);
+    else if (needs === 'quiet') r = r.filter((x) => x.chaseStatus !== 'active' && x.status !== 'done');
+    const t = q.trim().toLowerCase();
+    if (t) r = r.filter((x) => `${x.title} ${x.who} ${x.note || ''}`.toLowerCase().includes(t));
+    return r;
+  }, [rows, status, person, needs, q]);
+
+  async function toggle(t: Task) {
+    const res = await fetch(`/api/tasks/${t.id}/done`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: t.status !== 'done' }),
+    });
+    toast(res.ok ? 'success' : 'error', res.ok ? (t.status === 'done' ? 'Back to open — chase resumes' : 'Confirmed done — chase stopped') : 'Could not save');
+    load();
+  }
 
   async function remove(r: Row) {
     const res = await fetch(`/api/tasks/${r.id}`, { method: 'DELETE' });
@@ -47,105 +78,69 @@ export function Delegated() {
     load();
   }
 
-  async function toggleDone(r: Row) {
-    const res = await fetch(`/api/tasks/${r.id}/done`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: r.status !== 'done' }),
-    });
-    toast(res.ok ? 'success' : 'error', res.ok ? (r.status === 'done' ? 'Back to open — chase resumes' : 'Confirmed done — chase stopped') : 'Could not save');
-    load();
-  }
-
-  const people = useMemo(() => [...new Set((rows || []).map((r) => r.who))].sort(), [rows]);
-
-  const filters: Filter[] = [
-    { key: 'status', label: 'Status', options: [{ value: 'open', label: 'Still open' }, { value: 'done', label: 'Finished' }], match: (r, v) => r.status === v },
-    { key: 'who', label: 'Person', options: people.map((p) => ({ value: p, label: p })), match: (r, v) => r.who === v },
-    {
-      key: 'state',
-      label: 'Needs',
-      options: [
-        { value: 'claim', label: 'Waiting on you' },
-        { value: 'chasing', label: 'Being chased' },
-        { value: 'quiet', label: 'No chase running' },
-        { value: 'stalling', label: 'Not moving' },
-      ],
-      match: (r, v) =>
-        v === 'claim' ? !!r.claim
-        : v === 'chasing' ? r.chaseStatus === 'active'
-        : v === 'stalling' ? !!r.stalling
-        : r.chaseStatus !== 'active' && r.status !== 'done',
-    },
-  ];
-
-  const columns: Column<Row>[] = [
-    { key: 'title', label: 'What', width: '42%', sortable: true, render: (r) => (
-      <div className="min-w-0">
-        <span className={'block truncate ' + (r.status === 'done' ? 'text-zinc-400 line-through' : 'font-medium')}>{r.title}</span>
-        {r.claim && <span className="block text-[11px] text-violet-600 dark:text-violet-400">✋ says it's done — “{r.claim.quote.slice(0, 60)}”</span>}
-        {r.stalling && <span className="block text-[11px] text-amber-600 dark:text-amber-400">⏳ {r.stalling.join(' · ')}</span>}
-      </div>
-    ) },
-    { key: 'who', label: 'Who', width: '16%', sortable: true },
-    { key: 'openDays', label: 'Open', width: '12%', sortable: true, render: (r) => <span className={r.openDays >= 7 && r.status !== 'done' ? 'text-rose-600 dark:text-rose-400' : ''}>{r.status === 'done' ? '—' : r.openDays === 0 ? 'today' : `${r.openDays}d`}</span> },
-    { key: 'chaseCount', label: 'Chased', width: '12%', sortable: true, render: (r) => <span className="text-zinc-500">{r.chaseCount || 0}×</span> },
-    { key: 'chaseStatus', label: 'Chase', width: '18%', render: (r) => (
-      <span className={'rounded-full px-2 py-0.5 text-[11px] ' + (r.chaseStatus === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-500/10 text-zinc-500')}>
-        {CHASE_LABEL[r.chaseStatus] || r.chaseStatus}
-      </span>
-    ) },
-  ];
-
-  const card = (r: Row) => (
-    <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <p className={'font-medium leading-snug ' + (r.status === 'done' ? 'text-zinc-400 line-through' : '')}>{r.title}</p>
-      <p className="mt-0.5 text-xs text-zinc-500">{r.who} · {r.status === 'done' ? 'finished' : r.openDays === 0 ? 'given today' : `open ${r.openDays}d`} · chased {r.chaseCount || 0}×</p>
-      {r.claim && <p className="mt-2 rounded-lg bg-violet-500/10 px-2.5 py-1.5 text-xs text-violet-700 dark:text-violet-300">✋ says it's done — “{r.claim.quote}”</p>}
-      {r.stalling && <p className="mt-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-300">⏳ Not moving — {r.stalling.join(' · ')}</p>}
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        <span className={'rounded-full px-2 py-0.5 text-[11px] ' + (r.chaseStatus === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-500/10 text-zinc-500')}>{CHASE_LABEL[r.chaseStatus]}</span>
-        <button onClick={() => toggleDone(r)} className="ml-auto rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">{r.status === 'done' ? 'Reopen' : 'Done'}</button>
-        <button onClick={() => setEditing(r)} aria-label="Edit" className="rounded-lg border border-zinc-300 p-1.5 text-zinc-500 dark:border-zinc-700"><Pencil size={13} /></button>
-        <button onClick={() => setConfirm(r)} aria-label="Delete" className="rounded-lg border border-zinc-300 p-1.5 text-zinc-500 hover:border-rose-400 hover:text-rose-600 dark:border-zinc-700"><Trash2 size={13} /></button>
-      </div>
-    </div>
-  );
+  const sel = 'rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-600 dark:text-zinc-300';
 
   return (
     <div className="space-y-3">
-      {/* Stacked on a phone so the heading isn't squeezed by the button. (BEA-1029) */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Users className="text-amber-500" /> Delegated</h1>
-          <p className="text-sm text-zinc-500">Everything you're waiting on other people for.</p>
-        </div>
-        <button onClick={() => setAdding(true)} className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 sm:w-auto sm:py-2">
-          <Plus size={15} /> Give someone a task
-        </button>
-      </div>
-
+      {/* The four numbers that matter, in one glance. */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat icon={<Clock size={14} />} n={summary.open} label="still open" />
-        <Link to="/review" className="contents"><Stat icon={<Hand size={14} />} n={summary.awaitingYou} label="waiting on you" tone={summary.awaitingYou ? 'violet' : undefined} /></Link>
+        <Link to="/tasks?tab=review" className="contents"><Stat icon={<Hand size={14} />} n={summary.awaitingYou} label="waiting on you" tone={summary.awaitingYou ? 'violet' : undefined} /></Link>
         <Stat icon={<Radio size={14} />} n={summary.chasing} label="being chased" />
-        <Stat icon={<Clock size={14} />} n={summary.stalling || 0} label="not moving" tone={summary.stalling ? 'amber' : undefined} />
+        <Stat icon={<Timer size={14} />} n={summary.stalling || 0} label="not moving" tone={summary.stalling ? 'amber' : undefined} />
       </div>
 
-      <DataTable<Row>
-        columns={columns}
-        rows={rows || []}
-        loading={rows === null}
-        filters={filters}
-        pageSize={12}
-        renderCard={card}
-        onRowClick={(r) => setEditing(r)}
-        tableLayoutFixed
-        emptyText="You haven't given anyone anything yet. Brief a contact and their tasks show up here."
-        sortOptions={[
-          { label: 'Longest open', key: 'openDays', dir: -1 },
-          { label: 'Newest', key: 'createdAt', dir: -1 },
-          { label: 'Most chased', key: 'chaseCount', dir: -1 },
-        ]}
-      />
+      {/* Filter row in the board's own style. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={person} onChange={(e) => setPerson(e.target.value)} className={sel}>
+          <option value="">Anyone</option>
+          {people.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={status} onChange={(e) => setStatus(e.target.value as any)} className={sel}>
+          <option value="open">Still open</option>
+          <option value="done">Finished</option>
+          <option value="">All</option>
+        </select>
+        <select value={needs} onChange={(e) => setNeeds(e.target.value)} className={sel}>
+          <option value="">Everything</option>
+          <option value="claim">Waiting on you</option>
+          <option value="chasing">Being chased</option>
+          <option value="stalling">Not moving</option>
+          <option value="quiet">No chase running</option>
+        </select>
+        <button onClick={() => setShowSearch((v) => !v)} aria-label="Search" className={'rounded-lg border p-1.5 ' + (showSearch || q ? 'border-emerald-500 text-emerald-600' : 'border-zinc-200 dark:border-zinc-800 text-zinc-500')}>
+          <Search size={14} />
+        </button>
+        <span className="ml-auto text-xs text-zinc-500">{filtered.length} shown</span>
+      </div>
+      {showSearch && (
+        <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="Search by task, person or note…" className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-900" />
+      )}
+
+      {rows === null ? (
+        <div className="space-y-2.5">{[0, 1, 2].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center dark:border-zinc-700">
+          <p className="text-sm font-medium">{(rows || []).length ? 'Nothing matches those filters' : "You haven't given anyone anything yet"}</p>
+          <p className="mt-1 text-xs text-zinc-500">{(rows || []).length ? 'Clear a filter or two.' : 'Brief a contact, or use the button below.'}</p>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {filtered.slice(0, shown).map((r) => (
+            <TaskCard key={r.id} t={r} onToggle={toggle} onEdit={(t) => setEditing(t)} onDelete={(t) => setConfirm(t as Row)} />
+          ))}
+          {filtered.length > shown && (
+            <button onClick={() => setShown((n) => n + 12)} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">
+              Show {Math.min(12, filtered.length - shown)} more of {filtered.length}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Same floating-button pattern as the board — give, don't dump. */}
+      <button onClick={() => setAdding(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8">
+        <Plus className="h-4 w-4" /> Give someone a task
+      </button>
 
       {(editing || adding) && (
         <TaskFormModal task={editing} onClose={() => { setEditing(null); setAdding(false); }} onSaved={() => { setEditing(null); setAdding(false); load(); }} />
