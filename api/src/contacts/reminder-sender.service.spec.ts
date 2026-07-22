@@ -13,6 +13,24 @@ describe('PostboxService.renderReminderTemplate (BEA-753)', () => {
   });
 });
 
+describe('PostboxService.renderProgressNudge — the plain-chat chase (BEA-1045)', () => {
+  const pb = new PostboxService();
+  it('one task: asks how it is going, no list, no link', () => {
+    const s = pb.renderProgressNudge('Jayanth', 1, 'the OT update');
+    expect(s).toBe('Hi Jayanth, checking in again about the OT update — how is it going? Even a quick line on where it stands helps.');
+  });
+  it('several tasks: numbered list plus their page link', () => {
+    const s = pb.renderProgressNudge('Madhuri', 2, '1) A 2) B', 'madhuri-4x2k');
+    expect(s).toContain('2 things are still pending');
+    expect(s).toContain('1) A 2) B');
+    expect(s).toContain('https://mybrain.1site.ai/t/madhuri-4x2k');
+  });
+  it('no working slug: the list still reads fine without a link', () => {
+    const s = pb.renderProgressNudge('Madhuri', 2, '1) A 2) B', 'unavailable');
+    expect(s).not.toContain('http');
+  });
+});
+
 describe('rollDay — one-day auto-pause (BEA-764)', () => {
   it('pauses active reminders armed on a past day (or never armed) and clears their queued sends', async () => {
     const updates: any[] = [];
@@ -73,13 +91,8 @@ function makePrisma(sends: any[], lastInboundAt: Date | null = null) {
       deleteMany: async () => ({}),
     },
     reminderMessage: {
-      // Honour the createdAt>=since filter so the 24h scoping is actually exercised (BEA-774):
-      // a reply counts only if it lands inside the requested window.
-      count: async ({ where }: any = {}) => {
-        const since = where?.createdAt?.gte as Date | undefined;
-        if (!lastInboundAt) return 0;
-        return since && lastInboundAt < since ? 0 : 1;
-      },
+      // The sender reads the LATEST inbound reply and decides from its age (BEA-1045).
+      findFirst: async () => (lastInboundAt ? { createdAt: lastInboundAt } : null),
       create: async ({ data }: any) => state.msgs.push(data),
     },
     task: { findUnique: async () => null },
@@ -145,14 +158,68 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     expect(state.msgs).toHaveLength(1);
   });
 
-  it('skips a contact’s nudges while they are in a LIVE conversation (replied < 24h ago) (BEA-774)', async () => {
+  it('holds a nudge only while the conversation is genuinely live (replied < 1h ago) (BEA-1045)', async () => {
     const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: '919' } } }];
-    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 60 * 60 * 1000)); // replied 1h ago
+    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 30 * 60 * 1000)); // replied 30 min ago
     let sent = 0;
-    const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => { sent++; return {}; } };
+    const postbox: any = { isConfigured: () => true, sendText: async () => { sent++; return {}; }, sendReminderTemplate: async () => { sent++; return {}; } };
     await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
     expect(sent).toBe(0);
     expect(state.updates[0].status).toBe('skipped');
+  });
+
+  it('a morning reply does NOT kill the evening chase — it goes as a plain chat message, not the template (BEA-1045)', async () => {
+    // This is the bug the owner reported on 2026-07-22: Madhuri and Jayanth replied in the
+    // morning, and every noon/evening chase was silently skipped for 24 hours.
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'the OT update', createdAt: new Date(1), contact: { name: 'Jayanth', whatsappNumber: '919' } } }];
+    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 6 * 60 * 60 * 1000)); // replied 6h ago
+    let plain = '';
+    const postbox: any = {
+      isConfigured: () => true,
+      renderProgressNudge: (fn: string, n: number, s: string) => new PostboxService().renderProgressNudge(fn, n, s),
+      sendText: async (_to: string, body: string) => { plain = body; return { wamid: 'w', status: 'sent', error: null }; },
+      sendReminderTemplate: async () => { throw new Error('must not fire the template inside an open chat'); },
+      sendTaskListTemplate: async () => { throw new Error('must not fire the template inside an open chat'); },
+    };
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    expect(plain).toContain('checking in again about the OT update');
+    expect(state.updates[0].status).toBe('sent');
+    expect(state.msgs[0].body).toBe(plain); // the chat mirror shows exactly what went out
+  });
+
+  it('the plain-chat chase lists multiple tasks with the page link (BEA-1045)', async () => {
+    const sends = [
+      { id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'A', createdAt: new Date(1), contact: { name: 'Madhuri', whatsappNumber: '919' } } },
+      { id: 's2', reminder: { id: 'r2', status: 'active', contactId: 'c1', subject: 'B', createdAt: new Date(2), contact: { name: 'Madhuri', whatsappNumber: '919' } } },
+    ];
+    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 6 * 60 * 60 * 1000));
+    let plain = '';
+    const postbox: any = {
+      isConfigured: () => true,
+      renderProgressNudge: (fn: string, n: number, s: string, slug?: string | null) => new PostboxService().renderProgressNudge(fn, n, s, slug),
+      sendText: async (_to: string, body: string) => { plain = body; return { wamid: 'w', status: 'sent', error: null }; },
+      sendTaskListTemplate: async () => { throw new Error('must not fire the template inside an open chat'); },
+    };
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'madhuri-4x2k' }) } as any).tick();
+    expect(plain).toContain('1) A 2) B');
+    expect(plain).toContain('https://mybrain.1site.ai/t/madhuri-4x2k');
+    expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(2);
+  });
+
+  it('falls back to the template when the plain message bounces (session actually closed) (BEA-1045)', async () => {
+    const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'the videos', createdAt: new Date(1), contact: { name: 'X', whatsappNumber: '919' } } }];
+    const { prisma, state } = makePrisma(sends, new Date(Date.now() - 23 * 60 * 60 * 1000)); // our clock says open; Meta's says closed
+    let templated = 0;
+    const postbox: any = {
+      isConfigured: () => true,
+      renderReminderTemplate,
+      renderProgressNudge: (fn: string, n: number, s: string) => new PostboxService().renderProgressNudge(fn, n, s),
+      sendText: async () => ({ wamid: null, status: 'failed', error: 're-engagement required' }),
+      sendReminderTemplate: async () => { templated++; return { wamid: 'w' }; },
+    };
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    expect(templated).toBe(1); // the chase never silently dies
+    expect(state.updates[0].status).toBe('sent');
   });
 
   it('STILL sends a new reminder when the last reply was over 24h ago (BEA-774)', async () => {

@@ -202,44 +202,67 @@ export class ReminderSenderService implements OnModuleInit {
     }
 
     for (const [contactId, g] of groups) {
-      // While a conversation is genuinely LIVE, the two-way agent handles it — don't also fire a
-      // template nudge. "Live" = they replied within WhatsApp's 24h session window; older than that
-      // the chat is closed, so a NEW reminder must send as normal. Previously this was "ever replied",
-      // which silently killed every future reminder to anyone who ever answered once. (BEA-774, was BEA-735)
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const replied = await this.prisma.reminderMessage.count({ where: { contactId, direction: 'in', createdAt: { gte: since } } });
-      if (replied > 0) {
-        for (const s of g.sends) await this.mark(s.id, 'skipped', null, 'contact replied recently — agent is handling the live conversation');
+      // A reply changes HOW we chase, not WHETHER. The old rule ("replied within 24h → skip")
+      // silently killed every chase for a day the moment someone answered once — a chase loop
+      // where replying makes the chasing stop is not a chase loop. The owner's call (BEA-1045):
+      //   replied < 1h ago  → hold this slot: the two-way agent is (or just was) mid-conversation,
+      //                       and a scheduled nudge barging into a live chat reads like a robot;
+      //   replied < 24h ago → the WhatsApp session is open, so chase with a PLAIN chat message
+      //                       asking for progress instead of re-firing the formal template;
+      //   older than 24h    → the session is closed; only a template can be delivered, as before.
+      const HOUR = 60 * 60 * 1000;
+      const lastIn = await this.prisma.reminderMessage.findFirst({
+        where: { contactId, direction: 'in' },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      const sinceReply = lastIn ? Date.now() - new Date(lastIn.createdAt).getTime() : Infinity;
+      if (sinceReply < HOUR) {
+        for (const s of g.sends) await this.mark(s.id, 'skipped', null, 'they replied within the hour — the agent is mid-conversation');
         continue;
       }
+      const chatOpen = sinceReply < 24 * HOUR;
       const firstName = g.name.trim().split(/\s+/)[0];
       // The SAME order the agent numbers its items in (oldest reminder first), so when she replies
       // "1 and 3 are done" both sides mean the same tasks. (BEA-1041)
       const rems = [...g.reminders.values()].sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       const subjects: string[] = [];
       for (const r of rems) subjects.push(await this.subjectFor(r));
+      // Up to 3 full titles, then a count — the long tail lives on her page. (BEA-1041)
+      const shownList = subjects.slice(0, 3).map((t, i) => `${i + 1}) ${t}`).join(' ')
+        + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
 
-      let res: { wamid: string | null; status: string; error: string | null };
-      let rendered: string;
-      if (subjects.length >= 2) {
-        // Two or more items: the numbered template with her page behind an "Open my list" button.
-        // Up to 3 full titles, then a count — the long tail lives on her page. (BEA-1041)
-        const shownList = subjects.slice(0, 3).map((t, i) => `${i + 1}) ${t}`).join(' ')
-          + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
-        const slug = await this.slugFor(contactId, g.name);
-        res = await this.postbox.sendTaskListTemplate(g.number, firstName, subjects.length, shownList, slug);
-        rendered = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList, slug);
+      let res: { wamid: string | null; status: string; error: string | null } | null = null;
+      let rendered = '';
+      if (chatOpen) {
+        const slug = subjects.length >= 2 ? await this.slugFor(contactId, g.name) : null;
+        rendered = this.postbox.renderProgressNudge(firstName, subjects.length, subjects.length >= 2 ? shownList : subjects[0] || 'this', slug);
+        res = await this.postbox.sendText(g.number, rendered);
         if (res.error) {
-          // Not approved yet, or Meta hiccuped — the single-task template still says something true.
-          this.log.warn(`task-list template failed (${res.error}) — falling back to the combined nudge`);
+          // Our 24h clock and Meta's can disagree by minutes — if the session just closed, plain
+          // text bounces. Fall through to the template so the chase never silently dies. (BEA-1045)
+          this.log.warn(`progress nudge to ${g.name} failed (${res.error}) — falling back to the template`);
+          res = null;
+        }
+      }
+      if (!res) {
+        if (subjects.length >= 2) {
+          // Two or more items: the numbered template with her page behind an "Open my list" button.
+          const slug = await this.slugFor(contactId, g.name);
+          res = await this.postbox.sendTaskListTemplate(g.number, firstName, subjects.length, shownList, slug);
+          rendered = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList, slug);
+          if (res.error) {
+            // Not approved yet, or Meta hiccuped — the single-task template still says something true.
+            this.log.warn(`task-list template failed (${res.error}) — falling back to the combined nudge`);
+            const combined = joinSubjects(subjects);
+            res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
+            rendered = this.postbox.renderReminderTemplate(firstName, combined);
+          }
+        } else {
           const combined = joinSubjects(subjects);
           res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
           rendered = this.postbox.renderReminderTemplate(firstName, combined);
         }
-      } else {
-        const combined = joinSubjects(subjects);
-        res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
-        rendered = this.postbox.renderReminderTemplate(firstName, combined);
       }
       if (res.error) {
         for (const s of g.sends) await this.mark(s.id, 'failed', res.wamid, res.error);

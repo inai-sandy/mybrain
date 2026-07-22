@@ -94,6 +94,21 @@ export class PostboxService {
     return `Hi ${firstName}, following up on behalf of Sandeep — ${count} things are pending with him: ${list}. Just reply here with where things stand.${btn}`;
   }
 
+  /**
+   * The chase as a PLAIN chat message, for when the contact has replied within WhatsApp's 24h
+   * session window. The owner's call (BEA-1045): someone who answered in the morning must still be
+   * chased in the evening — but re-firing the formal template at a person who is already talking
+   * to us reads robotic. Inside an open session free text is allowed, so ask like a human would.
+   * Sent via {@link sendText}; this is the one place the wording lives.
+   */
+  renderProgressNudge(firstName: string, count: number, listOrSubject: string, slug?: string | null): string {
+    if (count <= 1) {
+      return `Hi ${firstName}, checking in again about ${listOrSubject} — how is it going? Even a quick line on where it stands helps.`;
+    }
+    const link = slug && slug !== 'unavailable' ? `\n🔗 Your list: https://mybrain.1site.ai/t/${slug}` : '';
+    return `Hi ${firstName}, checking in again — ${count} things are still pending with Sandeep: ${listOrSubject}. How are they coming along? A quick line on each is enough.${link}`;
+  }
+
   async sendReminderTemplate(to: string, firstName: string, subject: string) {
     if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured (missing POSTBOX_API_KEY).' };
     try {
