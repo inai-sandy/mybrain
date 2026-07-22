@@ -28,6 +28,17 @@ export function normTitleKey(title?: string | null): string {
   return String(title || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * The dedupe key for dumps: normTitleKey minus pure filler. Proven need: a live re-dump produced
+ * "Send the signed distributor agreement" next to "Send signed distributor agreement" — one "the"
+ * apart, and the exact-match skip sailed past it. Only filler that never changes what a task IS is
+ * dropped; real words all stay. Used for COMPARISON only, never for what gets stored. (BEA-1040)
+ */
+const FILLER = new Set(['the', 'a', 'an', 'to', 'me', 'my', 'his', 'her', 'their', 'our', 'please', 'today', 'now', 'also']);
+export function dumpKey(title?: string | null): string {
+  return normTitleKey(title).split(' ').filter((w) => !FILLER.has(w)).join(' ');
+}
+
 const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 const DEFAULT_TASKS_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 const DEFAULT_TZ = 'Asia/Kolkata';
@@ -432,7 +443,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     // Don't re-create tasks that already exist as open ones — re-dumping the same thing was piling
     // up duplicates. Skip a new task whose normalized title already exists (open, or added just now). (BEA-933)
     const existingOpen = await this.prisma.task.findMany({ where: { status: 'open' }, select: { title: true } });
-    const seenTitles = new Set(existingOpen.map((t) => normTitleKey(t.title)));
+    const seenTitles = new Set(existingOpen.map((t) => dumpKey(t.title)));
     // Someone else's work goes to that person — the dump learns the same rule as briefings: link
     // ONLY on an exact, unique contact match; anything unclear stays on the owner's board. (BEA-1040)
     const contacts = await this.allContacts();
@@ -441,7 +452,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     for (const c of crafted.tasks) {
       const title = String(c.title || '').trim().slice(0, 160);
       if (!title) continue;
-      const key = normTitleKey(title);
+      const key = dumpKey(title);
       if (key && seenTitles.has(key)) { skipped++; continue; } // duplicate of an existing open task
       seenTitles.add(key);
       const pinned = !!c.pinned && pinnedSeen.n < 3;

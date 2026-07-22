@@ -67,3 +67,16 @@ describe('the dump gives each task to the right person (BEA-1040)', () => {
     expect(tasks[0].ownerContactId).toBeNull();
   });
 });
+
+import { dumpKey } from './tasks.service';
+
+/** One "the" must not defeat the duplicate block — proven live before this fix. (BEA-1040) */
+describe('dumpKey — filler-proof dedupe', () => {
+  it('treats titles that differ only by filler as the same task', () => {
+    expect(dumpKey('Send the signed distributor agreement')).toBe(dumpKey('Send signed distributor agreement'));
+    expect(dumpKey('Call the bank today')).toBe(dumpKey('call bank'));
+  });
+  it('keeps genuinely different tasks apart', () => {
+    expect(dumpKey('Send the vendor list')).not.toBe(dumpKey('Send the price list'));
+  });
+});
