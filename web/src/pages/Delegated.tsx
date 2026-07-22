@@ -138,7 +138,7 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
       )}
 
       {/* Same floating-button pattern as the board — give, don't dump. */}
-      <button onClick={() => setAdding(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8">
+      <button onClick={() => setAdding(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8 md:right-24">
         <Plus className="h-4 w-4" /> Give someone a task
       </button>
 
