@@ -204,6 +204,14 @@ describe('EmoDeviceService (BEA-926)', () => {
     expect(setDone).toHaveBeenCalledWith('t1', false);
   });
 
+  it('an auto-"missed" from old firmware NEVER decides a claim — it is a timeout, not a human', async () => {
+    const decide = jest.fn(async () => ({ ok: true, taskId: 't1', confirmed: false }));
+    const s2 = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide } as any, { setDone: jest.fn() } as any);
+    const r = await s2.ackDeviceReminder('claim:k1', 'missed');
+    expect(r.ok).toBe(true);
+    expect(decide).not.toHaveBeenCalled();
+  });
+
   it('a plain reminder still acks exactly as before', async () => {
     await svc.ackDeviceReminder('dr1', 'missed');
     expect(prisma.emoDeviceReminder.update).toHaveBeenCalledWith({ where: { id: 'dr1' }, data: { status: 'missed' } });

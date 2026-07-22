@@ -164,7 +164,11 @@ export class EmoDeviceService {
     const raw = String(status || '').toLowerCase();
     if (id.startsWith('claim:')) {
       const claimId = id.slice('claim:'.length);
-      const confirm = !(raw === 'reject' || raw === 'missed' || raw === 'no');
+      // "missed" is what OLD firmware auto-sends when a ring goes unanswered — it is a timeout,
+      // not a human decision. A pendant sitting on a charger must never silently reject someone's
+      // claim. Ignore it; the claim stays waiting for a real answer. (BEA-1036 review)
+      if (raw === 'missed') return { ok: true };
+      const confirm = !(raw === 'reject' || raw === 'no');
       const r = await this.claims.decide(claimId, confirm).catch(() => ({ ok: false }) as any);
       if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
       return { ok: !!r.ok };
