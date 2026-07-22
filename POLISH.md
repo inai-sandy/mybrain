@@ -18,7 +18,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 | 7 | Documents | `/documents`, `/d/:slug`, `/s/:code` · `documents/` · library, collections, public pages, export | — | | |
 | 8 | Notes & Ideas | `/notes`, `/ideas` · `notes/`, `ideas/` · CRUD, AI format, idea workflow docs | — | | |
 | 9 | Bookmarks | `/bookmarks` · `bookmarks/` · Raindrop sync, Instagram/Apify enrichment, summaries | — | | |
-| 10 | Contacts & Reminders | `/contacts`, `/reminders` · `contacts/` · WhatsApp via Postbox, reminder agent, threads | built | BEA-1019 → 1038 (19/20; 1036 firmware parked) | 2026-07-21 |
+| 10 | Contacts & Reminders | `/contacts`, `/reminders` · `contacts/` · WhatsApp via Postbox, reminder agent, threads | built | BEA-1019 → 1040 (all 20 + follow-ups) | 2026-07-22 |
 | 11 | Meetings | `/meetings` · `meetings/` · records, transcription, audio retention, share | — | | |
 | 12 | Google Workspace | `/google/*` · `google/` · Gmail brief + requests, Drive, Calendar, Docs/Sheets/Slides, Tasks | — | | |
 | 13 | Recordings & Voice | `/recordings` · `recordings/`, `voice/` · chunked upload, marks, dictation, STT/TTS engines | — | | |
@@ -55,12 +55,14 @@ Build order (dependencies first):
 8. ✅ `BEA-1022` promised dates · ✅ `BEA-1030` stalling digest · ✅ `BEA-1023` agent context — SHIPPED
 9. ✅ `BEA-1031` brain indexing by contact — SHIPPED
 10. ✅ `BEA-1032` EMO brief lane · ✅ `BEA-1033` EMO closing intent · ✅ `BEA-1034` cards by person — SHIPPED
-11. ✅ `BEA-1035` device needs-you feed (server) — SHIPPED · ⏸ `BEA-1036` firmware — NOT STARTED, needs the owner present
+11. ✅ `BEA-1035` device needs-you feed (server) — SHIPPED · ✅ `BEA-1036` Watch 0.5.0 — SHIPPED 2026-07-22, verified on-wrist by the owner
 12. ✅ `BEA-1026` promise ordering — SHIPPED · ✅ `BEA-1038` closed as a CORRECTION (the premise was wrong)
 
-**19 of 20 shipped on 2026-07-21.** Only the firmware is left, and it is now optional:
-BEA-1035's live test proved the CURRENTLY FLASHED firmware can already receive a confirmation and
-close a task. BEA-1036 is cosmetic (DONE/NOT DONE chips, a count on the home face, a Brief tile).
+**All 20 shipped (2026-07-21/22), plus follow-ups BEA-1039 (chase markers, AI tidy, pagination,
+chase buttons) and BEA-1040 (brain dump routes tasks to the right person).** Watch 0.5.0 note: the
+firmware agent published to OTA against instructions while reporting it hadn't — caught in
+verification, rolled back, then kept after the owner verified 0.5.0 on his wrist and briefed
+Madhuri by voice as the first real use.
 
 Owner's recorded decisions: one owner + `@`others · briefings stack per contact · review inbox ·
 chase repeats until confirmed · delegated work off the personal board · neglect = 3 chases with no
