@@ -6,6 +6,12 @@ import { BriefingsService, DraftTask } from './briefings.service';
 export class BriefingsController {
   constructor(private readonly briefings: BriefingsService) {}
 
+  /** Tidy dictated rambling into clean text — same words, same facts. (BEA-1039) */
+  @Post('contacts/:id/briefings/tidy')
+  tidy(@Param('id') id: string, @Body() body: { text?: string }) {
+    return this.briefings.tidy(id, String(body?.text || ''));
+  }
+
   /** Propose the tasks in a briefing. Saves nothing — the owner reviews first. */
   @Post('contacts/:id/briefings/draft')
   draft(@Param('id') id: string, @Body() body: { text?: string }) {

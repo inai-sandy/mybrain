@@ -55,6 +55,28 @@ export class BriefingsService {
     return c;
   }
 
+  /**
+   * Tidy a dictated briefing: fix the rambling, keep the meaning, change no facts. The owner taps
+   * this BEFORE "Read it", so what gets saved is the version he approved on screen. If the model
+   * is down, his words come back untouched — tidying must never lose or invent anything. (BEA-1039)
+   */
+  async tidy(contactId: string, text: string): Promise<{ text: string }> {
+    const contact = await this.contactOrThrow(contactId);
+    const raw = String(text || '').trim();
+    if (!raw) throw new BadRequestException('Nothing to tidy yet');
+    const prompt =
+      `Tidy this spoken briefing about ${contact.name} into clean, plain sentences.\n` +
+      `Rules: keep EVERY fact, name, number and date exactly as said. Remove only filler, repetition and dictation stumbles. ` +
+      `Do NOT add anything, do NOT summarise away details, keep it in the first person. Reply with ONLY the tidied text, no preamble.\n\n${raw.slice(0, 8000)}`;
+    try {
+      const out = await this.llm.completeWith(await this.model(), prompt, 1200, 'briefing-tidy');
+      const cleaned = String(out || '').trim();
+      return { text: cleaned || raw };
+    } catch {
+      return { text: raw }; // the AI being down never eats his words
+    }
+  }
+
   /** Propose the tasks hidden in a briefing. Saves NOTHING — the owner reviews first. */
   async draft(contactId: string, text: string): Promise<{ summary: string; tasks: DraftTask[] }> {
     const contact = await this.contactOrThrow(contactId);

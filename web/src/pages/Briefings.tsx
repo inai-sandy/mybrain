@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquareQuote, Sparkles, Trash2, Pencil, X, Loader2, Check, CheckCircle2 } from 'lucide-react';
+import { MessageSquareQuote, Sparkles, Trash2, Pencil, X, Loader2, Check, CheckCircle2, Wand2 } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
@@ -32,8 +32,25 @@ export function BriefModal({ contactId, contactName, onClose, onSaved }: { conta
   const [chaseOn, setChaseOn] = useState(true);
   const [chaseTimes, setChaseTimes] = useState<string[]>(['09:00', '17:30']);
   const [busy, setBusy] = useState(false);
+  const [tidying, setTidying] = useState(false);
   const toast = useToast();
   const mentions = useMentions(text);
+
+  // Dictation comes out rambling. Tidy fixes the sentences and keeps every fact — and it runs
+  // BEFORE "Read it", so what you approve on screen is exactly what gets saved. (BEA-1039)
+  async function tidy() {
+    if (!text.trim() || tidying) return;
+    setTidying(true);
+    try {
+      const r = await fetch(`/api/contacts/${contactId}/briefings/tidy`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+      });
+      if (!r.ok) { toast('error', 'Could not tidy that'); return; }
+      const d = await r.json();
+      if (d.text && d.text !== text) { setText(d.text); toast('success', 'Tidied — check it still says what you meant'); }
+      else toast('success', 'Already tidy');
+    } catch { toast('error', 'Could not reach the server'); } finally { setTidying(false); }
+  }
 
   async function readIt() {
     if (!text.trim()) return;
@@ -90,7 +107,12 @@ export function BriefModal({ contactId, contactName, onClose, onSaved }: { conta
                 />
                 <div className="absolute right-2 top-2"><DictateButton onText={(t) => setText((v) => (v ? `${v} ${t}` : t))} /></div>
               </div>
-              <MentionChips mentions={mentions} className="mt-2" />
+              <div className="mt-1.5 flex items-center justify-between">
+                <MentionChips mentions={mentions} />
+                <button onClick={tidy} disabled={tidying || !text.trim()} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
+                  {tidying ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Tidy
+                </button>
+              </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button onClick={close} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Cancel</button>
                 <button onClick={readIt} disabled={busy || !text.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm text-white hover:bg-emerald-500 disabled:opacity-50">
@@ -208,6 +230,7 @@ export function BriefingsTab({ contactId, contactName, reload }: { contactId: st
     setConfirm(null);
   }
 
+  const [shown, setShown] = useState(5);
   if (rows === null) return <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>;
 
   if (!rows.length) {
@@ -222,8 +245,9 @@ export function BriefingsTab({ contactId, contactName, reload }: { contactId: st
 
   return (
     <>
+      <p className="text-xs text-zinc-500">{rows.length} briefing{rows.length === 1 ? '' : 's'}</p>
       <ul className="space-y-3">
-        {rows.map((b) => (
+        {rows.slice(0, shown).map((b) => (
           <li key={b.id} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -249,6 +273,12 @@ export function BriefingsTab({ contactId, contactName, reload }: { contactId: st
           </li>
         ))}
       </ul>
+
+      {rows.length > shown && (
+        <button onClick={() => setShown((n) => n + 5)} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">
+          Show {Math.min(5, rows.length - shown)} more of {rows.length}
+        </button>
+      )}
 
       {editing && (
         <Sheet onClose={() => setEditing(null)}>

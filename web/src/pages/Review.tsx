@@ -39,6 +39,8 @@ export function Review() {
   const [q, setQ] = useUrlState('q', '');
   const [rejecting, setRejecting] = useState<Claim | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
+  const PAGE = 10;
   const toast = useToast();
 
   const load = useCallback(() => {
@@ -50,12 +52,15 @@ export function Review() {
 
   useEffect(() => { load(); }, [load]);
 
-  const shown = useMemo(() => {
+  const filtered = useMemo(() => {
     const rows = claims || [];
     const t = q.trim().toLowerCase();
     if (!t) return rows;
     return rows.filter((c) => `${c.task?.title || ''} ${c.contact?.name || ''} ${c.quote}`.toLowerCase().includes(t));
   }, [claims, q]);
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const safePage = Math.min(page, pages - 1);
+  const shown = filtered.slice(safePage * PAGE, safePage * PAGE + PAGE);
 
   async function decide(c: Claim, confirm: boolean, reason?: string) {
     setBusy(c.id);
@@ -173,6 +178,14 @@ export function Review() {
             );
           })}
         </ul>
+      )}
+
+      {pages > 1 && (
+        <div className="flex items-center justify-between text-sm text-zinc-500">
+          <button disabled={safePage === 0} onClick={() => setPage(safePage - 1)} className="rounded-lg border border-zinc-300 px-3 py-1.5 disabled:opacity-40 dark:border-zinc-700">← Prev</button>
+          <span>Page {safePage + 1} of {pages} · {filtered.length} total</span>
+          <button disabled={safePage >= pages - 1} onClick={() => setPage(safePage + 1)} className="rounded-lg border border-zinc-300 px-3 py-1.5 disabled:opacity-40 dark:border-zinc-700">Next →</button>
+        </div>
       )}
 
       {rejecting && <RejectSheet claim={rejecting} onClose={() => setRejecting(null)} onDone={(reason, message) => decide(rejecting, false, reason).then((ok) => { if (ok && message && rejecting.chaseId) sendBack(rejecting.chaseId, message, toast); setRejecting(null); })} />}

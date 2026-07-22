@@ -7,7 +7,7 @@ import { ContactShareLink } from '../ui/ContactShareLink';
 import { ContactState, ContactTasks } from '../ui/ContactWork';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
-type Reminder = { id: string; contactId: string; taskId: string | null; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
+type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
 
 /** One row in the WhatsApp-style conversation inbox (BEA-921). */
 type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsOwner: boolean; unread: number };
@@ -190,7 +190,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
                         <button onClick={() => setOpenThread(rm.id)} className="min-w-0 flex-1 text-left">
                           <div className="flex items-center gap-2">
                             <span className="truncate font-medium">{rm.subject?.trim() || rm.task?.title || 'Reminder'}</span>
-                            <span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+                            {rm.repeat === 'daily' && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}<span className={'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
                           </div>
                           <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
                           <div className="mt-1.5 flex flex-wrap gap-1">
@@ -593,7 +593,7 @@ export function RemindersTab() {
                   <button onClick={() => setChatReminder(rm)} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
-                      <span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+                      {rm.repeat === 'daily' && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}<span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
                     </div>
                     {rm.task && <div className="text-xs text-zinc-400">re: {rm.task.title}</div>}
                     <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>

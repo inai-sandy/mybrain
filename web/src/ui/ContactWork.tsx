@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Circle, Hand, Radio, Clock, MessageSquare, Plus, Pencil, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Hand, Radio, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TaskFormModal, type Task } from '../pages/taskShared';
 
 type State = { open: number; done: number; awaitingYou: number; chasing: number; oldestOpenDays: number | null; lastHeardAt: string | null };
-type Row = Task & { who: string; openDays: number; chaseStatus: string; chaseCount: number };
+type Row = Task & { who: string; openDays: number; chaseStatus: string; chaseCount: number; chaseId: string | null };
 
 const ago = (iso: string | null) => {
   if (!iso) return 'never';
@@ -68,7 +68,27 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
   const [editing, setEditing] = useState<Task | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const [shown, setShown] = useState(8);
+  const [chasing, setChasing] = useState<string | null>(null); // row id with a chase call in flight
   const toast = useToast();
+
+  /** Start (or stop) the daily chase on one task — the CRUD that was missing. (BEA-1039) */
+  async function toggleChase(r: Row) {
+    setChasing(r.id);
+    try {
+      if (r.chaseStatus === 'active' && r.chaseId) {
+        const res = await fetch(`/api/reminders/${r.chaseId}/stop`, { method: 'POST' });
+        toast(res.ok ? 'success' : 'error', res.ok ? 'Chase stopped' : 'Could not stop it');
+      } else {
+        const res = await fetch('/api/reminders', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contactId, taskId: r.id, subject: r.title, message: `Following up on: ${r.title}`, times: ['09:00', '17:30'], repeat: 'daily' }),
+        });
+        toast(res.ok ? 'success' : 'error', res.ok ? 'Chasing daily at 9:00 and 17:30 — edit times in Reminders' : 'Could not start the chase');
+      }
+      await load();
+    } finally { setChasing(null); }
+  }
 
   const load = useCallback(
     () =>
@@ -113,7 +133,7 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
         </div>
       ) : (
         <ul className="space-y-2">
-          {rows.map((r) => (
+          {rows.slice(0, shown).map((r) => (
             <li key={r.id} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="flex items-start gap-2.5">
                 <button onClick={() => toggle(r)} aria-label={r.status === 'done' ? 'Reopen' : 'Mark done'} className="mt-0.5 shrink-0">
@@ -125,6 +145,12 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
                     <span className="inline-flex items-center gap-1"><Clock size={10} />{r.status === 'done' ? 'finished' : r.openDays === 0 ? 'today' : `open ${r.openDays}d`}</span>
                     {r.chaseCount > 0 && <span>chased {r.chaseCount}×</span>}
                     {r.chaseStatus === 'active' && <span className="text-emerald-600 dark:text-emerald-400">chasing</span>}
+                    {r.status !== 'done' && (
+                      <button onClick={() => toggleChase(r)} disabled={chasing === r.id} className="inline-flex items-center gap-1 rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50 dark:border-zinc-700">
+                        {chasing === r.id ? <Loader2 size={9} className="animate-spin" /> : null}
+                        {r.chaseStatus === 'active' ? 'Stop chase' : 'Chase daily'}
+                      </button>
+                    )}
                   </p>
                   {r.claim && <p className="mt-1.5 rounded-lg bg-violet-500/10 px-2 py-1 text-[11px] text-violet-700 dark:text-violet-300">✋ says it's done — “{r.claim.quote}”</p>}
                 </div>
@@ -136,6 +162,12 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
             </li>
           ))}
         </ul>
+      )}
+
+      {rows !== null && rows.length > shown && (
+        <button onClick={() => setShown((n) => n + 8)} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">
+          Show {Math.min(8, rows.length - shown)} more of {rows.length}
+        </button>
       )}
 
       {mentionedOnly.length > 0 && (
