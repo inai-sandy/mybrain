@@ -61,6 +61,33 @@ export class PostboxService {
   }
 
   /** Send the approved reminder template. Returns { wamid, status, error }. */
+  /**
+   * The multi-task chase (BEA-1041): numbered items, no reply buttons, and the contact's own page
+   * behind an "Open my list" button. Falls back to the single-task template upstream if this one
+   * is not approved yet — the caller handles that.
+   */
+  async sendTaskListTemplate(to: string, firstName: string, count: number, list: string, slug: string) {
+    if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured (missing POSTBOX_API_KEY).' };
+    try {
+      const r = await this.post('/v1/messages/template', {
+        to,
+        template: process.env.POSTBOX_TASKLIST_TEMPLATE || 'task_list_v1',
+        language: this.lang,
+        variables: [firstName, String(count), list],
+        buttonUrl: slug,
+      });
+      return { wamid: r?.wamid || null, status: r?.status || 'sent', error: r?.error || null };
+    } catch (e: any) {
+      this.log.warn(`sendTaskListTemplate -> ${e?.message}`);
+      return { wamid: null, status: 'failed', error: e?.message || 'send failed' };
+    }
+  }
+
+  /** What the multi-task template reads like — stored in the chat thread as the outbound body. */
+  renderTaskListTemplate(firstName: string, count: number, list: string): string {
+    return `Hi ${firstName}, following up on behalf of Sandeep — ${count} things are pending with him: ${list}. Just reply here with where things stand.`;
+  }
+
   async sendReminderTemplate(to: string, firstName: string, subject: string) {
     if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured (missing POSTBOX_API_KEY).' };
     try {

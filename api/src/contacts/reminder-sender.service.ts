@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
+import { ContactsService } from './contacts.service';
 import { REMINDER_TZ_OFFSET, scheduleOnDay, topicFromMessage } from './reminders.service';
 
 /** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
@@ -29,6 +30,7 @@ export class ReminderSenderService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
+    private readonly contacts: ContactsService,
   ) {}
 
   onModuleInit() {
@@ -89,6 +91,13 @@ export class ReminderSenderService implements OnModuleInit {
       await this.prisma.reminderSend.create({ data: { reminderId: r.id, at: when, status: 'queued' } }).catch(() => undefined);
     }
     await this.prisma.reminder.update({ where: { id: r.id }, data: { armedDay: dayKey, pausedAuto: false } }).catch(() => undefined);
+  }
+
+  /** The contact's page slug, created on first need so the button always has a live link. (BEA-1041) */
+  private async slugFor(contactId: string, name: string): Promise<string> {
+    const c = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { shareSlug: true } }).catch(() => null);
+    if (c?.shareSlug) return c.shareSlug;
+    return this.contacts.share(contactId).then((r) => r.slug).catch(() => 'unavailable');
   }
 
   /** Stop a chase for good and clear anything still queued. */
@@ -204,10 +213,34 @@ export class ReminderSenderService implements OnModuleInit {
         continue;
       }
       const firstName = g.name.trim().split(/\s+/)[0];
+      // The SAME order the agent numbers its items in (oldest reminder first), so when she replies
+      // "1 and 3 are done" both sides mean the same tasks. (BEA-1041)
+      const rems = [...g.reminders.values()].sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       const subjects: string[] = [];
-      for (const r of g.reminders.values()) subjects.push(await this.subjectFor(r));
-      const combined = joinSubjects(subjects);
-      const res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
+      for (const r of rems) subjects.push(await this.subjectFor(r));
+
+      let res: { wamid: string | null; status: string; error: string | null };
+      let rendered: string;
+      if (subjects.length >= 2) {
+        // Two or more items: the numbered template with her page behind an "Open my list" button.
+        // Up to 3 full titles, then a count — the long tail lives on her page. (BEA-1041)
+        const shownList = subjects.slice(0, 3).map((t, i) => `${i + 1}) ${t}`).join(' ')
+          + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
+        const slug = await this.slugFor(contactId, g.name);
+        res = await this.postbox.sendTaskListTemplate(g.number, firstName, subjects.length, shownList, slug);
+        rendered = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList);
+        if (res.error) {
+          // Not approved yet, or Meta hiccuped — the single-task template still says something true.
+          this.log.warn(`task-list template failed (${res.error}) — falling back to the combined nudge`);
+          const combined = joinSubjects(subjects);
+          res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
+          rendered = this.postbox.renderReminderTemplate(firstName, combined);
+        }
+      } else {
+        const combined = joinSubjects(subjects);
+        res = await this.postbox.sendReminderTemplate(g.number, firstName, combined);
+        rendered = this.postbox.renderReminderTemplate(firstName, combined);
+      }
       if (res.error) {
         for (const s of g.sends) await this.mark(s.id, 'failed', res.wamid, res.error);
         this.log.warn(`combined send to ${g.name} failed: ${res.error}`);
@@ -216,7 +249,6 @@ export class ReminderSenderService implements OnModuleInit {
       for (const s of g.sends) await this.mark(s.id, 'sent', res.wamid, null);
       // Store exactly what the template renders — same source as the send, so the
       // chat window can never show a message different from what actually went out. (BEA-753)
-      const rendered = this.postbox.renderReminderTemplate(firstName, combined);
       await this.prisma.reminderMessage
         .create({ data: { contactId, reminderId: [...g.reminders.keys()][0], direction: 'out', body: rendered, wamid: res.wamid || null, status: 'sent' } })
         .catch(() => undefined);

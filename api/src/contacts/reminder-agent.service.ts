@@ -186,7 +186,9 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // status only governs whether WE send scheduled nudges, never whether we answer THEM. (BEA-948)
     const allReminders: any[] = await this.prisma.reminder.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } });
     if (!allReminders.length) return; // no relationship at all → nothing to do
-    const reminders: any[] = allReminders.filter((r) => r.status === 'active' || r.status === 'paused'); // open items to chase
+    const reminders: any[] = allReminders
+      .filter((r) => r.status === 'active' || r.status === 'paused') // open items to chase
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); // same numbering as the message (BEA-1041)
     const anchorReminderId: string = (reminders[0] || allReminders[allReminders.length - 1]).id; // where to attach our outbound
     const messages: any[] = await this.prisma.reminderMessage.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } });
     const name = (contact.name || 'them').trim();
