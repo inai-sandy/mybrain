@@ -196,6 +196,12 @@ export class RemindersService {
   }
 
   /** Re-send the approved reminder template to re-open the 24h free-text window. (BEA-917) */
+  /**
+   * Re-open the 24h window with an approved template. Mirrors the scheduler exactly (BEA-1042):
+   * one open item sends the single-task template; two or more send the numbered list with the
+   * "Open my list" button — resending must never say less than the scheduled chase would.
+   * Subjects are the tasks' CURRENT titles, never the snapshot stored at creation time.
+   */
   async resendTemplate(id: string) {
     const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
     if (!r) throw new NotFoundException('Reminder not found');
@@ -203,10 +209,44 @@ export class RemindersService {
     if (!number) throw new BadRequestException('This contact has no WhatsApp number');
     if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
     const firstName = (r.contact?.name || 'there').trim().split(/\s+/)[0] || 'there';
-    const subject = (r.subject || 'the update').trim();
-    const res = await this.postbox.sendReminderTemplate(number, firstName, subject);
+
+    // Everything currently open with this person, in the SAME order the scheduler and the agent
+    // number them — so a reply of "2 is done" always means the same task.
+    const open = await this.prisma.reminder.findMany({
+      where: { contactId: r.contactId, status: { in: ['active', 'paused'] } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const items = open.length ? open : [r];
+    const subjects: string[] = [];
+    for (const it of items) {
+      let sub = '';
+      if (it.taskId) {
+        const t = await this.prisma.task.findUnique({ where: { id: it.taskId }, select: { title: true } }).catch(() => null);
+        sub = t?.title?.trim() || '';
+      }
+      subjects.push(sub || (it.subject || '').trim() || topicFromMessage(it.message));
+    }
+
+    let res: { wamid: string | null; status: string; error: string | null };
+    let body: string;
+    if (subjects.length >= 2) {
+      const shownList = subjects.slice(0, 3).map((t, i) => `${i + 1}) ${t}`).join(' ')
+        + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
+      const slug = await this.contacts.share(r.contactId).then((x) => x.slug).catch(() => 'unavailable');
+      res = await this.postbox.sendTaskListTemplate(number, firstName, subjects.length, shownList, slug);
+      body = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList);
+      if (res.error) {
+        // The list template failing must not leave the window closed — say the combined old line.
+        const combined = subjects.length === 2 ? `${subjects[0]} and ${subjects[1]}` : `${subjects.slice(0, -1).join(', ')} and ${subjects[subjects.length - 1]}`;
+        res = await this.postbox.sendReminderTemplate(number, firstName, combined);
+        body = this.postbox.renderReminderTemplate(firstName, combined);
+      }
+    } else {
+      const subject = subjects[0] || 'the update';
+      res = await this.postbox.sendReminderTemplate(number, firstName, subject);
+      body = this.postbox.renderReminderTemplate(firstName, subject);
+    }
     if (res.error) throw new BadRequestException(res.error);
-    const body = this.postbox.renderReminderTemplate(firstName, subject);
     const msg = await this.prisma.reminderMessage.create({
       data: { contactId: r.contactId, reminderId: id, direction: 'out', body, wamid: res.wamid || null, status: 'sent' },
     });

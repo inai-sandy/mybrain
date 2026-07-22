@@ -383,25 +383,62 @@ describe('spreadTimes (BEA-720)', () => {
   });
 });
 
-describe('resendTemplate (BEA-917)', () => {
-  it('sends the approved template and records the outgoing message', async () => {
+describe('resendTemplate (BEA-917 / BEA-1042)', () => {
+  function harness(openReminders: any[], tasks: Record<string, string> = {}) {
     const created: any[] = [];
+    const calls: any = { single: null, list: null };
     const prisma: any = {
-      reminder: { findUnique: async () => ({ id: 'r1', contactId: 'k1', subject: 'the update', contact: { name: 'Rakesh', whatsappNumber: '919999999999' } }) },
+      reminder: {
+        findUnique: async () => ({ id: 'r1', contactId: 'k1', taskId: null, subject: 'the update', message: 'm', contact: { name: 'Rakesh', whatsappNumber: '919999999999' } }),
+        findMany: async () => openReminders,
+      },
+      task: { findUnique: async ({ where }: any) => (tasks[where.id] ? { title: tasks[where.id] } : null) },
       reminderMessage: { create: async ({ data }: any) => { created.push(data); return { id: 'm1', ...data, createdAt: new Date() }; } },
     };
-    let sentArgs: any = null;
     const postbox: any = {
       isConfigured: () => true,
-      sendReminderTemplate: async (to: string, first: string, subject: string) => { sentArgs = { to, first, subject }; return { wamid: 'w9', status: 'sent', error: null }; },
-      renderReminderTemplate: (f: string, s: string) => `Hi ${f}, I'm following up on behalf of Sandeep about ${s}. Could you let him know where it stands? A quick tap below is enough.`,
+      sendReminderTemplate: async (to: string, first: string, subject: string) => { calls.single = { to, first, subject }; return { wamid: 'w9', status: 'sent', error: null }; },
+      renderReminderTemplate: (f: string, s2: string) => `Hi ${f}, I'm following up on behalf of Sandeep about ${s2}. Could you let him know where it stands? A quick tap below is enough.`,
+      sendTaskListTemplate: async (to: string, first: string, n: number, list: string, slug: string) => { calls.list = { to, first, n, list, slug }; return { wamid: 'w9', status: 'sent', error: null }; },
+      renderTaskListTemplate: (f: string, n: number, list: string) => `Hi ${f}, following up on behalf of Sandeep — ${n} things are pending with him: ${list}. Just reply here with where things stand.`,
     };
-    const svc = new RemindersService(prisma, {} as any, {} as any, postbox);
+    const contacts: any = { share: async () => ({ slug: 'rakesh-9x2k' }) };
+    const svc = new RemindersService(prisma, {} as any, contacts, postbox);
+    return { svc, created, calls };
+  }
+
+  it('one open item: the single-task template, with the task\'s CURRENT title, not the stored snapshot', async () => {
+    const { svc, created, calls } = harness([{ id: 'r1', taskId: 't1', subject: 'the OLD wording', message: 'm', createdAt: new Date(1) }], { t1: 'Send the signed agreement' });
     const res: any = await svc.resendTemplate('r1');
-    expect(sentArgs).toEqual({ to: '919999999999', first: 'Rakesh', subject: 'the update' });
+    expect(calls.single).toEqual({ to: '919999999999', first: 'Rakesh', subject: 'Send the signed agreement' });
+    expect(calls.list).toBeNull();
     expect(res.status).toBe('sent');
-    expect(created[0]).toMatchObject({ direction: 'out', wamid: 'w9', status: 'sent' });
-    expect(created[0].body).toContain('following up on behalf of Sandeep about the update');
+    expect(created[0].body).toContain('Send the signed agreement');
+  });
+
+  it('two or more open items: the numbered list template with their page button — same as the scheduler (BEA-1042)', async () => {
+    const { svc, calls } = harness(
+      [
+        { id: 'r1', taskId: 't1', subject: '', message: 'm', createdAt: new Date(1) },
+        { id: 'r2', taskId: 't2', subject: '', message: 'm', createdAt: new Date(2) },
+      ],
+      { t1: 'Upload the BOM', t2: 'Send the status report' },
+    );
+    await svc.resendTemplate('r1');
+    expect(calls.list).toEqual({ to: '919999999999', first: 'Rakesh', n: 2, list: '1) Upload the BOM 2) Send the status report', slug: 'rakesh-9x2k' });
+    expect(calls.single).toBeNull();
+  });
+
+  it('falls back to the combined old wording if the list template errors', async () => {
+    const { svc, calls } = harness(
+      [
+        { id: 'r1', taskId: null, subject: 'A', message: 'm', createdAt: new Date(1) },
+        { id: 'r2', taskId: null, subject: 'B', message: 'm', createdAt: new Date(2) },
+      ],
+    );
+    (svc as any).postbox.sendTaskListTemplate = async () => ({ wamid: null, status: 'failed', error: 'not approved' });
+    await svc.resendTemplate('r1');
+    expect(calls.single.subject).toBe('A and B');
   });
 });
 
