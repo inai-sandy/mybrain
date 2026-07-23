@@ -4,7 +4,7 @@ import { Brain, ChevronRight, Star, Lock } from 'lucide-react';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday } from './taskShared';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { StorySection } from './DailyStory';
-import { CloseDaySheet, OpenDaysBanner } from './CloseDay';
+import { CloseDaySheet, OpenDaysBanner, MissedDayPicker } from './CloseDay';
 
 /** One quiet line: what's out with other people, and what's waiting on you. (BEA-1029) */
 function DelegatedLine() {
@@ -132,6 +132,9 @@ export function Today() {
           <Lock size={15} /> Close the day — finish tasks, story &amp; settle the mentor
         </button>
       )}
+
+      {/* The door back into any past day — sealed or not. (BEA-1052) */}
+      <MissedDayPicker onPick={setCloseDay} />
 
       {closeDay && <CloseDaySheet day={closeDay} onClose={() => setCloseDay(null)} onClosed={() => { load(); setBannerKey((k) => k + 1); }} />}
 
