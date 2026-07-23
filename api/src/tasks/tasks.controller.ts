@@ -144,6 +144,12 @@ export class TasksController {
     return this.tasks.removeDuplicates(body?.ids || []);
   }
 
+  /** MERGE the user-confirmed duplicate groups onto their keepers — nothing of value is lost. (BEA-1057) */
+  @Post('merge-duplicates')
+  async mergeDuplicates(@Body() body: { groups?: { keepId?: string; removeIds?: string[] }[] }) {
+    return this.tasks.mergeDuplicates(body?.groups || []);
+  }
+
   @Post()
   async create(@Body() body: any) {
     if (!body?.title?.trim()) throw new BadRequestException('Add a title');

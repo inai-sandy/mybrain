@@ -285,7 +285,7 @@ export function Tasks() {
 function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
-  const [groups, setGroups] = useState<{ keep: Task; remove: Task[] }[]>([]);
+  const [groups, setGroups] = useState<{ keep: Task; remove: Task[]; via?: string }[]>([]);
   const [model, setModel] = useState('');
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [removing, setRemoving] = useState(false);
@@ -295,7 +295,7 @@ function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => v
     fetch('/api/tasks/find-duplicates', { method: 'POST' })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => {
-        const gs = (d.groups || []) as { keep: Task; remove: Task[] }[];
+        const gs = (d.groups || []) as { keep: Task; remove: Task[]; via?: string }[];
         setGroups(gs);
         setModel(d.model?.model || '');
         if (d.error === 'ai-unavailable') setErr('The AI model is unavailable right now. Check the Tasks model in Settings and try again.');
@@ -316,14 +316,18 @@ function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => v
     }
     setRemoving(true);
     try {
-      const r = await fetch('/api/tasks/remove-duplicates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: selectedIds }) });
+      // MERGE, never plain delete — notes, chases, owners and progress move onto the kept task. (BEA-1057)
+      const payload = groups
+        .map((g) => ({ keepId: g.keep.id, removeIds: g.remove.map((t) => t.id).filter((id) => checked[id]) }))
+        .filter((g) => g.removeIds.length);
+      const r = await fetch('/api/tasks/merge-duplicates', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groups: payload }) });
       if (!r.ok) throw new Error();
       const { removed } = await r.json();
-      toast('success', `Removed ${removed} duplicate${removed === 1 ? '' : 's'}`);
+      toast('success', `Merged away ${removed} duplicate${removed === 1 ? '' : 's'} — nothing was lost`);
       onDone();
       close();
     } catch {
-      toast('error', 'Could not remove those tasks');
+      toast('error', 'Could not merge those tasks');
       setRemoving(false);
     }
   }
@@ -336,7 +340,7 @@ function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => v
             <h3 className="font-bold flex items-center gap-2"><Copy size={18} className="text-emerald-600" /> Remove duplicates</h3>
             <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
           </div>
-          <p className="text-xs text-zinc-500 mb-4">AI looks across your open tasks and groups ones that mean the same thing. It keeps the most complete one in each group — review below and untick anything you want to keep.</p>
+          <p className="text-xs text-zinc-500 mb-4">Groups tasks that mean the same thing (same wording is caught instantly; the AI adds same-meaning ones). Ticked copies are MERGED into the kept task — their notes, progress, owner and chases move over, nothing is lost. Untick anything you want to keep separate.</p>
 
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-zinc-500 py-10 justify-center"><Loader2 size={16} className="animate-spin" /> Analyzing your tasks with AI…</div>
@@ -351,8 +355,8 @@ function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => v
                   {/* Kept */}
                   <div className="flex items-start gap-2 bg-emerald-500/5 px-3 py-2">
                     <CheckCircle2 size={15} className="text-emerald-600 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <div className="text-[10px] uppercase tracking-wide text-emerald-600 font-medium">Keeping</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[10px] uppercase tracking-wide text-emerald-600 font-medium">Keeping{g.via === 'wording' ? ' · same wording' : g.via === 'meaning' ? ' · same meaning' : ''}</div>
                       <div className="text-sm font-medium break-words">{g.keep.title}</div>
                       {g.keep.note && <div className="text-xs text-zinc-400 break-words">{g.keep.note}</div>}
                     </div>
@@ -379,11 +383,11 @@ function DedupeSheet({ onClose, onDone }: { onClose: () => void; onDone: () => v
 
           {!loading && !err && groups.length > 0 && (
             <div className="flex items-center justify-between gap-2 mt-4">
-              <span className="text-xs text-zinc-400">{selectedIds.length} to remove{model ? ` · via ${model}` : ''}</span>
+              <span className="text-xs text-zinc-400">{selectedIds.length} to merge away{model ? ` · via ${model}` : ''}</span>
               <div className="flex items-center gap-2">
                 <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
                 <button onClick={() => confirm(close)} disabled={removing || !selectedIds.length} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-                  {removing ? <><Loader2 size={14} className="animate-spin" /> Removing…</> : <>Remove {selectedIds.length} duplicate{selectedIds.length === 1 ? '' : 's'}</>}
+                  {removing ? <><Loader2 size={14} className="animate-spin" /> Merging…</> : <>Merge {selectedIds.length} duplicate{selectedIds.length === 1 ? '' : 's'}</>}
                 </button>
               </div>
             </div>
