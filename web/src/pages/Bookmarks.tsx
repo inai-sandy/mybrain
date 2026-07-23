@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2, Plus, Loader2 } from 'lucide-react';
 import { DataTable, Column } from '../ui/DataTable';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { FOLDER_ICON_NAMES, FOLDER_ICONS, DEFAULT_FOLDER_ICON, FolderGlyph } from '../ui/folderIcons';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
@@ -75,14 +76,30 @@ function FolderMenu({ b, folders, onAssign }: { b: BM; folders: Folder[]; onAssi
   );
 }
 
-function Card({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void; folders: Folder[]; onAssign: (id: string, folderId: string | null) => void }) {
+/** The selection checkbox — always visible, one tap. (BEA-1049) */
+function SelectDot({ on, toggle }: { on: boolean; toggle: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); toggle(); }}
+      title={on ? 'Unselect' : 'Select'}
+      aria-label={on ? 'Unselect' : 'Select'}
+      className={'shrink-0 grid h-5 w-5 place-items-center rounded-full border transition-colors ' + (on ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-zinc-300 dark:border-zinc-600 text-transparent hover:border-emerald-500')}
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5"><path d="M20 6 9 17l-5-5" /></svg>
+    </button>
+  );
+}
+
+type CardActions = { onOpen: (id: string) => void; onShare: (b: BM) => void; folders: Folder[]; onAssign: (id: string, folderId: string | null) => void; onDelete: (b: BM) => void; selected: boolean; onSelect: (id: string) => void };
+
+function Card({ b, onOpen, onShare, folders, onAssign, onDelete, selected, onSelect }: { b: BM } & CardActions) {
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
   const yt = isYouTube(b.sourceUrl);
   const Icon = yt ? Youtube : Link2;
   const chip = yt ? 'text-red-500 bg-red-500/10' : 'text-emerald-500 bg-emerald-500/10';
   const date = shortDate(b.createdAt);
   return (
-    <div className="group h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all flex flex-col">
+    <div className={'group h-full rounded-xl border bg-white dark:bg-zinc-900 p-4 hover:shadow-md transition-all flex flex-col ' + (selected ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40')}>
       {b.thumbnail && (
         <button onClick={() => onOpen(b.id)} title="Open in app" className="relative mb-3 block w-full rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 aspect-video">
           <img
@@ -104,8 +121,9 @@ function Card({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: s
           )}
         </button>
       )}
-      {/* Title row — source chip + title (opens the in-app page) + meta line (matches the document card) */}
+      {/* Title row — select + source chip + title (opens the in-app page) + meta line (matches the document card) */}
       <div className="flex items-start gap-3">
+        <div className="mt-2"><SelectDot on={selected} toggle={() => onSelect(b.id)} /></div>
         <div className={'shrink-0 rounded-lg p-2 ' + chip}>
           <Icon size={18} />
         </div>
@@ -141,18 +159,22 @@ function Card({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: s
           <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" title="Open original link" className={iconBtn}>
             <ExternalLink size={16} />
           </a>
+          <button onClick={() => onDelete(b)} title="Delete" className="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-500 transition-colors">
+            <Trash2 size={16} />
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-function Row({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: string) => void; onShare: (b: BM) => void; folders: Folder[]; onAssign: (id: string, folderId: string | null) => void }) {
+function Row({ b, onOpen, onShare, folders, onAssign, onDelete, selected, onSelect }: { b: BM } & CardActions) {
   const yt = isYouTube(b.sourceUrl);
   const Icon = yt ? Youtube : Link2;
   const iconBtn = 'p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-emerald-600 transition-colors';
   return (
-    <div className="group flex gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:border-emerald-500/40 transition-all">
+    <div className={'group flex items-center gap-3 rounded-xl border bg-white dark:bg-zinc-900 p-3 transition-all ' + (selected ? 'border-emerald-500 ring-1 ring-emerald-500/40' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40')}>
+      <SelectDot on={selected} toggle={() => onSelect(b.id)} />
       <button onClick={() => onOpen(b.id)} title="Open in app" className="relative shrink-0 w-24 sm:w-28 aspect-video rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
         {b.thumbnail ? (
           <img src={b.thumbnail} alt="" loading="lazy" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
@@ -175,6 +197,7 @@ function Row({ b, onOpen, onShare, folders, onAssign }: { b: BM; onOpen: (id: st
             <button onClick={() => onShare(b)} title="Share" className={iconBtn + (b.shared ? ' text-emerald-600' : '')}><Share2 size={15} /></button>
             <button onClick={() => onOpen(b.id)} title="Open in app" className={iconBtn}><Eye size={15} /></button>
             <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" title="Open original" className={iconBtn}><ExternalLink size={15} /></a>
+            <button onClick={() => onDelete(b)} title="Delete" className="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-500 transition-colors"><Trash2 size={15} /></button>
           </div>
         </div>
         {b.summary && <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400 line-clamp-1">{b.summary}</p>}
@@ -210,6 +233,8 @@ export function Bookmarks() {
   const [tagFilter, setTagFilter] = useState('');
   const [managing, setManaging] = useState(false);
   const [addingLink, setAddingLink] = useState(false); // BEA-1050
+  const [selected, setSelected] = useState<Set<string>>(new Set()); // BEA-1049
+  const [deleting, setDeleting] = useState<BM[] | null>(null); // what the confirm dialog is about to remove
   function changeView(v: 'grid' | 'list') {
     setView(v);
     try {
@@ -218,8 +243,48 @@ export function Bookmarks() {
       /* ignore */
     }
   }
-  const renderItem = (b: BM) => (view === 'list' ? <Row b={b} onOpen={onOpen} onShare={onShare} folders={folders} onAssign={assignFolder} /> : <Card b={b} onOpen={onOpen} onShare={onShare} folders={folders} onAssign={assignFolder} />);
+  function toggleSelect(id: string) {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  const actions: Omit<CardActions, 'selected'> = { onOpen, onShare, folders, onAssign: assignFolder, onDelete: (b) => setDeleting([b]), onSelect: toggleSelect };
+  const renderItem = (b: BM) => (view === 'list' ? <Row b={b} {...actions} selected={selected.has(b.id)} /> : <Card b={b} {...actions} selected={selected.has(b.id)} />);
   const gridCls = view === 'list' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2';
+
+  /** Delete for real — by explicit id only; row, file, brain entries and cached image all go. (BEA-1049) */
+  async function reallyDelete(list: BM[]) {
+    const ids = list.map((b) => b.id);
+    try {
+      const r = await fetch('/api/bookmarks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast('error', d.message || 'Could not delete');
+        return;
+      }
+      toast('success', d.deleted === 1 ? 'Bookmark deleted' : `${d.deleted} bookmarks deleted`);
+      setSelected(new Set());
+      setResults((rs) => (rs ? rs.filter((x) => !ids.includes(x.id)) : rs));
+      await load();
+    } catch {
+      toast('error', 'Could not delete');
+    } finally {
+      setDeleting(null);
+    }
+  }
+
+  /** Move everything selected into one folder. (BEA-1049) */
+  async function bulkMove(folderId: string) {
+    const ids = [...selected];
+    await fetch('/api/bookmarks/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, folderId: folderId || null }) }).catch(() => undefined);
+    toast('success', folderId ? `${ids.length} moved` : `${ids.length} unfiled`);
+    setSelected(new Set());
+    setItems((xs) => xs.map((x) => (ids.includes(x.id) ? { ...x, folderId: folderId || null } : x)));
+    reloadFolders();
+  }
 
   async function load() {
     // NOTE: no setLoading(true) on refresh — keep current content on screen so scroll position survives
@@ -434,6 +499,40 @@ export function Bookmarks() {
               ? 'No bookmarks match.'
               : 'No bookmarks yet — connect Raindrop in Settings, then tap “Sync last 3 months”.'
           }
+        />
+      )}
+
+      {/* Sticky bulk bar — appears the moment anything is selected. (BEA-1049) */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 shadow-xl">
+          <span className="text-sm font-medium whitespace-nowrap">{selected.size} selected</span>
+          <select
+            aria-label="Move to folder"
+            value=""
+            onChange={(e) => e.target.value !== '' && bulkMove(e.target.value === '__none' ? '' : e.target.value)}
+            className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1.5 text-xs outline-none focus:border-emerald-500 max-w-[9rem]"
+          >
+            <option value="">Move to…</option>
+            {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            <option value="__none">No folder</option>
+          </select>
+          <button onClick={() => setDeleting(items.filter((i) => selected.has(i.id)))} className="inline-flex items-center gap-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white px-2.5 py-1.5 text-xs">
+            <Trash2 size={13} /> Delete
+          </button>
+          <button onClick={() => setSelected(new Set())} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" title="Clear selection"><X size={16} /></button>
+        </div>
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title={deleting.length === 1 ? 'Delete this bookmark?' : `Delete ${deleting.length} bookmarks?`}
+          message={
+            deleting.length === 1
+              ? `"${deleting[0].title}" will be removed from Bookmarks and from your brain. The original page on the web is untouched.`
+              : `${deleting.length} bookmarks will be removed from Bookmarks and from your brain. The original pages on the web are untouched.`
+          }
+          confirmLabel="Delete"
+          onConfirm={() => reallyDelete(deleting)}
+          onCancel={() => setDeleting(null)}
         />
       )}
 

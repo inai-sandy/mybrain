@@ -45,8 +45,10 @@ function makeService(over: any = {}) {
     recent: async () => over.recent ?? [],
   };
   const instagram: any = { isInstagram: () => false, enrich: async () => null, configured: async () => false };
-  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram);
-  return { svc, created, updated, enqueued };
+  const removed: string[] = [];
+  const items: any = { remove: async (id: string) => removed.push(id) }; // the one true item delete (BEA-1049)
+  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram, items);
+  return { svc, created, updated, enqueued, removed };
 }
 
 const bm = (over: any) => ({ id: 1, title: 'T', link: '', excerpt: '', note: '', tags: [], created: '2026-05-10T00:00:00Z', ...over });
@@ -148,6 +150,22 @@ describe('BookmarksService', () => {
       expect(enqueued[0].opts.tags).toContain('bookmark');
       expect(enqueued[0].content).toContain('why I saved it'); // his words survive into the brain
     }, 20000);
+  });
+
+  // Delete by explicit id only, and only rows that ARE bookmarks. (BEA-1049)
+  describe('removeMany (BEA-1049)', () => {
+    it('deletes only the ids that are really bookmarks, via the one true item delete', async () => {
+      const { svc, removed } = makeService({ existingRows: [{ id: 'b1' }, { id: 'b2' }] });
+      const r = await svc.removeMany(['b1', 'b2', 'not-a-bookmark']);
+      expect(r).toEqual({ ok: true, deleted: 2 }); // findMany (the source filter) decides — a stray id can't take out a document
+      expect(removed).toEqual(['b1', 'b2']);
+    });
+
+    it('an empty selection deletes nothing', async () => {
+      const { svc, removed } = makeService({ existingRows: [] });
+      expect(await svc.removeMany([])).toEqual({ ok: true, deleted: 0 });
+      expect(removed).toEqual([]);
+    });
   });
 
   it('auto-sync defaults to enabled, hourly', async () => {

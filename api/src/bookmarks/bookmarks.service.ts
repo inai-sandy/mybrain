@@ -7,6 +7,7 @@ import { MemoryService } from '../memory/memory.service';
 import { SummarizerService } from './summarizer.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
 import { InstagramEnricher } from './instagram.service';
+import { ItemsService } from '../items/items.service';
 
 /** Bookmarks live alongside other items on disk so the existing view/delete endpoints work. */
 function itemsDir() {
@@ -51,6 +52,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     private readonly summarizer: SummarizerService,
     private readonly raindrop: RaindropClient,
     private readonly instagram: InstagramEnricher,
+    private readonly items: ItemsService, // LAST on purpose — keeps positional wiring stable (BEA-1049)
   ) {}
 
   private bookmarksDir() {
@@ -341,6 +343,20 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
   async setFolder(ids: string[], folderId: string | null) {
     const r = await this.prisma.item.updateMany({ where: { id: { in: ids || [] }, source: { in: ['raindrop', 'bookmark'] } }, data: { folderId: folderId || null } });
     return { ok: true, count: r.count };
+  }
+
+  /**
+   * Delete bookmark(s) for good — by explicit id only, and only rows that ARE bookmarks, so a stray
+   * id can never take out a document. Row + summary file + brain entries (via the one true item
+   * delete) + our cached image. (BEA-1049)
+   */
+  async removeMany(ids: string[]): Promise<{ ok: boolean; deleted: number }> {
+    const rows = await this.prisma.item.findMany({ where: { id: { in: ids || [] }, source: { in: ['raindrop', 'bookmark'] } }, select: { id: true } });
+    for (const r of rows) {
+      await this.items.remove(r.id);
+      await fs.unlink(join(this.bookmarksDir(), `${r.id}.jpg`)).catch(() => undefined); // cached IG image, if any
+    }
+    return { ok: true, deleted: rows.length };
   }
 
   /** Backfill thumbnails for existing bookmarks (YouTube poster from the URL; Raindrop cover for the rest). */
