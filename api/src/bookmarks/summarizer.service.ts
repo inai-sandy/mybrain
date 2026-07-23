@@ -113,6 +113,11 @@ export class SummarizerService {
     return text;
   }
 
+  /** Plain completion on the bookmarks model — used by the folder organizer. (BEA-1046) */
+  async complete(prompt: string, maxTokens = 2000): Promise<string | null> {
+    return this.call(prompt, maxTokens);
+  }
+
   /** Summarize already-extracted page text. */
   async summarizeText(title: string, text: string): Promise<string | null> {
     const doc = (text || '').slice(0, 8000);

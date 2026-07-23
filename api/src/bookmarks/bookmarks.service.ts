@@ -8,6 +8,7 @@ import { SummarizerService } from './summarizer.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
 import { InstagramEnricher } from './instagram.service';
 import { ItemsService } from '../items/items.service';
+import { looseJsonParse } from '../common/llm-json';
 
 /** Bookmarks live alongside other items on disk so the existing view/delete endpoints work. */
 function itemsDir() {
@@ -119,6 +120,22 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     this.tick = setInterval(() => this.autoTick().catch(() => undefined), 60_000);
     // One-time backfill of existing Instagram bookmarks once an Apify token is present. (BEA-610)
     setTimeout(() => this.runOnceIgBackfill().catch(() => undefined), 20_000);
+    // One-time auto-filing of the existing unfiled backlog. (BEA-1046)
+    setTimeout(() => this.runOnceOrganize().catch(() => undefined), 30_000);
+  }
+
+  /** Organize the pre-existing backlog exactly once (gated by a Setting flag). (BEA-1046) */
+  private async runOnceOrganize(): Promise<void> {
+    const flag = 'bookmarks.autoFolderV1';
+    const done = await this.prisma.setting.findUnique({ where: { key: flag } }).catch(() => null);
+    if (done?.value === 'done') return;
+    if (!(await this.summarizer.hasKey())) return; // wait until OpenRouter is connected
+    const res = await this.organize().catch(() => null);
+    if (res) {
+      // eslint-disable-next-line no-console
+      console.log(`[bookmark-folders] one-time backfill: filed ${res.filed}, left ${res.left}, created ${res.foldersCreated}`);
+      await this.prisma.setting.upsert({ where: { key: flag }, create: { key: flag, value: 'done' }, update: { value: 'done' } }).catch(() => undefined);
+    }
   }
 
   /** Re-enrich existing Instagram bookmarks exactly once (gated by a Setting flag). (BEA-610) */
@@ -359,6 +376,75 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, deleted: rows.length };
   }
 
+  // ---- automatic filing: folders fill themselves. (BEA-1046) ---------------
+
+  /** Never more than this many folders — broad areas stay broad. */
+  static readonly FOLDER_CAP = 12;
+
+  /**
+   * File every unfiled bookmark into a BROAD folder, fully automatically — the owner's call
+   * (2026-07-23): manual filing never happened, so the AI does it. Rules: reuse existing folders,
+   * invent only broad new ones (cap {@link FOLDER_CAP} total), and when unsure leave the bookmark
+   * unfiled ("Others") rather than guess wrong. Manual moves are respected — only folderId=null
+   * rows are ever touched.
+   */
+  async organize(): Promise<{ filed: number; left: number; foldersCreated: number }> {
+    const zero = { filed: 0, left: 0, foldersCreated: 0 };
+    if (!(await this.summarizer.hasKey())) return zero;
+    const unfiled = await this.prisma.item.findMany({
+      where: { source: { in: ['raindrop', 'bookmark'] }, folderId: null },
+      select: { id: true, title: true, summary: true, tags: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!unfiled.length) return zero;
+    const folders = await this.prisma.bookmarkFolder.findMany();
+    let filed = 0;
+    let foldersCreated = 0;
+
+    for (let i = 0; i < unfiled.length; i += 40) {
+      const batch = unfiled.slice(i, i + 40);
+      const canCreate = Math.max(0, BookmarksService.FOLDER_CAP - folders.length);
+      const lines = batch
+        .map((b) => {
+          const tags = (() => { try { return (JSON.parse(b.tags || '[]') as string[]).join(', '); } catch { return ''; } })();
+          return `${b.id} | ${(b.title || '').slice(0, 120)}${tags ? ` | tags: ${tags}` : ''} | ${(b.summary || '').slice(0, 140)}`;
+        })
+        .join('\n');
+      const prompt =
+        `You organize a personal bookmark library into folders.\n` +
+        `Existing folders: ${folders.map((f) => f.name).join(', ') || '(none yet)'}.\n` +
+        `Rules:\n` +
+        `- Folders are BROAD areas only (like "AI", "Hardware", "Marketing", "Health"). Never specific ones (not "Claude skills", not "mmWave radar").\n` +
+        `- Prefer an existing folder whenever it fits.\n` +
+        `- You may invent at most ${canCreate} NEW broad folder name(s), one or two plain words each.\n` +
+        `- If nothing fits confidently, use exactly "Others".\n` +
+        `Bookmarks (id | title | tags | summary):\n${lines}\n\n` +
+        `Reply with ONLY JSON: {"assignments":[{"id":"<id>","folder":"<folder name or Others>"}]} — one entry per bookmark.`;
+      const out = looseJsonParse(await this.summarizer.complete(prompt, 3000).catch(() => null));
+      const assignments: any[] = Array.isArray(out?.assignments) ? out.assignments : [];
+      const batchIds = new Set(batch.map((b) => b.id));
+      for (const a of assignments) {
+        const id = String(a?.id || '');
+        const name = String(a?.folder || '').trim();
+        if (!batchIds.has(id) || !name || /^others?$/i.test(name)) continue; // unsure → stays in Others, never a wrong guess
+        let folder = folders.find((f) => f.name.toLowerCase() === name.toLowerCase());
+        if (!folder) {
+          if (folders.length >= BookmarksService.FOLDER_CAP) continue; // cap wins over a new name
+          folder = await this.prisma.bookmarkFolder.create({ data: { name: name.slice(0, 40) } }).catch(() => null as any);
+          if (!folder) continue;
+          folders.push(folder);
+          foldersCreated++;
+        }
+        // Only fill EMPTY folder slots — a manual move done mid-run must never be overwritten.
+        const r = await this.prisma.item.updateMany({ where: { id, folderId: null }, data: { folderId: folder.id } });
+        filed += r.count;
+      }
+    }
+    const left = unfiled.length - filed;
+    if (filed) console.log(`[bookmark-folders] filed ${filed}, left ${left} in Others, created ${foldersCreated} folder(s)`);
+    return { filed, left, foldersCreated };
+  }
+
   /** Backfill thumbnails for existing bookmarks (YouTube poster from the URL; Raindrop cover for the rest). */
   async backfillThumbnails(): Promise<{ updated: number }> {
     const coverByLink = new Map<string, string>();
@@ -575,6 +661,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     }
     await this.prisma.item.update({ where: { id: item.id }, data });
     await this.memory.enqueue(this.buildMemoryText(title, summary, [], link), { itemId: item.id, title, tags: ['bookmark'] });
+    void this.organize().catch(() => undefined); // a hand-added link files itself too (BEA-1046)
     return { ok: true, id: item.id, title };
   }
 
@@ -704,6 +791,9 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.setting
         .upsert({ where: { key: 'bookmarks.lastSync' }, create: { key: 'bookmarks.lastSync', value: lastSync }, update: { value: lastSync } })
         .catch(() => undefined);
+      // New arrivals file themselves — only when something actually arrived, so the hourly
+      // no-op sync never spends an AI call. (BEA-1046)
+      if (this.prog.imported > 0) await this.organize().catch(() => undefined);
     }
   }
 }

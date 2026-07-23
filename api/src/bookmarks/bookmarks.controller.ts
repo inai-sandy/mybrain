@@ -39,6 +39,12 @@ export class BookmarksController {
     return this.bookmarks.setFolder(body?.ids || [], body?.folderId ?? null);
   }
 
+  /** File every unfiled bookmark into broad folders, automatically. (BEA-1046) */
+  @Post('organize')
+  organize() {
+    return this.bookmarks.organize();
+  }
+
   /** Delete bookmark(s) for good, by explicit ids. (BEA-1049) */
   @Post('delete')
   removeMany(@Body() body: { ids?: string[] }) {
