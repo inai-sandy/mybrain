@@ -11,7 +11,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 |---|--------|----------------|--------|--------|------|
 | 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | built | BEA-1019✅ 1029✅ 1038✅ | 2026-07-21 |
 | 2 | EMO | `/emo` · `emo/` · ask/talk/capture router, 6 card lanes, device turn + TTS | — | | |
-| 3 | Activity, Day Close & Story | `/activity`, CloseDay, DailyStory · `daily/` · day summary, story, month/year, personality | — | | |
+| 3 | Activity, Day Close & Story | `/activity`, CloseDay, DailyStory · `daily/` · day summary, story, month/year, personality | filed | BEA-1051 → 1057 (with Today & Tasks revamp) | 2026-07-23 |
 | 4 | Capture & Items | `/capture`, `/doc/:id`, `/view/:id` · `items/` · upload, URL, Notion, Supermemory import, share | — | | |
 | 5 | Explore | `/explore` · `explore/` · whole-brain + web ask (Tavily), saved answers, sources, rechunk | — | | |
 | 6 | Chat | `/chat`, `/chat/:id` · `chat/` · sessions, streaming, star/pin, retention, per-doc chat | — | | |
