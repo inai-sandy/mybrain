@@ -441,7 +441,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // Tasks land on the timeline on the day they were FINISHED, whenever they were added. (BEA-1018)
     const feedWindow = await this.tasks.dayWindow(day, tz).then((w) => ({ gte: w.start, lt: w.end }));
 
-    const [items, ideas, skills, doneTasks, dumps, story, notes] = await Promise.all([
+    const [items, ideas, skills, doneTasks, dumps, story, notes, lifeEvents] = await Promise.all([
       this.prisma.item.findMany({ orderBy: { createdAt: 'desc' }, take: 800 }),
       this.prisma.idea.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
       this.prisma.skill.findMany({ orderBy: { createdAt: 'desc' }, take: 500 }),
@@ -449,7 +449,19 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.prisma.brainDump.findMany({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } }),
       this.prisma.dayNote.findMany({ where: { day }, orderBy: { createdAt: 'desc' } }),
+      this.prisma.dayEvent.findMany({ where: { day }, orderBy: { createdAt: 'asc' } }).catch(() => [] as any[]),
     ]);
+
+    // Life events mined from his story get a rough clock slot so they sort into the real day. (BEA-1054)
+    if (lifeEvents.length) {
+      const { start } = await this.tasks.dayWindow(day, tz);
+      const slot = (at?: string | null): Date => {
+        const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(at || ''));
+        const mins = m ? Number(m[1]) * 60 + Number(m[2]) : at === 'morning' ? 9 * 60 : at === 'afternoon' ? 14 * 60 : at === 'evening' ? 19 * 60 : 12 * 60;
+        return new Date(start.getTime() + mins * 60000);
+      };
+      for (const e of lifeEvents) ev.push({ type: 'life', title: e.title, detail: `${e.at || 'during the day'} — from your story`, at: slot(e.at) as any });
+    }
 
     for (const it of items) {
       if (!onDay(it.createdAt)) continue;
@@ -1603,10 +1615,18 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     ]);
     const closed = !!closeRow;
     const isToday = day === this.dayKey(tz);
+    // The day's mined emotions — how it FELT, in his own words. (BEA-1054)
+    let emotions: any = null;
+    try {
+      emotions = (story as any)?.emotions ? JSON.parse((story as any).emotions) : null;
+    } catch {
+      emotions = null;
+    }
     return {
       day,
       isToday,
       stats: st,
+      emotions,
       story: story ? this.shapeStory(story) : null,
       summary: summary ? this.shapeSummary(summary) : null,
       dayStory: dayStory ? this.shapeDayStory(dayStory) : null,

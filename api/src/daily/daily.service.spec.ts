@@ -21,8 +21,10 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const settings: Record<string, string> = {};
   let seq = 0;
   const enqueued: any[] = [];
+  const dayEvents: any[] = [];
   const prisma: any = {
     mindRun: { create: async () => ({}) },
+    dayEvent: { findMany: async ({ where }: any = {}) => dayEvents.filter((e) => !where?.day || e.day === where.day) }, // life events (BEA-1054)
     setting: {
       findUnique: async ({ where }: any) => (settings[where.key] !== undefined ? { key: where.key, value: settings[where.key] } : null),
       upsert: async ({ where, create, update }: any) => {
@@ -277,7 +279,7 @@ function makeService(opts: { llmText?: string | null } = {}) {
   const prompts: any = { get: async (k: string) => `[${k} instruction]` };
   const mindCalls: any[] = [];
   const mindSvc: any = { learnDay: async (day: string) => { mindCalls.push(day); return { proposed: 0, reinforced: 0 }; }, summaryForMentor: async () => '' };
-  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc, mindSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls, mindCalls, settings };
+  return { svc: new DailyService(prisma, llm, memory, tasksSvc, prompts, mentorSvc, mindSvc), stories, notes, tasks, summaries, dayStories, monthStories, suggestions, dumps, insights, enqueued, yearStories, peopleMentions, dayCloses, rolledCalls, mentorCalls, mindCalls, settings, dayEvents };
 }
 
 describe('DailyService', () => {
@@ -312,6 +314,28 @@ describe('DailyService', () => {
       expect(stories.find((s: any) => s.id === 'a').workedMinutes).toBe(840);
       expect(stories.find((s: any) => s.id === 'b').workedMinutes).toBe(840);
       expect(stories.find((s: any) => s.id === 'c').workedMinutes).toBe(720);
+    });
+  });
+
+  // The timeline shows his LIFE, not just app clicks; the day carries how it FELT. (BEA-1054)
+  describe('life events + emotions on the day (BEA-1054)', () => {
+    it('story-mined life events land on the feed with a rough clock slot', async () => {
+      const { svc, dayEvents } = makeService();
+      const day = istToday();
+      dayEvents.push({ day, at: 'morning', title: 'At the factory checking QC', createdAt: new Date() }, { day, at: 'evening', title: 'EMO testing at home', createdAt: new Date() });
+      const feed = await svc.feed(day, 'Asia/Kolkata');
+      const life = feed.filter((e) => e.type === 'life');
+      expect(life).toHaveLength(2);
+      expect(life.map((e) => e.title)).toContain('At the factory checking QC');
+      expect(life[0].detail).toContain('from your story');
+    });
+
+    it('activity() returns the day\'s mined emotions', async () => {
+      const { svc, stories } = makeService();
+      const day = istToday();
+      stories.push({ id: 's1', day, rawText: 'story', emotions: JSON.stringify({ lifted: ['demo'], drained: [], energy: 70, worry: 30, feeling: 'Tired but proud.' }), createdAt: new Date(), updatedAt: new Date() });
+      const a = await svc.activity(day);
+      expect((a as any).emotions).toMatchObject({ energy: 70, worry: 30, feeling: 'Tired but proud.' });
     });
   });
 

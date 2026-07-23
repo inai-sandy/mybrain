@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown, Footprints, HeartPulse } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -14,7 +14,8 @@ type Stats = { tasksTotal: number; tasksDone: number; tasksOpen: number; minutes
 type Summary = { day: string; text: string; stats: Stats | null } | null;
 type Story = { text: string; mood?: string | null } | null;
 type DayStoryT = { text: string; personalText?: string | null; mood?: string | null; moodScore?: number | null; proMoodScore?: number | null; personalMoodScore?: number | null } | null;
-type DayData = { day: string; isToday: boolean; stats: Stats; story: Story; summary: Summary; dayStory: DayStoryT; timeline: Ev[]; closed?: boolean; provisional?: boolean; needsClosing?: boolean; openTaskCount?: number };
+type Emotions = { lifted: string[]; drained: string[]; energy: number | null; worry: number | null; feeling: string | null };
+type DayData = { day: string; isToday: boolean; stats: Stats; emotions?: Emotions | null; story: Story; summary: Summary; dayStory: DayStoryT; timeline: Ev[]; closed?: boolean; provisional?: boolean; needsClosing?: boolean; openTaskCount?: number };
 
 type Dash = {
   days: number;
@@ -29,11 +30,11 @@ type Dash = {
 };
 type Cal = { start: string; end: string; days: { day: string; done: number; total: number; dumped: boolean; story: boolean; suggested?: number }[] };
 
-const ICON: Record<string, any> = { capture: FileText, bookmark: Bookmark, idea: Lightbulb, skill: Wand2, task: CheckCircle2, dump: Brain, story: Moon, note: MessageSquare };
+const ICON: Record<string, any> = { capture: FileText, bookmark: Bookmark, idea: Lightbulb, skill: Wand2, task: CheckCircle2, dump: Brain, story: Moon, note: MessageSquare, life: Footprints };
 const TINT: Record<string, string> = {
   capture: 'text-sky-500 bg-sky-500/10', bookmark: 'text-emerald-500 bg-emerald-500/10', idea: 'text-amber-500 bg-amber-500/10',
   skill: 'text-violet-500 bg-violet-500/10', task: 'text-emerald-600 bg-emerald-600/10', dump: 'text-emerald-500 bg-emerald-500/10',
-  story: 'text-indigo-400 bg-indigo-500/10', note: 'text-zinc-500 bg-zinc-500/10',
+  story: 'text-indigo-400 bg-indigo-500/10', note: 'text-zinc-500 bg-zinc-500/10', life: 'text-pink-500 bg-pink-500/10',
 };
 
 function addDays(day: string, n: number): string {
@@ -143,6 +144,34 @@ function DayView({ day, onDay }: { day: string | null; onDay: (d: string) => voi
           <Stat big={st.workedMinutes != null ? mins(st.workedMinutes) : mins(st.minutesSpent)} label={st.workedMinutes != null ? 'worked' : 'time spent'} />
           <Stat big={`${pct}%`} label="follow-through" />
         </div>
+      )}
+
+      {/* How the day FELT — mined from his own words. (BEA-1054) */}
+      {data?.emotions && (data.emotions.feeling || data.emotions.lifted?.length || data.emotions.drained?.length) && (
+        <section className="rounded-xl border border-pink-300/40 dark:border-pink-500/25 bg-gradient-to-br from-pink-500/10 to-transparent p-4">
+          <h2 className="mb-1.5 flex items-center gap-2 text-sm font-semibold"><HeartPulse size={15} className="text-pink-500" /> How the day felt</h2>
+          {data.emotions.feeling && <p className="text-sm text-zinc-700 dark:text-zinc-200">{data.emotions.feeling}</p>}
+          {(data.emotions.energy != null || data.emotions.worry != null) && (
+            <div className="mt-2.5 space-y-1.5">
+              {data.emotions.energy != null && (
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className="w-12">energy</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"><div className="h-full bg-emerald-500" style={{ width: `${data.emotions.energy}%` }} /></div>
+                  <span className="w-7 text-right tabular-nums">{data.emotions.energy}</span></div>
+              )}
+              {data.emotions.worry != null && (
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500"><span className="w-12">worry</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"><div className="h-full bg-amber-500" style={{ width: `${data.emotions.worry}%` }} /></div>
+                  <span className="w-7 text-right tabular-nums">{data.emotions.worry}</span></div>
+              )}
+            </div>
+          )}
+          {(data.emotions.lifted?.length > 0 || data.emotions.drained?.length > 0) && (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {data.emotions.lifted?.map((x, i) => <span key={'l'+i} className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">▲ {x}</span>)}
+              {data.emotions.drained?.map((x, i) => <span key={'d'+i} className="rounded-full bg-rose-500/10 px-2 py-0.5 text-[11px] text-rose-600 dark:text-rose-400">▼ {x}</span>)}
+            </div>
+          )}
+        </section>
       )}
 
       {/* Story of the Day — the woven nightly narrative (story + tasks + activity) */}
