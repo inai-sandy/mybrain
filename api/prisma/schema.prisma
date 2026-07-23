@@ -56,6 +56,20 @@ model Item {
 }
 
 /// A My-Brain-owned folder for organising bookmarks (independent of Raindrop). (BEA-611)
+/// A life event mined from the owner's own story ("morning at the factory") — shown on the
+/// Activity timeline next to app events, so the timeline shows his day, not just his clicks. (BEA-1051)
+model DayEvent {
+  id        String   @id @default(uuid())
+  day       String // YYYY-MM-DD
+  at        String? // rough time: "morning" | "afternoon" | "evening" | "HH:MM"
+  title     String
+  detail    String?
+  source    String   @default("story")
+  createdAt DateTime @default(now())
+
+  @@index([day])
+}
+
 model BookmarkFolder {
   id        String   @id @default(uuid())
   name      String
@@ -150,6 +164,7 @@ model Story {
   mood            String? // optional one-tap mood/energy
   workedMinutes   Int? // user-stated hours worked that day (the real working-hours figure)
   workedBreakdown String? // JSON [{category, minutes}] — AI split of the stated hours across topics
+  emotions        String? // JSON {lifted[], drained[], energy, worry, feeling} mined from his own words (BEA-1051)
   supermemoryId   String? // Explore index doc ids (so re-index replaces, no dupes)
   ragId           String?
   createdAt       DateTime @default(now())

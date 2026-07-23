@@ -1,9 +1,27 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { DailyService } from './daily.service';
+import { StoryMiningService, MinedPayload } from './story-mining.service';
 
 @Controller('daily')
 export class DailyController {
-  constructor(private readonly daily: DailyService) {}
+  constructor(
+    private readonly daily: DailyService,
+    private readonly mining: StoryMiningService, // LAST on purpose — keeps positional wiring stable (BEA-1051)
+  ) {}
+
+  /** Deep-mine a day's story: every proposal for the Close-day wizard. Creates NOTHING. (BEA-1051) */
+  @Post('mine')
+  async mine(@Body() body: { day?: string }) {
+    if (!body?.day || !/^\d{4}-\d{2}-\d{2}$/.test(body.day)) throw new BadRequestException('Give the day as YYYY-MM-DD');
+    return this.mining.mine(body.day);
+  }
+
+  /** Create exactly what the owner ticked from the mined proposals. (BEA-1051) */
+  @Post('mine/apply')
+  async mineApply(@Body() body: { day?: string; picked?: Partial<MinedPayload> }) {
+    if (!body?.day || !/^\d{4}-\d{2}-\d{2}$/.test(body.day)) throw new BadRequestException('Give the day as YYYY-MM-DD');
+    return this.mining.apply(body.day, body?.picked || {});
+  }
 
   @Get('today')
   async today() {
