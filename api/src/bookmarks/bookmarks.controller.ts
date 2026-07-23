@@ -39,6 +39,13 @@ export class BookmarksController {
     return this.bookmarks.setFolder(body?.ids || [], body?.folderId ?? null);
   }
 
+  /** Delete bookmark(s) for good, by explicit ids. (BEA-1049) */
+  @Post('delete')
+  removeMany(@Body() body: { ids?: string[] }) {
+    if (!body?.ids?.length) throw new BadRequestException('Nothing selected');
+    return this.bookmarks.removeMany(body.ids);
+  }
+
   /** Serve a bookmark's cached image (downloaded so Instagram URLs can't expire). (BEA-609) */
   @Get(':id/image')
   async image(@Param('id') id: string, @Res() res: Response) {
