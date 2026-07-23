@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Moon, X, BookOpen, Plus, Trash2, MessageSquare, Clock, Check, Sparkles, Loader2, ArrowRight } from 'lucide-react';
+import { Moon, X, BookOpen, Plus, Trash2, MessageSquare } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { isDictating } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
@@ -19,45 +19,16 @@ function timeOf(iso: string): string {
 }
 
 /** The story-telling window. Pass `day` + `title` to narrate a past day (from Activity); without them it saves for today. */
-type Candidate = { title: string; category: string | null };
-
 export function StoryModal({ initial, day, title, onClose, onSaved }: { initial: { text?: string; mood?: string | null } | null; day?: string; title?: string; onClose: () => void; onSaved: () => void }) {
   const draftKey = `mybrain.draft.story.${day || 'today'}`;
   const [text, setText] = useState(initial?.text || loadDraft(draftKey));
   const [mood, setMood] = useState(initial?.mood || '');
   const [busy, setBusy] = useState(false);
-  const [step, setStep] = useState<'story' | 'wrap'>('story');
-  const [candidates, setCandidates] = useState<Candidate[] | null>(null);
-  const [openTasks, setOpenTasks] = useState<{ id: string; title: string }[]>([]);
-  const [todos, setTodos] = useState<{ title: string; category: string | null; note?: string | null; priority?: string }[] | null>(null); // forward to-dos from the story (BEA-513/934)
-  const [todoSel, setTodoSel] = useState<Record<number, boolean>>({});
-  const [todosAdded, setTodosAdded] = useState(false);
-  const [carry, setCarry] = useState<Record<string, 'roll' | 'drop' | undefined>>({});
-  const [hours, setHours] = useState('');
-  const [wrapBusy, setWrapBusy] = useState(false);
   const toast = useToast();
-  useDraftPersist(draftKey, step === 'story' ? text : ''); // keep the story draft safe until it's saved (BEA-512)
+  useDraftPersist(draftKey, text); // keep the story draft safe until it's saved (BEA-512)
   const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
-  // When we reach the wrap-up step, load everything it needs: found tasks, a suggested hours figure,
-  // and the day's unfinished tasks for carry-forward.
-  useEffect(() => {
-    if (step !== 'wrap' || candidates !== null) return;
-    fetch('/api/daily/wrap-up-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
-      .then((r) => (r.ok ? r.json() : { candidates: [], openTasks: [], suggestedMinutes: null }))
-      .then((d) => {
-        setCandidates(d.candidates || []);
-        setOpenTasks(d.openTasks || []);
-        const td = d.todos || [];
-        setTodos(td);
-        setTodoSel(Object.fromEntries(td.map((_: unknown, i: number) => [i, true])));
-        if (d.suggestedMinutes && !hours) setHours((d.suggestedMinutes / 60).toFixed(1).replace(/\.0$/, ''));
-      })
-      .catch(() => setCandidates([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, candidates, day]);
-
-  async function save() {
+  async function save(close: () => void) {
     if (!text.trim()) return;
     setBusy(true);
     try {
@@ -68,7 +39,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
         if (j?.wrapped) toast('success', 'Wrapping up that day now — your Mentor and the Lab are updating (about a minute).');
         clearDraft(draftKey); // saved server-side — the local backup is no longer needed (BEA-512)
         onSaved();
-        setStep('wrap'); // → wrap-up: finished tasks + working hours
+        close(); // the Close-day wizard asks the wrap questions now — ONE flow, not two (BEA-1052)
       } else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
     } catch {
       toast('error', 'Could not save');
@@ -77,140 +48,10 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
     }
   }
 
-  async function addTodos() {
-    const picked = (todos || []).filter((_, i) => todoSel[i]);
-    if (!picked.length) { setTodosAdded(true); return; }
-    try {
-      const r = await fetch('/api/daily/add-todos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ todos: picked }) });
-      const d = await r.json().catch(() => ({ created: 0 }));
-      toast('success', `Added ${d.created} to your tasks ✓`);
-      setTodosAdded(true);
-      onSaved();
-    } catch {
-      toast('error', 'Could not add those');
-    }
-  }
-
-  async function submitWrap(close: () => void) {
-    setWrapBusy(true);
-    try {
-      const h = parseFloat(hours);
-      const workedMinutes = Number.isFinite(h) && h > 0 ? Math.round(h * 60) : undefined;
-      const roll = Object.entries(carry).filter(([, v]) => v === 'roll').map(([id]) => id);
-      const drop = Object.entries(carry).filter(([, v]) => v === 'drop').map(([id]) => id);
-      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: candidates || [], workedMinutes, roll, drop }) });
-      const n = candidates?.length || 0;
-      toast('success', n ? `Logged ${n} finished task${n === 1 ? '' : 's'} ✓` : 'Day wrapped up ✓');
-      onSaved();
-      close();
-    } catch {
-      toast('error', 'Could not save the wrap-up');
-    } finally {
-      setWrapBusy(false);
-    }
-  }
-
   return (
-    <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => text.trim().length > 0 || step === 'wrap'}>
-      {(close) =>
-        step === 'wrap' ? (
-          <>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-bold flex items-center gap-2"><Sparkles className="text-emerald-500" size={18} /> Wrap up your day</h3>
-              <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
-            </div>
-
-            {/* Finished tasks found in the story */}
-            <div className="mb-4">
-              <p className="text-xs text-zinc-500 mb-2">Finished tasks I spotted in your story (delete any that aren’t real, the rest get logged as done today):</p>
-              {candidates === null ? (
-                <div className="py-4 text-center text-sm text-zinc-400"><Loader2 size={16} className="animate-spin inline mr-2" /> Reading your story for finished tasks &amp; to-dos…</div>
-              ) : candidates.length ? (
-                <ul className="space-y-1.5">
-                  {candidates.map((c, i) => (
-                    <li key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 px-3 py-2">
-                      <Check size={15} className="shrink-0 text-emerald-500" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">{c.title}</div>
-                        {c.category && <div className="text-[11px] text-zinc-400">{c.category}</div>}
-                      </div>
-                      <button onClick={() => setCandidates((arr) => (arr || []).filter((_, j) => j !== i))} aria-label="Remove" className="shrink-0 p-1 text-zinc-400 hover:text-rose-600"><X size={15} /></button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-zinc-400">No extra finished tasks found — nice and tidy.</p>
-              )}
-            </div>
-
-            {/* To-dos spotted in the story → add to the tasks sheet here (BEA-513) */}
-            {todos && todos.length > 0 && !todosAdded && (
-              <div className="mb-4">
-                <p className="text-xs text-zinc-500 mb-2">To-dos I spotted in your story — add to your tasks so you don’t have to dump again:</p>
-                <ul className="space-y-1.5">
-                  {todos.map((t, i) => (
-                    <li key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-2">
-                      <button onClick={() => setTodoSel((s) => ({ ...s, [i]: !s[i] }))} aria-label="Toggle" className={'shrink-0 grid place-items-center h-5 w-5 rounded border ' + (todoSel[i] ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-zinc-300 dark:border-zinc-600')}>{todoSel[i] && <Check size={13} />}</button>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium truncate">{t.title}</div>
-                        {t.note && <div className="text-[11px] text-zinc-500 line-clamp-2">{t.note}</div>}
-                        {t.category && <div className="text-[11px] text-zinc-400">{t.category}{t.priority && t.priority !== 'medium' ? ` · ${t.priority}` : ''}</div>}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-                <button onClick={addTodos} className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50" disabled={Object.values(todoSel).filter(Boolean).length === 0}>
-                  <Plus size={15} /> Add {Object.values(todoSel).filter(Boolean).length} to my tasks
-                </button>
-              </div>
-            )}
-            {todosAdded && <div className="mb-4 text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5"><Check size={15} /> Added to your tasks.</div>}
-
-            {/* Carry-forward — unfinished tasks */}
-            {openTasks.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-zinc-500 mb-2">Still unfinished — carry forward or drop?</p>
-                <ul className="space-y-1.5">
-                  {openTasks.map((t) => {
-                    const c = carry[t.id];
-                    return (
-                      <li key={t.id} className={'flex items-center gap-2 rounded-lg border px-3 py-2 ' + (c === 'drop' ? 'border-rose-300/60 dark:border-rose-500/30 opacity-60' : c === 'roll' ? 'border-emerald-400/60' : 'border-zinc-200 dark:border-zinc-800')}>
-                        <div className={'min-w-0 flex-1 text-sm truncate ' + (c === 'drop' ? 'line-through text-zinc-400' : '')}>{t.title}</div>
-                        <button onClick={() => setCarry((m) => ({ ...m, [t.id]: m[t.id] === 'roll' ? undefined : 'roll' }))} title="Roll to tomorrow" className={'shrink-0 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ' + (c === 'roll' ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500 hover:border-emerald-500')}>
-                          <ArrowRight size={12} /> Tomorrow
-                        </button>
-                        <button onClick={() => setCarry((m) => ({ ...m, [t.id]: m[t.id] === 'drop' ? undefined : 'drop' }))} title="Drop" className={'shrink-0 p-1 rounded-md ' + (c === 'drop' ? 'text-rose-600' : 'text-zinc-400 hover:text-rose-600')}><Trash2 size={14} /></button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <p className="mt-1 text-[11px] text-zinc-400">Leave untouched to keep them — they roll over on their own.</p>
-              </div>
-            )}
-
-            {/* Working hours */}
-            <div className="mb-4">
-              <p className="text-xs text-zinc-500 mb-2 flex items-center gap-1.5"><Clock size={13} /> How many hours did you work today?</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                {['4', '6', '8', '10'].map((h) => (
-                  <button key={h} onClick={() => setHours(h)} className={'rounded-full border px-3 py-1 text-sm ' + (hours === h ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300' : 'border-zinc-300 dark:border-zinc-700 text-zinc-500')}>{h}h</button>
-                ))}
-                <div className="relative">
-                  <input type="number" inputMode="decimal" min="0" max="24" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} placeholder="e.g. 7.5" className="w-24 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-3 pr-7 py-1.5 text-sm outline-none focus:border-emerald-500" />
-                  <span className="absolute right-2.5 top-1.5 text-xs text-zinc-400">h</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Skip</button>
-              <button onClick={() => submitWrap(close)} disabled={wrapBusy || candidates === null} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
-                {wrapBusy ? 'Saving…' : 'Submit'}
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
+    <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => text.trim().length > 0}>
+      {(close) => (
+        <>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-bold flex items-center gap-2"><Moon className="text-indigo-400" size={18} /> {title || "Tonight's story"}</h3>
             <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
@@ -239,7 +80,7 @@ export function StoryModal({ initial, day, title, onClose, onSaved }: { initial:
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <button onClick={close} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm">Cancel</button>
-            <button onClick={save} disabled={busy || !text.trim()} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
+            <button onClick={() => save(close)} disabled={busy || !text.trim()} className="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 text-sm disabled:opacity-50">
               {busy ? 'Saving…' : 'Save story'}
             </button>
           </div>

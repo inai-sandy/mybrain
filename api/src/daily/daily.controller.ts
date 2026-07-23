@@ -80,9 +80,10 @@ export class DailyController {
   }
 
   @Post('story')
-  async story(@Body() body: { text?: string; source?: string; mood?: string; day?: string }) {
+  async story(@Body() body: { text?: string; source?: string; mood?: string; day?: string; noWrap?: boolean }) {
     if (!body?.text?.trim()) throw new BadRequestException('Tell your story first');
-    return this.daily.submitStory(body.text, body.source || 'app', body.mood, body.day);
+    // noWrap: the Close-day wizard saves the story itself and stays in charge of sealing (BEA-1052).
+    return this.daily.submitStory(body.text, body.source || 'app', body.mood, body.day, body.noWrap === true);
   }
 
   /** One-shot: (re)index stories into the brain. ?all=1 re-indexes everything, else only un-indexed. (BEA-331) */
