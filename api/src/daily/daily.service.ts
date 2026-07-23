@@ -838,7 +838,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     const doneList = dayTasks
       .filter((t) => t.status === 'done')
-      .map((t) => `✓ ${t.title}${t.category ? ` [${t.category}]` : ''}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
+      // A finished Brain Eater is a BIG deal — the thing that circled his head for days is dead.
+      // Marked loudly so the story celebrates it. (BEA-1056)
+      .map((t) => `${(t as any).brainEater ? '🧠⚡ FINALLY DONE (this one circled his head for days): ' : '✓ '}${t.title}${t.category ? ` [${t.category}]` : ''}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
     const partialList = dayTasks
       .filter((t) => t.status !== 'done' && (t.progress || 0) > 0)
       .map((t) => `◐ ${t.title} — ${t.progress}% done`);

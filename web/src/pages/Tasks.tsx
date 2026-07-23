@@ -8,6 +8,7 @@ import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, u
 import { UnlinkedPeople } from '../ui/UnlinkedPeople';
 import { DelegatedTab } from './Delegated';
 import { Review } from './Review';
+import { BrainEatersTab } from './BrainEaters';
 
 export function Tasks() {
   const { data, loading, load } = useToday();
@@ -15,9 +16,11 @@ export function Tasks() {
   const [tab, setTab] = useUrlState('tab', 'mine');
   const [delegatedOpen, setDelegatedOpen] = useState<number | null>(null);
   const [reviewCount, setReviewCount] = useState<number | null>(null);
+  const [eaterCount, setEaterCount] = useState<number | null>(null); // BEA-1056
   useEffect(() => {
     fetch('/api/tasks/delegated').then((r) => (r.ok ? r.json() : null)).then((d) => setDelegatedOpen(d?.summary?.open ?? 0)).catch(() => setDelegatedOpen(0));
     fetch('/api/tasks/claims').then((r) => (r.ok ? r.json() : null)).then((d) => setReviewCount((d?.claims || []).length)).catch(() => setReviewCount(0));
+    fetch('/api/tasks/brain-eaters').then((r) => (r.ok ? r.json() : null)).then((d) => setEaterCount(d?.openCount ?? 0)).catch(() => setEaterCount(0));
   }, [tab]);
   const [dumping, setDumping] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -136,7 +139,7 @@ export function Tasks() {
         <div>
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><CheckSquare className="text-emerald-500" /> Tasks</h1>
           <p className="text-zinc-500 text-sm">
-            {tab === 'delegated' ? 'What other people owe you.' : tab === 'review' ? 'What they say is finished — your call.' : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
+            {tab === 'eaters' ? 'The things that circle your head — finish them for a peaceful sleep.' : tab === 'delegated' ? 'What other people owe you.' : tab === 'review' ? 'What they say is finished — your call.' : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
           </p>
         </div>
         {tab === 'mine' && (<div className="flex items-center gap-1">
@@ -161,7 +164,7 @@ export function Tasks() {
 
       {/* The three tabs. Same page, same look — different lists. (BEA-1044) */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
-        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['review', 'To review', reviewCount]] as const).map(([id, label, n]) => (
+        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['review', 'To review', reviewCount], ['eaters', '🧠 Brain Eaters', eaterCount]] as const).map(([id, label, n]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -175,6 +178,7 @@ export function Tasks() {
         ))}
       </div>
 
+      {tab === 'eaters' && <BrainEatersTab onCountChange={setEaterCount} />}
       {tab === 'delegated' && <DelegatedTab onCountChange={setDelegatedOpen} />}
       {tab === 'review' && <Review embedded onCountChange={setReviewCount} />}
 
