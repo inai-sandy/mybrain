@@ -36,9 +36,11 @@ export function Today() {
   const [review, setReview] = useState<Task[] | null>(null);
   const [closeDay, setCloseDay] = useState<string | null>(null);
   const [bannerKey, setBannerKey] = useState(0); // re-fetch open-days after a close
+  const [followUps, setFollowUps] = useState<string[]>([]); // last night's questions (BEA-1055)
 
   useEffect(() => {
     load();
+    fetch('/api/daily/morning-questions').then((r) => (r.ok ? r.json() : null)).then((d) => d && setFollowUps(d.questions || [])).catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -95,6 +97,12 @@ export function Today() {
           <Brain className="mx-auto text-emerald-500 mb-2" size={28} />
           <div className="font-semibold">🧠 Dump my brain</div>
           <p className="text-xs text-zinc-500 mt-1">{data?.question ? data.question : 'Type or speak everything on your mind — the AI builds your task list.'}</p>
+          {followUps.length > 0 && (
+            <div className="mx-auto mt-3 max-w-md rounded-lg border border-indigo-400/30 bg-indigo-500/5 px-3 py-2 text-left">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400">From last night's story</p>
+              {followUps.map((q, i) => <p key={i} className="text-xs text-zinc-600 dark:text-zinc-300">• {q}</p>)}
+            </div>
+          )}
         </button>
       )}
 
@@ -138,7 +146,7 @@ export function Today() {
 
       {closeDay && <CloseDaySheet day={closeDay} onClose={() => setCloseDay(null)} onClosed={() => { load(); setBannerKey((k) => k + 1); }} />}
 
-      {dumping && <DumpModal onClose={() => setDumping(false)} onDone={load} onCreated={setReview} initialQuestion={data?.question || null} />}
+      {dumping && <DumpModal onClose={() => setDumping(false)} onDone={load} onCreated={setReview} initialQuestion={data?.question || null} followUps={followUps} />}
       {review && <DumpReviewSheet tasks={review} onClose={() => setReview(null)} onChanged={load} />}
       {editing && <TaskFormModal task={editing} onClose={() => setEditing(null)} onSaved={load} />}
       {doneFor && <DoneModal task={doneFor} onClose={() => setDoneFor(null)} onSaved={load} />}

@@ -668,6 +668,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       await this.mentor.runMentorDay(day, true).catch(() => undefined);
       await this.generateSuggestions(this.dayAdd(day, 1)).catch(() => undefined);
       await this.mind.learnDay(day, skippedSnapshot).catch(() => undefined); // the Lab reflects once the day is complete, with the pre-rollover skipped set (BEA-458, BEA-808)
+      await this.generateMorningQuestions(day).catch(() => undefined); // tomorrow's dump opens with questions from tonight's story (BEA-1055)
     })().catch(() => undefined);
     return { day, closed: true, auto, rolled };
   }
@@ -706,6 +707,45 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       console.log(`[hours-backfill] filled ${res.filled} zero-hour day(s) with the 14h default`);
       await this.setSetting(flag, 'done').catch(() => undefined);
     }
+  }
+
+  /**
+   * The morning and night halves of the loop talk to each other (BEA-1055): when a day closes,
+   * write 2–3 SHARP follow-up questions from its story. The next Morning Dump opens with them —
+   * "Did the Alisan rework finish?" beats "what's on your mind?".
+   */
+  async generateMorningQuestions(day: string): Promise<{ questions: string[] }> {
+    const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
+    const text = (story?.rawText || '').trim();
+    if (text.length < 30) return { questions: [] };
+    const prompt =
+      `Yesterday (${day}) the user wrote this diary entry. Write 2-3 SHORT, SPECIFIC follow-up questions to ask him the next morning — ` +
+      `about unfinished business, risky things he mentioned, or people he was waiting on. Use HIS names and words. ` +
+      `No generic questions ("how do you feel?"). Reply ONLY JSON: {"questions":["..."]}.\n\nDIARY:\n${text.slice(0, 4000)}`;
+    const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 300, 'morning-questions').catch(() => null)) || '';
+    const j = looseJsonParse(raw);
+    const questions = (Array.isArray(j?.questions) ? j.questions : [])
+      .map((q: any) => String(q || '').trim().slice(0, 200))
+      .filter(Boolean)
+      .slice(0, 3);
+    if (questions.length) {
+      await this.setSetting('daily.morningQuestions', JSON.stringify({ forDay: this.dayAdd(day, 1), questions })).catch(() => undefined);
+    }
+    return { questions };
+  }
+
+  /** Today's follow-up questions (written when the previous day closed). Empty when stale. */
+  async morningQuestions(): Promise<{ questions: string[] }> {
+    const today = this.dayKey(await this.tz());
+    try {
+      const v = JSON.parse((await this.getSetting('daily.morningQuestions')) || '{}');
+      // Questions written for an earlier morning stay useful until a newer close replaces them —
+      // but never OLDER than 3 days, so a long gap doesn't resurface a dead question.
+      if (Array.isArray(v?.questions) && v.forDay && v.forDay <= today && v.forDay >= this.dayAdd(today, -3)) return { questions: v.questions.slice(0, 3) };
+    } catch {
+      /* ignore */
+    }
+    return { questions: [] };
   }
 
   /** The morning checkpoint (BEA-467): once a day at 10:00 local, wrap up yesterday if its story is in.

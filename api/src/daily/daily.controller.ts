@@ -9,6 +9,12 @@ export class DailyController {
     private readonly mining: StoryMiningService, // LAST on purpose — keeps positional wiring stable (BEA-1051)
   ) {}
 
+  /** This morning's follow-up questions, written when the previous day closed. (BEA-1055) */
+  @Get('morning-questions')
+  morningQuestions() {
+    return this.daily.morningQuestions();
+  }
+
   /** Deep-mine a day's story: every proposal for the Close-day wizard. Creates NOTHING. (BEA-1051) */
   @Post('mine')
   async mine(@Body() body: { day?: string }) {

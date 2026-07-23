@@ -4,6 +4,7 @@ import { DailyService } from './daily.service';
 // The service computes "today" in the user's timezone (Asia/Kolkata), so tests must too —
 // using UTC (new Date().toISOString()) flakes near IST midnight (passes by day, fails by night).
 const istToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const addDaysKey = (day: string, n: number) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
 function makeService(opts: { llmText?: string | null } = {}) {
   const stories: any[] = [];
@@ -336,6 +337,28 @@ describe('DailyService', () => {
       stories.push({ id: 's1', day, rawText: 'story', emotions: JSON.stringify({ lifted: ['demo'], drained: [], energy: 70, worry: 30, feeling: 'Tired but proud.' }), createdAt: new Date(), updatedAt: new Date() });
       const a = await svc.activity(day);
       expect((a as any).emotions).toMatchObject({ energy: 70, worry: 30, feeling: 'Tired but proud.' });
+    });
+  });
+
+  // Tomorrow's dump opens with questions from tonight's story. (BEA-1055)
+  describe('morning follow-up questions (BEA-1055)', () => {
+    it('writes sharp questions from the story and serves them the next morning', async () => {
+      const { svc, stories, settings } = makeService({ llmText: '{"questions":["Did the Alisan rework finish?","Did Madhuri send the report?"]}' });
+      const today = istToday();
+      const yesterday = addDaysKey(today, -1);
+      stories.push({ id: 's1', day: yesterday, rawText: 'Long diary about the Alisan rework and waiting on Madhuri for the report and more.', createdAt: new Date(), updatedAt: new Date() });
+      const g = await svc.generateMorningQuestions(yesterday);
+      expect(g.questions).toHaveLength(2);
+      expect(JSON.parse(settings['daily.morningQuestions']).forDay).toBe(today);
+      const m = await svc.morningQuestions();
+      expect(m.questions[0]).toContain('Alisan');
+    });
+
+    it('a short or missing story yields no questions, and stale questions are not served', async () => {
+      const { svc, settings } = makeService({ llmText: '{"questions":["x"]}' });
+      expect((await svc.generateMorningQuestions('2026-07-01')).questions).toEqual([]);
+      settings['daily.morningQuestions'] = JSON.stringify({ forDay: '2026-01-01', questions: ['old'] });
+      expect((await svc.morningQuestions()).questions).toEqual([]); // older than 3 days — dead question stays buried
     });
   });
 
