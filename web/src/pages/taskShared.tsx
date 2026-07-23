@@ -224,7 +224,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
 }
 
 // ---- brain-dump modal (type or speak) ----
-export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onClose: () => void; onDone: () => void; onCreated?: (tasks: Task[]) => void; initialQuestion: string | null }) {
+export function DumpModal({ onClose, onDone, onCreated, initialQuestion, followUps }: { onClose: () => void; onDone: () => void; onCreated?: (tasks: Task[]) => void; initialQuestion: string | null; followUps?: string[] }) {
   const draftKey = 'mybrain.draft.dump';
   const [text, setText] = useState(() => loadDraft(draftKey));
   const [busy, setBusy] = useState(false);
@@ -269,6 +269,15 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion }: { onC
             <button onClick={close} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
           </div>
           <p className="text-xs text-zinc-500 mb-3">Type or speak everything on your mind — the AI turns it into clean, prioritized tasks for today.</p>
+          {/* Last night's story asks back — the two halves of the loop finally talk. (BEA-1055) */}
+          {!!followUps?.length && (
+            <div className="mb-3 rounded-lg border border-indigo-400/30 bg-indigo-500/5 px-3 py-2">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400">From last night's story</p>
+              <ul className="space-y-1">
+                {followUps.map((q, i) => <li key={i} className="text-sm text-zinc-700 dark:text-zinc-200">• {q}</li>)}
+              </ul>
+            </div>
+          )}
           {question && (
             <div className="mb-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
               <span className="font-medium">One question: </span>{question}
