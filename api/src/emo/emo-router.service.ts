@@ -10,41 +10,13 @@ import { EmoMeetingService } from './emo-meeting.service';
 import { EmoCloseService } from './emo-close.service';
 import { EmoBriefService } from './emo-brief.service';
 import { EmoResearchService } from './emo-research.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 type Segment = { lane: EmoLane; summary: string; text: string };
 
 const LANES: EmoLane[] = ['task', 'reminder', 'story', 'meeting', 'search', 'research', 'note', 'idea', 'close', 'brief'];
 // Which lanes are terminal (the card itself IS the result) vs need a lane to process them.
 const TERMINAL = new Set<EmoLane>(['story', 'note']);
-
-const PROMPT = `You are Emo's intent router. Split a voice note into one or more INTENTS and classify each.
-
-Lanes:
-- task — a NEW to-do ("finish the BOM", "email the vendor"). Split several to-dos into several task intents.
-- brief — giving ONE named person a body of work ("Ramesh needs to finish the GST filing by Friday and send me the vendor list", "tell Srikar he owes me the drawings and the quote"). Use this whenever the speaker is describing what ANOTHER PERSON must do — even for a single item. The whole utterance is ONE brief segment, never split.
-- close — EXISTING work that is now FINISHED ("Ramesh finished the GST filing", "the vendor list is done", "I've sent the drawings", "mark the BOM done"). This is NOT a new task. Past tense, or an explicit "mark/tick … done", means close.
-- reminder — nudge a PERSON at a time ("remind Dharmendra on Friday").
-- story — a reflection / moment about the day ("met the vendor, felt good"; "stressed about the launch").
-- search — "search / find / what do we have on / look into…" (a question to answer).
-- research — "research / deep research / quick research on…".
-- meeting — a long multi-speaker meeting recording.
-- idea — a concept/spark to keep and develop ("I have an idea…", "what if we…").
-- note — anything else worth keeping.
-
-IMPORTANT — be CONSERVATIVE. Output the FEWEST segments possible:
-- A single command is ONE segment. "Remind <person> about <topic>" = exactly ONE reminder, nothing else. "Add a task to <X>" = exactly ONE task.
-- NEVER create a "search" or "research" intent unless the user EXPLICITLY says to search / find / look into / research something. A reminder or task that merely MENTIONS a topic is NOT a search — do not add one.
-- Only split into multiple segments when there are clearly SEPARATE, distinct actions (e.g. two different to-dos, or a task AND a reminder). When in doubt, keep it as one.
-- TASK vs BRIEF: a task is something SANDEEP will do himself. A brief is what someone ELSE must do. "Finish the BOM" = task. "Ramesh must finish the BOM" = brief.
-- TASK vs CLOSE is the easiest mistake to make and the most expensive: "finish the BOM" is a task, "finished the BOM" is a close. Read the tense. Filing a close as a task creates a DUPLICATE and leaves the real one open.
-
-For each intent give:
-- "lane": one of the above
-- "summary": one short line of what Emo will do, e.g. "Task: finish the BOM by Friday" / "Reminder: Dharmendra, Fri" / "Search: CCTV market"
-- "text": the exact slice of the transcript for that intent
-
-Reply with ONLY JSON, no prose:
-{"segments":[{"lane":"task","summary":"…","text":"…"}]}`;
 
 /**
  * EMO (BEA-863) — the AI intent router. A transcript in → one or more cards out. It classifies +
@@ -66,6 +38,7 @@ export class EmoRouterService {
     private readonly researchLane: EmoResearchService,
     private readonly closeLane: EmoCloseService, // last on purpose: keeps positional wiring stable
     private readonly briefLane: EmoBriefService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private parseSegments(raw: string | null, transcript: string): Segment[] {
@@ -100,7 +73,8 @@ export class EmoRouterService {
       segments = [{ lane: opts.lane, summary: text.replace(/\s+/g, ' ').slice(0, 120), text }];
     } else {
       // Routing is a tiny classification job — a heavyweight default model made 5s captures take 15s+ (BEA-929).
-      const raw = await this.llm.completeWith(await this.routerModel(), `${PROMPT}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
+      const routerTmpl = await this.prompts.get('emo.router');
+      const raw = await this.llm.completeWith(await this.routerModel(), `${routerTmpl}\n\nTranscript:\n${text}`, 800, 'emo-router').catch(() => null);
       segments = this.parseSegments(raw, text);
       // Nothing is lost: if the router couldn't make sense of it, keep the whole thing as a note.
       if (!segments.length) {

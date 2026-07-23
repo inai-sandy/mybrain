@@ -53,7 +53,7 @@ function make(llmReply: string | null, opts: { existingTitles?: string[] } = {})
   };
   const reminders: any = { create: async (d: any) => { chases.push(d); return d; } };
   const daily: any = { storyModel: async () => ({ provider: 'openrouter', model: 'x' }) };
-  const svc = new StoryMiningService(prisma, llm, tasks, reminders, daily);
+  const svc = new StoryMiningService(prisma, llm, tasks, reminders, daily, { get: async () => '' } as any);
   return { svc, createdTasks, doneTasks, chases, dayEvents, findings, storyUpdates };
 }
 

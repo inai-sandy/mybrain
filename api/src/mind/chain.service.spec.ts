@@ -55,7 +55,7 @@ describe('MindChainService.inferFromDay grounding (BEA-602)', () => {
       }),
     );
     const prisma = fakePrisma(STORY);
-    const svc = new MindChainService(prisma as any, llm as any, tasksSvc);
+    const svc = new MindChainService(prisma as any, llm as any, tasksSvc, { get: async () => '' } as any);
     const n = await svc.inferFromDay('2026-06-26');
     expect(n).toBe(1);
     expect(prisma._created).toHaveLength(1);
@@ -77,7 +77,7 @@ describe('MindChainService.inferFromDay grounding (BEA-602)', () => {
       }),
     );
     const prisma = fakePrisma(STORY);
-    const svc = new MindChainService(prisma as any, llm as any, tasksSvc);
+    const svc = new MindChainService(prisma as any, llm as any, tasksSvc, { get: async () => '' } as any);
     const n = await svc.inferFromDay('2026-06-26');
     expect(n).toBe(0);
     expect(prisma._created).toHaveLength(0);
@@ -86,7 +86,7 @@ describe('MindChainService.inferFromDay grounding (BEA-602)', () => {
   it('infers nothing when there is no story for the day', async () => {
     const llm = fakeLlm('{"chains":[]}');
     const prisma = fakePrisma(null, [{ title: 'x', status: 'todo', rolloverCount: 3 }]);
-    const svc = new MindChainService(prisma as any, llm as any, tasksSvc);
+    const svc = new MindChainService(prisma as any, llm as any, tasksSvc, { get: async () => '' } as any);
     expect(await svc.inferFromDay('2026-06-26')).toBe(0);
   });
 });

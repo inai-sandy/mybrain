@@ -55,7 +55,7 @@ function fakeItems() {
 describe('DocumentsService', () => {
   it('creates a markdown doc with a slug, tags, and an auto description', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'My Research Notes', contentText: '# Heading\n\nSome **important** body text here.', tags: ['research', 'notes'] });
     expect(doc.title).toBe('My Research Notes');
     expect(doc.slug).toMatch(/^my-research-notes-[a-z0-9]{6}$/);
@@ -67,7 +67,7 @@ describe('DocumentsService', () => {
 
   it('recovers a UTF-8 filename that multer decoded as latin1 (em-dash) (BEA-801)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     // busboy hands us the UTF-8 bytes of "Report — Final.md" decoded as latin1 (the mojibake)
     const mangled = Buffer.from('Report — Final.md', 'utf8').toString('latin1');
     const doc = await svc.createFromUpload({ originalname: mangled, mimetype: 'text/markdown', buffer: Buffer.from('# hi', 'utf8'), size: 4 });
@@ -77,7 +77,7 @@ describe('DocumentsService', () => {
 
   it('lists newest-first without content, gets full content, updates, and deletes', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const a = await svc.create({ title: 'First', contentText: 'a' });
     await svc.create({ title: 'Second', contentText: 'b' });
     const listed = await svc.list();
@@ -96,7 +96,7 @@ describe('DocumentsService', () => {
 
   it('shares a doc and only returns it publicly once shared', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Shareable', contentText: 'hello world' });
     expect(await svc.getShared(doc.slug)).toBeNull(); // not shared yet
 
@@ -111,7 +111,7 @@ describe('DocumentsService', () => {
 
   it('mints a short code on first share and resolves it (only while shared) (BEA-584)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Linkable', contentText: 'hi' });
 
     const shared = await svc.setShared(doc.id, true);
@@ -127,7 +127,7 @@ describe('DocumentsService', () => {
 
   it('ranks title matches above body matches, and tolerates typos (BEA-590)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     await svc.create({ title: 'Pricing Strategy', contentText: 'how we set prices' }); // title match
     await svc.create({ title: 'Random Notes', contentText: 'a note that mentions pricing once' }); // body match
     await svc.create({ title: 'Unrelated', contentText: 'nothing here' });
@@ -143,7 +143,7 @@ describe('DocumentsService', () => {
 
   it('requires all tokens for short queries (BEA-590)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     await svc.create({ title: 'Quarterly Budget Report', contentText: 'numbers' });
 
     expect((await svc.search('quarterly budget')).documents.length).toBe(1);
@@ -164,7 +164,7 @@ describe('DocumentsService', () => {
     const buf = zip.toBuffer();
 
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.createFromUpload({ originalname: 'My Site.zip', mimetype: 'application/zip', buffer: buf, size: buf.length });
     expect(doc.kind).toBe('site');
     expect(doc.siteEntry).toBe('index.html');
@@ -190,13 +190,13 @@ describe('DocumentsService', () => {
     const zip = new AdmZip();
     zip.addFile('readme.txt', Buffer.from('no html here'));
     const buf = zip.toBuffer();
-    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     await expect(svc.createFromUpload({ originalname: 'x.zip', mimetype: 'application/zip', buffer: buf, size: buf.length })).rejects.toThrow(/No HTML/i);
   });
 
   it('only allows public download when the owner opts in (BEA-597)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Downloadable', contentText: '# Hi\n\nbody' });
     await svc.setShared(doc.id, true);
 
@@ -217,7 +217,7 @@ describe('DocumentsService', () => {
 
   it('stars and unstars a document (BEA-596)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Fav', contentText: 'x' });
     expect(doc.starred).toBe(false);
 
@@ -231,7 +231,7 @@ describe('DocumentsService', () => {
 
   it('counts public opens of a shared doc (BEA-586)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Popular', contentText: 'hi' });
     await svc.setShared(doc.id, true);
 
@@ -248,7 +248,7 @@ describe('DocumentsService', () => {
 
   it('password-protects a share: locked until the right password unlocks it (BEA-585)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Secret', contentText: 'classified' });
     await svc.setShared(doc.id, true);
 
@@ -272,7 +272,7 @@ describe('DocumentsService', () => {
 
   it('expiry hides a shared doc and its short code (BEA-585)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Timed', contentText: 'tick' });
     const { shortCode } = await svc.setShared(doc.id, true) as any;
 
@@ -288,7 +288,7 @@ describe('DocumentsService', () => {
 
   it('renames the public link and rejects a duplicate / too-short name (BEA-584)', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const a = await svc.create({ title: 'Alpha', contentText: 'a' });
     const b = await svc.create({ title: 'Beta', contentText: 'b' });
 
@@ -300,7 +300,7 @@ describe('DocumentsService', () => {
   });
 
   it('manages the ingest token (create, verify constant-time, regenerate)', async () => {
-    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const t = await svc.ingestToken();
     expect(t).toHaveLength(64);
     expect(await svc.ingestToken()).toBe(t); // stable across reads
@@ -314,7 +314,7 @@ describe('DocumentsService', () => {
   });
 
   it('converts a text document into Capture (memory)', async () => {
-    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Memo', contentText: 'remember this content' });
     const res = await svc.convertToCapture(doc.id);
     expect(res.ok).toBe(true);
@@ -323,7 +323,7 @@ describe('DocumentsService', () => {
 
   it('produces a download payload with a safe filename', async () => {
     const prisma = fakePrisma();
-    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any);
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
     const doc = await svc.create({ title: 'Hello / World!', contentText: '# Hi' });
     const raw = await svc.raw(doc.id);
     expect(raw?.filename).toBe('hello-world.md');

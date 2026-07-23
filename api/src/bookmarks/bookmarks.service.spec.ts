@@ -61,7 +61,7 @@ function makeService(over: any = {}) {
   const startedRuns: any[] = [];
   const bridge: any = { startRun: async (input: any) => { startedRuns.push(input); return { id: 'run1' }; } };
   prisma.agentRun = { findMany: async () => over.researchRows ?? [] };
-  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram, items, bridge);
+  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram, items, bridge, { get: async () => '' } as any);
   return { svc, created, updated, enqueued, removed, filings, folderRows, startedRuns };
 }
 

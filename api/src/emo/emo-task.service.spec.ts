@@ -6,7 +6,7 @@ function make(opts: { title?: string; llmFail?: boolean; card?: any } = {}) {
   const cards: any = { get: jest.fn(async () => card), update: jest.fn(async (_id: string, p: any) => { updates.push(p); return { ...card, ...p }; }) };
   const llm: any = { complete: jest.fn(async () => { if (opts.llmFail) throw new Error('down'); return opts.title ?? 'Finish the BOM'; }) };
   const tasks: any = { create: jest.fn(async (t: any) => ({ id: 't1', title: t.title })) };
-  return { svc: new EmoTaskService(llm, tasks, cards), llm, tasks, updates };
+  return { svc: new EmoTaskService(llm, tasks, cards, { get: async () => '' } as any), llm, tasks, updates };
 }
 
 describe('EmoTaskService (BEA-947: ONE task per utterance)', () => {

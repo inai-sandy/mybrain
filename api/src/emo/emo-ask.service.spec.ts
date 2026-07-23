@@ -12,7 +12,7 @@ function make(opts: { clarify?: string; answer?: string } = {}) {
   const memory: any = { searchBrain: jest.fn(async () => [{ title: 'Trading docs', content: 'notes' }]) };
   const explore: any = { ask: jest.fn(async () => ({ answer: opts.answer ?? 'Full answer.', sources: [], matches: 3, summary: 'Short summary.' })) };
   const cards: any = { create: jest.fn(async (c: any) => { created.push(c); return { id: 'card1', ...c }; }) };
-  return { svc: new EmoAskService(llm, memory, explore, cards), llm, memory, explore, cards, created };
+  return { svc: new EmoAskService(llm, memory, explore, cards, { get: async () => '' } as any), llm, memory, explore, cards, created };
 }
 
 describe('EmoAskService (BEA-890)', () => {

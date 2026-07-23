@@ -27,7 +27,7 @@ describe('EmoRouterService (BEA-863)', () => {
       { lane: 'search', summary: 'Search: CCTV market', text: 'what do we have on the cctv market' },
     ] }) };
     const { svc, created } = makeCards();
-    const out = await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('… long dump …', { source: 'browser' });
+    const out = await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('… long dump …', { source: 'browser' });
     expect(out.cards).toHaveLength(3);
     expect(created.map((c) => c.lane)).toEqual(['task', 'reminder', 'search']);
     // terminal vs actionable status
@@ -39,10 +39,10 @@ describe('EmoRouterService (BEA-863)', () => {
     const llm: any = { completeWith: async () => JSON.stringify({ segments: [{ lane: 'story', summary: 'Met the vendor', text: 'met the vendor, felt good' }] }) };
     const { created } = makeCards();
     const { svc } = makeCards();
-    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('met the vendor, felt good');
+    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('met the vendor, felt good');
     // (use svc's own created via a fresh pair)
     const pair = makeCards();
-    await new EmoRouterService(prismaStub, llm, pair.svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('met the vendor, felt good');
+    await new EmoRouterService(prismaStub, llm, pair.svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('met the vendor, felt good');
     expect(pair.created[0].lane).toBe('story');
     expect(pair.created[0].status).toBe('done');
     void created;
@@ -51,7 +51,7 @@ describe('EmoRouterService (BEA-863)', () => {
   it('files a fallback note card when the LLM output is unusable — nothing is lost (BEA-863)', async () => {
     const llm: any = { completeWith: async () => 'sorry, I cannot help with that' };
     const { svc, created } = makeCards();
-    const out = await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('some rambling voice note');
+    const out = await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('some rambling voice note');
     expect(out.cards).toHaveLength(1);
     expect(created[0].lane).toBe('note');
     expect(created[0].rawTranscript).toBe('some rambling voice note'); // the whole thing kept
@@ -64,7 +64,7 @@ describe('EmoRouterService (BEA-863)', () => {
     searchStub.clarify.mockClear();
     searchStub.run.mockClear();
     const { svc } = makeCards();
-    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('cctv market', { source: 'emo-device' });
+    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('cctv market', { source: 'emo-device' });
     expect(searchStub.run).toHaveBeenCalled();
     expect(searchStub.clarify).not.toHaveBeenCalled();
   });
@@ -73,7 +73,7 @@ describe('EmoRouterService (BEA-863)', () => {
     const llm: any = { completeWith: jest.fn(async () => '{}') };
     ideaStub.handle.mockClear();
     const { svc } = makeCards();
-    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('an app that reminds plants to water themselves', { source: 'emo-device', lane: 'idea' });
+    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('an app that reminds plants to water themselves', { source: 'emo-device', lane: 'idea' });
     expect(ideaStub.handle).toHaveBeenCalled();
     expect(llm.completeWith).not.toHaveBeenCalled();   // no router guess, no research
   });
@@ -81,7 +81,7 @@ describe('EmoRouterService (BEA-863)', () => {
   it('returns nothing for an empty transcript', async () => {
     const llm: any = { completeWith: async () => '' };
     const { svc } = makeCards();
-    expect((await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('   ')).cards).toHaveLength(0);
+    expect((await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('   ')).cards).toHaveLength(0);
   });
 });
 
@@ -94,7 +94,7 @@ describe('EmoRouterService story day (BEA-981)', () => {
     ] }) };
     const { svc, created } = makeCards();
     jest.spyOn(svc, 'storyDay').mockResolvedValue('2026-07-15');
-    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub).route('dump');
+    await new EmoRouterService(prismaStub, llm, svc, searchStub, taskStub, ideaStub, reminderStub, meetingStub, researchStub, closeStub, closeStub, { get: async () => '' } as any).route('dump');
     expect(created.find((c) => c.lane === 'story').day).toBe('2026-07-15');
     expect(created.find((c) => c.lane === 'task').day).toBe(await svc.todayKey());
   });

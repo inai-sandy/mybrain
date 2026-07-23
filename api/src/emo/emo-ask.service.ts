@@ -3,6 +3,7 @@ import { LlmService } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { ExploreService } from '../explore/explore.service';
 import { EmoCardsService } from './emo-cards.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 export type AskTurn = { role: 'user' | 'emo'; text: string };
 export type AskOffer = { spoken: string; action: string };
@@ -27,6 +28,7 @@ export class EmoAskService {
     private readonly memory: MemoryService,
     private readonly explore: ExploreService,
     private readonly cards: EmoCardsService,
+    private readonly prompts: PromptsService,
   ) {}
 
   async ask(input: { question: string; history?: AskTurn[]; sessionContext?: string; web?: 'on' | 'off' | 'auto'; direct?: boolean; ragOnly?: boolean }): Promise<AskResult> {
@@ -75,7 +77,8 @@ export class EmoAskService {
 
   /** After answering, spot ONE genuinely useful next action to offer by voice (add a task / remind someone). */
   private async actionOffer(answer: string, question: string): Promise<AskOffer | undefined> {
-    const prompt = `Sandy asked: "${question}"\nEmo answered: "${answer.slice(0, 800)}"\n\nIf there is ONE clear, specific next action Sandy would likely want RIGHT NOW — either add a TASK, or send a REMINDER to a named person — reply with JSON:\n{"offer":"<one short spoken yes/no question, e.g. Want me to remind Srikar about the Zigbee testing?>","action":"<a plain command Emo can run, e.g. Remind Srikar to test the Zigbee dongle>"}\nOnly when it's genuinely useful and unambiguous. Otherwise reply exactly: {}`;
+    const offerTmpl = await this.prompts.get('emo.askOffer');
+    const prompt = `Sandy asked: "${question}"\nEmo answered: "${answer.slice(0, 800)}"\n\n${offerTmpl}`;
     const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 120, 'emo-ask-offer').catch(() => '')) || '';
     try {
       const j = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}');
@@ -88,7 +91,8 @@ export class EmoAskService {
 
   /** One short spoken sentence — the voice speaks this, not the card. */
   private async summarize(answer: string): Promise<string> {
-    const prompt = `You are Emo, speaking to Sandy. In ONE short spoken sentence (max 20 words), give him the key point of this answer to hear. You may use his name occasionally where it flows naturally — do NOT force it or tack it on. No preamble, no "here's", no lists — just the takeaway.\n\n${answer.slice(0, 1500)}`;
+    const summaryTmpl = await this.prompts.get('emo.askSummary');
+    const prompt = `${summaryTmpl}\n\n${answer.slice(0, 1500)}`;
     const out = ((await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 60, 'emo-ask-summary').catch(() => '')) || '').trim();
     return (out || answer.replace(/[#*_`>[\]]/g, '').replace(/\s+/g, ' ').slice(0, 140)).replace(/^["']|["']$/g, '');
   }

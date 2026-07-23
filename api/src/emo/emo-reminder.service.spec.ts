@@ -10,7 +10,7 @@ function make(opts: { extract: any; contacts?: any[]; card?: any }) {
   const list = opts.contacts ?? [];
   const contacts: any = { findAllByName: jest.fn(async () => list) };
   const reminders: any = { draftMessage: jest.fn(async () => ({ message: 'Hi Dharmendra, quick nudge on the socket pins.' })), create: jest.fn(async () => ({ id: 'rem1' })) };
-  return { svc: new EmoReminderService(prismaStub, llm, cards, contacts, reminders), cards, contacts, reminders, updates, prismaStub };
+  return { svc: new EmoReminderService(prismaStub, llm, cards, contacts, reminders, { get: async () => '' } as any), cards, contacts, reminders, updates, prismaStub };
 }
 
 const futureIstDay = (daysAhead: number) => new Date(Date.now() + 330 * 60000 + daysAhead * 86400000).toISOString().slice(0, 10);

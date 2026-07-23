@@ -7,6 +7,7 @@ import { join, extname, resolve, sep } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
 import TurndownService from 'turndown';
 
@@ -56,6 +57,7 @@ export class DocumentsService {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly items: ItemsService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** Copy a document into Capture/memory (RAG + SuperMemory) on demand. (BEA-540) */
@@ -109,9 +111,8 @@ export class DocumentsService {
   async summarize(content: string): Promise<{ description: string; tags: string[] }> {
     const text = (content || '').trim();
     if (!text) return { description: '', tags: [] };
-    const prompt =
-      `Read this document and describe it for a library card, in simple plain English.\n` +
-      `Return ONLY JSON: {"description":"a clear summary of what this document is, at most 200 characters","tags":["3-6 short lowercase topic tags"]}.\n\nDOCUMENT:\n${text.slice(0, 6000)}`;
+    const tmpl = await this.prompts.get('library.documentSummary');
+    const prompt = `${tmpl}\n\nDOCUMENT:\n${text.slice(0, 6000)}`;
     const raw = (await this.llm.completeWith(await this.documentsModel(), prompt, 300, 'document-summary'))?.trim() || '';
     try {
       const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));

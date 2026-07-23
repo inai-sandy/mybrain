@@ -4,6 +4,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { GoogleService } from './google.service';
 import { MemoryService } from '../memory/memory.service';
 import { EmailMemoryService } from './email-memory.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const BRIEF_AT = '23:58'; // 11:58 PM local — write today's email brief
@@ -26,6 +27,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     private readonly google: GoogleService,
     private readonly memory: MemoryService,
     private readonly emailMemory: EmailMemoryService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** Index the day's brief into Explore (mandatory section). (BEA-336) */
@@ -192,15 +194,8 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       summary = 'No important emails today — just promotions and newsletters, which were skipped.';
     } else {
       const lines = emails.map((e, i) => `${i + 1}. From: ${cleanFrom(e.from)} — ${e.subject}\n   ${(e.snippet || '').slice(0, 200)}`).join('\n');
-      const prompt =
-        `You are writing a short end-of-day email brief for the owner of this inbox. Promotions/social/newsletter emails are already removed.\n\n` +
-        `Return ONLY JSON (no prose, no code fences), shaped exactly:\n` +
-        `{"overview":"one short sentence on the overall picture","sections":[{"heading":"short topic or sender","points":["concise point","another"],"emails":[1,3]}]}\n\n` +
-        `Rules:\n` +
-        `- Group the emails into a few clear topics. Each section: a short heading, 1–4 concise points, and "emails" = the NUMBERS (from the list) the section is based on.\n` +
-        `- In points you may use **bold** for names, companies, amounts, dates. Prefix anything needing a reply with "Action:".\n` +
-        `- Keep it brief and skimmable. Write in simple, plain, everyday English — short words and short sentences, no fancy words.\n\n` +
-        `=== IMPORTANT EMAILS ON ${day} (${emails.length}) ===\n${lines}`;
+      const tmpl = await this.prompts.get('google.gmailBrief');
+      const prompt = `${tmpl}\n\n=== IMPORTANT EMAILS ON ${day} (${emails.length}) ===\n${lines}`;
       const res = await this.llm.completeWithModel(await this.briefModel(), prompt, 1200, 'gmail-brief');
       const raw = (res.text || '').trim();
       briefModelUsed = res.model || briefModelUsed;

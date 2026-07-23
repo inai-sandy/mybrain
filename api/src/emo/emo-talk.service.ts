@@ -3,6 +3,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ExploreService } from '../explore/explore.service';
 import { EmoCardsService } from './emo-cards.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /** Default Talk brain — Haiku (fast + cheap for conversation). Overridable via `emo.talk.model`. */
 const DEFAULT_TALK_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
@@ -22,6 +23,7 @@ export class EmoTalkService {
     private readonly llm: LlmService,
     private readonly explore: ExploreService,
     private readonly cards: EmoCardsService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private async talkModel(): Promise<LlmConfig> {
@@ -50,7 +52,8 @@ export class EmoTalkService {
     const webCtx = webSources.length ? webSources.map((s) => `[w${s.n}] ${s.title}: ${s.snippet}`).join('\n') : '';
 
     const convo = turns.slice(-10).map((t) => `${t.role === 'user' ? 'Sandy' : 'Emo'}: ${t.text}`).join('\n');
-    const prompt = `You are Emo, Sandy's warm, concise personal voice assistant having a spoken back-and-forth conversation. Reply in 2-5 natural spoken sentences — complete and specific, like talking out loud, not writing. Use his name (Sandy) only occasionally, where it flows. Today is ${this.explore.today()} — when he asks about "latest"/"news"/"recent", use the freshest web results below and mention roughly when they're from. HARD RULE: NEVER answer with a question or ask for clarification — no counter-questions, ever. If something is unclear, make the most reasonable assumption, say what you assumed, and give your best complete answer using your knowledge and the web results below. ${webCtx ? 'Use the current web results below when relevant.' : ''}
+    const talkTmpl = await this.prompts.get('emo.talk');
+    const prompt = `${talkTmpl.replace(/\{\{today\}\}/g, this.explore.today())} ${webCtx ? 'Use the current web results below when relevant.' : ''}
 
 ${webCtx ? `From the web:\n${webCtx}\n\n` : ''}Conversation so far:
 ${convo || '(this is the first message)'}

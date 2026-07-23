@@ -4,6 +4,7 @@ import { AgentService } from '../agent/agent.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { FlowsService } from '../flows/flows.service';
 import { EmoCardsService } from './emo-cards.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /**
  * EMO Research lanes — the research ladder's two upper tiers:
@@ -20,6 +21,7 @@ export class EmoResearchService {
     private readonly flows: FlowsService,
     private readonly agent: AgentService,
     private readonly bridge: HermesBridgeService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private isQuick(text: string): boolean {
@@ -48,7 +50,8 @@ export class EmoResearchService {
 
   private async runQuick(cardId: string, text: string): Promise<void> {
     const query = text.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').trim() || text;
-    const prompt = `Do a QUICK one-pass research pass over my second brain AND the web on the topic below, then return a CONCISE one-screen answer: a one-line headline, 4–6 tight bullet findings each with a source, and one "next step". Keep it short — this is the fast tier.\n\nTopic: ${query}`;
+    const quickTmpl = await this.prompts.get('emo.research');
+    const prompt = `${quickTmpl}\n\nTopic: ${query}`;
     try {
       const run: any = await this.agent.createRun({ title: `Emo quick research: ${query.slice(0, 50)}`, input: prompt });
       await this.bridge.execute(run.id, { prompt, title: 'Emo quick research', save: false, depth: 'quick' });
@@ -87,8 +90,9 @@ export class EmoResearchService {
     let questions: string[] = [];
     let options: string[] = [];
     try {
+      const clarifyTmpl = await this.prompts.get('emo.researchClarify');
       const raw = await this.llm.complete(
-        `The user wants deep research: "${topic}".\nWrite 2–3 SHORT questions that would most shape the research (angle · depth · sources · time frame). Also 3–5 quick answer chips.\nReply ONLY JSON: {"questions":["…"],"options":["…"]}`,
+        clarifyTmpl.replace(/\{\{topic\}\}/g, topic),
         300, 'emo-research-clarify',
       );
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
@@ -107,8 +111,9 @@ export class EmoResearchService {
     let topic = base.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').slice(0, 60).trim() || 'Research';
     let question = base;
     try {
+      const briefTmpl = await this.prompts.get('emo.researchBrief');
       const raw = await this.llm.complete(
-        `Turn this spoken request into a clean research brief. Reply ONLY JSON {"topic":"3-6 word title","question":"one clear research question/brief"}.\nRequest: "${base}"`,
+        briefTmpl.replace(/\{\{request\}\}/g, base),
         300, 'emo-research-brief',
       );
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');

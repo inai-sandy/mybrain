@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 const EXTRACT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
 const DEFAULT_TZ = 'Asia/Kolkata';
@@ -12,14 +13,6 @@ function dayAdd(day: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const SYSTEM =
-  `You extract accountability items from ONE day of someone's life. Be CONSERVATIVE — only pull CLEAR, explicit items; if unsure, leave it out.\n\n` +
-  `COMMITMENT = something the person promised/agreed to DO (capture who it's to and by when, if stated).\n` +
-  `DECISION = a clear choice that was made.\n\n` +
-  `Return ONLY JSON (no prose, no code fences), shaped exactly:\n` +
-  `{"commitments":[{"text":"short, in his voice","party":"who or null","due":"YYYY-MM-DD or null"}],"decisions":[{"text":"short","context":"one phrase or null"}]}\n` +
-  `If nothing is clearly a commitment or decision, return {"commitments":[],"decisions":[]}.`;
-
 @Injectable()
 export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
   private tick: NodeJS.Timeout | null = null;
@@ -28,6 +21,7 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly tasks: TasksService,
+    private readonly prompts: PromptsService,
   ) {}
 
   onModuleInit() {
@@ -98,7 +92,8 @@ export class AccountabilityService implements OnModuleInit, OnModuleDestroy {
       .join('\n\n');
     if (!material.trim()) return { commitments: 0, decisions: 0, day };
 
-    const raw = (await this.llm.completeWith(await this.model(), `${SYSTEM}\n\n=== THE DAY (${day}) ===\n${material}`, 800, 'commitments-extract'))?.trim() || '';
+    const tmpl = await this.prompts.get('other.commitmentsExtract');
+    const raw = (await this.llm.completeWith(await this.model(), `${tmpl}\n\n=== THE DAY (${day}) ===\n${material}`, 800, 'commitments-extract'))?.trim() || '';
     let parsed: any;
     try {
       parsed = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
