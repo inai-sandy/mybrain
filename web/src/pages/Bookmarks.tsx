@@ -632,7 +632,24 @@ function ManageBookmarkFolders({ folders, onClose, onChanged }: { folders: Folde
   const [list, setList] = useState<Folder[]>(folders);
   const [newName, setNewName] = useState('');
   const [newIcon, setNewIcon] = useState<string>(DEFAULT_FOLDER_ICON);
+  const [organizing, setOrganizing] = useState(false); // BEA-1046
   const toast = useToast();
+  /** Let the AI file everything unfiled, right now. (BEA-1046) */
+  async function organize() {
+    setOrganizing(true);
+    try {
+      const r = await fetch('/api/bookmarks/organize', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast('error', 'Could not organize');
+        return;
+      }
+      toast('success', d.filed ? `${d.filed} filed automatically${d.foldersCreated ? ` · ${d.foldersCreated} new folder${d.foldersCreated === 1 ? '' : 's'}` : ''}${d.left ? ` · ${d.left} left in Others` : ''}` : 'Nothing unfiled — all organized already');
+      reload();
+    } finally {
+      setOrganizing(false);
+    }
+  }
   async function reload() {
     const r = await fetch('/api/bookmarks/folders');
     if (r.ok) setList((await r.json()).folders || []);
@@ -661,6 +678,9 @@ function ManageBookmarkFolders({ folders, onClose, onChanged }: { folders: Folde
           <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} placeholder="New folder name" className="flex-1 min-w-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
           <button onClick={create} disabled={!newName.trim()} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 text-sm disabled:opacity-50">Add</button>
         </div>
+        <button onClick={organize} disabled={organizing} className="mb-4 w-full inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-500/5 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400 disabled:opacity-60">
+          {organizing ? (<><Loader2 size={15} className="animate-spin" /> Filing everything…</>) : '✨ Auto-organize unfiled bookmarks'}
+        </button>
         <div className="space-y-2 max-h-72 overflow-y-auto">
           {list.length === 0 && <p className="text-sm text-zinc-400 text-center py-4">No folders yet.</p>}
           {list.map((f) => (

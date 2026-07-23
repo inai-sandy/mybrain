@@ -28,6 +28,14 @@ function makeService(over: any = {}) {
     memoryOutbox: { deleteMany: async () => ({}) },
     setting: { upsert: async () => ({}), findUnique: async () => null },
   };
+  // Folder organizer doubles (BEA-1046)
+  const folderRows: any[] = over.folders ? [...over.folders] : [];
+  const filings: any[] = [];
+  prisma.bookmarkFolder = {
+    findMany: async () => [...folderRows], // a copy, like real prisma — the service mutates its own list
+    create: async ({ data }: any) => { const f = { id: `f${folderRows.length + 1}`, ...data }; folderRows.push(f); return f; },
+  };
+  prisma.item.updateMany = async ({ where, data }: any) => { filings.push({ id: where.id, folderId: data.folderId }); return { count: 1 }; };
   const memory: any = {
     enqueue: async (content: string, opts: any) => enqueued.push({ content, opts }),
     deleteDoc: async () => undefined,
@@ -39,6 +47,7 @@ function makeService(over: any = {}) {
     summarizeUrl: async () => over.urlSummary ?? null,
     summarizeText: async () => over.textSummary ?? 'A clear summary of the page.',
     hasKey: async () => over.hasModel ?? true,
+    complete: async () => over.organizeReply ?? null, // folder organizer (BEA-1046)
   };
   const raindrop: any = {
     hasKey: async () => over.hasRaindrop ?? true,
@@ -48,7 +57,7 @@ function makeService(over: any = {}) {
   const removed: string[] = [];
   const items: any = { remove: async (id: string) => removed.push(id) }; // the one true item delete (BEA-1049)
   const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram, items);
-  return { svc, created, updated, enqueued, removed };
+  return { svc, created, updated, enqueued, removed, filings, folderRows };
 }
 
 const bm = (over: any) => ({ id: 1, title: 'T', link: '', excerpt: '', note: '', tags: [], created: '2026-05-10T00:00:00Z', ...over });
@@ -165,6 +174,53 @@ describe('BookmarksService', () => {
       const { svc, removed } = makeService({ existingRows: [] });
       expect(await svc.removeMany([])).toEqual({ ok: true, deleted: 0 });
       expect(removed).toEqual([]);
+    });
+  });
+
+  // Folders fill themselves — the owner never files by hand. (BEA-1046)
+  describe('organize (BEA-1046)', () => {
+    const unfiled = [
+      { id: 'a1', title: 'Claude tips', summary: 's', tags: '["ai tools"]' },
+      { id: 'a2', title: 'mmWave radar sensor', summary: 's', tags: '[]' },
+      { id: 'a3', title: 'mystery link', summary: '', tags: '[]' },
+    ];
+
+    it('reuses existing folders, creates broad new ones, and leaves unsure rows in Others', async () => {
+      const reply = JSON.stringify({ assignments: [{ id: 'a1', folder: 'AI' }, { id: 'a2', folder: 'Hardware' }, { id: 'a3', folder: 'Others' }] });
+      const { svc, filings, folderRows } = makeService({ existingRows: unfiled, folders: [{ id: 'fAI', name: 'AI' }], organizeReply: reply });
+      const r = await svc.organize();
+      expect(r).toEqual({ filed: 2, left: 1, foldersCreated: 1 });
+      expect(filings).toEqual([{ id: 'a1', folderId: 'fAI' }, { id: 'a2', folderId: 'f2' }]); // a3 untouched — unsure never guesses
+      expect(folderRows.map((f: any) => f.name)).toEqual(['AI', 'Hardware']);
+    });
+
+    it('matches existing folder names case-insensitively instead of duplicating them', async () => {
+      const reply = JSON.stringify({ assignments: [{ id: 'a1', folder: 'ai' }] });
+      const { svc, folderRows } = makeService({ existingRows: [unfiled[0]], folders: [{ id: 'fAI', name: 'AI' }], organizeReply: reply });
+      await svc.organize();
+      expect(folderRows).toHaveLength(1); // no "ai" duplicate created
+    });
+
+    it('never crosses the 12-folder cap — extra names are dropped, the row stays in Others', async () => {
+      const atCap = Array.from({ length: 12 }, (_, i) => ({ id: `f${i}`, name: `F${i}` }));
+      const reply = JSON.stringify({ assignments: [{ id: 'a1', folder: 'Brand New Area' }] });
+      const { svc, filings, folderRows } = makeService({ existingRows: [unfiled[0]], folders: atCap, organizeReply: reply });
+      const r = await svc.organize();
+      expect(r.filed).toBe(0);
+      expect(filings).toEqual([]);
+      expect(folderRows).toHaveLength(12);
+    });
+
+    it('does nothing (and spends nothing) when everything is already filed', async () => {
+      const { svc } = makeService({ existingRows: [], organizeReply: 'MUST NOT BE USED' });
+      expect(await svc.organize()).toEqual({ filed: 0, left: 0, foldersCreated: 0 });
+    });
+
+    it('an unparseable AI reply files nothing — never a wrong guess', async () => {
+      const { svc, filings } = makeService({ existingRows: unfiled, organizeReply: 'sorry, no json here' });
+      const r = await svc.organize();
+      expect(r.filed).toBe(0);
+      expect(filings).toEqual([]);
     });
   });
 
