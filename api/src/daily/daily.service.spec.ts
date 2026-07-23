@@ -281,6 +281,40 @@ function makeService(opts: { llmText?: string | null } = {}) {
 }
 
 describe('DailyService', () => {
+  // A closed day must never record zero hours — the owner's real 14-hour days were landing as 0
+  // because only the typed-story path ever asked. (BEA-1053)
+  describe('hours can never be zero (BEA-1053)', () => {
+    it('ensureHours writes the 14h default onto a story with no hours', async () => {
+      const { svc, stories } = makeService({ llmText: '{"breakdown":[{"category":"Factory","minutes":600},{"category":"EMO","minutes":240}]}' });
+      stories.push({ id: 's1', day: '2026-07-20', rawText: 'a long real day at the factory and on EMO', workedMinutes: null });
+      const r = await svc.ensureHours('2026-07-20');
+      expect(r.set).toBe(true);
+      expect(stories[0].workedMinutes).toBe(14 * 60);
+      expect(stories[0].workedBreakdown).toContain('Factory');
+    });
+
+    it('never overwrites hours the owner actually stated', async () => {
+      const { svc, stories } = makeService();
+      stories.push({ id: 's1', day: '2026-07-19', rawText: 'story', workedMinutes: 720 });
+      expect((await svc.ensureHours('2026-07-19')).set).toBe(false);
+      expect(stories[0].workedMinutes).toBe(720);
+    });
+
+    it('backfillHours fills every past zero-hour day and leaves stated days alone', async () => {
+      const { svc, stories } = makeService({ llmText: null });
+      stories.push(
+        { id: 'a', day: '2026-07-18', rawText: 'long day one', workedMinutes: null },
+        { id: 'b', day: '2026-07-19', rawText: 'long day two', workedMinutes: 0 },
+        { id: 'c', day: '2026-07-16', rawText: 'stated', workedMinutes: 720 },
+      );
+      const r = await svc.backfillHours();
+      expect(r.filled).toBe(2);
+      expect(stories.find((s: any) => s.id === 'a').workedMinutes).toBe(840);
+      expect(stories.find((s: any) => s.id === 'b').workedMinutes).toBe(840);
+      expect(stories.find((s: any) => s.id === 'c').workedMinutes).toBe(720);
+    });
+  });
+
   describe('Story of the Month', () => {
     it('weaves a chapter from the month\'s day stories and indexes it to memory', async () => {
       const { svc, dayStories, monthStories, enqueued } = makeService({ llmText: '{"title":"The Month of Building","story":"May opened with doubt and closed with a shipped product."}' });
