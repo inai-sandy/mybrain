@@ -67,9 +67,16 @@ function makeService(opts: { llmText?: string | null } = {}) {
       },
     },
     task: {
+      // Enough of Prisma's where-shape for the daily queries: status (eq or {not}), day (eq/gte/lt/lte),
+      // ownerContactId (eq/null/{not:null}), promisedFor ({not:null}), brainEater. (BEA-1060)
       findMany: async ({ where }: any = {}) =>
         tasks.filter((t) => {
-          if (where?.status && t.status !== where.status) return false;
+          const s = where?.status;
+          if (s !== undefined) { if (typeof s === 'string') { if (t.status !== s) return false; } else if (s.not !== undefined && t.status === s.not) return false; }
+          const oc = where?.ownerContactId;
+          if (oc !== undefined) { if (oc === null) { if (t.ownerContactId) return false; } else if (oc.not === null && !t.ownerContactId) return false; }
+          if (where?.promisedFor?.not === null && !t.promisedFor) return false;
+          if (where?.brainEater !== undefined && !!t.brainEater !== where.brainEater) return false;
           const d = where?.day;
           if (d !== undefined) {
             if (typeof d === 'string') return t.day === d;
@@ -80,7 +87,14 @@ function makeService(opts: { llmText?: string | null } = {}) {
           return true;
         }),
       count: async ({ where }: any = {}) =>
-        tasks.filter((t) => (!where?.status || t.status === where.status) && (where?.day === undefined || t.day === where.day)).length,
+        tasks.filter((t) => {
+          const s = where?.status;
+          if (s !== undefined) { if (typeof s === 'string') { if (t.status !== s) return false; } else if (s.not !== undefined && t.status === s.not) return false; }
+          const oc = where?.ownerContactId;
+          if (oc !== undefined) { if (oc === null) { if (t.ownerContactId) return false; } else if (oc.not === null && !t.ownerContactId) return false; }
+          if (where?.day !== undefined && t.day !== where.day) return false;
+          return true;
+        }).length,
       create: async ({ data }: any) => {
         const row = { id: `t${++seq}`, createdAt: new Date(), status: 'open', ...data };
         tasks.push(row);
@@ -359,6 +373,44 @@ describe('DailyService', () => {
       expect((await svc.generateMorningQuestions('2026-07-01')).questions).toEqual([]);
       settings['daily.morningQuestions'] = JSON.stringify({ forDay: '2026-01-01', questions: ['old'] });
       expect((await svc.morningQuestions()).questions).toEqual([]); // older than 3 days — dead question stays buried
+    });
+  });
+
+  // Insights about HIM, not just tasks. (BEA-1060)
+  describe('insights (BEA-1060)', () => {
+    it('builds a mood trend, delegation & promise health, and a neglect scoreboard', async () => {
+      const { svc, stories, dayStories, tasks } = makeService();
+      const today = istToday();
+      const y = addDaysKey(today, -1);
+      dayStories.push({ day: y, moodScore: 60 }, { day: today, moodScore: 75 });
+      stories.push(
+        { id: 's1', day: y, emotions: JSON.stringify({ energy: 50, worry: 40 }), createdAt: new Date(), updatedAt: new Date() },
+        { id: 's2', day: today, emotions: JSON.stringify({ energy: 70, worry: 20 }), createdAt: new Date(), updatedAt: new Date() },
+      );
+      // one delegated-open, one delegated-done, a slipping promise, a brain eater
+      tasks.push(
+        { id: 't1', ownerContactId: 'c1', party: 'Madhuri', status: 'open', title: 'Send report', promisedFor: null, rolloverCount: 2, day: addDaysKey(today, -5), brainEater: false, promiseSlips: 0 },
+        { id: 't2', ownerContactId: 'c1', party: 'Madhuri', status: 'done', title: 'Old thing', completedAt: new Date(), promisedFor: null, rolloverCount: 0, day: today, brainEater: false, promiseSlips: 0 },
+        { id: 't3', ownerContactId: null, party: 'Srikar', status: 'open', title: 'Pay Srikar', promisedFor: addDaysKey(today, -2), promiseSlips: 2, rolloverCount: 3, day: addDaysKey(today, -3), brainEater: false },
+        { id: 't4', ownerContactId: null, status: 'open', title: 'Insurance renewal', promisedFor: null, rolloverCount: 8, day: addDaysKey(today, -10), brainEater: true, promiseSlips: 0 },
+      );
+      const r = await svc.insights(30);
+      expect(r.moodTrend.length).toBe(2);
+      expect(r.moodTrend[1]).toMatchObject({ mood: 75, energy: 70, worry: 20 });
+      expect(r.delegation.teamOpen).toBe(1);
+      expect(r.delegation.teamDone).toBe(1);
+      expect(r.delegation.teamFollowThrough).toBe(50);
+      expect(r.delegation.slipping[0]).toMatchObject({ title: 'Pay Srikar', slips: 2, overdue: true });
+      expect(r.neglect.brainEaterCount).toBe(1);
+      expect(r.neglect.aging[0].title).toBe('Insurance renewal');
+    });
+
+    it('is calm and empty when there is no data', async () => {
+      const { svc } = makeService();
+      const r = await svc.insights(30);
+      expect(r.moodTrend).toEqual([]);
+      expect(r.delegation.teamOpen).toBe(0);
+      expect(r.neglect.brainEaterCount).toBe(0);
     });
   });
 

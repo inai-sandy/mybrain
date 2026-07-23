@@ -9,6 +9,23 @@ export class DailyController {
     private readonly mining: StoryMiningService, // LAST on purpose — keeps positional wiring stable (BEA-1051)
   ) {}
 
+  /** Insights that are about YOU — mood/energy over time, delegation & promise health, neglect. (BEA-1060) */
+  @Get('insights')
+  insights(@Query('days') days?: string) {
+    return this.daily.insights(days ? Number(days) : 30);
+  }
+
+  /** The written "what's really going on" paragraph (cached daily). (BEA-1060) */
+  @Get('insights/written')
+  writtenInsight() {
+    return this.daily.writtenInsight(false);
+  }
+
+  @Post('insights/written/regenerate')
+  regenWrittenInsight() {
+    return this.daily.writtenInsight(true);
+  }
+
   /** One-time backfill of emotions + life-timeline for already-told days, so the card isn't empty. (BEA-1058) */
   @Post('backfill-feelings')
   backfillFeelings(@Body() body: { days?: number }) {
