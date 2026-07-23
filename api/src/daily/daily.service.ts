@@ -14,6 +14,8 @@ const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
 const STORY_AT = '23:58'; // local time the nightly Story of the Day fires
 const MORNING_WRAP_AT = '10:00'; // local time the morning auto-wrap-up runs (BEA-467)
 const DEFAULT_STORY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+/** The owner's stated default: a normal day is a 14-hour day. A closed day must never record zero. (BEA-1053) */
+export const DEFAULT_WORKED_MIN = 14 * 60;
 const DONE_EXTRACT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }; // tiny job: pull finished tasks from the story
 
 type TimelineEvent = { type: string; title: string; detail?: string; at: string };
@@ -33,6 +35,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    // One-time 14h backfill of past zero-hour days. (BEA-1053)
+    setTimeout(() => this.runOnceHoursBackfill().catch(() => undefined), 45_000);
     this.tick = setInterval(() => {
       this.summaryTick().catch(() => undefined);
       this.storyTick().catch(() => undefined);
@@ -644,6 +648,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // 2. Generate the heavy narrative + verdict in the BACKGROUND, in dependency order, then let the Lab
     //    reflect. The UI already tells the user this takes about a minute. Fire-and-forget.
     void (async () => {
+      // Hours first: EVERY close path (manual, 10:00 wrap, auto-seal) guarantees the day carries
+      // hours — real 14-hour days were landing as zero because only one path ever asked. (BEA-1053)
+      await this.ensureHours(day).catch(() => undefined);
       await this.generateSummary(day, true).catch(() => undefined);
       await this.generateDayStory(day, true).catch(() => undefined);
       await this.mentor.runMentorDay(day, true).catch(() => undefined);
@@ -651,6 +658,42 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       await this.mind.learnDay(day, skippedSnapshot).catch(() => undefined); // the Lab reflects once the day is complete, with the pre-rollover skipped set (BEA-458, BEA-808)
     })().catch(() => undefined);
     return { day, closed: true, auto, rolled };
+  }
+
+  /** A closed day never records zero hours: if no figure was given, write the 14h default (with the
+   *  AI category split when a story exists). A stated figure is never overwritten. (BEA-1053) */
+  async ensureHours(day: string): Promise<{ set: boolean }> {
+    const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
+    if (!story || (story.workedMinutes && story.workedMinutes > 0)) return { set: false };
+    const breakdown = (story.rawText || '').trim().length >= 15 ? await this.computeWorkedBreakdown(day, DEFAULT_WORKED_MIN).catch(() => null) : null;
+    await this.prisma.story
+      .update({ where: { id: story.id }, data: { workedMinutes: DEFAULT_WORKED_MIN, ...(breakdown?.length ? { workedBreakdown: JSON.stringify(breakdown) } : {}) } })
+      .catch(() => undefined);
+    return { set: true };
+  }
+
+  /** One-time backfill (BEA-1053): every past day whose story carries zero/no hours gets the 14h default. */
+  async backfillHours(): Promise<{ filled: number }> {
+    const today = this.dayKey(await this.tz());
+    const rows = await this.prisma.story.findMany({ where: { day: { lt: today }, OR: [{ workedMinutes: null }, { workedMinutes: 0 }] }, orderBy: { day: 'asc' } });
+    let filled = 0;
+    for (const s of rows) {
+      const r = await this.ensureHours(s.day).catch(() => ({ set: false }));
+      if (r.set) filled++;
+    }
+    return { filled };
+  }
+
+  private async runOnceHoursBackfill(): Promise<void> {
+    const flag = 'daily.hoursBackfillV1';
+    const done = await this.prisma.setting.findUnique({ where: { key: flag } }).catch(() => null);
+    if (done?.value === 'done') return;
+    const res = await this.backfillHours().catch(() => null);
+    if (res) {
+      // eslint-disable-next-line no-console
+      console.log(`[hours-backfill] filled ${res.filled} zero-hour day(s) with the 14h default`);
+      await this.setSetting(flag, 'done').catch(() => undefined);
+    }
   }
 
   /** The morning checkpoint (BEA-467): once a day at 10:00 local, wrap up yesterday if its story is in.
