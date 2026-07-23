@@ -29,7 +29,15 @@ export function cleanTags(tags: string[] = []): string[] {
   return out.slice(0, 12);
 }
 
-type ExistingRow = { id: string; sourceUrl: string | null; readFailed: boolean; supermemoryId: string | null; ragId: string | null; filePath: string | null };
+type ExistingRow = { id: string; sourceUrl: string | null; readFailed: boolean; readAttempts: number; supermemoryId: string | null; ragId: string | null; filePath: string | null };
+
+/** How many failed reads a bookmark gets before the sync stops paying to retry it. (BEA-841) */
+export const MAX_READ_ATTEMPTS = 5;
+
+/** Retry an unreadable bookmark only while it has tries left — dead links must not cost money every hour forever. (BEA-841) */
+export function shouldRetry(row: { readFailed: boolean; readAttempts: number }): boolean {
+  return row.readFailed && (row.readAttempts || 0) < MAX_READ_ATTEMPTS;
+}
 
 @Injectable()
 export class BookmarksService implements OnModuleInit, OnModuleDestroy {
@@ -481,10 +489,10 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     const recent = await this.raindrop.recent(sinceDays);
     const rows = (await this.prisma.item.findMany({
       where: { source: 'raindrop' },
-      select: { id: true, sourceUrl: true, readFailed: true, supermemoryId: true, ragId: true, filePath: true },
+      select: { id: true, sourceUrl: true, readFailed: true, readAttempts: true, supermemoryId: true, ragId: true, filePath: true },
     })) as ExistingRow[];
     const existing = new Map<string, ExistingRow>(rows.map((r) => [r.sourceUrl || '', r]));
-    const list = recent.filter((b) => b.link && (!existing.has(b.link) || existing.get(b.link)!.readFailed));
+    const list = recent.filter((b) => b.link && (!existing.has(b.link) || shouldRetry(existing.get(b.link)!)));
     return { list, existing };
   }
 
@@ -510,7 +518,8 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       const thumbnail = (ig?.imageUrl && (await this.cacheImage(ex.id, ig.imageUrl).catch(() => null))) || this.thumbFor(b.link, b.cover);
       await this.prisma.item.update({
         where: { id: ex.id },
-        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, filePath, thumbnail, supermemoryId: null, ragId: null },
+        // A failed retry burns one attempt; a successful read clears the count for good. (BEA-841)
+        data: { summary: this.shortDesc(summary), tags: JSON.stringify(tags), readFailed, readAttempts: readFailed ? { increment: 1 } : 0, filePath, thumbnail, supermemoryId: null, ragId: null },
       });
       await this.memory.enqueue(this.buildMemoryText(b.title, summary, tags, b.link), { itemId: ex.id, title: b.title, tags: [...tags, 'bookmark'] });
       return readFailed ? 'flagged' : 'imported';
@@ -528,6 +537,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
           sourceUrl: b.link,
           tags: JSON.stringify(tags),
           readFailed,
+          readAttempts: readFailed ? 1 : 0, // first failed read = first attempt spent (BEA-841)
           thumbnail: this.thumbFor(b.link, b.cover),
           ...(isNaN(created.getTime()) ? {} : { createdAt: created }),
         },

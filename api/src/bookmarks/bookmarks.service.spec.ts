@@ -1,7 +1,7 @@
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { promises as fs } from 'fs';
-import { BookmarksService, cleanTags } from './bookmarks.service';
+import { BookmarksService, cleanTags, shouldRetry, MAX_READ_ATTEMPTS } from './bookmarks.service';
 
 const YT = 'https://www.youtube.com/watch?v=abc123';
 const WEB = 'https://nonexistent.invalid.example/page'; // fetch fails → treated as unreadable
@@ -99,6 +99,28 @@ describe('BookmarksService', () => {
     expect(updated[0].where.id).toBe('old1');
     expect(updated[0].data.readFailed).toBe(false);
   }, 15000);
+
+  // Dead links must not cost money every hour forever. (BEA-841)
+  describe('retry cap for unreadable bookmarks (BEA-841)', () => {
+    it('retries an unreadable bookmark only while it has attempts left', () => {
+      expect(shouldRetry({ readFailed: true, readAttempts: 0 })).toBe(true);
+      expect(shouldRetry({ readFailed: true, readAttempts: MAX_READ_ATTEMPTS - 1 })).toBe(true);
+      expect(shouldRetry({ readFailed: true, readAttempts: MAX_READ_ATTEMPTS })).toBe(false); // gave up
+      expect(shouldRetry({ readFailed: false, readAttempts: 0 })).toBe(false); // readable — nothing to retry
+    });
+
+    it('a failed retry burns one attempt; success clears the count', async () => {
+      const existing = new Map<string, any>([[WEB, { id: 'dead1', sourceUrl: WEB, readFailed: true, readAttempts: 2, supermemoryId: null, ragId: null, filePath: null }]]);
+      const { svc, updated } = makeService();
+      await svc.importBatch([bm({ id: 1, title: 'Dead', link: WEB }) as any], existing);
+      expect(updated[0].data.readAttempts).toEqual({ increment: 1 }); // still unreadable → one more spent
+
+      const existing2 = new Map<string, any>([[YT, { id: 'ok1', sourceUrl: YT, readFailed: true, readAttempts: 4, supermemoryId: null, ragId: null, filePath: null }]]);
+      const s2 = makeService();
+      await s2.svc.importBatch([bm({ id: 2, title: 'Vid', link: YT }) as any], existing2);
+      expect(s2.updated[0].data.readAttempts).toBe(0); // finally read → counter wiped
+    }, 20000);
+  });
 
   it('auto-sync defaults to enabled, hourly', async () => {
     const { svc } = makeService();

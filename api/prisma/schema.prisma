@@ -43,6 +43,7 @@ model Item {
   supermemoryId String?
   ragId         String?
   readFailed    Boolean  @default(false) // bookmark whose page could not be read (summary from metadata only)
+  readAttempts  Int      @default(0) // failed read tries so far — retries stop at the cap, so dead links stop costing money (BEA-841)
   shared        Boolean  @default(false) // publicly viewable via /view/:id when true
   thumbnail     String? // cover image / YouTube thumbnail for bookmark cards
   ideaId        String? // links an uploaded research doc to an Idea
