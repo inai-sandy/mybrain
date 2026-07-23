@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export type PromptKey =
   | 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief'
   // Migrated inline prompts (BEA-1059)
-  | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMine'
+  | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMine' | 'daily.insightsWritten'
   | 'tasks.autoNote'
   | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe'
   | 'people.chaseAgent' | 'people.briefingTidy'
@@ -377,6 +377,13 @@ Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where th
     label: "Morning follow-up questions",
     description: "Writes 2–3 sharp follow-up questions from last night’s story to greet you in the morning dump. Your diary text is added automatically. The date fills in where it says {{day}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
     default: `Yesterday ({{day}}) the user wrote this diary entry. Write 2-3 SHORT, SPECIFIC follow-up questions to ask him the next morning — about unfinished business, risky things he mentioned, or people he was waiting on. Use HIS names and words. No generic questions ("how do you feel?"). Reply ONLY JSON: {"questions":["..."]}.`,
+  },
+  {
+    key: 'daily.insightsWritten',
+    category: "Daily & Story",
+    label: "Insights — 'what's really going on' read",
+    description: "The honest paragraph at the top of Activity → Insights that reads all your signals (mood, follow-through, promises, brain-eaters) and tells you the pattern. Your evidence is added automatically. (BEA-1060)",
+    default: `You are an honest, plain-spoken coach. From the evidence below, write ONE short paragraph (3-5 sentences) telling Sandeep what is REALLY going on this fortnight — the pattern he might not see. Be specific, use his own numbers and names, name one thing to fix. No lists, no preamble, no flattery.`,
   },
   {
     key: 'daily.storyMine',

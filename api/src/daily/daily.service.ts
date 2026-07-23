@@ -1597,6 +1597,105 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * The Insights that are about HIM, not just his tasks (BEA-1060): how he felt over time, whether
+   * his team and his own promises are being kept, and what keeps eating his brain. Pure data.
+   */
+  async insights(days = 30) {
+    const tz = await this.tz();
+    const today = this.dayKey(tz);
+    const span = Math.max(7, Math.min(365, days));
+    const start = this.dayAdd(today, -(span - 1));
+    const daysBetween = (from: string, to: string) => Math.round((new Date(to + 'T12:00:00Z').getTime() - new Date(from + 'T12:00:00Z').getTime()) / 86400000);
+
+    const [stories, dayStories, ownedOpen, ownedDone, promised, eaters, oldestOpen] = await Promise.all([
+      this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true, emotions: true, mood: true } }),
+      this.prisma.dayStory.findMany({ where: { day: { gte: start } }, select: { day: true, moodScore: true } }),
+      this.prisma.task.findMany({ where: { ownerContactId: { not: null }, status: { not: 'done' } }, select: { id: true, title: true, party: true, promisedFor: true, rolloverCount: true } }),
+      this.prisma.task.count({ where: { ownerContactId: { not: null }, status: 'done', completedAt: { gte: (await this.tasks.dayWindow(start, tz)).start } } }),
+      this.prisma.task.findMany({ where: { promisedFor: { not: null } }, select: { id: true, title: true, party: true, promisedFor: true, promiseSlips: true, status: true } }),
+      this.prisma.task.findMany({ where: { brainEater: true, status: { not: 'done' } }, select: { id: true, title: true, day: true, rolloverCount: true } }),
+      this.prisma.task.findMany({ where: { status: 'open', ownerContactId: null, brainEater: false }, orderBy: { day: 'asc' }, take: 5, select: { title: true, day: true, rolloverCount: true } }),
+    ]);
+
+    // 1) Mood & energy over time — one point per recorded day.
+    const moodByDay = new Map<string, { mood: number | null; energy: number | null; worry: number | null }>();
+    for (const s of dayStories) if (s.moodScore != null) moodByDay.set(s.day, { mood: s.moodScore, energy: null, worry: null });
+    for (const s of stories) {
+      let e: any = null;
+      try { e = s.emotions ? JSON.parse(s.emotions) : null; } catch { e = null; }
+      const cur = moodByDay.get(s.day) || { mood: null, energy: null, worry: null };
+      moodByDay.set(s.day, { mood: cur.mood, energy: e?.energy ?? cur.energy, worry: e?.worry ?? cur.worry });
+    }
+    const moodTrend = [...moodByDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, v]) => ({ day, ...v }));
+
+    // 2) Delegation & promise health.
+    const teamOpen = ownedOpen.length;
+    const teamTotal = teamOpen + ownedDone;
+    const promisesOpen = promised.filter((p) => p.status !== 'done');
+    const promisesKept = promised.filter((p) => p.status === 'done').length;
+    const promisesSlipping = promisesOpen
+      .filter((p) => (p.promiseSlips || 0) > 0 || (p.promisedFor && p.promisedFor < today))
+      .map((p) => ({ title: p.title, party: p.party || null, slips: p.promiseSlips || 0, due: p.promisedFor, overdue: !!(p.promisedFor && p.promisedFor < today) }))
+      .slice(0, 8);
+
+    // 3) Brain-eater & neglect — the "peaceful sleep" scoreboard.
+    const aging = eaters
+      .map((t) => ({ title: t.title, days: t.day ? Math.max(0, daysBetween(t.day, today)) : t.rolloverCount || 0 }))
+      .sort((a, b) => b.days - a.days);
+
+    return {
+      days: span,
+      moodTrend,
+      delegation: {
+        teamOpen,
+        teamDone: ownedDone,
+        teamFollowThrough: teamTotal ? Math.round((ownedDone / teamTotal) * 100) : null,
+        promisesTotal: promised.length,
+        promisesKept,
+        promisesOpen: promisesOpen.length,
+        promiseKeepRate: promised.length ? Math.round((promisesKept / promised.length) * 100) : null,
+        slipping: promisesSlipping,
+      },
+      neglect: {
+        brainEaterCount: eaters.length,
+        oldestBrainEaterDays: aging[0]?.days ?? 0,
+        aging: aging.slice(0, 6),
+        oldestOpen: oldestOpen.map((t) => ({ title: t.title, days: t.day ? Math.max(0, daysBetween(t.day, today)) : 0, carried: t.rolloverCount || 0 })),
+      },
+    };
+  }
+
+  /**
+   * The written "what's really going on" — one honest AI paragraph reading ALL the signals (mood,
+   * follow-through, promises, brain-eaters, category time). Cached per local day so opening Insights
+   * is instant; regenerated on demand. (BEA-1060)
+   */
+  async writtenInsight(force = false): Promise<{ text: string | null; generatedAt: string | null }> {
+    const today = this.dayKey(await this.tz());
+    if (!force) {
+      const cached = await this.getSetting('insights.written');
+      if (cached) {
+        try { const v = JSON.parse(cached); if (v?.day === today && v?.text) return { text: v.text, generatedAt: v.generatedAt }; } catch { /* fall through */ }
+      }
+    }
+    const [dash, ins] = await Promise.all([this.dashboard(14), this.insights(14)]);
+    if ((await this.daysCovered()) < 3) return { text: null, generatedAt: null }; // not enough to say anything real
+    const evidence =
+      `Last 14 days. Follow-through ${dash.totals.followThrough}% (${dash.totals.tasksDone}/${dash.totals.tasksTotal}). Dump streak ${dash.streak}. ` +
+      `Worked ${Math.round((dash.worked?.window || 0) / 60)}h in the window. ` +
+      `Time by category: ${dash.categoryTime.slice(0, 5).map((c: any) => `${c.category} ${Math.round(c.minutes / 60)}h`).join(', ') || 'n/a'}. ` +
+      `Mood trend (day:mood/energy/worry): ${ins.moodTrend.slice(-10).map((m) => `${m.day.slice(5)}:${m.mood ?? '-'}/${m.energy ?? '-'}/${m.worry ?? '-'}`).join(', ') || 'n/a'}. ` +
+      `Team follow-through ${ins.delegation.teamFollowThrough ?? '-'}% (${ins.delegation.teamDone} done / ${ins.delegation.teamOpen} open with people). ` +
+      `Promises kept ${ins.delegation.promiseKeepRate ?? '-'}%; slipping: ${ins.delegation.slipping.map((s) => `${s.title}${s.party ? ` (${s.party})` : ''}${s.slips ? ` ×${s.slips}` : ''}`).join('; ') || 'none'}. ` +
+      `Brain-eaters open ${ins.neglect.brainEaterCount}, oldest ${ins.neglect.oldestBrainEaterDays}d; aging: ${ins.neglect.aging.map((a) => `${a.title} (${a.days}d)`).join('; ') || 'none'}.`;
+    const tmpl = await this.prompts.get('daily.insightsWritten');
+    const prompt = `${tmpl}\n\nEVIDENCE:\n${evidence}`;
+    const text = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 400, 'insights-written').catch(() => null))?.trim() || null;
+    if (text) await this.setSetting('insights.written', JSON.stringify({ day: today, text, generatedAt: new Date().toISOString() })).catch(() => undefined);
+    return { text, generatedAt: text ? new Date().toISOString() : null };
+  }
+
   /** Per-day done/total counts across a range, for the calendar heatmap. */
   async calendar(months = 3) {
     const tz = await this.tz();

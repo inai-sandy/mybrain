@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown, Footprints, HeartPulse } from 'lucide-react';
+import { Activity as ActivityIcon, ChevronLeft, ChevronRight, FileText, Bookmark, Lightbulb, Wand2, CheckCircle2, Brain, Moon, MessageSquare, Sparkles, RefreshCw, Flame, BarChart3, CalendarDays, ListTree, Fingerprint, Check, X, Plus, ListChecks, Mic, BookOpen, Lock, Clock, TrendingUp, TrendingDown, Footprints, HeartPulse, Users } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -29,6 +29,13 @@ type Dash = {
   perDay: { day: string; done: number; total: number; worked?: number }[];
 };
 type Cal = { start: string; end: string; days: { day: string; done: number; total: number; dumped: boolean; story: boolean; suggested?: number }[] };
+// Insights that are about YOU, not just tasks. (BEA-1060)
+type Insights = {
+  days: number;
+  moodTrend: { day: string; mood: number | null; energy: number | null; worry: number | null }[];
+  delegation: { teamOpen: number; teamDone: number; teamFollowThrough: number | null; promisesTotal: number; promisesKept: number; promisesOpen: number; promiseKeepRate: number | null; slipping: { title: string; party: string | null; slips: number; due: string | null; overdue: boolean }[] };
+  neglect: { brainEaterCount: number; oldestBrainEaterDays: number; aging: { title: string; days: number }[]; oldestOpen: { title: string; days: number; carried: number }[] };
+};
 
 const ICON: Record<string, any> = { capture: FileText, bookmark: Bookmark, idea: Lightbulb, skill: Wand2, task: CheckCircle2, dump: Brain, story: Moon, note: MessageSquare, life: Footprints };
 const TINT: Record<string, string> = {
@@ -288,11 +295,50 @@ function Stat({ big, label }: { big: string; label: string }) {
 }
 
 // ---------- Insights view ----------
+/** A tiny SVG line for a 0–100 series across days — used for mood/energy/worry. (BEA-1060) */
+function TrendLine({ points, color, w = 300, h = 48 }: { points: (number | null)[]; color: string; w?: number; h?: number }) {
+  const vals = points.map((v, i) => ({ v, i })).filter((p): p is { v: number; i: number } => p.v != null);
+  if (vals.length < 2) return null;
+  const n = points.length - 1 || 1;
+  const x = (i: number) => (i / n) * (w - 4) + 2;
+  const y = (v: number) => h - 4 - (v / 100) * (h - 8);
+  const dPath = vals.map((p, k) => `${k === 0 ? 'M' : 'L'} ${x(p.i).toFixed(1)} ${y(p.v).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: h }} preserveAspectRatio="none">
+      <path d={dPath} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      {vals.map((p) => <circle key={p.i} cx={x(p.i)} cy={y(p.v)} r="2" fill={color} />)}
+    </svg>
+  );
+}
+
+/** The written "what's really going on" card. (BEA-1060) */
+function WrittenInsight() {
+  const [w, setW] = useState<{ text: string | null; generatedAt: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { fetch('/api/daily/insights/written').then((r) => (r.ok ? r.json() : null)).then(setW).catch(() => undefined); }, []);
+  async function regen() {
+    setBusy(true);
+    try { const r = await fetch('/api/daily/insights/written/regenerate', { method: 'POST' }); if (r.ok) setW(await r.json()); } finally { setBusy(false); }
+  }
+  if (!w || !w.text) return null;
+  return (
+    <section className="rounded-2xl border border-violet-400/30 bg-gradient-to-br from-violet-500/10 via-emerald-500/5 to-transparent p-5">
+      <div className="mb-1.5 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 font-semibold text-sm"><Sparkles size={15} className="text-violet-500" /> What's really going on</h2>
+        <button onClick={regen} disabled={busy} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-violet-500 disabled:opacity-50"><RefreshCw size={12} className={busy ? 'animate-spin' : ''} /> refresh</button>
+      </div>
+      <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">{w.text}</p>
+    </section>
+  );
+}
+
 function InsightsView() {
   const [d, setD] = useState<Dash | null>(null);
+  const [ins, setIns] = useState<Insights | null>(null);
   const [range, setRange] = useState(30);
   useEffect(() => {
     fetch(`/api/daily/dashboard?days=${range}`).then((r) => r.json()).then(setD).catch(() => undefined);
+    fetch(`/api/daily/insights?days=${range}`).then((r) => (r.ok ? r.json() : null)).then(setIns).catch(() => undefined);
   }, [range]);
   if (!d) return <p className="text-sm text-zinc-400">Loading…</p>;
 
@@ -310,6 +356,9 @@ function InsightsView() {
           <option value={90}>Last 90 days</option>
         </select>
       </div>
+
+      {/* The honest read, first — the pattern you might not see. (BEA-1060) */}
+      <WrittenInsight />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-amber-300/40 bg-amber-500/5 p-3 text-center">
@@ -353,6 +402,87 @@ function InsightsView() {
           </section>
         );
       })()}
+
+      {/* mood & energy over time — how you actually FELT, not just task counts. (BEA-1060) */}
+      {ins && ins.moodTrend.filter((m) => m.mood != null || m.energy != null || m.worry != null).length >= 2 && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="flex items-center gap-1.5 font-semibold text-sm"><HeartPulse size={15} className="text-pink-500" /> Mood & energy over time</h2>
+            <div className="flex items-center gap-3 text-[11px]">
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-500" /> mood</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> energy</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> worry</span>
+            </div>
+          </div>
+          <div className="relative">
+            <TrendLine points={ins.moodTrend.map((m) => m.mood)} color="#6366f1" />
+            <div className="-mt-12"><TrendLine points={ins.moodTrend.map((m) => m.energy)} color="#10b981" /></div>
+            <div className="-mt-12"><TrendLine points={ins.moodTrend.map((m) => m.worry)} color="#f59e0b" /></div>
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] text-zinc-400">
+            <span>{ins.moodTrend[0]?.day.slice(5)}</span>
+            <span>{ins.moodTrend[ins.moodTrend.length - 1]?.day.slice(5)}</span>
+          </div>
+        </section>
+      )}
+
+      {/* delegation & promise health — are people delivering, are you keeping your word? (BEA-1060) */}
+      {ins && (ins.delegation.teamOpen + ins.delegation.teamDone > 0 || ins.delegation.promisesTotal > 0) && (
+        <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+          <h2 className="mb-3 flex items-center gap-1.5 font-semibold text-sm"><Users size={15} className="text-amber-500" /> Delegation & promises</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <Stat big={ins.delegation.teamFollowThrough != null ? `${ins.delegation.teamFollowThrough}%` : '—'} label={`team follow-through · ${ins.delegation.teamOpen} open`} />
+            <Stat big={ins.delegation.promiseKeepRate != null ? `${ins.delegation.promiseKeepRate}%` : '—'} label={`your promises kept · ${ins.delegation.promisesKept}/${ins.delegation.promisesTotal}`} />
+          </div>
+          {ins.delegation.slipping.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs font-medium text-rose-600 dark:text-rose-400">Slipping promises</p>
+              <ul className="space-y-1.5">
+                {ins.delegation.slipping.map((s, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0 truncate">{s.title}{s.party ? <span className="text-zinc-400"> · {s.party}</span> : null}</span>
+                    <span className="shrink-0 text-[11px] text-rose-500">{s.overdue ? 'overdue' : ''}{s.slips ? ` · re-promised ${s.slips}×` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* brain-eaters & neglect — the peaceful-sleep scoreboard. (BEA-1060) */}
+      {ins && (ins.neglect.brainEaterCount > 0 || ins.neglect.oldestOpen.length > 0) && (
+        <section className="rounded-xl border border-fuchsia-300/30 dark:border-fuchsia-500/25 bg-fuchsia-500/[0.04] p-5">
+          <h2 className="mb-3 flex items-center gap-1.5 font-semibold text-sm"><Brain size={15} className="text-fuchsia-500" /> What's circling your head</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <Stat big={`${ins.neglect.brainEaterCount}`} label="brain eaters open" />
+            <Stat big={ins.neglect.oldestBrainEaterDays ? `${ins.neglect.oldestBrainEaterDays}d` : '—'} label="oldest one, circling" />
+          </div>
+          {ins.neglect.aging.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {ins.neglect.aging.map((a, i) => (
+                <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="min-w-0 truncate">🧠 {a.title}</span>
+                  <span className="shrink-0 text-[11px] text-zinc-400">{a.days}d</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {ins.neglect.brainEaterCount === 0 && ins.neglect.oldestOpen.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs text-zinc-500">Oldest still open (candidates for a brain eater):</p>
+              <ul className="space-y-1.5">
+                {ins.neglect.oldestOpen.map((t, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0 truncate">{t.title}</span>
+                    <span className="shrink-0 text-[11px] text-zinc-400">{t.days}d{t.carried ? ` · carried ${t.carried}×` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* time by category */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
