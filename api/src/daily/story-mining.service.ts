@@ -16,6 +16,7 @@ export type MinedEvent = { at: string | null; title: string };
 export type MinedPayload = {
   day: string;
   hasStory: boolean;
+  failed?: boolean; // the model reply was unusable — the UI must offer a retry, never claim "tidy day" (BEA-1052)
   done: { title: string; category: string | null }[];
   todos: { title: string; category: string | null; note: string | null; priority: string }[];
   delegations: MinedDelegation[];
@@ -96,11 +97,16 @@ export class StoryMiningService {
       `- lessons: max 2; empty array if the day shows none. Empty arrays are fine everywhere.\n\n` +
       `Known contact names (for spelling only): ${contactNames || '(none)'}\n\nDIARY:\n${text.slice(0, 6000)}`;
 
-    const raw = (await this.llm.completeWith(await this.daily.storyModel(), prompt, 2500, 'story-mine').catch(() => null)) || '';
-    const j = looseJsonParse(raw);
+    // One retry: a transient model hiccup must not cost the owner his whole day's findings.
+    let j: any = null;
+    for (let attempt = 0; attempt < 2 && !j; attempt++) {
+      const raw = (await this.llm.completeWith(await this.daily.storyModel(), prompt, 2500, 'story-mine').catch(() => null)) || '';
+      j = looseJsonParse(raw);
+      if (!j && attempt === 0) this.log.warn(`mine(${day}): unparseable model reply — retrying once`);
+    }
     if (!j) {
-      this.log.warn(`mine(${day}): unparseable model reply`);
-      return this.empty(day, true);
+      this.log.warn(`mine(${day}): model unusable after retry`);
+      return { ...this.empty(day, true), failed: true }; // honest failure — never dressed up as a tidy day
     }
 
     const S = (v: any, n = 160) => String(v || '').trim().slice(0, n);

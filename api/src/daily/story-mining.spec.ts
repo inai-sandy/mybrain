@@ -87,12 +87,18 @@ describe('mine — proposes everything, creates nothing (BEA-1051)', () => {
     expect(m.done).toHaveLength(0); // overlaps the logged task
   });
 
-  it('an unparseable model reply yields an empty payload, never a crash', async () => {
+  it('an unusable model reply is flagged failed=true — never dressed up as a tidy day', async () => {
     const { svc } = make('sorry, plain prose');
     const m = await svc.mine('2026-07-22');
     expect(m.hasStory).toBe(true);
+    expect(m.failed).toBe(true); // the wizard shows an honest Retry, not "nothing new found"
     expect(m.done).toEqual([]);
     expect(m.delegations).toEqual([]);
+  });
+
+  it('a good parse carries no failed flag', async () => {
+    const { svc } = make(RICH);
+    expect((await svc.mine('2026-07-22')).failed).toBeUndefined();
   });
 });
 

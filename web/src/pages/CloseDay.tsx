@@ -15,6 +15,7 @@ import { isDictating } from '../ui/useDictation';
 type Mined = {
   day: string;
   hasStory: boolean;
+  failed?: boolean;
   done: { title: string; category: string | null }[];
   todos: { title: string; category: string | null; note: string | null; priority: string }[];
   delegations: { contactName: string; contactId: string | null; title: string; chase: boolean }[];
@@ -104,28 +105,32 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
         setStorySavedText(text);
       }
       setStep('findings');
-      if (!mined) {
-        setMineErr(false);
-        fetch('/api/daily/mine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
-          .then((r) => (r.ok ? r.json() : Promise.reject()))
-          .then((m: Mined) => {
-            setMined(m);
-            const t: Record<string, boolean> = {};
-            m.done.forEach((_, i) => (t[`done:${i}`] = true));
-            m.todos.forEach((_, i) => (t[`todos:${i}`] = true));
-            m.delegations.forEach((_, i) => (t[`delegations:${i}`] = true));
-            m.myReminders.forEach((_, i) => (t[`myReminders:${i}`] = true));
-            m.promises.forEach((_, i) => (t[`promises:${i}`] = true));
-            m.events.forEach((_, i) => (t[`events:${i}`] = true));
-            m.lessons.forEach((_, i) => (t[`lessons:${i}`] = true));
-            if (m.emotions) t['emotions'] = true;
-            setTicked(t); // everything starts KEPT — unticking is the rejection
-          })
-          .catch(() => setMineErr(true));
-      }
+      if (!mined) loadMine();
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Deep-read the story. Separate so the honest Retry button can call it again. */
+  function loadMine() {
+    setMineErr(false);
+    setMined(null);
+    fetch('/api/daily/mine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((m: Mined) => {
+        setMined(m);
+        const t: Record<string, boolean> = {};
+        m.done.forEach((_, i) => (t[`done:${i}`] = true));
+        m.todos.forEach((_, i) => (t[`todos:${i}`] = true));
+        m.delegations.forEach((_, i) => (t[`delegations:${i}`] = true));
+        m.myReminders.forEach((_, i) => (t[`myReminders:${i}`] = true));
+        m.promises.forEach((_, i) => (t[`promises:${i}`] = true));
+        m.events.forEach((_, i) => (t[`events:${i}`] = true));
+        m.lessons.forEach((_, i) => (t[`lessons:${i}`] = true));
+        if (m.emotions) t['emotions'] = true;
+        setTicked(t); // everything starts KEPT — unticking is the rejection
+      })
+      .catch(() => setMineErr(true));
   }
 
   /** Step 3 → 4: load the day's still-open tasks for carry choices. */
@@ -220,8 +225,12 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
               <p className="mb-3 text-xs text-zinc-500 flex items-center gap-1.5"><Sparkles size={13} className="text-emerald-500" /> Everything I found in your story — untick anything that's wrong. Nothing is created until the end.</p>
               {mined === null && !mineErr ? (
                 <div className="py-10 text-center text-sm text-zinc-400"><Loader2 size={18} className="mx-auto mb-2 animate-spin" /> Reading your story deeply — tasks, people, feelings, your whole day…</div>
-              ) : mineErr ? (
-                <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">The deep read failed — you can still close the day; only the automatic findings are skipped.</div>
+              ) : mineErr || mined?.failed ? (
+                <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
+                  The deep read failed — an AI hiccup, not a tidy day.
+                  <button onClick={loadMine} className="ml-2 rounded-md border border-amber-400/60 px-2 py-0.5 text-xs font-medium hover:bg-amber-500/10">Try again</button>
+                  <p className="mt-1 text-[11px]">You can also continue — only the automatic findings are skipped.</p>
+                </div>
               ) : (
                 <div className="max-h-[46vh] space-y-4 overflow-y-auto pr-1">
                   <FindSection icon={<Check size={13} className="text-emerald-500" />} title="Finished (will be logged as done)" items={mined.done.map((d, i) => ({ key: `done:${i}`, main: d.title, sub: d.category }))} ticked={ticked} setTicked={setTicked} />
