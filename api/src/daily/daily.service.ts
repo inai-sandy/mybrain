@@ -1691,9 +1691,28 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Brain-eaters open ${ins.neglect.brainEaterCount}, oldest ${ins.neglect.oldestBrainEaterDays}d; aging: ${ins.neglect.aging.map((a) => `${a.title} (${a.days}d)`).join('; ') || 'none'}.`;
     const tmpl = await this.prompts.get('daily.insightsWritten');
     const prompt = `${tmpl}\n\nEVIDENCE:\n${evidence}`;
-    const text = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 400, 'insights-written').catch(() => null))?.trim() || null;
+    const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 400, 'insights-written').catch(() => null))?.trim() || '';
+    // Haiku sometimes wraps the paragraph in JSON ({"coaching_message":"…"}) or a ```json fence —
+    // never show that raw. Pull the prose out; fall back to a fence-stripped version. (BEA-1060)
+    const text = this.plainProse(raw);
     if (text) await this.setSetting('insights.written', JSON.stringify({ day: today, text, generatedAt: new Date().toISOString() })).catch(() => undefined);
-    return { text, generatedAt: text ? new Date().toISOString() : null };
+    return { text: text || null, generatedAt: text ? new Date().toISOString() : null };
+  }
+
+  /** Coerce an LLM reply that should be a plain paragraph into plain text — never a JSON blob. */
+  private plainProse(raw: string): string {
+    const s = (raw || '').trim();
+    if (!s) return '';
+    if (s.startsWith('{') || s.startsWith('```')) {
+      const parsed = looseJsonParse(s);
+      if (parsed && typeof parsed === 'object') {
+        const strings = Object.values(parsed).filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+        if (strings.length) return strings.sort((a, b) => b.length - a.length)[0].trim();
+      }
+      // not parseable JSON — strip a code fence if present
+      return s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').replace(/^\{|\}$/g, '').trim();
+    }
+    return s;
   }
 
   /** Per-day done/total counts across a range, for the calendar heatmap. */

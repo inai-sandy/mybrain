@@ -405,6 +405,15 @@ describe('DailyService', () => {
       expect(r.neglect.aging[0].title).toBe('Insurance renewal');
     });
 
+    it('writtenInsight never shows a raw JSON blob — it pulls the prose out (BEA-1060)', async () => {
+      const { svc, stories } = makeService({ llmText: '```json\n{"coaching_message":"You are pouring 14h into EMO while promises slip. Pick three and finish them."}\n```' });
+      const today = istToday();
+      for (let i = 0; i < 4; i++) stories.push({ id: `s${i}`, day: addDaysKey(today, -i), rawText: 'a real day of work and life', createdAt: new Date(), updatedAt: new Date() });
+      const r = await svc.writtenInsight(true);
+      expect(r.text).toBe('You are pouring 14h into EMO while promises slip. Pick three and finish them.');
+      expect(r.text).not.toContain('{'); // never the blob
+    });
+
     it('is calm and empty when there is no data', async () => {
       const { svc } = makeService();
       const r = await svc.insights(30);

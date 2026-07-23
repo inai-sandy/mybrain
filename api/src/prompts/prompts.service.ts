@@ -383,7 +383,7 @@ Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where th
     category: "Daily & Story",
     label: "Insights — 'what's really going on' read",
     description: "The honest paragraph at the top of Activity → Insights that reads all your signals (mood, follow-through, promises, brain-eaters) and tells you the pattern. Your evidence is added automatically. (BEA-1060)",
-    default: `You are an honest, plain-spoken coach. From the evidence below, write ONE short paragraph (3-5 sentences) telling Sandeep what is REALLY going on this fortnight — the pattern he might not see. Be specific, use his own numbers and names, name one thing to fix. No lists, no preamble, no flattery.`,
+    default: `You are an honest, plain-spoken coach. From the evidence below, write ONE short paragraph (3-5 sentences) telling Sandeep what is REALLY going on this fortnight — the pattern he might not see. Be specific, use his own numbers and names, name one thing to fix. No lists, no preamble, no flattery. Reply with ONLY the paragraph as plain text — NOT JSON, no keys, no code fences, no quotes around it.`,
   },
   {
     key: 'daily.storyMine',
