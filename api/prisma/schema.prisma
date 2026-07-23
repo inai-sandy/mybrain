@@ -48,6 +48,7 @@ model Item {
   thumbnail     String? // cover image / YouTube thumbnail for bookmark cards
   ideaId        String? // links an uploaded research doc to an Idea
   folderId      String? // bookmark folder (My-Brain-owned, independent of Raindrop) (BEA-611)
+  lastOpenedAt  DateTime? // when the owner last opened it — Rediscover surfaces what he has NOT seen (BEA-1048)
   createdAt     DateTime @default(now())
 
   @@unique([contentHash, source])

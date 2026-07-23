@@ -39,6 +39,18 @@ export class BookmarksController {
     return this.bookmarks.setFolder(body?.ids || [], body?.folderId ?? null);
   }
 
+  /** Forgotten bookmarks from one rotating topic — the Rediscover band. (BEA-1048) */
+  @Get('rediscover')
+  rediscover(@Query('shift') shift?: string) {
+    return this.bookmarks.rediscover(shift ? Number(shift) || 0 : 0);
+  }
+
+  /** The owner opened this bookmark — Rediscover stops suggesting it. (BEA-1048) */
+  @Post(':id/opened')
+  opened(@Param('id') id: string) {
+    return this.bookmarks.markOpened(id);
+  }
+
   /** File every unfiled bookmark into broad folders, automatically. (BEA-1046) */
   @Post('organize')
   organize() {

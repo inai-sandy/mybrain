@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2, Plus, Loader2 } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2, Plus, Loader2, Sparkles, Shuffle } from 'lucide-react';
 import { DataTable, Column } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { FOLDER_ICON_NAMES, FOLDER_ICONS, DEFAULT_FOLDER_ICON, FolderGlyph } from '../ui/folderIcons';
@@ -73,6 +73,94 @@ function FolderMenu({ b, folders, onAssign }: { b: BM; folders: Folder[]; onAssi
         </>
       )}
     </div>
+  );
+}
+
+/** "saved 3 months ago" — the age line on a Rediscover card. (BEA-1048) */
+function agoLong(iso: string): string {
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (d <= 0) return 'saved today';
+  if (d < 7) return `saved ${d} day${d === 1 ? '' : 's'} ago`;
+  if (d < 30) return `saved ${Math.floor(d / 7)} week${Math.floor(d / 7) === 1 ? '' : 's'} ago`;
+  const m = Math.floor(d / 30);
+  return `saved ${m} month${m === 1 ? '' : 's'} ago`;
+}
+
+type Redis = { topic: { id: string; name: string; icon?: string | null } | null; items: BM[]; topics: number };
+
+/**
+ * Rediscover — one TOPIC a day of bookmarks you saved and never went back to. The owner's core
+ * complaint was "once it lands, I never visit it again"; this band brings them back, beautifully.
+ * ↻ jumps to another topic; ✕ rests it for the day. Opening a card marks it seen. (BEA-1048)
+ */
+function RediscoverBand({ onOpen }: { onOpen: (id: string) => void }) {
+  const dayKey = new Date().toDateString();
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('bm.rediscoverHiddenDay') === dayKey; } catch { return false; } });
+  const [data, setData] = useState<Redis | null>(null);
+  const [shift, setShift] = useState(0);
+  const [spinning, setSpinning] = useState(false);
+
+  useEffect(() => {
+    if (hidden) return;
+    let dead = false;
+    setSpinning(true);
+    fetch(`/api/bookmarks/rediscover?shift=${shift}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!dead) setData(d); })
+      .catch(() => { if (!dead) setData(null); })
+      .finally(() => { if (!dead) setSpinning(false); });
+    return () => { dead = true; };
+  }, [shift, hidden]);
+
+  if (hidden || !data?.topic || !data.items.length) return null;
+
+  function dismiss() {
+    try { localStorage.setItem('bm.rediscoverHiddenDay', dayKey); } catch { /* ignore */ }
+    setHidden(true);
+  }
+
+  return (
+    <section className="relative overflow-hidden rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/10 via-emerald-500/[0.07] to-transparent p-4 dark:border-indigo-400/15">
+      {/* soft glow, pure decoration */}
+      <div aria-hidden className="pointer-events-none absolute -top-16 -right-16 h-48 w-48 rounded-full bg-indigo-500/15 blur-3xl" />
+      <div className="relative flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400"><Sparkles size={12} /> Rediscover</p>
+          <h2 className="mt-0.5 flex items-center gap-2 text-lg font-extrabold leading-tight">
+            <FolderGlyph name={data.topic.icon} size={18} /> <span className="truncate">{data.topic.name}</span>
+          </h2>
+          <p className="text-xs text-zinc-500">{data.items.length} you saved and haven't looked at lately</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {data.topics > 1 && (
+            <button onClick={() => setShift((s) => s + 1)} title="Another topic" className="rounded-lg border border-zinc-300/60 p-2 text-zinc-500 hover:border-indigo-400 hover:text-indigo-500 dark:border-zinc-700">
+              <Shuffle size={15} className={spinning ? 'animate-pulse' : ''} />
+            </button>
+          )}
+          <button onClick={dismiss} title="Hide for today" className="rounded-lg p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={16} /></button>
+        </div>
+      </div>
+      <div className="relative mt-3 flex snap-x gap-3 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+        {data.items.map((b) => (
+          <button key={b.id} onClick={() => onOpen(b.id)} className="group w-48 shrink-0 snap-start overflow-hidden rounded-xl border border-zinc-200/70 bg-white/80 text-left backdrop-blur transition-all hover:-translate-y-0.5 hover:border-indigo-400/60 hover:shadow-lg dark:border-zinc-700/60 dark:bg-zinc-900/70">
+            <div className="relative aspect-video w-full overflow-hidden bg-gradient-to-br from-indigo-500/15 to-emerald-500/15">
+              {b.thumbnail ? (
+                <img src={b.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              ) : (
+                <span className="absolute inset-0 grid place-items-center text-zinc-400"><Link2 size={22} /></span>
+              )}
+              {isYouTube(b.sourceUrl) && (
+                <span className="absolute inset-0 grid place-items-center"><span className="rounded-full bg-black/60 p-1.5"><Play size={12} className="fill-white text-white" /></span></span>
+              )}
+            </div>
+            <div className="p-2.5">
+              <p className="line-clamp-2 text-[13px] font-semibold leading-snug group-hover:text-indigo-500">{b.title}</p>
+              <p className="mt-1 text-[11px] text-zinc-400">{agoLong(b.createdAt)}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -225,7 +313,11 @@ export function Bookmarks() {
   const [results, setResults] = useState<BM[] | null>(null);
   const toast = useToast();
   const navigate = useNavigate();
-  const onOpen = (id: string) => navigate(`/doc/${id}`);
+  // Every in-app open is remembered, so Rediscover stops suggesting what you just read. (BEA-1048)
+  const onOpen = (id: string) => {
+    fetch(`/api/bookmarks/${id}/opened`, { method: 'POST' }).catch(() => undefined);
+    navigate(`/doc/${id}`);
+  };
   const [sharing, setSharing] = useState<BM | null>(null);
   const onShare = (b: BM) => setSharing(b);
   const [view, setView] = useState<'grid' | 'list'>(() => (typeof localStorage !== 'undefined' && localStorage.getItem('bm.view') === 'grid' ? 'grid' : 'list'));
@@ -438,6 +530,9 @@ export function Bookmarks() {
           </button>
         </div>
       </div>
+
+      {/* Forgotten bookmarks come back, one topic a day — hidden while searching. (BEA-1048) */}
+      {results === null && <RediscoverBand onOpen={onOpen} />}
 
       {/* One controls row: Search · Folder · Manage · Tag (BEA-614) */}
       <form onSubmit={ask} className="flex flex-wrap items-center gap-2">
