@@ -423,6 +423,37 @@ describe('DailyService', () => {
     });
   });
 
+  // The book: chapters + pull-quotes + per-month mood + year arc. (BEA-1061)
+  describe('bookData (BEA-1061)', () => {
+    it('assembles chapters with a pull-quote and month mood, pending months, and a 12-point arc', async () => {
+      const { svc, monthStories, dayStories } = makeService();
+      monthStories.push({ month: '2026-05', title: 'The Month of Building', text: 'May opened slow. I finally cracked the pricing after weeks of doubt and felt proud for the first time in months. Then the real work began.', createdAt: new Date(), updatedAt: new Date() });
+      // May has a chapter; June has 3 day-stories but no chapter → pending
+      dayStories.push(
+        { day: '2026-05-03', moodScore: 60 }, { day: '2026-05-20', moodScore: 80 },
+        { day: '2026-06-05', moodScore: 50 }, { day: '2026-06-12', moodScore: 55 }, { day: '2026-06-19', moodScore: 45 },
+      );
+      const b = await svc.bookData('2026');
+      expect(b.year).toBe('2026');
+      expect(b.chapters).toHaveLength(1);
+      expect(b.chapters[0].moodAvg).toBe(70); // (60+80)/2
+      expect(b.chapters[0].excerpt).toContain('proud'); // the emotionally-weighted sentence
+      expect(b.pending).toEqual(['2026-06']); // 3 days, no chapter
+      expect(b.moodArc).toHaveLength(12);
+      expect(b.moodArc[4]).toMatchObject({ month: '2026-05', mood: 70 });
+      expect(b.moodArc[5]).toMatchObject({ month: '2026-06', mood: 50 });
+      expect(b.moodArc[0].mood).toBeNull(); // January — no data
+    });
+
+    it('defaults to the current year and is empty-safe', async () => {
+      const { svc } = makeService();
+      const b = await svc.bookData();
+      expect(b.chapters).toEqual([]);
+      expect(b.pending).toEqual([]);
+      expect(b.moodArc).toHaveLength(12);
+    });
+  });
+
   describe('Story of the Month', () => {
     it('weaves a chapter from the month\'s day stories and indexes it to memory', async () => {
       const { svc, dayStories, monthStories, enqueued } = makeService({ llmText: '{"title":"The Month of Building","story":"May opened with doubt and closed with a shipped product."}' });

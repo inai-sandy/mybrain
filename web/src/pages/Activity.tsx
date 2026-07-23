@@ -1032,27 +1032,88 @@ function StoryTabs({ ds }: { ds: NonNullable<DayStoryT> }) {
   );
 }
 
-// ---------- Your book: monthly chapters woven from the day stories ----------
-type Chapter = { month: string; title?: string | null; text: string; createdAt: string };
+// ---------- Your book: a real illustrated life-book (BEA-1061) ----------
+type BookChapter = { month: string; title?: string | null; text: string; excerpt: string | null; moodAvg: number | null };
+type BookData = { year: string; yearStory: { year: string; title?: string | null; text: string; partial: boolean } | null; chapters: BookChapter[]; pending: string[]; moodArc: { month: string; mood: number | null }[] };
 
 function monthLabel(m: string): string {
   const [y, mo] = m.split('-').map(Number);
   return new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
+function monthShort(m: string): string {
+  const [y, mo] = m.split('-').map(Number);
+  return new Date(y, mo - 1, 1).toLocaleDateString(undefined, { month: 'short' });
+}
+const moodEmoji = (n: number | null) => (n == null ? '' : n >= 75 ? '😊' : n >= 55 ? '🙂' : n >= 40 ? '😐' : '😔');
+
+/** Strip markdown to readable plain text for the print edition. */
+function stripMd(t: string): string {
+  return (t || '').replace(/^#+\s*/gm, '').replace(/[*_`>~]/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trim();
+}
+
+/** Build a clean printable HTML book and open the browser print dialog → Save as PDF. (BEA-1061) */
+function printBook(data: BookData) {
+  const esc = (x: string) => x.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string));
+  const para = (t: string) => stripMd(t).split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br/>')}</p>`).join('');
+  const chapters = data.chapters.map((c) => `
+    <section class="chapter">
+      <div class="ch-month">${esc(monthLabel(c.month))} ${c.moodAvg != null ? `· mood ${c.moodAvg}` : ''}</div>
+      <h2>${esc(c.title || 'Chapter')}</h2>
+      ${c.excerpt ? `<blockquote>${esc(c.excerpt)}</blockquote>` : ''}
+      ${para(c.text)}
+    </section>`).join('');
+  const yearSec = data.yearStory ? `<section class="chapter year"><div class="ch-month">The year in full</div><h2>${esc(data.yearStory.title || `The Story of ${data.year}`)}</h2>${para(data.yearStory.text)}</section>` : '';
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>The Story of ${esc(data.year)}</title>
+    <style>
+      @page { margin: 22mm 18mm; }
+      body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; line-height: 1.7; }
+      .cover { text-align:center; page-break-after: always; padding-top: 40mm; }
+      .cover .big { font-size: 42px; font-weight: 700; letter-spacing: -0.5px; }
+      .cover .sub { font-size: 15px; color:#666; margin-top: 8px; letter-spacing: 3px; text-transform: uppercase; }
+      .cover .title { font-size: 24px; font-style: italic; color:#444; margin-top: 40px; }
+      .chapter { page-break-before: always; }
+      .ch-month { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color:#999; }
+      h2 { font-size: 26px; margin: 4px 0 14px; font-weight: 700; }
+      blockquote { border-left: 3px solid #bbb; margin: 16px 0; padding: 4px 0 4px 16px; font-style: italic; font-size: 18px; color:#555; }
+      p { margin: 0 0 12px; text-align: justify; }
+      p:first-of-type::first-letter { font-size: 46px; font-weight:700; float:left; line-height:0.8; padding: 6px 8px 0 0; }
+    </style></head><body>
+    <div class="cover"><div class="sub">The Story of</div><div class="big">${esc(data.year)}</div>${data.yearStory?.title ? `<div class="title">"${esc(data.yearStory.title)}"</div>` : ''}</div>
+    ${yearSec}${chapters}
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) return false;
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { w.focus(); w.print(); }, 400);
+  return true;
+}
+
+/** A single chapter, read like a memoir page — drop-cap, pull-quote, prose. */
+function ChapterReader({ c, onBack, onRewrite, rewriting }: { c: BookChapter; onBack: () => void; onRewrite: () => void; rewriting: boolean }) {
+  return (
+    <article className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 sm:p-8">
+      <button onClick={onBack} className="mb-4 inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-indigo-500"><ChevronLeft size={13} /> All chapters</button>
+      <p className="text-[11px] uppercase tracking-[0.2em] text-zinc-400">{monthLabel(c.month)} {c.moodAvg != null ? `· mood ${c.moodAvg} ${moodEmoji(c.moodAvg)}` : ''}</p>
+      <h1 className="mt-1 font-serif text-3xl font-bold leading-tight">{c.title || 'Chapter'}</h1>
+      {c.excerpt && <blockquote className="my-5 border-l-4 border-indigo-400/50 pl-4 font-serif text-xl italic leading-relaxed text-zinc-500 dark:text-zinc-400">“{c.excerpt}”</blockquote>}
+      <div className="dropcap font-serif text-[15px] leading-[1.85] text-zinc-700 dark:text-zinc-200">
+        <Markdown>{c.text}</Markdown>
+      </div>
+      <button onClick={onRewrite} disabled={rewriting} className="mt-6 inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-indigo-500"><RefreshCw size={12} className={rewriting ? 'animate-spin' : ''} /> {rewriting ? 'Rewriting…' : 'rewrite this chapter'}</button>
+    </article>
+  );
+}
 
 function BookView() {
-  const [data, setData] = useState<{ chapters: Chapter[]; pending: string[]; count: number } | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  const [data, setData] = useState<BookData | null>(null);
+  const [reading, setReading] = useState<string | null>(null); // month key being read, or 'year'
   const [writing, setWriting] = useState<string | null>(null);
   const toast = useToast();
 
   async function load() {
-    const r = await fetch('/api/daily/months');
-    if (r.ok) {
-      const j = await r.json();
-      setData(j);
-      setOpen((cur) => cur ?? j.chapters?.[0]?.month ?? null);
-    }
+    const r = await fetch('/api/daily/book');
+    if (r.ok) setData(await r.json());
   }
   useEffect(() => { load(); }, []);
 
@@ -1061,28 +1122,74 @@ function BookView() {
     try {
       const r = await fetch('/api/daily/month-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month, force }) });
       const j = await r.json();
-      if (r.ok && j.text) { toast('success', `Chapter written — ${monthLabel(month)}`); setOpen(month); load(); }
+      if (r.ok && j.text) { toast('success', `Chapter written — ${monthLabel(month)}`); await load(); }
       else toast('error', j.message || 'Could not write the chapter');
+    } finally { setWriting(null); }
+  }
+  async function writeYear() {
+    setWriting('year');
+    try {
+      const r = await fetch('/api/daily/year-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year: data?.year, force: true }) });
+      const j = await r.json();
+      if (r.ok && j.text) { toast('success', 'Your year, written ✨'); await load(); setReading('year'); }
+      else toast('error', j.message || 'Write a monthly chapter first');
     } finally { setWriting(null); }
   }
 
   if (!data) return <p className="text-sm text-zinc-400">Loading…</p>;
+
+  const arc = data.moodArc.filter((m) => m.mood != null);
+  const readingChapter = reading && reading !== 'year' ? data.chapters.find((c) => c.month === reading) : null;
+
+  // Reading a single chapter — full page.
+  if (readingChapter) return <ChapterReader c={readingChapter} onBack={() => setReading(null)} onRewrite={() => write(readingChapter.month, true)} rewriting={writing === readingChapter.month} />;
+  if (reading === 'year' && data.yearStory) {
+    return (
+      <ChapterReader
+        c={{ month: `${data.year}-13`, title: data.yearStory.title || `The Story of ${data.year}`, text: data.yearStory.text, excerpt: null, moodAvg: arc.length ? Math.round(arc.reduce((a, b) => a + (b.mood || 0), 0) / arc.length) : null }}
+        onBack={() => setReading(null)} onRewrite={writeYear} rewriting={writing === 'year'}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-indigo-300/50 dark:border-indigo-500/30 bg-gradient-to-br from-indigo-500/10 to-transparent p-5">
-        <h2 className="flex items-center gap-2 font-semibold mb-1"><BookOpen size={16} className="text-indigo-400" /> The book of your life</h2>
-        <p className="text-sm text-zinc-500">Every month, your daily stories are woven into one chapter — written automatically on the 1st. On December 31st, the chapters become the Story of your Year.</p>
+    <div className="space-y-5">
+      {/* The cover */}
+      <section className="relative overflow-hidden rounded-2xl border border-indigo-400/25 bg-gradient-to-br from-indigo-600/25 via-violet-600/15 to-amber-500/10 p-8 text-center">
+        <div aria-hidden className="pointer-events-none absolute -top-20 -right-16 h-56 w-56 rounded-full bg-indigo-500/20 blur-3xl" />
+        <div aria-hidden className="pointer-events-none absolute -bottom-20 -left-16 h-56 w-56 rounded-full bg-amber-500/15 blur-3xl" />
+        <p className="relative text-[11px] uppercase tracking-[0.35em] text-indigo-500 dark:text-indigo-300">The Story of</p>
+        <h1 className="relative font-serif text-6xl font-extrabold tracking-tight">{data.year}</h1>
+        {data.yearStory?.title && <p className="relative mt-3 font-serif text-xl italic text-zinc-600 dark:text-zinc-300">“{data.yearStory.title}”</p>}
+        <p className="relative mt-2 text-xs text-zinc-500">{data.chapters.length} chapter{data.chapters.length === 1 ? '' : 's'}{data.yearStory?.partial ? ' · year so far' : ''}</p>
+        <div className="relative mt-5 flex flex-wrap items-center justify-center gap-2">
+          {data.yearStory ? (
+            <button onClick={() => setReading('year')} className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"><BookOpen size={15} /> Read the year</button>
+          ) : (
+            <button onClick={writeYear} disabled={writing === 'year'} className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">{writing === 'year' ? 'Writing…' : 'Write my year so far'}</button>
+          )}
+          <button onClick={() => printBook(data)} className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 dark:border-zinc-600 px-4 py-2 text-sm font-medium hover:border-indigo-400 hover:text-indigo-500"><FileText size={15} /> Export PDF</button>
+        </div>
       </section>
 
-      <YearCard />
+      {/* The mood arc across the year */}
+      {arc.length >= 2 && (
+        <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
+          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold"><HeartPulse size={15} className="text-pink-500" /> Your mood, across the year</h2>
+          <TrendLine points={data.moodArc.map((m) => m.mood)} color="#6366f1" h={56} />
+          <div className="mt-1 flex justify-between text-[10px] text-zinc-400">
+            {data.moodArc.map((m) => <span key={m.month}>{monthShort(m.month)[0]}</span>)}
+          </div>
+        </section>
+      )}
 
-
+      {/* Pending months */}
       {data.pending.length > 0 && (
         <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-          <h3 className="text-sm font-semibold mb-2">Months waiting to be written</h3>
+          <h3 className="mb-2 text-sm font-semibold">Months ready to become a chapter</h3>
           <div className="flex flex-wrap gap-2">
             {data.pending.map((m) => (
-              <button key={m} onClick={() => write(m)} disabled={writing === m} className="rounded-full border border-indigo-300/50 dark:border-indigo-500/30 px-3 py-1.5 text-sm text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50">
+              <button key={m} onClick={() => write(m)} disabled={writing === m} className="rounded-full border border-indigo-300/50 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-500/10 disabled:opacity-50 dark:border-indigo-500/30 dark:text-indigo-300">
                 {writing === m ? 'Writing…' : `✍️ ${monthLabel(m)}`}
               </button>
             ))}
@@ -1090,86 +1197,30 @@ function BookView() {
         </section>
       )}
 
+      {/* Contents */}
       {data.chapters.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 p-8 text-center text-sm text-zinc-400">No chapters yet — they begin once a month has at least 3 recorded days.</p>
+        <p className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 p-10 text-center text-sm text-zinc-400">No chapters yet — a month becomes a chapter once it has at least 3 recorded days.</p>
       ) : (
-        <div className="space-y-2">
-          {data.chapters.map((c) => {
-            const isOpen = open === c.month;
-            return (
-              <section key={c.month} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
-                <button onClick={() => setOpen(isOpen ? null : c.month)} className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left">
-                  <span>
-                    <span className="block text-xs text-zinc-400">{monthLabel(c.month)}</span>
-                    <span className="font-semibold">{c.title || `Chapter — ${monthLabel(c.month)}`}</span>
-                  </span>
-                  <ChevronRight size={16} className={'shrink-0 text-zinc-400 transition-transform ' + (isOpen ? 'rotate-90' : '')} />
-                </button>
-                {isOpen && (
-                  <div className="px-4 pb-4">
-                    <Markdown className="text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed">{c.text}</Markdown>
-                    <button onClick={() => write(c.month, true)} disabled={writing === c.month} className="mt-3 text-xs text-zinc-400 hover:text-indigo-500 inline-flex items-center gap-1">
-                      <RefreshCw size={12} /> {writing === c.month ? 'Rewriting…' : 'rewrite chapter'}
-                    </button>
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
+        <section>
+          <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-zinc-400">Chapters</h3>
+          <div className="space-y-2.5">
+            {data.chapters.slice().reverse().map((c) => (
+              <button key={c.month} onClick={() => setReading(c.month)} className="group flex w-full items-start gap-4 rounded-xl border border-zinc-200 bg-white p-4 text-left transition-all hover:border-indigo-400/50 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="shrink-0 text-center">
+                  <div className="font-serif text-2xl font-bold leading-none">{monthShort(c.month)}</div>
+                  {c.moodAvg != null && <div className="mt-1 text-lg">{moodEmoji(c.moodAvg)}</div>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-serif text-lg font-semibold leading-snug group-hover:text-indigo-500">{c.title || monthLabel(c.month)}</h4>
+                  {c.excerpt && <p className="mt-1 line-clamp-2 text-sm italic text-zinc-500 dark:text-zinc-400">“{c.excerpt}”</p>}
+                </div>
+                <ChevronRight size={18} className="mt-1 shrink-0 text-zinc-300 group-hover:text-indigo-400 dark:text-zinc-600" />
+              </button>
+            ))}
+          </div>
+        </section>
       )}
     </div>
-  );
-}
-
-// ---------- Story of the Year card ----------
-type YearStoryT = { year: string; title?: string | null; text: string; partial: boolean; missing?: boolean };
-
-function YearCard() {
-  const year = String(new Date().getFullYear());
-  const [ys, setYs] = useState<YearStoryT | null>(null);
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const toast = useToast();
-
-  async function load() {
-    const r = await fetch(`/api/daily/year-story?year=${year}`);
-    if (r.ok) setYs(await r.json());
-  }
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function write() {
-    setBusy(true);
-    try {
-      const r = await fetch('/api/daily/year-story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ year, force: true }) });
-      const j = await r.json();
-      if (r.ok && j.text) { toast('success', 'Your year, written ✨'); setYs(j); setOpen(true); }
-      else toast('error', j.message || 'Write a monthly chapter first');
-    } finally { setBusy(false); }
-  }
-
-  const have = ys && !ys.missing;
-  return (
-    <section className="rounded-xl border border-amber-300/50 dark:border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-transparent p-5">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 font-semibold">
-          📖 Story of the Year {year}
-          {have && ys!.partial && <span className="text-[10px] uppercase tracking-wide rounded-full bg-amber-500/15 text-amber-600 px-2 py-0.5">so far</span>}
-        </h2>
-        <button onClick={write} disabled={busy} className="shrink-0 text-xs text-zinc-400 hover:text-amber-600 inline-flex items-center gap-1">
-          <RefreshCw size={12} /> {busy ? 'Writing…' : have ? 'Update' : 'Write my year so far'}
-        </button>
-      </div>
-      {have ? (
-        <div className="mt-2">
-          {ys!.title && <p className="font-bold text-lg">“{ys!.title}”</p>}
-          <Markdown className={'mt-1 text-sm text-zinc-700 dark:text-zinc-200 leading-relaxed ' + (open ? '' : 'line-clamp-4')}>{ys!.text}</Markdown>
-          <button onClick={() => setOpen((v) => !v)} className="mt-2 text-xs text-amber-600 hover:underline">{open ? 'Show less' : 'Read the whole story'}</button>
-        </div>
-      ) : (
-        <p className="mt-1 text-sm text-zinc-500">Written automatically on December 31st from your monthly chapters — or get a “year so far” edition any time with the button above.</p>
-      )}
-    </section>
   );
 }
 

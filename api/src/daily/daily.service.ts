@@ -907,6 +907,57 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return { month: m.month, title: m.title, text: m.text, createdAt: m.createdAt, updatedAt: m.updatedAt };
   }
 
+  /** Lift a punchy pull-quote out of a chapter — a memoir-style highlight. (BEA-1061) */
+  private pullQuote(text: string): string | null {
+    const plain = (text || '')
+      .replace(/[#*_>`~]/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const sentences = plain.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length >= 40 && s.length <= 180);
+    if (!sentences.length) return null;
+    // Prefer a sentence with emotional weight; else the second sentence (openers are often scene-setting).
+    const weighted = sentences.find((s) => /\b(felt|realised|realized|proud|afraid|hard|first time|finally|never|always|learned|hope|fear|love|lost|won|changed)\b/i.test(s));
+    return (weighted || sentences[1] || sentences[0]).replace(/"/g, '');
+  }
+
+  /**
+   * Everything the book screen needs in one call (BEA-1061): the year's chapters (each with a
+   * pull-quote + that month's average mood), the pending months, the year story, and a 12-point
+   * mood arc for the whole year.
+   */
+  async bookData(yearInput?: string) {
+    const tz = await this.tz();
+    const year = yearInput && /^\d{4}$/.test(yearInput) ? yearInput : this.dayKey(tz).slice(0, 4);
+    const [chapters, dayStories, yearRow] = await Promise.all([
+      this.prisma.monthStory.findMany({ where: { month: { gte: `${year}-01`, lte: `${year}-12` } }, orderBy: { month: 'asc' } }),
+      this.prisma.dayStory.findMany({ where: { day: { gte: `${year}-01-01`, lte: `${year}-12-31` } }, select: { day: true, moodScore: true } }),
+      this.prisma.yearStory.findUnique({ where: { year } }),
+    ]);
+    const byMonth: Record<string, number[]> = {};
+    const daysInMonth: Record<string, number> = {};
+    for (const s of dayStories) {
+      const m = s.day.slice(0, 7);
+      daysInMonth[m] = (daysInMonth[m] || 0) + 1;
+      if (s.moodScore != null) (byMonth[m] = byMonth[m] || []).push(s.moodScore);
+    }
+    const avg = (arr: number[]) => (arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null);
+    const have = new Set(chapters.map((c) => c.month));
+    const chapterOut = chapters.map((c) => ({
+      month: c.month,
+      title: c.title,
+      text: c.text,
+      excerpt: this.pullQuote(c.text),
+      moodAvg: avg(byMonth[c.month] || []),
+    }));
+    const pending = Object.keys(daysInMonth).filter((m) => daysInMonth[m] >= 3 && !have.has(m)).sort();
+    const moodArc = Array.from({ length: 12 }, (_, i) => {
+      const m = `${year}-${String(i + 1).padStart(2, '0')}`;
+      return { month: m, mood: avg(byMonth[m] || []) };
+    });
+    return { year, yearStory: yearRow ? this.shapeYearStory(yearRow) : null, chapters: chapterOut, pending, moodArc };
+  }
+
   /** Written chapters + months that have day-stories but no chapter yet (offered for on-demand writing). */
   async listMonths() {
     const [chapters, dayStories] = await Promise.all([
