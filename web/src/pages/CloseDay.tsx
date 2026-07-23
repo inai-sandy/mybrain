@@ -119,6 +119,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
             m.events.forEach((_, i) => (t[`events:${i}`] = true));
             m.lessons.forEach((_, i) => (t[`lessons:${i}`] = true));
             if (m.emotions) t['emotions'] = true;
+            setTicked(t); // everything starts KEPT — unticking is the rejection
           })
           .catch(() => setMineErr(true));
       }
