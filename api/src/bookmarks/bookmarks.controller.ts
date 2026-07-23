@@ -39,6 +39,20 @@ export class BookmarksController {
     return this.bookmarks.setFolder(body?.ids || [], body?.folderId ?? null);
   }
 
+  /** Start a real agent research run about this bookmark. (BEA-1047) */
+  @Post(':id/research')
+  async research(@Param('id') id: string, @Body() body: { question?: string }) {
+    const res = await this.bookmarks.research(id, body?.question || '');
+    if (!res.ok) throw new BadRequestException(res.message || 'Could not start the research');
+    return res;
+  }
+
+  /** Past research runs for this bookmark. (BEA-1047) */
+  @Get(':id/research')
+  researchRuns(@Param('id') id: string) {
+    return this.bookmarks.researchRuns(id);
+  }
+
   /** Forgotten bookmarks from one rotating topic — the Rediscover band. (BEA-1048) */
   @Get('rediscover')
   rediscover(@Query('shift') shift?: string) {

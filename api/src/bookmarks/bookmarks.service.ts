@@ -8,6 +8,7 @@ import { SummarizerService } from './summarizer.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
 import { InstagramEnricher } from './instagram.service';
 import { ItemsService } from '../items/items.service';
+import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { looseJsonParse } from '../common/llm-json';
 
 /** Bookmarks live alongside other items on disk so the existing view/delete endpoints work. */
@@ -53,7 +54,8 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     private readonly summarizer: SummarizerService,
     private readonly raindrop: RaindropClient,
     private readonly instagram: InstagramEnricher,
-    private readonly items: ItemsService, // LAST on purpose — keeps positional wiring stable (BEA-1049)
+    private readonly items: ItemsService, // new deps stay LAST — keeps positional wiring stable (BEA-1049)
+    private readonly bridge: HermesBridgeService, // research runs (BEA-1047)
   ) {}
 
   private bookmarksDir() {
@@ -374,6 +376,44 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       await fs.unlink(join(this.bookmarksDir(), `${r.id}.jpg`)).catch(() => undefined); // cached IG image, if any
     }
     return { ok: true, deleted: rows.length };
+  }
+
+  // ---- Research: a bookmark stops being a dead end. (BEA-1047) -------------
+
+  /** The marker stitched into a research run's input, so past research finds its bookmark again. */
+  private researchTag(id: string): string {
+    return `[bookmark:${id}]`;
+  }
+
+  /**
+   * Start a REAL agent run researching this bookmark, in the owner's own words. The run appears
+   * in the Agent module (watch it live), and the finished report is saved as a Document. (BEA-1047)
+   */
+  async research(id: string, question: string): Promise<{ ok: boolean; runId?: string; message?: string }> {
+    const q = String(question || '').trim();
+    if (!q) return { ok: false, message: 'Tell me what you want to research first' };
+    const b = await this.prisma.item.findFirst({ where: { id, source: { in: ['raindrop', 'bookmark'] } } });
+    if (!b) return { ok: false, message: 'Bookmark not found' };
+    const prompt =
+      `${this.researchTag(id)} Research request about one of Sandeep's saved bookmarks.\n\n` +
+      `Bookmark: ${b.title || 'untitled'}\nLink: ${b.sourceUrl || 'none'}\n` +
+      (b.summary ? `What we already know: ${b.summary}\n` : '') +
+      `\nSandeep asks, in his own words:\n"${q.slice(0, 2000)}"\n\n` +
+      `Do real research: read the bookmark's link and search the web as needed, cross-check what you find, ` +
+      `and write a clear plain-English report (short words, short sentences) with sources at the end. ` +
+      `Save the report as a document titled "Research: ${(b.title || 'bookmark').slice(0, 80)}".`;
+    const run = await this.bridge.startRun({ prompt, title: `Research: ${(b.title || 'bookmark').slice(0, 100)}`, save: true, depth: 'standard' });
+    return { ok: true, runId: run.id };
+  }
+
+  /** Past research runs for this bookmark — so research is never lost. (BEA-1047) */
+  async researchRuns(id: string) {
+    const runs = await this.prisma.agentRun.findMany({
+      where: { input: { contains: this.researchTag(id) } },
+      orderBy: { startedAt: 'desc' },
+      take: 10,
+    });
+    return { runs: runs.map((r) => ({ id: r.id, title: r.title, status: r.status, startedAt: r.startedAt, outputDocId: r.outputDocId })) };
   }
 
   // ---- Rediscover: forgotten bookmarks come back, one TOPIC at a time. (BEA-1048) ----

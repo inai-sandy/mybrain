@@ -57,8 +57,12 @@ function makeService(over: any = {}) {
   const instagram: any = { isInstagram: () => false, enrich: async () => null, configured: async () => false };
   const removed: string[] = [];
   const items: any = { remove: async (id: string) => removed.push(id) }; // the one true item delete (BEA-1049)
-  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram, items);
-  return { svc, created, updated, enqueued, removed, filings, folderRows };
+  // Research runs (BEA-1047)
+  const startedRuns: any[] = [];
+  const bridge: any = { startRun: async (input: any) => { startedRuns.push(input); return { id: 'run1' }; } };
+  prisma.agentRun = { findMany: async () => over.researchRows ?? [] };
+  const svc = new BookmarksService(prisma, memory, summarizer, raindrop, instagram, items, bridge);
+  return { svc, created, updated, enqueued, removed, filings, folderRows, startedRuns };
 }
 
 const bm = (over: any) => ({ id: 1, title: 'T', link: '', excerpt: '', note: '', tags: [], created: '2026-05-10T00:00:00Z', ...over });
@@ -243,6 +247,35 @@ describe('BookmarksService', () => {
     it('shows nothing rather than a thin band when no folder has enough in it', async () => {
       const { svc } = makeService({ folders, folderCounts: [{ folderId: 'fA', _count: 2 }] });
       expect(await svc.rediscover()).toEqual({ topic: null, items: [], topics: 0 });
+    });
+  });
+
+  // A bookmark stops being a dead end. (BEA-1047)
+  describe('research (BEA-1047)', () => {
+    it('starts a real agent run with the bookmark as context and a marker for finding it later', async () => {
+      const { svc, startedRuns } = makeService({ dupRow: { id: 'b1', title: 'EMO pendant ideas', sourceUrl: 'https://x.com/emo', summary: 'wearable notes', source: 'raindrop' } });
+      const r = await svc.research('b1', 'find similar products and their prices');
+      expect(r).toEqual({ ok: true, runId: 'run1' });
+      expect(startedRuns[0].prompt).toContain('[bookmark:b1]');
+      expect(startedRuns[0].prompt).toContain('EMO pendant ideas');
+      expect(startedRuns[0].prompt).toContain('find similar products and their prices');
+      expect(startedRuns[0].save).toBe(true); // the report lands as a Document
+      expect(startedRuns[0].title).toContain('Research:');
+    });
+
+    it('refuses an empty question and an unknown bookmark', async () => {
+      const empty = await makeService({ dupRow: { id: 'b1' } }).svc.research('b1', '   ');
+      expect(empty.ok).toBe(false);
+      const missing = await makeService({ dupRow: null }).svc.research('nope', 'anything');
+      expect(missing.ok).toBe(false);
+    });
+
+    it('lists past research runs so research is never lost', async () => {
+      const rows = [{ id: 'r1', title: 'Research: X', status: 'done', startedAt: new Date(), outputDocId: 'doc9', extra: 'hidden' }];
+      const { svc } = makeService({ researchRows: rows });
+      const out = await svc.researchRuns('b1');
+      expect(out.runs).toHaveLength(1);
+      expect(out.runs[0]).toEqual({ id: 'r1', title: 'Research: X', status: 'done', startedAt: rows[0].startedAt, outputDocId: 'doc9' });
     });
   });
 
