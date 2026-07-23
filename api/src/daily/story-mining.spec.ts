@@ -137,6 +137,17 @@ describe('apply — exactly what was ticked, through the real doors (BEA-1051)',
     expect(findings[0]).toMatchObject({ statement: 'Late nights eat mornings', status: 'proposed', firstSeenDay: '2026-07-22' });
   });
 
+  it('backfillFeelings writes ONLY emotions + events for already-told days — no tasks (BEA-1058)', async () => {
+    const { svc, createdTasks, storyUpdates, dayEvents } = make(RICH);
+    // one story with no emotions yet
+    (svc as any).prisma.story.findMany = async () => [{ id: 's1', day: '2026-07-22', rawText: 'A long real diary about the whole day at the factory and beyond, lots to mine.', emotions: null }];
+    const r = await svc.backfillFeelings(7);
+    expect(r.filled).toBe(1);
+    expect(storyUpdates.some((u: any) => u.emotions)).toBe(true); // emotions written
+    expect(dayEvents.length).toBeGreaterThan(0); // life events written
+    expect(createdTasks).toHaveLength(0); // NOTHING created — visible parts only
+  });
+
   it('applying an empty pick creates nothing', async () => {
     const { svc, createdTasks, doneTasks, chases } = make(RICH);
     const counts = await svc.apply('2026-07-22', {});
