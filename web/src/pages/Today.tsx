@@ -134,15 +134,16 @@ export function Today() {
       {/* Daytime notes + nightly story */}
       <StorySection />
 
-      {/* Seal today when you're done — the one act that settles everything */}
-      {data?.dumped && (
-        <button onClick={() => data?.day && setCloseDay(data.day)} className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10 p-3 text-sm font-medium text-emerald-700 dark:text-emerald-300 transition-colors">
-          <Lock size={15} /> Close the day — finish tasks, story &amp; settle the mentor
-        </button>
-      )}
-
-      {/* The door back into any past day — sealed or not. (BEA-1052) */}
-      <MissedDayPicker onPick={setCloseDay} />
+      {/* Seal today when you're done, or fill a past day you missed — the two day-actions together. */}
+      <div className="grid gap-2 sm:grid-cols-2">
+        {data?.dumped && (
+          <button onClick={() => data?.day && setCloseDay(data.day)} className="flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/5 hover:bg-emerald-500/10 p-3 text-sm font-medium text-emerald-700 dark:text-emerald-300 transition-colors">
+            <Lock size={15} /> Close the day
+          </button>
+        )}
+        {/* A proper button now — the door back into any past day, sealed or not. (BEA-1058) */}
+        <MissedDayPicker onPick={setCloseDay} />
+      </div>
 
       {closeDay && <CloseDaySheet day={closeDay} onClose={() => setCloseDay(null)} onClosed={() => { load(); setBannerKey((k) => k + 1); }} />}
 

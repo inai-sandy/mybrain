@@ -371,23 +371,23 @@ export function OpenDaysBanner({ onPick }: { onPick: (day: string) => void }) {
   );
 }
 
-/** "Fill a missed day" — the door back into ANY past day, sealed or not. (BEA-1052) */
+/**
+ * "Fill a past day" — a proper button (not a weak link), the door back into ANY past day, sealed or
+ * not. Tapping opens a native date picker; choosing a day launches the Close-day wizard. (BEA-1058)
+ */
 export function MissedDayPicker({ onPick }: { onPick: (day: string) => void }) {
-  const [open, setOpen] = useState(false);
   const yesterday = (() => { const d = new Date(Date.now() - 86400000); return d.toLocaleDateString('en-CA'); })();
   return (
-    <div className="text-center">
-      {open ? (
-        <div className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 p-2 dark:border-zinc-800">
-          <input type="date" max={yesterday} onChange={(e) => { if (e.target.value) { onPick(e.target.value); setOpen(false); } }}
-            className="rounded-lg border border-zinc-300 bg-zinc-100 px-2 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950" />
-          <button onClick={() => setOpen(false)} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={15} /></button>
-        </div>
-      ) : (
-        <button onClick={() => setOpen(true)} className="text-xs text-zinc-400 underline-offset-2 hover:text-emerald-600 hover:underline">
-          Missed a day? Fill its story from here
-        </button>
-      )}
-    </div>
+    <label className="relative inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white p-3 text-sm font-medium text-zinc-600 transition-colors hover:border-emerald-500/50 hover:text-emerald-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-emerald-300">
+      <CalendarDays size={15} /> Fill a past day you missed
+      {/* the real date input sits invisibly over the button so a tap opens the calendar */}
+      <input
+        type="date"
+        max={yesterday}
+        onChange={(e) => { if (e.target.value) onPick(e.target.value); }}
+        aria-label="Pick a past day to fill"
+        className="absolute inset-0 cursor-pointer opacity-0"
+      />
+    </label>
   );
 }

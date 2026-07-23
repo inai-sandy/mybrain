@@ -9,6 +9,12 @@ export class DailyController {
     private readonly mining: StoryMiningService, // LAST on purpose — keeps positional wiring stable (BEA-1051)
   ) {}
 
+  /** One-time backfill of emotions + life-timeline for already-told days, so the card isn't empty. (BEA-1058) */
+  @Post('backfill-feelings')
+  backfillFeelings(@Body() body: { days?: number }) {
+    return this.mining.backfillFeelings(body?.days ?? 7);
+  }
+
   /** This morning's follow-up questions, written when the previous day closed. (BEA-1055) */
   @Get('morning-questions')
   morningQuestions() {

@@ -50,6 +50,28 @@ export class StoryMiningService {
     return { day, hasStory, done: [], todos: [], delegations: [], myReminders: [], promises: [], emotions: null, events: [], lessons: [] };
   }
 
+  /**
+   * One-time backfill of the VISIBLE parts only — emotions + the life-timeline — for days already
+   * told before the wizard existed, so the Activity "How the day felt" card isn't empty. Reads his
+   * real stories; writes nothing but emotions and DayEvents (no tasks, no chases). (BEA-1058)
+   */
+  async backfillFeelings(days = 7): Promise<{ filled: number; scanned: number }> {
+    const rows = await this.prisma.story.findMany({
+      where: { emotions: null },
+      orderBy: { day: 'desc' },
+      take: Math.max(1, Math.min(31, days)),
+    });
+    let filled = 0;
+    for (const s of rows) {
+      if ((s.rawText || '').trim().length < 30) continue;
+      const mined = await this.mine(s.day).catch(() => null);
+      if (!mined || mined.failed || (!mined.emotions && !mined.events.length)) continue;
+      await this.apply(s.day, { emotions: mined.emotions, events: mined.events }).catch(() => undefined);
+      filled++;
+    }
+    return { filled, scanned: rows.length };
+  }
+
   /** All contacts shaped for the exact-match rule. */
   private async contacts(): Promise<{ id: string; name: string; aliases: string[] }[]> {
     const rows = await this.prisma.contact.findMany({ select: { id: true, name: true, aliases: true } });
