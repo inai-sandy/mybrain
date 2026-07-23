@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2 } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2, Plus, Loader2 } from 'lucide-react';
 import { DataTable, Column } from '../ui/DataTable';
 import { FOLDER_ICON_NAMES, FOLDER_ICONS, DEFAULT_FOLDER_ICON, FolderGlyph } from '../ui/folderIcons';
 import { StoreBadges } from '../ui/StoreBadges';
@@ -209,6 +209,7 @@ export function Bookmarks() {
   const [activeFolder, setActiveFolder] = useState<string>('all'); // all | others | <folderId>
   const [tagFilter, setTagFilter] = useState('');
   const [managing, setManaging] = useState(false);
+  const [addingLink, setAddingLink] = useState(false); // BEA-1050
   function changeView(v: 'grid' | 'list') {
     setView(v);
     try {
@@ -436,6 +437,12 @@ export function Bookmarks() {
         />
       )}
 
+      {/* Save any URL by hand — Raindrop stops being the only door in. (BEA-1050) */}
+      <button onClick={() => setAddingLink(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8 md:right-8">
+        <Plus className="h-4 w-4" /> Add link
+      </button>
+      {addingLink && <AddLinkModal onClose={() => setAddingLink(false)} onSaved={() => { setAddingLink(false); load(); }} />}
+
       {sharing && (
         <ShareDialog
           id={sharing.id}
@@ -446,6 +453,52 @@ export function Bookmarks() {
         />
       )}
       {managing && <ManageBookmarkFolders folders={folders} onClose={() => setManaging(false)} onChanged={reloadFolders} />}
+    </div>
+  );
+}
+
+/** Paste a URL, we read + summarize + index it like a synced bookmark. (BEA-1050) */
+function AddLinkModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [url, setUrl] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  async function save() {
+    if (!url.trim() || busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/bookmarks/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), note: note.trim() || undefined }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast('error', d.message || 'Could not save that link');
+        return;
+      }
+      toast('success', `Saved and summarized — “${d.title || url.trim()}”`);
+      onSaved();
+    } catch {
+      toast('error', 'Could not save that link');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={() => !busy && onClose()}>
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold">Add a link</h3>
+          <button onClick={onClose} disabled={busy} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50"><X size={18} /></button>
+        </div>
+        <div className="space-y-3">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} autoFocus placeholder="https://…" inputMode="url"
+            className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Why you're saving it (optional)"
+            className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500 resize-none" />
+          <button onClick={save} disabled={!url.trim() || busy} className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2.5 text-sm font-medium disabled:opacity-50">
+            {busy ? (<><Loader2 size={15} className="animate-spin" /> Reading the page…</>) : 'Save to Bookmarks'}
+          </button>
+          {busy && <p className="text-center text-xs text-zinc-400">The AI is reading and summarizing it — usually under half a minute.</p>}
+        </div>
+      </div>
     </div>
   );
 }

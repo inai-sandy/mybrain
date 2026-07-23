@@ -13,6 +13,7 @@ function makeService(over: any = {}) {
   const prisma: any = {
     item: {
       findMany: async () => over.existingRows ?? [],
+      findFirst: async () => over.dupRow ?? null,
       create: async ({ data }: any) => {
         const row = { id: `id${created.length + 1}`, ...data };
         created.push(row);
@@ -119,6 +120,33 @@ describe('BookmarksService', () => {
       const s2 = makeService();
       await s2.svc.importBatch([bm({ id: 2, title: 'Vid', link: YT }) as any], existing2);
       expect(s2.updated[0].data.readAttempts).toBe(0); // finally read → counter wiped
+    }, 20000);
+  });
+
+  // Save any URL by hand — Raindrop stops being the only door in. (BEA-1050)
+  describe('addManual (BEA-1050)', () => {
+    it('rejects something that is not a web link', async () => {
+      const { svc } = makeService();
+      expect(await svc.addManual('not a url')).toMatchObject({ ok: false, code: 'bad_url' });
+      expect(await svc.addManual('ftp://x')).toMatchObject({ ok: false, code: 'bad_url' });
+    });
+
+    it('refuses a link that is already saved instead of duplicating it', async () => {
+      const { svc } = makeService({ dupRow: { id: 'x', title: 'Old one' } });
+      const r = await svc.addManual('https://example.com/page');
+      expect(r).toMatchObject({ ok: false, code: 'exists' });
+      expect(r.message).toContain('Old one');
+    });
+
+    it('saves an unreadable link with the note kept and stamped "bookmark"', async () => {
+      const { svc, created, enqueued } = makeService();
+      const r = await svc.addManual(WEB, 'why I saved it');
+      expect(r.ok).toBe(true);
+      expect(created[0].source).toBe('bookmark');
+      expect(created[0].readFailed).toBe(true); // dead host — honest flag, attempts counted
+      expect(created[0].readAttempts).toBe(1);
+      expect(enqueued[0].opts.tags).toContain('bookmark');
+      expect(enqueued[0].content).toContain('why I saved it'); // his words survive into the brain
     }, 20000);
   });
 

@@ -482,6 +482,86 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     return total + matched * 0.1;
   }
 
+  // ---- add a link by hand (no Raindrop needed). (BEA-1050) -----------------
+
+  /** The page's <title>, for a link added by hand. Falls back to the hostname. */
+  private async pageTitle(url: string): Promise<string> {
+    try {
+      const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10_000), headers: { 'user-agent': 'Mozilla/5.0 (compatible; MyBrainBot/1.0)' } });
+      const html = await r.text();
+      const m = html.match(/<title[^>]*>([^<]{1,300})/i);
+      if (m) {
+        const t = m[1].replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+        if (t) return t.slice(0, 200);
+      }
+    } catch {
+      /* fall through to the hostname */
+    }
+    try {
+      return new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+      return url.slice(0, 200);
+    }
+  }
+
+  /**
+   * Save one URL straight into Bookmarks — same treatment as a synced bookmark: AI summary,
+   * thumbnail, brain indexing. Raindrop stops being the only door in. (BEA-1050)
+   */
+  async addManual(rawUrl: string, note?: string): Promise<{ ok: boolean; code?: string; message?: string; id?: string; title?: string }> {
+    let url: URL;
+    try {
+      url = new URL(String(rawUrl || '').trim());
+      if (!/^https?:$/.test(url.protocol)) throw new Error('not http');
+    } catch {
+      return { ok: false, code: 'bad_url', message: 'That does not look like a web link — it should start with https://' };
+    }
+    const link = url.toString();
+    const dup = await this.prisma.item.findFirst({ where: { sourceUrl: link, source: { in: ['raindrop', 'bookmark'] } }, select: { id: true, title: true } });
+    if (dup) return { ok: false, code: 'exists', message: `Already saved as “${dup.title || link}”.` };
+    if (!(await this.summarizer.hasKey())) return { ok: false, code: 'no_model', message: 'Connect OpenRouter (for summaries) in Settings first.' };
+
+    const title = await this.pageTitle(link);
+    const b: RaindropItem = { id: 0, title, link, excerpt: '', note: (note || '').trim().slice(0, 500), tags: [], created: new Date().toISOString(), cover: '' } as any;
+    let { summary, readFailed } = await this.makeSummary(b);
+    const ig = this.instagram.isInstagram(link) ? await this.instagram.enrich(link).catch(() => null) : null;
+    if (ig?.caption) {
+      summary = ig.caption;
+      readFailed = false;
+    }
+    if (b.note) summary = `${summary}\n\nNote: ${b.note}`; // the owner's words always survive on the summary
+
+    const item = await this.prisma.item
+      .create({
+        data: {
+          contentHash: createHash('sha256').update(`bookmark:${link}`).digest('hex'),
+          source: 'bookmark',
+          title: title.slice(0, 200),
+          summary: this.shortDesc(summary),
+          sourceUrl: link,
+          tags: JSON.stringify([]),
+          readFailed,
+          readAttempts: readFailed ? 1 : 0,
+          thumbnail: this.thumbFor(link, ''),
+        },
+      })
+      .catch(() => null);
+    if (!item) return { ok: false, code: 'exists', message: 'Already saved.' };
+
+    const dir = itemsDir();
+    await fs.mkdir(dir, { recursive: true });
+    const filePath = join(dir, `${item.id}.md`);
+    await fs.writeFile(filePath, this.buildMarkdown(b, summary, readFailed), 'utf8');
+    const data: { filePath: string; thumbnail?: string } = { filePath };
+    if (ig?.imageUrl) {
+      const cached = await this.cacheImage(item.id, ig.imageUrl).catch(() => null);
+      if (cached) data.thumbnail = cached;
+    }
+    await this.prisma.item.update({ where: { id: item.id }, data });
+    await this.memory.enqueue(this.buildMemoryText(title, summary, [], link), { itemId: item.id, title, tags: ['bookmark'] });
+    return { ok: true, id: item.id, title };
+  }
+
   // ---- the sync job --------------------------------------------------------
 
   /** Bookmarks from the last `sinceDays` that still need work: never-imported OR previously unreadable (retry). */
