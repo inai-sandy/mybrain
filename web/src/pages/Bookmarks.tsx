@@ -194,8 +194,9 @@ function Row({ b, onOpen, onShare, folders, onAssign, onDelete, selected, onSele
           </button>
           <div className="flex items-center gap-0.5 shrink-0">
             <FolderMenu b={b} folders={folders} onAssign={onAssign} />
-            <button onClick={() => onShare(b)} title="Share" className={iconBtn + (b.shared ? ' text-emerald-600' : '')}><Share2 size={15} /></button>
-            <button onClick={() => onOpen(b.id)} title="Open in app" className={iconBtn}><Eye size={15} /></button>
+            {/* Share + Eye hide on phones: the title itself opens in-app, and six icons were crushing row titles to three letters at 390px. */}
+            <button onClick={() => onShare(b)} title="Share" className={'hidden sm:block ' + iconBtn + (b.shared ? ' text-emerald-600' : '')}><Share2 size={15} /></button>
+            <button onClick={() => onOpen(b.id)} title="Open in app" className={'hidden sm:block ' + iconBtn}><Eye size={15} /></button>
             <a href={b.sourceUrl || '#'} target="_blank" rel="noreferrer" title="Open original" className={iconBtn}><ExternalLink size={15} /></a>
             <button onClick={() => onDelete(b)} title="Delete" className="p-1.5 rounded-md text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-rose-500 transition-colors"><Trash2 size={15} /></button>
           </div>
@@ -537,7 +538,8 @@ export function Bookmarks() {
       )}
 
       {/* Save any URL by hand — Raindrop stops being the only door in. (BEA-1050) */}
-      <button onClick={() => setAddingLink(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8 md:right-8">
+      {/* md:right-24 keeps it clear of the chat bubble (same fix as the Delegated FAB). */}
+      <button onClick={() => setAddingLink(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 md:bottom-8 md:right-24">
         <Plus className="h-4 w-4" /> Add link
       </button>
       {addingLink && <AddLinkModal onClose={() => setAddingLink(false)} onSaved={() => { setAddingLink(false); load(); }} />}
