@@ -10,6 +10,7 @@ import { PersonPicker } from '../ui/PersonPicker';
 import { MentionChips, useMentions } from '../ui/Mentions';
 
 export type Task = {
+  brainEater?: boolean; // circles his head, lives in the Brain Eaters tab (BEA-1056)
   id: string;
   title: string;
   note?: string | null;
@@ -84,7 +85,7 @@ export function sortTasksBy(list: Task[], mode: string): Task[] {
 }
 
 // ---- the task card (presentational; actions via callbacks) ----
-export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void; onProgress?: (t: Task, pct: number) => void }) {
+export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress, extraAction }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void; onProgress?: (t: Task, pct: number) => void; extraAction?: { label: string; onClick: () => void } }) {
   const p = PRIO[t.priority] || PRIO.medium;
   const done = t.status === 'done';
   const prog = t.progress ?? 0;
@@ -104,9 +105,13 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress }: { t: Tas
           <h3 className={'font-medium leading-snug flex-1 ' + (done ? 'line-through text-zinc-400' : '')}>
             {t.pinned && <Star size={13} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
             {t.followUp && <RotateCcw size={12} className="inline -mt-0.5 mr-1 text-indigo-500" />}
+            {t.brainEater && <span title="Brain eater" className="mr-1">🧠</span>}
             {t.title}
           </h3>
           <div className="flex items-center gap-0.5 shrink-0 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+            {extraAction && (
+              <button onClick={extraAction.onClick} className="rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] text-zinc-500 hover:border-fuchsia-500 hover:text-fuchsia-600 dark:border-zinc-700">{extraAction.label}</button>
+            )}
             <button onClick={() => onEdit(t)} title="Edit" className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={14} /></button>
             <button onClick={() => onDelete(t)} title="Delete" className="p-1 rounded text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Trash2 size={14} /></button>
           </div>

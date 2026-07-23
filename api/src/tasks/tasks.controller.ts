@@ -131,6 +131,24 @@ export class TasksController {
     return { models: await this.tasks.listModels() };
   }
 
+  // ---- Brain Eaters (BEA-1056). Declared before ':id' routes. ----
+  @Get('brain-eaters')
+  brainEaters() {
+    return this.tasks.brainEaters();
+  }
+
+  @Post('brain-eaters/dump')
+  dumpBrainEaters(@Body() body: { text?: string }) {
+    if (!body?.text?.trim()) throw new BadRequestException('Dump what is circling your head first');
+    return this.tasks.dumpBrainEaters(body.text);
+  }
+
+  @Post('brain-eaters/mark')
+  markBrainEaters(@Body() body: { ids?: string[]; on?: boolean }) {
+    if (!body?.ids?.length) throw new BadRequestException('Nothing selected');
+    return this.tasks.markBrainEater(body.ids, body?.on !== false);
+  }
+
   // ---- AI duplicate cleanup ----
   /** Analyze open tasks and return duplicate groups for review (nothing is deleted here). */
   @Post('find-duplicates')

@@ -517,6 +517,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       status: t.status,
       progress: t.progress ?? 0,
       followUp: !!t.followUp,
+      brainEater: !!t.brainEater, // circles his head, lives in its own tab (BEA-1056)
       rolloverCount: t.rolloverCount,
       createdAt: t.createdAt,
       completedAt: t.completedAt,
@@ -1048,6 +1049,48 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     if (t) this.unindexTask(t);
     await this.prisma.task.delete({ where: { id } }).catch(() => null);
     return { ok: true };
+  }
+
+  // ---- Brain Eaters: the things that circle his head and keep getting skipped. (BEA-1056) ----
+
+  /** How many days of carrying makes a task a Brain-Eater candidate. */
+  static readonly EATER_CARRY_DAYS = 4;
+
+  /** The tab's data: every brain eater (open first) + auto-spotted candidates awaiting his confirm. */
+  async brainEaters() {
+    const [rows, candidates] = await Promise.all([
+      this.prisma.task.findMany({ where: { brainEater: true }, orderBy: { createdAt: 'desc' }, include: PEOPLE_INCLUDE, take: 500 }),
+      // Auto-spotting: open tasks carried again and again are exactly the ones that eat the brain.
+      this.prisma.task.findMany({ where: { brainEater: false, status: 'open', rolloverCount: { gte: TasksService.EATER_CARRY_DAYS } }, orderBy: { rolloverCount: 'desc' }, take: 10 }),
+    ]);
+    const sorted = [...rows.filter((r) => r.status !== 'done'), ...rows.filter((r) => r.status === 'done')];
+    return {
+      tasks: sorted.map((t) => this.shape(t)),
+      openCount: rows.filter((r) => r.status !== 'done').length,
+      candidates: candidates.map((t) => ({ id: t.id, title: t.title, carried: t.rolloverCount })),
+    };
+  }
+
+  /** Mark (or un-mark) tasks as brain eaters — always the owner's call, never automatic. */
+  async markBrainEater(ids: string[], on: boolean) {
+    const r = await this.prisma.task.updateMany({ where: { id: { in: (ids || []).map(String).slice(0, 50) } }, data: { brainEater: !!on } });
+    return { ok: true, count: r.count };
+  }
+
+  /** Dump the nagging things the way he always dumps — AI splits them, each lands as a brain eater. */
+  async dumpBrainEaters(text: string): Promise<{ created: number }> {
+    const clean = (text || '').trim();
+    if (!clean) return { created: 0 };
+    const crafted = await this.craft(clean).catch(() => null);
+    const items = crafted?.tasks?.length ? crafted.tasks : [{ title: clean.replace(/\s+/g, ' ').slice(0, 160) } as any];
+    let created = 0;
+    for (const c of items.slice(0, 15)) {
+      const t: any = await this.create({ title: c.title, note: (c as any).note, category: (c as any).category, priority: (c as any).priority || 'high', auto: true }).catch(() => null);
+      if (!t) continue;
+      await this.prisma.task.update({ where: { id: t.id }, data: { brainEater: true } }).catch(() => undefined);
+      created++;
+    }
+    return { created };
   }
 
   // ---- AI duplicate cleanup ----

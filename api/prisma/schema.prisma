@@ -437,6 +437,7 @@ model Task {
   briefingId    String?
   briefing      Briefing? @relation(fields: [briefingId], references: [id], onDelete: SetNull)
   reminderSuggestDismissed Boolean @default(false) // user cleared this from "Suggested reminders" (BEA-882)
+  brainEater    Boolean   @default(false) // circles his head, keeps getting skipped — lives in its own tab (BEA-1056)
   dueDate       DateTime?
   status        String    @default("open") // open | done
   progress      Int       @default(0) // 0 | 30 | 60 | 100 — how far along (100 = done)
