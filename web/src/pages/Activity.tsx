@@ -531,77 +531,93 @@ function InsightsView() {
 function CalendarView({ onPick }: { onPick: (day: string) => void }) {
   const [cal, setCal] = useState<Cal | null>(null);
   const [months, setMonths] = useState(3);
-  useEffect(() => {
-    fetch(`/api/daily/calendar?months=${months}`).then((r) => r.json()).then(setCal).catch(() => undefined);
-  }, [months]);
+  const [fillDay, setFillDay] = useState<string | null>(null); // gap day being filled via the wizard (BEA-1062)
+  const load = () => fetch(`/api/daily/calendar?months=${months}`).then((r) => r.json()).then(setCal).catch(() => undefined);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [months]);
   if (!cal) return <p className="text-sm text-zinc-400">Loading…</p>;
 
+  const todayStr = new Date().toLocaleDateString('en-CA');
   const map = new Map(cal.days.map((d) => [d.day, d]));
-  // build weeks from the Sunday on/before start, to today
   const startD = new Date(cal.start + 'T12:00:00Z');
   startD.setUTCDate(startD.getUTCDate() - startD.getUTCDay()); // back to Sunday
   const cells: { day: string }[] = [];
   let cursor = startD.toISOString().slice(0, 10);
-  while (cursor <= cal.end) {
-    cells.push({ day: cursor });
-    cursor = addDays(cursor, 1);
-  }
+  while (cursor <= cal.end) { cells.push({ day: cursor }); cursor = addDays(cursor, 1); }
   const weeks: { day: string }[][] = [];
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
 
+  // Work heat (green). A day with no work but a story stays faint — the dot carries the story. (BEA-1062)
   function tint(day: string): string {
     const e = map.get(day);
-    if (!e) return 'bg-zinc-100 dark:bg-zinc-800/50';
+    if (!e) return 'bg-zinc-100 dark:bg-zinc-800/60';
     if (e.done >= 5) return 'bg-emerald-600';
     if (e.done >= 3) return 'bg-emerald-500';
     if (e.done >= 1) return 'bg-emerald-400/70';
     if (e.total > 0 || e.dumped || e.story) return 'bg-emerald-300/40';
-    if (e.suggested) return 'bg-indigo-400/70'; // upcoming day with suggested tasks waiting
-    return 'bg-zinc-100 dark:bg-zinc-800/50';
+    if (e.suggested) return 'bg-indigo-400/60';
+    return 'bg-zinc-100 dark:bg-zinc-800/60';
   }
+  // A gap = a PAST day that had activity (tasks or a dump) but you never told its story. (BEA-1062)
+  const isGap = (day: string) => {
+    const e = map.get(day);
+    return !!e && day < todayStr && !e.story && (e.total > 0 || e.dumped);
+  };
+  let gapCount = 0;
+  for (const d of cal.days) if (isGap(d.day)) gapCount++;
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <select value={months} onChange={(e) => setMonths(Number(e.target.value))} className="rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        {gapCount > 0 ? (
+          <span className="text-xs text-amber-600 dark:text-amber-400">{gapCount} day{gapCount === 1 ? '' : 's'} missing a story — the amber rings. Tap one to fill it.</span>
+        ) : <span />}
+        <select value={months} onChange={(e) => setMonths(Number(e.target.value))} className="shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs">
           <option value={3}>3 months</option>
           <option value={6}>6 months</option>
           <option value={12}>12 months</option>
         </select>
       </div>
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 overflow-x-auto">
-        <div className="flex gap-1">
+        <div className="flex gap-1.5">
           {weeks.map((w, wi) => (
-            <div key={wi} className="flex flex-col gap-1">
+            <div key={wi} className="flex flex-col gap-1.5">
               {w.map((c) => {
                 const e = map.get(c.day);
                 const future = c.day > cal.end;
+                const gap = isGap(c.day);
+                const hasStory = !!e?.story;
+                const isToday = c.day === todayStr;
                 return (
                   <button
                     key={c.day}
                     disabled={future}
-                    onClick={() => onPick(c.day)}
-                    title={future ? '' : `${c.day} — ${e ? `${e.done}/${e.total} done` : 'nothing'}${e?.dumped ? ' · dumped' : ''}${e?.story ? ' · story' : ''}${e?.suggested ? ` · ✨${e.suggested} suggested` : ''}`}
-                    className={'h-3.5 w-3.5 rounded-sm transition-transform hover:scale-125 ' + (future ? 'opacity-0' : tint(c.day))}
-                  />
+                    onClick={() => (gap ? setFillDay(c.day) : onPick(c.day))}
+                    title={future ? '' : `${c.day} — ${e ? `${e.done}/${e.total} done` : 'nothing'}${e?.dumped ? ' · dumped' : ''}${hasStory ? ' · story ✓' : gap ? ' · NO story (tap to fill)' : ''}${e?.suggested ? ` · ✨${e.suggested} suggested` : ''}`}
+                    className={
+                      'relative grid h-6 w-6 place-items-center rounded-md transition-transform hover:scale-110 sm:h-7 sm:w-7 ' +
+                      (future ? 'opacity-0' : tint(c.day)) +
+                      (gap ? ' ring-2 ring-amber-400 ring-inset' : '') +
+                      (isToday ? ' outline outline-2 outline-offset-1 outline-zinc-400 dark:outline-zinc-500' : '')
+                    }
+                  >
+                    {hasStory && <span className={'h-1.5 w-1.5 rounded-full ' + (e!.done >= 3 ? 'bg-white/90' : 'bg-indigo-500')} />}
+                  </button>
                 );
               })}
             </div>
           ))}
         </div>
-        <div className="flex items-center justify-end gap-1.5 mt-3 text-[11px] text-zinc-400">
-          <span>less</span>
-          <span className="h-3 w-3 rounded-sm bg-zinc-100 dark:bg-zinc-800/50" />
-          <span className="h-3 w-3 rounded-sm bg-emerald-300/40" />
-          <span className="h-3 w-3 rounded-sm bg-emerald-400/70" />
-          <span className="h-3 w-3 rounded-sm bg-emerald-500" />
-          <span className="h-3 w-3 rounded-sm bg-emerald-600" />
-          <span>more</span>
-          <span className="ml-2 h-3 w-3 rounded-sm bg-indigo-400/70" />
-          <span>suggested</span>
+        {/* legend */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-zinc-400">
+          <span className="inline-flex items-center gap-1.5"><span className="inline-flex h-4 w-4 items-center justify-center rounded-md bg-emerald-500"><span className="h-1.5 w-1.5 rounded-full bg-white/90" /></span> work done + story</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-4 w-4 rounded-md bg-emerald-300/40 ring-2 ring-amber-400 ring-inset" /> activity, no story (tap to fill)</span>
+          <span className="inline-flex items-center gap-1.5"><span className="grid h-4 w-4 place-items-center rounded-md bg-zinc-100 dark:bg-zinc-800/60"><span className="h-1.5 w-1.5 rounded-full bg-indigo-500" /></span> story only</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-4 w-4 rounded-md bg-indigo-400/60" /> suggested ahead</span>
         </div>
       </section>
-      <p className="text-xs text-zinc-400 text-center">Tap any day to open it. Indigo = upcoming day with suggested tasks.</p>
+      <p className="text-center text-xs text-zinc-400">Green = work done · a dot means the story is told · an amber ring is a day you skipped the story. Tap a ring to fill it.</p>
+
+      {fillDay && <CloseDaySheet day={fillDay} onClose={() => setFillDay(null)} onClosed={() => { setFillDay(null); load(); }} />}
     </div>
   );
 }
