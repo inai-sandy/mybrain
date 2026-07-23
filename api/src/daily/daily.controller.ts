@@ -9,6 +9,12 @@ export class DailyController {
     private readonly mining: StoryMiningService, // LAST on purpose — keeps positional wiring stable (BEA-1051)
   ) {}
 
+  /** The whole book in one call — chapters + pull-quotes + per-month mood + year arc. (BEA-1061) */
+  @Get('book')
+  book(@Query('year') year?: string) {
+    return this.daily.bookData(year);
+  }
+
   /** Insights that are about YOU — mood/energy over time, delegation & promise health, neglect. (BEA-1060) */
   @Get('insights')
   insights(@Query('days') days?: string) {

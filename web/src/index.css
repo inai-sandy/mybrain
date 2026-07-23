@@ -60,3 +60,13 @@
     transform: translateX(100%);
   }
 }
+
+/* Book chapter drop-cap — the memoir touch. (BEA-1061) */
+.dropcap p:first-of-type::first-letter {
+  font-size: 3.1em;
+  font-weight: 700;
+  float: left;
+  line-height: 0.72;
+  margin: 0.06em 0.1em 0 0;
+  color: #6366f1;
+}
