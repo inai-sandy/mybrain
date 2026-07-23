@@ -49,6 +49,14 @@ export class BookmarksController {
     res.sendFile(f);
   }
 
+  /** Save one URL by hand — summarized + indexed like a synced bookmark. (BEA-1050) */
+  @Post('add')
+  async add(@Body() body: { url?: string; note?: string }) {
+    const res = await this.bookmarks.addManual(body?.url || '', body?.note);
+    if (!res.ok) throw new BadRequestException(res.message || 'Could not save that link');
+    return res;
+  }
+
   /** Start a background sync of the last 3 months of Raindrop bookmarks. Returns immediately. */
   @Post('sync')
   async sync(@Body() body: { sinceDays?: number } = {}) {
