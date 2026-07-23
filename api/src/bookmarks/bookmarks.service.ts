@@ -5,6 +5,7 @@ import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { SummarizerService } from './summarizer.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
 import { InstagramEnricher } from './instagram.service';
 import { ItemsService } from '../items/items.service';
@@ -56,6 +57,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     private readonly instagram: InstagramEnricher,
     private readonly items: ItemsService, // new deps stay LAST — keeps positional wiring stable (BEA-1049)
     private readonly bridge: HermesBridgeService, // research runs (BEA-1047)
+    private readonly prompts: PromptsService,
   ) {}
 
   private bookmarksDir() {
@@ -488,16 +490,10 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
           return `${b.id} | ${(b.title || '').slice(0, 120)}${tags ? ` | tags: ${tags}` : ''} | ${(b.summary || '').slice(0, 140)}`;
         })
         .join('\n');
+      const tmpl = await this.prompts.get('library.bookmarkOrganize');
       const prompt =
-        `You organize a personal bookmark library into folders.\n` +
-        `Existing folders: ${folders.map((f) => f.name).join(', ') || '(none yet)'}.\n` +
-        `Rules:\n` +
-        `- Folders are BROAD areas only (like "AI", "Hardware", "Marketing", "Health"). Never specific ones (not "Claude skills", not "mmWave radar").\n` +
-        `- Prefer an existing folder whenever it fits.\n` +
-        `- You may invent at most ${canCreate} NEW broad folder name(s), one or two plain words each.\n` +
-        `- If nothing fits confidently, use exactly "Others".\n` +
-        `Bookmarks (id | title | tags | summary):\n${lines}\n\n` +
-        `Reply with ONLY JSON: {"assignments":[{"id":"<id>","folder":"<folder name or Others>"}]} — one entry per bookmark.`;
+        `${tmpl.replace(/\{\{folders\}\}/g, folders.map((f) => f.name).join(', ') || '(none yet)').replace(/\{\{canCreate\}\}/g, String(canCreate))}\n\n` +
+        `Bookmarks (id | title | tags | summary):\n${lines}`;
       const out = looseJsonParse(await this.summarizer.complete(prompt, 3000).catch(() => null));
       const assignments: any[] = Array.isArray(out?.assignments) ? out.assignments : [];
       const batchIds = new Set(batch.map((b) => b.id));

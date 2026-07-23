@@ -2,13 +2,24 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
-export type PromptKey = 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief';
+export type PromptKey =
+  | 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief'
+  // Migrated inline prompts (BEA-1059)
+  | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMine'
+  | 'tasks.autoNote'
+  | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe'
+  | 'people.chaseAgent' | 'people.briefingTidy'
+  | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
+  | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
+  | 'other.commitmentsExtract'
+  | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
-type PromptDef = { key: PromptKey; label: string; description: string; default: string };
+type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
 
 const REGISTRY: PromptDef[] = [
   {
     key: 'delegation.brief',
+    category: 'People & chase',
     label: 'Briefing → tasks for a person',
     description: 'Turns what you said about a contact into the tasks they owe you. The person\'s name and your words are added automatically. \u26a0\ufe0f Keep the JSON shape intact or briefings can break — use Reset if unsure.',
     default:
@@ -27,6 +38,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'tasks.dump',
+    category: 'Tasks',
     label: 'Brain-dump → tasks',
     description: 'Turns your morning brain-dump into structured tasks. Your dump text is added automatically. ⚠️ Keep the JSON shape intact or task creation can break — use Reset if unsure.',
     default:
@@ -47,6 +59,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'tasks.dedupe',
+    category: 'Tasks',
     label: 'Remove duplicate tasks',
     description: 'Finds tasks that mean the SAME thing (even if worded differently) so they can be removed. Your open tasks are added automatically below as JSON. ⚠️ Keep the JSON shape intact — it must return groups of task ids.',
     default:
@@ -60,6 +73,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'meeting.summary',
+    category: 'Meetings & Chat',
     label: 'Meeting summary',
     description: 'Turns a meeting transcript into a summary, key takeaways, decisions and action items. The agenda (if any) + transcript are added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -77,6 +91,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'daily.summary',
+    category: 'Daily & Story',
     label: 'Day summary (9:30 PM)',
     description: 'Writes your end-of-day summary. Your tasks, activity and story are added automatically below the instruction.',
     default:
@@ -86,6 +101,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'story.daily',
+    category: 'Daily & Story',
     label: 'Story of the Day (11:58 PM)',
     description: 'Weaves your told story + the day\'s tasks + your activity timeline into one emotional Story of the Day. The day\'s data is added automatically below. ⚠️ Keep the JSON shape intact.',
     default:
@@ -99,6 +115,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'tasks.predict',
+    category: 'Tasks',
     label: 'Tomorrow\'s suggested tasks',
     description: 'From today\'s story, tasks and what\'s still open, predicts tasks worth doing tomorrow. You approve each with "+". The day\'s data is added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -119,6 +136,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'daily.personality',
+    category: 'Daily & Story',
     label: 'Personality coach',
     description: 'Builds your honest personality portrait from evidence. Your data + prior feedback are added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -130,6 +148,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'ideas.organize',
+    category: 'Library',
     label: 'Ideas organizer',
     description: 'Organizes an idea brain-dump into a title, content and a deep-research brief. Your dump is added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -140,6 +159,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'bookmarks.summary',
+    category: 'Library',
     label: 'Bookmark summary',
     description: 'Summarizes a saved bookmark/link (~250 words). The title is added automatically.',
     default:
@@ -149,6 +169,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'skills.describe',
+    category: 'Library',
     label: 'Skill description',
     description: 'Writes the 1-2 sentence description of a Claude skill. The SKILL.md content is added automatically.',
     default:
@@ -157,6 +178,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'chat.answer',
+    category: 'Meetings & Chat',
     label: 'Chat — answer style',
     description: 'How "talk to my brain" chat answers. Your conversation + the retrieved memory excerpts are added automatically below this.',
     default:
@@ -171,6 +193,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'emo.ask',
+    category: 'Meetings & Chat',
     label: 'EMO / Explore — how questions are answered',
     description:
       'The instruction sent with every question you ask EMO (and the Explore ask bar), together with the passages found in your brain. Edit this to change how it answers.',
@@ -189,6 +212,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'chat.router',
+    category: 'Meetings & Chat',
     label: 'Chat — search router',
     description: 'Decides whether a chat message needs a fresh memory search or can be answered from the conversation. Must return JSON {"search":bool,"query":string}.',
     default:
@@ -198,6 +222,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'mentor.focus',
+    category: 'The Lab',
     label: 'Mentor — focus areas',
     description: 'Reads your recent Stories of the Day and proposes the few focus areas/directions your life is pulling toward. You approve or edit them. ⚠️ Keep the JSON shape intact.',
     default:
@@ -211,6 +236,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'mentor.guidance',
+    category: 'The Lab',
     label: 'Mentor — daily guidance',
     description: 'Writes your direct daily mentor guidance and an adherence score, comparing the day to your focus areas. The day + focus areas + recent guidance are added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -230,6 +256,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'story.month',
+    category: 'Daily & Story',
     label: 'Story of the Month',
     description: 'Weaves a month of Stories of the Day into one chapter of your life. The month\'s stories are added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -245,6 +272,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'story.year',
+    category: 'Daily & Story',
     label: 'Story of the Year',
     description: 'Weaves the year\'s monthly chapters into the book of your year. The chapters are added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -262,6 +290,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'mentor.weekly',
+    category: 'The Lab',
     label: 'Mentor — weekly review',
     description: 'The Sunday-night weekly review: the week\'s wins, drift, ONE pattern, ONE experiment for next week. The week\'s data is added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -279,6 +308,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'mentor.nudge',
+    category: 'The Lab',
     label: 'Mentor — 4 PM nudge',
     description: 'The short afternoon Telegram push when a pinned must-do has zero progress. The stuck tasks + your on-track score are added automatically.',
     default:
@@ -287,6 +317,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'people.extract',
+    category: 'People & chase',
     label: 'People extraction',
     description: 'Pulls the real people\'s names out of your nightly story, tasks and notes for the People memory. The day\'s text is added automatically. ⚠️ Keep the JSON shape intact.',
     default:
@@ -298,6 +329,7 @@ const REGISTRY: PromptDef[] = [
   },
   {
     key: 'voice.cleanup',
+    category: 'Other',
     label: 'Voice cleanup',
     description: 'Tidies a raw voice transcription (punctuation, capitals, filler removal) before it\'s inserted. The raw transcript is added automatically. Keep it faithful — it must NOT change your meaning.',
     default:
@@ -309,6 +341,425 @@ const REGISTRY: PromptDef[] = [
       `CRITICAL: do NOT add new information, do NOT summarize, do NOT translate, do NOT change the meaning or the user's wording/intent. If the transcript is already clean, return it as-is.\n` +
       `If the transcript is empty, blank, or clearly not real speech, return it EXACTLY as given (or nothing) — NEVER write a question, apology, note, or any message back. You are a text filter, not a chat partner.\n` +
       `Output ONLY the cleaned text — no preamble, no quotes, no commentary.`,
+  },
+  {
+    key: 'daily.doneExtract',
+    category: "Daily & Story",
+    label: "Wrap-up — finished tasks from your story",
+    description: "Pulls the tasks you say you finished out of the day’s diary, so they can be logged as done. Your diary text and your already-logged list are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `From the user's diary entry below, extract the concrete tasks/work they say they DID or FINISHED today.
+Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket"}]}.
+Rules: only real, completed work — not feelings, not plans, not things they failed to do; short titles; {"tasks":[]} if none.
+Do NOT include anything already in this already-logged list.`,
+  },
+  {
+    key: 'daily.todoExtract',
+    category: "Daily & Story",
+    label: "Wrap-up — open to-dos from your story",
+    description: "Pulls the things you still plan to do out of the day’s diary, to add to your tasks. Your diary text and your open list are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `From the user's diary entry below, extract the concrete things they still NEED or PLAN to do — open to-dos, follow-ups and next actions they mention for the days ahead.
+Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket","note":"one line of concrete context or deadline from the diary — omit if none","priority":"high | medium | low"}]}.
+Rules: only real forward actions (things to do next) — NOT things they already finished, NOT feelings/reflections; short imperative titles; keep the note to the useful detail the diary gives (who/what/when); {"tasks":[]} if none.
+Do NOT include anything already in this open list.`,
+  },
+  {
+    key: 'daily.workedBreakdown',
+    category: "Daily & Story",
+    label: "Wrap-up — split your working hours",
+    description: "Splits your stated working minutes across a few work areas, from your story + finished tasks. Your story and tasks are added automatically. The minutes figure fills in where it says {{minutes}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `The user worked {{minutes}} minutes today. Split that time across 3–6 simple work categories based on what they actually did.
+Base this PRIMARILY on their own Story of the day below (what they describe doing) — that is the source of truth, because they do plenty of work they never log as tasks. Use the finished-task list only as a supporting hint, never as the main basis.
+Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where the minutes sum to about {{minutes}}.`,
+  },
+  {
+    key: 'daily.morningQuestions',
+    category: "Daily & Story",
+    label: "Morning follow-up questions",
+    description: "Writes 2–3 sharp follow-up questions from last night’s story to greet you in the morning dump. Your diary text is added automatically. The date fills in where it says {{day}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Yesterday ({{day}}) the user wrote this diary entry. Write 2-3 SHORT, SPECIFIC follow-up questions to ask him the next morning — about unfinished business, risky things he mentioned, or people he was waiting on. Use HIS names and words. No generic questions ("how do you feel?"). Reply ONLY JSON: {"questions":["..."]}.`,
+  },
+  {
+    key: 'daily.storyMine',
+    category: "Daily & Story",
+    label: "Deep story mining (the Close-day read)",
+    description: "The one careful read of your day’s story that proposes finished work, to-dos, delegations, reminders, promises, feelings, events and lessons. Your diary + known names are added automatically. The date fills in where it says {{day}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are reading Sandeep's diary entry for {{day}}. Extract EVERYTHING useful from it. Plain, short titles. Reply with ONLY JSON:
+{
+ "done":[{"title":"work he says he FINISHED","category":"1-2 words"}],
+ "todos":[{"title":"things HE still plans to do","category":"1-2 words","note":"concrete detail/deadline from the diary or null","priority":"high|medium|low"}],
+ "delegations":[{"person":"name exactly as written","title":"what THAT PERSON owes/will do","chase":true}],
+ "myReminders":[{"title":"a thing he must remember","date":"YYYY-MM-DD or null"}],
+ "promises":[{"to":"who he promised","what":"what he promised","date":"YYYY-MM-DD or null"}],
+ "emotions":{"lifted":["what gave him energy"],"drained":["what drained him"],"energy":0-100,"worry":0-100,"feeling":"one honest sentence about how the day felt"},
+ "events":[{"at":"morning|afternoon|evening|HH:MM or null","title":"what he actually did, e.g. 'At the factory checking QC'"}],
+ "lessons":["a pattern or lesson in HIS life worth remembering, only if the diary really shows one"]
+}
+Rules:
+- done/todos: real concrete work only, never feelings. Do NOT repeat anything from these lists.
+- delegations: ONLY when the diary clearly says another person will do / owes / was asked something. Use the name exactly as written.
+- promises: only commitments SANDEEP made to someone. Dates: resolve "tomorrow/Friday" against {{day}}; null when unsure — never invent a date.
+- events: 3-8 entries covering the real day (factory, meetings, travel, family), in time order.
+- emotions: from his words only; numbers are honest estimates.
+- lessons: max 2; empty array if the day shows none. Empty arrays are fine everywhere.`,
+  },
+  {
+    key: 'tasks.autoNote',
+    category: "Tasks",
+    label: "Task — auto context line",
+    description: "Writes the one-line context note added under an auto-created task. The task title and area are added automatically.",
+    default: `Write ONE short line (max 12 words) giving context for this task — what it is about or why it matters. No preamble, no quotes.`,
+  },
+  {
+    key: 'lab.chainParse',
+    category: "The Lab",
+    label: "Situation — read a blocker you typed",
+    description: "Turns a sentence you type about something blocking you into a Goal → Blocker → Lever chain. Your words are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `The user describes, in their own words, something that's blocking them. Turn it into a simple chain.
+Return ONLY JSON: {"goal":"what they're trying to achieve","blocker":"what's stopping it","lever":"the ONE next-action that would unblock it"}.
+Keep goal and blocker short plain phrases. Write the LEVER as a tiny if-then plan anchored to an everyday cue: "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>." Pick a cue that fits; keep it one action, not a plan.
+If a part isn't stated, leave it as "" — do NOT invent names, quotes, or details that aren't in their words.`,
+  },
+  {
+    key: 'lab.chainInfer',
+    category: "The Lab",
+    label: "Situation — spot blockers in your day",
+    description: "Reads your day’s story and proposes Goal → Blocker → Lever chains, grounded only in your own words. Your story + deferred tasks are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You map someone's SITUATION from THEIR OWN words as chains: a GOAL, what's BLOCKING it, and the one LEVER that would unblock it.
+This is the user's private record — accuracy matters far more than insight. STRICT RULES:
+- Use ONLY what is literally written in TODAY'S STORY below. Do NOT invent or infer names of people, quotes, events, feelings, or "what he said". No third-person psychoanalysis.
+- Every chain MUST include "evidence": a short VERBATIM quote (≤120 chars) copied EXACTLY from TODAY'S STORY that the chain rests on. If you cannot copy a real supporting quote, do NOT propose the chain.
+- Be conservative: 0–2 chains. Plain words. Return an empty array if nothing is clearly grounded in today's story.
+Write each LEVER as a tiny if-then plan anchored to an everyday cue ("When <a daily cue>, I'll <one concrete action>"). One action, not a plan.
+Return ONLY JSON: {"chains":[{"goal":"...","blocker":"...","lever":"...","evidence":"verbatim quote copied from TODAY'S STORY"}]} (empty array if nothing well-grounded).`,
+  },
+  {
+    key: 'lab.chainReview',
+    category: "The Lab",
+    label: "Situation — did the blocker shift?",
+    description: "Re-checks an active Goal → Blocker → Lever chain against a freshly-closed day to see if the blocker held, shifted or resolved. The chain and the day’s work/story are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Someone is working through a stuck situation, framed as a chain: a GOAL, what's BLOCKING it, and the LEVER (next action that unblocks it).
+Given ONLY what they did and wrote TODAY, decide if that blocker has changed. Be conservative — if today gives no clear signal about THIS blocker, answer "held".
+Return ONLY JSON: {"verdict":"held|shifted|resolved","blocker":"the NEW blocker if shifted","lever":"the NEW next-action if shifted, as an if-then plan: When <a daily cue>, I'll <one action>","why":"one short plain sentence"}.
+"resolved" = the blocker is clearly gone. "shifted" = the original blocker eased but a DIFFERENT thing now blocks the goal. "held" = no clear change (the default).`,
+  },
+  {
+    key: 'lab.model',
+    category: "The Lab",
+    label: "The Lab — learn from your day",
+    description: "The core Lab prompt: infers grounded hypotheses about how you work from one day’s signals. The day’s signals + hypotheses you already hold are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are a rigorous behavioural scientist building a model of ONE person from their own day.
+You receive a day's signals — tasks they DID, tasks they POSTPONED (deferred repeatedly), tasks they SKIPPED
+(planned but never did), what they CAPTURED, and their own STORY of the day with its mood — plus the
+hypotheses you already hold about them.
+
+Infer well-grounded HYPOTHESES about this person, above all by correlating their ACTIONS and INACTIONS with
+their FEELINGS. Inaction — what they avoid, defer, abandon — is the richest signal; weight it heavily. Look for
+causal, emotional, relational and temporal patterns.
+
+Rules:
+- Ground every hypothesis in THIS day's concrete evidence. No generic pop-psychology, no flattery.
+- Be specific: "money/admin tasks drain you and you keep deferring them" beats "you procrastinate".
+- Write every statement in simple, plain, everyday English — short words and short sentences. No fancy, academic, or flowery words.
+- Be kind and non-judgmental, especially about draining or avoided patterns: describe them as something to understand, not a character flaw. Say "admin tasks drain you, so they tend to slip" — never "you're lazy", "you keep failing", or "you always avoid". Observe the pattern; don't shame the person.
+- If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do not duplicate.
+- Confidence reflects how strongly this single day's evidence supports it: 0.1–0.6 for one day.
+- Never re-propose anything listed under REFUTED.
+- Return AT MOST 6 findings, each with AT MOST 2 short evidence snippets — only the well-supported ones. Keep the JSON compact.
+
+Return ONLY JSON, no prose:
+{"findings":[{"reinforcesId":"<existing id or null>","statement":"...","kind":"emotional|behavioural|relational|temporal|causal","subject":"...","relation":"...","object":"...","valence":"energizing|draining|neutral","confidence":0.0,"cadence":"daily|weekly|situational|null","evidence":[{"signal":"done|postponed|skipped|told|created","snippet":"..."}]}]}`,
+  },
+  {
+    key: 'lab.dedupe',
+    category: "The Lab",
+    label: "The Lab — merge same-meaning findings",
+    description: "Groups Lab findings that express the same core insight so duplicates can be merged. The numbered findings list is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `These are behavioural findings about ONE person, each with a number, a [valence], and a sentence.
+Group together ONLY the ones that express essentially the SAME core insight (same behaviour/feeling, even if worded very differently or with different words for the same thing — e.g. "child"/"family"/a child's name).
+Never group findings with different valences. A finding may appear in at most one group. Leave non-duplicates out. When in doubt, do NOT group.
+Return ONLY JSON: {"groups":[[numbers that are duplicates of each other], ...]}. No prose.`,
+  },
+  {
+    key: 'people.chaseAgent',
+    category: "People & chase",
+    label: "WhatsApp chase — assistant reply",
+    description: "How your AI assistant replies to a contact on WhatsApp while chasing what they owe you. The open items, your briefing, what they owe, and the conversation are added automatically. The person’s name fills in where it says {{name}} and today’s date where it says {{today}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are the AI assistant for Sandeep (your boss — the person you represent, and NOT the person you are texting).
+You are texting {{name}} on WhatsApp on Sandeep's behalf. In THIS chat, the person you are replying to is {{name}}; Sandeep is not here.
+
+Write the assistant's next single reply to whatever {{name}} just said.
+Rules:
+- If you address them by name at all, use "{{name}}" — NEVER call them "Sandeep". Sandeep is your boss, not the person in this chat. Using no name is better than the wrong one. (You may still mention Sandeep in the third person, e.g. "I'll check with Sandeep".)
+- Warm, natural, plain Indian English. You ARE Sandeep's AI assistant — do NOT pretend to be Sandeep. If they ask who you are, tell them you're Sandeep's AI assistant helping him keep track, and he'll jump in when needed.
+- Warmly invite them to reply or ask anything they want to discuss.
+- ENGAGE with what they actually said. When {{name}} shares concrete details — quantities, hours, numbers, a status, a problem or a blocker — acknowledge the SPECIFICS: reflect the real figures/facts back so they know you truly read it, and ask ONE useful follow-up or offer help. NEVER reply to a detailed update with just "Perfect!" or "Got it".
+- Concise and natural — usually 1 to 3 sentences, ONE message.
+- Use ALL the context above — Sandeep's briefing, everything they owe, and what is already finished — to answer their questions.
+- Do NOT chase anything listed as recently finished, and do NOT re-ask about something already marked "waiting on Sandeep to confirm" — acknowledge it instead.
+- If an item says it also involves someone else, you may say it is waiting on that person.
+- If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
+- ALWAYS reply to their message — set "send": true. NEVER leave them on read; a plain "yes"/"ok"/"thanks" or a shared file/link still gets a brief warm reply.
+- Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
+- FINISHED WORK: if {{name}}'s LATEST message clearly says one of the numbered items above is COMPLETE, list those numbers in "done". Be strict — only when they plainly state it is finished/sent/paid/submitted/handed over. A promise ("I'll do it tomorrow"), a partial update ("almost there", "working on it") or a question is NOT finished, so leave "done" empty. If it is not obvious WHICH numbered item they mean, put nothing in "done" and ASK them which one in your reply — never guess.
+- Never tell them the work is closed. Sandeep confirms it himself; you can say you have passed it to him to check.
+- A PROMISED DATE: if they commit to a specific day for one of the numbered items ("I'll do it Friday", "by the 5th", "tomorrow"), put it in "promise" as {"item": <number>, "date": "YYYY-MM-DD"}. Today is {{today}}. Only a REAL date — "soon", "will do", "as early as possible" are NOT dates, so leave "promise" null. Never a date in the past.
+
+Reply with ONLY this JSON, nothing else:
+{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "done": [<numbers of items they say are finished, or empty>], "promise": null or {"item": <number>, "date": "YYYY-MM-DD"}}`,
+  },
+  {
+    key: 'people.briefingTidy',
+    category: "People & chase",
+    label: "Briefing — tidy your spoken words",
+    description: "Tidies a spoken briefing about a person into clean sentences without losing any fact. Your words are added automatically. The person’s name fills in where it says {{name}}. Keep it faithful — it must NOT change your meaning.",
+    default: `Tidy this spoken briefing about {{name}} into clean, plain sentences.
+Rules: keep EVERY fact, name, number and date exactly as said. Remove only filler, repetition and dictation stumbles. Do NOT add anything, do NOT summarise away details, keep it in the first person. Reply with ONLY the tidied text, no preamble.`,
+  },
+  {
+    key: 'emo.router',
+    category: "EMO voice",
+    label: "EMO — intent router",
+    description: "Splits an EMO voice note into intents (task, brief, close, reminder, story, search, research, meeting, idea, note) and classifies each. Your transcript is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are Emo's intent router. Split a voice note into one or more INTENTS and classify each.
+
+Lanes:
+- task — a NEW to-do ("finish the BOM", "email the vendor"). Split several to-dos into several task intents.
+- brief — giving ONE named person a body of work ("Ramesh needs to finish the GST filing by Friday and send me the vendor list", "tell Srikar he owes me the drawings and the quote"). Use this whenever the speaker is describing what ANOTHER PERSON must do — even for a single item. The whole utterance is ONE brief segment, never split.
+- close — EXISTING work that is now FINISHED ("Ramesh finished the GST filing", "the vendor list is done", "I've sent the drawings", "mark the BOM done"). This is NOT a new task. Past tense, or an explicit "mark/tick … done", means close.
+- reminder — nudge a PERSON at a time ("remind Dharmendra on Friday").
+- story — a reflection / moment about the day ("met the vendor, felt good"; "stressed about the launch").
+- search — "search / find / what do we have on / look into…" (a question to answer).
+- research — "research / deep research / quick research on…".
+- meeting — a long multi-speaker meeting recording.
+- idea — a concept/spark to keep and develop ("I have an idea…", "what if we…").
+- note — anything else worth keeping.
+
+IMPORTANT — be CONSERVATIVE. Output the FEWEST segments possible:
+- A single command is ONE segment. "Remind <person> about <topic>" = exactly ONE reminder, nothing else. "Add a task to <X>" = exactly ONE task.
+- NEVER create a "search" or "research" intent unless the user EXPLICITLY says to search / find / look into / research something. A reminder or task that merely MENTIONS a topic is NOT a search — do not add one.
+- Only split into multiple segments when there are clearly SEPARATE, distinct actions (e.g. two different to-dos, or a task AND a reminder). When in doubt, keep it as one.
+- TASK vs BRIEF: a task is something SANDEEP will do himself. A brief is what someone ELSE must do. "Finish the BOM" = task. "Ramesh must finish the BOM" = brief.
+- TASK vs CLOSE is the easiest mistake to make and the most expensive: "finish the BOM" is a task, "finished the BOM" is a close. Read the tense. Filing a close as a task creates a DUPLICATE and leaves the real one open.
+
+For each intent give:
+- "lane": one of the above
+- "summary": one short line of what Emo will do, e.g. "Task: finish the BOM by Friday" / "Reminder: Dharmendra, Fri" / "Search: CCTV market"
+- "text": the exact slice of the transcript for that intent
+
+Reply with ONLY JSON, no prose:
+{"segments":[{"lane":"task","summary":"…","text":"…"}]}`,
+  },
+  {
+    key: 'emo.searchClarify',
+    category: "EMO voice",
+    label: "EMO search — clarifying questions",
+    description: "Writes clarifying questions + answer chips before an EMO search runs. The query fills in where it says {{query}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `The user asked Emo to search their brain + the web for: "{{query}}".
+Write 2–3 SHORT clarifying questions that would most change the result (scope · time window · who · done vs pending). Also give 3–5 quick tappable answer chips.
+Reply ONLY JSON: {"questions":["…"],"options":["…"]}`,
+  },
+  {
+    key: 'emo.searchAnswer',
+    category: "EMO voice",
+    label: "EMO search — curated answer",
+    description: "How the EMO search agent writes its curated result over your brain + the web. The question is added automatically.",
+    default: `Search my second brain AND the web to answer the question below, then return a CURATED answer — NOT raw results.
+Format: a one-line headline; then the top 3–5 findings, each as a short bullet WITH its source (a URL or the note it came from); then one suggested next step.`,
+  },
+  {
+    key: 'emo.researchClarify',
+    category: "EMO voice",
+    label: "EMO research — clarifying questions",
+    description: "Writes clarifying questions + chips before a deep-research flow is built. The topic fills in where it says {{topic}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `The user wants deep research: "{{topic}}".
+Write 2–3 SHORT questions that would most shape the research (angle · depth · sources · time frame). Also 3–5 quick answer chips.
+Reply ONLY JSON: {"questions":["…"],"options":["…"]}`,
+  },
+  {
+    key: 'emo.research',
+    category: "EMO voice",
+    label: "EMO — quick research pass",
+    description: "The fast one-pass research answer over your brain + the web. The topic is added automatically.",
+    default: `Do a QUICK one-pass research pass over my second brain AND the web on the topic below, then return a CONCISE one-screen answer: a one-line headline, 4–6 tight bullet findings each with a source, and one "next step". Keep it short — this is the fast tier.`,
+  },
+  {
+    key: 'emo.researchBrief',
+    category: "EMO voice",
+    label: "EMO research — brief from your words",
+    description: "Turns a spoken research request into a clean topic + question for the flow. The request fills in where it says {{request}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Turn this spoken request into a clean research brief. Reply ONLY JSON {"topic":"3-6 word title","question":"one clear research question/brief"}.
+Request: "{{request}}"`,
+  },
+  {
+    key: 'emo.meeting',
+    category: "EMO voice",
+    label: "EMO meeting — summary",
+    description: "Summarises a short meeting transcript into key points, decisions and action items. The transcript is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Summarise this meeting transcript. Reply ONLY JSON:
+{"summary":"markdown with a **Key points** list and a **Decisions** list","actionItems":["short imperative action items"],"attendees":<approx number of distinct speakers>}`,
+  },
+  {
+    key: 'emo.meetingChunk',
+    category: "EMO voice",
+    label: "EMO meeting — long-meeting chunk notes",
+    description: "Extracts notes from one chunk of a long meeting transcript. The chunk is added automatically. The part number fills in where it says {{part}} and the total where it says {{total}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `These are PART {{part}} of {{total}} of a meeting transcript. Extract ONLY what is here. Reply ONLY JSON:
+{"points":["key points"],"decisions":["decisions made"],"actionItems":["short imperative action items"]}`,
+  },
+  {
+    key: 'emo.meetingMerge',
+    category: "EMO voice",
+    label: "EMO meeting — merge long-meeting notes",
+    description: "Merges the per-chunk notes of a long meeting into final minutes. The collected notes are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Merge these meeting notes (collected across the whole meeting, in order) into final minutes. Deduplicate, keep them concise. Reply ONLY JSON:
+{"summary":"markdown with a **Key points** list and a **Decisions** list","actionItems":["short imperative action items"],"attendees":<approx number of distinct speakers or null>}`,
+  },
+  {
+    key: 'emo.taskTitle',
+    category: "EMO voice",
+    label: "EMO task — title from your words",
+    description: "Cleans a spoken request into one short imperative task title. Your words are added automatically.",
+    default: `Turn this spoken request into ONE short imperative task title (max 12 words). Keep names and specifics. Reply ONLY the title.`,
+  },
+  {
+    key: 'emo.reminderExtract',
+    category: "EMO voice",
+    label: "EMO reminder — extract who/what/when",
+    description: "Pulls who/what/when out of a spoken reminder. Today’s date fills in where it says {{today}} and your words where it says {{request}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Today is {{today}} (IST). From this spoken reminder, extract JSON {"who":"…","what":"…","when":"…","startDay":"…","time":"…","inMinutes":0}.
+- who = the person to nudge on WhatsApp (their name), or "" if the user means themselves.
+- what = the thing to remind about, as a short topic (strip the verb and the name).
+- when = the timing words as said ("Friday", "tomorrow 10am"), or "".
+- startDay = if a day OTHER than today is meant, resolve it to a concrete FUTURE date YYYY-MM-DD; else "".
+- time = a specific clock time as HH:mm (24h) if one was said, else "".
+- inMinutes = if a RELATIVE delay was said ("in 10 minutes", "after 2 mins", "in an hour", "in half an hour"), the total minutes as a number; else 0.
+Request: "{{request}}"
+Reply ONLY JSON.`,
+  },
+  {
+    key: 'emo.briefWho',
+    category: "EMO voice",
+    label: "EMO brief — whose work is it",
+    description: "Pulls the one person a spoken briefing is about. Your words are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Whose work is this briefing about? Reply with ONLY JSON: {"who":"<the person's name exactly as said, or empty>"}
+It is about the ONE person the speaker is giving work to. If no person is named, "who" is empty.`,
+  },
+  {
+    key: 'emo.askOffer',
+    category: "EMO voice",
+    label: "EMO ask — next-action offer",
+    description: "After EMO answers a question, spots ONE useful next action to offer by voice (add a task / remind someone). The question and answer are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `If there is ONE clear, specific next action Sandy would likely want RIGHT NOW — either add a TASK, or send a REMINDER to a named person — reply with JSON:
+{"offer":"<one short spoken yes/no question, e.g. Want me to remind Srikar about the Zigbee testing?>","action":"<a plain command Emo can run, e.g. Remind Srikar to test the Zigbee dongle>"}
+Only when it's genuinely useful and unambiguous. Otherwise reply exactly: {}`,
+  },
+  {
+    key: 'emo.askSummary',
+    category: "EMO voice",
+    label: "EMO ask — spoken one-liner",
+    description: "The single spoken sentence EMO speaks as the takeaway of an answer. The answer is added automatically.",
+    default: `You are Emo, speaking to Sandy. In ONE short spoken sentence (max 20 words), give him the key point of this answer to hear. You may use his name occasionally where it flows naturally — do NOT force it or tack it on. No preamble, no "here's", no lists — just the takeaway.`,
+  },
+  {
+    key: 'emo.talk',
+    category: "EMO voice",
+    label: "EMO — spoken conversation",
+    description: "How EMO holds a spoken back-and-forth conversation. The web results and conversation so far are added automatically. Today’s date fills in where it says {{today}}.",
+    default: `You are Emo, Sandy's warm, concise personal voice assistant having a spoken back-and-forth conversation. Reply in 2-5 natural spoken sentences — complete and specific, like talking out loud, not writing. Use his name (Sandy) only occasionally, where it flows. Today is {{today}} — when he asks about "latest"/"news"/"recent", use the freshest web results below and mention roughly when they're from. HARD RULE: NEVER answer with a question or ask for clarification — no counter-questions, ever. If something is unclear, make the most reasonable assumption, say what you assumed, and give your best complete answer using your knowledge and the web results below.`,
+  },
+  {
+    key: 'library.noteFormat',
+    category: "Library",
+    label: "Note — AI clean-up",
+    description: "Reformats a note into clear, structured Markdown without losing any detail. The note text is added automatically.",
+    default: `Clean up and structure the note below into clear, well-formatted Markdown that is easy to read. Tighten rambling parts, use short headings and bullet points where they help, bold the key points, and fix grammar and spacing. KEEP all of the user's information and intent — never invent facts or drop details. Do NOT add a title (it is shown separately). Return ONLY the formatted Markdown.`,
+  },
+  {
+    key: 'library.documentSummary',
+    category: "Library",
+    label: "Document — library-card summary",
+    description: "Writes the short description + tags for a document in your library. The document text is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Read this document and describe it for a library card, in simple plain English.
+Return ONLY JSON: {"description":"a clear summary of what this document is, at most 200 characters","tags":["3-6 short lowercase topic tags"]}.`,
+  },
+  {
+    key: 'library.captureEnrich',
+    category: "Library",
+    label: "Capture — summary + tags",
+    description: "Summarises a captured document in one sentence and suggests topical tags. The title + document are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `Summarise the document in ONE short sentence and give 3-4 short lowercase topical tags (1-2 words each).
+Respond with ONLY JSON: {"summary":"...","tags":["..",".."]}`,
+  },
+  {
+    key: 'library.bookmarkOrganize',
+    category: "Library",
+    label: "Bookmarks — organise into folders",
+    description: "Sorts your bookmarks into broad folders. The bookmark list is added automatically. Existing folders fill in where it says {{folders}} and the new-folder allowance where it says {{canCreate}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You organize a personal bookmark library into folders.
+Existing folders: {{folders}}.
+Rules:
+- Folders are BROAD areas only (like "AI", "Hardware", "Marketing", "Health"). Never specific ones (not "Claude skills", not "mmWave radar").
+- Prefer an existing folder whenever it fits.
+- You may invent at most {{canCreate}} NEW broad folder name(s), one or two plain words each.
+- If nothing fits confidently, use exactly "Others".
+Reply with ONLY JSON: {"assignments":[{"id":"<id>","folder":"<folder name or Others>"}]} — one entry per bookmark.`,
+  },
+  {
+    key: 'other.commitmentsExtract',
+    category: "Other",
+    label: "Commitments — extract from a day",
+    description: "Pulls clear commitments and decisions out of one day of your life. The day’s material is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You extract accountability items from ONE day of someone's life. Be CONSERVATIVE — only pull CLEAR, explicit items; if unsure, leave it out.
+
+COMMITMENT = something the person promised/agreed to DO (capture who it's to and by when, if stated).
+DECISION = a clear choice that was made.
+
+Return ONLY JSON (no prose, no code fences), shaped exactly:
+{"commitments":[{"text":"short, in his voice","party":"who or null","due":"YYYY-MM-DD or null"}],"decisions":[{"text":"short","context":"one phrase or null"}]}
+If nothing is clearly a commitment or decision, return {"commitments":[],"decisions":[]}.`,
+  },
+  {
+    key: 'google.gmailQuery',
+    category: "Google",
+    label: "Gmail — build a search query",
+    description: "Turns your plain request into a concise Gmail search query. Your request is added automatically.",
+    default: `Convert this natural-language request into a concise Gmail search query.
+Rules: keep ONLY the meaningful keywords; drop filler words (there is, an email, regarding, about, please, find, show, etc.). You MAY use Gmail operators (from:, to:, subject:, has:attachment, after:YYYY/MM/DD) only when clearly implied by the request. Do NOT add quotes unless a multi-word phrase must stay exact. Return ONLY the query on a single line, nothing else.`,
+  },
+  {
+    key: 'google.gmailRequest',
+    category: "Google",
+    label: "Gmail — thread briefing",
+    description: "Writes the briefing for a chosen email thread. The full thread is added automatically. Your search fills in where it says {{query}}, the subject where it says {{subject}}, and the message count where it says {{count}}.",
+    default: `The user searched their email for: "{{query}}".
+Below is the FULL email thread "{{subject}}" — all {{count}} message(s), oldest first, with quoted reply history already removed. Cover the WHOLE back-and-forth, not just the first message. Write a clean briefing:
+- **Description** — 2–4 sentences on what this thread is about and where it stands now.
+- **The conversation** — a short chronological walk-through of who said/asked/decided what across the messages.
+- **Key points** — bullets: decisions, numbers, dates, commitments, open questions.
+- **Action items / next steps** — bullets, only if there are real ones.
+Use plain Markdown. No preamble, no sign-off.`,
+  },
+  {
+    key: 'google.gmailRequestTasks',
+    category: "Google",
+    label: "Gmail — action items from a briefing",
+    description: "Pulls concrete tasks for you out of an email briefing. The briefing is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `From the email briefing below, extract concrete action items FOR THE USER as JSON: {"tasks":[{"title":"..."}]}. Only real, actionable next steps the user must do; return {"tasks":[]} if there are none. Keep each title short and imperative.`,
+  },
+  {
+    key: 'google.gmailBrief',
+    category: "Google",
+    label: "Gmail — daily email brief",
+    description: "Writes your end-of-day email brief, grouping the day’s important emails into topics. The email list is added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are writing a short end-of-day email brief for the owner of this inbox. Promotions/social/newsletter emails are already removed.
+
+Return ONLY JSON (no prose, no code fences), shaped exactly:
+{"overview":"one short sentence on the overall picture","sections":[{"heading":"short topic or sender","points":["concise point","another"],"emails":[1,3]}]}
+
+Rules:
+- Group the emails into a few clear topics. Each section: a short heading, 1–4 concise points, and "emails" = the NUMBERS (from the list) the section is based on.
+- In points you may use **bold** for names, companies, amounts, dates. Prefix anything needing a reply with "Action:".
+- Keep it brief and skimmable. Write in simple, plain, everyday English — short words and short sentences, no fancy words.`,
   },
 ];
 
@@ -339,6 +790,7 @@ export class PromptsService {
       key: p.key,
       label: p.label,
       description: p.description,
+      category: p.category,
       default: p.default,
       value: overrides.get(p.key) ?? p.default,
       customized: overrides.has(p.key) && overrides.get(p.key) !== p.default,

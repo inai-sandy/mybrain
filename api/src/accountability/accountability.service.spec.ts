@@ -56,7 +56,7 @@ describe('AccountabilityService.extractForDay', () => {
   it('extracts a commitment + decision and de-dups on re-run', async () => {
     const prisma = makePrisma();
     const llm: any = { completeWith: jest.fn(async () => answer) };
-    const svc = new AccountabilityService(prisma, llm, makeTasksSvc([]));
+    const svc = new AccountabilityService(prisma, llm, makeTasksSvc([]), { get: async () => '' } as any);
 
     const r1 = await svc.extractForDay('2026-06-19');
     expect(r1.commitments).toBe(1);
@@ -71,7 +71,7 @@ describe('AccountabilityService.extractForDay', () => {
 
   it('mark-done sets completedAt', async () => {
     const prisma = makePrisma();
-    const svc = new AccountabilityService(prisma, { completeWith: jest.fn(async () => answer) } as any, makeTasksSvc([]));
+    const svc = new AccountabilityService(prisma, { completeWith: jest.fn(async () => answer) } as any, makeTasksSvc([]), { get: async () => '' } as any);
     await svc.extractForDay('2026-06-19');
     await svc.setStatus('1', 'done');
     expect(prisma._commitments[0].status).toBe('done');

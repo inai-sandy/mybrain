@@ -19,7 +19,7 @@ function makeSvc() {
       update: async () => ({}),
     },
   };
-  return new DocumentsService(prisma, null as any, null as any);
+  return new DocumentsService(prisma, null as any, null as any, { get: async () => '' } as any);
 }
 
 describe('DocumentsService.sharedRaw — raw markdown share link (BEA-970)', () => {

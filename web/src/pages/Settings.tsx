@@ -1668,12 +1668,17 @@ function VoiceModelCard() {
   );
 }
 
-type PromptItem = { key: string; label: string; description: string; default: string; value: string; customized: boolean };
+type PromptItem = { key: string; label: string; description: string; default: string; value: string; customized: boolean; category?: string };
+
+// Category display order — anything unknown falls to the end under "Other". (BEA-1059)
+const PROMPT_CAT_ORDER = ['Daily & Story', 'Tasks', 'People & chase', 'EMO voice', 'The Lab', 'Meetings & Chat', 'Library', 'Google', 'Other'];
 
 function PromptsSection() {
   const [items, setItems] = useState<PromptItem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
+  const [q, setQ] = useState('');
+  const [openCat, setOpenCat] = useState<string | null>(null);
   const toast = useToast();
 
   async function load() {
@@ -1705,36 +1710,75 @@ function PromptsSection() {
     }
   }
 
+  const query = q.trim().toLowerCase();
+  const filtered = query
+    ? items.filter((p) => `${p.label} ${p.description} ${p.key} ${p.value}`.toLowerCase().includes(query))
+    : items;
+
+  // Group by category, ordered; unknown categories fall under "Other". (BEA-1059)
+  const groups = new Map<string, PromptItem[]>();
+  for (const p of filtered) {
+    const cat = p.category && PROMPT_CAT_ORDER.includes(p.category) ? p.category : 'Other';
+    groups.set(cat, [...(groups.get(cat) || []), p]);
+  }
+  const orderedCats = PROMPT_CAT_ORDER.filter((c) => groups.has(c));
+
+  const promptCard = (p: PromptItem) => {
+    const dirty = drafts[p.key] !== p.value;
+    return (
+      <AccordionCard
+        key={p.key}
+        title={p.label}
+        icon={MessageSquare}
+        badge={p.customized ? <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">customized</span> : undefined}
+      >
+        <p className="text-xs text-zinc-500 mb-2">{p.description}</p>
+        <textarea
+          value={drafts[p.key] ?? ''}
+          onChange={(e) => setDrafts((prev) => ({ ...prev, [p.key]: e.target.value }))}
+          rows={Math.min(16, Math.max(5, (drafts[p.key] || '').split('\n').length + 1))}
+          className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-mono leading-relaxed outline-none focus:border-emerald-500"
+        />
+        <div className="mt-2 flex items-center justify-between">
+          <button onClick={() => reset(p.key)} title="Reset to default" className="text-xs text-zinc-400 hover:text-rose-600 inline-flex items-center gap-1"><RotateCcw size={12} /> reset</button>
+          <button onClick={() => save(p.key)} disabled={!dirty} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
+        </div>
+      </AccordionCard>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-        <h2 className="flex items-center gap-2 font-semibold mb-1"><MessageSquare size={18} className="text-emerald-600" /> AI prompts</h2>
-        <p className="text-sm text-zinc-500">Tune the exact instructions the AI follows across the app. Your edits apply immediately; the dynamic data (your dump, your day's tasks, etc.) is added automatically below each instruction. Use <b>Reset</b> any time to restore the original.</p>
+        <h2 className="flex items-center gap-2 font-semibold mb-1"><MessageSquare size={18} className="text-emerald-600" /> AI prompts <span className="text-xs font-normal text-zinc-400">· {items.length}</span></h2>
+        <p className="text-sm text-zinc-500">Tune the exact instructions the AI follows across the app. Your edits apply immediately; the dynamic data (your dump, your day's tasks, etc.) is added automatically. Use <b>Reset</b> any time to restore the original.</p>
+        <div className="relative mt-3">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search prompts…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-9 pr-3 py-2 text-sm outline-none focus:border-emerald-500" />
+        </div>
       </section>
 
-      {items.map((p) => {
-        const dirty = drafts[p.key] !== p.value;
-        return (
-          <AccordionCard
-            key={p.key}
-            title={p.label}
-            icon={MessageSquare}
-            badge={p.customized ? <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">customized</span> : undefined}
-          >
-            <p className="text-xs text-zinc-500 mb-2">{p.description}</p>
-            <textarea
-              value={drafts[p.key] ?? ''}
-              onChange={(e) => setDrafts((prev) => ({ ...prev, [p.key]: e.target.value }))}
-              rows={Math.min(16, Math.max(5, (drafts[p.key] || '').split('\n').length + 1))}
-              className="w-full resize-y rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-xs font-mono leading-relaxed outline-none focus:border-emerald-500"
-            />
-            <div className="mt-2 flex items-center justify-between">
-              <button onClick={() => reset(p.key)} title="Reset to default" className="text-xs text-zinc-400 hover:text-rose-600 inline-flex items-center gap-1"><RotateCcw size={12} /> reset</button>
-              <button onClick={() => save(p.key)} disabled={!dirty} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
-            </div>
-          </AccordionCard>
-        );
-      })}
+      {filtered.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 p-6 text-center text-sm text-zinc-400">No prompts match “{q}”.</p>
+      ) : query ? (
+        // while searching, show a flat list of matches — grouping just gets in the way
+        <div className="space-y-3">{filtered.map(promptCard)}</div>
+      ) : (
+        orderedCats.map((cat) => {
+          const list = groups.get(cat)!;
+          const open = openCat === cat;
+          const custom = list.filter((p) => p.customized).length;
+          return (
+            <section key={cat} className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <button onClick={() => setOpenCat(open ? null : cat)} className="flex w-full items-center justify-between gap-2 bg-zinc-50 dark:bg-zinc-900/60 px-4 py-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                <span className="flex items-center gap-2 font-semibold text-sm">{cat} <span className="text-xs font-normal text-zinc-400">· {list.length}</span>{custom > 0 && <span className="text-[10px] uppercase tracking-wide text-amber-600 bg-amber-500/10 rounded px-1.5 py-0.5">{custom} edited</span>}</span>
+                <ChevronDown size={16} className={'text-zinc-400 transition-transform ' + (open ? 'rotate-180' : '')} />
+              </button>
+              {open && <div className="space-y-3 p-3">{list.map(promptCard)}</div>}
+            </section>
+          );
+        })
+      )}
     </div>
   );
 }

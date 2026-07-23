@@ -898,7 +898,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const fallback = `Auto-added${category ? ` under ${category}` : ''} — add any details here.`;
     try {
       const model = await this.getModel();
-      const prompt = `Write ONE short line (max 12 words) giving context for this task — what it is about or why it matters. No preamble, no quotes.\nTask: "${title}"${category ? `\nArea: ${category}` : ''}`;
+      const tmpl = await this.prompts.get('tasks.autoNote');
+      const prompt = `${tmpl}\nTask: "${title}"${category ? `\nArea: ${category}` : ''}`;
       const text = await this.llm.completeWith(model, prompt, 40, 'task-autonote').catch(() => '');
       const line = (text || '').split('\n')[0].replace(/^["']+|["'.]+$/g, '').trim();
       return line || fallback;

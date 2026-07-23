@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 export type ChecklistItem = { text: string; done: boolean };
 
@@ -15,6 +16,7 @@ export class NotesService {
     private readonly prisma: PrismaService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** AI clean-up (BEA-964): reformat a note's raw text into clear, structured Markdown, save it, and
@@ -26,11 +28,8 @@ export class NotesService {
     try { checklist = (JSON.parse(n.checklist || '[]') as ChecklistItem[]).map((c) => `- [${c.done ? 'x' : ' '}] ${c.text}`).join('\n'); } catch { /* ignore */ }
     const raw = [n.content || '', checklist].filter(Boolean).join('\n\n').trim();
     if (!raw) return { ok: false };
-    const prompt =
-      `Clean up and structure the note below into clear, well-formatted Markdown that is easy to read. ` +
-      `Tighten rambling parts, use short headings and bullet points where they help, bold the key points, and fix grammar and spacing. ` +
-      `KEEP all of the user's information and intent — never invent facts or drop details. Do NOT add a title (it is shown separately). ` +
-      `Return ONLY the formatted Markdown.\n\nNOTE:\n${raw.slice(0, 6000)}`;
+    const tmpl = await this.prompts.get('library.noteFormat');
+    const prompt = `${tmpl}\n\nNOTE:\n${raw.slice(0, 6000)}`;
     const out = (await this.llm.complete(prompt, 1500, 'note-format'))?.trim();
     if (!out) return { ok: false };
     const previous = n.content || '';

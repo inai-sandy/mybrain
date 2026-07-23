@@ -4,6 +4,7 @@ import { LlmService } from '../llm/llm.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { RemindersService } from '../contacts/reminders.service';
 import { EmoCardsService } from './emo-cards.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /**
  * EMO (BEA-867) — the Reminders lane. A "reminder" card → a real WhatsApp reminder to a contact
@@ -20,6 +21,7 @@ export class EmoReminderService {
     private readonly cards: EmoCardsService,
     private readonly contacts: ContactsService,
     private readonly reminders: RemindersService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private todayKey(): string {
@@ -28,8 +30,9 @@ export class EmoReminderService {
 
   private async extract(text: string): Promise<{ who: string; what: string; when: string; startDay: string; time: string; inMinutes: number }> {
     try {
+      const extractTmpl = await this.prompts.get('emo.reminderExtract');
       const raw = await this.llm.complete(
-        `Today is ${this.todayKey()} (IST). From this spoken reminder, extract JSON {"who":"…","what":"…","when":"…","startDay":"…","time":"…","inMinutes":0}.\n- who = the person to nudge on WhatsApp (their name), or "" if the user means themselves.\n- what = the thing to remind about, as a short topic (strip the verb and the name).\n- when = the timing words as said ("Friday", "tomorrow 10am"), or "".\n- startDay = if a day OTHER than today is meant, resolve it to a concrete FUTURE date YYYY-MM-DD; else "".\n- time = a specific clock time as HH:mm (24h) if one was said, else "".\n- inMinutes = if a RELATIVE delay was said ("in 10 minutes", "after 2 mins", "in an hour", "in half an hour"), the total minutes as a number; else 0.\nRequest: "${text}"\nReply ONLY JSON.`,
+        extractTmpl.replace(/\{\{today\}\}/g, this.todayKey()).replace(/\{\{request\}\}/g, text),
         240, 'emo-reminder-extract',
       );
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');

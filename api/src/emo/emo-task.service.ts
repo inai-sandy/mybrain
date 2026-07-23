@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { EmoCardsService } from './emo-cards.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /**
  * EMO (BEA-866 / BEA-947) — the Tasks lane. One utterance = exactly ONE task (the user's rule).
@@ -14,6 +15,7 @@ export class EmoTaskService {
     private readonly llm: LlmService,
     private readonly tasks: TasksService,
     private readonly cards: EmoCardsService,
+    private readonly prompts: PromptsService,
   ) {}
 
   async handle(cardId: string): Promise<void> {
@@ -23,8 +25,9 @@ export class EmoTaskService {
     try {
       let title = '';
       try {
+        const titleTmpl = await this.prompts.get('emo.taskTitle');
         const raw = await this.llm.complete(
-          `Turn this spoken request into ONE short imperative task title (max 12 words). Keep names and specifics. Reply ONLY the title.\n"${text}"`,
+          `${titleTmpl}\n"${text}"`,
           60, 'emo-task-title',
         );
         title = (raw || '').trim().replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').slice(0, 140);

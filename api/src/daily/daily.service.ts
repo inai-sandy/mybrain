@@ -213,11 +213,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // anything added earlier, so the AI re-suggested work already logged. (BEA-1018)
     const existing = await this.prisma.task.findMany({ where: await this.tasks.whereForDay(day), select: { title: true } });
     const existingTitles = existing.map((e) => e.title);
+    const tmpl = await this.prompts.get('daily.doneExtract');
     const prompt =
-      `From the user's diary entry below, extract the concrete tasks/work they say they DID or FINISHED today.\n` +
-      `Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket"}]}.\n` +
-      `Rules: only real, completed work — not feelings, not plans, not things they failed to do; short titles; {"tasks":[]} if none.\n` +
-      `Do NOT include anything already in this already-logged list:\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
+      `${tmpl}\n\n` +
+      `Already-logged list (do NOT include these):\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
       `DIARY:\n${text.slice(0, 4000)}`;
     const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 500, 'done-extract'))?.trim() || '';
     let list: { title?: string; category?: string }[] = [];
@@ -260,11 +259,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // Every still-open task, not just the ones added on these two days. (BEA-1018)
     const existing = await this.prisma.task.findMany({ where: { status: { not: 'done' }, day: { lte: today } }, select: { title: true } });
     const existingTitles = existing.map((e) => e.title);
+    const tmpl = await this.prompts.get('daily.todoExtract');
     const prompt =
-      `From the user's diary entry below, extract the concrete things they still NEED or PLAN to do — open to-dos, follow-ups and next actions they mention for the days ahead.\n` +
-      `Return ONLY JSON: {"tasks":[{"title":"short imperative task","category":"optional 1-2 word bucket","note":"one line of concrete context or deadline from the diary — omit if none","priority":"high | medium | low"}]}.\n` +
-      `Rules: only real forward actions (things to do next) — NOT things they already finished, NOT feelings/reflections; short imperative titles; keep the note to the useful detail the diary gives (who/what/when); {"tasks":[]} if none.\n` +
-      `Do NOT include anything already in this open list:\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
+      `${tmpl}\n\n` +
+      `Open list (do NOT include these):\n${existingTitles.map((t) => `- ${t}`).join('\n') || '(none)'}\n\n` +
       `DIARY:\n${text.slice(0, 4000)}`;
     const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 500, 'todo-extract'))?.trim() || '';
     let list: { title?: string; category?: string; note?: string; priority?: string }[] = [];
@@ -318,10 +316,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.prisma.task.findMany({ where: { status: 'done', completedAt: { gte: start, lt: end } }, select: { title: true, category: true } }),
     ]);
     const taskLines = doneTasks.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''}`).join('\n');
+    const tmpl = await this.prompts.get('daily.workedBreakdown');
     const prompt =
-      `The user worked ${wm} minutes today. Split that time across 3–6 simple work categories based on what they actually did.\n` +
-      `Base this PRIMARILY on their own Story of the day below (what they describe doing) — that is the source of truth, because they do plenty of work they never log as tasks. Use the finished-task list only as a supporting hint, never as the main basis.\n` +
-      `Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where the minutes sum to about ${wm}.\n\n` +
+      `${tmpl.replace(/\{\{minutes\}\}/g, String(wm))}\n\n` +
       `Story of the day (primary source):\n${(story?.rawText || '').slice(0, 3000)}\n\nFinished tasks (supporting hints only):\n${taskLines || '(none logged)'}`;
     const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 400, 'worked-breakdown'))?.trim() || '';
     let list: { category?: string; minutes?: number }[] = [];
@@ -718,10 +715,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const text = (story?.rawText || '').trim();
     if (text.length < 30) return { questions: [] };
-    const prompt =
-      `Yesterday (${day}) the user wrote this diary entry. Write 2-3 SHORT, SPECIFIC follow-up questions to ask him the next morning — ` +
-      `about unfinished business, risky things he mentioned, or people he was waiting on. Use HIS names and words. ` +
-      `No generic questions ("how do you feel?"). Reply ONLY JSON: {"questions":["..."]}.\n\nDIARY:\n${text.slice(0, 4000)}`;
+    const tmpl = await this.prompts.get('daily.morningQuestions');
+    const prompt = `${tmpl.replace(/\{\{day\}\}/g, day)}\n\nDIARY:\n${text.slice(0, 4000)}`;
     const raw = (await this.llm.completeWith(DONE_EXTRACT_MODEL, prompt, 300, 'morning-questions').catch(() => null)) || '';
     const j = looseJsonParse(raw);
     const questions = (Array.isArray(j?.questions) ? j.questions : [])

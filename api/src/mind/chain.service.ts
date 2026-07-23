@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 // Cheap model for turning a plain sentence into a goal/blocker/lever chain.
 const PARSE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
@@ -13,6 +14,7 @@ export class MindChainService {
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly tasks: TasksService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private today() {
@@ -117,11 +119,8 @@ export class MindChainService {
   async parse(text: string): Promise<{ goal: string; blocker: string; lever: string }> {
     const t = (text || '').trim();
     if (!t) return { goal: '', blocker: '', lever: '' };
-    const prompt =
-      `The user describes, in their own words, something that's blocking them. Turn it into a simple chain.\n` +
-      `Return ONLY JSON: {"goal":"what they're trying to achieve","blocker":"what's stopping it","lever":"the ONE next-action that would unblock it"}.\n` +
-      `Keep goal and blocker short plain phrases. Write the LEVER as a tiny if-then plan anchored to an everyday cue: "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>." Pick a cue that fits; keep it one action, not a plan.\n` +
-      `If a part isn't stated, leave it as "" — do NOT invent names, quotes, or details that aren't in their words.\n\nUSER:\n${t.slice(0, 800)}`;
+    const tmpl = await this.prompts.get('lab.chainParse');
+    const prompt = `${tmpl}\n\nUSER:\n${t.slice(0, 800)}`;
     const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 300, 'chain-parse'))?.trim() || '';
     try {
       const j = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -203,16 +202,11 @@ export class MindChainService {
     const storyText = (story?.rawText || '').trim();
     if (!storyText) return 0; // a Situation must be grounded in the day's OWN story; no story → infer nothing
 
+    const tmpl = await this.prompts.get('lab.chainInfer');
     const prompt =
-      `You map someone's SITUATION from THEIR OWN words as chains: a GOAL, what's BLOCKING it, and the one LEVER that would unblock it.\n` +
-      `This is the user's private record — accuracy matters far more than insight. STRICT RULES:\n` +
-      `- Use ONLY what is literally written in TODAY'S STORY below. Do NOT invent or infer names of people, quotes, events, feelings, or "what he said". No third-person psychoanalysis.\n` +
-      `- Every chain MUST include "evidence": a short VERBATIM quote (≤120 chars) copied EXACTLY from TODAY'S STORY that the chain rests on. If you cannot copy a real supporting quote, do NOT propose the chain.\n` +
-      `- Be conservative: 0–2 chains. Plain words. Return an empty array if nothing is clearly grounded in today's story.\n` +
-      `Write each LEVER as a tiny if-then plan anchored to an everyday cue ("When <a daily cue>, I'll <one concrete action>"). One action, not a plan.\n\n` +
+      `${tmpl}\n\n` +
       (deferred.length ? `REPEATEDLY DEFERRED TASKS:\n${deferred.map((t) => `- ${t.title}${t.category ? ` [${t.category}]` : ''} (deferred ${t.rolloverCount}×)`).join('\n')}\n\n` : '') +
-      `TODAY'S STORY:\n${storyText.slice(0, 1500)}\n\n` +
-      `Return ONLY JSON: {"chains":[{"goal":"...","blocker":"...","lever":"...","evidence":"verbatim quote copied from TODAY'S STORY"}]} (empty array if nothing well-grounded).`;
+      `TODAY'S STORY:\n${storyText.slice(0, 1500)}`;
     const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 600, 'chain-infer'))?.trim() || '';
     let list: { goal?: string; blocker?: string; lever?: string; evidence?: string }[] = [];
     try {
@@ -269,14 +263,12 @@ export class MindChainService {
     let resolved = 0;
     let shifted = 0;
     for (const c of chains) {
+      const tmpl = await this.prompts.get('lab.chainReview');
       const prompt =
-        `Someone is working through a stuck situation, framed as a chain: a GOAL, what's BLOCKING it, and the LEVER (next action that unblocks it).\n` +
-        `Given ONLY what they did and wrote TODAY, decide if that blocker has changed. Be conservative — if today gives no clear signal about THIS blocker, answer "held".\n\n` +
+        `${tmpl}\n\n` +
         `GOAL: ${c.goal}\nBLOCKED BY: ${c.blocker}\nLEVER: ${c.lever}\n\n` +
         `WHAT THEY FINISHED TODAY:\n${doneList || '(nothing logged)'}\n\n` +
-        `TODAY'S STORY:\n${storyText || '(none)'}\n\n` +
-        `Return ONLY JSON: {"verdict":"held|shifted|resolved","blocker":"the NEW blocker if shifted","lever":"the NEW next-action if shifted, as an if-then plan: When <a daily cue>, I'll <one action>","why":"one short plain sentence"}.\n` +
-        `"resolved" = the blocker is clearly gone. "shifted" = the original blocker eased but a DIFFERENT thing now blocks the goal. "held" = no clear change (the default).`;
+        `TODAY'S STORY:\n${storyText || '(none)'}`;
       const raw = (await this.llm.completeWith(PARSE_MODEL, prompt, 300, 'chain-review'))?.trim() || '';
       let j: { verdict?: string; blocker?: string; lever?: string; why?: string } = {};
       try {

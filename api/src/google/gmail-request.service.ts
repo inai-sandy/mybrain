@@ -6,6 +6,7 @@ import { GoogleService } from './google.service';
 import { ItemsService } from '../items/items.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 const MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 const QUERY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }; // tiny job: NL → Gmail query
@@ -33,18 +34,15 @@ export class GmailRequestService {
     private readonly items: ItemsService,
     private readonly memory: MemoryService,
     private readonly tasks: TasksService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** Turn a natural-language ask into a tight Gmail query (keywords + safe operators). */
   private async buildGmailQuery(nl: string): Promise<string> {
     const raw = (nl || '').trim();
     if (!raw) return '';
-    const prompt =
-      `Convert this natural-language request into a concise Gmail search query.\n` +
-      `Rules: keep ONLY the meaningful keywords; drop filler words (there is, an email, regarding, about, please, find, show, etc.). ` +
-      `You MAY use Gmail operators (from:, to:, subject:, has:attachment, after:YYYY/MM/DD) only when clearly implied by the request. ` +
-      `Do NOT add quotes unless a multi-word phrase must stay exact. Return ONLY the query on a single line, nothing else.\n\n` +
-      `Request: ${raw}\nGmail query:`;
+    const tmpl = await this.prompts.get('google.gmailQuery');
+    const prompt = `${tmpl}\n\nRequest: ${raw}\nGmail query:`;
     const out = (await this.llm.completeWith(QUERY_MODEL, prompt, 60, 'gmail-query'))?.trim() || '';
     const cleaned = out.split('\n')[0].replace(/^["'`]+|["'`]+$/g, '').replace(/^Gmail query:\s*/i, '').trim();
     return cleaned || keywordize(raw);
@@ -80,15 +78,9 @@ export class GmailRequestService {
   }
 
   private async summarize(query: string, thread: Thread, messageCount: number): Promise<string> {
+    const tmpl = await this.prompts.get('google.gmailRequest');
     const prompt =
-      `The user searched their email for: "${query}".\n` +
-      `Below is the FULL email thread "${thread.subject}" — all ${messageCount} message(s), oldest first, with quoted reply history already removed. ` +
-      `Cover the WHOLE back-and-forth, not just the first message. Write a clean briefing:\n` +
-      `- **Description** — 2–4 sentences on what this thread is about and where it stands now.\n` +
-      `- **The conversation** — a short chronological walk-through of who said/asked/decided what across the messages.\n` +
-      `- **Key points** — bullets: decisions, numbers, dates, commitments, open questions.\n` +
-      `- **Action items / next steps** — bullets, only if there are real ones.\n` +
-      `Use plain Markdown. No preamble, no sign-off.\n\n` +
+      `${tmpl.replace(/\{\{query\}\}/g, query).replace(/\{\{subject\}\}/g, thread.subject).replace(/\{\{count\}\}/g, String(messageCount))}\n\n` +
       `=== EMAIL THREAD (${messageCount} messages) ===\n${thread.copy.slice(0, 60000)}`;
     return (await this.llm.completeWith(MODEL, prompt, 1600, 'gmail-request'))?.trim() || 'Could not summarise this thread.';
   }
@@ -211,9 +203,8 @@ export class GmailRequestService {
   async toTasks(id: string) {
     const r = await this.prisma.gmailRequest.findUnique({ where: { id } });
     if (!r) return { created: [] };
-    const prompt =
-      `From the email briefing below, extract concrete action items FOR THE USER as JSON: {"tasks":[{"title":"..."}]}. ` +
-      `Only real, actionable next steps the user must do; return {"tasks":[]} if there are none. Keep each title short and imperative.\n\n${r.summary}`;
+    const tmpl = await this.prompts.get('google.gmailRequestTasks');
+    const prompt = `${tmpl}\n\n${r.summary}`;
     const raw = (await this.llm.completeWith(MODEL, prompt, 500, 'gmail-request-tasks'))?.trim() || '';
     let titles: string[] = [];
     try {

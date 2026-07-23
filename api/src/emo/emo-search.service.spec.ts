@@ -9,7 +9,7 @@ function make(overrides: any = {}) {
   const llm: any = { complete: jest.fn(async () => overrides.clarify ?? '{"questions":["Which region?","Done or pending?"],"options":["South India","All India","Last 30 days"]}') };
   const agent: any = { createRun: jest.fn(async () => ({ id: 'run1' })), getRun: jest.fn(async () => ({ resultText: '## CCTV market\n- Finding one [source]', status: 'done' })) };
   const bridge: any = { execute: jest.fn(async () => undefined) };
-  return { svc: new EmoSearchService(llm, cards, agent, bridge), cards, llm, agent, bridge, updates };
+  return { svc: new EmoSearchService(llm, cards, agent, bridge, { get: async () => '' } as any), cards, llm, agent, bridge, updates };
 }
 
 describe('EmoSearchService (BEA-869)', () => {

@@ -3,6 +3,7 @@ import { LlmService } from '../llm/llm.service';
 import { AgentService } from '../agent/agent.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { EmoCardsService } from './emo-cards.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /**
  * EMO (BEA-869) — the Agentic Search lane. A "search" card, once filed by the router, ALWAYS gets a
@@ -18,6 +19,7 @@ export class EmoSearchService {
     private readonly cards: EmoCardsService,
     private readonly agent: AgentService,
     private readonly bridge: HermesBridgeService,
+    private readonly prompts: PromptsService,
   ) {}
 
   /** Put 2–3 clarifying questions on a fresh search card (always — the owner values precision). */
@@ -28,8 +30,9 @@ export class EmoSearchService {
     let questions: string[] = [];
     let options: string[] = [];
     try {
+      const clarifyTmpl = await this.prompts.get('emo.searchClarify');
       const raw = await this.llm.complete(
-        `The user asked Emo to search their brain + the web for: "${query}".\nWrite 2–3 SHORT clarifying questions that would most change the result (scope · time window · who · done vs pending). Also give 3–5 quick tappable answer chips.\nReply ONLY JSON: {"questions":["…"],"options":["…"]}`,
+        clarifyTmpl.replace(/\{\{query\}\}/g, query),
         300, 'emo-search-clarify',
       );
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
@@ -47,7 +50,8 @@ export class EmoSearchService {
     if (!card || card.lane !== 'search') return;
     const query = card.rawTranscript || card.summary || '';
     const refined = card.needsAnswer ? `\nWhat I clarified: ${card.needsAnswer}` : '';
-    const prompt = `Search my second brain AND the web to answer the question below, then return a CURATED answer — NOT raw results.\nFormat: a one-line headline; then the top 3–5 findings, each as a short bullet WITH its source (a URL or the note it came from); then one suggested next step.\n\nQuestion: ${query}${refined}`;
+    const answerTmpl = await this.prompts.get('emo.searchAnswer');
+    const prompt = `${answerTmpl}\n\nQuestion: ${query}${refined}`;
     try {
       const run = await this.agent.createRun({ title: `Emo search: ${(card.summary || query).slice(0, 60)}`, input: prompt });
       await this.bridge.execute(run.id, { prompt, title: `Emo search`, save: false, depth: 'standard' });

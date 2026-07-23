@@ -1,7 +1,7 @@
 import { BookmarksService } from './bookmarks.service';
 
 // keywordScore + tokenize are pure; build a bare service and poke them. (BEA-613)
-const svc = new BookmarksService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any) as any;
+const svc = new BookmarksService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any) as any;
 const score = (it: any, q: string) => svc.keywordScore({ tags: [], ...it }, svc.tokenize(q));
 
 describe('Bookmarks keyword search (BEA-613)', () => {

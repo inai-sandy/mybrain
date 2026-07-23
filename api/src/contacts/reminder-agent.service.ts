@@ -4,6 +4,7 @@ import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService, topicFromMessage } from './reminders.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /** Watchdog decision for an unanswered inbound of a given age. Pure + unit-tested. (BEA-953) */
 export function watchdogAction(ageMs: number, graceMs = 8 * 60_000, escalateMs = 45 * 60_000): 'skip' | 'retry' | 'escalate' {
@@ -91,6 +92,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     private readonly reminders: RemindersService,
     private readonly claims: ClaimsService,
     private readonly tasks: TasksService,
+    private readonly prompts: PromptsService,
   ) {}
 
   // Self-healing watchdog (BEA-953): every 10 min, catch any contact reply we haven't answered —
@@ -239,33 +241,15 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
 
     // Sandeep's transparent AI assistant — identifies itself, uses the notes as context, and
     // escalates to Sandeep when it can't answer, instead of impersonating him. (BEA-765/766)
-    const prompt = `You are the AI assistant for Sandeep (your boss — the person you represent, and NOT the person you are texting).
-You are texting ${name} on WhatsApp on Sandeep's behalf. In THIS chat, the person you are replying to is ${name}; Sandeep is not here.
-${items.length ? `Open item(s) you're following up on:` : `There are no open reminders right now — this is an ongoing WhatsApp conversation with ${name}:`}
-${itemList}
-${briefText ? `\nWhat Sandeep told you about ${name} (his own words, most recent first):\n${briefText}\n` : ''}${workLines ? `\nEverything ${name} currently owes Sandeep:\n${workLines}\n` : ''}${doneRecently.length ? `\nRecently finished and confirmed (do NOT chase these again):\n${doneRecently.map((t: any) => `- ${t.title}`).join('\n')}\n` : ''}
-Conversation so far:
-${thread}
-
-Write the assistant's next single reply to whatever ${name} just said.
-Rules:
-- If you address them by name at all, use "${name}" — NEVER call them "Sandeep". Sandeep is your boss, not the person in this chat. Using no name is better than the wrong one. (You may still mention Sandeep in the third person, e.g. "I'll check with Sandeep".)
-- Warm, natural, plain Indian English. You ARE Sandeep's AI assistant — do NOT pretend to be Sandeep. If they ask who you are, tell them you're Sandeep's AI assistant helping him keep track, and he'll jump in when needed.
-- Warmly invite them to reply or ask anything they want to discuss.
-- ENGAGE with what they actually said. When ${name} shares concrete details — quantities, hours, numbers, a status, a problem or a blocker — acknowledge the SPECIFICS: reflect the real figures/facts back so they know you truly read it, and ask ONE useful follow-up or offer help. NEVER reply to a detailed update with just "Perfect!" or "Got it".
-- Concise and natural — usually 1 to 3 sentences, ONE message.
-- Use ALL the context above — Sandeep's briefing, everything they owe, and what is already finished — to answer their questions.
-- Do NOT chase anything listed as recently finished, and do NOT re-ask about something already marked "waiting on Sandeep to confirm" — acknowledge it instead.
-- If an item says it also involves someone else, you may say it is waiting on that person.
-- If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
-- ALWAYS reply to their message — set "send": true. NEVER leave them on read; a plain "yes"/"ok"/"thanks" or a shared file/link still gets a brief warm reply.
-- Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
-- FINISHED WORK: if ${name}'s LATEST message clearly says one of the numbered items above is COMPLETE, list those numbers in "done". Be strict — only when they plainly state it is finished/sent/paid/submitted/handed over. A promise ("I'll do it tomorrow"), a partial update ("almost there", "working on it") or a question is NOT finished, so leave "done" empty. If it is not obvious WHICH numbered item they mean, put nothing in "done" and ASK them which one in your reply — never guess.
-- Never tell them the work is closed. Sandeep confirms it himself; you can say you have passed it to him to check.
-- A PROMISED DATE: if they commit to a specific day for one of the numbered items ("I'll do it Friday", "by the 5th", "tomorrow"), put it in "promise" as {"item": <number>, "date": "YYYY-MM-DD"}. Today is ${todayKey}. Only a REAL date — "soon", "will do", "as early as possible" are NOT dates, so leave "promise" null. Never a date in the past.
-
-Reply with ONLY this JSON, nothing else:
-{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "done": [<numbers of items they say are finished, or empty>], "promise": null or {"item": <number>, "date": "YYYY-MM-DD"}}`;
+    const tmpl = await this.prompts.get('people.chaseAgent');
+    const header = items.length
+      ? `Open item(s) you're following up on:`
+      : `There are no open reminders right now — this is an ongoing WhatsApp conversation with ${name}:`;
+    const prompt =
+      tmpl.replace(/\{\{name\}\}/g, name).replace(/\{\{today\}\}/g, todayKey) +
+      `\n\n${header}\n${itemList}\n` +
+      `${briefText ? `\nWhat Sandeep told you about ${name} (his own words, most recent first):\n${briefText}\n` : ''}${workLines ? `\nEverything ${name} currently owes Sandeep:\n${workLines}\n` : ''}${doneRecently.length ? `\nRecently finished and confirmed (do NOT chase these again):\n${doneRecently.map((t: any) => `- ${t.title}`).join('\n')}\n` : ''}` +
+      `\nConversation so far:\n${thread}`;
 
     const raw = await this.reminders.voiceComplete(prompt, 'reminder-agent', 700);
     const parsed: any = this.parseJson(raw) || {};

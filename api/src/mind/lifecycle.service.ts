@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 // Cheap, fast model for the "are these the same insight?" clustering — it's a simple grouping job.
 const DEDUPE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
@@ -59,6 +60,7 @@ export class MindLifecycleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm?: LlmService,
+    private readonly prompts?: PromptsService,
   ) {}
 
   /** Daily pass: dedupe (lexical + semantic), then decay/promote/retire. */
@@ -190,12 +192,8 @@ export class MindLifecycleService {
     if (rows.length < 3) return 0;
 
     const list = rows.map((r, i) => `${i}\t[${r.valence}] ${r.statement}`).join('\n');
-    const prompt =
-      `These are behavioural findings about ONE person, each with a number, a [valence], and a sentence.\n` +
-      `Group together ONLY the ones that express essentially the SAME core insight (same behaviour/feeling, even if worded very differently or with different words for the same thing — e.g. "child"/"family"/a child's name).\n` +
-      `Never group findings with different valences. A finding may appear in at most one group. Leave non-duplicates out. When in doubt, do NOT group.\n\n` +
-      `${list}\n\n` +
-      `Return ONLY JSON: {"groups":[[numbers that are duplicates of each other], ...]}. No prose.`;
+    const tmpl = (await this.prompts?.get('lab.dedupe')) || '';
+    const prompt = `${tmpl}\n\n${list}`;
 
     const raw = (await this.llm.completeWith(DEDUPE_MODEL, prompt, 800, 'mind-dedupe'))?.trim() || '';
     const groups = this.parseGroups(raw, rows.length);

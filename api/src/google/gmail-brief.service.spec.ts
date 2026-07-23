@@ -12,7 +12,7 @@ function make(opts: { hm: string; todayBrief?: any; nightlyDone?: string | null 
     gmailBrief: { findUnique: async ({ where }: any) => (where.day === '2026-07-02' ? (opts.todayBrief ?? null) : null) },
   };
   const google: any = { status: async () => ({ connected: true }) };
-  const svc = new GmailBriefService(prisma, {} as any, google, {} as any, {} as any);
+  const svc = new GmailBriefService(prisma, {} as any, google, {} as any, {} as any, { get: async () => '' } as any);
   jest.spyOn(svc as any, 'tz').mockResolvedValue('Asia/Kolkata');
   jest.spyOn(svc as any, 'dayKey').mockReturnValue('2026-07-02');
   jest.spyOn(svc as any, 'localHM').mockReturnValue(opts.hm);

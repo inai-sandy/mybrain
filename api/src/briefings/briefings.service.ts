@@ -64,10 +64,8 @@ export class BriefingsService {
     const contact = await this.contactOrThrow(contactId);
     const raw = String(text || '').trim();
     if (!raw) throw new BadRequestException('Nothing to tidy yet');
-    const prompt =
-      `Tidy this spoken briefing about ${contact.name} into clean, plain sentences.\n` +
-      `Rules: keep EVERY fact, name, number and date exactly as said. Remove only filler, repetition and dictation stumbles. ` +
-      `Do NOT add anything, do NOT summarise away details, keep it in the first person. Reply with ONLY the tidied text, no preamble.\n\n${raw.slice(0, 8000)}`;
+    const tmpl = await this.prompts.get('people.briefingTidy');
+    const prompt = `${tmpl.replace(/\{\{name\}\}/g, contact.name)}\n\n${raw.slice(0, 8000)}`;
     try {
       const out = await this.llm.completeWith(await this.model(), prompt, 1200, 'briefing-tidy');
       const cleaned = String(out || '').trim();

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { EmoCardsService } from './emo-cards.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /**
  * EMO (BEA-868) — the Meetings lane. A "meeting" card → a structured meeting card: a summary (key
@@ -17,6 +18,7 @@ export class EmoMeetingService {
     private readonly llm: LlmService,
     private readonly tasks: TasksService,
     private readonly cards: EmoCardsService,
+    private readonly prompts: PromptsService,
   ) {}
 
   async handle(cardId: string): Promise<void> {
@@ -34,8 +36,9 @@ export class EmoMeetingService {
       let actionItems: string[];
       let attendees: number | null;
       if (transcript.length <= 12000) {
+        const meetingTmpl = await this.prompts.get('emo.meeting');
         const raw = await this.llm.complete(
-          `Summarise this meeting transcript. Reply ONLY JSON:\n{"summary":"markdown with a **Key points** list and a **Decisions** list","actionItems":["short imperative action items"],"attendees":<approx number of distinct speakers>}\n\nTranscript:\n${transcript}`,
+          `${meetingTmpl}\n\nTranscript:\n${transcript}`,
           1000, 'emo-meeting',
         );
         const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
@@ -91,8 +94,9 @@ export class EmoMeetingService {
     }
     const notes: { points: string[]; decisions: string[]; actionItems: string[] }[] = [];
     for (let i = 0; i < chunks.length; i++) {
+      const chunkTmpl = await this.prompts.get('emo.meetingChunk');
       const raw = await this.llm.complete(
-        `These are PART ${i + 1} of ${chunks.length} of a meeting transcript. Extract ONLY what is here. Reply ONLY JSON:\n{"points":["key points"],"decisions":["decisions made"],"actionItems":["short imperative action items"]}\n\n${chunks[i]}`,
+        `${chunkTmpl.replace(/\{\{part\}\}/g, String(i + 1)).replace(/\{\{total\}\}/g, String(chunks.length))}\n\n${chunks[i]}`,
         700, 'emo-meeting-chunk',
       ).catch(() => '');
       try {
@@ -105,8 +109,9 @@ export class EmoMeetingService {
       } catch { /* skip an unparsable chunk — the rest still make the minutes */ }
     }
     const flat = (k: 'points' | 'decisions' | 'actionItems') => notes.flatMap((n) => n[k]).filter(Boolean);
+    const mergeTmpl = await this.prompts.get('emo.meetingMerge');
     const mergeRaw = await this.llm.complete(
-      `Merge these meeting notes (collected across the whole meeting, in order) into final minutes. Deduplicate, keep them concise. Reply ONLY JSON:\n{"summary":"markdown with a **Key points** list and a **Decisions** list","actionItems":["short imperative action items"],"attendees":<approx number of distinct speakers or null>}\n\nKey points:\n${flat('points').map((p) => `- ${p}`).join('\n')}\n\nDecisions:\n${flat('decisions').map((p) => `- ${p}`).join('\n')}\n\nAction items:\n${flat('actionItems').map((p) => `- ${p}`).join('\n')}`,
+      `${mergeTmpl}\n\nKey points:\n${flat('points').map((p) => `- ${p}`).join('\n')}\n\nDecisions:\n${flat('decisions').map((p) => `- ${p}`).join('\n')}\n\nAction items:\n${flat('actionItems').map((p) => `- ${p}`).join('\n')}`,
       1200, 'emo-meeting-merge',
     ).catch(() => '');
     try {

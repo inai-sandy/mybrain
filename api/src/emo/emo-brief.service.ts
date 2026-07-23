@@ -3,6 +3,7 @@ import { EmoCardsService } from './emo-cards.service';
 import { BriefingsService } from '../briefings/briefings.service';
 import { ContactsService } from '../contacts/contacts.service';
 import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { looseJsonParse } from '../common/llm-json';
 
 /**
@@ -28,6 +29,7 @@ export class EmoBriefService {
     private readonly briefings: BriefingsService,
     private readonly contacts: ContactsService,
     private readonly llm: LlmService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private label(c: any): string {
@@ -37,9 +39,8 @@ export class EmoBriefService {
 
   /** Pull the person's name out of the spoken briefing — nothing else. */
   private async whoIsIt(text: string): Promise<string> {
-    const prompt =
-      `Whose work is this briefing about? Reply with ONLY JSON: {"who":"<the person's name exactly as said, or empty>"}\n` +
-      `It is about the ONE person the speaker is giving work to. If no person is named, "who" is empty.\n\n${text.slice(0, 2000)}`;
+    const tmpl = await this.prompts.get('emo.briefWho');
+    const prompt = `${tmpl}\n\n${text.slice(0, 2000)}`;
     try {
       const raw = await this.llm.complete(prompt, 60, 'emo-brief-who');
       const out = looseJsonParse(raw);

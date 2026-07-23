@@ -6,7 +6,7 @@ function make(llmOut: string, card: any = { id: 'c1', lane: 'meeting', rawTransc
   const cards: any = { get: jest.fn(async () => card), update: jest.fn(async (_id: string, p: any) => { updates.push(p); return {}; }) };
   const llm: any = { complete: jest.fn(async () => llmOut) };
   const tasks: any = { create: jest.fn(async (d: any) => { const t = { id: `t${created.length + 1}`, ...d }; created.push(t); return t; }) };
-  return { svc: new EmoMeetingService(llm, tasks, cards), tasks, updates, created };
+  return { svc: new EmoMeetingService(llm, tasks, cards, { get: async () => '' } as any), tasks, updates, created };
 }
 
 describe('EmoMeetingService (BEA-868)', () => {
@@ -56,7 +56,7 @@ describe('EmoMeetingService (BEA-868)', () => {
       return '{}';
     }) };
     const tasks: any = { create: jest.fn(async (d: any) => ({ id: 't1', ...d })) };
-    await new EmoMeetingService(llm, tasks, cards).handle('c1');
+    await new EmoMeetingService(llm, tasks, cards, { get: async () => '' } as any).handle('c1');
     const chunkCalls = llm.complete.mock.calls.filter((c: any[]) => c[2] === 'emo-meeting-chunk').length;
     expect(chunkCalls).toBeGreaterThan(1);                       // more than one chunk was read
     expect(llm.complete.mock.calls.some((c: any[]) => c[2] === 'emo-meeting-merge')).toBe(true);

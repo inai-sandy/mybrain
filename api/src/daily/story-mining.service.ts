@@ -4,6 +4,7 @@ import { LlmService } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService } from '../contacts/reminders.service';
 import { DailyService } from './daily.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { looseJsonParse } from '../common/llm-json';
 import { matchContact } from '../contacts/person-identity';
 
@@ -44,6 +45,7 @@ export class StoryMiningService {
     private readonly tasks: TasksService,
     private readonly reminders: RemindersService,
     private readonly daily: DailyService,
+    private readonly prompts: PromptsService,
   ) {}
 
   private empty(day: string, hasStory = false): MinedPayload {
@@ -96,27 +98,11 @@ export class StoryMiningService {
     ]);
     const contactNames = contacts.map((c) => c.name).join(', ');
 
+    const tmpl = await this.prompts.get('daily.storyMine');
     const prompt =
-      `You are reading Sandeep's diary entry for ${day}. Extract EVERYTHING useful from it. Plain, short titles. Reply with ONLY JSON:\n` +
-      `{\n` +
-      ` "done":[{"title":"work he says he FINISHED","category":"1-2 words"}],\n` +
-      ` "todos":[{"title":"things HE still plans to do","category":"1-2 words","note":"concrete detail/deadline from the diary or null","priority":"high|medium|low"}],\n` +
-      ` "delegations":[{"person":"name exactly as written","title":"what THAT PERSON owes/will do","chase":true}],\n` +
-      ` "myReminders":[{"title":"a thing he must remember","date":"YYYY-MM-DD or null"}],\n` +
-      ` "promises":[{"to":"who he promised","what":"what he promised","date":"YYYY-MM-DD or null"}],\n` +
-      ` "emotions":{"lifted":["what gave him energy"],"drained":["what drained him"],"energy":0-100,"worry":0-100,"feeling":"one honest sentence about how the day felt"},\n` +
-      ` "events":[{"at":"morning|afternoon|evening|HH:MM or null","title":"what he actually did, e.g. 'At the factory checking QC'"}],\n` +
-      ` "lessons":["a pattern or lesson in HIS life worth remembering, only if the diary really shows one"]\n` +
-      `}\n` +
-      `Rules:\n` +
-      `- done/todos: real concrete work only, never feelings. Do NOT repeat anything from these lists.\n` +
-      `   Already logged: ${existing.map((t) => t.title).join(' | ') || '(none)'}\n` +
-      `   Open elsewhere: ${openAll.map((t) => t.title).slice(0, 60).join(' | ') || '(none)'}\n` +
-      `- delegations: ONLY when the diary clearly says another person will do / owes / was asked something. Use the name exactly as written.\n` +
-      `- promises: only commitments SANDEEP made to someone. Dates: resolve "tomorrow/Friday" against ${day}; null when unsure — never invent a date.\n` +
-      `- events: 3-8 entries covering the real day (factory, meetings, travel, family), in time order.\n` +
-      `- emotions: from his words only; numbers are honest estimates.\n` +
-      `- lessons: max 2; empty array if the day shows none. Empty arrays are fine everywhere.\n\n` +
+      `${tmpl.replace(/\{\{day\}\}/g, day)}\n\n` +
+      `Already logged: ${existing.map((t) => t.title).join(' | ') || '(none)'}\n` +
+      `Open elsewhere: ${openAll.map((t) => t.title).slice(0, 60).join(' | ') || '(none)'}\n` +
       `Known contact names (for spelling only): ${contactNames || '(none)'}\n\nDIARY:\n${text.slice(0, 6000)}`;
 
     // One retry: a transient model hiccup must not cost the owner his whole day's findings.

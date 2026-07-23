@@ -55,7 +55,7 @@ function harness(opts: { llmJson: string; existing?: any[]; closed?: string[] })
   const ingestion: any = { gatherDaySignals: jest.fn(async () => SIGNALS) };
   const lifecycle: any = { runDaily: jest.fn(async () => ({ merged: 0, decayed: 0, promoted: 0, retired: 0 })), consolidate: jest.fn(async () => 0) };
   const chains: any = { inferFromDay: jest.fn(async () => 0), reviewActiveChains: jest.fn(async () => ({ resolved: 0, shifted: 0 })), summaryForMentor: jest.fn(async () => '') };
-  const svc = new MentalModelService(prisma, llm, ingestion, lifecycle, chains);
+  const svc = new MentalModelService(prisma, llm, ingestion, lifecycle, chains, { get: async () => '' } as any);
   return { svc, created, updated, evidence, llm, ingestion, settings };
 }
 

@@ -4,6 +4,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MindIngestionService } from './ingestion.service';
 import { MindLifecycleService } from './lifecycle.service';
 import { MindChainService } from './chain.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { DaySignals } from './mind.types';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
@@ -11,28 +12,6 @@ const MODEL_KEY = 'mind.llm';
 const LEARNED_KEY = 'mind.learnedDays'; // closed days the Lab has already reflected on (BEA-458)
 const ABOUT_KEY = 'mind.aboutMe'; // the user's own words about who they are (BEA-463)
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
-
-const SYSTEM = `You are a rigorous behavioural scientist building a model of ONE person from their own day.
-You receive a day's signals — tasks they DID, tasks they POSTPONED (deferred repeatedly), tasks they SKIPPED
-(planned but never did), what they CAPTURED, and their own STORY of the day with its mood — plus the
-hypotheses you already hold about them.
-
-Infer well-grounded HYPOTHESES about this person, above all by correlating their ACTIONS and INACTIONS with
-their FEELINGS. Inaction — what they avoid, defer, abandon — is the richest signal; weight it heavily. Look for
-causal, emotional, relational and temporal patterns.
-
-Rules:
-- Ground every hypothesis in THIS day's concrete evidence. No generic pop-psychology, no flattery.
-- Be specific: "money/admin tasks drain you and you keep deferring them" beats "you procrastinate".
-- Write every statement in simple, plain, everyday English — short words and short sentences. No fancy, academic, or flowery words.
-- Be kind and non-judgmental, especially about draining or avoided patterns: describe them as something to understand, not a character flaw. Say "admin tasks drain you, so they tend to slip" — never "you're lazy", "you keep failing", or "you always avoid". Observe the pattern; don't shame the person.
-- If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do not duplicate.
-- Confidence reflects how strongly this single day's evidence supports it: 0.1–0.6 for one day.
-- Never re-propose anything listed under REFUTED.
-- Return AT MOST 6 findings, each with AT MOST 2 short evidence snippets — only the well-supported ones. Keep the JSON compact.
-
-Return ONLY JSON, no prose:
-{"findings":[{"reinforcesId":"<existing id or null>","statement":"...","kind":"emotional|behavioural|relational|temporal|causal","subject":"...","relation":"...","object":"...","valence":"energizing|draining|neutral","confidence":0.0,"cadence":"daily|weekly|situational|null","evidence":[{"signal":"done|postponed|skipped|told|created","snippet":"..."}]}]}`;
 
 type RawFinding = {
   reinforcesId?: string | null;
@@ -62,6 +41,7 @@ export class MentalModelService implements OnModuleInit {
     private readonly ingestion: MindIngestionService,
     private readonly lifecycle: MindLifecycleService,
     private readonly chains: MindChainService,
+    private readonly prompts: PromptsService,
   ) {}
 
   onModuleInit() {
@@ -254,8 +234,9 @@ export class MentalModelService implements OnModuleInit {
     const noteBy = new Map<string, string[]>();
     for (const n of notes) (noteBy.get(n.findingId) ?? noteBy.set(n.findingId, []).get(n.findingId)!).push(n.snippet || '');
 
+    const tmpl = await this.prompts.get('lab.model');
     const prompt =
-      `${SYSTEM}\n\n` +
+      `${tmpl}\n\n` +
       (about ? `=== WHAT THIS PERSON SAYS ABOUT THEMSELVES (their own words — weigh this heavily) ===\n${about}\n\n` : '') +
       `=== THE DAY (${day}) ===\n${this.formatSignals(signals)}\n\n` +
       `=== HYPOTHESES YOU ALREADY HOLD (reinforce by id, don't duplicate) ===\n` +

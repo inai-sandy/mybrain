@@ -1,4 +1,8 @@
 import { EmoResearchService } from './emo-research.service';
+import { PromptsService } from '../prompts/prompts.service';
+
+// Real registry defaults (no prisma overrides) so prompt-content routing in the LLM mock works.
+const realPrompts = new PromptsService({ setting: { findUnique: async () => null, findMany: async () => [] } } as any);
 
 function make(opts: { card: any; brief?: string; clarify?: string; result?: string }) {
   const updates: any[] = [];
@@ -7,7 +11,7 @@ function make(opts: { card: any; brief?: string; clarify?: string; result?: stri
   const flows: any = { create: jest.fn(async () => ({ id: 'f1' })), planAndSave: jest.fn(async () => ({ id: 'f1' })) };
   const agent: any = { createRun: jest.fn(async () => ({ id: 'run1' })), getRun: jest.fn(async () => ({ resultText: opts.result ?? '## CCTV\n- finding [src]', status: 'done' })) };
   const bridge: any = { execute: jest.fn(async () => undefined) };
-  return { svc: new EmoResearchService(llm, cards, flows, agent, bridge), cards, flows, agent, bridge, updates };
+  return { svc: new EmoResearchService(llm, cards, flows, agent, bridge, realPrompts as any), cards, flows, agent, bridge, updates };
 }
 
 describe('EmoResearchService — Deep (BEA-870)', () => {
