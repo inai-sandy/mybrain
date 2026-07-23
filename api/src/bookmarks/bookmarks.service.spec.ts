@@ -35,7 +35,8 @@ function makeService(over: any = {}) {
     findMany: async () => [...folderRows], // a copy, like real prisma — the service mutates its own list
     create: async ({ data }: any) => { const f = { id: `f${folderRows.length + 1}`, ...data }; folderRows.push(f); return f; },
   };
-  prisma.item.updateMany = async ({ where, data }: any) => { filings.push({ id: where.id, folderId: data.folderId }); return { count: 1 }; };
+  prisma.item.updateMany = async ({ where, data }: any) => { filings.push({ id: where.id, ...data }); return { count: 1 }; };
+  prisma.item.groupBy = async () => over.folderCounts ?? []; // rediscover topic sizes (BEA-1048)
   const memory: any = {
     enqueue: async (content: string, opts: any) => enqueued.push({ content, opts }),
     deleteDoc: async () => undefined,
@@ -222,6 +223,35 @@ describe('BookmarksService', () => {
       expect(r.filed).toBe(0);
       expect(filings).toEqual([]);
     });
+  });
+
+  // Forgotten bookmarks come back, one topic at a time. (BEA-1048)
+  describe('rediscover (BEA-1048)', () => {
+    const folders = [{ id: 'fA', name: 'AI' }, { id: 'fB', name: 'Hardware' }];
+    const counts = [{ folderId: 'fA', _count: 5 }, { folderId: 'fB', _count: 4 }];
+    const olds = [{ id: 'o1', title: 'old gem', sourceUrl: 'https://x', summary: 's', thumbnail: null, createdAt: new Date('2026-01-01') }];
+
+    it('rotates topics with the shift control and wraps around', async () => {
+      const { svc } = makeService({ folders, folderCounts: counts, existingRows: olds });
+      const t0 = (await svc.rediscover(0)).topic!.name;
+      const t1 = (await svc.rediscover(1)).topic!.name;
+      const t2 = (await svc.rediscover(2)).topic!.name;
+      expect(t1).not.toBe(t0); // shuffle really moves
+      expect(t2).toBe(t0); // 2 topics → wraps back
+    });
+
+    it('shows nothing rather than a thin band when no folder has enough in it', async () => {
+      const { svc } = makeService({ folders, folderCounts: [{ folderId: 'fA', _count: 2 }] });
+      expect(await svc.rediscover()).toEqual({ topic: null, items: [], topics: 0 });
+    });
+  });
+
+  it('markOpened stamps only bookmark rows, by id (BEA-1048)', async () => {
+    const { svc, filings } = makeService();
+    await svc.markOpened('b1');
+    expect(filings).toHaveLength(1);
+    expect(filings[0].id).toBe('b1');
+    expect(filings[0].lastOpenedAt).toBeInstanceOf(Date);
   });
 
   it('auto-sync defaults to enabled, hourly', async () => {

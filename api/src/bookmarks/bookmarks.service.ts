@@ -376,6 +376,44 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, deleted: rows.length };
   }
 
+  // ---- Rediscover: forgotten bookmarks come back, one TOPIC at a time. (BEA-1048) ----
+
+  /** The owner opened this bookmark — remember it, so Rediscover stops suggesting it. */
+  async markOpened(id: string): Promise<{ ok: boolean }> {
+    await this.prisma.item.updateMany({ where: { id, source: { in: ['raindrop', 'bookmark'] } }, data: { lastOpenedAt: new Date() } }).catch(() => undefined);
+    return { ok: true };
+  }
+
+  /**
+   * A hand of forgotten bookmarks from ONE topic (a folder), rotating daily — the owner's call
+   * (2026-07-23): Rediscover picks by topic. `shift` moves to the next topic (the ↻ control).
+   * "Forgotten" = not opened in the last 30 days (or ever); oldest-untouched first, so the pile
+   * actually drains instead of showing the same faces.
+   */
+  async rediscover(shift = 0): Promise<{ topic: { id: string; name: string; icon: string | null } | null; items: any[]; topics: number }> {
+    const folders = await this.prisma.bookmarkFolder.findMany({ orderBy: { name: 'asc' } });
+    const counts = await this.prisma.item.groupBy({ by: ['folderId'], where: { source: { in: ['raindrop', 'bookmark'] }, folderId: { not: null } }, _count: true }).catch(() => [] as any[]);
+    const byId: Record<string, number> = {};
+    for (const c of counts as any[]) if (c.folderId) byId[c.folderId] = c._count;
+    const topics = folders.filter((f) => (byId[f.id] || 0) >= 3); // a topic needs enough in it to be worth a band
+    if (!topics.length) return { topic: null, items: [], topics: 0 };
+    // Deterministic daily rotation (IST day), shifted by the refresh control.
+    const IST_OFFSET_MIN = 330;
+    const dayN = Math.floor((Date.now() + IST_OFFSET_MIN * 60000) / 86400000);
+    const topic = topics[(((dayN + Math.trunc(shift)) % topics.length) + topics.length) % topics.length];
+    const cutoff = new Date(Date.now() - 30 * 86400000);
+    const rows = await this.prisma.item.findMany({
+      where: { source: { in: ['raindrop', 'bookmark'] }, folderId: topic.id, OR: [{ lastOpenedAt: null }, { lastOpenedAt: { lt: cutoff } }] },
+      orderBy: [{ lastOpenedAt: 'asc' }, { createdAt: 'asc' }],
+      take: 8,
+    });
+    return {
+      topic: { id: topic.id, name: topic.name, icon: topic.icon || null },
+      items: rows.map((i) => ({ id: i.id, title: i.title, sourceUrl: i.sourceUrl, summary: i.summary, thumbnail: i.thumbnail, createdAt: i.createdAt })),
+      topics: topics.length,
+    };
+  }
+
   // ---- automatic filing: folders fill themselves. (BEA-1046) ---------------
 
   /** Never more than this many folders — broad areas stay broad. */
