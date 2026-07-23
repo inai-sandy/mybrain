@@ -1064,6 +1064,36 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     })[0];
   }
 
+  /**
+   * Lexical pre-pass (BEA-1057): cluster open tasks whose filler-stripped titles overlap heavily.
+   * Free and deterministic — the cheap duplicates never depend on the AI's mood. Union-find so
+   * "A~B" and "B~C" land in one group.
+   */
+  private lexicalGroups(rows: { id: string; title: string }[]): string[][] {
+    const sig = (s: string) => new Set(dumpKey(s).split(' ').filter((w) => w.length > 2));
+    const sigs = rows.map((r) => sig(r.title));
+    const parent = rows.map((_, i) => i);
+    const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const a = sigs[i];
+        const b = sigs[j];
+        if (!a.size || !b.size) continue;
+        const inter = [...a].filter((w) => b.has(w)).length;
+        const minSize = Math.min(a.size, b.size);
+        // ≥75% of the smaller title's key words shared, or identical single-word keys.
+        const same = minSize >= 2 ? inter / minSize >= 0.75 : inter === 1 && Math.max(a.size, b.size) === 1;
+        if (same) parent[find(i)] = find(j);
+      }
+    }
+    const groups = new Map<number, string[]>();
+    rows.forEach((r, i) => {
+      const root = find(i);
+      groups.set(root, [...(groups.get(root) || []), r.id]);
+    });
+    return [...groups.values()].filter((g) => g.length >= 2);
+  }
+
   /** Ask the Tasks model to cluster OPEN tasks that mean the same thing. Returns {keep, remove[]} groups
    *  for the user to review — nothing is deleted here. Conservative by design (this leads to deletion). */
   async findDuplicates() {
@@ -1093,19 +1123,73 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
 
     const byId = new Map(rows.map((r) => [r.id, r]));
     const used = new Set<string>();
-    const groups: { keep: any; remove: any[] }[] = [];
-    for (const g of raw) {
-      // De-dup ids within a group, drop unknowns, and never let an id land in two groups.
-      const members = Array.from(new Set((Array.isArray(g) ? g : []).map((x) => String(x))))
+    const groups: { keep: any; remove: any[]; via?: string }[] = [];
+    const addGroup = (ids: string[], via: string) => {
+      const members = Array.from(new Set(ids.map((x) => String(x))))
         .filter((id) => byId.has(id) && !used.has(id))
         .map((id) => byId.get(id));
-      if (members.length < 2) continue;
+      if (members.length < 2) return;
       members.forEach((m) => used.add(m.id));
       const keep = this.pickKeeper(members);
       const remove = members.filter((m) => m.id !== keep.id);
-      groups.push({ keep: this.shape(keep), remove: remove.map((m) => this.shape(m)) });
-    }
+      groups.push({ keep: this.shape(keep), remove: remove.map((m) => this.shape(m)), via });
+    };
+    // Wording-level matches FIRST (deterministic, free) — the AI adds only meaning-level ones. (BEA-1057)
+    for (const g of this.lexicalGroups(rows)) addGroup(g, 'wording');
+    for (const g of raw) addGroup(Array.isArray(g) ? g : [], 'meaning');
     return { groups, openCount: rows.length, model };
+  }
+
+  /**
+   * Merge duplicate groups (BEA-1057): everything of value on the copies — note, progress, owner,
+   * pin, priority, estimate, promise, people links, chases, claims — moves ONTO the keeper before
+   * the copies go. Deleting used to throw all of that away. Open tasks only; history is untouchable.
+   */
+  async mergeDuplicates(groups: { keepId?: string; removeIds?: string[] }[]) {
+    const rank: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    let merged = 0;
+    let removed = 0;
+    for (const g of (Array.isArray(groups) ? groups : []).slice(0, 100)) {
+      const keeper = await this.prisma.task.findUnique({ where: { id: String(g?.keepId || '') } });
+      if (!keeper || keeper.status === 'done') continue; // never rewrite completed history
+      const dups = await this.prisma.task.findMany({
+        where: { id: { in: (g?.removeIds || []).map(String).slice(0, 20), notIn: [keeper.id] }, status: 'open' },
+      });
+      if (!dups.length) continue;
+      for (const d of dups) {
+        const data: Record<string, any> = {};
+        if (d.note && !keeper.note) data.note = d.note;
+        else if (d.note && keeper.note && !keeper.note.includes(d.note)) data.note = `${keeper.note}\n${d.note}`.slice(0, 2000);
+        if ((d.progress || 0) > (keeper.progress || 0)) data.progress = d.progress;
+        if (!keeper.ownerContactId && d.ownerContactId) { data.ownerContactId = d.ownerContactId; data.party = d.party; }
+        if (d.pinned && !keeper.pinned) data.pinned = true;
+        if ((rank[d.priority] || 0) > (rank[keeper.priority] || 0)) data.priority = d.priority;
+        if (!keeper.estimateMin && d.estimateMin) data.estimateMin = d.estimateMin;
+        if (!keeper.promisedFor && d.promisedFor) { data.promisedFor = d.promisedFor; data.promisedAt = d.promisedAt; data.promiseSlips = d.promiseSlips; }
+        if (!(keeper as any).briefingId && (d as any).briefingId) data.briefingId = (d as any).briefingId;
+        if (Object.keys(data).length) {
+          await this.prisma.task.update({ where: { id: keeper.id }, data }).catch(() => undefined);
+          Object.assign(keeper, data);
+        }
+        // Chases follow the work — but only when the keeper has none active, so one task never gets
+        // chased twice a day. Otherwise the copy's chase dies with it (cascade).
+        const keeperChases = await this.prisma.reminder.count({ where: { taskId: keeper.id, status: 'active' } }).catch(() => 0);
+        if (!keeperChases) await this.prisma.reminder.updateMany({ where: { taskId: d.id }, data: { taskId: keeper.id } }).catch(() => undefined);
+        await this.prisma.taskClaim.updateMany({ where: { taskId: d.id }, data: { taskId: keeper.id } }).catch(() => undefined);
+        const links = await this.prisma.taskPerson.findMany({ where: { taskId: d.id } }).catch(() => [] as any[]);
+        for (const l of links) {
+          await this.prisma.taskPerson
+            .upsert({ where: { taskId_contactId: { taskId: keeper.id, contactId: l.contactId } }, create: { taskId: keeper.id, contactId: l.contactId }, update: {} })
+            .catch(() => undefined);
+        }
+        this.unindexTask(d);
+        const del = await this.prisma.task.delete({ where: { id: d.id } }).catch(() => null);
+        if (del) removed++;
+      }
+      this.indexTask(keeper); // the keeper's brain doc now reflects everything it absorbed
+      merged++;
+    }
+    return { merged, removed };
   }
 
   /** Delete chosen duplicate ids — but ONLY ones still open, so completed history is never touched. */
