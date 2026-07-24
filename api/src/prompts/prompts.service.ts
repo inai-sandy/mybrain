@@ -12,7 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
-  | 'agent.metaDraft' | 'agent.draftCheck'
+  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -813,6 +813,28 @@ The draft it wants approved:
 
 Does the draft actually fit the goal? Look for: wrong person or name, wrong date or amount, tone that would embarrass the owner, doing more than the goal asked, or contradicting the goal.
 Reply ONLY JSON: {"ok": true} if it looks fine, or {"ok": false, "note": "<ONE short plain-English warning, e.g. 'The draft says Monday but the goal says Friday.'>"}. Be strict about real mistakes, relaxed about style.`,
+});
+
+REGISTRY.push({
+  key: 'agent.uiSpec',
+  label: "Agents — the mini-interface designer",
+  description: "Designs an agent's own small screen from approved building blocks (input widgets + a result view). The agent's task and description are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+  category: 'Agents',
+  default: `Design a SMALL fitting screen for this AI agent, using only the approved building blocks.
+
+The agent:
+Name: {{name}}
+What it does: {{description}}
+Its task: {{task}}
+
+Reply ONLY JSON:
+{
+ "headline": "<a short inviting line for the top of its screen, in the user's voice, e.g. 'What should I research?'>",
+ "inputs": [up to 2 of: {"key":"<snake_key>","label":"<short label>","type":"topic|text|url|contact|date|choice","placeholder":"<hint text>","options":["only for choice"]}],
+ "view": "<how its result reads best: report (long structured text) | brief (headline + bullets) | checklist (list of items) | plain (short answer)>",
+ "runLabel": "<the run button text, e.g. 'Research it →' / 'Brief me →'>"
+}
+Rules: a scheduled agent that needs no input gets "inputs": []. A research agent gets one topic box. A person-chaser gets a contact input. Keep it minimal — the fewest inputs that make sense.`,
 });
 
 const MAP = new Map(REGISTRY.map((p) => [p.key, p]));

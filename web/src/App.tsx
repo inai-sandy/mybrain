@@ -45,6 +45,7 @@ import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
 import { SavedByAgents } from './pages/SavedByAgents';
 import { AgentDetail } from './pages/AgentDetail';
+import { AgentApp } from './pages/AgentApp';
 import { FlowsList } from './pages/FlowsList';
 import { FlowRunView } from './pages/FlowRunView';
 import { FlowRunsList } from './pages/FlowRunsList';
@@ -141,6 +142,7 @@ function AuthedApp() {
         <Route path="agent/history" element={<AgentHistory />} />
         <Route path="agent/saved" element={<SavedByAgents />} />
         <Route path="agent/agents/:id" element={<AgentDetail />} />
+        <Route path="agent/a/:id" element={<AgentApp />} />
         <Route path="agent/runs/:id" element={<AgentRunView />} />
         <Route path="flows" element={<FlowsList />} />
         <Route path="flows/runs/:id" element={<FlowRunView />} />

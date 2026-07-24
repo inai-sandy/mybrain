@@ -271,13 +271,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeAgent(a);
   }
 
-  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[] }) {
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; ui?: unknown }) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
     const data: any = {};
     if (patch.category !== undefined) data.category = patch.category?.trim() || null;
     if (patch.color !== undefined) data.color = patch.color?.trim() || null;
     if (patch.skills !== undefined) data.skills = JSON.stringify(Array.isArray(patch.skills) ? patch.skills.slice(0, 10) : []); // attached skills (BEA-1079)
+    if (patch.ui !== undefined) data.ui = patch.ui ? JSON.stringify(patch.ui) : null; // mini-interface spec (BEA-1082)
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
     if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
     if (patch.rubric !== undefined) data.rubric = patch.rubric?.trim() || null;
@@ -316,7 +317,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private shapeAgent(a: any) {
-    return { ...a, skills: this.parse(a.skills, [] as unknown), schedule: a.schedule ? this.parse(a.schedule, null) : null, evals: this.parse(a.evals, [] as unknown) };
+    return { ...a, skills: this.parse(a.skills, [] as unknown), schedule: a.schedule ? this.parse(a.schedule, null) : null, evals: this.parse(a.evals, [] as unknown), ui: a.ui ? this.parse(a.ui, null) : null };
   }
 
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */
