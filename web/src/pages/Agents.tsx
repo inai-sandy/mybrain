@@ -666,10 +666,10 @@ export function Agents() {
         </button>
       )}
 
-      {/* ⚡ Waiting on you — the Mission Control strip (BEA-1066 + BEA-1087) */}
+      {/* ⚡ Needs you — attention first (BEA-1066 + BEA-1087 + BEA-1091) */}
       {waiting.length > 0 && (
         <section className="space-y-2">
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400"><PauseCircle className="h-4 w-4" />Waiting on you</h2>
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400"><PauseCircle className="h-4 w-4" />Needs you<span className="rounded-full bg-amber-100 px-1.5 text-xs font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span></h2>
           <div className="grid gap-3 lg:grid-cols-2">
             {waiting.map((w) => (
               <WaitingCard key={w.waitpointId || w.runId} w={w} focus={!!focusId && (w.waitpointId === focusId || w.runId === focusId)} onAnswered={loadHome} />
@@ -681,31 +681,19 @@ export function Agents() {
       {/* 🟢 Running now */}
       {running.length > 0 && (
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-zinc-500">Running now</h2>
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-500"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" /></span>Running now<span className="text-xs font-normal text-zinc-400">· {running.length}</span></h2>
           <div className="grid gap-3 lg:grid-cols-2">
             {running.map((r) => <RunningCard key={r.id} r={r} />)}
           </div>
         </section>
       )}
 
-      {/* 📬 Landed today */}
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-500">Landed today</h2>
-          <div className="flex items-center gap-1">
-            <button onClick={() => nav('/agent/saved')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ShieldCheck className="h-4 w-4" />Agent saves</button>
-            <button onClick={() => nav('/agent/history')} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><HistoryIcon className="h-4 w-4" />All runs</button>
+      {/* 📬 Landed today — only when something actually landed (no empty-state clutter, BEA-1091) */}
+      {landed.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-500">Landed today<span className="ml-1 text-xs font-normal text-zinc-400">· {landed.length}</span></h2>
           </div>
-        </div>
-        {home === null ? (
-          <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
-        ) : landed.length === 0 && running.length === 0 && waiting.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
-            Nothing ran in the last day. Tap an agent's Run — or Quick ask for a one-off.
-          </div>
-        ) : landed.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500 dark:border-zinc-700">Nothing finished yet today.</div>
-        ) : (
           <ul className="space-y-2">
             {landed.map((r) => (
               <li key={r.source + r.id}>
@@ -720,16 +708,18 @@ export function Agents() {
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
 
-      {/* 🗂 Your agents — the shelf (BEA-1083 + BEA-1087) */}
-      <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-500">Your agents</h2>
-          <div className="flex items-center gap-2.5">
-            <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" title="Bring any public Claude agent from GitHub">📦 From GitHub</button>
-            <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-500"><Plus className="h-4 w-4" />New agent</button>
+      {/* 🗂 Your agents — the shelf (BEA-1083 + BEA-1087 + BEA-1091) */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-bold">Your agents{agents && agents.length > 0 ? <span className="ml-1 text-sm font-normal text-zinc-400">· {agents.length}</span> : null}</h2>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => nav('/agent/saved')} title="Everything agents have saved" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><ShieldCheck className="h-4 w-4" /><span className="hidden sm:inline">Saves</span></button>
+            <button onClick={() => nav('/agent/history')} title="All past runs" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><HistoryIcon className="h-4 w-4" /><span className="hidden sm:inline">All runs</span></button>
+            <button onClick={() => setShowImport(true)} title="Bring any public Claude agent from GitHub" className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300">🔗<span className="hidden sm:inline">GitHub</span></button>
+            <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New agent</button>
           </div>
         </div>
         {showImport && <ImportGithubModal onDone={() => { setShowImport(false); loadHome(); }} onClose={() => setShowImport(false)} />}
