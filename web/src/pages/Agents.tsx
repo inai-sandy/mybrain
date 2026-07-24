@@ -85,10 +85,19 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
   const choices: string[] = Array.isArray(w.options) ? w.options.filter((o: any) => typeof o === 'string') : [];
   const isApprove = w.kind === 'approve_edit_reject';
   const draft = !isApprove ? '' : typeof w.options === 'object' && w.options && !Array.isArray(w.options) ? String((w.options as any).description || (w.options as any).command || '') : '';
+  // The four clear kinds of ask (BEA-1067) — the tag tells you at a glance what's being asked of you.
+  const tag = isApprove
+    ? { label: 'Check before it acts', cls: 'bg-amber-500/15 text-amber-700 dark:text-amber-300' }
+    : w.kind === 'choice'
+      ? { label: 'Pick one', cls: 'bg-sky-500/15 text-sky-700 dark:text-sky-300' }
+      : w.kind === 'form'
+        ? { label: 'Fill this in', cls: 'bg-violet-500/15 text-violet-700 dark:text-violet-300' }
+        : { label: 'Answer a question', cls: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' };
 
   return (
     <div ref={ref} id={w.waitpointId ? `wp-${w.waitpointId}` : `fw-${w.runId}`}
       className={'rounded-2xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/25 dark:bg-amber-500/5 ' + (focus ? 'ring-2 ring-amber-400' : '')}>
+      <span className={'mb-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ' + tag.cls}>{tag.label}</span>
       <div className="flex items-center gap-2">
         <span className="text-xl leading-none">{w.icon}</span>
         <button onClick={() => nav(runUrl(w.source, w.runId))} className="min-w-0 truncate text-sm font-semibold hover:text-amber-700 dark:hover:text-amber-300">{w.title}</button>
