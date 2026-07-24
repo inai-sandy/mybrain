@@ -376,6 +376,56 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return { count: wps + flows };
   }
 
+  /**
+   * Every run — agents AND flows — merged into one honest history (BEA-1069). Each row carries a
+   * human name ("Morning Brief — Thu"), its source, and how long it took.
+   */
+  async allRuns(limit = 500) {
+    const take = Math.min(Math.max(limit, 1), 1000);
+    const [agentRuns, flowRuns] = await Promise.all([
+      this.prisma.agentRun.findMany({ orderBy: { startedAt: 'desc' }, take }),
+      this.prisma.flowRun.findMany({ orderBy: { startedAt: 'desc' }, take }),
+    ]);
+    const flowIds = [...new Set(flowRuns.map((f: any) => f.flowId).filter(Boolean))] as string[];
+    const flowNames = new Map<string, string>();
+    if (flowIds.length) {
+      for (const f of await this.prisma.flow.findMany({ where: { id: { in: flowIds } }, select: { id: true, name: true } })) flowNames.set(f.id, f.name);
+    }
+    const dayName = (d: Date | null) => (d ? ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(d.getTime() + 330 * 60000).getUTCDay()] : '');
+    const durationSec = (s: Date | null, e: Date | null) => (s && e ? Math.max(0, Math.round((new Date(e).getTime() - new Date(s).getTime()) / 1000)) : null);
+    const rows = [
+      ...agentRuns.map((r: any) => ({
+        id: r.id,
+        source: 'agent' as const,
+        name: `${r.title || 'Agent run'} — ${dayName(r.startedAt)}`,
+        title: r.title || 'Agent run',
+        status: r.status,
+        depth: r.depth || null,
+        grade: r.grade ? this.parse(r.grade, null) : null,
+        outputDocId: r.outputDocId || null,
+        error: r.error || null,
+        startedAt: r.startedAt,
+        endedAt: r.endedAt,
+        durationSec: durationSec(r.startedAt, r.endedAt),
+      })),
+      ...flowRuns.map((f: any) => ({
+        id: f.id,
+        source: 'flow' as const,
+        name: `${flowNames.get(f.flowId) || 'Flow run'} — ${dayName(f.startedAt)}`,
+        title: flowNames.get(f.flowId) || 'Flow run',
+        status: f.status, // running | waiting | done | failed | cancelled
+        depth: null,
+        grade: null,
+        outputDocId: null,
+        error: f.error || null,
+        startedAt: f.startedAt,
+        endedAt: f.endedAt,
+        durationSec: durationSec(f.startedAt, f.endedAt),
+      })),
+    ].sort((a, b) => new Date(b.startedAt || 0).getTime() - new Date(a.startedAt || 0).getTime());
+    return rows.slice(0, take);
+  }
+
   // ---------- the Agents home (BEA-1087): one payload for the whole screen ----------
 
   /** Shelf group when the agent has none set — a light keyword guess, never persisted. */

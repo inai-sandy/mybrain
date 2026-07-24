@@ -47,6 +47,12 @@ export class AgentController {
     return this.agent.waitingCount();
   }
 
+  /** Every run, agents + flows, one honest history. (BEA-1069) */
+  @Get('history')
+  history(@Query('limit') limit?: string) {
+    return this.agent.allRuns(limit ? Number(limit) : 500);
+  }
+
   // ---- saved agents (BEA-623) ----
 
   @Get('agents')
