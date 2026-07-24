@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import { ArrowLeft, Trash2, RotateCcw } from 'lucide-react';
 import { DataTable, Column, Filter } from '../ui/DataTable';
 import { StatusBadge, timeAgo } from './Agents';
 import { useToast } from '../ui/Toast';
@@ -45,6 +45,22 @@ export function AgentHistory() {
 
   const live = (s: string) => s === 'running' || s === 'awaiting_input' || s === 'waiting' || s === 'paused';
 
+  // Replay a finished run on the same captured input (BEA-1070) — fix at noon, don't wait for tomorrow.
+  const [replaying, setReplaying] = useState<string | null>(null);
+  async function replay(row: any) {
+    if (replaying) return;
+    setReplaying(row.id);
+    try {
+      const url = row.source === 'flow' ? `/api/flows/runs/${row.id}/replay` : `/api/agent/runs/${row.id}/replay`;
+      const d = await (await fetch(url, { method: 'POST' })).json();
+      if (d?.ok === false) throw new Error(d.message || 'Could not replay');
+      const newId = row.source === 'flow' ? d.runId : d.id;
+      if (!newId) throw new Error('Could not replay');
+      toast('success', 'Replaying on the same input…');
+      nav(row.source === 'flow' ? `/flows/runs/${newId}` : `/agent/runs/${newId}`);
+    } catch (e: any) { toast('error', e?.message || 'Could not replay'); setReplaying(null); }
+  }
+
   const columns: Column<any>[] = [
     { key: 'name', label: 'Run', sortable: true, render: (r) => <span className="font-medium">{r.name}</span> },
     { key: 'source', label: 'Kind', sortable: true, render: (r) => <span className={'rounded-full px-2 py-0.5 text-xs capitalize ' + (r.source === 'flow' ? 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' : 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300')}>{r.source}</span> },
@@ -53,7 +69,12 @@ export function AgentHistory() {
     { key: 'durationSec', label: 'Took', sortable: true, render: (r) => <span className="text-xs text-zinc-500">{fmtDuration(r.durationSec) || (live(r.status) ? '…' : '—')}</span> },
     { key: 'startedAt', label: 'When', sortable: true, render: (r) => <span className="text-zinc-500">{timeAgo(r.startedAt)}</span> },
     { key: 'outputDocId', label: 'Output', render: (r) => (r.outputDocId ? <span className="text-xs text-emerald-600 dark:text-emerald-400">document ↗</span> : <span className="text-xs text-zinc-400">—</span>) },
-    { key: '_del', label: '', render: (r) => (live(r.status) ? null : <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this run? Saved documents are kept.')) del(r); }} title="Delete run" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>) },
+    { key: '_act', label: '', render: (r) => (live(r.status) ? null : (
+      <span className="flex items-center gap-0.5">
+        <button onClick={(e) => { e.stopPropagation(); replay(r); }} disabled={!!replaying} title="Replay on the same input" className="rounded-lg p-1.5 text-zinc-300 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40 dark:text-zinc-600 dark:hover:bg-emerald-500/10"><RotateCcw className="h-4 w-4" /></button>
+        <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this run? Saved documents are kept.')) del(r); }} title="Delete run" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+      </span>
+    )) },
   ];
 
   const filters: Filter[] = [

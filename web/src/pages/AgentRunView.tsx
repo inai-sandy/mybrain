@@ -91,7 +91,8 @@ export function AgentRunView() {
     if (!run?.input || rerunning) return;
     setRerunning(true);
     try {
-      const r = await fetch('/api/agent/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: run.input, title: run.title || undefined }) });
+      // Proper replay (BEA-1070): same captured input, current agent definition, linked back.
+      const r = await fetch(`/api/agent/runs/${run.id}/replay`, { method: 'POST' });
       const d = await r.json();
       if (d?.id) nav('/agent/runs/' + d.id);
     } finally {

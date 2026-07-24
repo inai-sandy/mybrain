@@ -35,6 +35,12 @@ export class HermesController {
     return { ok: true, kept: out.filter((o) => o.status === 'kept').length };
   }
 
+  /** Replay a finished run on the same captured input (BEA-1070). */
+  @Post('runs/:id/replay')
+  async replayRun(@Param('id') id: string) {
+    return this.bridge.replayRun(id);
+  }
+
   /** Run a saved agent now (uses its stored prompt). */
   @Post('agents/:id/run')
   async runAgent(@Param('id') id: string) {
