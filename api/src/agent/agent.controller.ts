@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
+import { AgentsImportService } from './agents-import.service';
 
 type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string };
 
@@ -10,7 +11,26 @@ type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unk
  */
 @Controller('agent')
 export class AgentController {
-  constructor(private readonly agent: AgentService) {}
+  constructor(
+    private readonly agent: AgentService,
+    private readonly agentsImport: AgentsImportService,
+  ) {}
+
+  // ---- GitHub agent import (BEA-1081) ----
+
+  /** Read a GitHub link: the agents found there + the install plan. Writes nothing. */
+  @Post('import/github/preview')
+  importPreview(@Body() body: { url?: string }) {
+    if (!body?.url?.trim()) throw new BadRequestException('Paste a GitHub link first');
+    return this.agentsImport.preview(body.url.trim());
+  }
+
+  /** Import the picked agents; install the approved plan on the engine host. */
+  @Post('import/github/confirm')
+  importConfirm(@Body() body: { url?: string; pick?: string[]; installDeps?: boolean }) {
+    if (!body?.url?.trim()) throw new BadRequestException('Missing the GitHub link');
+    return this.agentsImport.confirm(body.url.trim(), Array.isArray(body.pick) ? body.pick : [], !!body.installDeps);
+  }
 
   // ---- engine settings ----
 
