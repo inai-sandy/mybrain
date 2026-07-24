@@ -107,31 +107,47 @@ function run(opts) {
       catch (e) { try { child.kill('SIGKILL'); } catch (e2) {} }
     };
     const killer = setTimeout(() => { timedOut = true; killGroup(); }, timeoutMs);
-    child.stdout.on('data', (d) => { stdout += d; });
+    // Live play-by-play (BEA-1084): parse the JSONL stream AS IT ARRIVES so a caller can relay
+    // each step to the run screen while the turn is still going. State accumulates here; the
+    // close handler just assembles the result from it.
+    let sessionId = opts.sessionId || null;
+    const events = [];
+    let usage = null;
+    let finalMsg = '';
+    let lineBuf = '';
+    const onEvent = typeof opts.onEvent === 'function' ? opts.onEvent : null;
+    const handleLine = (line) => {
+      const s = line.trim();
+      if (!s) return;
+      let ev;
+      try { ev = JSON.parse(s); } catch (e) { return; }
+      if (ev.type === 'thread.started' && ev.thread_id) sessionId = ev.thread_id;
+      else if (ev.type === 'turn.completed') usage = ev.usage || null;
+      else if (ev.type === 'item.completed' && ev.item) {
+        if (ev.item.type === 'agent_message' && typeof ev.item.text === 'string') finalMsg = ev.item.text; // keep the last one
+        const compact = {
+          type: ev.item.type,
+          name: ev.item.name || ev.item.server || ev.item.tool || undefined,
+          tool: ev.item.tool || undefined,
+          query: typeof ev.item.query === 'string' ? ev.item.query.slice(0, 120) : undefined,
+          command: typeof ev.item.command === 'string' ? ev.item.command.slice(0, 120) : undefined,
+          text: typeof ev.item.text === 'string' ? ev.item.text.slice(0, 2000) : undefined,
+        };
+        events.push(compact);
+        if (onEvent) { try { onEvent(compact); } catch (e) {} }
+      }
+    };
+    child.stdout.on('data', (d) => {
+      stdout += d;
+      lineBuf += d;
+      let i;
+      while ((i = lineBuf.indexOf('\n')) >= 0) { handleLine(lineBuf.slice(0, i)); lineBuf = lineBuf.slice(i + 1); }
+    });
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => { clearTimeout(killer); resolve({ text: '', error: String((e && e.message) || e) }); });
     child.on('close', (code) => {
       clearTimeout(killer);
-      let sessionId = opts.sessionId || null;
-      const events = [];
-      let usage = null;
-      let finalMsg = '';
-      for (const line of stdout.split('\n')) {
-        const s = line.trim();
-        if (!s) continue;
-        let ev;
-        try { ev = JSON.parse(s); } catch (e) { continue; }
-        if (ev.type === 'thread.started' && ev.thread_id) sessionId = ev.thread_id;
-        else if (ev.type === 'turn.completed') usage = ev.usage || null;
-        else if (ev.type === 'item.completed' && ev.item) {
-          if (ev.item.type === 'agent_message' && typeof ev.item.text === 'string') finalMsg = ev.item.text; // keep the last one
-          events.push({
-            type: ev.item.type,
-            name: ev.item.name || ev.item.server || ev.item.tool || undefined,
-            text: typeof ev.item.text === 'string' ? ev.item.text.slice(0, 2000) : undefined,
-          });
-        }
-      }
+      handleLine(lineBuf); // flush any last partial line
       // prefer the final agent message from the stream (works for resume too); fall back to the -o file
       let text = finalMsg;
       if (!text) { try { text = fs.readFileSync(out, 'utf8'); } catch (e) {} }
@@ -164,6 +180,14 @@ const server = http.createServer(async (req, res) => {
     }
     const prompt = body && body.prompt ? String(body.prompt) : '';
     if (!prompt) { res.statusCode = 400; res.end(JSON.stringify({ error: 'no prompt' })); return; }
+    // Live play-by-play (BEA-1084): stream:true → ndjson; one {type:'ev'} line per step as it
+    // happens, then a final {type:'result'} line. Non-stream keeps the old single-JSON reply.
+    if (body.stream) {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+      const r = await run({ ...body, onEvent: (ev) => { try { res.write(JSON.stringify({ type: 'ev', ev }) + '\n'); } catch (e) {} } });
+      try { res.end(JSON.stringify({ type: 'result', text: r.text, sessionId: r.sessionId || null, events: r.events || [], usage: r.usage || null, error: r.error || null }) + '\n'); } catch (e) {}
+      return;
+    }
     const r = await run(body);
     if (!r.text && r.error) { res.statusCode = 500; res.end(JSON.stringify({ error: r.error, sessionId: r.sessionId || null })); return; }
     res.end(JSON.stringify({ text: r.text, sessionId: r.sessionId || null, events: r.events || [], usage: r.usage || null }));

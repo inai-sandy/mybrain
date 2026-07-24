@@ -416,20 +416,65 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
    * F2 (BEA-660): run a turn through the host Codex directly (no Hermes), via the codex-runner /run.
    * Same HermesRunResult shape so execute() is engine-agnostic. Tool calls surface as steps.
    */
+  /** One live step from a raw engine event, in plain words — or null for noise. (BEA-1084) */
+  private liveLabel(ev: any): string | null {
+    if (!ev) return null;
+    if (ev.type === 'mcp_tool_call') {
+      const t = ev.tool || ev.name;
+      if (!ev.tool && ev.name === 'mybrain') return '🧠 Used your brain'; // old runner: server name only
+      if (t === 'search_brain') return '🧠 Searched your brain';
+      if (t === 'save_document') return '💾 Saved a document';
+      if (t === 'remember') return '📌 Remembered a fact';
+      if (t === 'ask_user') return '✋ Asked you';
+      if (t === 'get_answer') return null; // answer polling — noise
+      return `🔧 Used ${t || 'a tool'}`;
+    }
+    if (ev.type === 'web_search') return ev.query ? `🌐 Searched: ${String(ev.query).slice(0, 60)}` : '🌐 Searched the web';
+    if (ev.type === 'command_execution') return '💻 Ran a command';
+    return null; // agent_message / reasoning — the answer, not a step
+  }
+
   private async runViaCodex(prompt: string, handlers: HermesRunHandlers, opts: { title?: string; model?: string; sessionId?: string; skill?: string; bypass?: boolean }): Promise<HermesRunResult> {
+    // Live play-by-play (BEA-1084): when someone is watching steps, ask the runner to STREAM its
+    // events (ndjson) and append each step the moment it happens — the run screen's poll turns
+    // that into a live feed. Headless calls (skills) keep the old single-JSON reply.
+    const stream = !!handlers.onStep;
     try {
       const r = await fetch(`${CODEX_RUNNER}/run`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, model: opts.model, sandbox: 'read-only', sessionId: opts.sessionId, skill: opts.skill, bypass: opts.bypass, timeoutMs: 240000 }),
+        body: JSON.stringify({ prompt, model: opts.model, sandbox: 'read-only', sessionId: opts.sessionId, skill: opts.skill, bypass: opts.bypass, timeoutMs: 240000, stream }),
         signal: AbortSignal.timeout(250000),
       });
+      const ctype = r.headers.get('content-type') || '';
+      if (stream && r.ok && ctype.includes('ndjson') && r.body) {
+        let result: any = null;
+        let buf = '';
+        const dec = new TextDecoder();
+        for await (const chunk of r.body as any) {
+          buf += typeof chunk === 'string' ? chunk : dec.decode(chunk, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i);
+            buf = buf.slice(i + 1);
+            if (!line.trim()) continue;
+            let m: any;
+            try { m = JSON.parse(line); } catch { continue; }
+            if (m.type === 'ev') {
+              const label = this.liveLabel(m.ev);
+              if (label) handlers.onStep?.({ label, status: 'done', kind: 'tool' });
+            } else if (m.type === 'result') result = m;
+          }
+        }
+        if (!result) return { sessionId: undefined as any, finalText: '', status: 'error', error: 'The engine stream ended without a result.' };
+        if (result.error && !result.text) return { sessionId: result.sessionId, finalText: '', status: 'error', error: result.error };
+        return { sessionId: result.sessionId, finalText: String(result.text || ''), status: 'ok', error: undefined, usage: result.usage };
+      }
       const d: any = await r.json().catch(() => ({}));
       if (!r.ok) return { sessionId: d?.sessionId, finalText: '', status: 'error', error: d?.error || 'Codex run failed' };
       for (const ev of d.events || []) {
-        if (ev.type === 'mcp_tool_call') handlers.onStep?.({ label: codexToolLabel(ev.name), status: 'done', kind: 'tool' });
-        else if (ev.type === 'command_execution') handlers.onStep?.({ label: 'Ran a command', status: 'done', kind: 'tool' });
-        else if (ev.type === 'web_search') handlers.onStep?.({ label: 'Searched the web', status: 'done', kind: 'tool' });
+        const label = this.liveLabel(ev) || (ev.type === 'mcp_tool_call' ? codexToolLabel(ev.name) : null);
+        if (label) handlers.onStep?.({ label, status: 'done', kind: 'tool' });
       }
       return { sessionId: d.sessionId, finalText: String(d.text || ''), status: 'ok', error: undefined, usage: d.usage };
     } catch (e: any) {
