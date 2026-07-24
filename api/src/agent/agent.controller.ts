@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
 
-type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string };
+type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.
@@ -33,6 +33,18 @@ export class AgentController {
       { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini (fast)' },
       { value: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
     ];
+  }
+
+  /** The whole Agents home in one call: waiting-on-you + running + landed + the shelf. (BEA-1087) */
+  @Get('home')
+  home() {
+    return this.agent.home();
+  }
+
+  /** Count of questions waiting on the owner — the nav badge polls this. (BEA-1066) */
+  @Get('waiting-count')
+  waitingCount() {
+    return this.agent.waitingCount();
   }
 
   // ---- saved agents (BEA-623) ----
