@@ -369,3 +369,32 @@ describe('FlowRunnerService.cancelRun (BEA-776)', () => {
     expect((await runnerWithPrisma(prisma).cancelRun('r3')).ok).toBe(false);
   });
 });
+
+describe('FlowRunnerService.sweepFlowParts — working-doc retention (BEA-1085)', () => {
+  function harness(docs: any[], days?: string) {
+    const removed: string[] = [];
+    const prisma: any = {
+      setting: { findUnique: async () => (days === undefined ? null : { value: days }) },
+      document: { findMany: async () => docs },
+    };
+    const documents: any = { remove: jest.fn(async (id: string) => { removed.push(id); }) };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, {} as any, documents, {} as any, {} as any, {} as any, {} as any);
+    return { svc, removed };
+  }
+  const old = new Date(Date.now() - 40 * 24 * 3600_000);
+
+  it('removes only untouched old parts, by exact id; edited docs survive', async () => {
+    const h = harness([
+      { id: 'p1', createdAt: old, updatedAt: old }, // untouched part → cleaned
+      { id: 'p2', createdAt: old, updatedAt: new Date(old.getTime() + 3600_000) }, // user edited it → KEEP
+    ]);
+    expect(await h.svc.sweepFlowParts()).toBe(1);
+    expect(h.removed).toEqual(['p1']);
+  });
+
+  it('0 days = keep everything forever', async () => {
+    const h = harness([{ id: 'p1', createdAt: old, updatedAt: old }], '0');
+    expect(await h.svc.sweepFlowParts()).toBe(0);
+    expect(h.removed).toEqual([]);
+  });
+});

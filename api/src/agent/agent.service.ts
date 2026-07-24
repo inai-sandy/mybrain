@@ -171,7 +171,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   /** The user-configurable agent engine knobs (with sane defaults). */
   async engineSettings() {
-    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber] = await Promise.all([
+    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber, flowPartDays] = await Promise.all([
       this.getSetting('agent.model'),
       this.getSetting('agent.autonomy'),
       this.getSetting('agent.askTimeoutMin'),
@@ -181,6 +181,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       this.getSetting('agent.outputCollectionId'),
       this.getSetting('alerts.onFailure'),
       this.getSetting('alerts.whatsappNumber'),
+      this.getSetting('docs.flowPartDays'),
     ]);
     return {
       model: model || '', // '' = use the engine's default model
@@ -194,6 +195,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       // "WhatsApp me when an automation fails" (BEA-1071)
       alertsOnFailure: alertsOnFailure == null ? true : alertsOnFailure === 'true',
       alertsWhatsappNumber: alertsWhatsappNumber || '',
+      // How long flow working-part documents live before auto-clean (BEA-1085); 0 = keep forever.
+      flowPartDays: flowPartDays == null || flowPartDays === '' ? 30 : Math.max(0, Number(flowPartDays) || 0),
     };
   }
 
@@ -208,6 +211,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       outputCollectionId: 'agent.outputCollectionId',
       alertsOnFailure: 'alerts.onFailure',
       alertsWhatsappNumber: 'alerts.whatsappNumber',
+      flowPartDays: 'docs.flowPartDays',
     };
     for (const [k, key] of Object.entries(map)) {
       if (patch[k] !== undefined) await this.setSetting(key, patch[k] == null ? '' : String(patch[k]));

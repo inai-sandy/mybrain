@@ -49,7 +49,14 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly alerts?: AlertsService,
   ) {}
 
+  private partSweepTimer: ReturnType<typeof setInterval> | null = null;
+
   onModuleInit() {
+    // Working-part retention (BEA-1085): branch part-documents auto-clean after N days (default 30).
+    // Pure deletion by id, finals untouched, user-edited docs never candidates. Zero AI cost.
+    this.partSweepTimer = setInterval(() => void this.sweepFlowParts().catch(() => undefined), 6 * 3600_000);
+    if (typeof this.partSweepTimer.unref === 'function') this.partSweepTimer.unref();
+    setTimeout(() => void this.sweepFlowParts().catch(() => undefined), 90_000); // one pass shortly after boot
     // A flow run's driver (the execute() walk) lives in this process's memory. A restart
     // (deploy/crash/reboot — we docker rm -f on every ship) leaves 'running' rows with nothing to
     // advance them, and start()'s no-stacking guard then hands that dead run back on every future
@@ -446,6 +453,30 @@ export class FlowRunnerService implements OnModuleInit {
     }
   }
 
+  /**
+   * Delete flow working-part documents older than the retention window (BEA-1085). Only docs
+   * tagged 'flow-part'; a doc edited after creation (updatedAt drifted) is treated as the user's
+   * and left alone. Deletion is by exact id via DocumentsService.
+   */
+  async sweepFlowParts(now: Date = new Date()): Promise<number> {
+    const raw = await this.prisma.setting.findUnique({ where: { key: 'docs.flowPartDays' } }).catch(() => null);
+    const days = raw?.value === '' ? 30 : Number(raw?.value ?? 30);
+    if (!days || days <= 0 || Number.isNaN(days)) return 0; // 0/blank = keep forever
+    const cutoff = new Date(now.getTime() - days * 24 * 3600_000);
+    const parts = await this.prisma.document.findMany({
+      where: { tags: { contains: '"flow-part"' }, createdAt: { lt: cutoff } },
+      select: { id: true, createdAt: true, updatedAt: true },
+      take: 200,
+    });
+    let removed = 0;
+    for (const d of parts) {
+      if (d.updatedAt && d.createdAt && new Date(d.updatedAt).getTime() - new Date(d.createdAt).getTime() > 60_000) continue; // edited → the user's now
+      await this.documents.remove(d.id).then(() => removed++).catch(() => undefined);
+    }
+    if (removed) this.log.log(`cleaned ${removed} flow working-part document(s) older than ${days}d`);
+    return removed;
+  }
+
   /** Forget a finished run's driver state — only if this generation still owns the run. (BEA-792) */
   private dropDriver(runId: string, gen: number) {
     if (this.gens.get(runId) !== gen) return;
@@ -516,7 +547,7 @@ export class FlowRunnerService implements OnModuleInit {
       for (const sid of partIds) {
         const r = results[sid];
         if (r?.status !== 'done' || !r.output?.trim()) continue;
-        const d = await this.saveDoc(`${name} — ${branchTitle(sid).slice(0, 90)}`, r.output, name);
+        const d = await this.saveDoc(`${name} — ${branchTitle(sid).slice(0, 90)}`, r.output, name, true); // a working part — auto-cleaned later (BEA-1085)
         if (d) docs.push(d);
       }
     }
@@ -524,10 +555,10 @@ export class FlowRunnerService implements OnModuleInit {
     return docs;
   }
 
-  private async saveDoc(title: string, content: string, flowName: string): Promise<{ id: string; slug: string; title: string } | null> {
+  private async saveDoc(title: string, content: string, flowName: string, isPart = false): Promise<{ id: string; slug: string; title: string } | null> {
     try {
       // pass description + tags so DocumentsService skips its (paid) AI summarise pass
-      const doc: any = await this.documents.create({ title: title.slice(0, 180), contentText: content, kind: 'md', description: content.replace(/\s+/g, ' ').slice(0, 180), tags: ['flow', flowName.slice(0, 40)] });
+      const doc: any = await this.documents.create({ title: title.slice(0, 180), contentText: content, kind: 'md', description: content.replace(/\s+/g, ' ').slice(0, 180), tags: ['flow', flowName.slice(0, 40), ...(isPart ? ['flow-part'] : [])] });
       return { id: doc.id, slug: doc.slug, title: doc.title };
     } catch (e: any) { this.log.warn(`flow doc save failed: ${e?.message || e}`); return null; }
   }
