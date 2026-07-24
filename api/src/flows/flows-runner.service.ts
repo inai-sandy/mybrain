@@ -24,6 +24,14 @@ export class FlowRunnerService implements OnModuleInit {
   private readonly log = new Logger('FlowRunner');
   /** Runs cancelled in this process — checked before a live driver writes back, so a cancel sticks. */
   private cancelled = new Set<string>();
+  /**
+   * BEA-792: per-run driver generation + the live walk's in-flight node promises. When one branch
+   * pauses on a question, sibling branches keep running; answering starts a NEW driver. The old
+   * driver's writes must then become no-ops (generation guard), and the new driver ADOPTS the
+   * still-in-flight sibling promises instead of re-running them (no duplicate engine cost/docs).
+   */
+  private gens = new Map<string, number>();
+  private liveMemo = new Map<string, Map<string, Promise<string>>>();
   constructor(
     private readonly prisma: PrismaService,
     private readonly bridge: HermesBridgeService,
@@ -244,6 +252,12 @@ export class FlowRunnerService implements OnModuleInit {
   }
 
   private async execute(runId: string, flow: any, opts: { evalMode?: boolean } = {}) {
+    // Claim the driver generation for this run (BEA-792). If a later driver claims it (an answer
+    // re-drive), THIS driver's writes go dead — stale branches can never clobber the new state.
+    const gen = (this.gens.get(runId) || 0) + 1;
+    this.gens.set(runId, gen);
+    const stale = () => this.gens.get(runId) !== gen;
+
     const graph = this.parse(flow.graph);
     const nodes = new Map<string, any>((graph.nodes || []).map((n: any) => [n.id, n]));
     const incoming = new Map<string, string[]>();
@@ -258,9 +272,34 @@ export class FlowRunnerService implements OnModuleInit {
     // Seed both 'done' and 'skipped' so a resumed run doesn't re-run branches that were skipped
     // (a per-run selection isn't re-applied on resume, which reloads the saved flow). (BEA-796)
     for (const [nid, rr] of Object.entries(results)) { const st = (rr as NodeResult)?.status; if (st === 'done' || st === 'skipped') memo.set(nid, Promise.resolve((rr as NodeResult).output || '')); }
-    const persist = () => this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
+    const persist = () => stale() || this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
     if (!opts.evalMode && !terminal.length) term('▶ started');
+
+    // Adopt the paused driver's still-in-flight sibling work (BEA-792): a node the old walk left
+    // 'running' has a live engine call behind it — await THAT promise instead of starting a second
+    // one. Nodes that never really started (blocked behind the question) aren't 'running' and run
+    // fresh. After a restart there is no old memo and 'running' nodes simply re-run.
+    const prior = this.liveMemo.get(runId);
+    if (prior && !opts.evalMode) {
+      for (const [nid, p] of prior) {
+        if (memo.has(nid)) continue;
+        if ((results[nid] as NodeResult)?.status !== 'running') continue;
+        const node = nodes.get(nid);
+        memo.set(nid, p.then((out) => {
+          results[nid] = { status: 'done', output: out, kind: node?.data?.kind, label: node?.data?.label };
+          const line = this.termLine(node, out);
+          if (line) term(line);
+          void persist();
+          return out;
+        }).catch((e: any) => {
+          results[nid] = { status: 'failed', output: String(e?.message || e), kind: node?.data?.kind, label: node?.data?.label };
+          void persist();
+          return '';
+        }));
+      }
+    }
+    this.liveMemo.set(runId, memo);
 
     const outputOf = (nodeId: string): Promise<string> => {
       if (memo.has(nodeId)) return memo.get(nodeId)!;
@@ -316,8 +355,12 @@ export class FlowRunnerService implements OnModuleInit {
     let finalOutput = '';
     for (const n of terminals) { const r = results[n.id]; if (r?.status === 'done' && r.output) finalOutput = r.output; }
 
+    // A newer driver owns this run now (the question was answered mid-walk) — this walk's ending
+    // must not touch the row. (BEA-792)
+    if (stale()) return;
+
     // If the run was cancelled while this driver was mid-flight, don't resurrect it as 'done'. (BEA-776)
-    if (this.cancelled.has(runId)) { this.cancelled.delete(runId); return; }
+    if (this.cancelled.has(runId)) { this.cancelled.delete(runId); this.dropDriver(runId, gen); return; }
 
     // If nothing succeeded and a step failed, the run FAILED — don't report 'done' with a blank answer. (BEA-800)
     if (!opts.evalMode && !finalOutput.trim()) {
@@ -326,6 +369,7 @@ export class FlowRunnerService implements OnModuleInit {
         if (!terminal.length || terminal[terminal.length - 1]?.text !== '✗ a step failed') term('✗ a step failed');
         await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
         this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
+        this.dropDriver(runId, gen);
         return;
       }
     }
@@ -335,11 +379,19 @@ export class FlowRunnerService implements OnModuleInit {
     if (!opts.evalMode) term('✓ done');
 
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'done', finalOutput, results: JSON.stringify(results), documentIds: JSON.stringify(docs), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
+    this.dropDriver(runId, gen);
 
     // Notify on a background/long run so you know it's ready even if you walked away (workspace ⑥).
     if (!opts.evalMode && runRow?.startedAt && Date.now() - new Date(runRow.startedAt).getTime() > 60_000) {
       this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'done', snippet: finalOutput }).catch(() => undefined);
     }
+  }
+
+  /** Forget a finished run's driver state — only if this generation still owns the run. (BEA-792) */
+  private dropDriver(runId: string, gen: number) {
+    if (this.gens.get(runId) !== gen) return;
+    this.gens.delete(runId);
+    this.liveMemo.delete(runId);
   }
 
   /** Persist the pause (status 'waiting') + notify the user (Move B). */
@@ -366,6 +418,9 @@ export class FlowRunnerService implements OnModuleInit {
     // the same run — duplicate Codex turns, duplicate documents, clobbered results. Only one wins. (BEA-791)
     const claim = await this.prisma.flowRun.updateMany({ where: { id: runId, status: 'waiting' }, data: { status: 'running' } });
     if (claim.count === 0) return { ok: false, message: 'This run is already being answered.' };
+    // Silence the paused driver's lingering branch writes IMMEDIATELY — before the new driver even
+    // reads the row — so a stale persist can't undo the answer we're about to write. (BEA-792)
+    this.gens.set(runId, (this.gens.get(runId) || 0) + 1);
     const flow = run.flowId ? await this.prisma.flow.findUnique({ where: { id: run.flowId } }) : null;
     const results: Record<string, NodeResult> = this.parse(run.results) || {};
     const nodeId = (run as any).waitNodeId as string;

@@ -106,6 +106,103 @@ describe('FlowRunnerService.answer — atomic claim (BEA-791)', () => {
   });
 });
 
+describe('FlowRunnerService — answering early with a sibling branch still running (BEA-792)', () => {
+  it('adopts the in-flight sibling (no re-run), and the old driver cannot clobber the answered state', async () => {
+    // Graph: tool A (slow engine call) and ask B feed output O. B pauses while A is mid-flight.
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'A', data: { kind: 'tool', refId: 'web_search', label: 'Research' } },
+        { id: 'B', data: { kind: 'ask_user', question: 'Continue?', label: 'Ask me' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'A', target: 'O' }, { source: 'B', target: 'O' }],
+    });
+    const flowObj = { id: 'f1', name: 'F', graph };
+
+    const row: any = { id: 'r1', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: {
+        findUnique: async () => ({ ...row }),
+        update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; },
+        updateMany: async ({ where, data }: any) => {
+          if (where.status === 'waiting' && row.status === 'waiting') { row.status = data.status; return { count: 1 }; }
+          return { count: 0 };
+        },
+      },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+
+    // The engine call for A: resolves only when WE say so (it outlives the pause).
+    let releaseA!: () => void;
+    const engineGate = new Promise<void>((r) => { releaseA = r; });
+    const bridge: any = { execute: jest.fn(async () => { await engineGate; }) };
+    const agent: any = {
+      createRun: jest.fn(async () => ({ id: 'ar1' })),
+      getRun: jest.fn(async () => ({ status: 'done', resultText: 'A-result' })),
+    };
+    const telegram: any = { notifyFlowWaiting: jest.fn(async () => undefined), notifyFlowDone: jest.fn(async () => undefined) };
+    const svc = new FlowRunnerService(prisma, bridge, agent, {} as any, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+
+    // Old driver: B pauses the run while A's engine call is still in flight.
+    await (svc as any).execute('r1', flowObj);
+    expect(row.status).toBe('waiting');
+    expect(JSON.parse(row.results).A.status).toBe('running'); // sibling genuinely mid-flight
+    expect(JSON.parse(row.results).B.status).toBe('waiting');
+
+    // Answer while A is STILL running — the new driver must adopt A, not restart it.
+    const res = await svc.answer('r1', 'go ahead');
+    expect(res.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(row.status).toBe('running'); // resumed, waiting on the adopted A
+
+    releaseA(); // the engine call finally finishes (this also wakes the OLD driver's continuation)
+    await new Promise((r) => setTimeout(r, 25));
+
+    expect(agent.createRun).toHaveBeenCalledTimes(1); // A ran ONCE — adopted, not re-run
+    expect(row.status).toBe('done');
+    const results = JSON.parse(row.results);
+    expect(results.A).toMatchObject({ status: 'done', output: 'A-result' });
+    expect(results.B).toMatchObject({ status: 'done', output: 'go ahead' }); // old driver never clobbered the answer
+    expect(String(row.finalOutput)).toContain('A-result'); // the output node saw the adopted branch
+  });
+
+  it('a paused driver with NO live siblings resumes cleanly (nothing to adopt)', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'B', data: { kind: 'ask_user', question: 'Continue?', label: 'Ask me' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'B', target: 'O' }],
+    });
+    const flowObj = { id: 'f1', name: 'F', graph };
+    const row: any = { id: 'r1', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: {
+        findUnique: async () => ({ ...row }),
+        update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; },
+        updateMany: async ({ where, data }: any) => {
+          if (where.status === 'waiting' && row.status === 'waiting') { row.status = data.status; return { count: 1 }; }
+          return { count: 0 };
+        },
+      },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+    };
+    const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+
+    await (svc as any).execute('r1', flowObj);
+    expect(row.status).toBe('waiting');
+    const res = await svc.answer('r1', 'yes');
+    expect(res.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 25));
+    expect(row.status).toBe('done');
+    expect(String(row.finalOutput)).toContain('yes');
+  });
+});
+
 describe('FlowRunnerService.applySkip — per-run branch selection (BEA-796)', () => {
   const flow = {
     id: 'f1', name: 'Flow',
