@@ -504,7 +504,9 @@ export class FlowRunnerService implements OnModuleInit {
     return this.runOnEngine(async () => {
       const run = await this.agent.createRun({ title, input: prompt });
       try {
-        await this.bridge.execute(run.id, { prompt, title, save: false });
+        // allowAsk:false — a flow's tool node must never park its helper run on a question; flow
+        // HITL happens through the flow's own ask_user NODE, not the agent tool. (BEA-795)
+        await this.bridge.execute(run.id, { prompt, title, save: false, allowAsk: false });
       } catch (e: any) {
         // A thrown execute must never leave the branch run stuck on "running". (BEA-772)
         await this.prisma.agentRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);

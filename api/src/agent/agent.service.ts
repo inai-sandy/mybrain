@@ -48,10 +48,13 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
    * logged step. Idempotent: terminal runs (done/failed/cancelled) and paused ones are untouched.
    */
   async reconcileOrphans(): Promise<number> {
-    // 'running' = mid-turn when the process died; 'awaiting_input' = paused on a question whose
-    // in-memory poll loop also died. Neither can resume after a restart, so fail both with a clear,
-    // tailored message + Re-run (BEA-629, BEA-632). Terminal/scheduled runs are untouched.
-    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] } }, select: { id: true, status: true, stepLog: true } });
+    // Durable ask (BEA-795): a run PARKED on a question carries its engine session on the row
+    // (sessionId != null) and needs no live driver — surviving a restart is the whole point, so
+    // those are left alone (same for an answered park the resume sweeper hasn't picked up yet).
+    // Only runs with no way to advance are failed:
+    //   'running' + no sessionId        → mid-turn when the process died
+    //   'awaiting_input' + no sessionId → an old in-memory wait whose poll loop died
+    const orphans = await this.prisma.agentRun.findMany({ where: { status: { in: ['running', 'awaiting_input'] }, sessionId: null }, select: { id: true, status: true, stepLog: true } });
     if (!orphans.length) return 0;
     const now = new Date();
     for (const o of orphans) {
@@ -340,6 +343,36 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } });
     const updated = await this.prisma.agentRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date() } });
     return this.shapeRun(updated);
+  }
+
+  // ---------- durable park + resume (BEA-795) ----------
+
+  /**
+   * Park a run on its engine session: the model asked a question and ended its turn, so nothing is
+   * running in memory any more — the row alone (status 'awaiting_input' + sessionId) carries enough
+   * to resume hours or days later, across restarts. '' = parked without a session id (the engine
+   * gave none); the resume then starts a fresh session from the task text instead.
+   */
+  async parkRun(runId: string, sessionId?: string | null) {
+    await this.prisma.agentRun.update({ where: { id: runId }, data: { sessionId: sessionId || '' } }).catch(() => undefined);
+  }
+
+  /** Parked runs whose question has been answered — ready for the resume sweeper. */
+  async listResumable() {
+    const rows = await this.prisma.agentRun.findMany({
+      where: { status: 'running', NOT: { sessionId: null }, waitpoints: { some: { status: 'answered' } } },
+      include: { waitpoints: true },
+    });
+    return rows.map((r: any) => this.shapeRun(r));
+  }
+
+  /**
+   * Atomically claim a resumable run (clears the park marker) — only one sweeper tick can win,
+   * so an answer can never spawn two concurrent drivers (same discipline as BEA-791).
+   */
+  async claimResume(runId: string): Promise<boolean> {
+    const res = await this.prisma.agentRun.updateMany({ where: { id: runId, status: 'running', NOT: { sessionId: null } }, data: { sessionId: null } });
+    return res.count > 0;
   }
 
   // ---------- the durable HITL primitive ----------

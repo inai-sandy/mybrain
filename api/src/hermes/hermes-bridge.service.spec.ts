@@ -16,6 +16,11 @@ function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
     finishRun: jest.fn(async (runId: string, patch: any) => { Object.assign(runs[runId], patch, { ended: true }); return runs[runId]; }),
     setLearnings: jest.fn(async function (this: any, _runId: string, items: any) { this.learnings = items; return runs['run-1']; }),
     setEvals: jest.fn(async () => undefined),
+    // durable park + resume (BEA-795)
+    parkRun: jest.fn(async (runId: string, sessionId?: string) => { runs[runId].sessionId = sessionId || ''; }),
+    listResumable: jest.fn(async () => [] as any[]),
+    claimResume: jest.fn(async (runId: string) => { const had = runs[runId]?.sessionId != null; if (runs[runId]) runs[runId].sessionId = null; return had; }),
+    getAgent: jest.fn(async () => null),
   };
 }
 const fakeDocs = () => ({ create: jest.fn(async (i: any) => ({ id: 'doc-1', slug: 'x', title: i.title })) });
@@ -247,5 +252,86 @@ describe('HermesBridgeService (Codex engine)', () => {
     mockCodex({ text: 'big result text' });
     await build(agent, fakeMem(), fakeLlm()).execute('run-1', { prompt: 'x', save: false });
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', { status: 'done', resultText: 'big result text' });
+  });
+
+  // ---- durable ask-me (BEA-795): park on ask, resume on answer ----
+
+  it('BEA-795 offers the ask_user tool with the runId; allowAsk:false (flows/evals) leaves it out', async () => {
+    const agent = fakeAgent();
+    let seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
+    await build(agent).execute('run-1', { prompt: 'task' });
+    expect(seenPrompt).toContain('ask_user');
+    expect(seenPrompt).toContain('runId "run-1"');
+
+    seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
+    await build(fakeAgent()).execute('run-1', { prompt: 'task', allowAsk: false });
+    expect(seenPrompt).not.toContain('ask_user');
+  });
+
+  it('BEA-795 parks the run (sessionId kept, Telegram ping, NOT finished) when the model asked and ended its turn', async () => {
+    const agent = fakeAgent();
+    const tg = fakeTg();
+    const docs = fakeDocs();
+    // during the turn the model called ask_user → the REST tool flipped the run to awaiting_input
+    mockCodex(() => {
+      agent.runs['run-1'].status = 'awaiting_input';
+      agent.runs['run-1'].waitpoints = [{ id: 'wp-1', status: 'pending', question: 'Which vendor?', kind: 'choice', options: ['A', 'B'] }];
+      return { text: 'I asked the user and am waiting.' };
+    });
+    await build(agent, fakeMem(), fakeLlm(), docs, tg).execute('run-1', { prompt: 'research then ask', title: 'Vendors' });
+    expect(agent.parkRun).toHaveBeenCalledWith('run-1', 's'); // the engine session is kept on the row
+    expect(tg.pushAgentQuestion).toHaveBeenCalledWith(expect.objectContaining({ question: 'Which vendor?' }));
+    expect(agent.finishRun).not.toHaveBeenCalled(); // finishing would cancel the pending question
+    expect(docs.create).not.toHaveBeenCalled(); // the parting note is not saved as a result
+    expect(agent.steps.some((s: any) => /waiting for your answer/i.test(s.label))).toBe(true);
+  });
+
+  it('BEA-795 parking wins over a turn error — the question survives an engine timeout', async () => {
+    const agent = fakeAgent();
+    mockCodex(() => {
+      agent.runs['run-1'].status = 'awaiting_input';
+      agent.runs['run-1'].waitpoints = [{ id: 'wp-1', status: 'pending', question: 'q' }];
+      return { httpError: true, error: 'timed out' };
+    });
+    await build(agent).execute('run-1', { prompt: 'x' });
+    expect(agent.parkRun).toHaveBeenCalled();
+    expect(agent.finishRun).not.toHaveBeenCalled();
+  });
+
+  it('BEA-795 resumeTick claims an answered park exactly once and resumes the SAME engine session', async () => {
+    const agent = fakeAgent();
+    agent.runs['run-1'] = {
+      id: 'run-1', status: 'running', sessionId: 'sess-42', input: 'the original task', title: 'T', agentId: null, depth: 'standard',
+      waitpoints: [{ id: 'wp-1', status: 'answered', question: 'Colour?', answer: 'blue', answeredAt: '2026-07-24T06:00:00Z' }],
+    };
+    agent.listResumable = jest.fn(async () => [agent.runs['run-1']]);
+    let seenBody: any = null;
+    mockCodex((body: any) => { seenBody = body; return { text: 'finished with blue' }; });
+    const svc = build(agent);
+    await svc.resumeTick();
+    await new Promise((r) => setTimeout(r, 20)); // let the fire-and-forget resume settle
+    expect(agent.claimResume).toHaveBeenCalledWith('run-1'); // atomic claim — no double drivers
+    expect(seenBody.sessionId).toBe('sess-42'); // continues the SAME session
+    expect(seenBody.prompt).toContain('The user answered: "blue"');
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done' }));
+    expect(agent.steps.some((s: any) => /resuming/i.test(s.label))).toBe(true);
+  });
+
+  it('BEA-795 a park without a session resumes fresh, restating the task', async () => {
+    const agent = fakeAgent();
+    agent.runs['run-1'] = {
+      id: 'run-1', status: 'running', sessionId: '', input: 'summarise my vendors', title: 'T', agentId: null, depth: 'quick',
+      waitpoints: [{ id: 'wp-1', status: 'answered', question: 'Include drafts?', answer: 'no', answeredAt: '2026-07-24T06:00:00Z' }],
+    };
+    agent.listResumable = jest.fn(async () => [agent.runs['run-1']]);
+    let seenBody: any = null;
+    mockCodex((body: any) => { seenBody = body; return { text: 'done' }; });
+    await build(agent).resumeTick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(seenBody.sessionId).toBeUndefined(); // no session to continue
+    expect(seenBody.prompt).toContain('The task:\nsummarise my vendors'); // restated so the fresh session is self-contained
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done' }));
   });
 });

@@ -45,7 +45,14 @@ function fakePrisma() {
           if (typeof where.status === 'object' && Array.isArray(where.status.in)) return where.status.in.includes(r.status);
           return r.status === where.status;
         };
-        let out = runs.filter((r) => (where?.agentId ? r.agentId === where.agentId : true) && statusOk(r));
+        // sessionId / NOT.sessionId / waitpoints.some filters (durable park + resume, BEA-795)
+        const parkOk = (r: any) => {
+          if (where?.sessionId !== undefined && (r.sessionId ?? null) !== where.sessionId) return false;
+          if (where?.NOT?.sessionId !== undefined && (r.sessionId ?? null) === where.NOT.sessionId) return false;
+          if (where?.waitpoints?.some && !wps.some((w) => w.runId === r.id && matchWp(w, where.waitpoints.some))) return false;
+          return true;
+        };
+        let out = runs.filter((r) => (where?.agentId ? r.agentId === where.agentId : true) && statusOk(r) && parkOk(r));
         out = [...out].reverse();
         if (take) out = out.slice(0, take);
         return include?.waitpoints ? out.map((r) => ({ ...r, waitpoints: wps.filter((w) => w.runId === r.id) })) : out;
@@ -59,6 +66,7 @@ function fakePrisma() {
       updateMany: async ({ where, data }: any) => {
         const match = (r: any) => {
           if (where?.id !== undefined && r.id !== where.id) return false;
+          if (where?.NOT?.sessionId !== undefined && (r.sessionId ?? null) === where.NOT.sessionId) return false;
           if (where?.status !== undefined) {
             if (typeof where.status === 'object' && Array.isArray(where.status.in)) return where.status.in.includes(r.status);
             return r.status === where.status;
@@ -412,6 +420,50 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
 
     // idempotent — nothing left to fix
     expect(await svc.reconcileOrphans()).toBe(0);
+  });
+
+  it('BEA-795 reconcileOrphans leaves durably PARKED runs alone — the pause must survive a restart', async () => {
+    const parked = await svc.createRun({ input: 'research then ask me' });
+    await svc.ask(parked.id, { question: 'Which vendor?', kind: 'choice', options: ['A', 'B'] });
+    await svc.parkRun(parked.id, 'sess-1'); // the bridge parked it on its engine session
+
+    const answeredPark = await svc.createRun({ input: 'other parked run' });
+    const wp = await svc.ask(answeredPark.id, { question: 'Go on?', kind: 'free_text' });
+    await svc.parkRun(answeredPark.id, 'sess-2');
+    await svc.answerByToken(wp.resumeToken, 'yes'); // → status 'running' + sessionId still set (awaiting the sweeper)
+
+    expect(await svc.reconcileOrphans()).toBe(0); // neither is an orphan
+    expect((await svc.getRun(parked.id)).status).toBe('awaiting_input'); // still waiting, question intact
+    expect((prisma._wps as any[]).filter((w) => w.runId === parked.id && w.status === 'pending')).toHaveLength(1);
+    expect((await svc.getRun(answeredPark.id)).status).toBe('running'); // left for the resume sweeper
+  });
+
+  it('BEA-795 listResumable + claimResume: answered parks surface once, and only one claimer wins', async () => {
+    const run = await svc.createRun({ input: 'ask then continue' });
+    const wp = await svc.ask(run.id, { question: 'Colour?', kind: 'choice', options: ['red', 'blue'] });
+    await svc.parkRun(run.id, 'sess-9');
+
+    expect(await svc.listResumable()).toHaveLength(0); // unanswered → not resumable yet
+    await svc.answerByToken(wp.resumeToken, 'blue');
+    const list = await svc.listResumable();
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(run.id);
+    expect(list[0].sessionId).toBe('sess-9');
+
+    expect(await svc.claimResume(run.id)).toBe(true); // first claim wins and clears the marker
+    expect(await svc.claimResume(run.id)).toBe(false); // second claim loses (no double drivers)
+    expect(await svc.listResumable()).toHaveLength(0); // claimed → gone from the queue
+  });
+
+  it('BEA-795 parkRun with no engine session stores the "" marker so the run still resumes', async () => {
+    const run = await svc.createRun({ input: 'x' });
+    const wp = await svc.ask(run.id, { question: 'q', kind: 'free_text' });
+    await svc.parkRun(run.id, undefined); // engine returned no sessionId
+    await svc.answerByToken(wp.resumeToken, 'ok');
+    const list = await svc.listResumable();
+    expect(list).toHaveLength(1);
+    expect(list[0].sessionId).toBe(''); // parked-without-session sentinel
+    expect(await svc.claimResume(run.id)).toBe(true);
   });
 
   it('records and reads engine watchdog health (BEA-632)', async () => {
