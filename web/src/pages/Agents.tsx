@@ -163,6 +163,100 @@ function RunningCard({ r }: { r: RunningItem }) {
   );
 }
 
+/** Paste a GitHub link → agents found there + the install plan (BEA-1081). Nothing installs without the tap. */
+function ImportGithubModal({ onDone, onClose }: { onDone: () => void; onClose: () => void }) {
+  const toast = useToast();
+  const [url, setUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<any | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [installDeps, setInstallDeps] = useState(true);
+
+  async function loadPreview() {
+    if (!url.trim()) { toast('error', 'Paste a GitHub link first'); return; }
+    setBusy(true);
+    setPreview(null);
+    try {
+      const r = await fetch('/api/agent/import/github/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim() }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || "Couldn't read that link");
+      setPreview(d);
+      setPicked(new Set(d.agents.slice(0, 10).map((a: any) => a.name)));
+    } catch (e: any) { toast('error', e?.message || "Couldn't read that link"); } finally { setBusy(false); }
+  }
+
+  async function doImport() {
+    if (!picked.size) { toast('error', 'Pick at least one agent'); return; }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/agent/import/github/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url.trim(), pick: [...picked], installDeps }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Import failed');
+      const mcpOk = (d.installed?.mcp || []).filter((x: any) => x.ok).length;
+      const cliOk = (d.installed?.clis || []).filter((x: any) => x.ok).length;
+      toast('success', `Imported ${d.imported.length} agent${d.imported.length === 1 ? '' : 's'}${mcpOk || cliOk ? ` · installed ${mcpOk} MCP + ${cliOk} CLI` : ''}`);
+      onDone();
+    } catch (e: any) { toast('error', e?.message || 'Import failed'); setBusy(false); }
+  }
+
+  const deps = preview?.deps;
+  const hasDeps = !!deps && (deps.mcpServers.length > 0 || deps.clis.length > 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={() => !busy && onClose()}>
+      <div className="flex max-h-[88vh] w-full max-w-lg flex-col gap-3 overflow-hidden rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">📦 Bring an agent from GitHub</h2>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="flex gap-2">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && loadPreview()} placeholder="https://github.com/owner/repo (or a folder / file link)" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
+          <button onClick={loadPreview} disabled={busy} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{busy && !preview ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Read it'}</button>
+        </div>
+        {preview && (
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">{preview.agents.length} agent{preview.agents.length === 1 ? '' : 's'} found — pick which to bring in</div>
+              <div className="space-y-1.5">
+                {preview.agents.map((a: any) => (
+                  <label key={a.name} className={'flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 text-sm transition-colors ' + (picked.has(a.name) ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10' : 'border-zinc-200 dark:border-zinc-700')}>
+                    <input type="checkbox" checked={picked.has(a.name)} onChange={(e) => setPicked((p) => { const n = new Set(p); e.target.checked ? n.add(a.name) : n.delete(a.name); return n; })} className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600" />
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{a.name}</span>
+                      <span className="block text-xs text-zinc-500">{a.description}</span>
+                      {a.tools?.length > 0 && <span className="mt-0.5 block truncate text-[11px] text-zinc-400">tools: {a.tools.join(', ')}</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {hasDeps ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-500/25 dark:bg-amber-500/5">
+                <div className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">Install plan — needs your OK</div>
+                <ul className="mt-1.5 space-y-1 text-sm text-zinc-700 dark:text-zinc-200">
+                  {deps.mcpServers.map((s: any) => <li key={s.name}>🔌 MCP server <b>{s.name}</b> <span className="text-xs text-zinc-500">({s.command} {s.args.join(' ')})</span></li>)}
+                  {deps.clis.map((c: string) => <li key={c}>💻 CLI <b>{c}</b> <span className="text-xs text-zinc-500">(npm install -g)</span></li>)}
+                </ul>
+                <label className="mt-2 flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={installDeps} onChange={(e) => setInstallDeps(e.target.checked)} className="h-4 w-4 accent-emerald-600" />
+                  Install these on my server
+                </label>
+                <p className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/70">Only these exact items are installed — the repo's own install scripts are never run.</p>
+              </div>
+            ) : (
+              <div className="rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-500 dark:bg-zinc-800/60">Nothing extra to install — these agents run on your existing tools.</div>
+            )}
+            {deps?.notes?.length > 0 && <div className="text-[11px] text-zinc-400">{deps.notes.map((n: string, i: number) => <div key={i}>ℹ️ {n}</div>)}</div>}
+            <button onClick={doImport} disabled={busy || !picked.size} className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Import {picked.size} agent{picked.size === 1 ? '' : 's'}{hasDeps && installDeps ? ' + install the plan' : ''}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | null; onCreated: () => void; onCancel: () => void }) {
   const toast = useToast();
   const [step, setStep] = useState<'describe' | 'form'>('describe');
@@ -377,6 +471,8 @@ export function Agents() {
   // Run popup: after planning a deep research, pick which sub-questions to run. (BEA-773)
   const [planFor, setPlanFor] = useState<{ flowId: string; subs: { id: string; branchIdx: number; sub: string; on: boolean }[] } | null>(null);
   const [q, setQ] = useState('');
+  const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // big shelf groups expanded (BEA-1083)
   // Slim one-tap push opt-in (BEA-1088) — shown while this device could get notifications but isn't
   // subscribed yet (covers both "never asked" and "allowed but not registered").
   const [pushNudge, setPushNudge] = useState(false);
@@ -626,8 +722,12 @@ export function Agents() {
       <section className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-500">Your agents</h2>
-          <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-500"><Plus className="h-4 w-4" />New agent</button>
+          <div className="flex items-center gap-2.5">
+            <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" title="Bring any public Claude agent from GitHub">📦 From GitHub</button>
+            <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 text-sm text-emerald-600 hover:text-emerald-500"><Plus className="h-4 w-4" />New agent</button>
+          </div>
         </div>
+        {showImport && <ImportGithubModal onDone={() => { setShowImport(false); loadHome(); }} onClose={() => setShowImport(false)} />}
         {showNew && <NewAgentForm initial={starterPick} onCreated={() => { setShowNew(false); setStarterPick(null); loadHome(); }} onCancel={() => { setShowNew(false); setStarterPick(null); }} />}
         {agents === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
@@ -676,6 +776,7 @@ export function Agents() {
                   ) : <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">never ran</span>}
                   {scored > 0 && <span className={'rounded-full px-2 py-0.5 text-xs font-bold ' + passCls}>{passed}/{evs.length} pass</span>}
                   {a.scheduleText ? <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800"><CalendarClock className="h-3 w-3" />{a.scheduleText}</span> : null}
+                  {a.sourceUrl && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-700 dark:bg-violet-500/10 dark:text-violet-300" title={a.sourceUrl}>from GitHub</span>}
                   {!a.enabled && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">paused</span>}
                 </div>
                 <div className="mt-3 flex items-center gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
@@ -714,7 +815,11 @@ export function Agents() {
               {groups.map((g) => (
                 <div key={g.cat} className="space-y-2">
                   {groups.length > 1 && <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{g.cat} <span className="font-normal">· {g.list.length}</span></h3>}
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{g.list.map(card)}</div>
+                  {/* Big groups (a grown import shelf) show 9 and expand — the page stays scannable. (BEA-1083) */}
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{(expanded.has(g.cat) ? g.list : g.list.slice(0, 9)).map(card)}</div>
+                  {g.list.length > 9 && !expanded.has(g.cat) && (
+                    <button onClick={() => setExpanded((p) => new Set(p).add(g.cat))} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">Show all {g.list.length}</button>
+                  )}
                 </div>
               ))}
               {filtered.length === 0 && <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">No agents match.</div>}

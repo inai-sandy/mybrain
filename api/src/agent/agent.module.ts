@@ -3,6 +3,7 @@ import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { AgentToolsController } from './agent-tools.controller';
 import { AgentToolsService } from './agent-tools.service';
+import { AgentsImportService } from './agents-import.service';
 import { DocumentsModule } from '../documents/documents.module';
 import { MemoryModule } from '../memory/memory.module';
 
@@ -16,7 +17,7 @@ import { MemoryModule } from '../memory/memory.module';
 @Module({
   imports: [DocumentsModule, MemoryModule],
   controllers: [AgentController, AgentToolsController],
-  providers: [AgentService, AgentToolsService],
-  exports: [AgentService, AgentToolsService],
+  providers: [AgentService, AgentToolsService, AgentsImportService],
+  exports: [AgentService, AgentToolsService, AgentsImportService],
 })
 export class AgentModule {}

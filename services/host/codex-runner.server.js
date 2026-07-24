@@ -169,6 +169,43 @@ const server = http.createServer(async (req, res) => {
     catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: String((e && e.message) || e) })); }
     return;
   }
+  // BEA-1081: install an APPROVED plan — MCP server entries into ~/.codex/config.toml and CLIs via
+  // `npm i -g` ONLY. Repo install scripts are never executed; package names are strictly validated.
+  if (req.method === 'POST' && req.url === '/install') {
+    let body = {};
+    try { body = JSON.parse(await readBody(req)); } catch (e) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'bad body' })); return; }
+    const out = { ok: true, mcp: [], clis: [] };
+    try {
+      const cfgPath = path.join(os.homedir(), '.codex', 'config.toml');
+      let cfg = fs.readFileSync(cfgPath, 'utf8');
+      for (const s of Array.isArray(body.mcpServers) ? body.mcpServers.slice(0, 8) : []) {
+        const name = String(s.name || '').replace(/[^\w-]/g, '').slice(0, 40);
+        const command = String(s.command || '').trim();
+        const args = (Array.isArray(s.args) ? s.args : []).map((a) => String(a)).slice(0, 10);
+        if (!name || !command || !/^[\w./@-]+$/.test(command)) { out.mcp.push({ name: s.name, ok: false, why: 'unsafe or empty command' }); continue; }
+        if (cfg.includes(`[mcp_servers.${name}]`)) { out.mcp.push({ name, ok: true, why: 'already registered' }); continue; }
+        cfg += `\n[mcp_servers.${name}]\n` +
+          `default_tools_approval_mode = "approve"\n` +
+          `command = ${JSON.stringify(command)}\n` +
+          `args = [${args.map((a) => JSON.stringify(a)).join(', ')}]\n` +
+          `startup_timeout_sec = 30.0\n`;
+        out.mcp.push({ name, ok: true });
+      }
+      fs.writeFileSync(cfgPath, cfg);
+    } catch (e) { out.ok = false; out.error = 'config write failed: ' + String((e && e.message) || e); }
+    const clis = Array.isArray(body.clis) ? body.clis.slice(0, 5) : [];
+    for (const pkg of clis) {
+      const name = String(pkg).trim();
+      if (!/^(@[a-z0-9~][\w.-]*\/)?[a-z0-9~][\w.-]*$/i.test(name)) { out.clis.push({ pkg: name, ok: false, why: 'unsafe package name' }); continue; }
+      // eslint-disable-next-line no-await-in-loop
+      const r = await new Promise((resolve) => {
+        execFile('npm', ['install', '-g', '--no-fund', '--no-audit', name], { timeout: 120000 }, (err, so, se) => resolve(err ? { ok: false, why: String(se || err.message).slice(0, 200) } : { ok: true }));
+      });
+      out.clis.push({ pkg: name, ...r });
+    }
+    res.end(JSON.stringify(out));
+    return;
+  }
   if (req.method === 'POST' && req.url === '/run') {
     let body = {};
     try { body = JSON.parse(await readBody(req)); }
