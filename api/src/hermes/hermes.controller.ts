@@ -49,7 +49,8 @@ export class HermesController {
     // Honour the agent's default depth (BEA-695). 'deep' agents are run via their flow by the UI; if this
     // single-turn endpoint is hit for one, it falls back to standard depth (non-quick).
     const depth = agent.defaultDepth === 'quick' ? 'quick' : 'standard';
-    return this.bridge.startRun({ prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth });
+    const input = await this.bridge.applyAgentSkills(agent, { prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth }); // BEA-1079
+    return this.bridge.startRun(input);
   }
 
   // ---- "Saved by agents" trust view (BEA-700) ----

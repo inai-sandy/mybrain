@@ -5,7 +5,7 @@ describe('AgentEvents — event triggers (BEA-1076)', () => {
   function harness(agents: any[]) {
     const started: any[] = [];
     const agent: any = { listAgents: jest.fn(async () => agents) };
-    const bridge: any = { startRun: jest.fn(async (i: any) => { started.push(i); return { id: 'r1' }; }) };
+    const bridge: any = { startRun: jest.fn(async (i: any) => { started.push(i); return { id: 'r1' }; }), applyAgentSkills: jest.fn(async (_a: any, i: any) => i) };
     const events = new AppEventsService();
     const svc = new AgentEvents(agent, bridge, events);
     svc.onModuleInit();

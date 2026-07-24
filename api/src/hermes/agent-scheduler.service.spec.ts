@@ -6,7 +6,7 @@ function build(agents: any[]) {
   const started: any[] = [];
   const marked: any[] = [];
   const agent: any = { listSchedulable: async () => agents, markFired: async (id: string, key: string) => marked.push({ id, key }) };
-  const bridge: any = { startRun: async (i: any) => { started.push(i); return { id: 'run' }; } };
+  const bridge: any = { startRun: async (i: any) => { started.push(i); return { id: 'run' }; }, applyAgentSkills: async (_a: any, i: any) => i };
   return { sch: new AgentScheduler(agent, bridge, prisma), started, marked };
 }
 const mk = (over: any = {}) => ({ id: 'a1', name: 'Brief', prompt: 'do it', collectionId: null, lastFiredKey: null, schedule: { every: 'day', at: '07:00' }, ...over });
