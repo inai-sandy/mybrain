@@ -186,6 +186,10 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
   function pickStarter(s: Starter) {
     setName(s.name); setTask(s.task); setRubric(s.rubric); setDefaultDepth(s.depth);
     if (s.icon) setIcon(s.icon);
+    if (s.color) setColor(s.color);
+    if (s.category) setCategory(s.category);
+    if (s.blurb) setDescription(s.blurb);
+    if (s.autonomy) setAutonomy(s.autonomy);
     setEvery(s.every || 'manual'); if (s.at) setAt(s.at);
     setStep('form');
   }
@@ -218,6 +222,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
     let scheduleText: string | undefined;
     if (every === 'day') { schedule = { every: 'day', at }; scheduleText = `Every day at ${at}`; }
     else if (every === 'weekday') { schedule = { every: 'weekday', at }; scheduleText = `Every weekday at ${at}`; }
+    else if (every === 'week') { schedule = { every: 'week', dow: 0, at }; scheduleText = `Every Sunday at ${at}`; }
     else if (every === 'hour') { schedule = { every: 'hour', minute: Number(at.split(':')[1]) || 0 }; scheduleText = `Every hour at :${at.split(':')[1] || '00'}`; }
     setSaving(true);
     try {
@@ -238,14 +243,9 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
   if (step === 'describe') {
     return (
       <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Start from a template</div>
-        <div className="grid grid-cols-2 gap-2">
-          {STARTERS.map((s) => (
-            <button key={s.key} onClick={() => pickStarter(s)} className="rounded-xl border border-zinc-200 p-2.5 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800">
-              <div className="flex items-center gap-1.5 text-sm font-medium"><span>{s.icon}</span>{s.name}</div>
-              <div className="mt-0.5 text-[11px] leading-snug text-zinc-500">{s.blurb}</div>
-            </button>
-          ))}
+        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Start from a template — first run uses YOUR real brain</div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {STARTERS.map((s) => <StarterCard key={s.key} s={s} onPick={pickStarter} />)}
         </div>
         <div className="flex items-center gap-2 pt-1 text-sm font-medium"><Sparkles className="h-4 w-4 text-emerald-600" />…or describe your own</div>
         <div className="relative">
@@ -316,6 +316,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
           <option value="manual">Manual (run by hand)</option>
           <option value="day">Every day</option>
           <option value="weekday">Every weekday</option>
+          <option value="week">Every Sunday</option>
           <option value="hour">Every hour</option>
         </select>
         {every !== 'manual' && <input type="time" value={at} onChange={(e) => setAt(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />}
@@ -329,6 +330,31 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
 }
 
 const CATEGORY_ORDER = ['Daily', 'Research', 'People', 'Brain care', 'Imported', 'Other'];
+
+/** One template card on the shelf gallery (BEA-1064): icon, what it does, example runs, rhythm. */
+function StarterCard({ s, onPick }: { s: Starter; onPick: (s: Starter) => void }) {
+  return (
+    <button onClick={() => onPick(s)} style={{ borderLeftColor: s.color }}
+      className="rounded-xl border border-l-4 border-zinc-200 bg-white p-3 text-left transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex items-center gap-2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg" style={{ background: s.color + '22' }}>{s.icon}</span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-semibold">{s.name}</span>
+          <span className="block truncate text-[11px] text-zinc-500">{s.blurb}</span>
+        </span>
+      </div>
+      {s.examples?.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {s.examples.slice(0, 2).map((ex, i) => <div key={i} className="truncate text-[11px] italic text-zinc-400">{ex}</div>)}
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-1">
+        {s.every && s.every !== 'manual' && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{s.every === 'day' ? `daily ${s.at}` : s.every === 'week' ? `Sundays ${s.at}` : s.every === 'weekday' ? `weekdays ${s.at}` : 'hourly'}</span>}
+        <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] capitalize text-zinc-500 dark:bg-zinc-800">{s.category}</span>
+      </div>
+    </button>
+  );
+}
 
 export function Agents() {
   const nav = useNavigate();
@@ -608,14 +634,9 @@ export function Agents() {
         ) : agents.length === 0 ? (
           !showNew && (
             <div className="rounded-2xl border border-dashed border-zinc-300 p-5 dark:border-zinc-700">
-              <p className="mb-3 text-center text-sm text-zinc-500">No saved agents yet — start from a template:</p>
+              <p className="mb-3 text-center text-sm text-zinc-500">No saved agents yet — start from a template (the first run uses YOUR real brain):</p>
               <div className="grid gap-2 sm:grid-cols-2">
-                {STARTERS.map((s) => (
-                  <button key={s.key} onClick={() => { setStarterPick(s); setShowNew(true); }} className="rounded-xl border border-zinc-200 bg-white p-3 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
-                    <div className="flex items-center gap-1.5 text-sm font-medium"><span>{s.icon}</span>{s.name}</div>
-                    <div className="mt-0.5 text-[11px] leading-snug text-zinc-500">{s.blurb}</div>
-                  </button>
-                ))}
+                {STARTERS.map((s) => <StarterCard key={s.key} s={s} onPick={(st) => { setStarterPick(st); setShowNew(true); }} />)}
               </div>
             </div>
           )
