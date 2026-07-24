@@ -182,6 +182,9 @@ export function AgentDetail() {
         {tab === 'Flow' && (
           flow ? (
             <div>
+              <div className="mb-2 rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
+                ✦ This is the <b>picture</b> of what you told this agent. Change it here — or just <button onClick={() => nav(`/agent/a/${id}?mode=chat`)} className="font-semibold underline decoration-violet-400 underline-offset-2 hover:text-violet-600 dark:hover:text-violet-100">💬 Chat</button> and it re-draws itself.
+              </div>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <button onClick={genFlowNow} disabled={genFlow} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10">{genFlow ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}Regenerate flow</button>
                 <button onClick={() => setShowCanvas((v) => !v)} className="rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 sm:hidden">{showCanvas ? 'Show steps' : 'Open canvas'}</button>

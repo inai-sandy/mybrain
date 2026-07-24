@@ -440,6 +440,13 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
         <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="The one big ask… e.g. “Full competitor analysis of Tesla.”" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
         <button onClick={autoPlan} disabled={splitting} title="Let the agent plan the whole flow from your question" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{splitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Auto-plan</button>
       </div>
+      {/* "picture of your words" banner (BEA-1092) — only on the standalone editor; the agent's Flow tab has its own */}
+      {agentId && !embedded && (
+        <div className="flex items-center gap-2 border-b border-violet-200 bg-violet-50/70 px-4 py-2 text-xs text-violet-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-200">
+          <span className="min-w-0 flex-1">✦ This is the <b>picture</b> of what you told this agent. Change it here — or just chat and it re-draws itself.</span>
+          <button onClick={() => nav(`/agent/a/${agentId}?mode=chat`)} className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-500">💬 Chat</button>
+        </div>
+      )}
       <div className="min-h-0 flex-1">
         <div className="flex h-full">
           <div className="relative min-h-0 flex-1" ref={wrap}>
