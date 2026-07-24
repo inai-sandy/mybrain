@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AppEventsService } from '../events/events.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -32,6 +33,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     private readonly prompts: PromptsService,
     private readonly mentor: MentorService,
     private readonly mind: MentalModelService,
+    // Optional + LAST so positional test construction stays valid (BEA-1076).
+    private readonly appEvents?: AppEventsService,
   ) {}
 
   onModuleInit() {
@@ -144,6 +147,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const row = existing
       ? await this.prisma.story.update({ where: { id: existing.id }, data: { rawText: text, source, mood: mood ?? existing.mood } })
       : await this.prisma.story.create({ data: { day, rawText: text, source, mood: mood || null } });
+    // Event trigger (BEA-1076): agents set to "when I add a journal entry" fire now.
+    this.appEvents?.emit('journal.added', { summary: `A journal entry was just added for ${day}: "${text.slice(0, 400)}"`, day });
     // Index his own words so "My life" chat + Explore can answer from them ("what was I worried about in May?").
     // Linked to the Story row (refType 'story') so rewriting a day REPLACES its doc instead of duplicating. (BEA-331)
     this.memory

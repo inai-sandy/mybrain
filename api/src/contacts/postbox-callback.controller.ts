@@ -3,6 +3,7 @@ import { Public } from '../auth/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { ReminderAgentService } from './reminder-agent.service';
+import { AppEventsService } from '../events/events.service';
 
 /**
  * Receives Postbox callbacks for My Brain's reminder conversations (BEA-729):
@@ -18,6 +19,8 @@ export class PostboxCallbackController {
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
     private readonly agent: ReminderAgentService,
+    // Optional + LAST — positional spec construction stays valid (BEA-1076).
+    private readonly appEvents?: AppEventsService,
   ) {}
 
   @Public()
@@ -66,6 +69,8 @@ export class PostboxCallbackController {
             .catch(() => undefined);
           // Kick off the two-way agent (C2) for the whole contact — fire-and-forget so the callback returns fast.
           void this.agent.onContactReply(contact.id).catch((e) => this.log.warn(`agent onContactReply: ${e?.message}`));
+          // Event trigger (BEA-1076): agents set to "when a contact replies" fire now.
+          this.appEvents?.emit('whatsapp.reply', { summary: `${contact.name || 'A contact'} replied on WhatsApp: "${text.slice(0, 300)}"`, contactId: contact.id });
         }
       }
     }
