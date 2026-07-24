@@ -483,3 +483,39 @@ describe('FlowRunnerService — If / Filter / Wait are real (BEA-1073)', () => {
     expect(svc.evalCond(null, 'anything')).toBe(true); // no condition = "did anything arrive?"
   });
 });
+
+describe('FlowRunnerService.testToNode — run to here + pins (BEA-1072)', () => {
+  it('runs only the feeders, reuses frozen results, and reports input/output', async () => {
+    let engineCalls = 0;
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'R', data: { kind: 'tool', refId: 'web_search', label: 'Research', pin: { output: 'FROZEN RESEARCH RESULT' } } }, // pinned — must NOT re-run
+        { id: 'T', data: { kind: 'text', text: '', label: 'Shape it' } }, // the target (pass-through of input)
+        { id: 'ELSEWHERE', data: { kind: 'tool', refId: 'web_search', label: 'Unrelated' } }, // NOT upstream — must not run
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'R', target: 'T' }, { source: 'T', target: 'O' }, { source: 'ELSEWHERE', target: 'O' }],
+    });
+    const prisma: any = { flow: { findUnique: async () => ({ id: 'f1', name: 'F', graph }) } };
+    const agent: any = { createRun: jest.fn(async () => { engineCalls++; return { id: 'ar1' }; }), getRun: jest.fn(async () => ({ status: 'done', resultText: 'live result' })) };
+    const bridge: any = { execute: jest.fn(async () => { engineCalls++; }) };
+    const svc = new FlowRunnerService(prisma, bridge, agent, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const r = await svc.testToNode('f1', 'T');
+    expect(r.ok).toBe(true);
+    expect(r.input).toContain('FROZEN RESEARCH RESULT'); // the pin fed the target…
+    expect(engineCalls).toBe(0); // …and nothing expensive ran
+    expect(r.nodes!.R.pinned).toBe(true);
+    expect(r.nodes!.ELSEWHERE).toBeUndefined(); // untouched — only the feeders ran
+  });
+
+  it('the target itself always runs fresh, even if it carries a pin', async () => {
+    const graph = JSON.stringify({
+      nodes: [{ id: 'T', data: { kind: 'text', text: 'fresh value', label: 'T', pin: { output: 'stale pin' } } }],
+      edges: [],
+    });
+    const prisma: any = { flow: { findUnique: async () => ({ id: 'f1', name: 'F', graph }) } };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    const r = await svc.testToNode('f1', 'T');
+    expect(r.output).toBe('fresh value'); // not the stale pin
+  });
+});

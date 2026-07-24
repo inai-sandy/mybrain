@@ -68,6 +68,13 @@ export class FlowsController {
     return this.runner.replay(runId);
   }
 
+  // "Run to here": test one block with only its upstream feeders, honouring frozen pins (BEA-1072)
+  @Post(':id/test-node')
+  testNode(@Param('id') id: string, @Body() body: { nodeId?: string }) {
+    if (!body?.nodeId) throw new BadRequestException('Which block?');
+    return this.runner.testToNode(id, body.nodeId);
+  }
+
   // cancel a running/waiting run so the flow is free to run again (BEA-776)
   @Post('runs/:runId/cancel')
   cancel(@Param('runId') runId: string) {

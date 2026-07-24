@@ -488,6 +488,79 @@ export class FlowRunnerService implements OnModuleInit {
     return removed;
   }
 
+  /**
+   * "Run to here" (BEA-1072): execute ONLY the blocks needed to feed one node — using any frozen
+   * (pinned) results instead of re-running those steps — and report exactly what went in and what
+   * came out. Nothing is persisted: no run row, no documents, no notifications. Pins are honoured
+   * for UPSTREAM blocks; the target itself always runs fresh (so you can re-freeze it).
+   */
+  async testToNode(flowId: string, nodeId: string): Promise<{ ok: boolean; message?: string; input?: string; output?: string; nodes?: Record<string, { status: string; output: string; pinned?: boolean }> }> {
+    const flow = await this.prisma.flow.findUnique({ where: { id: flowId } });
+    if (!flow) throw new NotFoundException('Flow not found');
+    const graph = this.parse(flow.graph);
+    const nodes = new Map<string, any>((graph.nodes || []).map((n: any) => [n.id, n]));
+    if (!nodes.has(nodeId)) return { ok: false, message: 'That block is not in the saved flow — Save first, then test.' };
+    const incoming = new Map<string, string[]>();
+    for (const n of graph.nodes || []) incoming.set(n.id, []);
+    for (const e of graph.edges || []) if (incoming.has(e.target)) incoming.get(e.target)!.push(e.source);
+    const errEdge = new Set<string>();
+    for (const e of graph.edges || []) if (e?.data?.onError) errEdge.add(`${e.source}->${e.target}`);
+
+    const results: Record<string, NodeResult & { pinned?: boolean }> = {};
+    const memo = new Map<string, Promise<string>>();
+    let targetInput = '';
+
+    const outputOf = (nid: string): Promise<string> => {
+      if (memo.has(nid)) return memo.get(nid)!;
+      const p = (async (): Promise<string> => {
+        const node = nodes.get(nid);
+        if (!node) return '';
+        const kind = node.data?.kind;
+        const label = node.data?.label;
+        if (node.data?.enabled === false) { results[nid] = { status: 'skipped', output: '', kind, label }; return ''; }
+        // Frozen result (pin): upstream blocks reuse it — no engine call, no re-send, no cost.
+        if (nid !== nodeId && node.data?.pin?.output != null) {
+          results[nid] = { status: 'done', output: String(node.data.pin.output), kind, label, pinned: true };
+          return String(node.data.pin.output);
+        }
+        const ups = incoming.get(nid) || [];
+        const upOuts = await Promise.all(ups.map(async (s) => {
+          const out = await outputOf(s);
+          const rs = results[s];
+          const failedUp = rs?.status === 'failed';
+          const marked = errEdge.has(`${s}->${nid}`);
+          if (rs?.kind === 'if' && rs.condFalse !== undefined) {
+            if (marked) return rs.condFalse ? (rs.output || 'the condition was not met') : '';
+            return rs.condFalse ? '' : out;
+          }
+          if (marked) return failedUp ? `The previous step failed: ${rs?.output || 'unknown error'}` : '';
+          return failedUp ? '' : out;
+        }));
+        const live = upOuts.filter(Boolean);
+        const input = live.join('\n\n');
+        if (nid === nodeId) targetInput = input;
+        if (kind === 'ask_user') { results[nid] = { status: 'skipped', output: input, kind, label }; return input; } // nobody to answer in a test — pass through
+        try {
+          const output = await this.runNode(node, input, live);
+          const condFalse = kind === 'if' ? !this.evalCond(node.data?.cond, input) : undefined;
+          results[nid] = { status: 'done', output, kind, label, ...(condFalse !== undefined ? { condFalse } : {}) };
+          return output;
+        } catch (e: any) {
+          if (e instanceof PauseSignal) { results[nid] = { status: 'skipped', output: input, kind, label }; return input; }
+          results[nid] = { status: 'failed', output: String(e?.message || e), kind, label };
+          return '';
+        }
+      })();
+      memo.set(nid, p);
+      return p;
+    };
+
+    const output = await outputOf(nodeId);
+    const compact: Record<string, { status: string; output: string; pinned?: boolean }> = {};
+    for (const [nid, r] of Object.entries(results)) compact[nid] = { status: r.status, output: (r.output || '').slice(0, 4000), ...(r.pinned ? { pinned: true } : {}) };
+    return { ok: results[nodeId]?.status !== 'failed', message: results[nodeId]?.status === 'failed' ? results[nodeId].output : undefined, input: targetInput.slice(0, 6000), output: (output || '').slice(0, 8000), nodes: compact };
+  }
+
   /** Plain-English If conditions (BEA-1073). No condition set = "did anything arrive?". */
   evalCond(cond: any, input: string): boolean {
     const text = input || '';
