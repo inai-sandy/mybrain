@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { AppEventsService } from '../events/events.service';
 import { MemoryService } from '../memory/memory.service';
 import { SummarizerService } from './summarizer.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -58,7 +59,15 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     private readonly items: ItemsService, // new deps stay LAST — keeps positional wiring stable (BEA-1049)
     private readonly bridge: HermesBridgeService, // research runs (BEA-1047)
     private readonly prompts: PromptsService,
+    // Optional + LAST so positional test construction stays valid (BEA-1076).
+    private readonly appEvents?: AppEventsService,
   ) {}
+
+  /** Event trigger (BEA-1076): agents set to "when a new bookmark lands" fire now. */
+  private announceBookmark(item: { title?: string | null; sourceUrl?: string | null } | null) {
+    if (!item) return;
+    this.appEvents?.emit('bookmark.added', { summary: `A new bookmark just landed: "${item.title || 'untitled'}" (${item.sourceUrl || 'no url'})`, url: item.sourceUrl || undefined });
+  }
 
   private bookmarksDir() {
     return join(process.env.DATA_DIR || '/app/data', 'bookmarks');
@@ -723,6 +732,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       })
       .catch(() => null);
     if (!item) return { ok: false, code: 'exists', message: 'Already saved.' };
+    this.announceBookmark(item); // BEA-1076
 
     const dir = itemsDir();
     await fs.mkdir(dir, { recursive: true });
@@ -801,6 +811,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       })
       .catch(() => null);
     if (!item) return 'skip';
+    this.announceBookmark(item); // BEA-1076
 
     const filePath = join(dir, `${item.id}.md`);
     await fs.writeFile(filePath, md, 'utf8');

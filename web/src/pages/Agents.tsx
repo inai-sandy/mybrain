@@ -7,6 +7,7 @@ import { DictateButton } from '../ui/DictateButton';
 import { DepthDial, type Depth } from '../ui/DepthDial';
 import { STARTERS, type Starter } from '../ui/agentStarters';
 import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
+import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
 
 export type Run = { id: string; title?: string; status: string; startedAt: string; endedAt?: string | null; outputDocId?: string | null };
 
@@ -268,8 +269,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
   const [defaultDepth, setDefaultDepth] = useState<Depth>('standard');
   const [evals, setEvals] = useState<string[]>([]);
   const [newEval, setNewEval] = useState('');
-  const [every, setEvery] = useState('manual');
-  const [at, setAt] = useState('07:00');
+  const [sched, setSched] = useState<Sched>(null); // shared plain-English picker (BEA-1075/1076)
   // The rest of the drafted identity (BEA-1063) — the meta-agent fills these; you can still tweak.
   const [icon, setIcon] = useState('🤖');
   const [color, setColor] = useState<string | null>(null);
@@ -284,7 +284,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
     if (s.category) setCategory(s.category);
     if (s.blurb) setDescription(s.blurb);
     if (s.autonomy) setAutonomy(s.autonomy);
-    setEvery(s.every || 'manual'); if (s.at) setAt(s.at);
+    setSched(s.every && s.every !== 'manual' ? (s.every === 'hour' ? { every: 'hour', minute: 0 } : s.every === 'week' ? { every: 'week', dow: 0, at: s.at || '08:00' } : { every: s.every, at: s.at || '07:00' }) : null);
     setStep('form');
   }
   useEffect(() => { if (initial) pickStarter(initial); /* eslint-disable-next-line */ }, []);
@@ -305,19 +305,15 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
       if (d.description) setDescription(d.description);
       if (d.autonomy) setAutonomy(d.autonomy);
       if (d.defaultDepth) setDefaultDepth(d.defaultDepth === 'quick' ? 'quick' : 'standard');
-      if (d.schedule?.every) { setEvery(d.schedule.every); if (d.schedule.at) setAt(d.schedule.at); }
+      if (d.schedule) setSched(d.schedule);
       setStep('form');
     } catch (e: any) { toast('error', e?.message || 'Could not draft'); } finally { setDrafting(false); }
   }
 
   async function save() {
     if (!name.trim() || !task.trim()) { toast('error', 'Give it a name and a task'); return; }
-    let schedule: any = null;
-    let scheduleText: string | undefined;
-    if (every === 'day') { schedule = { every: 'day', at }; scheduleText = `Every day at ${at}`; }
-    else if (every === 'weekday') { schedule = { every: 'weekday', at }; scheduleText = `Every weekday at ${at}`; }
-    else if (every === 'week') { schedule = { every: 'week', dow: 0, at }; scheduleText = `Every Sunday at ${at}`; }
-    else if (every === 'hour') { schedule = { every: 'hour', minute: Number(at.split(':')[1]) || 0 }; scheduleText = `Every hour at :${at.split(':')[1] || '00'}`; }
+    const schedule: any = sched;
+    const scheduleText = schedText(sched) || undefined;
     setSaving(true);
     try {
       const evalCases = evals.map((x) => x.trim()).filter(Boolean).map((input) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input }));
@@ -406,15 +402,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pt-1">
-        <select value={every} onChange={(e) => setEvery(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-          <option value="manual">Manual (run by hand)</option>
-          <option value="day">Every day</option>
-          <option value="weekday">Every weekday</option>
-          <option value="week">Every Sunday</option>
-          <option value="hour">Every hour</option>
-        </select>
-        {every !== 'manual' && <input type="time" value={at} onChange={(e) => setAt(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />}
-        <span className="w-full text-xs text-zinc-400 sm:w-auto">{every === 'manual' ? 'Runs only when you press Run.' : every === 'day' ? `Runs every day at ${at}.` : every === 'weekday' ? `Runs every weekday at ${at}.` : every === 'week' ? `Runs every Sunday at ${at}.` : `Runs every hour at :${at.split(':')[1] || '00'}.`}</span>
+        <SchedulePicker value={sched} onChange={setSched} />
         <div className="ml-auto flex gap-2">
           <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
           <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}Save agent</button>
