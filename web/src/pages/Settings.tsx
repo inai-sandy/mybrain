@@ -498,6 +498,12 @@ function AgentEngineSection() {
               <span className="text-sm text-zinc-500">hours</span>
             </div>
           </EngineField>
+          <EngineField label="WhatsApp me when an automation fails" hint="One plain message per failure (name + reason + link), max one per automation per 30 min">
+            <div className="flex flex-wrap items-center gap-2">
+              <Switch checked={cfg.alertsOnFailure !== false} onChange={(v: boolean) => save({ alertsOnFailure: v })} />
+              <input value={cfg.alertsWhatsappNumber ?? ''} onChange={(e) => setCfg((c: any) => ({ ...c, alertsWhatsappNumber: e.target.value }))} onBlur={(e) => save({ alertsWhatsappNumber: e.target.value.replace(/[^\d+]/g, '') })} placeholder="Your WhatsApp number e.g. 9198…" className="w-52 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+            </div>
+          </EngineField>
           <EngineField label="Phone notifications" hint={`Your phone buzzes when an agent needs you or a long run finishes${pushDevices != null ? ` · ${pushDevices} device${pushDevices === 1 ? '' : 's'} subscribed` : ''}`}>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={togglePush} disabled={pushBusy || pushHere === null} className={'rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ' + (pushHere ? 'border border-zinc-300 dark:border-zinc-700' : 'bg-emerald-600 text-white hover:bg-emerald-500')}>

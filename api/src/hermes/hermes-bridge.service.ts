@@ -13,6 +13,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
 import { PushService } from '../push/push.service';
+import { AlertsService } from '../push/alerts.service';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -55,6 +56,8 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
     private readonly push: PushService,
+    // Optional so test harnesses that build with fewer args keep working.
+    private readonly alerts?: AlertsService,
   ) {}
 
   onModuleInit() {
@@ -503,6 +506,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       const secs = Math.round((Date.now() - startedAt) / 1000);
       if (status === 'failed') {
         await this.push?.send({ title: `${input.title || 'Agent run'} failed`, body: (detail || 'The run hit a problem.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
+        await this.alerts?.runFailed(input.title || 'Agent run', detail || 'The run hit a problem.', `/agent/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
       } else if (secs > 60) {
         await this.push?.send({ title: `${input.title || 'Agent run'} finished ✓`, body: (detail || 'The result is ready.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
       }

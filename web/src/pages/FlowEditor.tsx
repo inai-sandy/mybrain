@@ -78,20 +78,31 @@ function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boo
 const nodeTypes = { box: NodeBox };
 
 // Edge with a ✕ at its midpoint so a connection can be disconnected (BEA-705). Also deletable via Backspace.
+// The ⚠ button flips it to an "on failure" path (BEA-1071): it fires ONLY when the source step fails.
 const EdgeCtx = createContext<(id: string) => void>(() => undefined);
-function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, selected }: EdgeProps) {
+const EdgeErrCtx = createContext<(id: string) => void>(() => undefined);
+function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, style, selected, data }: EdgeProps) {
   const remove = useContext(EdgeCtx);
+  const toggleErr = useContext(EdgeErrCtx);
+  const onError = !!(data as any)?.onError;
   const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={onError ? { ...style, stroke: '#f87171', strokeDasharray: '6 4' } : style} />
       <EdgeLabelRenderer>
-        <button
-          className={'nodrag nopan pointer-events-auto absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-white text-zinc-400 shadow-sm transition-colors hover:border-rose-400 hover:text-rose-600 dark:bg-zinc-900 ' + (selected ? 'border-rose-400 text-rose-500' : 'border-zinc-300 dark:border-zinc-600')}
-          style={{ left: labelX, top: labelY }}
-          title="Disconnect this link"
-          onClick={(e) => { e.stopPropagation(); remove(id); }}
-        ><X className="h-3 w-3" /></button>
+        <div className="nodrag nopan pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1" style={{ left: labelX, top: labelY }}>
+          {onError && <span className="rounded-full bg-rose-500/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-sm">on failure</span>}
+          <button
+            className={'flex h-5 w-5 items-center justify-center rounded-full border bg-white shadow-sm transition-colors dark:bg-zinc-900 ' + (onError ? 'border-rose-400 text-rose-500' : 'border-zinc-300 text-zinc-400 hover:border-amber-400 hover:text-amber-600 dark:border-zinc-600')}
+            title={onError ? 'Make this a normal path again' : 'Only run this path when the step FAILS'}
+            onClick={(e) => { e.stopPropagation(); toggleErr(id); }}
+          ><span className="text-[10px] leading-none">⚠</span></button>
+          <button
+            className={'flex h-5 w-5 items-center justify-center rounded-full border bg-white text-zinc-400 shadow-sm transition-colors hover:border-rose-400 hover:text-rose-600 dark:bg-zinc-900 ' + (selected ? 'border-rose-400 text-rose-500' : 'border-zinc-300 dark:border-zinc-600')}
+            title="Disconnect this link"
+            onClick={(e) => { e.stopPropagation(); remove(id); }}
+          ><X className="h-3 w-3" /></button>
+        </div>
       </EdgeLabelRenderer>
     </>
   );
@@ -161,6 +172,8 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
 
   const onConnect = useCallback((c: Connection) => setEdges((e) => addEdge({ ...c, animated: true }, e)), [setEdges]);
   const removeEdge = useCallback((eid: string) => setEdges((es) => es.filter((e) => e.id !== eid)), [setEdges]);
+  // Flip a link to an "on failure" path and back (BEA-1071).
+  const toggleEdgeError = useCallback((eid: string) => setEdges((es) => es.map((e) => (e.id === eid ? { ...e, data: { ...(e.data || {}), onError: !(e.data as any)?.onError } } : e))), [setEdges]);
 
   function addNode(item: PaletteItem, pos: { x: number; y: number }): string {
     const newId = nid(item.type);
@@ -219,7 +232,8 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
     setSelected(null);
   }
   function graphJson() {
-    return { nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })), edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated })) };
+    // edge data (e.g. onError, BEA-1071) must survive the round-trip — it drives the executor.
+    return { nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })), edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated, data: e.data })) };
   }
   async function save() {
     setSaving(true);
@@ -314,10 +328,12 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
           <div className="relative min-h-0 flex-1" ref={wrap}>
             <NodeCtx.Provider value={{ addAfter, toggleEnabled }}>
              <EdgeCtx.Provider value={removeEdge}>
+              <EdgeErrCtx.Provider value={toggleEdgeError}>
               <ReactFlow nodes={dispNodes} edges={dispEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_, n) => setSelected(n.id)} onPaneClick={() => setSelected(null)} nodeTypes={nodeTypes} edgeTypes={edgeTypes} defaultEdgeOptions={{ type: 'deletable', animated: true }} deleteKeyCode={['Backspace', 'Delete']} fitView proOptions={{ hideAttribution: true }} colorMode="system">
                 <Background gap={16} />
                 <Controls showInteractive={false} />
               </ReactFlow>
+              </EdgeErrCtx.Provider>
              </EdgeCtx.Provider>
             </NodeCtx.Provider>
             {picker && <BlockPicker palette={palette} onPick={pick} onClose={() => setPicker(null)} />}
@@ -444,6 +460,18 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose }: { node: Nod
               <textarea value={d.guidance || ''} onChange={(e) => set({ guidance: e.target.value })} placeholder="e.g. keep it under 5 bullet points" rows={3} className={inputCls + ' resize-y leading-snug'} />
             </div>
           </>
+        )}
+        {(kind === 'skill' || kind === 'tool' || kind === 'ask_ai') && (
+          <div>
+            <label className={labelCls}>If it fails</label>
+            <select value={String(d.retries ?? 0)} onChange={(e) => set({ retries: Number(e.target.value) })} className={inputCls}>
+              <option value="0">Give up (or follow an ⚠ on-failure path)</option>
+              <option value="1">Retry once first</option>
+              <option value="2">Retry twice first</option>
+              <option value="3">Retry 3 times first</option>
+            </select>
+            <p className="mt-1 text-[11px] text-zinc-400">Tip: tap the ⚠ on any outgoing link to make it an <em>on-failure</em> path — it runs only when this step breaks.</p>
+          </div>
         )}
         {kind === 'wait' && (
           <div>
