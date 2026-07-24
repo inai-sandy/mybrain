@@ -284,6 +284,35 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     return this.memory.purgeByTag('learning');
   }
 
+  /**
+   * Replay (BEA-1070): re-run a finished run on the SAME captured input, against the agent's
+   * CURRENT definition. The new run is linked back via its first step.
+   */
+  async replayRun(runId: string) {
+    const old: any = await this.agent.getRun(runId); // throws NotFound if missing
+    if (['running', 'awaiting_input', 'paused'].includes(old.status)) return { ok: false, message: 'That run is still in progress — nothing to replay yet.' };
+    if (!old.input) return { ok: false, message: 'That run kept no input, so it cannot be replayed.' };
+    const agentRow: any = old.agentId ? await this.agent.getAgent(old.agentId).catch(() => null) : null;
+    const depth = old.depth === 'quick' ? 'quick' : 'standard';
+    const input: StartRunInput = {
+      prompt: old.input,
+      title: old.title || 'Agent run',
+      agentId: old.agentId || undefined,
+      rubric: agentRow?.rubric || undefined,
+      saveCollectionId: agentRow?.collectionId ?? null,
+      depth,
+    };
+    const run = await this.agent.createRun({ agentId: old.agentId ?? null, title: input.title, input: old.input, depth });
+    // The link step goes in BEFORE the engine fires — appending after raced execute()'s own first
+    // step (read-modify-write on the step log) and could lose the write.
+    await this.agent.appendStep(run.id, { label: '↻ Replay of an earlier run', status: 'info', detail: `original: ${old.title || old.id} · ${new Date(old.startedAt).toLocaleString()}` }).catch(() => undefined);
+    this.execute(run.id, input).catch(async (e) => {
+      this.log.error(`replay run ${run.id} crashed: ${e?.message || e}`);
+      await this.agent.finishRun(run.id, { status: 'failed', error: friendlyError(e?.message || String(e)) }).catch(() => undefined);
+    });
+    return run;
+  }
+
   /** Create the run row and kick off execution in the background; returns immediately. */
   async startRun(input: StartRunInput) {
     const depth = input.depth ?? (input.quick ? 'quick' : 'standard');

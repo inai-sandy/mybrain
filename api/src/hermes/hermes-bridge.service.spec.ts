@@ -321,6 +321,31 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(agent.steps.some((s: any) => /resuming/i.test(s.label))).toBe(true);
   });
 
+  it('BEA-1070 replay re-runs a finished run on the SAME input and links back via a step', async () => {
+    const agent = fakeAgent();
+    agent.runs['old'] = { id: 'old', status: 'failed', input: 'summarise my vendors', title: 'Morning Brief', agentId: null, depth: 'standard', startedAt: '2026-07-24T06:00:00Z' };
+    agent.getRun = jest.fn(async (id: string) => agent.runs[id]);
+    agent.createRun = jest.fn(async (i: any) => { agent.runs['run-2'] = { id: 'run-2', status: 'running', ...i }; return agent.runs['run-2']; });
+    let seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'better this time' }; });
+    const res: any = await build(agent).replayRun('old');
+    expect(res.id).toBe('run-2');
+    await new Promise((r) => setTimeout(r, 25)); // let the fire-and-forget run settle
+    expect(agent.createRun).toHaveBeenCalledWith(expect.objectContaining({ input: 'summarise my vendors', title: 'Morning Brief' }));
+    expect(seenPrompt).toContain('summarise my vendors'); // the SAME captured input
+    expect(agent.steps.some((s: any) => /Replay of an earlier run/.test(s.label))).toBe(true); // linked back
+  });
+
+  it('BEA-1070 replay refuses live runs and runs with no kept input', async () => {
+    const agent = fakeAgent();
+    agent.runs['live'] = { id: 'live', status: 'running', input: 'x' };
+    agent.runs['blank'] = { id: 'blank', status: 'done', input: null };
+    agent.getRun = jest.fn(async (id: string) => agent.runs[id]);
+    const svc = build(agent);
+    expect(((await svc.replayRun('live')) as any).ok).toBe(false);
+    expect(((await svc.replayRun('blank')) as any).ok).toBe(false);
+  });
+
   it('BEA-1067 guidance: reads never gate, irreversible actions must carry a draft', async () => {
     let seenPrompt = '';
     mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });

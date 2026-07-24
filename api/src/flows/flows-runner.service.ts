@@ -231,6 +231,14 @@ export class FlowRunnerService implements OnModuleInit {
     return { ...flow, graph: JSON.stringify({ ...graph, nodes }) };
   }
 
+  /** Replay (BEA-1070): run the same flow again, straight from a past run's row. */
+  async replay(runId: string): Promise<{ runId: string; ok?: boolean; message?: string }> {
+    const old = await this.prisma.flowRun.findUnique({ where: { id: runId } });
+    if (!old) throw new NotFoundException('Run not found');
+    if (!old.flowId) return { runId: '', ok: false, message: 'That run has no saved flow to replay (it was a one-off eval).' };
+    return this.start(old.flowId); // the no-stacking guard hands back a live run if one exists
+  }
+
   async start(flowId: string, opts: { skipBranches?: number[] } = {}): Promise<{ runId: string }> {
     const flow = await this.prisma.flow.findUnique({ where: { id: flowId } });
     if (!flow) throw new NotFoundException('Flow not found');

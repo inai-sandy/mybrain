@@ -62,6 +62,12 @@ export class FlowsController {
     return this.runner.answer(runId, (body?.answer ?? '').toString());
   }
 
+  // replay: run the same flow again from a past run's row (BEA-1070)
+  @Post('runs/:runId/replay')
+  replay(@Param('runId') runId: string) {
+    return this.runner.replay(runId);
+  }
+
   // cancel a running/waiting run so the flow is free to run again (BEA-776)
   @Post('runs/:runId/cancel')
   cancel(@Param('runId') runId: string) {
