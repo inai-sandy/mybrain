@@ -508,6 +508,8 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     let prompt = input.prompt + this.researchGuidance(quick, cfg.recall);
     // The durable ask_user tool (BEA-795) — offered unless the caller runs headless (flows, evals).
     if (input.allowAsk !== false) prompt += this.askGuidance(runId, cfg.autonomy);
+    // Ground the run in "what's fresh" (BEA-1077) — real runs only; flows/evals stay lean.
+    if (input.allowAsk !== false && cfg.recall) prompt += await this.agent.freshContext().catch(() => '');
     await this.driveTurn(runId, input, cfg, prompt);
   }
 

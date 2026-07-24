@@ -20,6 +20,7 @@ function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
     parkRun: jest.fn(async (runId: string, sessionId?: string) => { runs[runId].sessionId = sessionId || ''; }),
     listResumable: jest.fn(async () => [] as any[]),
     pauseStaleAsks: jest.fn(async () => [] as any[]), // gentle TTL pause (BEA-1068)
+    freshContext: jest.fn(async () => '') as any, // grounding note (BEA-1077)
     claimResume: jest.fn(async (runId: string) => { const had = runs[runId]?.sessionId != null; if (runs[runId]) runs[runId].sessionId = null; return had; }),
     getAgent: jest.fn(async () => null),
   };
@@ -334,6 +335,20 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(seenBody.prompt).toContain('The user answered: "blue"');
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done' }));
     expect(agent.steps.some((s: any) => /resuming/i.test(s.label))).toBe(true);
+  });
+
+  it('BEA-1077 real runs carry the fresh-context note; flows/evals stay lean', async () => {
+    const agent = fakeAgent();
+    agent.freshContext = jest.fn(async () => "\n\n[What's fresh in the user's life — today is 2026-07-24]\nOpen tasks: 3.");
+    let seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
+    await build(agent).execute('run-1', { prompt: 'task' });
+    expect(seenPrompt).toContain("What's fresh in the user's life");
+
+    seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
+    await build(agent).execute('run-1', { prompt: 'task', allowAsk: false }); // flow/eval helper
+    expect(seenPrompt).not.toContain("What's fresh");
   });
 
   it('BEA-1084 streams live steps in plain words while the turn runs, and takes the result line', async () => {
