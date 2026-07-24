@@ -27,7 +27,26 @@ const KIND_STYLE: Record<string, string> = {
   filter: 'border-teal-400 bg-teal-50 dark:border-teal-500/40 dark:bg-teal-500/10',
   wait: 'border-zinc-400 bg-zinc-50 dark:border-zinc-500/40 dark:bg-zinc-700/40',
   ask_user: 'border-amber-400 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10',
+  ask_ai: 'border-fuchsia-400 bg-fuchsia-50 dark:border-fuchsia-500/40 dark:bg-fuchsia-500/10',
   output: 'border-zinc-400 bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800',
+};
+
+// Every block wears its kind on its face (BEA-1074): an icon + a plain name, so the canvas reads
+// at a glance — "🔀 Merge", "✋ Ask me", "🧰 Tool" — instead of look-alike boxes.
+const KIND_META: Record<string, { icon: string; name: string }> = {
+  question: { icon: '❓', name: 'The question' },
+  subquestion: { icon: '🌿', name: 'Branch' },
+  skill: { icon: '🪄', name: 'Skill' },
+  tool: { icon: '🧰', name: 'Tool' },
+  merge: { icon: '🔀', name: 'Merge' },
+  text: { icon: '📝', name: 'Text' },
+  note: { icon: '💬', name: 'Note' },
+  if: { icon: '🔱', name: 'If' },
+  filter: { icon: '🚦', name: 'Filter' },
+  wait: { icon: '⏳', name: 'Wait' },
+  ask_user: { icon: '✋', name: 'Ask me' },
+  ask_ai: { icon: '✨', name: 'Ask AI' },
+  output: { icon: '🏁', name: 'Answer' },
 };
 
 // Lets a node's controls (inline "+", on/off) reach the editor.
@@ -55,6 +74,10 @@ function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boo
       {data.kind !== 'question' && <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-zinc-400" />}
       <div className="flex items-start gap-1.5">
         <div className="min-w-0 flex-1">
+          <div className="mb-0.5 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+            <span className="text-[11px] leading-none">{(KIND_META[data.kind] || KIND_META.tool).icon}</span>
+            {(KIND_META[data.kind] || KIND_META.tool).name}
+          </div>
           <div className="truncate font-medium text-zinc-800 dark:text-zinc-100">{data.label}</div>
           {data.sub && <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-500">{data.sub}</div>}
           {data.kind === 'merge' && <div className="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">{(data.mode || 'ai') === 'ai' ? 'AI synthesise' : 'Stack raw'}</div>}
