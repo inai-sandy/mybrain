@@ -95,6 +95,14 @@ export class TelegramService implements OnModuleInit {
     await this.send(owner, `🤖 <b>${title} needs you</b>\n\n${this.esc(args.question)}${draft}`, { reply_markup: { inline_keyboard: rows } });
   }
 
+  /** A question waited past the TTL and its run paused itself gently (BEA-1068). */
+  async notifyAgentPaused(args: { runTitle?: string; question: string; waitedHours: number }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    const title = this.esc(args.runTitle || 'Your agent');
+    await this.send(owner, `⏸️ <b>${title} paused itself</b>\n\nI waited ${args.waitedHours}h for your answer to:\n${this.esc(args.question.slice(0, 300))}\n\nAnswer whenever you like — the run will continue from where it stopped.`);
+  }
+
   /** A background/long flow run finished or failed — notify the owner (workspace ⑥). */
   async notifyFlowDone(args: { flowName?: string; status: string; snippet?: string }): Promise<void> {
     const owner = await this.ownerChatId();

@@ -247,14 +247,35 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     void wp;
   });
 
-  it('sweepExpired parks the run when there is no default', async () => {
-    const run = await svc.createRun();
+  it('BEA-1068 an overdue question with NO default pauses gently — question kept, nothing failed', async () => {
+    const run = await svc.createRun({ title: 'Vendor check' });
     await svc.ask(run.id, { question: 'pick', options: ['a', 'b'], expiresInMs: 1000 });
-    const handled = await svc.sweepExpired(new Date(Date.now() + 10_000));
-    expect(handled).toBe(1);
+    expect(await svc.sweepExpired(new Date(Date.now() + 10_000))).toBe(0); // no default → not the sweeper's job any more
+    const paused = await svc.pauseStaleAsks(new Date(Date.now() + 10_000));
+    expect(paused).toHaveLength(1);
+    expect(paused[0]).toMatchObject({ runId: run.id, title: 'Vendor check', question: 'pick' });
     const fresh = await svc.getRun(run.id);
-    expect(fresh.waitpoints[0].status).toBe('expired');
-    expect(fresh.status).toBe('failed');
+    expect(fresh.status).toBe('paused'); // NOT failed
+    expect(fresh.waitpoints[0].status).toBe('pending'); // the question is still answerable
+    // second sweep is a no-op — the owner gets notified exactly once
+    expect(await svc.pauseStaleAsks(new Date(Date.now() + 20_000))).toHaveLength(0);
+  });
+
+  it('BEA-1068 a durable park with no expiry pauses after the TTL, and answering later still resumes it', async () => {
+    const run = await svc.createRun({ input: 'ask me things' });
+    const wp = await svc.ask(run.id, { question: 'Which vendor?', kind: 'choice', options: ['A', 'B'] }); // no expiry — waits indefinitely
+    await svc.parkRun(run.id, 'sess-77');
+
+    expect(await svc.pauseStaleAsks(new Date(Date.now() + 71 * 3600_000))).toHaveLength(0); // 71h — still inside the 72h TTL
+    const paused = await svc.pauseStaleAsks(new Date(Date.now() + 73 * 3600_000)); // 73h — past it
+    expect(paused).toHaveLength(1);
+    expect((await svc.getRun(run.id)).status).toBe('paused');
+
+    // days later the owner answers — the run revives and the resume sweeper can pick it up
+    const ans = await svc.answerByToken(wp.resumeToken, 'A');
+    expect(ans.applied).toBe(true);
+    expect((await svc.getRun(run.id)).status).toBe('running');
+    expect((await svc.listResumable()).map((r: any) => r.id)).toEqual([run.id]); // sessionId intact → resumable
   });
 
   it('sweepExpired ignores questions that are not due yet or already answered', async () => {
@@ -299,13 +320,14 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect((await svc.getRun(run.id)).status).toBe('failed'); // NOT flipped back to running
   });
 
-  it('an expired question does not flip an already-finished run to failed (BEA-794)', async () => {
+  it('an expired question does not touch an already-finished run (BEA-794 / BEA-1068)', async () => {
     const run = await svc.createRun();
     const wp = await svc.ask(run.id, { question: 'pick', options: ['a'] });
     await (svc as any).prisma.waitpoint.update({ where: { id: wp.id }, data: { expiresAt: new Date(Date.now() - 1000), defaultValue: null } });
     await (svc as any).prisma.agentRun.update({ where: { id: run.id }, data: { status: 'done', endedAt: new Date() } });
     await svc.sweepExpired(new Date());
-    expect((await svc.getRun(run.id)).status).toBe('done'); // NOT flipped to failed
+    expect(await svc.pauseStaleAsks(new Date())).toHaveLength(0); // the claim requires a run still waiting
+    expect((await svc.getRun(run.id)).status).toBe('done'); // untouched
   });
 
   it('finishing a run cancels its open question (BEA-794)', async () => {

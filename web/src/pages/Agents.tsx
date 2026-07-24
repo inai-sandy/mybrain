@@ -13,6 +13,7 @@ const STATUS: Record<string, { label: string; cls: string; icon: any; spin?: boo
   running: { label: 'Running', cls: 'text-blue-600 bg-blue-50 dark:text-blue-300 dark:bg-blue-500/10', icon: Loader2, spin: true },
   awaiting_input: { label: 'Waiting on you', cls: 'text-amber-600 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/10', icon: PauseCircle },
   waiting: { label: 'Waiting on you', cls: 'text-amber-600 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/10', icon: PauseCircle },
+  paused: { label: 'Paused — waiting on you', cls: 'text-amber-600 bg-amber-50 dark:text-amber-300 dark:bg-amber-500/10', icon: PauseCircle },
   scheduled: { label: 'Scheduled', cls: 'text-zinc-500 bg-zinc-100 dark:bg-zinc-800', icon: Clock },
   done: { label: 'Done', cls: 'text-emerald-600 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-500/10', icon: CheckCircle2 },
   failed: { label: 'Failed', cls: 'text-red-600 bg-red-50 dark:text-red-300 dark:bg-red-500/10', icon: XCircle },
@@ -46,7 +47,7 @@ function elapsed(iso?: string | null): string {
 }
 
 // ---------- the home payload (BEA-1087) ----------
-type WaitItem = { source: 'agent' | 'flow'; waitpointId: string | null; runId: string; title: string; icon: string; color: string; question: string; kind: string; options: any; defaultValue?: string | null; askedAt: string; expiresAt?: string | null };
+type WaitItem = { source: 'agent' | 'flow'; waitpointId: string | null; runId: string; title: string; icon: string; color: string; question: string; kind: string; options: any; defaultValue?: string | null; askedAt: string; expiresAt?: string | null; paused?: boolean };
 type RunningItem = { source: 'agent' | 'flow'; id: string; title: string; startedAt: string; steps: { label: string; status?: string }[] };
 type LandedItem = { source: 'agent' | 'flow'; id: string; title: string; status: string; endedAt?: string | null; outputDocId?: string | null; error?: string | null };
 type ShelfAgent = any; // shaped agent + { category, color, lastRun }
@@ -131,7 +132,11 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
           <button onClick={() => setEditing(true)} disabled={busy} className="rounded-full px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">something else…</button>
         </div>
       )}
-      {w.expiresAt && <div className="mt-2 text-[11px] text-amber-600/80 dark:text-amber-400/70">⏳ falls back to the safe default {timeAgo(w.expiresAt).includes('ago') ? 'soon' : 'by ' + new Date(w.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>}
+      {w.paused ? (
+        <div className="mt-2 text-[11px] text-amber-600/80 dark:text-amber-400/70">⏸ it waited a while and paused itself — answering continues it from where it stopped</div>
+      ) : w.expiresAt ? (
+        <div className="mt-2 text-[11px] text-amber-600/80 dark:text-amber-400/70">⏳ falls back to the safe default {timeAgo(w.expiresAt).includes('ago') ? 'soon' : 'by ' + new Date(w.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+      ) : null}
     </div>
   );
 }
