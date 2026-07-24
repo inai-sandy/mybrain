@@ -215,6 +215,89 @@ describe('FlowRunnerService — answering early with a sibling branch still runn
   });
 });
 
+describe('FlowRunnerService — on-failure paths + retries (BEA-1071)', () => {
+  function harness(graph: any, bridgeImpl: any) {
+    const row: any = { id: 'r1', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: {
+        findUnique: async () => ({ ...row }),
+        update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; },
+      },
+      agentRun: { update: async () => ({}) },
+    };
+    const agent: any = { createRun: jest.fn(async () => ({ id: 'ar' + Math.random() })), getRun: jest.fn(async () => ({ status: 'failed', error: 'engine boom' })) };
+    const telegram: any = { notifyFlowDone: async () => undefined, notifyFlowWaiting: async () => undefined };
+    const llm: any = { complete: jest.fn(async (p: string) => 'AI: ' + p.slice(0, 40)) };
+    const svc = new FlowRunnerService(prisma, bridgeImpl, agent, llm, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+    return { svc, row, agent };
+  }
+
+  it('an ⚠ on-failure edge runs the fallback with the error text — and the run finishes instead of dying', async () => {
+    // A (tool, will fail) → O (output, normal edge); A → F (ask_ai fallback, error edge) → O
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'A', data: { kind: 'tool', refId: 'web_search', label: 'Research' } },
+        { id: 'F', data: { kind: 'ask_ai', label: 'Fallback', sub: 'Explain what went wrong in one line.' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [
+        { source: 'A', target: 'O' },
+        { source: 'A', target: 'F', data: { onError: true } },
+        { source: 'F', target: 'O' },
+      ],
+    });
+    const bridge: any = { execute: async () => { throw new Error('engine boom'); } };
+    const h = harness(graph, bridge);
+    await (h.svc as any).execute('r1', { id: 'f1', name: 'F', graph });
+    const results = JSON.parse(h.row.results);
+    expect(results.A.status).toBe('failed');
+    expect(results.F.status).toBe('done'); // the fallback ran…
+    expect(h.row.status).toBe('done'); // …and the run did NOT die
+    expect(String(h.row.finalOutput)).toContain('AI:'); // the fallback's answer became the output
+  });
+
+  it('the on-failure path is SKIPPED when nothing failed', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'A', data: { kind: 'ask_ai', label: 'Fine', sub: 'say hi' } },
+        { id: 'F', data: { kind: 'ask_ai', label: 'Fallback', sub: 'x' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [
+        { source: 'A', target: 'O' },
+        { source: 'A', target: 'F', data: { onError: true } },
+        { source: 'F', target: 'O' },
+      ],
+    });
+    const h = harness(graph, {} as any);
+    await (h.svc as any).execute('r1', { id: 'f1', name: 'F', graph });
+    const results = JSON.parse(h.row.results);
+    expect(results.A.status).toBe('done');
+    expect(results.F.status).toBe('skipped'); // fallback never fired
+    expect(h.row.status).toBe('done');
+  });
+
+  it('retries: a node that fails once then succeeds finishes when retries are allowed', async () => {
+    let calls = 0;
+    const bridge: any = { execute: async () => { calls++; if (calls === 1) throw new Error('flaky'); } };
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'A', data: { kind: 'tool', refId: 'web_search', label: 'Flaky', retries: 2 } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'A', target: 'O' }],
+    });
+    const h = harness(graph, bridge);
+    h.agent.getRun = jest.fn(async () => (calls > 1 ? { status: 'done', resultText: 'worked on retry' } : { status: 'failed', error: 'flaky' }));
+    await (h.svc as any).execute('r1', { id: 'f1', name: 'F', graph });
+    const results = JSON.parse(h.row.results);
+    expect(calls).toBeGreaterThan(1); // it retried
+    expect(results.A.status).toBe('done');
+    expect(h.row.status).toBe('done');
+  });
+});
+
 describe('FlowRunnerService.applySkip — per-run branch selection (BEA-796)', () => {
   const flow = {
     id: 'f1', name: 'Flow',

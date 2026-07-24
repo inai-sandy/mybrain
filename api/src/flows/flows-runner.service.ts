@@ -6,6 +6,7 @@ import { LlmService } from '../llm/llm.service';
 import { DocumentsService } from '../documents/documents.service';
 import { MemoryService } from '../memory/memory.service';
 import { PushService } from '../push/push.service';
+import { AlertsService } from '../push/alerts.service';
 import { SkillsService } from '../skills/skills.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
@@ -45,6 +46,7 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly flows: FlowsService,
     // Optional so older test harnesses that build with 9 args keep working (BEA-1088).
     private readonly push?: PushService,
+    private readonly alerts?: AlertsService,
   ) {}
 
   onModuleInit() {
@@ -288,6 +290,9 @@ export class FlowRunnerService implements OnModuleInit {
     const incoming = new Map<string, string[]>();
     for (const n of graph.nodes || []) incoming.set(n.id, []);
     for (const e of graph.edges || []) if (incoming.has(e.target)) incoming.get(e.target)!.push(e.source);
+    // "on failure" edges (BEA-1071) — marked on the canvas; keyed "src->tgt".
+    const errEdge = new Set<string>();
+    for (const e of graph.edges || []) if (e?.data?.onError) errEdge.add(`${e.source}->${e.target}`);
 
     // Resume-safe (Move B): start from whatever finished before a pause/restart so we don't re-run it.
     const runRow = await this.prisma.flowRun.findUnique({ where: { id: runId } });
@@ -335,7 +340,21 @@ export class FlowRunnerService implements OnModuleInit {
         const label = node.data?.label;
         if (node.data?.enabled === false) { results[nodeId] = { status: 'skipped', output: '', kind, label }; await persist(); return ''; }
         const ups = incoming.get(nodeId) || [];
-        const upOuts = await Promise.all(ups.map((s) => outputOf(s)));
+        // Error branches (BEA-1071): an "on failure" edge delivers ONLY when its source failed — and
+        // then it carries the error text, so the fallback path knows what went wrong. Normal edges
+        // deliver only on success (unchanged).
+        const upOuts = await Promise.all(ups.map(async (s) => {
+          const out = await outputOf(s);
+          const failedUp = (results[s] as NodeResult)?.status === 'failed';
+          if (errEdge.has(`${s}->${nodeId}`)) return failedUp ? `The previous step failed: ${(results[s] as NodeResult)?.output || 'unknown error'}` : '';
+          return failedUp ? '' : out;
+        }));
+        // A node fed ONLY by error paths is skipped when nothing actually failed.
+        if (ups.length && ups.every((s) => errEdge.has(`${s}->${nodeId}`)) && !upOuts.some(Boolean)) {
+          results[nodeId] = { status: 'skipped', output: '', kind, label };
+          await persist();
+          return '';
+        }
         const live = upOuts.filter(Boolean);
         const input = live.join('\n\n');
         // "Ask me" block — pause durably until the user answers (Move B). An already-answered one
@@ -348,7 +367,19 @@ export class FlowRunnerService implements OnModuleInit {
         }
         results[nodeId] = { status: 'running', output: '', kind, label }; await persist();
         try {
-          const output = await this.runNode(node, input, live);
+          // Optional per-node retry (BEA-1071): "if it fails, try again N times" before giving up.
+          const retries = Math.min(3, Math.max(0, Number(node.data?.retries) || 0));
+          let output = '';
+          let lastErr: any = null;
+          for (let attempt = 0; attempt <= retries; attempt++) {
+            try { output = await this.runNode(node, input, live); lastErr = null; break; }
+            catch (e: any) {
+              if (e instanceof PauseSignal) throw e;
+              lastErr = e;
+              if (attempt < retries) term(`↻ ${label || kind} failed — retrying (${attempt + 1}/${retries})`);
+            }
+          }
+          if (lastErr) throw lastErr;
           results[nodeId] = { status: 'done', output, kind, label };
           const line = this.termLine(node, output);
           if (line) term(`${line}`);
@@ -395,6 +426,7 @@ export class FlowRunnerService implements OnModuleInit {
         await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
         this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
         void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: (failed.output || 'a step failed').slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
+        void this.alerts?.runFailed(flow?.name || 'Your flow', (failed.output || 'a step failed').slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
         this.dropDriver(runId, gen);
         return;
       }

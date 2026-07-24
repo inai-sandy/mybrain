@@ -171,7 +171,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   /** The user-configurable agent engine knobs (with sane defaults). */
   async engineSettings() {
-    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId] = await Promise.all([
+    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber] = await Promise.all([
       this.getSetting('agent.model'),
       this.getSetting('agent.autonomy'),
       this.getSetting('agent.askTimeoutMin'),
@@ -179,6 +179,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       this.getSetting('agent.recall'),
       this.getSetting('agent.learn'),
       this.getSetting('agent.outputCollectionId'),
+      this.getSetting('alerts.onFailure'),
+      this.getSetting('alerts.whatsappNumber'),
     ]);
     return {
       model: model || '', // '' = use the engine's default model
@@ -189,6 +191,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       recall: recall == null ? true : recall === 'true',
       learn: learn == null ? true : learn === 'true',
       outputCollectionId: outputCollectionId || null,
+      // "WhatsApp me when an automation fails" (BEA-1071)
+      alertsOnFailure: alertsOnFailure == null ? true : alertsOnFailure === 'true',
+      alertsWhatsappNumber: alertsWhatsappNumber || '',
     };
   }
 
@@ -201,6 +206,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       recall: 'agent.recall',
       learn: 'agent.learn',
       outputCollectionId: 'agent.outputCollectionId',
+      alertsOnFailure: 'alerts.onFailure',
+      alertsWhatsappNumber: 'alerts.whatsappNumber',
     };
     for (const [k, key] of Object.entries(map)) {
       if (patch[k] !== undefined) await this.setSetting(key, patch[k] == null ? '' : String(patch[k]));
