@@ -319,6 +319,42 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(agent.steps.some((s: any) => /resuming/i.test(s.label))).toBe(true);
   });
 
+  it('BEA-1067 guidance: reads never gate, irreversible actions must carry a draft', async () => {
+    let seenPrompt = '';
+    mockCodex((body: any) => { seenPrompt = body.prompt; return { text: 'ok' }; });
+    await build(fakeAgent()).execute('run-1', { prompt: 'task' });
+    expect(seenPrompt).toContain('NEVER need permission'); // reads/searches auto-proceed
+    expect(seenPrompt).toContain('cannot take back'); // irreversible actions gate
+    expect(seenPrompt).toContain('draft'); // …with the exact action shown for approval
+  });
+
+  it('BEA-1067 resume translates approve / reject / edited-draft answers into instructions', async () => {
+    const mk = (answer: string) => {
+      const agent = fakeAgent();
+      agent.runs['run-1'] = {
+        id: 'run-1', status: 'running', sessionId: 's1', input: 'send the nudge', title: 'T', agentId: null, depth: 'quick',
+        waitpoints: [{ id: 'wp-1', status: 'answered', kind: 'approve_edit_reject', question: 'Send this?', answer, answeredAt: '2026-07-24T06:00:00Z' }],
+      };
+      agent.listResumable = jest.fn(async () => [agent.runs['run-1']]);
+      return agent;
+    };
+    let seen = '';
+    mockCodex((body: any) => { seen = body.prompt; return { text: 'done' }; });
+
+    await build(mk('approve')).resumeTick();
+    await new Promise((r) => setTimeout(r, 15));
+    expect(seen).toContain('APPROVED — go ahead exactly as drafted');
+
+    await build(mk('reject')).resumeTick();
+    await new Promise((r) => setTimeout(r, 15));
+    expect(seen).toContain('NO — do not do it');
+
+    await build(mk('Hi Jayanth — shorter version')).resumeTick();
+    await new Promise((r) => setTimeout(r, 15));
+    expect(seen).toContain('EDITED the draft');
+    expect(seen).toContain('Hi Jayanth — shorter version');
+  });
+
   it('BEA-795 a park without a session resumes fresh, restating the task', async () => {
     const agent = fakeAgent();
     agent.runs['run-1'] = {

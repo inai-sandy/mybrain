@@ -80,14 +80,19 @@ export class TelegramService implements OnModuleInit {
     if (!owner) return;
     const title = this.esc(args.runTitle || 'Your agent');
     let rows: any[][];
+    let draft = '';
     if (args.kind === 'approve_edit_reject') {
       rows = [[{ text: '✅ Approve', callback_data: `agent:${args.waitpointId}:__approve` }, { text: '🚫 Reject', callback_data: `agent:${args.waitpointId}:__reject` }]];
+      // Show WHAT is being approved — the draft rides in options.{description|command}. (BEA-1067)
+      const o: any = args.options;
+      const d = o && !Array.isArray(o) ? String(o.description || o.command || '') : '';
+      if (d) draft = `\n\n<i>${this.esc(d.slice(0, 500))}</i>`;
     } else {
       const opts = Array.isArray(args.options) ? (args.options as any[]) : [];
       rows = opts.slice(0, 6).map((o, i) => [{ text: this.agentBtnLabel(o), callback_data: `agent:${args.waitpointId}:${i}` }]);
       if (rows.length === 0) rows = [[{ text: 'Proceed', callback_data: `agent:${args.waitpointId}:__default` }]];
     }
-    await this.send(owner, `🤖 <b>${title} needs you</b>\n\n${this.esc(args.question)}`, { reply_markup: { inline_keyboard: rows } });
+    await this.send(owner, `🤖 <b>${title} needs you</b>\n\n${this.esc(args.question)}${draft}`, { reply_markup: { inline_keyboard: rows } });
   }
 
   /** A background/long flow run finished or failed — notify the owner (workspace ⑥). */

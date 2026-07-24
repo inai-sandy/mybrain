@@ -104,10 +104,14 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
    * later. How eagerly it may ask follows the autonomy setting.
    */
   private askGuidance(runId: string, autonomy: string): string {
-    const base = `\n\nAsking the user: you may ask the user a question mid-task with the mybrain ask_user tool — pass runId "${runId}". If the tool replies that the user is not available, END YOUR TURN immediately with a one-line note that you are waiting; the run pauses safely and you will be resumed with their answer. Never invent an answer to your own question.`;
-    if (autonomy === 'autopilot') return `${base}\nOnly ask if the task is impossible without the answer; otherwise use your best judgment and do not ask.`;
-    if (autonomy === 'balanced') return `${base}\nAsk ONLY before something irreversible, or when a wrong guess would waste the whole run; otherwise proceed on your best judgment.`;
-    return `${base}\nAsk whenever a real decision, preference, or fact only the user knows would change the result. Don't ask about trivia.`;
+    const base =
+      `\n\nAsking the user: you may ask the user a question mid-task with the mybrain ask_user tool — pass runId "${runId}". ` +
+      `Reading and searching NEVER need permission — never ask before looking something up or researching. ` +
+      `But before ANY action you cannot take back (sending a message to a real person, deleting something, spending money), you MUST ask first and put the exact message/action in the tool's \`draft\` field so the user can approve, edit, or reject it. ` +
+      `If the tool replies that the user is not available, END YOUR TURN immediately with a one-line note that you are waiting; the run pauses safely and you will be resumed with their answer. Never invent an answer to your own question.`;
+    if (autonomy === 'autopilot') return `${base}\nBeyond that: never ask — use your best judgment, and simply SKIP irreversible actions instead of asking.`;
+    if (autonomy === 'balanced') return `${base}\nBeyond that: only ask when a wrong guess would waste the whole run; otherwise proceed on your best judgment.`;
+    return `${base}\nBeyond that: ask whenever a real decision, preference, or fact only the user knows would change the result (autonomy: cautious). Don't ask about trivia.`;
   }
 
   /** BEA-795: find parked runs whose question has been answered and resume each exactly once. */
@@ -135,8 +139,17 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       .filter((w: any) => w.status === 'answered')
       .sort((a: any, b: any) => new Date(a.answeredAt || 0).getTime() - new Date(b.answeredAt || 0).getTime());
     const wp = answered[answered.length - 1];
-    const answer = typeof wp?.answer === 'string' ? wp.answer : JSON.stringify(wp?.answer ?? 'proceed');
-    await this.agent.appendStep(run.id, { label: 'You answered — resuming', status: 'done', detail: String(answer).slice(0, 200) }).catch(() => undefined);
+    const raw = typeof wp?.answer === 'string' ? wp.answer : JSON.stringify(wp?.answer ?? 'proceed');
+    // Typed answers read as instructions, not just values (BEA-1067): approve/reject/edited-draft.
+    const answer =
+      wp?.kind === 'approve_edit_reject'
+        ? raw === 'approve'
+          ? 'APPROVED — go ahead exactly as drafted.'
+          : raw === 'reject'
+            ? 'NO — do not do it; adjust your approach or finish without it.'
+            : `EDITED the draft — use this exact version instead:\n${raw}`
+        : raw;
+    await this.agent.appendStep(run.id, { label: 'You answered — resuming', status: 'done', detail: String(raw).slice(0, 200) }).catch(() => undefined);
     const input: StartRunInput = {
       prompt: run.input || '',
       title: run.title || undefined,
