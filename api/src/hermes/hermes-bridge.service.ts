@@ -114,8 +114,19 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     return `${base}\nBeyond that: ask whenever a real decision, preference, or fact only the user knows would change the result (autonomy: cautious). Don't ask about trivia.`;
   }
 
+  private lastStaleSweep = 0;
+
   /** BEA-795: find parked runs whose question has been answered and resume each exactly once. */
   async resumeTick() {
+    // Gentle auto-pause of questions that waited past the TTL (BEA-1068) — checked every 10 min,
+    // notified exactly once per pause.
+    if (Date.now() - this.lastStaleSweep > 600_000) {
+      this.lastStaleSweep = Date.now();
+      const paused = await this.agent.pauseStaleAsks().catch(() => [] as any[]);
+      for (const p of paused) {
+        await this.telegram.notifyAgentPaused({ runTitle: p.title || 'Your agent', question: p.question, waitedHours: p.waitedHours }).catch(() => undefined);
+      }
+    }
     const runs = await this.agent.listResumable().catch(() => [] as any[]);
     for (const run of runs) {
       if (this.resuming.has(run.id)) continue;

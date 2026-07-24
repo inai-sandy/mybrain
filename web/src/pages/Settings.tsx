@@ -461,6 +461,12 @@ function AgentEngineSection() {
               <span className="text-sm text-zinc-500">minutes</span>
             </div>
           </EngineField>
+          <EngineField label="Auto-pause a waiting agent after" hint="A question with no answer pauses its run gently — answering later still continues it">
+            <div className="flex items-center gap-2">
+              <input type="number" min={1} max={720} value={cfg.askTtlHours ?? 72} onChange={(e) => save({ askTtlHours: Math.max(1, Number(e.target.value) || 72) })} className="w-24 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+              <span className="text-sm text-zinc-500">hours</span>
+            </div>
+          </EngineField>
           <EngineToggle id="set-recall" label="Recall my brain before each run" hint="Pulls relevant notes from your memory into the task" checked={!!cfg.recall} onChange={(v) => save({ recall: v })} />
           <EngineToggle id="set-learn" label="Propose what it learned after" hint="Suggests durable facts to keep — you confirm" checked={!!cfg.learn} onChange={(v) => save({ learn: v })} />
           <EngineField label="Save results to" hint="Default Documents collection for agent outputs">

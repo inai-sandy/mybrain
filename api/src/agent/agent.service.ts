@@ -171,10 +171,11 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   /** The user-configurable agent engine knobs (with sane defaults). */
   async engineSettings() {
-    const [model, autonomy, askTimeoutMin, recall, learn, outputCollectionId] = await Promise.all([
+    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId] = await Promise.all([
       this.getSetting('agent.model'),
       this.getSetting('agent.autonomy'),
       this.getSetting('agent.askTimeoutMin'),
+      this.getSetting('agent.askTtlHours'),
       this.getSetting('agent.recall'),
       this.getSetting('agent.learn'),
       this.getSetting('agent.outputCollectionId'),
@@ -183,6 +184,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       model: model || '', // '' = use the engine's default model
       autonomy: autonomy || 'cautious', // cautious | balanced | autopilot
       askTimeoutMin: askTimeoutMin ? Math.max(1, Number(askTimeoutMin) || 20) : 20,
+      // How long a durable "ask me" waits before the run pauses itself gently (BEA-1068).
+      askTtlHours: askTtlHours ? Math.max(1, Number(askTtlHours) || 72) : 72,
       recall: recall == null ? true : recall === 'true',
       learn: learn == null ? true : learn === 'true',
       outputCollectionId: outputCollectionId || null,
@@ -194,6 +197,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       model: 'agent.model',
       autonomy: 'agent.autonomy',
       askTimeoutMin: 'agent.askTimeoutMin',
+      askTtlHours: 'agent.askTtlHours',
       recall: 'agent.recall',
       learn: 'agent.learn',
       outputCollectionId: 'agent.outputCollectionId',
@@ -445,6 +449,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
             defaultValue: wp.defaultValue ?? null,
             askedAt: wp.createdAt,
             expiresAt: wp.expiresAt ?? null,
+            paused: wp.run.status === 'paused', // waited past the TTL and paused itself (BEA-1068)
           };
         }),
       ...waitingFlows.map((f: any) => ({
@@ -574,34 +579,57 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       const run = fresh ? await this.prisma.agentRun.findUnique({ where: { id: fresh.runId } }) : null;
       return { applied: false, alreadyResolved: true, status: fresh?.status, waitpoint: fresh && this.shapeWaitpoint(fresh), run: run && this.shapeRun(run) };
     }
-    // Hand the run back to the engine ONLY if it's still waiting. If it already finished (e.g. the
-    // Codex turn hit its cap and failed while the question was open), answering must NOT flip a
-    // terminal run back to 'running' with no driver — that leaves it stuck forever. (BEA-794)
-    await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: 'awaiting_input' }, data: { status: 'running' } });
+    // Hand the run back to the engine ONLY if it's still waiting (or gently auto-paused — BEA-1068:
+    // answering a paused run revives it too). If it already finished (e.g. the Codex turn hit its
+    // cap and failed while the question was open), answering must NOT flip a terminal run back to
+    // 'running' with no driver — that leaves it stuck forever. (BEA-794)
+    await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: { in: ['awaiting_input', 'paused'] } }, data: { status: 'running' } });
     const run = await this.prisma.agentRun.findUnique({ where: { id: wp.runId } });
     const fresh = await this.prisma.waitpoint.findUnique({ where: { id: wp.id } });
     return { applied: true, alreadyResolved: false, status: 'answered', waitpoint: this.shapeWaitpoint(fresh), run: run ? this.shapeRun(run) : null };
   }
 
-  /** Apply timeouts to overdue questions: use the smart default if there is one, else park the run. */
+  /**
+   * Apply timeouts to overdue questions that carry a SMART DEFAULT. Questions without a default are
+   * no longer expired-and-failed here — they pause gently via pauseStaleAsks (BEA-1068), with the
+   * question kept answerable.
+   */
   async sweepExpired(now: Date = new Date()) {
     const due = await this.prisma.waitpoint.findMany({ where: { status: 'pending', expiresAt: { not: null, lte: now } } });
     let handled = 0;
     for (const wp of due) {
-      if (wp.defaultValue != null) {
-        const r = await this.resolve(wp, wp.defaultValue, 'timeout');
-        if (r.applied) handled++;
-      } else {
-        const res = await this.prisma.waitpoint.updateMany({ where: { id: wp.id, status: 'pending' }, data: { status: 'expired', answeredAt: new Date() } });
-        if (res.count > 0) {
-          handled++;
-          // Only park a run that is actually still waiting — never flip a run that already finished
-          // (done/failed/cancelled) to 'failed' and lose its visible result. (BEA-794)
-          await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: 'awaiting_input' }, data: { status: 'failed', error: 'No answer in time, so this run was parked.', endedAt: new Date() } });
-        }
-      }
+      if (wp.defaultValue == null) continue; // gentle-pause territory (BEA-1068)
+      const r = await this.resolve(wp, wp.defaultValue, 'timeout');
+      if (r.applied) handled++;
     }
     return handled;
+  }
+
+  /**
+   * Gentle auto-pause (BEA-1068): a question that has waited past the TTL (default 72h) — or past
+   * its own expiry with no smart default — moves its run to 'paused'. Nothing is failed and the
+   * question STAYS pending, so answering it any time later still resumes the run (resolve() flips
+   * paused → running and the resume sweeper carries on). Returns what was paused this call so the
+   * caller can notify the owner exactly once.
+   */
+  async pauseStaleAsks(now: Date = new Date()) {
+    const { askTtlHours } = await this.engineSettings();
+    const cutoff = new Date(now.getTime() - askTtlHours * 3600_000);
+    const pending = await this.prisma.waitpoint.findMany({ where: { status: 'pending' } });
+    const stale = pending.filter((wp: any) =>
+      wp.expiresAt ? wp.defaultValue == null && new Date(wp.expiresAt) <= now : new Date(wp.createdAt) <= cutoff,
+    );
+    const paused: { runId: string; title: string | null; question: string; waitedHours: number }[] = [];
+    for (const wp of stale) {
+      // Atomic claim: only a run still actively waiting flips — a second sweep is a no-op.
+      const res = await this.prisma.agentRun.updateMany({ where: { id: wp.runId, status: 'awaiting_input' }, data: { status: 'paused' } });
+      if (res.count === 0) continue;
+      const waitedHours = Math.max(1, Math.round((now.getTime() - new Date(wp.createdAt).getTime()) / 3600_000));
+      await this.appendStep(wp.runId, { label: `Paused — I waited ${waitedHours}h for your answer`, status: 'info', detail: 'Answer whenever you like and the run continues.' }).catch(() => undefined);
+      const run = await this.prisma.agentRun.findUnique({ where: { id: wp.runId }, select: { title: true } }).catch(() => null);
+      paused.push({ runId: wp.runId, title: run?.title ?? null, question: wp.question, waitedHours });
+    }
+    return paused;
   }
 
   // ---------- shaping / json safety ----------

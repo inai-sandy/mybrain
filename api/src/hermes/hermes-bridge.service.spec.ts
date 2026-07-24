@@ -19,12 +19,13 @@ function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
     // durable park + resume (BEA-795)
     parkRun: jest.fn(async (runId: string, sessionId?: string) => { runs[runId].sessionId = sessionId || ''; }),
     listResumable: jest.fn(async () => [] as any[]),
+    pauseStaleAsks: jest.fn(async () => [] as any[]), // gentle TTL pause (BEA-1068)
     claimResume: jest.fn(async (runId: string) => { const had = runs[runId]?.sessionId != null; if (runs[runId]) runs[runId].sessionId = null; return had; }),
     getAgent: jest.fn(async () => null),
   };
 }
 const fakeDocs = () => ({ create: jest.fn(async (i: any) => ({ id: 'doc-1', slug: 'x', title: i.title })) });
-const fakeTg = () => ({ pushAgentQuestion: jest.fn(async () => undefined) });
+const fakeTg = () => ({ pushAgentQuestion: jest.fn(async () => undefined), notifyAgentPaused: jest.fn(async () => undefined) });
 const fakeMem = (hits: any[] = []) => ({ searchBrain: jest.fn(async () => hits), enqueue: jest.fn(async () => undefined) });
 const fakeLlm = (out = '') => ({ complete: jest.fn(async () => out) });
 
