@@ -32,6 +32,16 @@ export class FlowsController {
     return this.flows.planAndSave(id);
   }
 
+  // canvas → words (BEA-1065): preview the rewritten agent Task for this flow; apply only on confirm
+  @Post(':id/sync-agent/preview')
+  syncAgentPreview(@Param('id') id: string) {
+    return this.flows.syncAgentPreview(id);
+  }
+  @Post(':id/sync-agent/apply')
+  syncAgentApply(@Param('id') id: string, @Body() body: { task?: string }) {
+    return this.flows.syncAgentApply(id, (body?.task ?? '').toString());
+  }
+
   // a self-contained copy-paste prompt built from the flow (Agent↔Flow merge ③)
   @Get(':id/prompt')
   prompt(@Param('id') id: string) {

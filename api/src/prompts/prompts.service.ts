@@ -12,7 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
-  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec'
+  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -835,6 +835,58 @@ Reply ONLY JSON:
  "runLabel": "<the run button text, e.g. 'Research it →' / 'Brief me →'>"
 }
 Rules: a scheduled agent that needs no input gets "inputs": []. A research agent gets one topic box. A person-chaser gets a contact input. Keep it minimal — the fewest inputs that make sense.`,
+});
+
+REGISTRY.push({
+  key: 'agent.chatEdit',
+  label: 'Agents — change it by chatting',
+  description: 'Turns a chat message like "add a step that messages Mom" into a PROPOSED change to the agent (task, outcome, schedule, autonomy, name) plus a plain-English list of what changed. Nothing is saved until you press Apply. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
+  category: 'Agents',
+  default: `You edit an AI agent's definition from the owner's chat message. Change ONLY what the message asks for — keep everything else exactly as it is.
+
+The agent today (JSON):
+{{agent}}
+
+The owner said:
+"{{message}}"
+
+Reply with ONLY JSON, no prose:
+{
+ "patch": { ONLY the fields that change — any of:
+   "name": "<2-4 plain words>",
+   "description": "<one sentence>",
+   "task": "<the FULL updated task: a numbered list of plain-English steps with the change worked in. Keep the owner's wording for steps that did not change.>",
+   "outcome": "<the FULL updated outcome text>",
+   "autonomy": "cautious | balanced | autopilot",
+   "depth": "quick | standard | deep",
+   "schedule": null or {"every":"day","at":"HH:MM"} / {"every":"weekday","at":"HH:MM"} / {"every":"hour","minute":0} / {"event":"bookmark.added"} / {"event":"journal.added"} / {"event":"whatsapp.reply"},
+   "scheduleText": "<a plain sentence like 'Every day at 07:00', or null>"
+ },
+ "changes": ["<1-4 short lines, each starting with Added: / Changed: / Removed:, e.g. 'Added: a step that drafts a WhatsApp message to Mom.'>"],
+ "note": "<ONE friendly plain-English sentence back to the owner about what you did — or a question, if the message was too vague to act on>"
+}
+Rules: if the message is just a question (not a change), return "patch": {} and answer it in "note". If the change touches the schedule, set BOTH schedule and scheduleText. Tools the task may name: search_brain (read the owner's notes first), save_document (save a result), ask_user (check with the owner before anything that cannot be undone, like sending a message), web search. Write in simple, plain, everyday English.`,
+});
+
+REGISTRY.push({
+  key: 'flow.syncWords',
+  label: 'Agents — canvas → words sync',
+  description: "After you drag-edit an agent's flow, this rewrites the agent's plain-words Task to match the new canvas and lists what changed. Shown as a diff first; applied only when you confirm. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+  category: 'Agents',
+  default: `The owner drag-edited the visual flow of their AI agent on a canvas. Rewrite the agent's plain-words Task so it matches the NEW flow exactly.
+
+The agent's Task today (the old words):
+{{task}}
+
+What the NEW flow actually does (walked step by step from the canvas):
+{{flow}}
+
+Reply with ONLY JSON, no prose:
+{
+ "task": "<the updated Task: a NUMBERED list of 3-8 plain-English steps matching the NEW flow. Keep the owner's wording and tone wherever a step did not change.>",
+ "changes": ["<1-4 short lines, each starting with Added: / Changed: / Removed:>"]
+}
+Write in simple, plain, everyday English — short words and short sentences.`,
 });
 
 const MAP = new Map(REGISTRY.map((p) => [p.key, p]));

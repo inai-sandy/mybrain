@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 /** Generic building blocks (n8n-style utility nodes). `kind` drives the node's look/behaviour. */
 const GENERIC_PALETTE = [
@@ -34,6 +35,7 @@ export class FlowsService {
     private readonly prisma: PrismaService,
     private readonly skills: SkillsService,
     private readonly llm: LlmService,
+    private readonly promptsSvc?: PromptsService, // optional + LAST — spec files construct positionally
   ) {}
 
   private parse(s?: string | null): any {
@@ -205,6 +207,55 @@ export class FlowsService {
       p.finishing.forEach((s, j) => lines.push(`   ${j + 1}. ${s}`));
     }
     return lines.join('\n');
+  }
+
+  /**
+   * Canvas → words sync, preview (BEA-1065): the owner drag-edited the flow; rewrite the linked
+   * agent's plain-words Task to match the new graph. Nothing is saved — the UI shows old vs new
+   * plus a plain-English change list, and calls syncAgentApply only on confirm.
+   */
+  async syncAgentPreview(id: string): Promise<{ oldTask: string; newTask: string; changes: string[] }> {
+    const f = await this.prisma.flow.findUnique({ where: { id } });
+    if (!f) throw new NotFoundException('Flow not found');
+    if (!f.agentId) throw new BadRequestException('This flow is not linked to an agent.');
+    const agent = await this.prisma.agent.findUnique({ where: { id: f.agentId } });
+    if (!agent) throw new NotFoundException('The linked agent no longer exists.');
+    const flowWords = this.buildPrompt(this.describeFlow(f));
+    let newTask = '';
+    let changes: string[] = [];
+    try {
+      const tpl = (await this.promptsSvc?.get('flow.syncWords').catch(() => '')) || '';
+      if (tpl) {
+        const out = await this.llm.complete(
+          tpl.replaceAll('{{task}}', (agent.prompt || '(empty)').slice(0, 2000)).replaceAll('{{flow}}', flowWords.slice(0, 3000)),
+          900,
+          'flow-sync-words',
+        );
+        const m = (out || '').match(/\{[\s\S]*\}/);
+        if (m) {
+          const g = JSON.parse(m[0]);
+          newTask = String(g.task || '').trim().slice(0, 4000);
+          changes = (Array.isArray(g.changes) ? g.changes : []).slice(0, 6).map((c: any) => String(c).slice(0, 200));
+        }
+      }
+    } catch { /* fall through to the word-for-word fallback */ }
+    if (!newTask) {
+      newTask = flowWords.slice(0, 4000);
+      changes = ['Changed: the Task now follows the flow word-for-word (the rewriter was unavailable).'];
+    }
+    return { oldTask: agent.prompt || '', newTask, changes };
+  }
+
+  /** Canvas → words sync, apply: write the confirmed new Task onto the linked agent. */
+  async syncAgentApply(id: string, task: string) {
+    const f = await this.prisma.flow.findUnique({ where: { id } });
+    if (!f) throw new NotFoundException('Flow not found');
+    if (!f.agentId) throw new BadRequestException('This flow is not linked to an agent.');
+    const t = (task || '').trim().slice(0, 4000);
+    if (!t) throw new BadRequestException('The new Task is empty.');
+    await this.prisma.agent.update({ where: { id: f.agentId }, data: { prompt: t } })
+      .catch(() => { throw new NotFoundException('The linked agent no longer exists.'); });
+    return { ok: true };
   }
 
   /** Plan a full flow from this flow's question/task and overwrite its graph (Agent↔Flow merge ②). */

@@ -285,7 +285,35 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
       const r = await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, question, graph: graphJson() }) });
       if (!r.ok) throw new Error();
       toast('success', 'Flow saved');
+      if (agentId) setSyncOffer(true); // canvas → words (BEA-1065): offer to re-sync the agent's Task
     } catch { toast('error', 'Could not save'); } finally { setSaving(false); }
+  }
+
+  // Canvas → words sync (BEA-1065): preview the rewritten agent Task, apply only on confirm.
+  const [syncOffer, setSyncOffer] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncData, setSyncData] = useState<any>(null); // {oldTask, newTask, changes}
+  async function openSync() {
+    setSyncOpen(true); setSyncBusy(true); setSyncData(null);
+    try {
+      const r = await fetch(`/api/flows/${id}/sync-agent/preview`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not compare');
+      setSyncData(d);
+    } catch (e: any) { toast('error', e.message || 'Could not compare'); setSyncOpen(false); }
+    setSyncBusy(false);
+  }
+  async function applySync() {
+    if (!syncData || syncBusy) return;
+    setSyncBusy(true);
+    try {
+      const r = await fetch(`/api/flows/${id}/sync-agent/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task: syncData.newTask }) });
+      if (!r.ok) throw new Error();
+      toast('success', "Done — the agent's words now match this canvas");
+      setSyncOpen(false); setSyncOffer(false);
+    } catch { toast('error', 'Could not update the agent'); }
+    setSyncBusy(false);
   }
   async function saveSchedule(s: any) {
     setSchedule(s);
@@ -362,6 +390,51 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
         <button onClick={run} disabled={running} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Run</button>
       </header>
       {schedOpen && <SchedulePopover schedule={schedule} onSave={saveSchedule} onClose={() => setSchedOpen(false)} />}
+      {/* canvas → words offer (BEA-1065) */}
+      {syncOffer && agentId && (
+        <div className="flex items-center gap-2 border-b border-violet-200 bg-violet-50 px-4 py-2 text-sm dark:border-violet-500/30 dark:bg-violet-500/10">
+          <Bot className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-300" />
+          <span className="min-w-0 flex-1 truncate text-violet-800 dark:text-violet-200">Saved. Update the agent's words to match this canvas?</span>
+          <button onClick={openSync} className="shrink-0 rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-500">See what changes</button>
+          <button onClick={() => setSyncOffer(false)} title="Not now" className="shrink-0 rounded p-1 text-violet-400 hover:text-violet-600"><X className="h-4 w-4" /></button>
+        </div>
+      )}
+      {syncOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !syncBusy && setSyncOpen(false)}>
+          <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
+            <h3 className="flex items-center gap-2 text-sm font-semibold"><Bot className="h-4 w-4 text-violet-500" />Update the agent's words</h3>
+            {!syncData ? (
+              <div className="flex items-center gap-2 py-8 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Reading the canvas and rewriting the words…</div>
+            ) : (
+              <>
+                <p className="mt-1 text-xs text-zinc-400">Nothing changes until you confirm.</p>
+                <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">What changed</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {(syncData.changes || []).map((c: string, i: number) => (
+                      <li key={i} className="flex items-start gap-1.5 text-sm text-zinc-700 dark:text-zinc-200"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-500" />{c}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-400">Before</p>
+                    <p className="mt-0.5 whitespace-pre-wrap rounded-lg bg-zinc-50 p-2.5 text-xs text-zinc-400 line-through decoration-zinc-300 dark:bg-zinc-800/60 dark:decoration-zinc-600">{syncData.oldTask || '(empty)'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-600">After</p>
+                    <p className="mt-0.5 whitespace-pre-wrap rounded-lg border border-emerald-200 bg-emerald-50/50 p-2.5 text-xs text-zinc-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-zinc-200">{syncData.newTask}</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button onClick={applySync} disabled={syncBusy} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{syncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Update the words</button>
+                  <button onClick={() => setSyncOpen(false)} disabled={syncBusy} className="rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Keep as is</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
         <span className="shrink-0 text-xs font-medium text-zinc-500">Question</span>
         <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="The one big ask… e.g. “Full competitor analysis of Tesla.”" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />

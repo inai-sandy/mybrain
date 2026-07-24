@@ -319,6 +319,52 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     return spec;
   }
 
+  /**
+   * Change an agent by chatting (BEA-1065): turn one chat message into a PROPOSED patch plus a
+   * plain-English "here's what changed" list. Nothing is saved here — the UI shows the diff and
+   * applies through the normal agent-update endpoint only when the owner confirms.
+   */
+  async chatEdit(agentId: string, message: string): Promise<{ patch: any; changes: string[]; note: string }> {
+    const cantDo = { patch: {}, changes: [] as string[], note: "I couldn't work that one out — try saying it another way." };
+    const a: any = await this.agent.getAgent(agentId);
+    try {
+      const tpl = (await this.prompts?.get('agent.chatEdit').catch(() => '')) || '';
+      if (!tpl) return cantDo;
+      const current = JSON.stringify({
+        name: a.name, description: a.description || '', task: a.prompt || '', outcome: a.rubric || '',
+        autonomy: a.autonomy || 'cautious', depth: a.defaultDepth || 'standard',
+        schedule: a.schedule || null, scheduleText: a.scheduleText || null,
+      });
+      const out = await this.llm.complete(
+        tpl.replaceAll('{{agent}}', current).replaceAll('{{message}}', (message || '').slice(0, 600)),
+        900,
+        'agent-chat-edit',
+      );
+      const m = (out || '').match(/\{[\s\S]*\}/);
+      if (!m) return cantDo;
+      const g = JSON.parse(m[0]);
+      const p = g.patch && typeof g.patch === 'object' ? g.patch : {};
+      // whitelist + clamp — the model's field names are the friendly ones (task/outcome/depth)
+      const patch: any = {};
+      if (typeof p.name === 'string' && p.name.trim()) patch.name = p.name.trim().slice(0, 120);
+      if (typeof p.description === 'string' && p.description.trim()) patch.description = p.description.trim().slice(0, 300);
+      if (typeof p.task === 'string' && p.task.trim()) patch.prompt = p.task.trim().slice(0, 4000);
+      if (typeof p.outcome === 'string' && p.outcome.trim()) patch.rubric = p.outcome.trim().slice(0, 2000);
+      if (['cautious', 'balanced', 'autopilot'].includes(p.autonomy)) patch.autonomy = p.autonomy;
+      if (['quick', 'standard', 'deep'].includes(p.depth)) patch.defaultDepth = p.depth;
+      if ('schedule' in p) {
+        patch.schedule = p.schedule && typeof p.schedule === 'object' ? p.schedule : null;
+        patch.scheduleText = typeof p.scheduleText === 'string' && p.scheduleText.trim() ? p.scheduleText.trim().slice(0, 120) : null;
+      }
+      const changes = (Array.isArray(g.changes) ? g.changes : []).slice(0, 6).map((c: any) => String(c).slice(0, 200));
+      const note = String(g.note || (Object.keys(patch).length ? "Here's what would change." : 'Nothing needs to change for that.')).slice(0, 400);
+      if (!Object.keys(patch).length) return { patch: {}, changes: [], note };
+      return { patch, changes, note };
+    } catch {
+      return cantDo;
+    }
+  }
+
   /** "Saved by agents" (BEA-700): everything agents wrote — Documents (tag 'agent') + brain learnings. */
   async listSavedByAgents(): Promise<{ documents: any[]; brainLearnings: { id: string; title: string }[] }> {
     let documents: any[] = [];

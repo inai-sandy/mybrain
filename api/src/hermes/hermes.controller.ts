@@ -47,6 +47,13 @@ export class HermesController {
     return this.bridge.generateUi(id);
   }
 
+  /** Change an agent by chatting (BEA-1065): message → proposed patch + plain-English diff. Nothing saved. */
+  @Post('agents/:id/chat')
+  async chatEdit(@Param('id') id: string, @Body() body: { message?: string }) {
+    if (!body?.message?.trim()) throw new BadRequestException('Say what to change first.');
+    return this.bridge.chatEdit(id, body.message.trim());
+  }
+
   /** Run a saved agent now (uses its stored prompt; optional extra input from its mini screen). */
   @Post('agents/:id/run')
   async runAgent(@Param('id') id: string, @Body() body?: { input?: string }) {

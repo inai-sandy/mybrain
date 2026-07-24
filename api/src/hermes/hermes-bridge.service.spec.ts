@@ -469,3 +469,51 @@ describe('applyAgentSkills (BEA-1079)', () => {
     expect((await svc.applyAgentSkills({ skills: [] }, { prompt: 'x' })).prompt).toBe('x'); // none → untouched
   });
 });
+
+/** Change an agent by chatting (BEA-1065): one message → a PROPOSED patch + plain-English diff.
+ *  The bridge never saves — the UI applies through the normal update endpoint on confirm. */
+describe('chatEdit — change an agent by chatting (BEA-1065)', () => {
+  const agentRow = { id: 'a1', name: 'Morning Brief', description: 'brief', prompt: '1. Search my brain\n2. Write a brief', rubric: '3 bullets', autonomy: 'cautious', defaultDepth: 'standard', schedule: null, scheduleText: null };
+  const fakePrompts = () => ({ get: jest.fn(async () => 'AGENT={{agent}} MSG={{message}}') });
+  const buildChat = (llm: any, agent: any) =>
+    new HermesBridgeService(agent as any, fakeDocs() as any, fakeTg() as any, fakeMem() as any, llm as any, fakePush() as any, undefined, fakePrompts() as any);
+
+  it('proposes a whitelisted patch + changes list, saving nothing', async () => {
+    const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn() };
+    const llm = fakeLlm(JSON.stringify({
+      patch: { task: '1. Search my brain\n2. Draft a WhatsApp message to Mom\n3. Write a brief', autonomy: 'balanced', hack: 'evil', depth: 'bogus' },
+      changes: ['Added: a step that drafts a message to Mom.'],
+      note: 'Added it — check the diff.',
+    }));
+    const out = await buildChat(llm, agent).chatEdit('a1', 'add a step that messages Mom');
+    expect(out.patch.prompt).toContain('message to Mom');
+    expect(out.patch.autonomy).toBe('balanced');
+    expect(out.patch.hack).toBeUndefined(); // whitelist: unknown fields dropped
+    expect(out.patch.defaultDepth).toBeUndefined(); // clamp: invalid depth dropped
+    expect(out.changes[0]).toMatch(/^Added:/);
+    expect(agent.updateAgent).not.toHaveBeenCalled(); // proposal only — the UI applies on confirm
+  });
+
+  it('a plain question comes back as an answer with no patch', async () => {
+    const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn() };
+    const llm = fakeLlm(JSON.stringify({ patch: {}, changes: [], note: 'It runs every morning at 07:00.' }));
+    const out = await buildChat(llm, agent).chatEdit('a1', 'when does it run?');
+    expect(out.patch).toEqual({});
+    expect(out.note).toContain('07:00');
+  });
+
+  it('degrades gracefully when the model returns garbage', async () => {
+    const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn() };
+    const out = await buildChat(fakeLlm('total garbage, no json'), agent).chatEdit('a1', 'do something');
+    expect(out.patch).toEqual({});
+    expect(out.note).toContain('another way');
+  });
+
+  it('a schedule change carries both schedule and its plain sentence', async () => {
+    const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn() };
+    const llm = fakeLlm(JSON.stringify({ patch: { schedule: { every: 'day', at: '07:00' }, scheduleText: 'Every day at 07:00' }, changes: ['Added: runs every morning at 7.'], note: 'Scheduled.' }));
+    const out = await buildChat(llm, agent).chatEdit('a1', 'run it every morning at 7');
+    expect(out.patch.schedule).toEqual({ every: 'day', at: '07:00' });
+    expect(out.patch.scheduleText).toBe('Every day at 07:00');
+  });
+});

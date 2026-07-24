@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useGoBack } from '../ui/useGoBack';
-import { ArrowLeft, Save, Plus, Trash2, Loader2, Play, CheckCircle2, Sparkles, Check, X, Workflow, Clock, FileText, AlertCircle, Circle } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Loader2, Play, CheckCircle2, Sparkles, Check, X, Workflow, Clock, FileText, AlertCircle, Circle, MessageSquare, Send } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { FlowProcess } from '../ui/FlowProcess';
 import { SchedulePicker, schedText } from '../ui/SchedulePicker';
@@ -118,6 +118,56 @@ export function AgentDetail() {
     catch { toast('error', 'Could not run'); } finally { setRunning(false); }
   }
 
+  // ---- Change it by chatting (BEA-1065): message → proposed diff → apply on confirm ----
+  const [chatMsg, setChatMsg] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatLog, setChatLog] = useState<{ who: 'you' | 'ai'; text: string }[]>([]);
+  const [proposal, setProposal] = useState<any>(null); // {patch, changes, note}
+
+  async function sendChat() {
+    const msg = chatMsg.trim();
+    if (!msg || chatBusy) return;
+    setChatBusy(true);
+    setProposal(null);
+    setChatLog((p) => [...p, { who: 'you', text: msg }]);
+    setChatMsg('');
+    try {
+      const r = await fetch(`/api/agent/agents/${id}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not do that');
+      setChatLog((p) => [...p, { who: 'ai', text: d.note || 'Done.' }]);
+      if (d.patch && Object.keys(d.patch).length) setProposal(d);
+    } catch (e: any) {
+      setChatLog((p) => [...p, { who: 'ai', text: e.message || 'Something went wrong — try again.' }]);
+    }
+    setChatBusy(false);
+  }
+
+  async function applyProposal() {
+    if (!proposal || chatBusy) return;
+    setChatBusy(true);
+    try {
+      const d = await patch(proposal.patch);
+      if (!d) throw new Error();
+      dirtyRef.current = false;
+      setTask(d.prompt || '');
+      setRubric(d.rubric || '');
+      // agent is boss: when the words changed, re-draw the flow from them
+      if (flow && proposal.patch.prompt) {
+        await fetch(`/api/flows/${flow.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: d.prompt || '' }) }).catch(() => undefined);
+        await fetch(`/api/flows/${flow.id}/plan`, { method: 'POST' }).catch(() => undefined);
+        await load();
+        toast('success', 'Changed — and the flow was re-drawn to match');
+      } else {
+        await load();
+        toast('success', 'Changed');
+      }
+      setChatLog((p) => [...p, { who: 'ai', text: 'Applied ✓' }]);
+      setProposal(null);
+    } catch { toast('error', 'Could not apply the change'); }
+    setChatBusy(false);
+  }
+
   async function patch(body: any) {
     const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r.ok) { const d = await r.json(); setA(d); return d; }
@@ -186,6 +236,44 @@ export function AgentDetail() {
         {/* ---- BUILD ---- */}
         {tab === 'Build' && (
           <div className="space-y-4">
+            {/* Change it by chatting (BEA-1065) — the diff is shown and applied only on confirm */}
+            <section className="space-y-3 rounded-2xl border border-violet-200 bg-white p-4 dark:border-violet-500/30 dark:bg-zinc-900">
+              <h2 className="flex items-center gap-2 text-sm font-semibold"><MessageSquare className="h-4 w-4 text-violet-500" />Change it by chatting</h2>
+              {chatLog.length === 0 && <p className="text-xs text-zinc-400">Say the change in your own words — “add a step that messages Mom”, “run it every morning at 7”, “stop asking me before saving”. You'll see what would change before it sticks.</p>}
+              {chatLog.length > 0 && (
+                <div className="max-h-56 space-y-1.5 overflow-y-auto">
+                  {chatLog.map((m, i) => (
+                    <div key={i} className={'flex ' + (m.who === 'you' ? 'justify-end' : 'justify-start')}>
+                      <div className={'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm ' + (m.who === 'you' ? 'bg-violet-600 text-white' : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200')}>{m.text}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {proposal && (
+                <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/30 dark:bg-violet-500/10">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">Here's what would change</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {(proposal.changes || []).map((c: string, i: number) => (
+                      <li key={i} className="flex items-start gap-1.5 text-sm text-zinc-700 dark:text-zinc-200"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-500" />{c}</li>
+                    ))}
+                    {(proposal.changes || []).length === 0 && <li className="text-sm text-zinc-600 dark:text-zinc-300">A small update to this agent.</li>}
+                  </ul>
+                  {proposal.patch?.prompt && flow && <p className="mt-1.5 text-[11px] text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
+                  <div className="mt-2 flex gap-2">
+                    <button onClick={applyProposal} disabled={chatBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Apply change</button>
+                    <button onClick={() => { setProposal(null); setChatLog((p) => [...p, { who: 'ai', text: 'Okay, left as it was.' }]); }} disabled={chatBusy} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Not this</button>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <input value={chatMsg} onChange={(e) => setChatMsg(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Tell it what to change…" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 pr-10 text-sm outline-none focus:border-violet-400 dark:border-zinc-700" />
+                  <DictateButton onText={(t) => setChatMsg((p) => (p ? p + ' ' : '') + t)} className="absolute right-1.5 top-1/2 -translate-y-1/2" />
+                </div>
+                <button onClick={sendChat} disabled={chatBusy || !chatMsg.trim()} title="Send" className="shrink-0 rounded-lg bg-violet-600 p-2 text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
+              </div>
+            </section>
+
             <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <label className="block text-xs font-medium text-zinc-500">Task — what it does each run
                 <div className="relative mt-1">
@@ -268,7 +356,7 @@ export function AgentDetail() {
               {showCanvas ? (
                 <div className="h-[72vh] overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
                   <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-zinc-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Loading editor…</div>}>
-                    <FlowEditor flowId={flow.id} embedded />
+                    <FlowEditor key={flow.updatedAt || flow.id} flowId={flow.id} embedded />
                   </Suspense>
                 </div>
               ) : (
