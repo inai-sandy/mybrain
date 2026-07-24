@@ -216,10 +216,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
+        category: input.category?.trim() || null,
+        color: input.color?.trim() || null,
         name: input.name.trim().slice(0, 120),
         prompt: input.prompt?.trim() || null,
         rubric: input.rubric?.trim() || null,
@@ -253,10 +255,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeAgent(a);
   }
 
-  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string }) {
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string }) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
     const data: any = {};
+    if (patch.category !== undefined) data.category = patch.category?.trim() || null;
+    if (patch.color !== undefined) data.color = patch.color?.trim() || null;
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
     if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
     if (patch.rubric !== undefined) data.rubric = patch.rubric?.trim() || null;
@@ -357,6 +361,127 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.waitpoint.updateMany({ where: { runId: id, status: 'pending' }, data: { status: 'cancelled' } });
     const updated = await this.prisma.agentRun.update({ where: { id }, data: { status: 'cancelled', endedAt: new Date() } });
     return this.shapeRun(updated);
+  }
+
+  /** How many questions are waiting on the owner right now — the nav badge (BEA-1066). */
+  async waitingCount(): Promise<{ count: number }> {
+    const [wps, flows] = await Promise.all([
+      this.prisma.waitpoint.count({ where: { status: 'pending', run: { status: { notIn: FINISHED } } } }),
+      this.prisma.flowRun.count({ where: { status: 'waiting' } }),
+    ]);
+    return { count: wps + flows };
+  }
+
+  // ---------- the Agents home (BEA-1087): one payload for the whole screen ----------
+
+  /** Shelf group when the agent has none set — a light keyword guess, never persisted. */
+  guessCategory(a: { name?: string | null; prompt?: string | null; description?: string | null }): string {
+    const t = `${a.name || ''} ${a.description || ''} ${a.prompt || ''}`.toLowerCase();
+    if (/brief|morning|daily|digest|journal|summar|week/.test(t)) return 'Daily';
+    if (/remind|chase|contact|whatsapp|message|nudge|follow|people/.test(t)) return 'People';
+    if (/clean|duplicate|tidy|hygiene|stale|organis|organiz/.test(t)) return 'Brain care';
+    if (/research|find|compare|watch|monitor|report|look/.test(t)) return 'Research';
+    return 'Other';
+  }
+
+  /** Card colour when none is set — a stable palette by category. */
+  categoryColor(category: string): string {
+    return (
+      {
+        'Daily': '#818cf8',
+        'Research': '#22d3ee',
+        'People': '#34d399',
+        'Brain care': '#c084fc',
+        'Imported': '#f59e0b',
+      } as Record<string, string>
+    )[category] || '#94a3b8';
+  }
+
+  /**
+   * Everything the Agents home shows, in ONE call: what's waiting on you (agent waitpoints + flow
+   * waits), what's running, what landed in the last 24h, and the agent shelf with health.
+   */
+  async home() {
+    const dayAgo = new Date(Date.now() - 24 * 3600 * 1000);
+    const [pendingWps, waitingFlows, runningAgents, runningFlows, landedAgents, landedFlows, agentRows, recentRuns] = await Promise.all([
+      this.prisma.waitpoint.findMany({ where: { status: 'pending' }, orderBy: { createdAt: 'asc' }, include: { run: true } }),
+      this.prisma.flowRun.findMany({ where: { status: 'waiting' }, orderBy: { startedAt: 'asc' } }),
+      this.prisma.agentRun.findMany({ where: { status: 'running' }, orderBy: { startedAt: 'desc' }, take: 6 }),
+      this.prisma.flowRun.findMany({ where: { status: 'running' }, orderBy: { startedAt: 'desc' }, take: 6 }),
+      this.prisma.agentRun.findMany({ where: { status: { in: ['done', 'failed', 'cancelled'] }, endedAt: { gte: dayAgo } }, orderBy: { endedAt: 'desc' }, take: 12 }),
+      this.prisma.flowRun.findMany({ where: { status: { in: ['done', 'failed', 'cancelled'] }, endedAt: { gte: dayAgo } }, orderBy: { endedAt: 'desc' }, take: 12 }),
+      this.prisma.agent.findMany({ orderBy: { createdAt: 'desc' } }),
+      this.prisma.agentRun.findMany({ orderBy: { startedAt: 'desc' }, take: 120, select: { agentId: true, status: true, startedAt: true, endedAt: true } }),
+    ]);
+
+    const flowIds = [...new Set([...waitingFlows, ...runningFlows, ...landedFlows].map((f: any) => f.flowId).filter(Boolean))] as string[];
+    const flowNames = new Map<string, string>();
+    if (flowIds.length) {
+      const flows = await this.prisma.flow.findMany({ where: { id: { in: flowIds } }, select: { id: true, name: true } });
+      for (const f of flows) flowNames.set(f.id, f.name);
+    }
+    const byAgent = new Map<string, any>();
+    for (const a of agentRows) byAgent.set(a.id, a);
+    // newest run per agent → the honest health chip on its card
+    const lastRun = new Map<string, { status: string; at: Date | null }>();
+    for (const r of recentRuns) if (r.agentId && !lastRun.has(r.agentId)) lastRun.set(r.agentId, { status: r.status, at: r.endedAt || r.startedAt });
+
+    const waiting = [
+      ...pendingWps
+        .filter((wp: any) => wp.run && !FINISHED.includes(wp.run.status))
+        .map((wp: any) => {
+          const agent = wp.run.agentId ? byAgent.get(wp.run.agentId) : null;
+          const category = agent ? agent.category || this.guessCategory(agent) : 'Other';
+          return {
+            source: 'agent' as const,
+            waitpointId: wp.id,
+            runId: wp.runId,
+            title: wp.run.title || agent?.name || 'Agent run',
+            icon: agent?.icon || '🤖',
+            color: agent?.color || this.categoryColor(category),
+            question: wp.question,
+            kind: wp.kind,
+            options: this.parse(wp.options, [] as unknown),
+            defaultValue: wp.defaultValue ?? null,
+            askedAt: wp.createdAt,
+            expiresAt: wp.expiresAt ?? null,
+          };
+        }),
+      ...waitingFlows.map((f: any) => ({
+        source: 'flow' as const,
+        waitpointId: null,
+        runId: f.id,
+        title: flowNames.get(f.flowId) || 'Flow run',
+        icon: '🕸',
+        color: '#22d3ee',
+        question: f.waitQuestion || 'Your input is needed to continue.',
+        kind: f.waitKind || 'free_text',
+        options: this.parse(f.waitOptions, [] as unknown),
+        defaultValue: null,
+        askedAt: f.startedAt,
+        expiresAt: null,
+      })),
+    ].sort((a, b) => new Date(a.askedAt).getTime() - new Date(b.askedAt).getTime());
+
+    const lastSteps = (stepLog: unknown, n = 3) => this.parse(stepLog, [] as any[]).filter((s: any) => s.kind !== 'log').slice(-n).map((s: any) => ({ label: s.label, status: s.status }));
+    const running = [
+      ...runningAgents.map((r: any) => ({ source: 'agent' as const, id: r.id, title: r.title || 'Agent run', startedAt: r.startedAt, steps: lastSteps(r.stepLog) })),
+      ...runningFlows.map((f: any) => ({ source: 'flow' as const, id: f.id, title: flowNames.get(f.flowId) || 'Flow run', startedAt: f.startedAt, steps: this.parse(f.terminal, [] as any[]).slice(-3).map((t: any) => ({ label: t.text, status: 'done' })) })),
+    ].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+
+    const landed = [
+      ...landedAgents.map((r: any) => ({ source: 'agent' as const, id: r.id, title: r.title || 'Agent run', status: r.status, endedAt: r.endedAt, outputDocId: r.outputDocId || null, error: r.error || null })),
+      ...landedFlows.map((f: any) => ({ source: 'flow' as const, id: f.id, title: flowNames.get(f.flowId) || 'Flow run', status: f.status, endedAt: f.endedAt, outputDocId: null, error: f.error || null })),
+    ]
+      .sort((a, b) => new Date(b.endedAt || 0).getTime() - new Date(a.endedAt || 0).getTime())
+      .slice(0, 12);
+
+    const shelf = agentRows.map((a: any) => {
+      const category = a.category || this.guessCategory(a);
+      return { ...this.shapeAgent(a), category, color: a.color || this.categoryColor(category), lastRun: lastRun.get(a.id) || null };
+    });
+
+    return { waiting, running, landed, agents: shelf };
   }
 
   // ---------- durable park + resume (BEA-795) ----------

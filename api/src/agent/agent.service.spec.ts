@@ -108,7 +108,12 @@ function fakePrisma() {
         return row;
       },
       findUnique: async ({ where }: any) => wps.find((w) => (where.id ? w.id === where.id : w.resumeToken === where.resumeToken)) || null,
-      findMany: async ({ where }: any = {}) => wps.filter((w) => matchWp(w, where)),
+      findMany: async ({ where, include }: any = {}) => {
+        const out = wps.filter((w) => matchWp(w, where));
+        return include?.run ? out.map((w) => ({ ...w, run: runs.find((r) => r.id === w.runId) || null })) : out;
+      },
+      count: async ({ where }: any = {}) =>
+        wps.filter((w) => matchWp(w, { status: where?.status }) && (!where?.run?.status?.notIn || !where.run.status.notIn.includes(runs.find((r) => r.id === w.runId)?.status))).length,
       update: async ({ where, data }: any) => {
         const w = wps.find((x) => x.id === where.id);
         if (!w) throw new Error('wp not found');
@@ -136,6 +141,9 @@ function fakePrisma() {
       update: async ({ where, data }: any) => { const a = ags.find((x) => x.id === where.id); if (!a) throw new Error('not found'); Object.assign(a, data); return a; },
       delete: async ({ where }: any) => { const i = ags.findIndex((x) => x.id === where.id); if (i < 0) throw new Error('not found'); return ags.splice(i, 1)[0]; },
     },
+    // The Agents home also reads flow waits/runs (BEA-1087) — empty by default.
+    flowRun: { findMany: async () => [] as any[], count: async () => 0 },
+    flow: { findMany: async () => [] as any[] },
   };
 }
 
@@ -464,6 +472,55 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(list).toHaveLength(1);
     expect(list[0].sessionId).toBe(''); // parked-without-session sentinel
     expect(await svc.claimResume(run.id)).toBe(true);
+  });
+
+  it('BEA-1087 home() gathers waiting + running + landed + the shelf in one payload', async () => {
+    const daily = await svc.createAgent({ name: 'Morning Brief', prompt: 'summarise my journal every morning' });
+    await svc.createAgent({ name: 'Task Chaser', prompt: 'nudge contacts who go quiet', color: '#123456' });
+
+    const asked = await svc.createRun({ agentId: daily.id, title: 'Morning Brief — Thu', input: 'go' });
+    await svc.ask(asked.id, { question: 'Include the weekend?', kind: 'choice', options: ['yes', 'no'] });
+    const live = await svc.createRun({ title: 'Research X', input: 'topic' });
+    const finished = await svc.createRun({ title: 'Old run', input: 'x' });
+    await svc.finishRun(finished.id, { status: 'done' });
+
+    const h = await svc.home();
+    // waiting: the pending question, with the agent's face on it
+    expect(h.waiting).toHaveLength(1);
+    expect(h.waiting[0]).toMatchObject({ source: 'agent', runId: asked.id, question: 'Include the weekend?', kind: 'choice', options: ['yes', 'no'] });
+    expect(h.waiting[0].color).toBeTruthy();
+    // running: only the genuinely running run
+    expect(h.running.map((r: any) => r.id)).toEqual([live.id]);
+    // landed: the finished one
+    expect(h.landed.map((r: any) => r.id)).toEqual([finished.id]);
+    expect(h.landed[0].status).toBe('done');
+    // shelf: both agents, with category + colour + honest health
+    expect(h.agents).toHaveLength(2);
+    const brief = h.agents.find((a: any) => a.name === 'Morning Brief');
+    expect(brief.category).toBe('Daily'); // guessed from the words
+    expect(brief.color).toBe(svc.categoryColor('Daily'));
+    expect(brief.lastRun.status).toBe('awaiting_input'); // its newest run is the parked one
+    const chaser = h.agents.find((a: any) => a.name === 'Task Chaser');
+    expect(chaser.category).toBe('People');
+    expect(chaser.color).toBe('#123456'); // explicit colour wins over the palette
+    expect(chaser.lastRun).toBeNull(); // never ran
+  });
+
+  it('BEA-1066 waitingCount counts only live pending questions (the nav badge)', async () => {
+    expect((await svc.waitingCount()).count).toBe(0);
+    const run = await svc.createRun({ input: 'x' });
+    await svc.ask(run.id, { question: 'q?', kind: 'free_text' });
+    expect((await svc.waitingCount()).count).toBe(1);
+    await svc.cancelRun(run.id); // cancelling clears the pending question
+    expect((await svc.waitingCount()).count).toBe(0);
+  });
+
+  it('BEA-1087 guessCategory maps plain words to shelf groups', () => {
+    expect(svc.guessCategory({ name: 'Weekly Journal Digest' })).toBe('Daily');
+    expect(svc.guessCategory({ name: 'X', prompt: 'chase people on whatsapp' })).toBe('People');
+    expect(svc.guessCategory({ name: 'X', prompt: 'find duplicate notes and tidy them' })).toBe('Brain care');
+    expect(svc.guessCategory({ name: 'Vendor Watch', prompt: 'compare suppliers' })).toBe('Research');
+    expect(svc.guessCategory({ name: 'Mystery' })).toBe('Other');
   });
 
   it('BEA-859 boot reconcile retries through transient DB failures instead of swallowing them', async () => {

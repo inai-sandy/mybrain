@@ -57,6 +57,20 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar.collapsed') === '1');
   useEffect(() => { localStorage.setItem('sidebar.collapsed', collapsed ? '1' : '0'); }, [collapsed]);
 
+  // Agents nav badge: how many agent questions are waiting on you. Polled gently; refreshed on
+  // every route change so answering a card clears it right away. (BEA-1066)
+  const [waiting, setWaiting] = useState(0);
+  useEffect(() => {
+    const load = () => fetch('/api/agent/waiting-count').then((r) => r.json()).then((d) => setWaiting(d?.count || 0)).catch(() => undefined);
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [location.pathname]);
+  const navBadge = (to: string) =>
+    to === '/agent' && waiting > 0 ? (
+      <span className="ml-auto rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{waiting}</span>
+    ) : null;
+
   const itemCls = ({ isActive }: { isActive: boolean }) =>
     'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ' +
     (isActive ? 'bg-emerald-600 text-white' : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800');
@@ -85,7 +99,12 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
               {g.label && collapsed && <div className="mx-3 my-1.5 border-t border-zinc-100 dark:border-zinc-800" />}
               {g.items.map((n) => (
                 <NavLink key={n.to} to={n.to} end={n.end} title={collapsed ? n.label : undefined} className={deskItemCls}>
-                  <n.icon size={18} /> {!collapsed && n.label}
+                  <span className="relative">
+                    <n.icon size={18} />
+                    {collapsed && n.to === '/agent' && waiting > 0 && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-500" />}
+                  </span>
+                  {!collapsed && n.label}
+                  {!collapsed && navBadge(n.to)}
                 </NavLink>
               ))}
             </div>
@@ -121,6 +140,7 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
                   {g.items.map((n) => (
                     <NavLink key={n.to} to={n.to} end={n.end} onClick={() => setDrawer(false)} className={itemCls}>
                       <n.icon size={18} /> {n.label}
+                      {navBadge(n.to)}
                     </NavLink>
                   ))}
                 </div>

@@ -314,13 +314,20 @@ describe('rollDay — a daily chase repeats instead of pausing (BEA-1021)', () =
   }
 
   it('re-arms a daily chase for the new day instead of pausing it', async () => {
-    const h = harness([{ id: 'c1', status: 'active', armedDay: '2000-01-01', repeat: 'daily', times: '["09:00","17:00"]', taskId: 't1' }], { status: 'open', title: 'x' });
-    await h.svc.rollDay();
-    expect(h.updates.some((u) => u.status === 'paused')).toBe(false);
-    const armed = h.updates.find((u) => u.armedDay);
-    expect(armed).toBeTruthy();
-    expect(armed.pausedAuto).toBe(false);
-    expect(h.created.length).toBeGreaterThan(0); // today's sends put on the board
+    // Pin the clock to mid-morning IST: with real time this test silently depended on the hour it
+    // ran at — after 17:00 IST both chase times were "already past today" and no send was created.
+    jest.useFakeTimers({ now: new Date('2026-07-24T06:00:00Z') }); // 11:30 IST
+    try {
+      const h = harness([{ id: 'c1', status: 'active', armedDay: '2000-01-01', repeat: 'daily', times: '["09:00","17:00"]', taskId: 't1' }], { status: 'open', title: 'x' });
+      await h.svc.rollDay();
+      expect(h.updates.some((u) => u.status === 'paused')).toBe(false);
+      const armed = h.updates.find((u) => u.armedDay);
+      expect(armed).toBeTruthy();
+      expect(armed.pausedAuto).toBe(false);
+      expect(h.created.length).toBeGreaterThan(0); // today's remaining send (17:00) put on the board
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('STOPS a daily chase once the task is done — no more messages', async () => {
