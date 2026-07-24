@@ -595,6 +595,7 @@ model Agent {
   collectionId String? // Documents collection for saved outputs
   category     String? // shelf group on the Agents home (Daily | Research | People | Brain care | Imported | Other) — null = auto-guessed (BEA-1087)
   sourceUrl    String? // where an imported agent came from (the GitHub link) — the origin badge (BEA-1081/1083)
+  ui           String? // JSON mini-interface spec {inputs:[{key,label,type,options?,placeholder?}], view, headline} (BEA-1082)
   color        String? // card/stripe colour (hex or named, the Claude-agent `color:` convention) — null = palette by category (BEA-1087)
   enabled      Boolean    @default(true)
   createdAt    DateTime   @default(now())

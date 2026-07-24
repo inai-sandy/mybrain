@@ -41,15 +41,22 @@ export class HermesController {
     return this.bridge.replayRun(id);
   }
 
-  /** Run a saved agent now (uses its stored prompt). */
+  /** Design (or redesign) the agent's mini-interface (BEA-1082). */
+  @Post('agents/:id/ui/generate')
+  async generateUi(@Param('id') id: string) {
+    return this.bridge.generateUi(id);
+  }
+
+  /** Run a saved agent now (uses its stored prompt; optional extra input from its mini screen). */
   @Post('agents/:id/run')
-  async runAgent(@Param('id') id: string) {
+  async runAgent(@Param('id') id: string, @Body() body?: { input?: string }) {
     const agent = await this.agent.getAgent(id);
     if (!agent.prompt) throw new BadRequestException('This agent has no task set yet');
     // Honour the agent's default depth (BEA-695). 'deep' agents are run via their flow by the UI; if this
     // single-turn endpoint is hit for one, it falls back to standard depth (non-quick).
     const depth = agent.defaultDepth === 'quick' ? 'quick' : 'standard';
-    const input = await this.bridge.applyAgentSkills(agent, { prompt: agent.prompt, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth }); // BEA-1079
+    const extra = body?.input?.trim() ? `\n\n[Your input this run]\n${body.input.trim().slice(0, 2000)}` : '';
+    const input = await this.bridge.applyAgentSkills(agent, { prompt: `${agent.prompt}${extra}`, title: agent.name, agentId: agent.id, saveCollectionId: agent.collectionId, rubric: agent.rubric, depth }); // BEA-1079
     return this.bridge.startRun(input);
   }
 

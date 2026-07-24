@@ -280,6 +280,45 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Design (or redesign) an agent's mini-interface spec from the approved blocks (BEA-1082). */
+  async generateUi(agentId: string): Promise<any> {
+    const a: any = await this.agent.getAgent(agentId);
+    const fallback = { headline: `Run ${a.name}`, inputs: a.schedule ? [] : [{ key: 'ask', label: 'What should it work on?', type: 'text', placeholder: 'Type it in your own words…' }], view: 'report', runLabel: 'Run →' };
+    try {
+      const tpl = (await this.prompts?.get('agent.uiSpec').catch(() => '')) || '';
+      if (!tpl) return this.saveUi(agentId, fallback);
+      const out = await this.llm.complete(
+        tpl.replaceAll('{{name}}', a.name || '').replaceAll('{{description}}', a.description || '').replaceAll('{{task}}', (a.prompt || '').slice(0, 800)),
+        400,
+        'agent-ui-spec',
+      );
+      const m = (out || '').match(/\{[\s\S]*\}/);
+      if (!m) return this.saveUi(agentId, fallback);
+      const g = JSON.parse(m[0]);
+      const TYPES = ['topic', 'text', 'url', 'contact', 'date', 'choice'];
+      const spec = {
+        headline: String(g.headline || fallback.headline).slice(0, 120),
+        inputs: (Array.isArray(g.inputs) ? g.inputs : []).slice(0, 2).map((i: any) => ({
+          key: String(i.key || 'ask').replace(/[^a-z0-9_]/gi, '').slice(0, 30) || 'ask',
+          label: String(i.label || 'Input').slice(0, 60),
+          type: TYPES.includes(i.type) ? i.type : 'text',
+          placeholder: String(i.placeholder || '').slice(0, 120),
+          ...(i.type === 'choice' && Array.isArray(i.options) ? { options: i.options.slice(0, 6).map((o: any) => String(o).slice(0, 40)) } : {}),
+        })),
+        view: ['report', 'brief', 'checklist', 'plain'].includes(g.view) ? g.view : 'report',
+        runLabel: String(g.runLabel || 'Run →').slice(0, 30),
+      };
+      return this.saveUi(agentId, spec);
+    } catch {
+      return this.saveUi(agentId, fallback);
+    }
+  }
+
+  private async saveUi(agentId: string, spec: any) {
+    await this.agent.updateAgent(agentId, { ui: spec } as any).catch(() => undefined);
+    return spec;
+  }
+
   /** "Saved by agents" (BEA-700): everything agents wrote — Documents (tag 'agent') + brain learnings. */
   async listSavedByAgents(): Promise<{ documents: any[]; brainLearnings: { id: string; title: string }[] }> {
     let documents: any[] = [];

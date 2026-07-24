@@ -751,7 +751,7 @@ export function Agents() {
             const passCls = passed === evs.length ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' : passed === 0 ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400' : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
             const lr = a.lastRun;
             return (
-              <div key={a.id} onClick={() => nav(`/agent/agents/${a.id}`)} style={{ borderLeftColor: a.color }} className="group flex cursor-pointer flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900" >
+              <div key={a.id} onClick={() => nav(`/agent/a/${a.id}`)} style={{ borderLeftColor: a.color }} className="group flex cursor-pointer flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900" >
                 <div className="flex items-start gap-2.5">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: a.color + '22' }}>{a.icon || '🤖'}</span>
                   <div className="min-w-0 flex-1">
