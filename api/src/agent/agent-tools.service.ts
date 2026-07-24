@@ -33,6 +33,8 @@ export class AgentToolsService {
         { name: 'search_brain', desc: 'Read your whole second brain — notes, documents and saved memories' },
         { name: 'save_document', desc: 'Write a markdown document into your Documents library' },
         { name: 'remember', desc: 'Save a durable fact into your long-term memory' },
+        { name: 'ask_user', desc: 'Pause the run on a question for you — durable, resumes when you answer (BEA-795)' },
+        { name: 'get_answer', desc: 'Read back your answer to a question it asked' },
       ],
       // Raw connection details for the settings disclosure (BEA-628). These describe the host
       // MCP server the Codex runtime spawns; the app itself is just the endpoint it proxies to.

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 // Engine run types (formerly in the now-removed hermes.client).
 export type RunStep = { label: string; status?: string; detail?: string; kind?: string };
 export interface HermesRunHandlers {
@@ -32,6 +32,8 @@ export type StartRunInput = {
   depth?: 'quick' | 'standard' | 'deep';
   /** The Outcome (definition of done) to grade this run against (BEA-641). */
   rubric?: string;
+  /** Offer the durable ask_user tool (BEA-795). Flows + evals set false — they must never park. */
+  allowAsk?: boolean;
 };
 
 /**
@@ -40,8 +42,10 @@ export type StartRunInput = {
  * result into Documents. Hermes is the doer; My Brain owns the record + the output.
  */
 @Injectable()
-export class HermesBridgeService {
+export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('HermesBridge');
+  private resumeTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly resuming = new Set<string>();
 
   constructor(
     private readonly agent: AgentService,
@@ -50,6 +54,17 @@ export class HermesBridgeService {
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
   ) {}
+
+  onModuleInit() {
+    // Resume sweeper (BEA-795): wakes parked runs whose question has been answered. DB-backed, so
+    // an answer given days later — or before a restart — still resumes the run.
+    this.resumeTimer = setInterval(() => void this.resumeTick().catch(() => undefined), 5_000);
+    if (typeof this.resumeTimer.unref === 'function') this.resumeTimer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.resumeTimer) clearInterval(this.resumeTimer);
+  }
 
   /** Where agent outputs go when nothing specific is set: a dedicated "Agent outputs" collection (kept separate from real Documents). */
   private async defaultCollectionId(): Promise<string | null> {
@@ -81,6 +96,62 @@ export class HermesBridgeService {
       return `\n\nAnswer concisely. Research the topic (don\'t rely on memory alone)${brainAvailable ? '; quickly check the user\'s brain with the search_brain tool if it helps' : ''}.${trust} Keep it short. Do not save anything.`;
     }
     return `\n\n---\nHow to approach this:\n1. Research the topic properly FIRST — use web search and read sources, combined with what you know. Be thorough; don\'t stop at a single search.${brainStep}\n3. Give a clear, well-structured answer. **Cite your sources inline** as [1], [2]… and end with a short "Sources" list (web links + which brain notes you used) so the reader can verify. Don\'t state facts you couldn\'t support.${trust}`;
+  }
+
+  /**
+   * Durable ask-the-user guidance (BEA-795): the model can pause the run on a real question via the
+   * mybrain ask_user MCP tool; the run parks durably and resumes when the user answers — even days
+   * later. How eagerly it may ask follows the autonomy setting.
+   */
+  private askGuidance(runId: string, autonomy: string): string {
+    const base = `\n\nAsking the user: you may ask the user a question mid-task with the mybrain ask_user tool — pass runId "${runId}". If the tool replies that the user is not available, END YOUR TURN immediately with a one-line note that you are waiting; the run pauses safely and you will be resumed with their answer. Never invent an answer to your own question.`;
+    if (autonomy === 'autopilot') return `${base}\nOnly ask if the task is impossible without the answer; otherwise use your best judgment and do not ask.`;
+    if (autonomy === 'balanced') return `${base}\nAsk ONLY before something irreversible, or when a wrong guess would waste the whole run; otherwise proceed on your best judgment.`;
+    return `${base}\nAsk whenever a real decision, preference, or fact only the user knows would change the result. Don't ask about trivia.`;
+  }
+
+  /** BEA-795: find parked runs whose question has been answered and resume each exactly once. */
+  async resumeTick() {
+    const runs = await this.agent.listResumable().catch(() => [] as any[]);
+    for (const run of runs) {
+      if (this.resuming.has(run.id)) continue;
+      const sessionId = run.sessionId || undefined; // read before the claim clears the marker
+      if (!(await this.agent.claimResume(run.id).catch(() => false))) continue;
+      this.resuming.add(run.id);
+      this.resumeRun(run, sessionId)
+        .catch(async (e) => {
+          this.log.error(`resume of run ${run.id} crashed: ${e?.message || e}`);
+          await this.agent.finishRun(run.id, { status: 'failed', error: friendlyError(e?.message || String(e)) }).catch(() => undefined);
+        })
+        .finally(() => this.resuming.delete(run.id));
+    }
+  }
+
+  /** Continue a parked run's engine session with the user's answer (fresh session if none was kept). */
+  private async resumeRun(run: any, sessionId?: string) {
+    const cfg = await this.agent.engineSettings();
+    const agentRow: any = run.agentId ? await this.agent.getAgent(run.agentId).catch(() => null) : null;
+    const answered = (run.waitpoints || [])
+      .filter((w: any) => w.status === 'answered')
+      .sort((a: any, b: any) => new Date(a.answeredAt || 0).getTime() - new Date(b.answeredAt || 0).getTime());
+    const wp = answered[answered.length - 1];
+    const answer = typeof wp?.answer === 'string' ? wp.answer : JSON.stringify(wp?.answer ?? 'proceed');
+    await this.agent.appendStep(run.id, { label: 'You answered — resuming', status: 'done', detail: String(answer).slice(0, 200) }).catch(() => undefined);
+    const input: StartRunInput = {
+      prompt: run.input || '',
+      title: run.title || undefined,
+      agentId: run.agentId || undefined,
+      rubric: agentRow?.rubric || undefined,
+      saveCollectionId: agentRow?.collectionId ?? null,
+      depth: run.depth === 'quick' ? 'quick' : 'standard',
+    };
+    // With a kept session the engine remembers the task; without one, restate it so the fresh
+    // session is self-contained.
+    const prompt =
+      `${sessionId ? '' : `The task:\n${run.input || ''}\n\n`}You asked the user: "${wp?.question || ''}"\n` +
+      `The user answered: "${answer}"\n\nContinue the task from where you stopped, take the answer into account, and complete it.` +
+      this.askGuidance(run.id, cfg.autonomy);
+    await this.driveTurn(run.id, input, cfg, prompt, sessionId);
   }
 
   /** Learn-after: propose a few durable facts from the result (the user keeps/forgets later). */
@@ -259,7 +330,7 @@ export class HermesBridgeService {
     try {
       const run = await this.agent.createRun({ agentId, title: `Eval — ${agent.name}`, input: c.input });
       const prompt = agent.prompt ? `${agent.prompt}\n\n[Test input] ${c.input}` : c.input;
-      await this.execute(run.id, { prompt, title: `Eval — ${agent.name}`, agentId, rubric: agent.rubric, save: false });
+      await this.execute(run.id, { prompt, title: `Eval — ${agent.name}`, agentId, rubric: agent.rubric, save: false, allowAsk: false });
       const r: any = await this.agent.getRun(run.id).catch(() => null);
       return { runId: run.id, status: r?.status, grade: r?.grade };
     } catch {
@@ -312,12 +383,24 @@ export class HermesBridgeService {
     const quick = depth === 'quick';
     await this.agent.appendStep(runId, { label: quick ? 'Starting up (quick answer)' : 'Starting up', status: 'done' });
     const cfg = await this.agent.engineSettings();
-    const timeoutMs = cfg.askTimeoutMin * 60_000;
     // Research FIRST, brain SECOND (BEA-692). We no longer pre-inject a RAG recall as the opening
     // context (that made the agent "start with the brain"). Instead it researches the topic, then
     // consults the user's brain via the search_brain tool and reconciles — trusting the user's own
     // notes for their own terms. cfg.recall just means "the brain is available as a tool".
     let prompt = input.prompt + this.researchGuidance(quick, cfg.recall);
+    // The durable ask_user tool (BEA-795) — offered unless the caller runs headless (flows, evals).
+    if (input.allowAsk !== false) prompt += this.askGuidance(runId, cfg.autonomy);
+    await this.driveTurn(runId, input, cfg, prompt);
+  }
+
+  /**
+   * Drive ONE engine turn and land its outcome: park (the model asked the user — BEA-795), fail,
+   * or grade + learn + save + finish. Shared by first turns (execute) and resumes (resumeRun).
+   */
+  private async driveTurn(runId: string, input: StartRunInput, cfg: any, prompt: string, sessionId?: string) {
+    const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
+    const quick = depth === 'quick';
+    const timeoutMs = cfg.askTimeoutMin * 60_000;
 
     const handlers: HermesRunHandlers = {
       onStep: (s) => void this.agent.appendStep(runId, s).catch(() => undefined),
@@ -364,13 +447,26 @@ export class HermesBridgeService {
 
     let result;
     try {
-      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: cfg.model || undefined });
+      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: cfg.model || undefined, sessionId });
     } catch (e: any) {
       clearInterval(heartbeat);
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
       return;
     }
     clearInterval(heartbeat);
+
+    // Durable ask (BEA-795): the model called ask_user and its turn ended while the question is
+    // still open — PARK the run on its engine session instead of finishing (finishRun would cancel
+    // the pending question). The resume sweeper continues it when the answer lands. Parking wins
+    // even over a turn error (e.g. the turn timed out mid-wait): the question must survive.
+    const askedRun: any = await this.agent.getRun(runId).catch(() => null);
+    if (askedRun?.status === 'awaiting_input') {
+      await this.agent.parkRun(runId, result.sessionId);
+      await this.agent.appendStep(runId, { label: 'Paused — waiting for your answer', status: 'awaiting' }).catch(() => undefined);
+      const wp = (askedRun.waitpoints || []).filter((w: any) => w.status === 'pending').pop();
+      if (wp) await this.telegram.pushAgentQuestion({ runTitle: input.title, waitpointId: wp.id, question: wp.question, kind: wp.kind, options: wp.options }).catch(() => undefined);
+      return;
+    }
 
     if (result.status === 'error') {
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(result.error) });
