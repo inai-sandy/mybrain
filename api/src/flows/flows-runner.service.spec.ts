@@ -398,3 +398,88 @@ describe('FlowRunnerService.sweepFlowParts — working-doc retention (BEA-1085)'
     expect(h.removed).toEqual([]);
   });
 });
+
+describe('FlowRunnerService — If / Filter / Wait are real (BEA-1073)', () => {
+  function harness(graph: string) {
+    const row: any = { id: 'r1', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; } },
+    };
+    const telegram: any = { notifyFlowDone: async () => undefined, notifyFlowWaiting: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+    return { svc, row };
+  }
+
+  it('If routes yes down plain edges and no down ⚠ edges', async () => {
+    const mk = (text: string) => JSON.stringify({
+      nodes: [
+        { id: 'S', data: { kind: 'text', text, label: 'Input' } },
+        { id: 'I', data: { kind: 'if', label: 'Urgent?', cond: { op: 'contains', value: 'urgent' } } },
+        { id: 'Y', data: { kind: 'text', text: 'YES PATH', label: 'Yes' } },
+        { id: 'N', data: { kind: 'text', text: 'NO PATH', label: 'No' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [
+        { source: 'S', target: 'I' },
+        { source: 'I', target: 'Y' },
+        { source: 'I', target: 'N', data: { onError: true } }, // the "no" path
+        { source: 'Y', target: 'O' },
+        { source: 'N', target: 'O' },
+      ],
+    });
+    const yes = harness(mk('this is urgent, deal with it'));
+    await (yes.svc as any).execute('r1', { id: 'f1', name: 'F', graph: mk('this is urgent, deal with it') });
+    let results = JSON.parse(yes.row.results);
+    expect(results.Y.status).toBe('done');
+    expect(results.N.status).toBe('skipped'); // the no path never fired
+    expect(yes.row.status).toBe('done');
+
+    const no = harness(mk('all calm today'));
+    await (no.svc as any).execute('r1', { id: 'f1', name: 'F', graph: mk('all calm today') });
+    results = JSON.parse(no.row.results);
+    expect(results.N.status).toBe('done'); // the no path fired…
+    expect(no.row.status).toBe('done');
+  });
+
+  it('Filter keeps only matching lines', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'S', data: { kind: 'text', text: 'urgent: call vendor\nlater: read blog\nurgent: pay bill', label: 'List' } },
+        { id: 'F', data: { kind: 'filter', label: 'Urgent only', match: 'urgent' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'S', target: 'F' }, { source: 'F', target: 'O' }],
+    });
+    const h = harness(graph);
+    await (h.svc as any).execute('r1', { id: 'f1', name: 'F', graph });
+    expect(h.row.finalOutput).toContain('call vendor');
+    expect(h.row.finalOutput).toContain('pay bill');
+    expect(h.row.finalOutput).not.toContain('read blog');
+  });
+
+  it('Wait genuinely pauses before the next step', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'S', data: { kind: 'text', text: 'hello', label: 'In' } },
+        { id: 'W', data: { kind: 'wait', seconds: 1, label: 'Breathe' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'S', target: 'W' }, { source: 'W', target: 'O' }],
+    });
+    const h = harness(graph);
+    const t0 = Date.now();
+    await (h.svc as any).execute('r1', { id: 'f1', name: 'F', graph });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(950); // it actually waited
+    expect(h.row.status).toBe('done');
+  });
+
+  it('evalCond speaks plain English correctly', () => {
+    const svc = harness('{}').svc;
+    expect(svc.evalCond({ op: 'contains', value: 'Mood' }, 'mood: 3 today')).toBe(true);
+    expect(svc.evalCond({ op: 'number_lte', value: '5' }, 'mood: 3 today')).toBe(true);
+    expect(svc.evalCond({ op: 'number_gte', value: '5' }, 'mood: 3 today')).toBe(false);
+    expect(svc.evalCond({ op: 'empty' }, '   ')).toBe(true);
+    expect(svc.evalCond(null, 'anything')).toBe(true); // no condition = "did anything arrive?"
+  });
+});

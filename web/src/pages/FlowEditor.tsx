@@ -498,8 +498,33 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose }: { node: Nod
         )}
         {kind === 'wait' && (
           <div>
-            <label className={labelCls}>Seconds</label>
-            <input type="number" min={0} value={d.seconds ?? 0} onChange={(e) => set({ seconds: Number(e.target.value) })} className={inputCls} />
+            <label className={labelCls}>Wait for (seconds)</label>
+            <input type="number" min={0} max={600} value={d.seconds ?? 0} onChange={(e) => set({ seconds: Math.min(600, Math.max(0, Number(e.target.value) || 0)) })} className={inputCls} />
+            <p className="mt-1 text-[11px] text-zinc-400">The run genuinely pauses here (up to 10 minutes) before the next step.</p>
+          </div>
+        )}
+        {kind === 'if' && (
+          <div className="space-y-2">
+            <label className={labelCls}>If the input…</label>
+            <select value={d.cond?.op || 'contains'} onChange={(e) => set({ cond: { ...(d.cond || {}), op: e.target.value } })} className={inputCls}>
+              <option value="contains">contains the words…</option>
+              <option value="not_contains">does NOT contain…</option>
+              <option value="longer_than">is longer than (characters)…</option>
+              <option value="number_gte">has a number ≥ …</option>
+              <option value="number_lte">has a number ≤ …</option>
+              <option value="empty">is empty</option>
+            </select>
+            {(d.cond?.op || 'contains') !== 'empty' && (
+              <input value={d.cond?.value ?? ''} onChange={(e) => set({ cond: { op: d.cond?.op || 'contains', value: e.target.value } })} placeholder="the words / the number" className={inputCls} />
+            )}
+            <p className="text-[11px] text-zinc-400">Plain links leaving this block = the <b>yes</b> path. Tap ⚠ on a link to make it the <b>no</b> path.</p>
+          </div>
+        )}
+        {kind === 'filter' && (
+          <div>
+            <label className={labelCls}>Keep only lines containing</label>
+            <input value={d.match ?? ''} onChange={(e) => set({ match: e.target.value })} placeholder="e.g. urgent" className={inputCls} />
+            <p className="mt-1 text-[11px] text-zinc-400">Everything else is dropped before the next step. Empty = keep all.</p>
           </div>
         )}
         {kind === 'ask_user' && (
@@ -509,7 +534,6 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose }: { node: Nod
             <p className="mt-1 text-[11px] text-zinc-400">Empty = free text. Add lines to get tap buttons. The flow pauses here until you answer (in-app or later).</p>
           </div>
         )}
-        {(kind === 'if' || kind === 'filter') && <div className="rounded-lg bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-500 dark:bg-zinc-800/60">Passes input straight through for now — conditions come in a later update.</div>}
           <button onClick={() => onDelete(node.id)} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-500/30 dark:hover:bg-rose-500/10"><Trash2 className="h-3.5 w-3.5" />Delete block</button>
         </div>
       </div>

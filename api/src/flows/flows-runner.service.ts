@@ -12,7 +12,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
 import { randomBytes } from 'crypto';
 
-type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string };
+type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean };
 
 /** Thrown to abort the graph walk when a flow pauses on an "Ask me" block (Move B). */
 class PauseSignal { constructor(public nodeId: string) {} }
@@ -352,8 +352,16 @@ export class FlowRunnerService implements OnModuleInit {
         // deliver only on success (unchanged).
         const upOuts = await Promise.all(ups.map(async (s) => {
           const out = await outputOf(s);
-          const failedUp = (results[s] as NodeResult)?.status === 'failed';
-          if (errEdge.has(`${s}->${nodeId}`)) return failedUp ? `The previous step failed: ${(results[s] as NodeResult)?.output || 'unknown error'}` : '';
+          const rs = results[s] as NodeResult;
+          const failedUp = rs?.status === 'failed';
+          const marked = errEdge.has(`${s}->${nodeId}`);
+          // An If steers its edges (BEA-1073): plain edges are the TRUE path, ⚠-marked edges are
+          // the FALSE/else path (carrying the input through so the other branch can use it).
+          if (rs?.kind === 'if' && rs.condFalse !== undefined) {
+            if (marked) return rs.condFalse ? (rs.output || 'the condition was not met') : '';
+            return rs.condFalse ? '' : out;
+          }
+          if (marked) return failedUp ? `The previous step failed: ${rs?.output || 'unknown error'}` : '';
           return failedUp ? '' : out;
         }));
         // A node fed ONLY by error paths is skipped when nothing actually failed.
@@ -387,7 +395,10 @@ export class FlowRunnerService implements OnModuleInit {
             }
           }
           if (lastErr) throw lastErr;
-          results[nodeId] = { status: 'done', output, kind, label };
+          // If-condition verdict (BEA-1073) — stored on the result so its edges can steer.
+          const condFalse = kind === 'if' ? !this.evalCond(node.data?.cond, input) : undefined;
+          if (kind === 'if') term(`🔱 ${label || 'If'}: ${condFalse ? 'no — taking the other path' : 'yes'}`);
+          results[nodeId] = { status: 'done', output, kind, label, ...(condFalse !== undefined ? { condFalse } : {}) };
           const line = this.termLine(node, output);
           if (line) term(`${line}`);
           await persist();
@@ -475,6 +486,24 @@ export class FlowRunnerService implements OnModuleInit {
     }
     if (removed) this.log.log(`cleaned ${removed} flow working-part document(s) older than ${days}d`);
     return removed;
+  }
+
+  /** Plain-English If conditions (BEA-1073). No condition set = "did anything arrive?". */
+  evalCond(cond: any, input: string): boolean {
+    const text = input || '';
+    if (!cond || !cond.op) return !!text.trim();
+    const val = String(cond.value ?? '');
+    if (cond.op === 'contains') return text.toLowerCase().includes(val.toLowerCase());
+    if (cond.op === 'not_contains') return !text.toLowerCase().includes(val.toLowerCase());
+    if (cond.op === 'longer_than') return text.length > (Number(val) || 0);
+    if (cond.op === 'empty') return !text.trim();
+    if (cond.op === 'number_gte' || cond.op === 'number_lte') {
+      const m = text.match(/-?\d+(\.\d+)?/);
+      if (!m) return false;
+      const n = Number(m[0]);
+      return cond.op === 'number_gte' ? n >= (Number(val) || 0) : n <= (Number(val) || 0);
+    }
+    return true;
   }
 
   /** Forget a finished run's driver state — only if this generation still owns the run. (BEA-792) */
@@ -581,7 +610,24 @@ export class FlowRunnerService implements OnModuleInit {
         return `OVERALL RESEARCH GOAL (interpret every term and stay strictly within this):\n${goal}\n\nTHIS BRANCH FOCUSES ON:\n${focus}`;
       }
       case 'text': return node.data?.text || node.data?.sub || '';
-      case 'note': case 'wait': case 'if': case 'filter': return input; // pass-through (v0)
+      case 'note': return input; // a comment for the human, invisible to the run
+      // Wait — a real pause before the next step (BEA-1073). Capped at 10 minutes inline; a longer
+      // ambient wait belongs to a schedule/event trigger, not a blocking node.
+      case 'wait': {
+        const secs = Math.min(600, Math.max(0, Number(node.data?.seconds) || 0));
+        if (secs > 0) await new Promise((r) => setTimeout(r, secs * 1000));
+        return input;
+      }
+      // Filter — keep only the lines that match (BEA-1073). Empty match = pass everything.
+      case 'filter': {
+        const needle = String(node.data?.match || '').trim().toLowerCase();
+        if (!needle) return input;
+        const kept = (input || '').split('\n').filter((l) => l.toLowerCase().includes(needle));
+        return kept.join('\n');
+      }
+      // If — evaluated in outputOf (it must set condFalse on the RESULT to steer the edges); by the
+      // time runNode sees it the answer is just "pass the input through".
+      case 'if': return input;
       case 'output': return input;
       case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal);
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
