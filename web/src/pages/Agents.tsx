@@ -176,9 +176,16 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
   const [newEval, setNewEval] = useState('');
   const [every, setEvery] = useState('manual');
   const [at, setAt] = useState('07:00');
+  // The rest of the drafted identity (BEA-1063) — the meta-agent fills these; you can still tweak.
+  const [icon, setIcon] = useState('🤖');
+  const [color, setColor] = useState<string | null>(null);
+  const [category, setCategory] = useState<string>('');
+  const [description, setDescription] = useState('');
+  const [autonomy, setAutonomy] = useState('cautious');
 
   function pickStarter(s: Starter) {
     setName(s.name); setTask(s.task); setRubric(s.rubric); setDefaultDepth(s.depth);
+    if (s.icon) setIcon(s.icon);
     setEvery(s.every || 'manual'); if (s.at) setAt(s.at);
     setStep('form');
   }
@@ -194,6 +201,13 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not draft');
       setName(d.name || ''); setTask(d.prompt || ''); setRubric(d.rubric || ''); setEvals(Array.isArray(d.evals) ? d.evals : []);
+      if (d.icon) setIcon(d.icon);
+      if (d.color) setColor(d.color);
+      if (d.category) setCategory(d.category);
+      if (d.description) setDescription(d.description);
+      if (d.autonomy) setAutonomy(d.autonomy);
+      if (d.defaultDepth) setDefaultDepth(d.defaultDepth === 'quick' ? 'quick' : 'standard');
+      if (d.schedule?.every) { setEvery(d.schedule.every); if (d.schedule.at) setAt(d.schedule.at); }
       setStep('form');
     } catch (e: any) { toast('error', e?.message || 'Could not draft'); } finally { setDrafting(false); }
   }
@@ -208,7 +222,14 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
     setSaving(true);
     try {
       const evalCases = evals.map((x) => x.trim()).filter(Boolean).map((input) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input }));
-      const r = await fetch('/api/agent/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, defaultDepth, evals: evalCases, schedule, scheduleText }) });
+      const r = await fetch('/api/agent/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, defaultDepth, evals: evalCases, schedule, scheduleText,
+          icon, color: color || undefined, category: category || undefined, description: description.trim() || undefined, autonomy,
+        }),
+      });
       if (!r.ok) throw new Error('Could not save');
       onCreated();
     } catch (e: any) { toast('error', e?.message || 'Could not save'); } finally { setSaving(false); }
@@ -244,8 +265,23 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
   }
 
   return (
-    <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Agent name (e.g. Morning Brief)" className={inp} />
+    <div className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900" style={color ? { borderLeft: `4px solid ${color}` } : undefined}>
+      <div className="flex gap-2">
+        <input value={icon} onChange={(e) => setIcon(e.target.value.slice(0, 4))} title="Icon" className="w-14 shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-center text-lg outline-none focus:border-emerald-400 dark:border-zinc-700" />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Agent name (e.g. Morning Brief)" className={inp} />
+      </div>
+      <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="One line: what it does and when (shows on its card)" className={inp} />
+      <div className="flex flex-wrap gap-2">
+        <select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="">Category: auto</option>
+          {['Daily', 'Research', 'People', 'Brain care', 'Other'].map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={autonomy} onChange={(e) => setAutonomy(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+          <option value="cautious">Cautious — checks before acting</option>
+          <option value="balanced">Balanced — asks only on big ones</option>
+          <option value="autopilot">Autopilot — never asks</option>
+        </select>
+      </div>
       <label className="block text-xs text-zinc-500">Task
         <div className="relative mt-1">
           <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} placeholder="What should it do each time it runs?" className={inp + ' resize-none pr-11'} />

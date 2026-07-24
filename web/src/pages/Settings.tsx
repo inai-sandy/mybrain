@@ -1722,7 +1722,7 @@ function VoiceModelCard() {
 type PromptItem = { key: string; label: string; description: string; default: string; value: string; customized: boolean; category?: string };
 
 // Category display order — anything unknown falls to the end under "Other". (BEA-1059)
-const PROMPT_CAT_ORDER = ['Daily & Story', 'Tasks', 'People & chase', 'EMO voice', 'The Lab', 'Meetings & Chat', 'Library', 'Google', 'Other'];
+const PROMPT_CAT_ORDER = ['Daily & Story', 'Tasks', 'People & chase', 'Agents', 'EMO voice', 'The Lab', 'Meetings & Chat', 'Library', 'Google', 'Other'];
 
 function PromptsSection() {
   const [items, setItems] = useState<PromptItem[]>([]);

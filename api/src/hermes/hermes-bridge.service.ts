@@ -14,6 +14,7 @@ import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
 import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -58,6 +59,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly push: PushService,
     // Optional so test harnesses that build with fewer args keep working.
     private readonly alerts?: AlertsService,
+    private readonly prompts?: PromptsService,
   ) {}
 
   onModuleInit() {
@@ -237,24 +239,36 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Guided builder (BEA-643): turn a one-line idea into a draft agent config — name, task, Outcome
-   * (3-5 criteria), and a few starter eval cases — for the user to review and save.
+   * The "describe it" box (BEA-1063, replacing the thin BEA-643 draft): one plain sentence in, a
+   * COMPLETE agent out — name, icon, colour, category, a numbered step plan, Outcome, autonomy,
+   * depth, a schedule when the idea implies one, and test cases. Nothing is created here; the user
+   * reviews the draft card and saves.
    */
-  async draftAgent(idea: string): Promise<{ name: string; prompt: string; rubric: string; evals: string[] }> {
-    const fallback = { name: 'New agent', prompt: idea.trim().slice(0, 2000), rubric: '', evals: [] as string[] };
+  async draftAgent(idea: string): Promise<any> {
+    const fallback = { name: 'New agent', icon: '🤖', color: null, category: null, description: '', prompt: idea.trim().slice(0, 2000), rubric: '', autonomy: 'cautious', defaultDepth: 'standard', schedule: null, scheduleText: null, evals: [] as string[] };
     try {
-      const out = await this.llm.complete(
-        `Turn this idea into a config for a small AI agent. The user said:\n"${idea.slice(0, 600)}"\n\nReply with ONLY JSON, no prose:\n{"name":"<short 2-4 word name>","task":"<one clear plain-English instruction the agent runs each time>","outcome":["<criterion>","<criterion>","<criterion>"],"evals":["<realistic example input>","<another>","<another>"]}\nThe "outcome" is 3-5 short, checkable criteria for what a good result looks like. The "evals" are 2-3 realistic example inputs to test it on. Keep everything concrete and in plain English.`,
-        700,
-        'agent-draft',
-      );
+      const tpl = (await this.prompts?.get('agent.metaDraft').catch(() => '')) || '';
+      const prompt = tpl
+        ? tpl.replaceAll('{{idea}}', idea.slice(0, 600))
+        : `Turn this idea into a config for a small AI agent. The user said:\n"${idea.slice(0, 600)}"\nReply with ONLY JSON: {"name":"...","task":"...","outcome":["..."],"evals":["..."]}`;
+      const out = await this.llm.complete(prompt, 1100, 'agent-draft');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (!m) return fallback;
       const g = JSON.parse(m[0]);
+      const CATS = ['Daily', 'Research', 'People', 'Brain care', 'Other'];
+      const sched = g.schedule && typeof g.schedule === 'object' && ['day', 'weekday', 'week', 'hour'].includes(g.schedule.every) ? g.schedule : null;
       return {
         name: String(g.name || 'New agent').slice(0, 80),
+        icon: typeof g.icon === 'string' && g.icon.trim() ? g.icon.trim().slice(0, 4) : '🤖',
+        color: typeof g.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(g.color.trim()) ? g.color.trim() : null,
+        category: CATS.includes(g.category) ? g.category : null,
+        description: String(g.description || '').slice(0, 200),
         prompt: String(g.task || idea).trim().slice(0, 2000),
         rubric: Array.isArray(g.outcome) ? g.outcome.map((s: any) => `- ${String(s).trim()}`).join('\n').slice(0, 1500) : String(g.outcome || '').slice(0, 1500),
+        autonomy: ['cautious', 'balanced', 'autopilot'].includes(g.autonomy) ? g.autonomy : 'cautious',
+        defaultDepth: g.depth === 'quick' ? 'quick' : 'standard',
+        schedule: sched,
+        scheduleText: sched ? String(g.scheduleText || '').slice(0, 80) || null : null,
         evals: Array.isArray(g.evals) ? g.evals.slice(0, 5).map((s: any) => String(s).trim().slice(0, 200)).filter(Boolean) : [],
       };
     } catch {

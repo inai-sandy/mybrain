@@ -12,6 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
+  | 'agent.metaDraft'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -769,6 +770,32 @@ Rules:
 - Keep it brief and skimmable. Write in simple, plain, everyday English — short words and short sentences, no fancy words.`,
   },
 ];
+
+REGISTRY.push({
+  key: 'agent.metaDraft',
+  label: 'Agents — the "describe it" box',
+  description: 'Turns your one-line idea into a COMPLETE agent: name, icon, colour, category, a numbered step plan, the Outcome, autonomy, a schedule when the idea implies one, and test cases. Your idea fills in where it says {{idea}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
+  category: 'Agents',
+  default: `Turn the user's one-line idea into a COMPLETE agent for their personal second-brain app. The user said:
+"{{idea}}"
+
+Reply with ONLY JSON, no prose:
+{
+ "name": "<short 2-4 word name in plain words>",
+ "icon": "<one fitting emoji>",
+ "category": "<one of: Daily | Research | People | Brain care | Other>",
+ "color": "<a fitting hex colour, e.g. #818cf8 daily, #22d3ee research, #34d399 people, #c084fc brain care>",
+ "description": "<ONE sentence: what it does and when it runs>",
+ "task": "<the agent's plan as a NUMBERED list of 3-6 plain-English steps. Name the tools where they matter: search_brain to read the user's saved notes FIRST for context, save_document to save a result, ask_user to check with the user before anything that cannot be undone (sending a message, deleting).>",
+ "outcome": ["<3-5 short, checkable criteria for a good result>"],
+ "autonomy": "<cautious if it contacts people or changes things · balanced if it only reads and writes documents · autopilot only for pure read-and-summarise>",
+ "depth": "<quick for short daily summaries · standard for research or multi-step work>",
+ "schedule": <null, or {"every":"day","at":"HH:MM"} / {"every":"weekday","at":"HH:MM"} / {"every":"hour","minute":0} when the idea implies a rhythm like "every morning">,
+ "scheduleText": "<a plain sentence like 'Every day at 07:00', or null>",
+ "evals": ["<2-3 realistic example inputs to test it on>"]
+}
+Everything concrete, nothing vague. The plan must be doable by an AI agent that has web search, the user's saved notes (search_brain), documents (save_document) and questions to the user (ask_user).`,
+});
 
 const MAP = new Map(REGISTRY.map((p) => [p.key, p]));
 
