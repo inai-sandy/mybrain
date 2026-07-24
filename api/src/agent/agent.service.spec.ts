@@ -537,6 +537,20 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect((await svc.waitingCount()).count).toBe(0);
   });
 
+  it('BEA-1069 allRuns names every run and reports how long it took', async () => {
+    const a = await svc.createRun({ title: 'Morning Brief', input: 'x' });
+    await (svc as any).prisma.agentRun.update({ where: { id: a.id }, data: { status: 'done', startedAt: new Date('2026-07-23T00:30:00Z'), endedAt: new Date('2026-07-23T00:32:05Z') } });
+    const b = await svc.createRun({ title: 'Research', input: 'y' }); // still running
+    const rows = await svc.allRuns();
+    expect(rows).toHaveLength(2);
+    expect(rows[0].id).toBe(b.id); // newest first
+    const brief = rows.find((r: any) => r.id === a.id)!;
+    expect(brief.name).toBe('Morning Brief — Thu'); // 00:30 UTC = 06:00 IST Thursday
+    expect(brief.durationSec).toBe(125);
+    expect(brief.source).toBe('agent');
+    expect(rows.find((r: any) => r.id === b.id)!.durationSec).toBeNull(); // still going
+  });
+
   it('BEA-1087 guessCategory maps plain words to shelf groups', () => {
     expect(svc.guessCategory({ name: 'Weekly Journal Digest' })).toBe('Daily');
     expect(svc.guessCategory({ name: 'X', prompt: 'chase people on whatsapp' })).toBe('People');
