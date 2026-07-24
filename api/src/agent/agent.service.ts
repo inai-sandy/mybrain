@@ -375,6 +375,32 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(updated);
   }
 
+  /**
+   * "What's fresh in my life" (BEA-1077) — a tiny always-current grounding note injected at the
+   * start of every real agent run: the latest journal head + today's open-task picture. Cheap
+   * (two small queries), and it makes a run about MY life instead of a cold start.
+   */
+  async freshContext(): Promise<string> {
+    try {
+      const [story, open] = await Promise.all([
+        this.prisma.story.findFirst({ orderBy: { createdAt: 'desc' }, select: { day: true, rawText: true } }),
+        this.prisma.task.findMany({ where: { status: 'open' }, orderBy: [{ pinned: 'desc' }, { day: 'desc' }], take: 60, select: { title: true, pinned: true, day: true } }),
+      ]);
+      const today = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); // IST day
+      const parts: string[] = [];
+      if (story?.rawText) parts.push(`Latest journal (${story.day}): "${story.rawText.replace(/\s+/g, ' ').slice(0, 260)}…"`);
+      if (open.length) {
+        const dueToday = open.filter((t) => t.day && t.day <= today).length;
+        const top = open.slice(0, 3).map((t) => t.title).join(' · ');
+        parts.push(`Open tasks: ${open.length}${dueToday ? ` (${dueToday} due today or overdue)` : ''}. Top of mind: ${top}.`);
+      }
+      if (!parts.length) return '';
+      return `\n\n[What's fresh in the user's life — today is ${today}]\n${parts.join('\n')}\nUse this only as context; the task above is what you're doing.`;
+    } catch {
+      return '';
+    }
+  }
+
   /** How many questions are waiting on the owner right now — the nav badge (BEA-1066). */
   async waitingCount(): Promise<{ count: number }> {
     const [wps, flows] = await Promise.all([

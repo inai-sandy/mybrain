@@ -144,6 +144,9 @@ function fakePrisma() {
     // The Agents home also reads flow waits/runs (BEA-1087) — empty by default.
     flowRun: { findMany: async () => [] as any[], count: async () => 0 },
     flow: { findMany: async () => [] as any[] },
+    // freshContext grounding (BEA-1077) — empty by default; tests override.
+    story: { findFirst: async () => null as any },
+    task: { findMany: async () => [] as any[] },
   };
 }
 
@@ -549,6 +552,26 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(brief.durationSec).toBe(125);
     expect(brief.source).toBe('agent');
     expect(rows.find((r: any) => r.id === b.id)!.durationSec).toBeNull(); // still going
+  });
+
+  it('BEA-1077 freshContext grounds a run in the latest journal + open tasks', async () => {
+    (prisma as any).story.findFirst = async () => ({ day: '2026-07-23', rawText: 'Closed the vendor question. Worried about the BOM upload.' });
+    (prisma as any).task.findMany = async () => [
+      { title: 'Finish Beakn Portal testing', pinned: true, day: '2026-07-20' },
+      { title: 'Upload BOM to Focus ERP', pinned: false, day: '2026-07-23' },
+      { title: 'Call the spring vendor', pinned: false, day: null },
+    ];
+    const ctx = await svc.freshContext();
+    expect(ctx).toContain('Latest journal (2026-07-23)');
+    expect(ctx).toContain('Closed the vendor question');
+    expect(ctx).toContain('Open tasks: 3');
+    expect(ctx).toContain('due today or overdue');
+    expect(ctx).toContain('Finish Beakn Portal testing');
+    expect(ctx).toContain('only as context'); // it must not hijack the task
+  });
+
+  it('BEA-1077 freshContext is empty (not broken) when there is nothing fresh', async () => {
+    expect(await svc.freshContext()).toBe('');
   });
 
   it('BEA-1087 guessCategory maps plain words to shelf groups', () => {
