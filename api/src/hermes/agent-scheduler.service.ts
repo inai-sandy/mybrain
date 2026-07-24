@@ -66,7 +66,7 @@ export class AgentScheduler implements OnModuleInit, OnModuleDestroy {
         await this.agent.markFired(a.id, key);
         a.lastFiredKey = key;
         try {
-          await this.bridge.startRun({ prompt: a.prompt, title: a.name, agentId: a.id, saveCollectionId: a.collectionId });
+          await this.bridge.startRun(await this.bridge.applyAgentSkills(a, { prompt: a.prompt, title: a.name, agentId: a.id, saveCollectionId: a.collectionId })); // skills ride along (BEA-1079)
           fired++;
         } catch (e: any) {
           this.log.error(`scheduled agent ${a.id} failed to start: ${e?.message || e}`);

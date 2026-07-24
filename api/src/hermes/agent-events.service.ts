@@ -31,14 +31,14 @@ export class AgentEvents implements OnModuleInit {
     const hit = agents.filter((a) => a.enabled && a.prompt && a.schedule && (a.schedule as any).event === name);
     for (const a of hit) {
       this.log.log(`event ${name} → firing agent "${a.name}"`);
-      await this.bridge.startRun({
+      await this.bridge.startRun(await this.bridge.applyAgentSkills(a, {
         prompt: `${a.prompt}\n\n[Trigger] ${payload.summary}`,
         title: `${a.name} — ${EVENT_LABEL[name] || name}`,
         agentId: a.id,
         rubric: a.rubric || undefined,
         saveCollectionId: a.collectionId ?? null,
         depth: a.defaultDepth === 'quick' ? 'quick' : 'standard',
-      }).catch((e) => this.log.warn(`event run for ${a.name} failed to start: ${e?.message}`));
+      })).catch((e) => this.log.warn(`event run for ${a.name} failed to start: ${e?.message}`));
     }
   }
 }

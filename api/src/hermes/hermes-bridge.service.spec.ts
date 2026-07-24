@@ -454,3 +454,18 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done' }));
   });
 });
+
+describe('applyAgentSkills (BEA-1079)', () => {
+  it('injects attached skill instructions and runs single-skill agents in the skill folder', async () => {
+    const skills: any = { get: jest.fn(async (id: string) => ({ id, title: 'banner-design', content: 'Always use the brand palette.', slug: 'banner-design', deployments: '{"sandy":"banner-design"}' })) };
+    const svc = new HermesBridgeService(fakeAgent() as any, fakeDocs() as any, fakeTg() as any, fakeMem() as any, fakeLlm() as any, fakePush() as any, undefined, undefined, skills);
+    const out = await svc.applyAgentSkills({ skills: ['sk1'] }, { prompt: 'make a banner', title: 'T' });
+    expect(out.prompt).toContain('Skills you must follow');
+    expect(out.prompt).toContain('Always use the brand palette');
+    expect(out.skill).toBe('banner-design'); // single skill → its folder becomes the workspace
+
+    const two = await svc.applyAgentSkills({ skills: ['sk1', 'sk2'] }, { prompt: 'x', title: 'T' });
+    expect(two.skill).toBeUndefined(); // multiple skills → instructions only, no single folder
+    expect((await svc.applyAgentSkills({ skills: [] }, { prompt: 'x' })).prompt).toBe('x'); // none → untouched
+  });
+});

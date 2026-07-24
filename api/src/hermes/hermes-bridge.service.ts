@@ -15,6 +15,7 @@ import { LlmService } from '../llm/llm.service';
 import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { SkillsService } from '../skills/skills.service';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -37,6 +38,8 @@ export type StartRunInput = {
   rubric?: string;
   /** Offer the durable ask_user tool (BEA-795). Flows + evals set false — they must never park. */
   allowAsk?: boolean;
+  /** Run inside this deployed skill's folder (single-skill agents, BEA-1079). */
+  skill?: string;
 };
 
 /**
@@ -60,6 +63,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     // Optional so test harnesses that build with fewer args keep working.
     private readonly alerts?: AlertsService,
     private readonly prompts?: PromptsService,
+    private readonly skillsSvc?: SkillsService,
   ) {}
 
   onModuleInit() {
@@ -330,6 +334,25 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     return run;
   }
 
+  /**
+   * Attach an agent's skills to its run (BEA-1079): each attached skill's instructions ride in the
+   * prompt (up to 3), and a single-skill agent runs INSIDE that skill's folder so its assets and
+   * scripts are actually available.
+   */
+  async applyAgentSkills(agent: any, input: StartRunInput): Promise<StartRunInput> {
+    const ids: string[] = Array.isArray(agent?.skills) ? agent.skills : [];
+    if (!ids.length || !this.skillsSvc) return input;
+    const rows = (await Promise.all(ids.slice(0, 3).map((id) => this.skillsSvc!.get(id).catch(() => null)))).filter(Boolean) as any[];
+    if (!rows.length) return input;
+    const block = rows.map((r) => `## Skill: ${r.title}\n${String(r.content || r.description || '').slice(0, 2500)}`).join('\n\n');
+    const out: StartRunInput = { ...input, prompt: `${input.prompt}\n\n[Skills you must follow]\n${block}` };
+    if (rows.length === 1) {
+      const dep = typeof rows[0].deployments === 'string' ? (() => { try { return JSON.parse(rows[0].deployments || '{}'); } catch { return {}; } })() : rows[0].deployments || {};
+      out.skill = dep.sandy || rows[0].slug || dep.hermes || dep.beakn || undefined;
+    }
+    return out;
+  }
+
   /** Create the run row and kick off execution in the background; returns immediately. */
   async startRun(input: StartRunInput) {
     const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
@@ -579,7 +602,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
 
     let result;
     try {
-      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: cfg.model || undefined, sessionId });
+      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: cfg.model || undefined, sessionId, skill: input.skill });
     } catch (e: any) {
       clearInterval(heartbeat);
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });

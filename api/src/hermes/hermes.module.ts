@@ -11,13 +11,14 @@ import { MemoryModule } from '../memory/memory.module';
 import { LlmModule } from '../llm/llm.module';
 import { PushModule } from '../push/push.module';
 import { PromptsModule } from '../prompts/prompts.module';
+import { SkillsModule } from '../skills/skills.module';
 
 /**
  * Agent engine bridge — runs agent turns on the host Codex (via codex-runner) and mirrors them into
  * our AgentRun + Documents. (Was the Hermes WS bridge; Hermes removed BEA-663/667.)
  */
 @Module({
-  imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule, PushModule, PromptsModule],
+  imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule, PushModule, PromptsModule, SkillsModule],
   controllers: [HermesController],
   providers: [HermesBridgeService, AgentScheduler, EngineWatchdog, AgentEvents],
   exports: [HermesBridgeService],

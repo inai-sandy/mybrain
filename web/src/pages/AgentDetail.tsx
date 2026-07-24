@@ -49,6 +49,8 @@ export function AgentDetail() {
   const [tab, setTab] = useState<Tab>('Build');
   const [runs, setRuns] = useState<any[] | null>(null);
   const [showCanvas, setShowCanvas] = useState(true);
+  const [allSkills, setAllSkills] = useState<any[] | null>(null); // installed skills for the attach chips (BEA-1079)
+  useEffect(() => { fetch('/api/skills').then((r) => r.json()).then((d) => setAllSkills(d.skills || [])).catch(() => setAllSkills([])); }, []);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dirtyRef = useRef(false); // true once you edit Task/Outcome — the eval poll must not overwrite it (BEA-817)
 
@@ -198,6 +200,36 @@ export function AgentDetail() {
                 </div>
               </label>
               <button onClick={saveCfg} disabled={savingCfg} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900">{savingCfg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
+            </section>
+
+            {/* Skills this agent uses on every run (BEA-1079) */}
+            <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <h2 className="text-sm font-semibold">Skills it uses</h2>
+              {allSkills === null ? (
+                <div className="h-8 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />
+              ) : allSkills.length === 0 ? (
+                <p className="text-xs text-zinc-500">No skills installed yet — add some on the <Link to="/skills" className="text-emerald-600 hover:underline">Skills</Link> page.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allSkills.map((sk: any) => {
+                      const on = (a?.skills || []).includes(sk.id);
+                      return (
+                        <button key={sk.id} title={sk.description || sk.title}
+                          onClick={async () => {
+                            const next = on ? (a.skills || []).filter((x: string) => x !== sk.id) : [...(a.skills || []), sk.id];
+                            await patch({ skills: next });
+                            toast('success', on ? `Removed ${sk.title}` : `Attached ${sk.title}`);
+                          }}
+                          className={'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' + (on ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700')}>
+                          {on ? '✓ ' : ''}{sk.title}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-zinc-400">Attached skills ride along on every run (up to 3 are used); a single attached skill also gives the run its files and scripts.</p>
+                </>
+              )}
             </section>
 
             {/* When it runs — editable on the agent itself, not just at create (BEA-1075) */}
