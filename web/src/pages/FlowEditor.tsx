@@ -71,6 +71,7 @@ function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boo
   return (
     <div className={'relative cursor-pointer rounded-lg border px-3 py-2 text-xs shadow-sm transition-shadow hover:ring-2 hover:ring-emerald-400/40 ' + (KIND_STYLE[data.kind] || KIND_STYLE.tool) + (off ? ' opacity-40' : '') + (selected ? ' ring-2 ring-emerald-500' : runRing)} style={{ minWidth: 130, maxWidth: 220 }}>
       <RunBadge s={rs} />
+      {data.pin?.output != null && <span title="Frozen — tests reuse this result" className="absolute -right-1.5 -top-1.5 rounded-full bg-sky-500 px-1 text-[9px] leading-4 text-white shadow">❄</span>}
       {data.kind !== 'question' && <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-zinc-400" />}
       <div className="flex items-start gap-1.5">
         <div className="min-w-0 flex-1">
@@ -258,6 +259,26 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
     // edge data (e.g. onError, BEA-1071) must survive the round-trip — it drives the executor.
     return { nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })), edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated, data: e.data })) };
   }
+  // "Run to here" (BEA-1072): save silently, then test one block with its upstream feeders.
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ nodeId: string; label: string; data: any } | null>(null);
+  async function testToNode(nodeId: string) {
+    setTesting(nodeId);
+    try {
+      await fetch(`/api/flows/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, question, graph: graphJson() }) }); // silent save so the test sees your edits
+      const r = await fetch(`/api/flows/${id}/test-node`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodeId }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not test');
+      const label = (nodes.find((n) => n.id === nodeId)?.data as any)?.label || 'Block';
+      setTestResult({ nodeId, label, data: d });
+    } catch (e: any) { toast('error', e?.message || 'Could not test'); }
+    setTesting(null);
+  }
+  function freezeResult(nodeId: string, output: string) {
+    setNodeData(nodeId, { pin: { output, at: new Date().toISOString() } });
+    toast('success', 'Frozen — tests reuse this result until you unfreeze (real runs ignore it)');
+  }
+
   async function save() {
     setSaving(true);
     try {
@@ -360,6 +381,36 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
              </EdgeCtx.Provider>
             </NodeCtx.Provider>
             {picker && <BlockPicker palette={palette} onPick={pick} onClose={() => setPicker(null)} />}
+            {/* Test-to-here result: exactly what went IN and what came OUT of one block (BEA-1072) */}
+            {testResult && (
+              <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={() => setTestResult(null)}>
+                <div className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-3 overflow-hidden rounded-t-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-semibold">▶ Tested: {testResult.label}</h2>
+                    <button onClick={() => setTestResult(null)} className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X className="h-4 w-4" /></button>
+                  </div>
+                  <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">What went in</div>
+                      <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-950/60 dark:text-zinc-300">{testResult.data.input || '(nothing — this block starts the chain)'}</pre>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">What came out</div>
+                      <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-xs text-zinc-700 dark:bg-zinc-950/60 dark:text-zinc-300">{testResult.data.output || (testResult.data.message ? '✗ ' + testResult.data.message : '(empty)')}</pre>
+                    </div>
+                  </div>
+                  {testResult.data.nodes && Object.values(testResult.data.nodes).some((n: any) => n.pinned) && (
+                    <p className="text-[11px] text-sky-600 dark:text-sky-400">❄ Some feeding steps used their frozen results — nothing expensive re-ran.</p>
+                  )}
+                  <div className="flex gap-2">
+                    {testResult.data.ok && testResult.data.output && (
+                      <button onClick={() => { freezeResult(testResult.nodeId, testResult.data.output); setTestResult(null); }} className="flex-1 rounded-lg border border-sky-300 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-50 dark:border-sky-500/40 dark:text-sky-300 dark:hover:bg-sky-500/10">❄ Freeze this result for tests</button>
+                    )}
+                    <button onClick={() => setTestResult(null)} className="flex-1 rounded-lg bg-zinc-900 px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-zinc-900">Done</button>
+                  </div>
+                </div>
+              </div>
+            )}
             {showProc && (
               <div className="absolute inset-0 z-30 flex items-start justify-center bg-black/30 p-4 pt-12" onClick={() => setShowProc(false)}>
                 <div className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
@@ -379,7 +430,7 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
               </div>
             )}
           </div>
-          {selectedNode && <Inspector node={selectedNode} postMerge={postMergeIds.has(selectedNode.id)} onChange={setNodeData} onDelete={deleteNode} onClose={() => setSelected(null)} />}
+          {selectedNode && <Inspector node={selectedNode} postMerge={postMergeIds.has(selectedNode.id)} onChange={setNodeData} onDelete={deleteNode} onClose={() => setSelected(null)} onTest={testToNode} testing={testing === selectedNode.id} />}
         </div>
       </div>
     </div>
@@ -437,7 +488,7 @@ const TEXT_FIELD: Record<string, { key: string; label: string; placeholder: stri
   ask_user: { key: 'sub', label: 'Question to ask you', placeholder: 'e.g. Approve this draft? / Which option?' },
 };
 
-function Inspector({ node, postMerge, onChange, onDelete, onClose }: { node: Node; postMerge?: boolean; onChange: (id: string, patch: Record<string, any>) => void; onDelete: (id: string) => void; onClose: () => void }) {
+function Inspector({ node, postMerge, onChange, onDelete, onClose, onTest, testing }: { node: Node; postMerge?: boolean; onChange: (id: string, patch: Record<string, any>) => void; onDelete: (id: string) => void; onClose: () => void; onTest?: (id: string) => void; testing?: boolean }) {
   const d: any = node.data;
   const kind: string = d.kind;
   const set = (patch: Record<string, any>) => onChange(node.id, patch);
@@ -534,6 +585,17 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose }: { node: Nod
             <p className="mt-1 text-[11px] text-zinc-400">Empty = free text. Add lines to get tap buttons. The flow pauses here until you answer (in-app or later).</p>
           </div>
         )}
+          {d.pin?.output != null && (
+            <div className="rounded-lg border border-sky-200 bg-sky-50/60 px-2.5 py-1.5 text-xs text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300">
+              ❄ Frozen — tests reuse this result instead of re-running the step. Real runs ignore it.
+              <button onClick={() => onChange(node.id, { pin: undefined })} className="ml-2 font-semibold underline">Unfreeze</button>
+            </div>
+          )}
+          {onTest && kind !== 'question' && kind !== 'note' && (
+            <button onClick={() => onTest(node.id)} disabled={testing} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+              {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Test to here
+            </button>
+          )}
           <button onClick={() => onDelete(node.id)} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-500/30 dark:hover:bg-rose-500/10"><Trash2 className="h-3.5 w-3.5" />Delete block</button>
         </div>
       </div>
