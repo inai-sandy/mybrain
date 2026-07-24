@@ -111,3 +111,35 @@ describe('AgentToolsService — the MCP tool capabilities (BEA-622)', () => {
     });
   });
 });
+
+describe('validateDraft — the quiet double-check (BEA-1078)', () => {
+  function harness(llmOut: string) {
+    const annotations: any[] = [];
+    const agent: any = {
+      ask: jest.fn(async () => ({ id: 'wp1', resumeToken: 't', status: 'pending', kind: 'approve_edit_reject' })),
+      getRun: jest.fn(async () => ({ id: 'r1', input: 'Nudge Jayanth about the FRIDAY samples deadline' })),
+      getWaitpointById: jest.fn(async () => ({ id: 'wp1', status: 'pending', options: { description: 'Hi Jayanth, reminder the samples are due MONDAY.' } })),
+      annotateWaitpoint: jest.fn(async (_id: string, note: string) => { annotations.push(note); }),
+    };
+    const llm: any = { complete: jest.fn(async () => llmOut) };
+    const prompts: any = { get: jest.fn(async () => 'goal: {{goal}} draft: {{draft}} → JSON') };
+    const { AgentToolsService } = require('./agent-tools.service');
+    const svc = new AgentToolsService({} as any, {} as any, agent, llm, prompts);
+    return { svc, agent, annotations };
+  }
+
+  it('a mismatched draft gets an amber warning on the card', async () => {
+    const h = harness('{"ok": false, "note": "The draft says Monday but the goal says Friday."}');
+    await h.svc.validateDraft('r1', 'wp1');
+    expect(h.annotations).toEqual(['The draft says Monday but the goal says Friday.']);
+  });
+
+  it('a fine draft stays untouched, and validator failures never block the ask', async () => {
+    const ok = harness('{"ok": true}');
+    await ok.svc.validateDraft('r1', 'wp1');
+    expect(ok.annotations).toEqual([]);
+    const broken = harness('not json at all');
+    await broken.svc.validateDraft('r1', 'wp1'); // must not throw
+    expect(broken.annotations).toEqual([]);
+  });
+});

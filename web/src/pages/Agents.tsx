@@ -108,6 +108,10 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
       </div>
       <p className="mt-2 whitespace-pre-wrap rounded-xl bg-white/70 px-3 py-2 text-sm text-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-200">{w.question}</p>
       {isApprove && draft && <p className="mt-2 rounded-lg border-l-2 border-amber-400 bg-white/50 px-3 py-1.5 text-xs text-zinc-600 dark:bg-zinc-900/40 dark:text-zinc-300">{draft}</p>}
+      {/* The quiet double-check's warning (BEA-1078) — only shows when something looked off. */}
+      {isApprove && typeof w.options === 'object' && w.options && (w.options as any).validatorNote && (
+        <p className="mt-2 rounded-lg bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-700 dark:text-rose-300">⚠️ Check closely: {(w.options as any).validatorNote}</p>
+      )}
 
       {editing || (!choices.length && !isApprove) ? (
         <div className="mt-3 flex gap-2">

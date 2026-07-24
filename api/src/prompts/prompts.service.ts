@@ -12,7 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
-  | 'agent.metaDraft'
+  | 'agent.metaDraft' | 'agent.draftCheck'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -795,6 +795,23 @@ Reply with ONLY JSON, no prose:
  "evals": ["<2-3 realistic example inputs to test it on>"]
 }
 Everything concrete, nothing vague. The plan must be doable by an AI agent that has web search, the user's saved notes (search_brain), documents (save_document) and questions to the user (ask_user).`,
+});
+
+REGISTRY.push({
+  key: 'agent.draftCheck',
+  label: 'Agents — the quiet double-check',
+  description: "Sanity-checks a draft the agent wants approved (a message, an action) against the run's goal, and writes ONE short warning if something looks off. The goal and draft are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+  category: 'Agents',
+  default: `An AI agent is asking its owner to approve a draft action. Quietly sanity-check it.
+
+The run's goal:
+{{goal}}
+
+The draft it wants approved:
+{{draft}}
+
+Does the draft actually fit the goal? Look for: wrong person or name, wrong date or amount, tone that would embarrass the owner, doing more than the goal asked, or contradicting the goal.
+Reply ONLY JSON: {"ok": true} if it looks fine, or {"ok": false, "note": "<ONE short plain-English warning, e.g. 'The draft says Monday but the goal says Friday.'>"}. Be strict about real mistakes, relaxed about style.`,
 });
 
 const MAP = new Map(REGISTRY.map((p) => [p.key, p]));

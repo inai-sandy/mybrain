@@ -2,6 +2,8 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { DocumentsService } from '../documents/documents.service';
 import { MemoryService } from '../memory/memory.service';
 import { AgentService, WaitKind } from './agent.service';
+import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 export type SaveDocInput = { title: string; content: string; tags?: string[]; collectionId?: string | null; kind?: string; remember?: boolean; runId?: string };
 export type SearchBrainInput = { query: string; limit?: number };
@@ -18,6 +20,9 @@ export class AgentToolsService {
     private readonly documents: DocumentsService,
     private readonly memory: MemoryService,
     private readonly agent: AgentService,
+    // Optional + LAST so positional test construction stays valid (BEA-1078).
+    private readonly llm?: LlmService,
+    private readonly prompts?: PromptsService,
   ) {}
 
   /**
@@ -91,12 +96,35 @@ export class AgentToolsService {
       defaultValue: input.defaultValue,
       expiresInMs: input.expiresInMs,
     });
+    // The quiet double-check (BEA-1078): drafts get a background sanity pass against the run's
+    // goal; a real mismatch lands as an amber warning on the approval card. Fire-and-forget.
+    if (input.kind === 'approve_edit_reject') void this.validateDraft(input.runId, wp.id).catch(() => undefined);
     return {
       waitpointId: wp.id,
       token: wp.resumeToken,
       status: wp.status, // 'pending' — the run is now awaiting_input
       note: 'The run is paused durably. Poll get_answer with this token, or the run will be resumed when the user replies.',
     };
+  }
+
+  /** Sanity-check a pending draft vs the run's goal; annotate the waitpoint if it looks wrong. */
+  async validateDraft(runId: string, waitpointId: string): Promise<void> {
+    if (!this.llm) return;
+    try {
+      const [run, wp] = await Promise.all([this.agent.getRun(runId), this.agent.getWaitpointById(waitpointId)]);
+      if (!run || !wp || wp.status !== 'pending') return;
+      const draft = wp.options && !Array.isArray(wp.options) ? String((wp.options as any).description || (wp.options as any).command || '') : '';
+      if (!draft.trim() || !run.input) return;
+      const tpl = (await this.prompts?.get('agent.draftCheck').catch(() => '')) || '';
+      if (!tpl) return;
+      const out = await this.llm.complete(tpl.replaceAll('{{goal}}', String(run.input).slice(0, 500)).replaceAll('{{draft}}', draft.slice(0, 800)), 200, 'agent-draft-check');
+      const m = (out || '').match(/\{[\s\S]*\}/);
+      if (!m) return;
+      const g = JSON.parse(m[0]);
+      if (g.ok === false && g.note) {
+        await this.agent.annotateWaitpoint(waitpointId, String(g.note).slice(0, 200));
+      }
+    } catch { /* the check is best-effort — never block the ask */ }
   }
 
   /** remember — write a durable fact straight into the user's memory (RAG + SuperMemory). */
