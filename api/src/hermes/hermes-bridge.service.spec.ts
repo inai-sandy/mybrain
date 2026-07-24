@@ -37,9 +37,24 @@ function mockCodex(resp: any = {}) {
     const body = JSON.parse((init && init.body) || '{}');
     const r = (typeof resp === 'function' ? resp(body) : resp) || {};
     if (r.throw) throw new Error(r.throw);
-    if (r.httpError) return { ok: false, json: async () => ({ error: r.error || 'boom' }) } as any;
-    return { ok: true, json: async () => ({ text: r.text ?? 'ok', sessionId: 's', events: r.events ?? [] }) } as any;
+    const headers = { get: () => 'application/json' };
+    if (r.httpError) return { ok: false, headers, json: async () => ({ error: r.error || 'boom' }) } as any;
+    return { ok: true, headers, json: async () => ({ text: r.text ?? 'ok', sessionId: 's', events: r.events ?? [] }) } as any;
   });
+  (global as any).fetch = fn;
+  return fn;
+}
+
+/** ndjson streaming variant (BEA-1084): yields the given lines, then a result line. */
+function mockCodexStream(lines: any[], result: any = { text: 'streamed answer', sessionId: 's', events: [], usage: null, error: null }) {
+  const fn = jest.fn(async () => ({
+    ok: true,
+    headers: { get: () => 'application/x-ndjson' },
+    body: (async function* () {
+      for (const l of lines) yield JSON.stringify({ type: 'ev', ev: l }) + '\n';
+      yield JSON.stringify({ type: 'result', ...result }) + '\n';
+    })(),
+  }) as any);
   (global as any).fetch = fn;
   return fn;
 }
@@ -319,6 +334,32 @@ describe('HermesBridgeService (Codex engine)', () => {
     expect(seenBody.prompt).toContain('The user answered: "blue"');
     expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done' }));
     expect(agent.steps.some((s: any) => /resuming/i.test(s.label))).toBe(true);
+  });
+
+  it('BEA-1084 streams live steps in plain words while the turn runs, and takes the result line', async () => {
+    const agent = fakeAgent();
+    mockCodexStream([
+      { type: 'mcp_tool_call', tool: 'search_brain', name: 'mybrain' },
+      { type: 'web_search', query: 'best solar water heater hyderabad' },
+      { type: 'mcp_tool_call', tool: 'get_answer', name: 'mybrain' }, // polling noise — must be filtered
+      { type: 'mcp_tool_call', tool: 'save_document', name: 'mybrain' },
+      { type: 'agent_message', text: 'the answer' }, // the answer itself, not a step
+    ]);
+    await build(agent).execute('run-1', { prompt: 'research', title: 'T', save: false });
+    const labels = agent.steps.map((s: any) => s.label);
+    expect(labels).toContain('🧠 Searched your brain');
+    expect(labels.some((l: string) => l.startsWith('🌐 Searched: best solar'))).toBe(true);
+    expect(labels).toContain('💾 Saved a document');
+    expect(labels.every((l: string) => !l.includes('get_answer'))).toBe(true); // noise filtered
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done', resultText: 'streamed answer' }));
+  });
+
+  it('BEA-1084 an old runner (plain JSON reply) still works — graceful fallback', async () => {
+    const agent = fakeAgent();
+    mockCodex({ text: 'legacy ok', events: [{ type: 'mcp_tool_call', name: 'mybrain', tool: 'search_brain' }] });
+    await build(agent).execute('run-1', { prompt: 'x', save: false });
+    expect(agent.steps.some((s: any) => s.label === '🧠 Searched your brain')).toBe(true);
+    expect(agent.finishRun).toHaveBeenCalledWith('run-1', expect.objectContaining({ status: 'done', resultText: 'legacy ok' }));
   });
 
   it('BEA-1070 replay re-runs a finished run on the SAME input and links back via a step', async () => {
