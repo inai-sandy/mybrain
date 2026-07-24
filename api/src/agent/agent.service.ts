@@ -371,6 +371,15 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return wp ? this.shapeWaitpoint(wp) : null;
   }
 
+  /** Attach the quiet double-check's warning to a pending draft (BEA-1078). */
+  async annotateWaitpoint(id: string, validatorNote: string) {
+    const wp = await this.prisma.waitpoint.findUnique({ where: { id } });
+    if (!wp || wp.status !== 'pending') return;
+    const options = this.parse(wp.options, {} as any);
+    const next = options && !Array.isArray(options) ? { ...options, validatorNote } : { validatorNote };
+    await this.prisma.waitpoint.update({ where: { id }, data: { options: JSON.stringify(next) } }).catch(() => undefined);
+  }
+
   /** Cancel a run and any of its still-pending questions. */
   async cancelRun(id: string) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
