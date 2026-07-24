@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { EmoCardsService, EmoLane, EmoStatus } from './emo-cards.service';
+import { EmoAgentLaneService } from './emo-agent-lane.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
@@ -36,6 +37,7 @@ export class EmoController {
     private readonly notesSvc: NotesService,
     private readonly closeLane: EmoCloseService, // last on purpose: keeps positional wiring stable
     private readonly briefLane: EmoBriefService,
+    private readonly agentLane: EmoAgentLaneService,
   ) {}
 
   // Shared EMO settings (BEA-908) — same source of truth for web + app.
@@ -217,6 +219,7 @@ export class EmoController {
     else if (res.ok && res.card?.lane === 'research') void this.researchLane.handle(id).catch(() => undefined);
     else if (res.ok && res.card?.lane === 'close') void this.closeLane.handle(id).catch(() => undefined); // "which one?" (BEA-1033)
     else if (res.ok && res.card?.lane === 'brief') void this.briefLane.handle(id).catch(() => undefined); // "which person?" (BEA-1032)
+    else if (res.ok && res.card?.lane === 'agent') void this.agentLane.handle(id, (body?.answer ?? '').toString()).catch(() => undefined); // "which agent?" (BEA-1086)
     return res;
   }
 
