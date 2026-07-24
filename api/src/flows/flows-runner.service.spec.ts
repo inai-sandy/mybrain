@@ -36,6 +36,18 @@ describe('FlowRunnerService.reconcileOrphans (BEA-776)', () => {
     const prisma = { flowRun: { findMany: async () => [], update: async () => { throw new Error('should not update'); } } };
     expect(await runnerWithPrisma(prisma).reconcileOrphans()).toBe(0);
   });
+
+  it('BEA-859 boot reconcile retries through a transient DB lock', async () => {
+    let calls = 0;
+    const svc = runnerWithPrisma({});
+    (svc as any).reconcileOrphans = jest.fn(async () => {
+      calls++;
+      if (calls < 2) throw new Error('database is locked');
+      return 1;
+    });
+    await svc.reconcileWithRetry(5, 1);
+    expect(calls).toBe(2);
+  });
 });
 
 describe('FlowRunnerService.execute — failure propagation (BEA-800)', () => {

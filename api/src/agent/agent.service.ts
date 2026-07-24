@@ -32,14 +32,28 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     // A run's driver lives in this process's memory. If the process restarts (deploy/crash/reboot)
     // mid-run, the row is left status='running' with nothing to advance it — it would spin forever.
-    // Fail those orphans on boot so they never spin silently again (BEA-629).
-    this.reconcileOrphans().catch(() => undefined);
+    // Fail those orphans on boot so they never spin silently again (BEA-629). The DB can be briefly
+    // locked in the post-deploy stampede, so a failed attempt RETRIES instead of being swallowed —
+    // a swallowed failure left runs stuck 'running' in the UI (BEA-859).
+    void this.reconcileWithRetry();
     // Per-minute sweeper that applies timeouts to overdue questions. Guarded so a bad tick
     // can never crash the app (matches the gmail-brief.service.ts pattern).
     this.sweepTimer = setInterval(() => {
       this.sweepExpired().catch(() => undefined);
     }, 60_000);
     if (typeof this.sweepTimer.unref === 'function') this.sweepTimer.unref();
+  }
+
+  /** Boot reconcile with retries (BEA-859): up to 5 attempts, 5s apart, then give up loudly-ish. */
+  async reconcileWithRetry(attempts = 5, delayMs = 5_000): Promise<void> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await this.reconcileOrphans();
+        return;
+      } catch {
+        if (i < attempts - 1) await new Promise((r) => { const t = setTimeout(r, delayMs); if (typeof (t as any).unref === 'function') (t as any).unref(); });
+      }
+    }
   }
 
   /**
