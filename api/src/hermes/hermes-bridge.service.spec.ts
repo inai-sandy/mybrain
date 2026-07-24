@@ -28,6 +28,7 @@ const fakeDocs = () => ({ create: jest.fn(async (i: any) => ({ id: 'doc-1', slug
 const fakeTg = () => ({ pushAgentQuestion: jest.fn(async () => undefined), notifyAgentPaused: jest.fn(async () => undefined) });
 const fakeMem = (hits: any[] = []) => ({ searchBrain: jest.fn(async () => hits), enqueue: jest.fn(async () => undefined) });
 const fakeLlm = (out = '') => ({ complete: jest.fn(async () => out) });
+const fakePush = () => ({ send: jest.fn(async () => ({ sent: 1, pruned: 0 })) });
 
 // The engine is the host codex-runner, reached over HTTP. Mock global.fetch to drive a turn.
 // resp: object or (body)=>object with { text?, events?, httpError?, error?, throw? }.
@@ -43,8 +44,8 @@ function mockCodex(resp: any = {}) {
   return fn;
 }
 
-function build(agent: any, mem = fakeMem(), llm = fakeLlm(), docs = fakeDocs(), tg = fakeTg()) {
-  return new HermesBridgeService(agent as any, docs as any, tg as any, mem as any, llm as any);
+function build(agent: any, mem = fakeMem(), llm = fakeLlm(), docs = fakeDocs(), tg = fakeTg(), push = fakePush()) {
+  return new HermesBridgeService(agent as any, docs as any, tg as any, mem as any, llm as any, push as any);
 }
 
 describe('HermesBridgeService (Codex engine)', () => {
@@ -155,7 +156,7 @@ describe('HermesBridgeService (Codex engine)', () => {
   it('BEA-700 listSavedByAgents returns agent-tagged docs + brain learnings', async () => {
     const docs: any = { list: async () => ({ documents: [{ id: 'd1', title: 'Saved A', tags: ['agent'], description: 'x', createdAt: '2026-06-30' }, { id: 'd2', title: 'Note', tags: ['note'] }] }), remove: async () => undefined };
     const mem: any = { listRagByTag: async () => [{ id: 'l1', title: 'Agent learned' }] };
-    const svc = new HermesBridgeService({} as any, docs, fakeTg() as any, mem, fakeLlm() as any);
+    const svc = new HermesBridgeService({} as any, docs, fakeTg() as any, mem, fakeLlm() as any, fakePush() as any);
     const res = await svc.listSavedByAgents();
     expect(res.documents.map((d: any) => d.id)).toEqual(['d1']); // only the 'agent'-tagged doc
     expect(res.brainLearnings).toHaveLength(1);

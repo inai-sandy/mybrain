@@ -6,6 +6,7 @@ import { GrowTextarea } from '../ui/GrowTextarea';
 import { DictateButton } from '../ui/DictateButton';
 import { DepthDial, type Depth } from '../ui/DepthDial';
 import { STARTERS, type Starter } from '../ui/agentStarters';
+import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
 
 export type Run = { id: string; title?: string; status: string; startedAt: string; endedAt?: string | null; outputDocId?: string | null };
 
@@ -314,6 +315,15 @@ export function Agents() {
   // Run popup: after planning a deep research, pick which sub-questions to run. (BEA-773)
   const [planFor, setPlanFor] = useState<{ flowId: string; subs: { id: string; branchIdx: number; sub: string; on: boolean }[] } | null>(null);
   const [q, setQ] = useState('');
+  // Slim one-tap push opt-in (BEA-1088) — shown while this device could get notifications but isn't
+  // subscribed yet (covers both "never asked" and "allowed but not registered").
+  const [pushNudge, setPushNudge] = useState(false);
+  useEffect(() => {
+    if (localStorage.getItem('push.nudgeDismissed') === '1') return;
+    const perm = pushPermission();
+    if (perm === 'denied' || perm === 'unsupported') return;
+    pushEnabledHere().then((on) => { if (!on) setPushNudge(true); }).catch(() => undefined);
+  }, []);
 
   const loadHome = useCallback(() => fetch('/api/agent/home').then((r) => r.json()).then(setHome).catch(() => setHome((p) => p || { waiting: [], running: [], landed: [], agents: [] })), []);
 
@@ -482,6 +492,15 @@ export function Agents() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* One-tap phone notifications (BEA-1088) — shown until this device opts in or dismisses. */}
+      {pushNudge && (
+        <button onClick={async () => { const r = await enablePush(); if (r.ok) { toast('success', 'Phone notifications are ON'); setPushNudge(false); } else { toast('error', r.message || 'Not allowed'); setPushNudge(false); localStorage.setItem('push.nudgeDismissed', '1'); } }}
+          className="flex w-full items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-left text-sm text-emerald-800 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+          🔔 <span className="flex-1"><b>Get notified on your phone</b> when an agent needs you or finishes — tap to turn on.</span>
+          <span onClick={(e) => { e.stopPropagation(); setPushNudge(false); localStorage.setItem('push.nudgeDismissed', '1'); }} className="px-1 text-emerald-600/70 hover:text-emerald-800 dark:hover:text-emerald-200">✕</span>
+        </button>
       )}
 
       {/* ⚡ Waiting on you — the Mission Control strip (BEA-1066 + BEA-1087) */}

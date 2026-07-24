@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { forceUpdate } from '../ui/forceUpdate';
+import { enablePush, disablePush, pushEnabledHere } from '../ui/push';
 
 type FieldDef = { key: string; label: string; type?: string };
 type Integration = { name: string; label: string; desc: string; icon: LucideIcon; managed?: boolean; testable?: boolean; fields?: FieldDef[] };
@@ -343,14 +344,44 @@ function AgentEngineSection() {
   const [collections, setCollections] = useState<any[]>([]);
   const [savedAt, setSavedAt] = useState(0);
   const [restarting, setRestarting] = useState(false);
+  // Phone notifications (BEA-1088)
+  const [pushHere, setPushHere] = useState<boolean | null>(null);
+  const [pushDevices, setPushDevices] = useState<number | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
 
+  const loadPush = () => {
+    pushEnabledHere().then(setPushHere).catch(() => setPushHere(false));
+    fetch('/api/push/status').then((r) => r.json()).then((d) => setPushDevices(d?.devices ?? 0)).catch(() => setPushDevices(null));
+  };
   const loadEngine = () => fetch('/api/agent/engine').then((r) => r.json()).then(setEngine).catch(() => setEngine({ ok: false }));
   useEffect(() => {
     loadEngine();
+    loadPush();
     fetch('/api/agent/settings').then((r) => r.json()).then(setCfg).catch(() => setCfg({ model: '', autonomy: 'cautious', askTimeoutMin: 20, recall: true, learn: true, outputCollectionId: null }));
     fetch('/api/agent/models').then((r) => r.json()).then(setModels).catch(() => setModels([]));
     fetch('/api/documents/collections').then((r) => r.json()).then((d) => setCollections(Array.isArray(d) ? d : d?.collections || [])).catch(() => setCollections([]));
   }, []);
+
+  async function togglePush() {
+    setPushBusy(true);
+    try {
+      if (pushHere) {
+        await disablePush();
+        toast('success', 'This device will no longer get notifications');
+      } else {
+        const r = await enablePush();
+        if (!r.ok) throw new Error(r.message);
+        toast('success', 'Phone notifications are ON for this device');
+      }
+      loadPush();
+    } catch (e: any) { toast('error', e?.message || 'Could not change notifications'); } finally { setPushBusy(false); }
+  }
+  async function testPush() {
+    try {
+      const d = await (await fetch('/api/push/test', { method: 'POST' })).json();
+      toast(d?.sent ? 'success' : 'error', d?.sent ? `Test sent to ${d.sent} device${d.sent > 1 ? 's' : ''}` : 'No devices are subscribed yet');
+    } catch { toast('error', 'Could not send the test'); }
+  }
 
   async function save(patch: any) {
     setCfg((c: any) => ({ ...c, ...patch }));
@@ -465,6 +496,14 @@ function AgentEngineSection() {
             <div className="flex items-center gap-2">
               <input type="number" min={1} max={720} value={cfg.askTtlHours ?? 72} onChange={(e) => save({ askTtlHours: Math.max(1, Number(e.target.value) || 72) })} className="w-24 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
               <span className="text-sm text-zinc-500">hours</span>
+            </div>
+          </EngineField>
+          <EngineField label="Phone notifications" hint={`Your phone buzzes when an agent needs you or a long run finishes${pushDevices != null ? ` · ${pushDevices} device${pushDevices === 1 ? '' : 's'} subscribed` : ''}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={togglePush} disabled={pushBusy || pushHere === null} className={'rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 ' + (pushHere ? 'border border-zinc-300 dark:border-zinc-700' : 'bg-emerald-600 text-white hover:bg-emerald-500')}>
+                {pushHere === null ? 'Checking…' : pushHere ? 'Turn off on this device' : '🔔 Turn on for this device'}
+              </button>
+              {!!pushDevices && <button onClick={testPush} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Send a test</button>}
             </div>
           </EngineField>
           <EngineToggle id="set-recall" label="Recall my brain before each run" hint="Pulls relevant notes from your memory into the task" checked={!!cfg.recall} onChange={(v) => save({ recall: v })} />

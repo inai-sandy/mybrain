@@ -1147,3 +1147,14 @@ model RecordingMark {
   @@index([recordingId])
   @@index([status])
 }
+
+/// One browser/device subscribed to Web Push (BEA-1088). Endpoint is the identity; dead
+/// endpoints (410/404 on send) are pruned automatically.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+}

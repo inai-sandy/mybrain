@@ -5,6 +5,7 @@ import { AgentService } from '../agent/agent.service';
 import { LlmService } from '../llm/llm.service';
 import { DocumentsService } from '../documents/documents.service';
 import { MemoryService } from '../memory/memory.service';
+import { PushService } from '../push/push.service';
 import { SkillsService } from '../skills/skills.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
@@ -42,6 +43,8 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly skills: SkillsService,
     private readonly telegram: TelegramService,
     private readonly flows: FlowsService,
+    // Optional so older test harnesses that build with 9 args keep working (BEA-1088).
+    private readonly push?: PushService,
   ) {}
 
   onModuleInit() {
@@ -383,6 +386,7 @@ export class FlowRunnerService implements OnModuleInit {
         if (!terminal.length || terminal[terminal.length - 1]?.text !== '✗ a step failed') term('✗ a step failed');
         await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
         this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
+        void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: (failed.output || 'a step failed').slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
         this.dropDriver(runId, gen);
         return;
       }
@@ -398,6 +402,7 @@ export class FlowRunnerService implements OnModuleInit {
     // Notify on a background/long run so you know it's ready even if you walked away (workspace ⑥).
     if (!opts.evalMode && runRow?.startedAt && Date.now() - new Date(runRow.startedAt).getTime() > 60_000) {
       this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'done', snippet: finalOutput }).catch(() => undefined);
+      void this.push?.send({ title: `${flow?.name || 'Your flow'} finished ✓`, body: (finalOutput || 'The result is ready.').slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
     }
   }
 
@@ -421,6 +426,8 @@ export class FlowRunnerService implements OnModuleInit {
       data: { status: 'waiting', results: JSON.stringify(results), waitNodeId: node.id, waitQuestion: question, waitKind: kind, waitOptions: JSON.stringify(options), waitToken: randomBytes(16).toString('hex') },
     });
     this.telegram.notifyFlowWaiting({ flowName: flow?.name, question }).catch(() => undefined);
+    // Phone push (BEA-1088): a flow's direct ask always delivers; tapping lands on the waiting card.
+    void this.push?.send({ title: `${flow?.name || 'Your flow'} needs you`, body: question.slice(0, 160), url: `/agent?focus=${runId}`, tag: `flow-ask-${runId}`, isAsk: true }).catch(() => undefined);
   }
 
   /** Answer the open "Ask me" question and resume the run (Move B). */

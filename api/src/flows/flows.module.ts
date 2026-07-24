@@ -6,6 +6,7 @@ import { HermesModule } from '../hermes/hermes.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { MemoryModule } from '../memory/memory.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { PushModule } from '../push/push.module';
 import { FlowsService } from './flows.service';
 import { FlowRunnerService } from './flows-runner.service';
 import { FlowScheduler } from './flow-scheduler.service';
@@ -13,7 +14,7 @@ import { FlowsController } from './flows.controller';
 
 /** Flow canvas (Phase 2, BEA-644/646) — saved flows, palette, decompose, the graph executor + scheduler. */
 @Module({
-  imports: [SkillsModule, LlmModule, AgentModule, HermesModule, DocumentsModule, MemoryModule, TelegramModule],
+  imports: [SkillsModule, LlmModule, AgentModule, HermesModule, DocumentsModule, MemoryModule, TelegramModule, PushModule],
   controllers: [FlowsController],
   providers: [FlowsService, FlowRunnerService, FlowScheduler],
   exports: [FlowsService], // EMO Deep Research lane (BEA-870) builds & saves flows

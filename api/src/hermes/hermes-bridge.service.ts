@@ -12,6 +12,7 @@ import { DocumentsService } from '../documents/documents.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
+import { PushService } from '../push/push.service';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -53,6 +54,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly telegram: TelegramService,
     private readonly memory: MemoryService,
     private readonly llm: LlmService,
+    private readonly push: PushService,
   ) {}
 
   onModuleInit() {
@@ -125,6 +127,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       const paused = await this.agent.pauseStaleAsks().catch(() => [] as any[]);
       for (const p of paused) {
         await this.telegram.notifyAgentPaused({ runTitle: p.title || 'Your agent', question: p.question, waitedHours: p.waitedHours }).catch(() => undefined);
+        await this.push?.send({ title: `${p.title || 'Your agent'} paused itself`, body: `Waited ${p.waitedHours}h for: ${String(p.question).slice(0, 120)}`, url: '/agent', tag: `pause-${p.runId}`, isAsk: true }).catch(() => undefined);
       }
     }
     const runs = await this.agent.listResumable().catch(() => [] as any[]);
@@ -464,6 +467,17 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     // this the run looks frozen for a minute+. Log that we sent it, then a "still working" tick.
     await this.agent.appendStep(runId, { label: `Sent to ${cfg.model || 'gpt-5.5'} · Codex`, status: 'running', kind: 'log' }).catch(() => undefined);
     const startedAt = Date.now();
+    // Phone push on landing (BEA-1088): failures always; successes only when the run took long
+    // enough that you probably walked away. Headless runs (flows/evals, allowAsk:false) never push.
+    const notifyEnd = async (status: 'done' | 'failed', detail?: string) => {
+      if (input.allowAsk === false) return;
+      const secs = Math.round((Date.now() - startedAt) / 1000);
+      if (status === 'failed') {
+        await this.push?.send({ title: `${input.title || 'Agent run'} failed`, body: (detail || 'The run hit a problem.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
+      } else if (secs > 60) {
+        await this.push?.send({ title: `${input.title || 'Agent run'} finished ✓`, body: (detail || 'The result is ready.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
+      }
+    };
     const heartbeat = setInterval(() => {
       const s = Math.round((Date.now() - startedAt) / 1000);
       void this.agent.appendStep(runId, { label: `Still working… ${fmtElapsed(s)}`, status: 'running', kind: 'log' }).catch(() => undefined);
@@ -475,6 +489,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     } catch (e: any) {
       clearInterval(heartbeat);
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
+      await notifyEnd('failed', friendlyError(e?.message));
       return;
     }
     clearInterval(heartbeat);
@@ -488,12 +503,17 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       await this.agent.parkRun(runId, result.sessionId);
       await this.agent.appendStep(runId, { label: 'Paused — waiting for your answer', status: 'awaiting' }).catch(() => undefined);
       const wp = (askedRun.waitpoints || []).filter((w: any) => w.status === 'pending').pop();
-      if (wp) await this.telegram.pushAgentQuestion({ runTitle: input.title, waitpointId: wp.id, question: wp.question, kind: wp.kind, options: wp.options }).catch(() => undefined);
+      if (wp) {
+        await this.telegram.pushAgentQuestion({ runTitle: input.title, waitpointId: wp.id, question: wp.question, kind: wp.kind, options: wp.options }).catch(() => undefined);
+        // Phone push (BEA-1088): a direct ask always delivers; tapping lands on the exact card.
+        await this.push?.send({ title: `${input.title || 'Your agent'} needs you`, body: String(wp.question).slice(0, 160), url: `/agent?focus=${wp.id}`, tag: `ask-${wp.id}`, isAsk: true }).catch(() => undefined);
+      }
       return;
     }
 
     if (result.status === 'error') {
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(result.error) });
+      await notifyEnd('failed', friendlyError(result.error));
       return;
     }
 
@@ -542,12 +562,14 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         await this.agent.attachOutput(runId, doc.id);
         await this.agent.appendStep(runId, { label: 'Saved to Documents', status: 'done', detail: doc.title });
         await this.agent.finishRun(runId, { status: 'done', outputDocId: doc.id, resultText: text, grade: gradeJson });
+        await notifyEnd('done', doc.title);
         return;
       } catch (e: any) {
         await this.agent.appendStep(runId, { label: 'Could not save the document', status: 'failed', detail: e?.message }).catch(() => undefined);
       }
     }
     await this.agent.finishRun(runId, { status: 'done', resultText: text, grade: gradeJson });
+    await notifyEnd('done', text.slice(0, 120));
   }
 }
 

@@ -46,6 +46,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Web Push handler (BEA-1088) — the generated SW imports our static push/notification code.
+        importScripts: ['push-sw.js'],
         // The main bundle crossed workbox's 2 MiB default (build hard-fails); keep precaching it.
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
