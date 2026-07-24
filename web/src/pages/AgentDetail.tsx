@@ -4,6 +4,7 @@ import { useGoBack } from '../ui/useGoBack';
 import { ArrowLeft, Save, Plus, Trash2, Loader2, Play, CheckCircle2, Sparkles, Check, X, Workflow, Clock, FileText, AlertCircle, Circle } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { FlowProcess } from '../ui/FlowProcess';
+import { SchedulePicker, schedText } from '../ui/SchedulePicker';
 import { DictateButton } from '../ui/DictateButton';
 
 const FlowEditor = lazy(() => import('./FlowEditor').then((m) => ({ default: m.FlowEditor })));
@@ -197,6 +198,22 @@ export function AgentDetail() {
                 </div>
               </label>
               <button onClick={saveCfg} disabled={savingCfg} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900">{savingCfg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
+            </section>
+
+            {/* When it runs — editable on the agent itself, not just at create (BEA-1075) */}
+            <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <h2 className="text-sm font-semibold">When it runs</h2>
+              <SchedulePicker
+                value={a?.schedule || null}
+                onChange={async (s) => {
+                  setA((p: any) => ({ ...p, schedule: s, scheduleText: schedText(s) }));
+                  try {
+                    const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schedule: s, scheduleText: schedText(s) }) });
+                    if (!r.ok) throw new Error();
+                    toast('success', schedText(s) ? `Saved — ${schedText(s)}` : 'Saved — manual only');
+                  } catch { toast('error', 'Could not save the schedule'); }
+                }}
+              />
             </section>
 
             <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

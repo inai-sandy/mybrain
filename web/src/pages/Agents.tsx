@@ -414,6 +414,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
           <option value="hour">Every hour</option>
         </select>
         {every !== 'manual' && <input type="time" value={at} onChange={(e) => setAt(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />}
+        <span className="w-full text-xs text-zinc-400 sm:w-auto">{every === 'manual' ? 'Runs only when you press Run.' : every === 'day' ? `Runs every day at ${at}.` : every === 'weekday' ? `Runs every weekday at ${at}.` : every === 'week' ? `Runs every Sunday at ${at}.` : `Runs every hour at :${at.split(':')[1] || '00'}.`}</span>
         <div className="ml-auto flex gap-2">
           <button onClick={onCancel} className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Cancel</button>
           <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}Save agent</button>
