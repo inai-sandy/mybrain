@@ -12,6 +12,7 @@ import { EmoCardsService } from './emo-cards.service';
 import { EmoCloseService } from './emo-close.service';
 import { EmoBriefService } from './emo-brief.service';
 import { BriefingsModule } from '../briefings/briefings.module';
+import { EmoAgentLaneService } from './emo-agent-lane.service';
 import { EmoRouterService } from './emo-router.service';
 import { EmoCaptureService } from './emo-capture.service';
 import { EmoSearchService } from './emo-search.service';
@@ -34,7 +35,7 @@ import { EmoController } from './emo.controller';
   imports: [BriefingsModule, VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule],
   controllers: [EmoController],
   providers: [EmoCardsService, EmoRouterService,
-    EmoCloseService, EmoBriefService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService],
+    EmoCloseService, EmoBriefService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService, EmoAgentLaneService],
   exports: [EmoCardsService, EmoRouterService],
 })
 export class EmoModule {}

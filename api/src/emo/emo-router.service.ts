@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmoAgentLaneService } from './emo-agent-lane.service';
 import { EmoCardsService, EmoLane } from './emo-cards.service';
 import { EmoSearchService } from './emo-search.service';
 import { EmoTaskService } from './emo-task.service';
@@ -14,7 +15,7 @@ import { PromptsService } from '../prompts/prompts.service';
 
 type Segment = { lane: EmoLane; summary: string; text: string };
 
-const LANES: EmoLane[] = ['task', 'reminder', 'story', 'meeting', 'search', 'research', 'note', 'idea', 'close', 'brief'];
+const LANES: EmoLane[] = ['task', 'reminder', 'story', 'meeting', 'search', 'research', 'note', 'idea', 'close', 'brief', 'agent'];
 // Which lanes are terminal (the card itself IS the result) vs need a lane to process them.
 const TERMINAL = new Set<EmoLane>(['story', 'note']);
 
@@ -39,6 +40,7 @@ export class EmoRouterService {
     private readonly closeLane: EmoCloseService, // last on purpose: keeps positional wiring stable
     private readonly briefLane: EmoBriefService,
     private readonly prompts: PromptsService,
+    private readonly agentLane: EmoAgentLaneService,
   ) {}
 
   private parseSegments(raw: string | null, transcript: string): Segment[] {
@@ -113,6 +115,7 @@ export class EmoRouterService {
         else if (card.lane === 'reminder') void this.reminderLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'meeting') void this.meetingLane.handle(card.id).catch(() => undefined);
         else if (card.lane === 'research') void this.researchLane.handle(card.id).catch(() => undefined);
+        else if (card.lane === 'agent') void this.agentLane.handle(card.id).catch(() => undefined); // run a saved agent by voice (BEA-1086)
       }
     }
     return { cards };

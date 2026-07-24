@@ -21,7 +21,7 @@ describe('EmoController (BEA-862)', () => {
   const settingsSvc: any = { get: jest.fn(async () => ({})), set: jest.fn(async () => ({})) };
   const deviceSvc: any = { turn: jest.fn(async () => ({ ok: true, mode: 'capture', heard: 'x', reply: 'r', say: 's' })), ttsWav16k: jest.fn(async () => Buffer.from('RIFF')), readAudio: jest.fn(() => Buffer.from('RIFFdata')) };
   const notesSvc: any = { create: jest.fn(async () => ({ id: 'n1' })) };
-  const ctrl = new EmoController(svc, router, capture, search, taskLane, reminderLane, storyLane, researchLane, askSvc, talkSvc, settingsSvc, deviceSvc, notesSvc, { handle: async () => undefined } as any, { handle: async () => undefined } as any);
+  const ctrl = new EmoController(svc, router, capture, search, taskLane, reminderLane, storyLane, researchLane, askSvc, talkSvc, settingsSvc, deviceSvc, notesSvc, { handle: async () => undefined } as any, { handle: async () => undefined } as any, { handle: async () => undefined } as any);
 
   it('uploads a recording to the capture pipeline, and rejects an empty upload', async () => {
     await ctrl.upload({ buffer: Buffer.from('audio'), originalname: 'r.webm', mimetype: 'audio/webm' });
