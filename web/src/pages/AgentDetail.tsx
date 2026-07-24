@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState, lazy, Suspense } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useGoBack } from '../ui/useGoBack';
-import { ArrowLeft, Save, Plus, Trash2, Loader2, Play, CheckCircle2, Sparkles, Check, X, Workflow, Clock, FileText, AlertCircle, Circle, MessageSquare, Send } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, Loader2, Play, CheckCircle2, Sparkles, Check, X, Workflow, Clock, FileText, AlertCircle, Circle } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { FlowProcess } from '../ui/FlowProcess';
-import { SchedulePicker, schedText } from '../ui/SchedulePicker';
-import { DictateButton } from '../ui/DictateButton';
 
 const FlowEditor = lazy(() => import('./FlowEditor').then((m) => ({ default: m.FlowEditor })));
 
@@ -27,7 +25,7 @@ function RunIcon({ s }: { s?: string }) {
   return <Circle className="h-4 w-4 text-zinc-300 dark:text-zinc-600" />;
 }
 
-type Tab = 'Build' | 'Flow' | 'Evals' | 'Runs';
+type Tab = 'Flow' | 'Evals' | 'Runs';
 
 export function AgentDetail() {
   const { id } = useParams();
@@ -37,7 +35,6 @@ export function AgentDetail() {
   const [a, setA] = useState<any>(null);
   const [task, setTask] = useState('');
   const [rubric, setRubric] = useState('');
-  const [savingCfg, setSavingCfg] = useState(false);
   const [newInput, setNewInput] = useState('');
   const [runningEvals, setRunningEvals] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
@@ -46,11 +43,11 @@ export function AgentDetail() {
   const [running, setRunning] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [process, setProcess] = useState<any>(null);
-  const [tab, setTab] = useState<Tab>('Build');
+  const [sp] = useSearchParams(); // opened from the agent's Settings → Flow / Tests / History (BEA-1090)
+  const initTab = (sp.get('tab') as Tab) || 'Flow';
+  const [tab, setTab] = useState<Tab>((['Flow', 'Evals', 'Runs'] as Tab[]).includes(initTab) ? initTab : 'Flow');
   const [runs, setRuns] = useState<any[] | null>(null);
   const [showCanvas, setShowCanvas] = useState(true);
-  const [allSkills, setAllSkills] = useState<any[] | null>(null); // installed skills for the attach chips (BEA-1079)
-  useEffect(() => { fetch('/api/skills').then((r) => r.json()).then((d) => setAllSkills(d.skills || [])).catch(() => setAllSkills([])); }, []);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dirtyRef = useRef(false); // true once you edit Task/Outcome — the eval poll must not overwrite it (BEA-817)
 
@@ -118,62 +115,11 @@ export function AgentDetail() {
     catch { toast('error', 'Could not run'); } finally { setRunning(false); }
   }
 
-  // ---- Change it by chatting (BEA-1065): message → proposed diff → apply on confirm ----
-  const [chatMsg, setChatMsg] = useState('');
-  const [chatBusy, setChatBusy] = useState(false);
-  const [chatLog, setChatLog] = useState<{ who: 'you' | 'ai'; text: string }[]>([]);
-  const [proposal, setProposal] = useState<any>(null); // {patch, changes, note}
-
-  async function sendChat() {
-    const msg = chatMsg.trim();
-    if (!msg || chatBusy) return;
-    setChatBusy(true);
-    setProposal(null);
-    setChatLog((p) => [...p, { who: 'you', text: msg }]);
-    setChatMsg('');
-    try {
-      const r = await fetch(`/api/agent/agents/${id}/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.message || 'Could not do that');
-      setChatLog((p) => [...p, { who: 'ai', text: d.note || 'Done.' }]);
-      if (d.patch && Object.keys(d.patch).length) setProposal(d);
-    } catch (e: any) {
-      setChatLog((p) => [...p, { who: 'ai', text: e.message || 'Something went wrong — try again.' }]);
-    }
-    setChatBusy(false);
-  }
-
-  async function applyProposal() {
-    if (!proposal || chatBusy) return;
-    setChatBusy(true);
-    try {
-      const d = await patch(proposal.patch);
-      if (!d) throw new Error();
-      dirtyRef.current = false;
-      setTask(d.prompt || '');
-      setRubric(d.rubric || '');
-      // agent is boss: when the words changed, re-draw the flow from them
-      if (flow && proposal.patch.prompt) {
-        await fetch(`/api/flows/${flow.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: d.prompt || '' }) }).catch(() => undefined);
-        await fetch(`/api/flows/${flow.id}/plan`, { method: 'POST' }).catch(() => undefined);
-        await load();
-        toast('success', 'Changed — and the flow was re-drawn to match');
-      } else {
-        await load();
-        toast('success', 'Changed');
-      }
-      setChatLog((p) => [...p, { who: 'ai', text: 'Applied ✓' }]);
-      setProposal(null);
-    } catch { toast('error', 'Could not apply the change'); }
-    setChatBusy(false);
-  }
-
   async function patch(body: any) {
     const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r.ok) { const d = await r.json(); setA(d); return d; }
     toast('error', 'Could not save');
   }
-  async function saveCfg() { setSavingCfg(true); await patch({ prompt: task, rubric }); dirtyRef.current = false; setSavingCfg(false); toast('success', 'Saved'); }
   async function addEval() { const input = newInput.trim(); if (!input) return; await patch({ evals: [...(a.evals || []), { id: 'ev_' + Math.random().toString(36).slice(2, 9), input }] }); setNewInput(''); }
   async function delEval(eid: string) { await patch({ evals: (a.evals || []).filter((e: any) => e.id !== eid) }); }
   async function suggestEvals() {
@@ -205,7 +151,6 @@ export function AgentDetail() {
   const evals = a.evals || [];
   const passed = evals.filter((e: any) => e.lastVerdict === 'pass').length;
   const scored = evals.filter((e: any) => e.lastVerdict).length;
-  const inp = 'w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
   const passPill = scored > 0 ? (passed === evals.length ? VERDICT.pass : passed === 0 ? VERDICT.fail : VERDICT.partial) : '';
 
   return (
@@ -227,131 +172,19 @@ export function AgentDetail() {
 
       {/* Tabs */}
       <nav className="mt-4 flex gap-1 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800">
-        {(['Build', 'Flow', 'Evals', 'Runs'] as Tab[]).map((t) => (
+        {(['Flow', 'Evals', 'Runs'] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)} className={'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === t ? 'border-emerald-500 text-zinc-900 dark:text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{t}</button>
         ))}
       </nav>
 
       <div className="mt-4">
-        {/* ---- BUILD ---- */}
-        {tab === 'Build' && (
-          <div className="space-y-4">
-            {/* Change it by chatting (BEA-1065) — the diff is shown and applied only on confirm */}
-            <section className="space-y-3 rounded-2xl border border-violet-200 bg-white p-4 dark:border-violet-500/30 dark:bg-zinc-900">
-              <h2 className="flex items-center gap-2 text-sm font-semibold"><MessageSquare className="h-4 w-4 text-violet-500" />Change it by chatting</h2>
-              {chatLog.length === 0 && <p className="text-xs text-zinc-400">Say the change in your own words — “add a step that messages Mom”, “run it every morning at 7”, “stop asking me before saving”. You'll see what would change before it sticks.</p>}
-              {chatLog.length > 0 && (
-                <div className="max-h-56 space-y-1.5 overflow-y-auto">
-                  {chatLog.map((m, i) => (
-                    <div key={i} className={'flex ' + (m.who === 'you' ? 'justify-end' : 'justify-start')}>
-                      <div className={'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm ' + (m.who === 'you' ? 'bg-violet-600 text-white' : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200')}>{m.text}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {proposal && (
-                <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-500/30 dark:bg-violet-500/10">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">Here's what would change</p>
-                  <ul className="mt-1.5 space-y-1">
-                    {(proposal.changes || []).map((c: string, i: number) => (
-                      <li key={i} className="flex items-start gap-1.5 text-sm text-zinc-700 dark:text-zinc-200"><Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-500" />{c}</li>
-                    ))}
-                    {(proposal.changes || []).length === 0 && <li className="text-sm text-zinc-600 dark:text-zinc-300">A small update to this agent.</li>}
-                  </ul>
-                  {proposal.patch?.prompt && flow && <p className="mt-1.5 text-[11px] text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
-                  <div className="mt-2 flex gap-2">
-                    <button onClick={applyProposal} disabled={chatBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Apply change</button>
-                    <button onClick={() => { setProposal(null); setChatLog((p) => [...p, { who: 'ai', text: 'Okay, left as it was.' }]); }} disabled={chatBusy} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Not this</button>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <input value={chatMsg} onChange={(e) => setChatMsg(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Tell it what to change…" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 pr-10 text-sm outline-none focus:border-violet-400 dark:border-zinc-700" />
-                  <DictateButton onText={(t) => setChatMsg((p) => (p ? p + ' ' : '') + t)} className="absolute right-1.5 top-1/2 -translate-y-1/2" />
-                </div>
-                <button onClick={sendChat} disabled={chatBusy || !chatMsg.trim()} title="Send" className="shrink-0 rounded-lg bg-violet-600 p-2 text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
-              </div>
-            </section>
-
-            <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-              <label className="block text-xs font-medium text-zinc-500">Task — what it does each run
-                <div className="relative mt-1">
-                  <textarea value={task} onChange={(e) => { dirtyRef.current = true; setTask(e.target.value); }} rows={3} className={inp + ' pr-11'} />
-                  <DictateButton onText={(t) => { dirtyRef.current = true; setTask((p) => (p ? p + ' ' : '') + t); }} className="absolute right-2 top-2" />
-                </div>
-              </label>
-              <label className="block text-xs font-medium text-zinc-500">Outcome — what does a good result look like? (each run is graded against this)
-                <div className="relative mt-1">
-                  <textarea value={rubric} onChange={(e) => { dirtyRef.current = true; setRubric(e.target.value); }} rows={3} placeholder="e.g. Has 3 bullets. Each is one short sentence. Mentions a source." className={inp + ' pr-11'} />
-                  <DictateButton onText={(t) => { dirtyRef.current = true; setRubric((p) => (p ? p + ' ' : '') + t); }} className="absolute right-2 top-2" />
-                </div>
-              </label>
-              <button onClick={saveCfg} disabled={savingCfg} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-white dark:text-zinc-900">{savingCfg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save</button>
-            </section>
-
-            {/* Skills this agent uses on every run (BEA-1079) */}
-            <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-              <h2 className="text-sm font-semibold">Skills it uses</h2>
-              {allSkills === null ? (
-                <div className="h-8 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />
-              ) : allSkills.length === 0 ? (
-                <p className="text-xs text-zinc-500">No skills installed yet — add some on the <Link to="/skills" className="text-emerald-600 hover:underline">Skills</Link> page.</p>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-1.5">
-                    {allSkills.map((sk: any) => {
-                      const on = (a?.skills || []).includes(sk.id);
-                      return (
-                        <button key={sk.id} title={sk.description || sk.title}
-                          onClick={async () => {
-                            const next = on ? (a.skills || []).filter((x: string) => x !== sk.id) : [...(a.skills || []), sk.id];
-                            await patch({ skills: next });
-                            toast('success', on ? `Removed ${sk.title}` : `Attached ${sk.title}`);
-                          }}
-                          className={'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' + (on ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700')}>
-                          {on ? '✓ ' : ''}{sk.title}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[11px] text-zinc-400">Attached skills ride along on every run (up to 3 are used); a single attached skill also gives the run its files and scripts.</p>
-                </>
-              )}
-            </section>
-
-            {/* When it runs — editable on the agent itself, not just at create (BEA-1075) */}
-            <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-              <h2 className="text-sm font-semibold">When it runs</h2>
-              <SchedulePicker
-                value={a?.schedule || null}
-                onChange={async (s) => {
-                  setA((p: any) => ({ ...p, schedule: s, scheduleText: schedText(s) }));
-                  try {
-                    const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schedule: s, scheduleText: schedText(s) }) });
-                    if (!r.ok) throw new Error();
-                    toast('success', schedText(s) ? `Saved — ${schedText(s)}` : 'Saved — manual only');
-                  } catch { toast('error', 'Could not save the schedule'); }
-                }}
-              />
-            </section>
-
-            <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="flex items-center gap-2 text-sm font-semibold"><Workflow className="h-4 w-4 text-violet-500" />How it runs</h2>
-                <button onClick={genFlowNow} disabled={genFlow} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{genFlow ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{flow ? 'Regenerate flow' : 'Generate flow'}</button>
-              </div>
-              {flow && process ? <FlowProcess process={process} prompt={prompt} /> : <p className="text-xs text-zinc-500">No flow yet — Generate one to turn this agent's Task into a step-by-step process you can edit and run.</p>}
-            </section>
-          </div>
-        )}
-
         {/* ---- FLOW (canvas on desktop, steps-first on mobile) ---- */}
         {tab === 'Flow' && (
           flow ? (
             <div>
-              <div className="mb-2 flex items-center justify-end sm:hidden">
-                <button onClick={() => setShowCanvas((v) => !v)} className="rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">{showCanvas ? 'Show steps' : 'Open canvas'}</button>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <button onClick={genFlowNow} disabled={genFlow} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10">{genFlow ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}Regenerate flow</button>
+                <button onClick={() => setShowCanvas((v) => !v)} className="rounded-lg border border-zinc-300 px-2 py-1 text-xs hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 sm:hidden">{showCanvas ? 'Show steps' : 'Open canvas'}</button>
               </div>
               {showCanvas ? (
                 <div className="h-[72vh] overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800">
