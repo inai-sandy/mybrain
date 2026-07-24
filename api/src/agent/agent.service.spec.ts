@@ -466,6 +466,22 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(await svc.claimResume(run.id)).toBe(true);
   });
 
+  it('BEA-859 boot reconcile retries through transient DB failures instead of swallowing them', async () => {
+    let calls = 0;
+    (svc as any).reconcileOrphans = jest.fn(async () => {
+      calls++;
+      if (calls < 3) throw new Error('database is locked');
+      return 0;
+    });
+    await svc.reconcileWithRetry(5, 1);
+    expect(calls).toBe(3); // failed twice, then succeeded — no orphan left stuck
+
+    calls = 0;
+    (svc as any).reconcileOrphans = jest.fn(async () => { calls++; throw new Error('database is locked'); });
+    await svc.reconcileWithRetry(4, 1); // exhausts without throwing (boot must not crash)
+    expect(calls).toBe(4);
+  });
+
   it('records and reads engine watchdog health (BEA-632)', async () => {
     expect(await svc.engineHealth()).toEqual({ lastHealthyAt: null, lastAutoRestartAt: null, lastError: null });
     await svc.recordEngineHealth({ healthyAt: 1234, error: null });

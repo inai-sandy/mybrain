@@ -49,7 +49,21 @@ export class FlowRunnerService implements OnModuleInit {
     // (deploy/crash/reboot — we docker rm -f on every ship) leaves 'running' rows with nothing to
     // advance them, and start()'s no-stacking guard then hands that dead run back on every future
     // Run click and schedule — the flow can never run again. Fail those orphans on boot. (BEA-776)
-    this.reconcileOrphans().catch(() => undefined);
+    // Retried (BEA-859): the DB can be briefly locked in the post-deploy stampede; a swallowed
+    // failure would leave those runs stuck 'running' — and blocking their flow — forever.
+    void this.reconcileWithRetry();
+  }
+
+  /** Boot reconcile with retries (BEA-859): up to 5 attempts, 5s apart. */
+  async reconcileWithRetry(attempts = 5, delayMs = 5_000): Promise<void> {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await this.reconcileOrphans();
+        return;
+      } catch {
+        if (i < attempts - 1) await new Promise((r) => { const t = setTimeout(r, delayMs); if (typeof (t as any).unref === 'function') (t as any).unref(); });
+      }
+    }
   }
 
   /**
