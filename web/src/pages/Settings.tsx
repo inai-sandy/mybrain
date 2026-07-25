@@ -41,7 +41,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity' | 'emo';
+type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity' | 'emo' | 'whatsapp';
 
 type Cat = { id: Tab; label: string; icon: LucideIcon; desc: string; group: string };
 const CATS: Cat[] = [
@@ -52,6 +52,7 @@ const CATS: Cat[] = [
   { id: 'google', label: 'Google', icon: Globe, desc: 'Workspace services', group: 'Connections' },
   { id: 'cli', label: 'CLI', icon: Terminal, desc: 'Command-line access', group: 'Connections' },
   { id: 'sync', label: 'Sync', icon: RefreshCw, desc: 'Import & reconcile memory', group: 'Connections' },
+  { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, desc: 'My Brain templates & messages', group: 'Connections' },
   { id: 'emo', label: 'EMO', icon: Mic, desc: 'Voice device & EMO voice', group: 'AI brain' },
   { id: 'agent', label: 'Agent Engine', icon: Bot, desc: 'How agents run', group: 'AI brain' },
   { id: 'models', label: 'Models', icon: Cpu, desc: 'Which models do what', group: 'AI brain' },
@@ -85,6 +86,7 @@ function renderSection(id: Tab, email?: string): ReactNode {
     case 'cli': return <CliSection />;
     case 'google': return <GoogleServicesSection />;
     case 'models': return <ModelsSection />;
+    case 'whatsapp': return <WhatsAppSection />;
     case 'usage': return <UsageCard />;
     case 'index': return <IndexSection />;
     case 'prompts': return <PromptsSection />;
@@ -114,6 +116,7 @@ const SEARCH_INDEX: { label: string; keywords: string; cat: Tab; anchor?: string
   { label: 'Import / reconcile memory', keywords: 'sync import reconcile supermemory backfill', cat: 'sync' },
   { label: 'Agent autonomy', keywords: 'autonomy cautious balanced autopilot agent permission approve', cat: 'agent', anchor: 'set-autonomy' },
   { label: 'Agent model', keywords: 'agent model codex gpt engine default', cat: 'agent', anchor: 'set-model' },
+  { label: 'WhatsApp templates & messages', keywords: 'whatsapp template message log sent delivered number postbox', cat: 'whatsapp' },
   { label: 'Recall brain before a run', keywords: 'recall brain context before search agent', cat: 'agent', anchor: 'set-recall' },
   { label: 'Learn after runs', keywords: 'learn learnings remember after run agent', cat: 'agent', anchor: 'set-learn' },
   { label: 'Which model does what', keywords: 'models story lab meeting voice haiku sonnet gemini per feature', cat: 'models' },
@@ -500,18 +503,8 @@ function AgentEngineSection() {
               <span className="text-sm text-zinc-500">hours</span>
             </div>
           </EngineField>
-          <EngineField label="WhatsApp" hint="Your number is used for both kinds of message. Each job also has its own 'Send to WhatsApp' toggle in its Settings.">
-            <div className="space-y-2">
-              <input value={cfg.alertsWhatsappNumber ?? ''} onChange={(e) => setCfg((c: any) => ({ ...c, alertsWhatsappNumber: e.target.value }))} onBlur={(e) => save({ alertsWhatsappNumber: e.target.value.replace(/[^\d+]/g, '') })} placeholder="Your WhatsApp number e.g. 9198…" className="w-52 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
-              <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-                <Switch checked={cfg.whatsappOutputs !== false} onChange={(v: boolean) => save({ whatsappOutputs: v })} />
-                <span>Message me when a job finishes <span className="text-xs text-zinc-400">(master switch — per-job toggles sit under it)</span></span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
-                <Switch checked={cfg.alertsOnFailure !== false} onChange={(v: boolean) => save({ alertsOnFailure: v })} />
-                <span>Message me when an automation fails <span className="text-xs text-zinc-400">(max one per automation per 30 min)</span></span>
-              </div>
-            </div>
+          <EngineField label="WhatsApp" hint="Moved to its own section — number, delivery switches, templates and the message log.">
+            <p className="text-sm text-zinc-500">See <b>Settings → WhatsApp</b>.</p>
           </EngineField>
           <EngineField label="Keep flow working documents for" hint="Branch part-results auto-clean after this; final answers are kept forever. 0 = keep everything">
             <div className="flex items-center gap-2">
@@ -2970,5 +2963,140 @@ function LabActivitySection() {
         )}
       </div>
     </section>
+  );
+}
+
+
+/** Settings → WhatsApp (BEA-1114): My Brain's own slice of the gateway — number & delivery,
+ *  the templates THIS app sends with (live approval status), and the messages THIS app sent. */
+function WhatsAppSection() {
+  const toast = useToast();
+  const [cfg, setCfg] = useState<any>(null);
+  const [templates, setTemplates] = useState<any[] | null>(null);
+  const [waConfigured, setWaConfigured] = useState(true);
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+
+  useEffect(() => { fetch('/api/agent/settings').then((r) => r.json()).then(setCfg).catch(() => setCfg({})); }, []);
+  useEffect(() => {
+    fetch('/api/whatsapp/templates').then((r) => r.json()).then((d) => { setWaConfigured(d.configured !== false); setTemplates(d.templates || []); }).catch(() => setTemplates([]));
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const p = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (q.trim()) p.set('query', q.trim());
+      if (status) p.set('status', status);
+      fetch('/api/whatsapp/messages?' + p.toString()).then((r) => r.json()).then((d) => { setRows(d.rows || []); setTotal(d.total || 0); }).catch(() => { setRows([]); setTotal(0); });
+    }, q ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [q, status, page]);
+
+  async function save(patch: any) {
+    const r = await fetch('/api/agent/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+    if (r.ok) { setCfg(await r.json()); toast('success', 'Saved'); } else toast('error', 'Could not save');
+  }
+
+  const T_BADGE: Record<string, string> = {
+    APPROVED: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400',
+    PENDING: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+    REJECTED: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400',
+  };
+  const M_BADGE: Record<string, string> = {
+    read: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400',
+    delivered: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300',
+    sent: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300',
+    queued: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800',
+    failed: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400',
+  };
+  const fmtAt = (iso?: string) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+
+  return (
+    <div className="space-y-4">
+      {/* Number & delivery — moved here from Agent Engine */}
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold">Number & delivery</h2>
+        {cfg === null ? <div className="mt-2 h-16 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" /> : (
+          <div className="mt-2 space-y-2">
+            <input value={cfg.alertsWhatsappNumber ?? ''} onChange={(e) => setCfg((c: any) => ({ ...c, alertsWhatsappNumber: e.target.value }))} onBlur={(e) => save({ alertsWhatsappNumber: e.target.value.replace(/[^\d+]/g, '') })} placeholder="Your WhatsApp number e.g. 9198…" className="w-56 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+            <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+              <Switch checked={cfg.whatsappOutputs !== false} onChange={(v: boolean) => save({ whatsappOutputs: v })} />
+              <span>Message me when a job finishes <span className="text-xs text-zinc-400">(master switch — per-job toggles sit under it)</span></span>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+              <Switch checked={cfg.alertsOnFailure !== false} onChange={(v: boolean) => save({ alertsOnFailure: v })} />
+              <span>Message me when an automation fails <span className="text-xs text-zinc-400">(max one per automation per 30 min)</span></span>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Templates My Brain uses */}
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold">Templates My Brain uses</h2>
+        <p className="mt-0.5 text-xs text-zinc-400">Only this app's templates, with their live WhatsApp approval status.</p>
+        {!waConfigured ? <p className="mt-2 text-sm text-amber-600">The gateway token isn't set up on the server.</p>
+        : templates === null ? <div className="mt-2 h-12 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />
+        : (
+          <ul className="mt-2 space-y-1.5">
+            {templates.map((t: any) => (
+              <li key={t.name} className="rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-sm">{t.name}</span>
+                  {t.language && <span className="text-xs text-zinc-400">{t.language}</span>}
+                  <span className={'ml-auto rounded-full px-2 py-0.5 text-xs font-medium ' + (T_BADGE[t.status] || 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800')}>{t.status === 'NOT_FOUND' ? 'not found' : (t.status || '').toLowerCase()}</span>
+                </div>
+                {t.warning && <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">⚠ {t.warning}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Message log — My Brain only */}
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Messages sent by My Brain <span className="font-normal text-zinc-400">· {total}</span></h2>
+          <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+            <option value="">All statuses</option>
+            <option value="read">Read</option>
+            <option value="delivered">Delivered</option>
+            <option value="sent">Sent</option>
+            <option value="queued">Queued</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+        <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search number, template or text…" className="mt-2 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
+        {rows === null ? <div className="mt-2 space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />)}</div>
+        : rows.length === 0 ? <p className="mt-3 rounded-xl border border-dashed border-zinc-300 p-5 text-center text-sm text-zinc-500 dark:border-zinc-700">No messages{q || status ? ' match' : ' yet — this fills as My Brain sends reminders and agent pings'}.</p>
+        : (
+          <ul className="mt-2 space-y-1.5">
+            {rows.map((m: any) => (
+              <li key={m.id} className="rounded-xl border border-zinc-100 px-3 py-2 dark:border-zinc-800">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  <span className="font-medium text-zinc-700 dark:text-zinc-200">{m.direction === 'in' ? '↙ from' : '↗ to'} {m.to}</span>
+                  {m.templateName ? <span className="rounded bg-violet-50 px-1.5 py-0.5 font-mono text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">{m.templateName}</span> : <span className="rounded bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">text</span>}
+                  <span className={'rounded-full px-2 py-0.5 font-medium ' + (M_BADGE[m.status] || 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800')}>{m.status}</span>
+                  <span className="ml-auto">{fmtAt(m.at)}</span>
+                </div>
+                {m.body && <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{m.body}</p>}
+                {m.error && <p className="mt-1 text-xs text-rose-600">⚠ {m.error}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {pages > 1 && (
+          <div className="mt-3 flex items-center justify-between text-sm">
+            <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-lg border border-zinc-300 px-3 py-1 disabled:opacity-40 dark:border-zinc-700">← Newer</button>
+            <span className="text-xs text-zinc-400">page {page} of {pages}</span>
+            <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)} className="rounded-lg border border-zinc-300 px-3 py-1 disabled:opacity-40 dark:border-zinc-700">Older →</button>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
