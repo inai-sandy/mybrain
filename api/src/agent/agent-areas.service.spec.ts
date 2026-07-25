@@ -69,3 +69,43 @@ describe('AgentAreasService (BEA-1095)', () => {
     expect(a.tools).toEqual([{ kind: 'api', name: 'Tavily', status: 'needed' }]); // bogus kind clamped, empty name dropped
   });
 });
+
+/** BEA-1103: one-call spec creation — the landing point for the Claude Code skill + chat builder. */
+describe('createFromSpec (BEA-1103)', () => {
+  const build = () => {
+    const { prisma } = fakePrisma({ areas: [], agents: [] });
+    (prisma.agentArea.create as jest.Mock).mockImplementation(async ({ data }: any) => ({ id: 'ar-new', tools: data.tools ?? '[]', createdAt: new Date(), ...data }));
+    const created: any[] = [];
+    const patched: any[] = [];
+    const agentSvc: any = {
+      createAgent: jest.fn(async (input: any) => { created.push(input); return { id: 'j-' + created.length, name: input.name, areaId: input.areaId }; }),
+      updateAgent: jest.fn(async (id: string, patch: any) => { patched.push({ id, patch }); return {}; }),
+    };
+    const { AgentAreasService } = require('./agent-areas.service');
+    return { svc: new (AgentAreasService as any)(prisma, agentSvc), created, patched };
+  };
+
+  it('creates the area + all jobs with schedules and per-job settings', async () => {
+    const { svc, created, patched } = build();
+    const out = await svc.createFromSpec({
+      area: { name: 'Daily News', icon: '📰', tools: [{ kind: 'api', name: 'Tavily' }] },
+      jobs: [
+        { name: 'Tech news', task: 'get tech news', schedule: { every: 'day', at: '07:00' }, scheduleText: 'Every day at 07:00', notifyWhatsApp: true, keepDays: 30, evals: ['a normal day'] },
+        { name: 'AI news', task: 'get AI news' },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    expect(out.jobs.map((j: any) => j.name)).toEqual(['Tech news', 'AI news']);
+    expect(created[0].areaId).toBe('ar-new');
+    expect(created[0].schedule).toEqual({ every: 'day', at: '07:00' });
+    expect(created[0].evals[0].input).toBe('a normal day');
+    expect(patched[0].patch).toEqual({ notifyWhatsApp: true, keepDays: 30 });
+  });
+
+  it('refuses partial specs up front', async () => {
+    const { svc } = build();
+    await expect(svc.createFromSpec({ area: { name: '' }, jobs: [] })).rejects.toThrow(/needs a name/);
+    await expect(svc.createFromSpec({ area: { name: 'X' }, jobs: [] })).rejects.toThrow(/at least one job/);
+    await expect(svc.createFromSpec({ area: { name: 'X' }, jobs: [{ name: 'j' }] })).rejects.toThrow(/name and a task/);
+  });
+});

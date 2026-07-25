@@ -25,6 +25,12 @@ export class AgentController {
     return this.areas.list();
   }
 
+  /** Create a whole agent (area + jobs + tools) from one spec — the skill/chat-builder landing point (BEA-1103). */
+  @Post('areas/spec')
+  createFromSpec(@Body() body: unknown) {
+    return this.areas.createFromSpec(body || {});
+  }
+
   @Post('areas')
   createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     return this.areas.create(body || {});

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AgentService } from './agent.service';
 
 export type AreaTool = { kind: 'skill' | 'api' | 'mcp' | 'cli'; name: string; note?: string; status?: 'installed' | 'needed' };
 
@@ -10,7 +11,53 @@ export type AreaTool = { kind: 'skill' | 'api' | 'mcp' | 'cli'; name: string; no
  */
 @Injectable()
 export class AgentAreasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly agentSvc?: AgentService, // optional + LAST — spec files construct positionally
+  ) {}
+
+  /**
+   * Create a WHOLE agent from a spec in one call (BEA-1103) — the landing point for the Claude
+   * Code skill and the in-app chat builder: area (identity + tools) + its jobs (each with task,
+   * outcome, schedule and per-job settings). Nothing partial: a bad spec is refused up front.
+   */
+  async createFromSpec(spec: any): Promise<{ ok: true; areaId: string; url: string; jobs: { id: string; name: string }[] }> {
+    const areaIn = spec?.area || {};
+    const jobsIn: any[] = Array.isArray(spec?.jobs) ? spec.jobs : [];
+    if (!areaIn?.name?.trim()) throw new BadRequestException('The agent needs a name.');
+    if (!jobsIn.length) throw new BadRequestException('Give the agent at least one job.');
+    for (const j of jobsIn) {
+      if (!j?.name?.trim() || !j?.task?.trim()) throw new BadRequestException(`Every job needs a name and a task (check "${j?.name || '?'}").`);
+    }
+    if (!this.agentSvc) throw new BadRequestException('Agent service unavailable.');
+    const area = await this.create({
+      name: areaIn.name, icon: areaIn.icon, color: areaIn.color, description: areaIn.description,
+      tools: areaIn.tools, sourceUrl: areaIn.sourceUrl,
+    });
+    const jobs: { id: string; name: string }[] = [];
+    for (const j of jobsIn.slice(0, 12)) {
+      const created: any = await this.agentSvc.createAgent({
+        areaId: area.id,
+        name: j.name.trim(),
+        icon: j.icon || areaIn.icon || undefined,
+        color: j.color || areaIn.color || undefined,
+        description: j.description || undefined,
+        prompt: String(j.task).trim(),
+        rubric: j.outcome ? String(Array.isArray(j.outcome) ? j.outcome.map((o: any) => `- ${o}`).join('\n') : j.outcome).slice(0, 2000) : undefined,
+        autonomy: ['cautious', 'balanced', 'autopilot'].includes(j.autonomy) ? j.autonomy : 'cautious',
+        defaultDepth: j.depth,
+        schedule: j.schedule && typeof j.schedule === 'object' ? j.schedule : undefined,
+        scheduleText: j.scheduleText || undefined,
+        evals: Array.isArray(j.evals) ? j.evals.slice(0, 5).map((input: any) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input: String(input).slice(0, 300) })) : undefined,
+      } as any);
+      const settings: any = {};
+      if (j.notifyWhatsApp != null) settings.notifyWhatsApp = !!j.notifyWhatsApp;
+      if (j.keepDays !== undefined) settings.keepDays = j.keepDays;
+      if (Object.keys(settings).length) await this.agentSvc.updateAgent(created.id, settings).catch(() => undefined);
+      jobs.push({ id: created.id, name: created.name });
+    }
+    return { ok: true, areaId: area.id, url: `/agent/ar/${area.id}`, jobs };
+  }
 
   private parse<T>(s: string | null | undefined, fb: T): T {
     try { return s ? (JSON.parse(s) as T) : fb; } catch { return fb; }
