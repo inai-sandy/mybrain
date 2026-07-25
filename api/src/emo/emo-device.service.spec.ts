@@ -74,6 +74,33 @@ describe('EmoDeviceService (BEA-926)', () => {
     await expect(svc.turn(Buffer.alloc(0))).rejects.toThrow();
   });
 
+  // BEA-1116: the morning brain-dump must hit the REAL tasks.dump pipeline (app/Telegram
+  // parity), never the generic intent router — routing a dump scatters one morning into
+  // mixed lanes instead of a day's task list.
+  it('dump mode runs tasks.dump and reports the task count', async () => {
+    const tasks: any = {
+      setDone: async () => undefined,
+      dump: jest.fn(async () => ({ dumpId: 'd1', tasks: [{ title: 'Call the supplier' }, { title: 'Send the BOM' }] })),
+    };
+    const s = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, tasks);
+    const r = await s.turn(pcm, { mode: 'dump' });
+    expect(tasks.dump).toHaveBeenCalledWith(expect.any(String), 'emo-device');
+    expect(router.route).not.toHaveBeenCalled();
+    expect(r.mode).toBe('dump');
+    expect(r.say).toContain('2 tasks');
+    expect(r.reply).toContain('Call the supplier');
+  });
+
+  it('dump mode with nothing usable passes the server question back', async () => {
+    const tasks: any = {
+      setDone: async () => undefined,
+      dump: jest.fn(async () => ({ dumpId: 'd2', question: 'What is on your mind this morning?', tasks: [] })),
+    };
+    const s = new EmoDeviceService(voice, router, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, tasks);
+    const r = await s.turn(pcm, { mode: 'dump' });
+    expect(r.say).toContain('What is on your mind');
+  });
+
   it('capture mode routes the transcript and answers with a confirmation', async () => {
     const r = await svc.turn(pcm, { mode: 'capture' });
     expect(voice.transcribeWith).toHaveBeenCalledWith('deepgram', expect.any(Buffer), 'device-turn.wav', 'audio/wav');

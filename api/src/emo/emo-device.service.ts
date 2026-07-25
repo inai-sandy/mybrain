@@ -87,8 +87,8 @@ export function normalizePcm(pcm: Buffer): Buffer {
   return out;
 }
 
-export type DeviceMode = 'capture' | 'ask' | 'story' | 'meeting' | 'research' | 'talk' | 'task' | 'reminder' | 'idea' | 'note' | 'brief';
-const MODES: DeviceMode[] = ['capture', 'ask', 'story', 'meeting', 'research', 'talk', 'task', 'reminder', 'idea', 'note', 'brief'];
+export type DeviceMode = 'capture' | 'ask' | 'story' | 'meeting' | 'research' | 'talk' | 'task' | 'reminder' | 'idea' | 'note' | 'brief' | 'dump';
+const MODES: DeviceMode[] = ['capture', 'ask', 'story', 'meeting', 'research', 'talk', 'task', 'reminder', 'idea', 'note', 'brief', 'dump'];
 
 export type DeviceTurn = {
   ok: boolean;
@@ -213,6 +213,24 @@ export class EmoDeviceService {
       const r = await this.talk.talk({ message: heard, conversationId: opts.conversationId || undefined, web: 'on', noQuestions: true });
       const s = (r.reply || '').trim() || 'Okay.';
       return { ok: true, mode, heard, reply: s, say: s.slice(0, 600), conversationId: r.conversationId };
+    }
+
+    if (mode === 'dump') {
+      // Morning brain-dump (BEA-1116): the SAME pipeline as the app and Telegram /dump —
+      // tasks.dump() LLM-splits the ramble into today's tasks, stores the BrainDump row and
+      // indexes each task. Deliberately NOT the intent router: routing a dump generically
+      // scatters one morning into mixed lanes instead of a day's task list.
+      // V1 is capture + count: a clarifying question is still recorded server-side, but the
+      // device does not round-trip on it.
+      const d = await this.tasks.dump(heard, 'emo-device');
+      const n = d?.tasks?.length || 0;
+      const reply = n
+        ? d.tasks.map((t: any) => `• ${t.title || ''}`).join('\n')
+        : (d?.question || 'Nothing captured.');
+      const say = n === 0
+        ? (d?.question || 'Hmm, nothing captured. Try again.')
+        : n === 1 ? 'Got it. One task for today.' : `Got it — ${n} tasks for today.`;
+      return { ok: true, mode, heard, reply, say };
     }
 
     // capture routes freely; story/meeting/research force their lane
