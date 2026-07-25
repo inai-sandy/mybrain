@@ -690,8 +690,17 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       if (status === 'failed') {
         await this.push?.send({ title: `${input.title || 'Agent run'} failed`, body: (detail || 'The run hit a problem.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
         await this.alerts?.runFailed(input.title || 'Agent run', detail || 'The run hit a problem.', `/agent/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
-      } else if (secs > 60) {
-        await this.push?.send({ title: `${input.title || 'Agent run'} finished ✓`, body: (detail || 'The result is ready.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
+      } else {
+        if (secs > 60) {
+          await this.push?.send({ title: `${input.title || 'Agent run'} finished ✓`, body: (detail || 'The result is ready.').slice(0, 140), url: `/agent/runs/${runId}`, tag: `run-${runId}` }).catch(() => undefined);
+        }
+        // Per-job WhatsApp delivery (BEA-1102): one message per finished job, gated by its own toggle.
+        if (input.agentId) {
+          const job: any = await this.agent.getAgent(input.agentId).catch(() => null);
+          if (job?.notifyWhatsApp) {
+            await (this.alerts as any)?.runFinished?.(job.name || input.title || 'Your agent', detail || 'The result is ready.', `/agent/runs/${runId}`).catch(() => undefined);
+          }
+        }
       }
     };
     const heartbeat = setInterval(() => {

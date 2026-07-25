@@ -498,10 +498,17 @@ function AgentEngineSection() {
               <span className="text-sm text-zinc-500">hours</span>
             </div>
           </EngineField>
-          <EngineField label="WhatsApp me when an automation fails" hint="One plain message per failure (name + reason + link), max one per automation per 30 min">
-            <div className="flex flex-wrap items-center gap-2">
-              <Switch checked={cfg.alertsOnFailure !== false} onChange={(v: boolean) => save({ alertsOnFailure: v })} />
+          <EngineField label="WhatsApp" hint="Your number is used for both kinds of message. Each job also has its own 'Send to WhatsApp' toggle in its Settings.">
+            <div className="space-y-2">
               <input value={cfg.alertsWhatsappNumber ?? ''} onChange={(e) => setCfg((c: any) => ({ ...c, alertsWhatsappNumber: e.target.value }))} onBlur={(e) => save({ alertsWhatsappNumber: e.target.value.replace(/[^\d+]/g, '') })} placeholder="Your WhatsApp number e.g. 9198…" className="w-52 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+              <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                <Switch checked={cfg.whatsappOutputs !== false} onChange={(v: boolean) => save({ whatsappOutputs: v })} />
+                <span>Message me when a job finishes <span className="text-xs text-zinc-400">(master switch — per-job toggles sit under it)</span></span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
+                <Switch checked={cfg.alertsOnFailure !== false} onChange={(v: boolean) => save({ alertsOnFailure: v })} />
+                <span>Message me when an automation fails <span className="text-xs text-zinc-400">(max one per automation per 30 min)</span></span>
+              </div>
             </div>
           </EngineField>
           <EngineField label="Keep flow working documents for" hint="Branch part-results auto-clean after this; final answers are kept forever. 0 = keep everything">

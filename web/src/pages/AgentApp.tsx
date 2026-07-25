@@ -408,7 +408,15 @@ export function AgentApp() {
 
           {/* History retention + move (BEA-1099) */}
           <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <div>
+            {/* Per-job WhatsApp delivery (BEA-1102) */}
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span>
+                <span className="block text-sm font-semibold">Send to WhatsApp when it finishes</span>
+                <span className="block text-[11px] text-zinc-400">One message per finish: name + headline + a private link. Needs your number in Settings → Agent Engine.</span>
+              </span>
+              <input type="checkbox" checked={!!a.notifyWhatsApp} onChange={async (e) => { const d = await patch({ notifyWhatsApp: e.target.checked }); if (d) toast('success', e.target.checked ? 'It will WhatsApp you when it finishes' : 'WhatsApp off for this job'); }} className="h-5 w-9 accent-emerald-600" />
+            </label>
+            <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
               <h2 className="text-sm font-semibold">Keep history for</h2>
               <select value={a.keepDays == null ? '' : String(a.keepDays)} onChange={async (e) => { const v = e.target.value; const d = await patch({ keepDays: v === '' ? null : Number(v) }); if (d) toast('success', v === '' ? 'History kept forever' : `Old entries clear after ${v} days`); }} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900">
                 <option value="">Forever (good for research)</option>

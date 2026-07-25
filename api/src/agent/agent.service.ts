@@ -189,7 +189,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   /** The user-configurable agent engine knobs (with sane defaults). */
   async engineSettings() {
-    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber, flowPartDays] = await Promise.all([
+    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber, flowPartDays, whatsappOutputs] = await Promise.all([
       this.getSetting('agent.model'),
       this.getSetting('agent.autonomy'),
       this.getSetting('agent.askTimeoutMin'),
@@ -200,6 +200,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       this.getSetting('alerts.onFailure'),
       this.getSetting('alerts.whatsappNumber'),
       this.getSetting('docs.flowPartDays'),
+      this.getSetting('whatsapp.outputs'),
     ]);
     return {
       model: model || '', // '' = use the engine's default model
@@ -215,6 +216,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       alertsWhatsappNumber: alertsWhatsappNumber || '',
       // How long flow working-part documents live before auto-clean (BEA-1085); 0 = keep forever.
       flowPartDays: flowPartDays == null || flowPartDays === '' ? 30 : Math.max(0, Number(flowPartDays) || 0),
+      // Master switch for "WhatsApp me every finished job" (BEA-1102) — per-job toggles sit under it.
+      whatsappOutputs: whatsappOutputs == null ? true : whatsappOutputs === 'true',
     };
   }
 
@@ -230,6 +233,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       alertsOnFailure: 'alerts.onFailure',
       alertsWhatsappNumber: 'alerts.whatsappNumber',
       flowPartDays: 'docs.flowPartDays',
+      whatsappOutputs: 'whatsapp.outputs',
     };
     for (const [k, key] of Object.entries(map)) {
       if (patch[k] !== undefined) await this.setSetting(key, patch[k] == null ? '' : String(patch[k]));

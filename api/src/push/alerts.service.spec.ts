@@ -41,3 +41,40 @@ describe('AlertsService — WhatsApp me when an automation fails (BEA-1071)', ()
     expect((await h.svc.runFailed('Y', 'e', '/p')).sent).toBe(true); // a different automation still alerts
   });
 });
+
+/** BEA-1102: one WhatsApp per finished job — gated, with the template fallback. */
+describe('AlertsService.runFinished (BEA-1102)', () => {
+  const build = (settings: Record<string, string>, textStatus = 'sent') => {
+    const sent: any[] = [];
+    const prisma: any = { setting: { findUnique: jest.fn(async ({ where }: any) => (settings[where.key] != null ? { value: settings[where.key] } : null)) } };
+    const postbox: any = {
+      isConfigured: () => true,
+      sendText: jest.fn(async (to: string, body: string) => { sent.push({ kind: 'text', to, body }); return { status: textStatus }; }),
+      sendReminderTemplate: jest.fn(async (to: string, name: string, subject: string) => { sent.push({ kind: 'template', to, subject }); return { status: 'sent' }; }),
+    };
+    const { AlertsService } = require('./alerts.service');
+    return { svc: new (AlertsService as any)(prisma, postbox), sent };
+  };
+
+  it('sends name + headline + private link', async () => {
+    const { svc, sent } = build({ 'alerts.whatsappNumber': '919999' });
+    const r = await svc.runFinished('Tech news', 'Apple on-device model + 3 more', '/agent/runs/r1');
+    expect(r.sent).toBe(true);
+    expect(sent[0].body).toContain('Tech news');
+    expect(sent[0].body).toContain('Apple on-device model');
+    expect(sent[0].body).toContain('https://mybrain.1site.ai/agent/runs/r1');
+  });
+
+  it('respects the master switch and missing number', async () => {
+    expect((await build({ 'whatsapp.outputs': 'false', 'alerts.whatsappNumber': '9' }).svc.runFinished('X', 'y', '/p')).why).toBe('off');
+    expect((await build({}).svc.runFinished('X', 'y', '/p')).why).toBe('no number');
+  });
+
+  it('falls back to the approved template outside the session window', async () => {
+    const { svc, sent } = build({ 'alerts.whatsappNumber': '919999' }, 'failed');
+    const r = await svc.runFinished('Tech news', 'headline', '/agent/runs/r1');
+    expect(r.sent).toBe(true);
+    expect(sent[1].kind).toBe('template');
+    expect(sent[1].subject).toContain('finished');
+  });
+});
