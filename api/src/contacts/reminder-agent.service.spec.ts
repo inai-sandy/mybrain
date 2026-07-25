@@ -291,3 +291,43 @@ describe("a daily report satisfies today, never the task (BEA-1118)", () => {
     expect(state.sent).toBe(1);
   });
 });
+
+/**
+ * BEA-1122: end to end — the model says item 1 is done, but the message is Madhuri's real progress
+ * report. No claim may be filed, because a claim silences the chase.
+ */
+describe('a progress report never becomes a claim (BEA-1122)', () => {
+  function assignmentSetup(lastIn: string) {
+    const contact = { id: 'c1', name: 'Madhuri', whatsappNumber: '918019282143' };
+    const reminders = [{ id: 'r1', status: 'active', subject: 'the BOM upload', taskId: 't1' }];
+    const state: any = { out: [], sent: 0, claims: [], received: [] };
+    const prisma: any = {
+      contact: { findUnique: async () => contact },
+      reminder: { findMany: async () => reminders, update: async () => undefined, updateMany: async () => undefined },
+      reminderMessage: { findMany: async () => [{ direction: 'in', body: lastIn }], create: async ({ data }: any) => state.out.push(data) },
+      setting: { findUnique: async () => ({ value: '919885698665' }) },
+      // t1 is an ASSIGNMENT — the recurring path must not be what saves us here
+      task: { findUnique: async () => ({ title: 'Upload all BOMs', kind: 'assignment', status: 'open' }), findMany: async () => [] },
+      briefing: { findMany: async () => [] },
+    };
+    const postbox: any = { isConfigured: () => true, sendText: async () => { state.sent++; return { wamid: 'w1' }; } };
+    const remindersSvc: any = { voiceComplete: async () => '{"send":true,"reply":"Thanks Madhuri.","needsSandeep":false,"done":[1]}' };
+    const claims: any = { claim: async (i: any) => { state.claims.push(i); return { id: 'k1' }; }, isPending: async () => false };
+    const recurring: any = { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false };
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, claims, recurring, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
+    return { svc, state };
+  }
+
+  it('refuses the claim on her real "45 of 120" message', async () => {
+    const { svc, state } = assignmentSetup('Total we have  120 BOMs to upload,upto know we uploaded 45 BOMs  in Focus ERP');
+    await svc.onContactReply('c1');
+    expect(state.claims).toHaveLength(0); // the chase stays alive
+    expect(state.sent).toBe(1); // she still gets a reply
+  });
+
+  it('still claims when she plainly says it is finished', async () => {
+    const { svc, state } = assignmentSetup('All the BOMs are uploaded, all done');
+    await svc.onContactReply('c1');
+    expect(state.claims).toHaveLength(1);
+  });
+});

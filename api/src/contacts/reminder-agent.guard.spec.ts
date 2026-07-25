@@ -1,4 +1,4 @@
-import { fixOwnerVocative, needsFirstAck, needsAck, ackLine, watchdogAction, trimThread, THREAD_KEEP } from './reminder-agent.service';
+import { fixOwnerVocative, needsFirstAck, needsAck, ackLine, watchdogAction, trimThread, THREAD_KEEP, looksLikePartialProgress } from './reminder-agent.service';
 
 describe('needsFirstAck — never leave a first "yes/ok" on read (BEA-902)', () => {
   const reminder = { direction: 'out', body: 'Hi Rakesh, a gentle reminder about the production update.' };
@@ -145,5 +145,58 @@ describe('trimThread — keep the recent exchange, not the whole history', () =>
   it('never returns more than the cap, however long the history', () => {
     const thread = Array.from({ length: 500 }, (_, i) => (i % 2 ? out(`a${i}`) : inn(`q${i}`)));
     expect(trimThread(thread).length).toBeLessThanOrEqual(THREAD_KEEP.maxMessages);
+  });
+});
+
+/**
+ * BEA-1122: the bug that started all of this. The agent read Madhuri's "Total we have 120 BOMs to
+ * upload, upto know we uploaded 45 BOMs" as DONE. That filed a claim, the chase went quiet waiting
+ * for a review nobody knew about, and she was not chased for two days. The prompt already forbade
+ * it, so the guard has to be deterministic.
+ */
+describe('looksLikePartialProgress — progress is not completion', () => {
+  it("catches Madhuri's real message that was misread as done", () => {
+    expect(looksLikePartialProgress('Total we have  120 BOMs to upload,upto know we uploaded 45 BOMs  in Focus ERP')).toBe(true);
+  });
+
+  it("catches her second one — an ongoing state, not a finished job", () => {
+    expect(looksLikePartialProgress('We are using the kitflow daily and updating the data in it')).toBe(true);
+  });
+
+  it('catches a count short of the total', () => {
+    expect(looksLikePartialProgress('45 of 120 done')).toBe(true);
+    expect(looksLikePartialProgress('uploaded 45/120')).toBe(true);
+    expect(looksLikePartialProgress('30 out of 200 finished')).toBe(true);
+  });
+
+  it('catches the usual progress words', () => {
+    expect(looksLikePartialProgress('almost there')).toBe(true);
+    expect(looksLikePartialProgress('working on it')).toBe(true);
+    expect(looksLikePartialProgress('50 done so far')).toBe(true);
+    expect(looksLikePartialProgress('balance will be done tomorrow')).toBe(true);
+    expect(looksLikePartialProgress('yet to start')).toBe(true);
+  });
+
+  it('does NOT block a plain completion', () => {
+    expect(looksLikePartialProgress('Done')).toBe(false);
+    expect(looksLikePartialProgress('It is completed')).toBe(false);
+    expect(looksLikePartialProgress('Sent it to the CA yesterday')).toBe(false);
+    expect(looksLikePartialProgress('I have uploaded all the BOMs')).toBe(false);
+    expect(looksLikePartialProgress('submitted')).toBe(false);
+  });
+
+  it('a clear "all done" beats a progress word in the same message', () => {
+    // "remaining" would normally block, but they have plainly said the whole thing is finished
+    expect(looksLikePartialProgress('The remaining ones are done too — all done now')).toBe(false);
+    expect(looksLikePartialProgress('120 of 120 uploaded, fully completed')).toBe(false);
+  });
+
+  it('a count equal to the total is not partial', () => {
+    expect(looksLikePartialProgress('120 of 120')).toBe(false);
+  });
+
+  it('handles empty input', () => {
+    expect(looksLikePartialProgress('')).toBe(false);
+    expect(looksLikePartialProgress('   ')).toBe(false);
   });
 });
