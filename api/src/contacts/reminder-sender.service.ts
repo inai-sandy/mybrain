@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { ContactsService } from './contacts.service';
-import { REMINDER_TZ_OFFSET, scheduleOnDay, topicFromMessage } from './reminders.service';
+import { CHAT_WINDOW_MS, REMINDER_TZ_OFFSET, scheduleOnDay, topicFromMessage } from './reminders.service';
 
 /** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
 export function joinSubjects(subjects: string[]): string {
@@ -221,7 +221,7 @@ export class ReminderSenderService implements OnModuleInit {
         for (const s of g.sends) await this.mark(s.id, 'skipped', null, 'they replied within the hour — the agent is mid-conversation');
         continue;
       }
-      const chatOpen = sinceReply < 24 * HOUR;
+      const chatOpen = sinceReply < CHAT_WINDOW_MS; // one source of truth, shared with the manual send (BEA-1112)
       const firstName = g.name.trim().split(/\s+/)[0];
       // The SAME order the agent numbers its items in (oldest reminder first), so when she replies
       // "1 and 3 are done" both sides mean the same tasks. (BEA-1041)

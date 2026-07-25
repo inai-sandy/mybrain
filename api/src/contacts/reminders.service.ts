@@ -93,6 +93,25 @@ export function sanitizeTimes(times: unknown): string[] {
 export const REMINDER_TZ_OFFSET = Number(process.env.REMINDER_TZ_OFFSET_MINUTES) || 330;
 
 /**
+ * WhatsApp only carries free text for 24h after the person's last message; after that ONLY an
+ * approved template is delivered. One source of truth for that number, shared by the scheduled
+ * chase and the manual send. (BEA-1112)
+ */
+export const CHAT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Is the free-text window still open, given when they last messaged us?
+ *
+ * Checked BEFORE sending, never after: Pinnacle ACCEPTS an out-of-window text and only reports the
+ * failure later on the delivery webhook, so the app thinks it sent and the person hears nothing.
+ * That is exactly how a rejected claim went silent for two days. (BEA-1112)
+ */
+export function chatWindowOpen(lastInboundAt: Date | null | undefined, now: Date = new Date()): boolean {
+  if (!lastInboundAt) return false; // never heard from them → only a template can open the conversation
+  return now.getTime() - new Date(lastInboundAt).getTime() < CHAT_WINDOW_MS;
+}
+
+/**
  * Turn "HH:MM" LOCAL times (in the user's tz) into concrete UTC datetimes for today.
  * e.g. "09:00" IST → today 03:30 UTC. Slots already >2 min in the past are skipped
  * (so a reminder made after a slot doesn't fire that missed nudge immediately). Pure/testable. (BEA-734)
@@ -169,7 +188,33 @@ export class RemindersService {
     private readonly postbox: PostboxService,
   ) {}
 
-  /** Send a manual message to the contact from the chat window (user takes over). Free-text, 24h-window. (BEA-736) */
+  /** When did this contact last message us? Drives the 24h free-text window. (BEA-1112) */
+  private async lastInboundAt(contactId: string | null): Promise<Date | null> {
+    if (!contactId) return null;
+    const row = await this.prisma.reminderMessage
+      .findFirst({ where: { contactId, direction: 'in' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } })
+      .catch(() => null);
+    return row?.createdAt ?? null;
+  }
+
+  /** What the template says this chase is about — the live task title wins, as in the scheduler. (BEA-1021) */
+  private async subjectForReminder(r: any): Promise<string> {
+    if (r.taskId) {
+      const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true } }).catch(() => null);
+      if (t?.title?.trim()) return t.title.trim();
+    }
+    if (r.subject?.trim()) return r.subject.trim();
+    return topicFromMessage(r.message);
+  }
+
+  /**
+   * Send a manual message to the contact from the chat window (user takes over). Free-text, 24h-window. (BEA-736)
+   *
+   * Outside that window WhatsApp will not carry free text, so we send the approved template instead
+   * rather than posting into the void. It has to be decided BEFORE sending: an out-of-window text is
+   * accepted and only fails later on the delivery webhook, so the app would report success while the
+   * person heard nothing — which is how a rejected claim went silent for two days. (BEA-1112)
+   */
   async sendManual(id: string, body: string) {
     const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
     if (!r) throw new NotFoundException('Reminder not found');
@@ -178,6 +223,29 @@ export class RemindersService {
     const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number) throw new BadRequestException('This contact has no WhatsApp number');
     if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
+
+    // ---- the checkpoint ----
+    if (!chatWindowOpen(await this.lastInboundAt(r.contactId))) {
+      const firstName = (r.contact?.name || 'there').trim().split(/\s+/)[0];
+      const subject = await this.subjectForReminder(r);
+      const t = await this.postbox.sendReminderTemplate(number, firstName, subject);
+      if (t.error) throw new BadRequestException(t.error);
+      const rendered = this.postbox.renderReminderTemplate(firstName, subject);
+      const sent = await this.prisma.reminderMessage.create({
+        data: { contactId: r.contactId, reminderId: id, direction: 'out', body: rendered, wamid: t.wamid || null, status: 'sent' },
+      });
+      await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
+      return {
+        id: sent.id,
+        direction: 'out',
+        body: rendered,
+        at: sent.createdAt,
+        status: 'sent',
+        viaTemplate: true,
+        note: `It has been more than 24 hours since ${firstName} last replied, so WhatsApp would not carry your own words. The approved reminder went instead, so ${firstName} still hears about it — once they reply you can write freely again.`,
+      };
+    }
+
     const res = await this.postbox.sendText(number, text);
     if (res.error) {
       // Most common: outside the 24h window (WhatsApp only allows free text within 24h of their last reply).
@@ -192,7 +260,7 @@ export class RemindersService {
     });
     // Sandeep just replied → clear the "needs you" flag for this contact. (BEA-766)
     await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
-    return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt, status: 'sent' };
+    return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt, status: 'sent', viaTemplate: false, note: null as string | null };
   }
 
   /** Re-send the approved reminder template to re-open the 24h free-text window. (BEA-917) */

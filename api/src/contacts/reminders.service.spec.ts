@@ -1,4 +1,4 @@
-import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes, topicFromMessage } from './reminders.service';
+import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes, topicFromMessage, chatWindowOpen, CHAT_WINDOW_MS } from './reminders.service';
 
 describe('update() reschedule (BEA-883)', () => {
   const todayIST = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
@@ -564,5 +564,85 @@ describe('create/update persist the repeat mode (BEA-1021)', () => {
     const { svc, rows } = makeCreateSvc();
     await svc.create({ contactId: 'c1', message: 'x', times: ['09:00'], repeat: 'hourly-forever' });
     expect(rows[0].repeat).toBe('none');
+  });
+});
+
+/**
+ * BEA-1112: rejecting a claim sent free text 27h after the contact's last reply. WhatsApp refused
+ * it ("Re-engagement message") and — because the refusal only arrives later on the delivery webhook
+ * — the app reported success while she heard nothing. The window is now checked BEFORE sending.
+ */
+describe('chatWindowOpen — the 24h rule', () => {
+  const now = new Date('2026-07-25T07:15:00Z');
+
+  it('is open just inside 24 hours', () => {
+    expect(chatWindowOpen(new Date(now.getTime() - 23 * 60 * 60 * 1000), now)).toBe(true);
+  });
+
+  it('is shut just past 24 hours', () => {
+    expect(chatWindowOpen(new Date(now.getTime() - 25 * 60 * 60 * 1000), now)).toBe(false);
+  });
+
+  it('is shut at exactly 24 hours', () => {
+    expect(chatWindowOpen(new Date(now.getTime() - CHAT_WINDOW_MS), now)).toBe(false);
+  });
+
+  it('is shut for the real Madhuri case — last reply 24 Jul 09:36 IST, sent 25 Jul 12:45 IST', () => {
+    expect(chatWindowOpen(new Date('2026-07-24T04:06:00Z'), new Date('2026-07-25T07:15:00Z'))).toBe(false);
+  });
+
+  it('is shut when they have never messaged us', () => {
+    expect(chatWindowOpen(null, now)).toBe(false);
+  });
+});
+
+describe('sendManual — falls back to the approved template outside the window (BEA-1112)', () => {
+  function makeSvc(lastInbound: Date | null) {
+    const calls: any = { text: [], template: [] };
+    const prisma: any = {
+      reminder: {
+        findUnique: async () => ({ id: 'r1', contactId: 'c1', taskId: null, subject: 'the BOM upload', message: 'chase it', contact: { name: 'Madhuri Rao', whatsappNumber: '918019282143' } }),
+        updateMany: async () => ({}),
+      },
+      reminderMessage: {
+        findFirst: async () => (lastInbound ? { createdAt: lastInbound } : null),
+        create: async ({ data }: any) => ({ id: 'm1', createdAt: new Date(), ...data }),
+      },
+      task: { findUnique: async () => null },
+    };
+    const postbox: any = {
+      isConfigured: () => true,
+      sendText: async (to: string, body: string) => { calls.text.push({ to, body }); return { wamid: 'w1', status: 'sent', error: null }; },
+      sendReminderTemplate: async (to: string, first: string, subject: string) => { calls.template.push({ to, first, subject }); return { wamid: 'w2', status: 'sent', error: null }; },
+      renderReminderTemplate: (first: string, subject: string) => `Hi ${first}, following up about ${subject}.`,
+    };
+    return { svc: new RemindersService(prisma, {} as any, {} as any, postbox), calls };
+  }
+
+  it('sends the free text when they replied recently', async () => {
+    const { svc, calls } = makeSvc(new Date(Date.now() - 2 * 60 * 60 * 1000));
+    const out: any = await svc.sendManual('r1', 'Sandeep says this is still open.');
+    expect(calls.text).toHaveLength(1);
+    expect(calls.template).toHaveLength(0);
+    expect(out.viaTemplate).toBe(false);
+    expect(out.body).toBe('Sandeep says this is still open.');
+  });
+
+  it('sends the approved template instead when the window is shut', async () => {
+    const { svc, calls } = makeSvc(new Date(Date.now() - 27 * 60 * 60 * 1000));
+    const out: any = await svc.sendManual('r1', 'Sandeep says this is still open.');
+    expect(calls.text).toHaveLength(0); // never posts free text into a closed window
+    expect(calls.template).toHaveLength(1);
+    expect(calls.template[0].first).toBe('Madhuri'); // first name only
+    expect(calls.template[0].subject).toBe('the BOM upload');
+    expect(out.viaTemplate).toBe(true);
+    expect(out.note).toMatch(/more than 24 hours/i);
+  });
+
+  it('uses the template when the contact has never replied', async () => {
+    const { svc, calls } = makeSvc(null);
+    const out: any = await svc.sendManual('r1', 'first contact');
+    expect(calls.text).toHaveLength(0);
+    expect(out.viaTemplate).toBe(true);
   });
 });

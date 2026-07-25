@@ -677,6 +677,8 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
       if (!r.ok) throw new Error(d?.message || 'Could not send');
       setData((prev) => (prev ? { ...prev, messages: [...prev.messages, d] } : prev));
       setText('');
+      // Outside the 24h window your own words can't be carried — say so instead of pretending. (BEA-1112)
+      if (d?.viaTemplate && d?.note) toast('error', d.note);
     } catch (e: any) {
       toast('error', e.message || 'Could not send');
     } finally {
