@@ -41,6 +41,28 @@ export class AlertsService {
     return { sent: r.status !== 'failed' };
   }
 
+  /**
+   * ONE end-of-day summary of the daily reports that never arrived (BEA-1121). Deliberately a
+   * single message listing everything, not one per item: on a bad day that would be three pings.
+   * A miss is the signal worth the owner's attention — arrivals need no message at all.
+   */
+  async dailyMissDigest(day: string, missed: { title: string; contact: string | null }[]): Promise<{ sent: boolean; why?: string }> {
+    if (!missed.length) return { sent: false, why: 'nothing missed' };
+    const to = await this.setting('alerts.whatsappNumber');
+    if (!to) return { sent: false, why: 'no number' };
+    if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
+    const lines = missed.slice(0, 10).map((m) => `• ${m.title}${m.contact ? ` — ${m.contact}` : ''}`).join('\n');
+    const more = missed.length > 10 ? `\n…and ${missed.length - 10} more` : '';
+    const body = `📋 ${day}: ${missed.length} daily update${missed.length === 1 ? '' : 's'} did not come in\n${lines}${more}\n\nOpen: https://mybrain.1site.ai/tasks?tab=review&rtab=daily`;
+    let r = await this.postbox.sendText(to, body);
+    if (r.status === 'failed') {
+      // Outside the 24h session window only the approved template can be delivered. (BEA-1112)
+      r = await this.postbox.sendReminderTemplate(to, 'Sandy', `${missed.length} daily update${missed.length === 1 ? '' : 's'} missing for ${day}`);
+    }
+    if (r.status === 'failed') this.log.warn(`miss digest not delivered: ${r.error}`);
+    return { sent: r.status !== 'failed' };
+  }
+
   /** An automation failed — WhatsApp the owner (if configured), quietly rate-limited. */
   async runFailed(name: string, reason: string, path: string): Promise<{ sent: boolean; why?: string }> {
     const [enabled, to] = await Promise.all([this.setting('alerts.onFailure'), this.setting('alerts.whatsappNumber')]);

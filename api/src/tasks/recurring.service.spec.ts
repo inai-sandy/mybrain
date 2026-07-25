@@ -128,3 +128,86 @@ describe('the day log the owner reads', () => {
     expect(log.items[0]).toMatchObject({ status: 'received', quote: 'OT 8 members' });
   });
 });
+
+/**
+ * BEA-1121: a daily report never reaches a review queue, so a missed day has to reach the owner
+ * the same evening. Closed once per day, never on a rest day, and only misses are worth a message.
+ */
+describe('closing the day and the miss summary', () => {
+  const EVENING = new Date('2026-07-27T15:00:00Z'); // 20:30 IST, Monday — past the digest hour
+  const MIDDAY = new Date('2026-07-27T06:00:00Z'); // 11:30 IST — the day is not over
+
+  function svcFor(opts: { rows?: any[]; closedDay?: string; restDays?: string } = {}) {
+    const rows: any[] = opts.rows ? [...opts.rows] : [];
+    const settings: Record<string, string> = {};
+    if (opts.closedDay) settings['recurring.closedDay'] = opts.closedDay;
+    settings['recurring.restDays'] = opts.restDays ?? JSON.stringify(['Sun']);
+    const prisma: any = {
+      setting: {
+        findUnique: async ({ where }: any) => (settings[where.key] ? { value: settings[where.key] } : null),
+        upsert: async ({ where, create }: any) => { settings[where.key] = create.value; return create; },
+      },
+      taskStatusDay: {
+        findUnique: async ({ where }: any) => rows.find((r) => r.taskId === where.taskId_day.taskId && r.day === where.taskId_day.day) || null,
+        upsert: async ({ where, create, update }: any) => {
+          const i = rows.findIndex((r) => r.taskId === where.taskId_day.taskId && r.day === where.taskId_day.day);
+          if (i >= 0) rows[i] = { ...rows[i], ...update }; else rows.push({ ...create });
+          return rows[0];
+        },
+        create: async ({ data }: any) => { rows.push({ ...data }); return data; },
+        findMany: async () => rows,
+      },
+      task: {
+        findMany: async () => [
+          { id: 't1', title: 'Send the daily production update', ownerContact: { name: 'Jayanth' } },
+          { id: 't2', title: 'Send the OT update', ownerContact: { name: 'Jayanth' } },
+        ],
+      },
+    };
+    return { svc: new RecurringService(prisma), rows: () => rows, settings };
+  }
+
+  it('says nothing before the day is over', async () => {
+    const { svc, rows } = svcFor();
+    expect(await svc.closeDay(MIDDAY)).toBeNull();
+    expect(rows()).toHaveLength(0); // and records no miss yet
+  });
+
+  it('records the misses and returns them for ONE summary', async () => {
+    const { svc } = svcFor();
+    const out = await svc.closeDay(EVENING);
+    expect(out).toEqual({
+      day: '2026-07-27',
+      missed: [
+        { title: 'Send the daily production update', contact: 'Jayanth' },
+        { title: 'Send the OT update', contact: 'Jayanth' },
+      ],
+    });
+  });
+
+  it('leaves out what actually arrived', async () => {
+    const { svc } = svcFor({ rows: [{ taskId: 't1', day: '2026-07-27', status: 'received' }] });
+    const out = await svc.closeDay(EVENING);
+    expect(out?.missed.map((m) => m.title)).toEqual(['Send the OT update']);
+  });
+
+  it('says nothing when everything came in', async () => {
+    const { svc } = svcFor({ rows: [
+      { taskId: 't1', day: '2026-07-27', status: 'received' },
+      { taskId: 't2', day: '2026-07-27', status: 'received' },
+    ] });
+    expect(await svc.closeDay(EVENING)).toBeNull();
+  });
+
+  it('never sends twice for the same day', async () => {
+    const { svc } = svcFor();
+    expect((await svc.closeDay(EVENING))?.missed).toHaveLength(2);
+    expect(await svc.closeDay(EVENING)).toBeNull(); // second pass is silent
+  });
+
+  it('records nothing on a rest day — nothing was owed', async () => {
+    const { svc, rows } = svcFor({ restDays: JSON.stringify(['Mon']) }); // make the test day a rest day
+    expect(await svc.closeDay(EVENING)).toBeNull();
+    expect(rows()).toHaveLength(0);
+  });
+});
