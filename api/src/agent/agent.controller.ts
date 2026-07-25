@@ -31,6 +31,28 @@ export class AgentController {
     return this.areas.createFromSpec(body || {});
   }
 
+  // ---- the in-app chat builder (BEA-1104) ----
+
+  @Get('builder')
+  builderState() {
+    return this.areas.builderState();
+  }
+
+  @Post('builder/chat')
+  builderChat(@Body() body: { message?: string }) {
+    return this.areas.builderChat(body?.message || '');
+  }
+
+  @Post('builder/create')
+  builderCreate() {
+    return this.areas.builderCreate();
+  }
+
+  @Delete('builder')
+  builderReset() {
+    return this.areas.builderReset();
+  }
+
   @Post('areas')
   createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     return this.areas.create(body || {});

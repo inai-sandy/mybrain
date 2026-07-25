@@ -109,3 +109,44 @@ describe('createFromSpec (BEA-1103)', () => {
     await expect(svc.createFromSpec({ area: { name: 'X' }, jobs: [{ name: 'j' }] })).rejects.toThrow(/name and a task/);
   });
 });
+
+/** BEA-1104: the chat builder — persisted turns, evolving spec, create-on-command. */
+describe('builder (BEA-1104)', () => {
+  const build = (llmText: string | null) => {
+    const store: Record<string, string> = {};
+    const prisma: any = {
+      setting: {
+        findUnique: jest.fn(async ({ where }: any) => (store[where.key] ? { value: store[where.key] } : null)),
+        upsert: jest.fn(async ({ where, create, update }: any) => { store[where.key] = (update?.value ?? create.value); return {}; }),
+      },
+      agentArea: { create: jest.fn(async ({ data }: any) => ({ id: 'ar-b', tools: data.tools ?? '[]', createdAt: new Date(), ...data })) },
+    };
+    const agentSvc: any = { createAgent: jest.fn(async (i: any) => ({ id: 'j1', name: i.name })), updateAgent: jest.fn(async () => ({})) };
+    const llm: any = { completeWithModel: jest.fn(async () => ({ text: llmText, model: 'codex' })) };
+    const prompts: any = { get: jest.fn(async () => 'CONVO={{conversation}}') };
+    const { AgentAreasService } = require('./agent-areas.service');
+    return { svc: new (AgentAreasService as any)(prisma, agentSvc, llm, prompts), store, llm };
+  };
+
+  it('persists turns and adopts the proposed spec', async () => {
+    const spec = { area: { name: 'Daily News', icon: '📰' }, jobs: [{ name: 'Tech news', task: 'get news' }] };
+    const { svc, llm } = build(JSON.stringify({ reply: 'Here is the plan.', spec }));
+    const r = await svc.builderChat('daily news agent, mornings');
+    expect(r.reply).toBe('Here is the plan.');
+    expect(r.spec.area.name).toBe('Daily News');
+    expect((llm.completeWithModel.mock.calls[0][0])).toEqual({ provider: 'codex', model: 'codex' }); // flat-rate first
+    const st = await svc.builderState();
+    expect(st.log.length).toBe(2); // you + ai, persisted
+  });
+
+  it('create requires a proposal, then clears it and keeps the log', async () => {
+    const { svc } = build(JSON.stringify({ reply: 'ok', spec: { area: { name: 'X', icon: '🤖' }, jobs: [{ name: 'j', task: 't' }] } }));
+    await expect(svc.builderCreate()).rejects.toThrow(/no proposal/);
+    await svc.builderChat('make X');
+    const res = await svc.builderCreate();
+    expect(res.ok).toBe(true);
+    const st = await svc.builderState();
+    expect(st.spec).toBeNull();
+    expect(st.log.at(-1).text).toContain('Created ✓');
+  });
+});

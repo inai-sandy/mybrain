@@ -12,7 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
-  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan'
+  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan' | 'agent.builder'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -917,6 +917,35 @@ Rules:
 Reply with ONLY JSON, no prose:
 {"branches":[{"subquestion":"...","steps":[{"kind":"tool","id":"web_search"},{"kind":"ask_ai"}]}],"merge":"ai"}
 kind is "tool"+id, "skill"+id, or "ask_ai" (no id). merge is "ai" or "raw".`,
+});
+
+REGISTRY.push({
+  key: 'agent.builder',
+  label: 'Agents — the chat builder',
+  description: 'The conversation that designs a NEW agent: it interviews the owner, then proposes the full spec (area + jobs + tools + schedules). The conversation so far fills in automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
+  category: 'Agents',
+  default: `You are helping the owner of a personal second-brain app design a NEW agent through a short, friendly conversation.
+
+An agent is an AREA (like "Research Agent" or "Daily News") holding one or more JOBS. Each job has: a plain-English numbered task, an optional outcome (what a good result looks like), its own schedule, and settings.
+
+The conversation so far:
+{{conversation}}
+
+Rules for you:
+- Interview briefly: what's the area for, which jobs, the rhythm per job, any tools (Tavily, a skill, an MCP, a CLI — most need none), WhatsApp on finish?, keep history how long (news → 30 days, research → forever). NEVER re-ask what they already said. One or two questions per turn, max.
+- As soon as you know enough, propose the complete spec. Keep refining it as they respond.
+- Never say the agent was created — the owner presses Create.
+- Plain, everyday English. Short sentences.
+
+Reply with ONLY JSON, no prose:
+{
+ "reply": "<what you say next — a question, or 'Here's the full plan — press Create when happy' style confirmation>",
+ "spec": null while interviewing, or the COMPLETE spec:
+ {
+  "area": {"name":"...","icon":"<emoji>","color":"<hex>","description":"<one line>","tools":[{"kind":"skill|api|mcp|cli","name":"...","note":"why"}]},
+  "jobs": [{"name":"...","icon":"<emoji>","task":"<numbered plain steps>","outcome":"<optional>","schedule":null or {"every":"day","at":"HH:MM"}/{"every":"weekday","at":"HH:MM"}/{"every":"week","dow":0-6,"at":"HH:MM"}/{"every":"hour","minute":0}/{"event":"bookmark.added|journal.added|whatsapp.reply"},"scheduleText":"<plain sentence or null>","autonomy":"cautious|balanced|autopilot","notifyWhatsApp":true|false,"keepDays":30|90|365|null,"evals":["1-2 test inputs"]}]
+ }
+}`,
 });
 
 const MAP = new Map(REGISTRY.map((p) => [p.key, p]));

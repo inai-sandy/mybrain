@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from './agent.service';
+import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 
 export type AreaTool = { kind: 'skill' | 'api' | 'mcp' | 'cli'; name: string; note?: string; status?: 'installed' | 'needed' };
 
@@ -14,7 +16,62 @@ export class AgentAreasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly agentSvc?: AgentService, // optional + LAST — spec files construct positionally
+    private readonly llm?: LlmService,
+    private readonly promptsSvc?: PromptsService,
   ) {}
+
+  // ---- The in-app chat builder (BEA-1104): a persisted conversation that designs a new agent. ----
+
+  private async builderLoad(): Promise<{ log: any[]; spec: any | null }> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'agent.builder' } }).catch(() => null);
+    try { return row ? JSON.parse((row as any).value) : { log: [], spec: null }; } catch { return { log: [], spec: null }; }
+  }
+  private async builderSave(st: { log: any[]; spec: any | null }) {
+    const value = JSON.stringify({ log: st.log.slice(-40), spec: st.spec });
+    await this.prisma.setting.upsert({ where: { key: 'agent.builder' }, create: { key: 'agent.builder', value }, update: { value } });
+  }
+
+  async builderState() { return this.builderLoad(); }
+  async builderReset() { await this.builderSave({ log: [], spec: null }); return { ok: true }; }
+
+  /** One builder turn: owner's message → the designer's reply (+ the evolving spec). Flat-rate
+   *  Codex first (the llm layer falls back to Sonnet automatically), so API calls stay minimal. */
+  async builderChat(message: string): Promise<{ reply: string; spec: any | null }> {
+    const msg = (message || '').trim().slice(0, 1000);
+    if (!msg) throw new BadRequestException('Say something first.');
+    const st = await this.builderLoad();
+    const at = new Date().toISOString();
+    st.log.push({ who: 'you', text: msg, at });
+    const cantDo = "I couldn't work that out — try saying it another way.";
+    try {
+      const tpl = (await this.promptsSvc?.get('agent.builder').catch(() => '')) || '';
+      const convo = st.log.slice(-20).map((m: any) => `${m.who === 'you' ? 'OWNER' : 'YOU'}: ${m.text}`).join('\n');
+      const specNote = st.spec ? `\n\nThe spec you last proposed (refine it, don't start over):\n${JSON.stringify(st.spec)}` : '';
+      const { text } = (await this.llm?.completeWithModel({ provider: 'codex', model: 'codex' }, tpl.replaceAll('{{conversation}}', convo) + specNote, 1600, 'agent-builder')) || { text: null };
+      const m = (text || '').match(/\{[\s\S]*\}/);
+      const g = m ? JSON.parse(m[0]) : null;
+      const reply = String(g?.reply || cantDo).slice(0, 800);
+      if (g?.spec && typeof g.spec === 'object' && g.spec.area?.name) st.spec = g.spec;
+      st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
+      await this.builderSave(st);
+      return { reply, spec: st.spec };
+    } catch {
+      st.log.push({ who: 'ai', text: cantDo, at: new Date().toISOString() });
+      await this.builderSave(st);
+      return { reply: cantDo, spec: st.spec };
+    }
+  }
+
+  /** Create the agent from the current proposal (the owner pressed Create). */
+  async builderCreate() {
+    const st = await this.builderLoad();
+    if (!st.spec) throw new BadRequestException('There is no proposal to create yet — keep chatting.');
+    const res = await this.createFromSpec(st.spec);
+    st.log.push({ who: 'ai', text: `Created ✓ — "${st.spec.area.name}" with ${res.jobs.length} job(s).`, at: new Date().toISOString() });
+    st.spec = null;
+    await this.builderSave(st);
+    return res;
+  }
 
   /**
    * Create a WHOLE agent from a spec in one call (BEA-1103) — the landing point for the Claude

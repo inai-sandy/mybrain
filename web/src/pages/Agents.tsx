@@ -8,6 +8,7 @@ import { DepthDial, type Depth } from '../ui/DepthDial';
 import { STARTERS, type Starter } from '../ui/agentStarters';
 import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
 import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
+import { AgentBuilder } from './AgentBuilder';
 
 export type Run = { id: string; title?: string; status: string; startedAt: string; endedAt?: string | null; outputDocId?: string | null };
 
@@ -482,6 +483,7 @@ export function Agents() {
   const [planFor, setPlanFor] = useState<{ flowId: string; subs: { id: string; branchIdx: number; sub: string; on: boolean }[] } | null>(null);
   const [q, setQ] = useState('');
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
+  const [showBuilder, setShowBuilder] = useState(false); // chat builder (BEA-1104)
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // big shelf groups expanded (BEA-1083)
   // Slim one-tap push opt-in (BEA-1088) — shown while this device could get notifications but isn't
   // subscribed yet (covers both "never asked" and "allowed but not registered").
@@ -740,10 +742,11 @@ export function Agents() {
             <button onClick={() => nav('/agent/saved')} title="Everything agents have saved" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><ShieldCheck className="h-4 w-4" /><span className="hidden sm:inline">Saves</span></button>
             <button onClick={() => nav('/agent/history')} title="All past runs" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><HistoryIcon className="h-4 w-4" /><span className="hidden sm:inline">All runs</span></button>
             <button onClick={() => setShowImport(true)} title="Bring any public Claude agent from GitHub" className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300">🔗<span className="hidden sm:inline">GitHub</span></button>
-            <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New agent</button>
+            <button onClick={() => setShowBuilder(true)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New agent</button>
           </div>
         </div>
         {showImport && <ImportGithubModal onDone={() => { setShowImport(false); loadHome(); loadAreas(); }} onClose={() => setShowImport(false)} />}
+        {showBuilder && <AgentBuilder onCreated={(url) => { setShowBuilder(false); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); setShowNew(true); }} onClose={() => setShowBuilder(false)} />}
         {showNew && <NewAgentForm initial={starterPick} onCreated={() => { setShowNew(false); setStarterPick(null); loadHome(); loadAreas(); }} onCancel={() => { setShowNew(false); setStarterPick(null); }} />}
         {areasList === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
