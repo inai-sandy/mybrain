@@ -6,7 +6,7 @@ import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { forceUpdate } from '../ui/forceUpdate';
-import { enablePush, disablePush, pushEnabledHere } from '../ui/push';
+import { enablePush, disablePush, pushEnabledHere, pushDiagnostics } from '../ui/push';
 
 type FieldDef = { key: string; label: string; type?: string };
 type Integration = { name: string; label: string; desc: string; icon: LucideIcon; managed?: boolean; testable?: boolean; fields?: FieldDef[] };
@@ -349,8 +349,10 @@ function AgentEngineSection() {
   const [pushDevices, setPushDevices] = useState<number | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
 
+  const [pushDiag, setPushDiag] = useState<{ browser: string; permission: string; subscribedHere: boolean } | null>(null); // honest browser state (BEA-1111)
   const loadPush = () => {
     pushEnabledHere().then(setPushHere).catch(() => setPushHere(false));
+    pushDiagnostics().then(setPushDiag).catch(() => setPushDiag(null));
     fetch('/api/push/status').then((r) => r.json()).then((d) => setPushDevices(d?.devices ?? 0)).catch(() => setPushDevices(null));
   };
   const loadEngine = () => fetch('/api/agent/engine').then((r) => r.json()).then(setEngine).catch(() => setEngine({ ok: false }));
@@ -524,6 +526,14 @@ function AgentEngineSection() {
               </button>
               {!!pushDevices && <button onClick={testPush} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Send a test</button>}
             </div>
+            {/* What THIS browser truly reports — a stuck Deny is visible at a glance (BEA-1111). */}
+            {pushDiag && (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                {pushDiag.browser} says: {pushDiag.permission === 'granted' ? '✅ allowed' : pushDiag.permission === 'denied' ? '🚫 blocked' : pushDiag.permission === 'unsupported' ? '— not supported here' : '❔ never asked'}
+                {' · this device subscribed: '}{pushDiag.subscribedHere ? 'yes' : 'no'}
+                {pushDiag.permission === 'denied' && pushDiag.browser === 'Safari' && <span className="block text-amber-600 dark:text-amber-400">Unblock: Safari → Settings → Websites → Notifications → mybrain.1site.ai → Allow, then reload.</span>}
+              </p>
+            )}
           </EngineField>
           <EngineToggle id="set-recall" label="Recall my brain before each run" hint="Pulls relevant notes from your memory into the task" checked={!!cfg.recall} onChange={(v) => save({ recall: v })} />
           <EngineToggle id="set-learn" label="Propose what it learned after" hint="Suggests durable facts to keep — you confirm" checked={!!cfg.learn} onChange={(v) => save({ learn: v })} />

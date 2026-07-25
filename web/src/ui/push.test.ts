@@ -176,3 +176,24 @@ describe('the Settings toggle can never be frozen (BEA-1093)', () => {
     expect(await p).toEqual({ ok: true });
   });
 });
+
+/** BEA-1111: Safari support — callback-style permission + honest diagnostics. */
+describe('Safari hardening (BEA-1111)', () => {
+  it('supports callback-style Notification.requestPermission (old Safari)', async () => {
+    stubSupported('default');
+    // callback style: returns undefined, calls the callback instead of returning a promise
+    g.Notification.requestPermission = vi.fn((cb?: (v: string) => void) => { cb?.('default'); return undefined; });
+    const r = await enablePush();
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/not allowed/i); // resolved via the callback, no hang
+  });
+
+  it('pushDiagnostics reports the true permission state', async () => {
+    stubSupported('denied');
+    const { pushDiagnostics } = await import('./push');
+    const d = await pushDiagnostics();
+    expect(d.permission).toBe('denied');
+    expect(typeof d.browser).toBe('string');
+    expect(d.subscribedHere).toBe(false);
+  });
+});

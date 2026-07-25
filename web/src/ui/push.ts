@@ -57,9 +57,20 @@ type Result = { ok: boolean; message?: string };
 export async function enablePush(): Promise<Result> {
   const run = async (): Promise<Result> => {
     if (!pushSupported()) return { ok: false, message: 'This browser cannot do notifications. On iPhone, add the app to your Home Screen first, then open it from there.' };
-    if (Notification.permission === 'denied') return { ok: false, message: 'Notifications are blocked for this site in your browser settings. Allow them there, then try again.' };
+    if (Notification.permission === 'denied') {
+      return { ok: false, message: isSafari()
+        ? 'Notifications are blocked for this site. In Safari: Settings → Websites → Notifications → find mybrain.1site.ai → Allow, then reload and try again.'
+        : 'Notifications are blocked for this site in your browser settings. Allow them there, then try again.' };
+    }
 
-    const perm = await withTimeout(Notification.requestPermission(), T.permission);
+    // Older Safari only supports the callback style of requestPermission — accept both (BEA-1111).
+    const askPermission = () => new Promise<NotificationPermission>((resolve) => {
+      try {
+        const maybe = Notification.requestPermission((v) => resolve(v));
+        if (maybe && typeof (maybe as any).then === 'function') (maybe as Promise<NotificationPermission>).then(resolve);
+      } catch { resolve(Notification.permission); }
+    });
+    const perm = await withTimeout(askPermission(), T.permission);
     if (perm === TIMED_OUT) return { ok: false, message: 'Your browser never answered the permission request. Look for a bell or lock icon next to the address bar and choose Allow, then try again. (step: permission)' };
     if (perm !== 'granted') return { ok: false, message: 'Notifications were not allowed.' };
 
@@ -101,8 +112,25 @@ export async function enablePush(): Promise<Result> {
     if (r === TIMED_OUT) return { ok: false, message: 'Turning on notifications took too long. Close and reopen the app, then try again.' };
     return r;
   } catch (e: any) {
-    return { ok: false, message: e?.message || 'Could not turn on notifications. Try reopening the app.' };
+    // Surface the REAL reason — Safari's subscribe errors were vanishing into vagueness (BEA-1111).
+    const why = [e?.name, e?.message].filter(Boolean).join(': ') || 'unknown error';
+    return { ok: false, message: `Could not turn on notifications (${why}).${isSafari() ? ' In Safari, also check Settings → Websites → Notifications.' : ''}` };
   }
+}
+
+/** Safari (not Chrome/Edge/Firefox pretending) — drives the Safari-specific guidance (BEA-1111). */
+export function isSafari(): boolean {
+  const ua = navigator.userAgent;
+  return /safari/i.test(ua) && !/chrome|chromium|crios|android|edg|fxios/i.test(ua);
+}
+
+/** What THIS browser truly reports — the Settings diagnostics line (BEA-1111). */
+export async function pushDiagnostics(): Promise<{ browser: string; permission: string; subscribedHere: boolean }> {
+  const ua = navigator.userAgent;
+  const browser = isSafari() ? 'Safari' : /edg/i.test(ua) ? 'Edge' : /chrome|crios/i.test(ua) ? 'Chrome' : /firefox|fxios/i.test(ua) ? 'Firefox' : 'this browser';
+  const permission = pushSupported() ? Notification.permission : 'unsupported';
+  const subscribedHere = await pushEnabledHere().catch(() => false);
+  return { browser, permission, subscribedHere };
 }
 
 export async function disablePush(): Promise<{ ok: boolean }> {
