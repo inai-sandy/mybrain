@@ -429,6 +429,8 @@ model Task {
   chases        Reminder[]
   /// Times someone said this was finished. A claim is NOT done — the owner confirms. (BEA-1024)
   claims        TaskClaim[]
+  /// For a recurring task: one row per day, did today's status arrive? (BEA-1117)
+  statusDays    TaskStatusDay[]
   /// The date they promised. Slows the chase to once a day until then — never pauses it, because
   /// silence must always still reach the owner. (BEA-1022)
   promisedFor   String? // local day key YYYY-MM-DD
@@ -441,6 +443,13 @@ model Task {
   brainEater    Boolean   @default(false) // circles his head, keeps getting skipped — lives in its own tab (BEA-1056)
   dueDate       DateTime?
   status        String    @default("open") // open | done
+  /// Does this work ever FINISH? (BEA-1117)
+  ///   assignment — a one-off deliverable: they claim it, the owner confirms, the chase ends.
+  ///   recurring  — a standing daily report (production update, OT update). It NEVER completes;
+  ///                a status arriving satisfies TODAY only and the chase returns tomorrow.
+  /// `Reminder.repeat` says how often we chase; this says whether the work can be finished at all.
+  /// Confirming a recurring task done would kill the chase forever — so claims are blocked on it.
+  kind          String    @default("assignment") // assignment | recurring
   progress      Int       @default(0) // 0 | 30 | 60 | 100 — how far along (100 = done)
   followUp      Boolean   @default(false) // true if this task was spawned as a follow-up to another
   rolloverCount Int       @default(0)
@@ -451,6 +460,25 @@ model Task {
 
   @@index([ownerContactId])
   @@index([briefingId])
+}
+
+/// Did a recurring task's status arrive on a given day? One row per task per local day (IST).
+/// A recurring report is never "done" — it is satisfied for TODAY and owed again tomorrow, so the
+/// unit of truth is the day, not the task. Also what the end-of-day miss summary reads. (BEA-1117)
+model TaskStatusDay {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  day       String // local day key YYYY-MM-DD, in the owner's timezone
+  status    String   @default("received") // received | missed
+  /// Their own words that satisfied the day — evidence, never rewritten.
+  quote     String?
+  contactId String?
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, day])
+  @@index([day])
+  @@index([taskId])
 }
 
 /// The situation you told me about a person, in your own words — and the work it produced.
