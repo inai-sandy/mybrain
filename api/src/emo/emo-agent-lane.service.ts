@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EmoCardsService } from './emo-cards.service';
 import { AgentService } from '../agent/agent.service';
 import { HermesBridgeService } from '../hermes/hermes-bridge.service';
+import { AgentAreasService } from '../agent/agent-areas.service';
 
 /**
  * EMO agent lane (BEA-1086) — "run my morning brief" by voice. Never-guess rules: the spoken words
@@ -16,7 +17,15 @@ export class EmoAgentLaneService {
     private readonly cards: EmoCardsService,
     private readonly agent: AgentService,
     private readonly bridge: HermesBridgeService,
+    private readonly areas?: AgentAreasService, // optional + LAST — spec files construct positionally
   ) {}
+
+  private async listAreaNames(): Promise<{ id: string; name: string }[]> {
+    try {
+      const rows = (await this.areas?.list()) || [];
+      return rows.map((r: any) => ({ id: r.id, name: r.name }));
+    } catch { return []; }
+  }
 
   /** Which saved agents do these words single out? */
   matchAgents(text: string, agents: { id: string; name: string; enabled?: boolean }[]): { id: string; name: string }[] {
@@ -35,8 +44,34 @@ export class EmoAgentLaneService {
     const card: any = await this.cards.get(cardId).catch(() => null);
     if (!card || card.lane !== 'agent') return;
     const spoken = `${answerText || ''} ${card.rawTranscript || card.summary || ''}`.trim();
-    const agents = (await this.agent.listAgents()) as any[];
-    const hits = this.matchAgents(spoken, agents);
+    const agents = (await this.agent.listAgents()) as any[]; // Agent rows ARE the jobs (BEA-1095)
+    let hits = this.matchAgents(spoken, agents);
+
+    // Areas-aware resolution (BEA-1107): "run my daily news" may name the AGENT, not a job.
+    // Never-guess rule holds: a matched area only runs when it has exactly ONE enabled job.
+    if (hits.length !== 1) {
+      const byArea = new Map<string, { name: string; jobs: any[] }>();
+      for (const a of agents) {
+        if (a.enabled === false || !a.areaId) continue;
+        if (!byArea.has(a.areaId)) byArea.set(a.areaId, { name: '', jobs: [] });
+        byArea.get(a.areaId)!.jobs.push(a);
+      }
+      const areaRows = await this.listAreaNames();
+      for (const ar of areaRows) if (byArea.has(ar.id)) byArea.get(ar.id)!.name = ar.name;
+      const areaHits = [...byArea.values()].filter((g) => g.name && this.matchAgents(spoken, [{ id: 'x', name: g.name }] as any).length === 1);
+      if (areaHits.length === 1) {
+        const g = areaHits[0];
+        if (g.jobs.length === 1) {
+          hits = [{ id: g.jobs[0].id, name: g.jobs[0].name }];
+        } else {
+          await this.cards.update(cardId, {
+            status: 'needs_you',
+            needsQuestion: `Which job of ${g.name}? ${g.jobs.slice(0, 6).map((j) => j.name).join(' · ')}`,
+          }).catch(() => undefined);
+          return;
+        }
+      }
+    }
 
     if (hits.length !== 1) {
       const names = agents.filter((a) => a.enabled !== false).slice(0, 6).map((a) => a.name).join(' · ');

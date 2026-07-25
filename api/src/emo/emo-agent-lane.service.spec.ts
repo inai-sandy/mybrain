@@ -44,3 +44,39 @@ describe('EmoAgentLane — run agents by voice (BEA-1086)', () => {
     return updates.map((u) => u.summary || '').join(' ');
   }
 });
+
+/** BEA-1107: "run my daily news" may name the AGENT (area) — resolve to its job, never guessing. */
+describe('area-aware voice resolution (BEA-1107)', () => {
+  const jobs = [
+    { id: 'j1', name: 'Tech news', areaId: 'ar1', enabled: true, prompt: 'get tech news' },
+    { id: 'j2', name: 'Crypto brief', areaId: 'ar2', enabled: true, prompt: 'get crypto' },
+    { id: 'j3', name: 'Morning digest', areaId: 'ar2', enabled: true, prompt: 'digest' },
+  ];
+  const build = (updates: any[]) => {
+    const cards: any = { get: jest.fn(async () => ({ id: 'c1', lane: 'agent', rawTranscript: '' })), update: jest.fn(async (_id: string, p: any) => { updates.push(p); }) };
+    const agent: any = { listAgents: jest.fn(async () => jobs) };
+    const bridge: any = { applyAgentSkills: jest.fn(async (_a: any, i: any) => i), startRun: jest.fn(async () => ({ id: 'run1' })) };
+    const areas: any = { list: jest.fn(async () => [{ id: 'ar1', name: 'Daily News' }, { id: 'ar2', name: 'Money Agent' }]) };
+    const { EmoAgentLaneService } = require('./emo-agent-lane.service');
+    return new (EmoAgentLaneService as any)(cards, agent, bridge, areas);
+  };
+
+  it('a one-job area name runs that job', async () => {
+    const updates: any[] = [];
+    const svc = build(updates);
+    (svc as any).cards.get = jest.fn(async () => ({ id: 'c1', lane: 'agent', rawTranscript: 'run my daily news' }));
+    await svc.handle('c1');
+    expect(updates.at(-1).status).toBe('done');
+    expect(updates.at(-1).summary).toContain('Tech news'); // resolved to the area's single job
+  });
+
+  it('a multi-job area name asks which job — never guesses', async () => {
+    const updates: any[] = [];
+    const svc = build(updates);
+    (svc as any).cards.get = jest.fn(async () => ({ id: 'c1', lane: 'agent', rawTranscript: 'run my money agent' }));
+    await svc.handle('c1');
+    expect(updates.at(-1).status).toBe('needs_you');
+    expect(updates.at(-1).needsQuestion).toContain('Which job of Money Agent');
+    expect(updates.at(-1).needsQuestion).toContain('Crypto brief');
+  });
+});
