@@ -34,6 +34,10 @@ export function AgentApp() {
   const [redesigning, setRedesigning] = useState(false);
   const [flow, setFlow] = useState<any>(null);
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
+  const [histQ, setHistQ] = useState(''); // dated-history search + filter (BEA-1099)
+  const [histFilter, setHistFilter] = useState<'all' | 'done' | 'failed'>('all');
+  const [areas, setAreas] = useState<any[] | null>(null); // for move-to-agent
+  const [moveTo, setMoveTo] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initialMode = (params.get('mode') as Mode) || 'run';
   const [mode, setModeState] = useState<Mode>(['run', 'chat', 'settings'].includes(initialMode) ? initialMode : 'run');
@@ -55,7 +59,7 @@ export function AgentApp() {
     return d;
   }
   async function loadRuns() {
-    const rs = await fetch(`/api/agent/runs?agentId=${id}`).then((r) => r.json()).catch(() => []);
+    const rs = await fetch(`/api/agent/runs?agentId=${id}&limit=300`).then((r) => r.json()).catch(() => []);
     const list = Array.isArray(rs) ? rs : [];
     setRuns(list);
     const live = list.find((r: any) => r.status === 'running' || r.status === 'awaiting_input' || r.status === 'paused');
@@ -262,19 +266,44 @@ export function AgentApp() {
           </section>
         )}
 
-        {(runs || []).length > 0 && (
-          <section className="space-y-1.5">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Past runs</h3>
-            {(runs || []).slice(0, 6).map((r: any) => (
-              <button key={r.id} onClick={() => nav(`/agent/runs/${r.id}`)} className="flex w-full items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left text-sm transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
-                <span className="min-w-0 flex-1 truncate">{r.title || a.name}</span>
-                {r.id === latest?.id ? null : r.status === 'done' && <button onClick={(e) => { e.stopPropagation(); fetch(`/api/agent/runs/${r.id}/replay`, { method: 'POST' }).then(() => loadRuns()); }} title="Replay" className="rounded p-1 text-zinc-300 hover:text-emerald-600"><RotateCcw className="h-3.5 w-3.5" /></button>}
-                <span className="shrink-0 text-xs text-zinc-400">{timeAgo(r.startedAt)}</span>
-                <StatusBadge status={r.status} />
-              </button>
-            ))}
-          </section>
-        )}
+        {/* Dated history (BEA-1099): every entry this job produced, newest first, honest about failures. */}
+        {(runs || []).length > 0 && (() => {
+          const all = runs || [];
+          const filtered = all
+            .filter((r: any) => histFilter === 'all' || (histFilter === 'done' ? r.status === 'done' : r.status === 'failed'))
+            .filter((r: any) => !histQ || ((r.title || '') + ' ' + (r.resultText || '')).toLowerCase().includes(histQ.toLowerCase()));
+          const fmtDay = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '');
+          return (
+            <section className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">History · {filtered.length}</h3>
+                {all.length > 3 && (
+                  <div className="flex gap-1">
+                    {(['all', 'done', 'failed'] as const).map((f) => (
+                      <button key={f} onClick={() => setHistFilter(f)} className={'rounded-full border px-2 py-0.5 text-[11px] font-medium ' + (histFilter === f ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-zinc-200 text-zinc-400 dark:border-zinc-700')}>{f === 'all' ? 'All' : f === 'done' ? 'Done' : 'Failed'}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {all.length > 5 && (
+                <input value={histQ} onChange={(e) => setHistQ(e.target.value)} placeholder="Search this job's history…" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
+              )}
+              {filtered.slice(0, 30).map((r: any) => (
+                <div key={r.id} className="group flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
+                  <button onClick={() => nav(`/agent/runs/${r.id}`)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                    <span className="w-[4.6rem] shrink-0 text-[11px] font-bold uppercase tracking-wide" style={{ color }}>{fmtDay(r.endedAt || r.startedAt)}</span>
+                    <span className="min-w-0 flex-1 truncate">{r.status === 'failed' ? <span className="text-rose-600 dark:text-rose-400">Failed{r.error ? ` — ${String(r.error).slice(0, 50)}` : ''}</span> : ((r.resultText || '').split('\n')[0] || r.title || a.name)}</span>
+                  </button>
+                  {(r.status === 'failed' || r.status === 'done') && (
+                    <button onClick={() => fetch(`/api/agent/runs/${r.id}/replay`, { method: 'POST' }).then(() => { toast('success', r.status === 'failed' ? 'Retrying…' : 'Running it again…'); loadRuns(); })} title={r.status === 'failed' ? 'Retry' : 'Run again'} className={'shrink-0 rounded-lg p-1 ' + (r.status === 'failed' ? 'text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10' : 'text-zinc-300 hover:text-emerald-600 group-hover:text-zinc-400')}><RotateCcw className="h-3.5 w-3.5" /></button>
+                  )}
+                  <StatusBadge status={r.status} />
+                </div>
+              ))}
+              {filtered.length === 0 && <p className="rounded-xl border border-dashed border-zinc-300 p-4 text-center text-xs text-zinc-400 dark:border-zinc-700">Nothing matches.</p>}
+            </section>
+          );
+        })()}
       </>)}
 
       {/* ===================== CHAT ===================== */}
@@ -370,6 +399,38 @@ export function AgentApp() {
           <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="text-sm font-semibold">When it runs</h2>
             <SchedulePicker value={a?.schedule || null} onChange={async (s) => { setA((p: any) => ({ ...p, schedule: s, scheduleText: schedText(s) })); const d = await patch({ schedule: s, scheduleText: schedText(s) }); if (d) toast('success', schedText(s) ? `Saved — ${schedText(s)}` : 'Saved — manual only'); }} />
+          </section>
+
+          {/* History retention + move (BEA-1099) */}
+          <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <div>
+              <h2 className="text-sm font-semibold">Keep history for</h2>
+              <select value={a.keepDays == null ? '' : String(a.keepDays)} onChange={async (e) => { const v = e.target.value; const d = await patch({ keepDays: v === '' ? null : Number(v) }); if (d) toast('success', v === '' ? 'History kept forever' : `Old entries clear after ${v} days`); }} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900">
+                <option value="">Forever (good for research)</option>
+                <option value="30">30 days (good for daily news)</option>
+                <option value="90">90 days</option>
+                <option value="365">1 year</option>
+              </select>
+              <p className="mt-1 text-[11px] text-zinc-400">Only finished entries are cleared. Saved documents are never touched.</p>
+            </div>
+            <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <h2 className="text-sm font-semibold">Move to another agent</h2>
+              {areas === null ? (
+                <button onClick={() => fetch('/api/agent/areas').then((r) => r.json()).then((d) => setAreas(Array.isArray(d) ? d.filter((x: any) => x.id !== a.areaId) : []))} className="mt-1.5 text-xs text-emerald-600 hover:underline">Choose an agent…</button>
+              ) : (
+                <div className="mt-1.5 flex gap-2">
+                  <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900">
+                    <option value="">Pick where this job goes…</option>
+                    {areas.map((ar: any) => <option key={ar.id} value={ar.id}>{ar.icon ? ar.icon + ' ' : ''}{ar.name}</option>)}
+                  </select>
+                  <button disabled={!moveTo} onClick={async () => {
+                    const r = await fetch(`/api/agent/agents/${id}/move`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ areaId: moveTo }) });
+                    if (r.ok) { toast('success', 'Moved'); setAreas(null); setMoveTo(''); load(); } else toast('error', 'Could not move');
+                  }} className="shrink-0 rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-40 dark:bg-white dark:text-zinc-900">Move</button>
+                </div>
+              )}
+              <p className="mt-1 text-[11px] text-zinc-400">All its history and settings travel with it.</p>
+            </div>
           </section>
 
           {/* Links out to the deeper views */}

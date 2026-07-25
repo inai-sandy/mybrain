@@ -133,6 +133,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     // notified exactly once per pause.
     if (Date.now() - this.lastStaleSweep > 600_000) {
       this.lastStaleSweep = Date.now();
+      await (this.agent as any).sweepOldRuns?.().catch(() => undefined); // per-job history retention (BEA-1099)
       const paused = await this.agent.pauseStaleAsks().catch(() => [] as any[]);
       for (const p of paused) {
         await this.telegram.notifyAgentPaused({ runTitle: p.title || 'Your agent', question: p.question, waitedHours: p.waitedHours }).catch(() => undefined);

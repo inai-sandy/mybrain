@@ -139,6 +139,24 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(run);
   }
 
+  /**
+   * Per-job history retention (BEA-1099): jobs with `keepDays` set drop FINISHED entries older
+   * than that. Only done/failed/cancelled rows go; running/waiting rows and the saved Documents
+   * are never touched (documents live in the Documents library with their own rules).
+   */
+  async sweepOldRuns(): Promise<number> {
+    const jobs = await this.prisma.agent.findMany({ where: { keepDays: { not: null } } as any, select: { id: true, keepDays: true } as any });
+    let swept = 0;
+    for (const j of jobs as any[]) {
+      const cutoff = new Date(Date.now() - j.keepDays * 86_400_000);
+      const r = await this.prisma.agentRun.deleteMany({
+        where: { agentId: j.id, status: { in: ['done', 'failed', 'cancelled'] }, endedAt: { lt: cutoff } },
+      }).catch(() => ({ count: 0 }));
+      swept += r.count;
+    }
+    return swept;
+  }
+
   /** Statuses that mean "still in flight" — these can't be deleted (cancel first). */
   private readonly liveRunStatuses = ['running', 'awaiting_input'];
 

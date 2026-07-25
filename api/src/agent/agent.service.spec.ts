@@ -608,3 +608,21 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(h.lastError).toBe('auto-restarted');
   });
 });
+
+/** BEA-1099: per-job history retention — only FINISHED entries older than keepDays go. */
+describe('sweepOldRuns (BEA-1099)', () => {
+  it('deletes finished runs past each job keepDays and reports the count', async () => {
+    const dels: any[] = [];
+    const prisma: any = {
+      agent: { findMany: jest.fn(async () => [{ id: 'j1', keepDays: 30 }, { id: 'j2', keepDays: 7 }]) },
+      agentRun: { deleteMany: jest.fn(async (args: any) => { dels.push(args.where); return { count: 2 }; }) },
+    };
+    const { AgentService } = await import('./agent.service');
+    const svc = new (AgentService as any)(prisma);
+    const n = await svc.sweepOldRuns();
+    expect(n).toBe(4);
+    expect(dels[0].agentId).toBe('j1');
+    expect(dels[0].status.in).toEqual(['done', 'failed', 'cancelled']); // running/waiting rows are safe
+    expect(dels[0].endedAt.lt).toBeInstanceOf(Date);
+  });
+});
