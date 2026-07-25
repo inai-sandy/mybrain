@@ -494,7 +494,7 @@ describe('chatEdit — change an agent by chatting (BEA-1065)', () => {
     expect(agent.updateAgent).not.toHaveBeenCalled(); // proposal only — the UI applies on confirm
     // BEA-1094: the chat runs on Claude Sonnet, not the shared default model
     expect(llm.completeWith).toHaveBeenCalled();
-    expect(llm.completeWith.mock.calls[0][0]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' });
+    expect((llm.completeWith as jest.Mock).mock.calls[0][0]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' });
   });
 
   it('falls back to the shared default model if Sonnet is unavailable (BEA-1094)', async () => {
