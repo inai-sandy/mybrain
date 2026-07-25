@@ -12,7 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
-  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords'
+  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -887,6 +887,35 @@ Reply with ONLY JSON, no prose:
  "changes": ["<1-4 short lines, each starting with Added: / Changed: / Removed:>"]
 }
 Write in simple, plain, everyday English — short words and short sentences.`,
+});
+
+REGISTRY.push({
+  key: 'flow.plan',
+  label: 'Flows — the auto-planner',
+  description: 'Plans a complete flow from a request: independent branches of tool/skill steps into a merge. The request, tools and skills fill in automatically. ⚠️ It must NOT add "search my brain" unless the request clearly asks for the owner\'s own notes. Keep the JSON shape intact — use Reset if unsure.',
+  category: 'Agents',
+  default: `You plan a visual workflow ("flow") that answers a request by splitting it into independent branches that run, then merge into one answer.
+
+Request:
+"{{question}}"
+
+Steps you may place in a branch (use the EXACT id):
+TOOLS:
+{{tools}}
+SKILLS (only use one if its description is an OBVIOUS fit for THIS request — most tasks need NONE):
+{{skills}}
+
+Rules:
+- Plan 2-4 branches. Each branch = a short sub-question + 1-3 ordered steps.
+- Each sub-question MUST be self-contained: name the exact subject explicitly (e.g. the specific repo/product/person from the request), never a pronoun or a generic word that could be misread out of context.
+- For facts about the world, use web_search then ask_ai.
+- Do NOT use search_brain unless the request EXPLICITLY asks about the user's own notes, saved items or brain (e.g. "from my notes", "what did I save", "my brain"). Never add it just because the topic relates to the user — the owner adds that block manually when wanted.
+- Do NOT add a skill unless it clearly matches the request (e.g. don't use a UI/design skill for a research task). When unsure, use ask_ai.
+- End each branch with ask_ai so it produces written output.
+
+Reply with ONLY JSON, no prose:
+{"branches":[{"subquestion":"...","steps":[{"kind":"tool","id":"web_search"},{"kind":"ask_ai"}]}],"merge":"ai"}
+kind is "tool"+id, "skill"+id, or "ask_ai" (no id). merge is "ai" or "raw".`,
 });
 
 const MAP = new Map(REGISTRY.map((p) => [p.key, p]));

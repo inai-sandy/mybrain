@@ -97,3 +97,27 @@ describe('FlowsService canvas → words sync (BEA-1065)', () => {
     await expect(svc.syncAgentApply('f1', 'x')).rejects.toThrow('not linked');
   });
 });
+
+/** BEA-1096: the auto-planner must NOT add "search my brain" by default — and the planner prompt
+ *  is now the editable registry entry `flow.plan`. */
+describe('planFlow — no search_brain by default (BEA-1096)', () => {
+  it('fills the registry template and builds the graph from the plan', async () => {
+    const seen: string[] = [];
+    const skills = { list: async () => [] };
+    const llm = { complete: async (p: string) => { seen.push(p); return JSON.stringify({ branches: [{ subquestion: 'Tesla facts', steps: [{ kind: 'tool', id: 'web_search' }, { kind: 'ask_ai' }] }], merge: 'ai' }); } };
+    const prompts = { get: async (k: string) => (k === 'flow.plan' ? 'Q={{question}} T={{tools}} S={{skills}}' : '') };
+    const svc = new FlowsService({} as any, skills as any, llm as any, prompts as any);
+    const g = await svc.planFlow('research Tesla');
+    expect(seen[0]).toContain('Q=research Tesla');
+    expect(g.nodes.some((n: any) => n.data.refId === 'web_search')).toBe(true);
+    expect(g.nodes.some((n: any) => n.data.refId === 'search_brain')).toBe(false);
+  });
+
+  it('the default planner prompt forbids search_brain unless explicitly asked', async () => {
+    const { PromptsService } = await import('../prompts/prompts.service');
+    const real = new PromptsService({ setting: { findUnique: async () => null } } as any);
+    const def = await real.get('flow.plan');
+    expect(def).toContain('Do NOT use search_brain unless the request EXPLICITLY asks');
+    expect(def).not.toContain("INCLUDE one branch that uses search_brain");
+  });
+});
