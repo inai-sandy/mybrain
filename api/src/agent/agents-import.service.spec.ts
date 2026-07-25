@@ -41,3 +41,22 @@ You are a careful reviewer.
     expect(deps.notes.some((n) => n.toLowerCase().includes('hooks'))).toBe(true);
   });
 });
+
+/** BEA-1100: the imported agent's Tools section = declared tools + repo MCP servers + CLIs. */
+describe('toolsFromImport (BEA-1100)', () => {
+  it('maps declared tools, MCP servers and CLIs with honest install status', async () => {
+    const { AgentsImportService } = await import('./agents-import.service');
+    const svc = new (AgentsImportService as any)({});
+    const out = svc.toolsFromImport(
+      { tools: ['WebSearch'] },
+      { mcpServers: [{ name: 'tavily', command: 'npx', args: [] }], clis: ['@tavily/cli'], notes: [] },
+      false,
+    );
+    expect(out).toEqual([
+      { kind: 'api', name: 'WebSearch', note: 'named in the agent definition', status: 'installed' },
+      { kind: 'mcp', name: 'tavily', note: 'npx', status: 'needed' },
+      { kind: 'cli', name: '@tavily/cli', status: 'needed' },
+    ]);
+    expect(svc.toolsFromImport({ tools: [] }, { mcpServers: [], clis: ['x'], notes: [] }, true)[0].status).toBe('installed');
+  });
+});

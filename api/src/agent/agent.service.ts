@@ -275,8 +275,18 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // its own area (same identity) — exactly like the migration did for the pre-areas agents.
     if (!(a as any).areaId) {
       try {
+        // Toolbox inferred at creation (BEA-1100) — lands on the new area's Tools section.
+        const KINDS = ['skill', 'api', 'mcp', 'cli'];
+        const tools = Array.isArray((input as any).tools)
+          ? (input as any).tools.slice(0, 40).map((t: any) => ({
+              kind: KINDS.includes(t?.kind) ? t.kind : 'api',
+              name: String(t?.name || '').slice(0, 80),
+              ...(t?.note ? { note: String(t.note).slice(0, 200) } : {}),
+              status: t?.status === 'installed' ? 'installed' : 'needed',
+            })).filter((t: any) => t.name)
+          : [];
         const area = await (this.prisma as any).agentArea.create({
-          data: { name: a.name, icon: a.icon, color: a.color, description: a.description, sourceUrl: (a as any).sourceUrl ?? null },
+          data: { name: a.name, icon: a.icon, color: a.color, description: a.description, sourceUrl: (a as any).sourceUrl ?? null, tools: JSON.stringify(tools) },
         });
         await this.prisma.agent.update({ where: { id: a.id }, data: { areaId: area.id } as any });
         (a as any).areaId = area.id;

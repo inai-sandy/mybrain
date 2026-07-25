@@ -280,6 +280,7 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
   const [category, setCategory] = useState<string>('');
   const [description, setDescription] = useState('');
   const [autonomy, setAutonomy] = useState('cautious');
+  const [draftTools, setDraftTools] = useState<any[]>([]); // toolbox inferred from the idea (BEA-1100)
 
   function pickStarter(s: Starter) {
     setName(s.name); setTask(s.task); setRubric(s.rubric); setDefaultDepth(s.depth);
@@ -310,6 +311,7 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
       if (d.autonomy) setAutonomy(d.autonomy);
       if (d.defaultDepth) setDefaultDepth(d.defaultDepth === 'quick' ? 'quick' : 'standard');
       if (d.schedule) setSched(d.schedule);
+      setDraftTools(Array.isArray(d.tools) ? d.tools : []);
       setStep('form');
     } catch (e: any) { toast('error', e?.message || 'Could not draft'); } finally { setDrafting(false); }
   }
@@ -328,6 +330,7 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
           name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, defaultDepth, evals: evalCases, schedule, scheduleText,
           icon, color: color || undefined, category: category || undefined, description: description.trim() || undefined, autonomy,
           ...(areaId ? { areaId } : {}), // creating a job inside an existing agent (BEA-1098)
+          ...(draftTools.length ? { tools: draftTools } : {}), // inferred toolbox → the area's Tools section (BEA-1100)
         }),
       });
       if (!r.ok) throw new Error('Could not save');
@@ -406,6 +409,19 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
           <button onClick={() => { if (newEval.trim()) { setEvals((p) => [...p, newEval.trim()]); setNewEval(''); } }} className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" /></button>
         </div>
       </div>
+      {draftTools.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-zinc-500">Tools it will need <span className="font-normal text-zinc-400">· lands on the agent's Tools section</span></div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {draftTools.map((t: any, i: number) => (
+              <span key={i} title={t.note || ''} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                <span className="uppercase opacity-50">{t.kind}</span>{t.name}
+                <button onClick={() => setDraftTools((p) => p.filter((_, j) => j !== i))} className="text-zinc-400 hover:text-rose-500">✕</button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <SchedulePicker value={sched} onChange={setSched} />
         <div className="ml-auto flex gap-2">

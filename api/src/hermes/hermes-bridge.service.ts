@@ -275,6 +275,15 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         schedule: sched,
         scheduleText: sched ? String(g.scheduleText || '').slice(0, 80) || null : null,
         evals: Array.isArray(g.evals) ? g.evals.slice(0, 5).map((s: any) => String(s).trim().slice(0, 200)).filter(Boolean) : [],
+        // The agent's toolbox, inferred from the idea (BEA-1100) — shown in the area's Tools section.
+        tools: Array.isArray(g.tools)
+          ? g.tools.slice(0, 5).map((t: any) => ({
+              kind: ['skill', 'api', 'mcp', 'cli'].includes(t?.kind) ? t.kind : 'api',
+              name: String(t?.name || '').slice(0, 80),
+              ...(t?.note ? { note: String(t.note).slice(0, 200) } : {}),
+              status: 'needed',
+            })).filter((t: any) => t.name)
+          : [],
       };
     } catch {
       return fallback;

@@ -28,6 +28,20 @@ export function AgentAreaPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
+  const [addingTool, setAddingTool] = useState(false); // toolbox editing (BEA-1100)
+  const [newToolKind, setNewToolKind] = useState('api');
+  const [newToolName, setNewToolName] = useState('');
+
+  async function saveTools(next: AreaTool[]) {
+    const r = await fetch(`/api/agent/areas/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: next }) });
+    if (r.ok) load(); else toast('error', 'Could not save the tools');
+  }
+  function addTool() {
+    const n = newToolName.trim();
+    if (!n) return;
+    saveTools([...(area?.tools || []), { kind: newToolKind as any, name: n, status: 'needed' }]);
+    setNewToolName('');
+  }
 
   function load() {
     fetch(`/api/agent/areas/${id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { setArea(d); if (d) { setName(d.name); setDesc(d.description || ''); } }).catch(() => setArea(null));
@@ -83,11 +97,14 @@ export function AgentAreaPage() {
         )}
       </header>
 
-      {/* Tools — the visible toolbox (BEA-1100 adds editing/inference; here it's shown honestly) */}
+      {/* Tools — the agent's visible toolbox (BEA-1100): filled by import/inference, editable here. */}
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="flex items-center gap-2 text-sm font-semibold"><Wrench className="h-4 w-4 text-zinc-400" />Tools</h2>
-        {tools.length === 0 ? (
-          <p className="mt-1.5 text-xs text-zinc-400">No tools listed yet. Imported and described agents will fill this in with everything they use — skills, APIs, MCP servers, CLIs.</p>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold"><Wrench className="h-4 w-4 text-zinc-400" />Tools</h2>
+          <button onClick={() => setAddingTool((v) => !v)} className="text-xs text-emerald-600 hover:underline">{addingTool ? 'Close' : '＋ Add tool'}</button>
+        </div>
+        {tools.length === 0 && !addingTool ? (
+          <p className="mt-1.5 text-xs text-zinc-400">No tools listed yet. Imported and described agents fill this in with everything they use — skills, APIs, MCP servers, CLIs.</p>
         ) : (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {tools.map((t, i) => {
@@ -96,9 +113,19 @@ export function AgentAreaPage() {
                 <span key={i} title={t.note || ''} className={'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ' + k.cls}>
                   <span className="opacity-60">{k.label}</span>{t.name}
                   {t.status === 'needed' && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs install</span>}
+                  <button onClick={() => saveTools(tools.filter((_, j) => j !== i))} title="Remove" className="opacity-50 hover:opacity-100">✕</button>
                 </span>
               );
             })}
+          </div>
+        )}
+        {addingTool && (
+          <div className="mt-2 flex gap-1.5">
+            <select value={newToolKind} onChange={(e) => setNewToolKind(e.target.value)} className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="skill">Skill</option><option value="api">API</option><option value="mcp">MCP</option><option value="cli">CLI</option>
+            </select>
+            <input value={newToolName} onChange={(e) => setNewToolName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTool()} placeholder="e.g. Tavily, deep-research…" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700" />
+            <button onClick={addTool} disabled={!newToolName.trim()} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">Add</button>
           </div>
         )}
       </section>

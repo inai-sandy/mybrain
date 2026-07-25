@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AgentService } from './agent.service';
+import { AgentAreasService, AreaTool } from './agent-areas.service';
 import { SkillsImportService } from '../skills/skills-import.service';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AdmZip: any = require('adm-zip');
@@ -36,7 +37,20 @@ export type ImportPreview = { url: string; agents: ImportedAgentDef[]; deps: Imp
 export class AgentsImportService {
   private readonly log = new Logger('AgentsImport');
 
-  constructor(private readonly agent: AgentService) {}
+  constructor(
+    private readonly agent: AgentService,
+    private readonly areas?: AgentAreasService, // optional + LAST — spec files construct positionally
+  ) {}
+
+  /** The imported agent's toolbox (BEA-1100): its declared tools + the repo's MCP servers and CLIs. */
+  toolsFromImport(def: { tools: string[] }, deps: ImportDeps, installedOk: boolean): AreaTool[] {
+    const status = installedOk ? ('installed' as const) : ('needed' as const);
+    return [
+      ...def.tools.slice(0, 10).map((name) => ({ kind: 'api' as const, name: String(name).slice(0, 80), note: 'named in the agent definition', status: 'installed' as const })),
+      ...deps.mcpServers.slice(0, 10).map((m) => ({ kind: 'mcp' as const, name: m.name, note: m.command, status })),
+      ...deps.clis.slice(0, 10).map((c) => ({ kind: 'cli' as const, name: c, status })),
+    ].filter((t) => t.name);
+  }
 
   /** Parse the flat YAML frontmatter the community agent files use. */
   parseAgentMd(raw: string, file: string): ImportedAgentDef | null {
@@ -138,10 +152,11 @@ export class AgentsImportService {
     if (!wanted.length) throw new BadRequestException('Pick at least one agent to import.');
     const imported: string[] = [];
     const skipped: string[] = [];
+    const createdAreas: { areaId: string; def: (typeof wanted)[number] }[] = [];
     for (const a of wanted) {
       try {
         const toolsLine = a.tools.length ? `\n\nTools it expects: ${a.tools.join(', ')}. Use my brain tools (search_brain, save_document, ask_user) where they fit.` : '';
-        await this.agent.createAgent({
+        const created: any = await this.agent.createAgent({
           name: a.name,
           icon: '📦',
           color: a.color && a.color.startsWith('#') ? a.color : undefined,
@@ -152,6 +167,7 @@ export class AgentsImportService {
           defaultDepth: 'standard',
           sourceUrl: rawUrl,
         } as any);
+        if (created?.areaId) createdAreas.push({ areaId: created.areaId, def: a });
         imported.push(a.name);
       } catch (e: any) {
         skipped.push(`${a.name}: ${e?.message || 'could not save'}`);
@@ -160,6 +176,11 @@ export class AgentsImportService {
     let installed: any;
     if (installDeps && (prev.deps.mcpServers.length || prev.deps.clis.length)) {
       installed = await this.installOnHost(prev.deps).catch((e) => ({ ok: false, error: e?.message || 'install failed' }));
+    }
+    // Fill each new agent's Tools section from the repo analysis (BEA-1100). Never blocks the import.
+    for (const c of createdAreas) {
+      const tools = this.toolsFromImport(c.def, prev.deps, !!installed?.ok);
+      if (tools.length) await this.areas?.update(c.areaId, { tools }).catch(() => undefined);
     }
     return { imported, installed, skipped };
   }

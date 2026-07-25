@@ -545,3 +545,21 @@ describe('chatEdit persists the conversation (BEA-1097)', () => {
     ]);
   });
 });
+
+/** BEA-1100: the describe-it draft infers the agent's toolbox. */
+describe('draftAgent infers tools (BEA-1100)', () => {
+  it('clamps kinds and drops nameless entries', async () => {
+    const llm = fakeLlm(JSON.stringify({ name: 'R', task: 't', tools: [
+      { kind: 'api', name: 'Tavily', note: 'web research' },
+      { kind: 'bogus', name: 'thing' },
+      { kind: 'skill', name: '' },
+    ]}));
+    const prompts = { get: jest.fn(async () => 'IDEA={{idea}}') };
+    const svc = new HermesBridgeService(fakeAgent() as any, fakeDocs() as any, fakeTg() as any, fakeMem() as any, llm as any, fakePush() as any, undefined, prompts as any);
+    const d = await svc.draftAgent('research things');
+    expect(d.tools).toEqual([
+      { kind: 'api', name: 'Tavily', note: 'web research', status: 'needed' },
+      { kind: 'api', name: 'thing', status: 'needed' },
+    ]);
+  });
+});

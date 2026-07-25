@@ -793,7 +793,8 @@ Reply with ONLY JSON, no prose:
  "depth": "<quick for short daily summaries · standard for research or multi-step work>",
  "schedule": <null, or {"every":"day","at":"HH:MM"} / {"every":"weekday","at":"HH:MM"} / {"every":"hour","minute":0} when the idea implies a rhythm like "every morning">,
  "scheduleText": "<a plain sentence like 'Every day at 07:00', or null>",
- "evals": ["<2-3 realistic example inputs to test it on>"]
+ "evals": ["<2-3 realistic example inputs to test it on>"],
+ "tools": [up to 5 of {"kind":"skill|api|mcp|cli","name":"<short name>","note":"<one plain-English line: why it's needed>"} — ONLY external things this agent genuinely needs (e.g. Tavily for serious web research, a deep-research skill). Most simple agents need NONE — then use []]
 }
 Everything concrete, nothing vague. The plan must be doable by an AI agent that has web search, the user's saved notes (search_brain), documents (save_document) and questions to the user (ask_user).`,
 });
