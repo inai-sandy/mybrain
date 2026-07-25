@@ -80,3 +80,38 @@ describe('area-aware voice resolution (BEA-1107)', () => {
     expect(updates.at(-1).needsQuestion).toContain('Crypto brief');
   });
 });
+
+/** BEA-1110: spoken create-intent lands as a job inside the permanent Research Agent. */
+describe('voice create → Research Agent job (BEA-1110)', () => {
+  const build = () => {
+    const updates: any[] = [];
+    const created: any[] = [];
+    const runs: any[] = [];
+    const cards: any = { get: jest.fn(), update: jest.fn(async (_i: string, p: any) => { updates.push(p); }) };
+    const agent: any = { listAgents: jest.fn(async () => []), createAgent: jest.fn(async (i: any) => { created.push(i); return { id: 'jr1', name: i.name, prompt: i.prompt, skills: [] }; }) };
+    const bridge: any = { applyAgentSkills: jest.fn(async (_a: any, i: any) => i), startRun: jest.fn(async () => { runs.push(1); return { id: 'run9' }; }) };
+    const areas: any = { list: jest.fn(async () => []), ensureResearchAgent: jest.fn(async () => ({ id: 'ar-research' })) };
+    const { EmoAgentLaneService } = require('./emo-agent-lane.service');
+    return { svc: new (EmoAgentLaneService as any)(cards, agent, bridge, areas), updates, created, runs, cards };
+  };
+
+  it('"create an agent to research X" creates the job — and does NOT run it', async () => {
+    const { svc, updates, created, runs, cards } = build();
+    cards.get.mockResolvedValue({ id: 'c1', lane: 'agent', rawTranscript: 'create an agent to research the best e ink tablets' });
+    await svc.handle('c1');
+    expect(created[0].areaId).toBe('ar-research');
+    expect(created[0].name).toContain('Research:');
+    expect(created[0].name).toContain('e ink tablets');
+    expect(runs.length).toBe(0); // create-only by decision
+    expect(updates.at(-1).summary).toContain('Created research job');
+  });
+
+  it('"…and run it" creates AND runs', async () => {
+    const { svc, updates, runs, cards } = build();
+    cards.get.mockResolvedValue({ id: 'c1', lane: 'agent', rawTranscript: 'make a research job on solar batteries and run it' });
+    await svc.handle('c1');
+    expect(runs.length).toBe(1);
+    expect(updates.at(-1).summary).toContain('Created + running');
+    expect(updates.at(-1).links.some((l: any) => l.kind === 'agent-run')).toBe(true);
+  });
+});

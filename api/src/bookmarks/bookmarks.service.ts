@@ -7,6 +7,8 @@ import { AppEventsService } from '../events/events.service';
 import { MemoryService } from '../memory/memory.service';
 import { SummarizerService } from './summarizer.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { AgentAreasService } from '../agent/agent-areas.service';
+import { AgentService } from '../agent/agent.service';
 import { RaindropClient, RaindropItem } from './raindrop.client';
 import { InstagramEnricher } from './instagram.service';
 import { ItemsService } from '../items/items.service';
@@ -59,6 +61,8 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
     private readonly items: ItemsService, // new deps stay LAST — keeps positional wiring stable (BEA-1049)
     private readonly bridge: HermesBridgeService, // research runs (BEA-1047)
     private readonly prompts: PromptsService,
+    private readonly areas?: AgentAreasService, // Research Agent collector (BEA-1110) — optional + LAST
+    private readonly agentSvc?: AgentService,
     // Optional + LAST so positional test construction stays valid (BEA-1076).
     private readonly appEvents?: AppEventsService,
   ) {}
@@ -400,7 +404,7 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
    * Start a REAL agent run researching this bookmark, in the owner's own words. The run appears
    * in the Agent module (watch it live), and the finished report is saved as a Document. (BEA-1047)
    */
-  async research(id: string, question: string): Promise<{ ok: boolean; runId?: string; message?: string }> {
+  async research(id: string, question: string): Promise<{ ok: boolean; runId?: string; jobId?: string; areaId?: string; url?: string; message?: string }> {
     const q = String(question || '').trim();
     if (!q) return { ok: false, message: 'Tell me what you want to research first' };
     const b = await this.prisma.item.findFirst({ where: { id, source: { in: ['raindrop', 'bookmark'] } } });
@@ -413,6 +417,16 @@ export class BookmarksService implements OnModuleInit, OnModuleDestroy {
       `Do real research: read the bookmark's link and search the web as needed, cross-check what you find, ` +
       `and write a clear plain-English report (short words, short sentences) with sources at the end. ` +
       `Save the report as a document titled "Research: ${(b.title || 'bookmark').slice(0, 80)}".`;
+    // BEA-1110: research becomes a JOB inside the permanent Research Agent — created, NOT run
+    // (the owner presses Run). Falls back to the old direct run only if the areas service is absent.
+    if (this.areas && this.agentSvc) {
+      const { id: areaId } = await this.areas.ensureResearchAgent();
+      const job: any = await this.agentSvc.createAgent({
+        areaId, name: `Research: ${(b.title || 'bookmark').slice(0, 90)}`, icon: '🔬',
+        description: q.slice(0, 200), prompt, autonomy: 'balanced',
+      } as any);
+      return { ok: true, jobId: job.id, areaId, url: `/agent/a/${job.id}` };
+    }
     const run = await this.bridge.startRun({ prompt, title: `Research: ${(b.title || 'bookmark').slice(0, 100)}`, save: true, depth: 'standard' });
     return { ok: true, runId: run.id };
   }

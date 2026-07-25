@@ -683,12 +683,18 @@ function ResearchModal({ b, onClose }: { b: BM; onClose: () => void }) {
     try {
       const r = await fetch(`/api/bookmarks/${b.id}/research`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: question.trim() }) });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok || !d.runId) {
-        toast('error', d.message || 'Could not start the research');
+      if (!r.ok || (!d.jobId && !d.runId)) {
+        toast('error', d.message || 'Could not create the research job');
         return;
       }
-      toast('success', 'Research started — watch it live');
-      navigate(`/agent/runs/${d.runId}`);
+      if (d.jobId) {
+        // BEA-1110: the research lands as a job inside Research Agent — created, you press Run.
+        toast('success', 'Research job created in Research Agent — press Run when ready');
+        navigate(d.url || `/agent/a/${d.jobId}`);
+      } else {
+        toast('success', 'Research started — watch it live');
+        navigate(`/agent/runs/${d.runId}`);
+      }
     } catch {
       toast('error', 'Could not start the research');
     } finally {
@@ -716,7 +722,7 @@ function ResearchModal({ b, onClose }: { b: BM; onClose: () => void }) {
           className="w-full resize-none rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-zinc-700 dark:bg-zinc-950"
         />
         <button onClick={start} disabled={!question.trim() || busy} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
-          {busy ? (<><Loader2 size={15} className="animate-spin" /> Starting the agent…</>) : 'Start researching'}
+          {busy ? (<><Loader2 size={15} className="animate-spin" /> Creating the job…</>) : 'Create research job'}
         </button>
         <p className="mt-1.5 text-center text-[11px] text-zinc-400">A real agent digs in — watch it live, the report is saved as a Document.</p>
 

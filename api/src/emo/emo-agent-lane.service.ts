@@ -73,6 +73,40 @@ export class EmoAgentLaneService {
       }
     }
 
+    // Create-intent (BEA-1110): "create an agent to research X" / "make a research job on X" —
+    // lands as a job inside the permanent Research Agent. "run it" in the words also runs it.
+    const low = spoken.toLowerCase();
+    const createIntent = /\b(create|make|start|new)\b/.test(low) && /\b(research|agent|job)\b/.test(low);
+    if (hits.length !== 1 && createIntent && this.areas) {
+      const runIt = /\brun it\b|\band run\b|\bthen run\b/.test(low);
+      const subject = spoken
+        .replace(/\b(please|create|make|start|new|an?|the|agent|job|to|that|which|for|about|on|research(es|ing)?|run it|and run|then run)\b/gi, ' ')
+        .replace(/\s+/g, ' ').trim() || 'the topic you mentioned';
+      try {
+        const { id: areaId } = await this.areas.ensureResearchAgent();
+        const job: any = await (this.agent as any).createAgent({
+          areaId, name: `Research: ${subject.slice(0, 70)}`, icon: '🔬', autonomy: 'balanced',
+          prompt: `1. Research this properly — read the best sources on the web: ${subject}.\n2. Write a clear plain-English report with sources at the end.\n3. Save the report as a document.`,
+        });
+        let runId: string | null = null;
+        if (runIt) {
+          const input = await this.bridge.applyAgentSkills(job, { prompt: job.prompt, title: job.name, agentId: job.id, depth: 'standard' });
+          const run = await this.bridge.startRun(input);
+          runId = run.id;
+        }
+        await this.cards.update(cardId, {
+          status: 'done',
+          summary: runIt ? `🔬 Created + running: ${job.name}` : `🔬 Created research job: ${job.name}`,
+          detail: runIt ? 'It is researching now — the result lands in the job (Research Agent).' : 'It is waiting inside Research Agent — press Run when you are ready.',
+          links: [{ kind: 'agent-job', id: job.id, label: job.name }, ...(runId ? [{ kind: 'agent-run', id: runId, label: 'live run' }] : [])],
+        }).catch(() => undefined);
+        this.log.log(`voice → created research job "${job.name}"${runIt ? ' + run' : ''}`);
+        return;
+      } catch (e: any) {
+        this.log.warn(`voice create-research failed: ${e?.message}`);
+      }
+    }
+
     if (hits.length !== 1) {
       const names = agents.filter((a) => a.enabled !== false).slice(0, 6).map((a) => a.name).join(' · ');
       await this.cards.update(cardId, {

@@ -161,3 +161,19 @@ describe('builder (BEA-1104)', () => {
     expect(st.log.at(-1).text).toContain('Created ✓');
   });
 });
+
+/** BEA-1110: one permanent Research Agent — found by name, created once. */
+describe('ensureResearchAgent (BEA-1110)', () => {
+  it('reuses an existing Research Agent by name', async () => {
+    const { prisma } = fakePrisma({ areas: [{ id: 'arx', name: '  research AGENT ', icon: '🔬', tools: '[]', createdAt: new Date() }], agents: [] });
+    const r = await new AgentAreasService(prisma as any).ensureResearchAgent();
+    expect(r.id).toBe('arx');
+    expect(prisma.agentArea.create).not.toHaveBeenCalled();
+  });
+  it('creates it on first need', async () => {
+    const { prisma } = fakePrisma({ areas: [], agents: [] });
+    const r = await new AgentAreasService(prisma as any).ensureResearchAgent();
+    expect(r.id).toBe('ar-new');
+    expect((prisma.agentArea.create as jest.Mock).mock.calls[0][0].data.name).toBe('Research Agent');
+  });
+});

@@ -536,7 +536,7 @@ Lanes:
 - close — EXISTING work that is now FINISHED ("Ramesh finished the GST filing", "the vendor list is done", "I've sent the drawings", "mark the BOM done"). This is NOT a new task. Past tense, or an explicit "mark/tick … done", means close.
 - reminder — nudge a PERSON at a time ("remind Dharmendra on Friday").
 - story — a reflection / moment about the day ("met the vendor, felt good"; "stressed about the launch").
-- agent — RUN one of the user's saved AI agents ("run my morning brief", "start the bookmark triage", "run the vendor watch agent"). The words "run/start/fire" + an agent-like name mean agent, not task.
+- agent — RUN one of the user's saved AI agents ("run my morning brief", "start the bookmark triage"), OR CREATE a new research job by voice ("create an agent to research X", "make a research job on Y — and run it"). The words "run/start/fire" + an agent-like name, or "create/make" + agent/research/job, mean agent — not task.
 - search — "search / find / what do we have on / look into…" (a question to answer).
 - research — "research / deep research / quick research on…".
 - meeting — a long multi-speaker meeting recording.
