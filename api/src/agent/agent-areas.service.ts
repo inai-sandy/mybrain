@@ -218,8 +218,11 @@ export class AgentAreasService {
     if (jobs.length > 0 && !opts.withJobs) throw new BadRequestException('This agent still has jobs. Move or delete them first — their history is precious.');
     if (opts.withJobs) {
       for (const j of jobs as any[]) {
-        await this.prisma.agentRun.deleteMany({ where: { agentId: j.id } }).catch(() => undefined);
-        await this.prisma.agent.delete({ where: { id: j.id } }).catch(() => undefined);
+        if (this.agentSvc) await this.agentSvc.deleteAgent(j.id).catch(() => undefined); // runs + flows go too (BEA-1113)
+        else {
+          await this.prisma.agentRun.deleteMany({ where: { agentId: j.id } }).catch(() => undefined);
+          await this.prisma.agent.delete({ where: { id: j.id } }).catch(() => undefined);
+        }
       }
     }
     await (this.prisma as any).agentArea.delete({ where: { id } }).catch(() => { throw new NotFoundException('Agent not found'); });

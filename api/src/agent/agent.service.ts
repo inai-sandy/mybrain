@@ -365,9 +365,15 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   async deleteAgent(id: string) {
-    // A deleted job takes its run history with it (BEA-1109) — no orphan rows in Landed/History.
+    // A deleted job takes its run history with it (BEA-1109) — no orphan rows in Landed/History —
+    // and its flows + flow runs (BEA-1113): with no Flows sidebar, an orphaned flow is unreachable.
     // Waitpoints cascade with their runs; saved Documents are never touched.
     await this.prisma.agentRun.deleteMany({ where: { agentId: id } }).catch(() => undefined);
+    try {
+      const flows = await this.prisma.flow.findMany({ where: { agentId: id }, select: { id: true } });
+      for (const f of flows) await this.prisma.flowRun.deleteMany({ where: { flowId: f.id } }).catch(() => undefined);
+      await this.prisma.flow.deleteMany({ where: { agentId: id } });
+    } catch { /* flow cleanup must never block the delete */ }
     await this.prisma.agent.delete({ where: { id } }).catch(() => { throw new NotFoundException('Agent not found'); });
     return { ok: true };
   }

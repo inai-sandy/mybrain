@@ -626,3 +626,23 @@ describe('sweepOldRuns (BEA-1099)', () => {
     expect(dels[0].endedAt.lt).toBeInstanceOf(Date);
   });
 });
+
+/** BEA-1113: a deleted job takes its flows and their flow runs — no unreachable ghosts. */
+describe('deleteAgent cascades flows (BEA-1113)', () => {
+  it('removes runs, the flows and their flow runs, then the job', async () => {
+    const gone: string[] = [];
+    const prisma: any = {
+      agentRun: { deleteMany: jest.fn(async () => { gone.push('agentRuns'); return { count: 1 }; }) },
+      flow: {
+        findMany: jest.fn(async () => [{ id: 'f1' }, { id: 'f2' }]),
+        deleteMany: jest.fn(async () => { gone.push('flows'); return { count: 2 }; }),
+      },
+      flowRun: { deleteMany: jest.fn(async ({ where }: any) => { gone.push('flowRuns:' + where.flowId); return { count: 1 }; }) },
+      agent: { delete: jest.fn(async () => { gone.push('job'); return {}; }) },
+    };
+    const { AgentService } = await import('./agent.service');
+    const svc = new (AgentService as any)(prisma);
+    await svc.deleteAgent('j1');
+    expect(gone).toEqual(['agentRuns', 'flowRuns:f1', 'flowRuns:f2', 'flows', 'job']);
+  });
+});
