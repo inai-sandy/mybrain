@@ -58,6 +58,13 @@ export class AgentController {
     return this.agent.clearChat(id);
   }
 
+  /** Append a marker line to the chat history (the UI's "Applied ✓" / "left as it was"). */
+  @Post('agents/:id/chat-log')
+  appendChat(@Param('id') id: string, @Body() body: { text?: string; who?: string }) {
+    if (!body?.text?.trim()) throw new BadRequestException('Nothing to add.');
+    return this.agent.appendChat(id, [{ who: body.who === 'you' ? 'you' : 'ai', text: body.text.trim() }]);
+  }
+
   // ---- GitHub agent import (BEA-1081) ----
 
   /** Read a GitHub link: the agents found there + the install plan. Writes nothing. */

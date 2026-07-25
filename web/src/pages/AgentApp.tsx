@@ -43,6 +43,7 @@ export function AgentApp() {
     const d = await fetch(`/api/agent/agents/${id}`).then((r) => r.json()).catch(() => null);
     if (!d?.id) { setA(null); return; }
     setA(d);
+    if (Array.isArray(d.chatLog)) setChatLog(d.chatLog); // the persisted conversation (BEA-1097)
     if (!dirtyRef.current) { setTask(d.prompt || ''); setRubric(d.rubric || ''); }
     if (d.ui) setSpec(d.ui);
     else {
@@ -140,9 +141,15 @@ export function AgentApp() {
       } else { toast('success', 'Changed'); }
       setSpec(null); load(); // the run screen may need to re-fit; reload spec
       setChatLog((p) => [...p, { who: 'ai', text: 'Applied ✓' }]);
+      fetch(`/api/agent/agents/${id}/chat-log`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Applied ✓' }) }).catch(() => undefined);
       setProposal(null);
     } catch { toast('error', 'Could not apply the change'); }
     setChatBusy(false);
+  }
+  async function clearChatLog() {
+    await fetch(`/api/agent/agents/${id}/chat-log`, { method: 'DELETE' }).catch(() => undefined);
+    setChatLog([]); setProposal(null);
+    toast('success', 'Chat cleared');
   }
 
   if (a === null) return <div className="p-6 text-sm text-zinc-500">This agent doesn't exist any more. <button onClick={() => nav('/agent')} className="text-emerald-600 hover:underline">Back to Agents</button></div>;
@@ -273,7 +280,10 @@ export function AgentApp() {
       {/* ===================== CHAT ===================== */}
       {mode === 'chat' && (
         <section className="space-y-3 rounded-2xl border border-violet-200 bg-white p-4 dark:border-violet-500/30 dark:bg-zinc-900">
-          <h2 className="flex items-center gap-2 text-sm font-semibold"><MessageSquare className="h-4 w-4 text-violet-500" />Change it by chatting</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold"><MessageSquare className="h-4 w-4 text-violet-500" />Change it by chatting</h2>
+            {chatLog.length > 0 && <button onClick={clearChatLog} className="text-xs text-zinc-400 hover:text-rose-500">Clear chat</button>}
+          </div>
           {chatLog.length === 0 && <p className="text-xs text-zinc-400">Say the change in your own words — “add a step that messages Mom”, “run it every morning at 7”, “stop asking me before saving”. Or just ask it a question. You'll see what would change before it sticks.</p>}
           {chatLog.length > 0 && (
             <div className="max-h-72 space-y-1.5 overflow-y-auto">
@@ -296,7 +306,7 @@ export function AgentApp() {
               {proposal.patch?.prompt && flow && <p className="mt-1.5 text-[11px] text-violet-600 dark:text-violet-300">The flow will be re-drawn to match.</p>}
               <div className="mt-2 flex gap-2">
                 <button onClick={applyProposal} disabled={chatBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Apply change</button>
-                <button onClick={() => { setProposal(null); setChatLog((p) => [...p, { who: 'ai', text: 'Okay, left as it was.' }]); }} disabled={chatBusy} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Not this</button>
+                <button onClick={() => { setProposal(null); setChatLog((p) => [...p, { who: 'ai', text: 'Okay, left as it was.' }]); fetch(`/api/agent/agents/${id}/chat-log`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Okay, left as it was.' }) }).catch(() => undefined); }} disabled={chatBusy} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">Not this</button>
               </div>
             </div>
           )}

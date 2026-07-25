@@ -529,3 +529,19 @@ describe('chatEdit — change an agent by chatting (BEA-1065)', () => {
     expect(out.patch.scheduleText).toBe('Every day at 07:00');
   });
 });
+
+/** BEA-1097: every chat exchange is persisted to the job's chatLog so it survives leaving the page. */
+describe('chatEdit persists the conversation (BEA-1097)', () => {
+  it('appends the you+ai messages to the agent chat log', async () => {
+    const agentRow = { id: 'a1', name: 'X', description: '', prompt: 't', rubric: '', autonomy: 'cautious', defaultDepth: 'standard', schedule: null, scheduleText: null };
+    const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn(), appendChat: jest.fn(async () => []) };
+    const llm = fakeLlm(JSON.stringify({ patch: {}, changes: [], note: 'It runs at 7.' }));
+    const prompts = { get: jest.fn(async () => 'A={{agent}} M={{message}}') };
+    const svc = new HermesBridgeService(agent as any, fakeDocs() as any, fakeTg() as any, fakeMem() as any, llm as any, fakePush() as any, undefined, prompts as any);
+    await svc.chatEdit('a1', 'when does it run?');
+    expect(agent.appendChat).toHaveBeenCalledWith('a1', [
+      { who: 'you', text: 'when does it run?' },
+      { who: 'ai', text: 'It runs at 7.' },
+    ]);
+  });
+});

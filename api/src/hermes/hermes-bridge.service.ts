@@ -359,9 +359,12 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       }
       const changes = (Array.isArray(g.changes) ? g.changes : []).slice(0, 6).map((c: any) => String(c).slice(0, 200));
       const note = String(g.note || (Object.keys(patch).length ? "Here's what would change." : 'Nothing needs to change for that.')).slice(0, 400);
+      // Persist the exchange so the conversation survives leaving the page (BEA-1097). Never blocks.
+      await (this.agent as any).appendChat?.(agentId, [{ who: 'you', text: message }, { who: 'ai', text: note }]).catch(() => undefined);
       if (!Object.keys(patch).length) return { patch: {}, changes: [], note };
       return { patch, changes, note };
     } catch {
+      await (this.agent as any).appendChat?.(agentId, [{ who: 'you', text: message }, { who: 'ai', text: cantDo.note }]).catch(() => undefined);
       return cantDo;
     }
   }
