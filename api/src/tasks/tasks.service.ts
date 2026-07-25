@@ -752,7 +752,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    */
   async delegated(contactId?: string) {
     const rows = await this.prisma.task.findMany({
-      where: contactId ? { ownerContactId: contactId } : { NOT: { ownerContactId: null } },
+      // Recurring reports are a standing arrangement, not work to finish — they'd sit here
+      // forever and inflate the count. They have their own tab now. (BEA-1123)
+      where: { ...(contactId ? { ownerContactId: contactId } : { NOT: { ownerContactId: null } }), kind: { not: 'recurring' } },
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       take: 2000,
       include: {
@@ -794,7 +796,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   async stalling() {
     const today = this.dayKey(await this.tz());
     const rows = await this.prisma.task.findMany({
-      where: { status: 'open', NOT: { ownerContactId: null } },
+      // A standing daily report is open by design — it can never be "stalled", and its old
+      // rejected claims must not read as neglect. Assignments only. (BEA-1123)
+      where: { status: 'open', NOT: { ownerContactId: null }, kind: { not: 'recurring' } },
       take: 1000,
       select: {
         id: true, title: true, createdAt: true, promisedFor: true, promiseSlips: true, ownerContactId: true,

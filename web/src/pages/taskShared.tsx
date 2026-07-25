@@ -26,6 +26,8 @@ export type Task = {
   day?: string | null;
   party?: string | null; // display text for the person
   ownerContactId?: string | null; // the REAL owner link — null means it's yours (BEA-1019)
+  /** assignment | recurring — a daily report is a standing arrangement that never finishes (BEA-1117/1123) */
+  kind?: 'assignment' | 'recurring';
   owner?: { id: string; name: string } | null;
   people?: { id: string; name: string }[]; // everyone @mentioned on this task (BEA-1019)
   /** Someone says this is finished and it's waiting on you. NOT done. (BEA-1024) */
@@ -413,6 +415,7 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
   const [reminders, setReminders] = useState(task?.reminderCount ?? 0);
   const [party, setParty] = useState(task?.party || '');
   const [partyId, setPartyId] = useState<string | null>(task?.ownerContactId || null);
+  const [recurring, setRecurring] = useState(task?.kind === 'recurring');
   const mentions = useMentions(`${title}\n${note}`);
   const [due, setDue] = useState(task?.dueDate ? new Date(task.dueDate).toISOString().slice(0, 10) : '');
   const [busy, setBusy] = useState(false);
@@ -436,6 +439,9 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
       party: party.trim() || null,
       // The REAL link. Sent alongside `party` so the display text and the link never disagree. (BEA-1019)
       ownerContactId: partyId,
+      // A daily report never completes — it is chased every working day and satisfied per day
+      // rather than finished. (BEA-1123)
+      kind: recurring ? 'recurring' : 'assignment',
       dueDate: due || null,
     };
     try {
@@ -502,9 +508,23 @@ export function TaskFormModal({ task, onClose, onSaved }: { task: Task | null; o
               />
             </label>
             <label className="text-sm text-zinc-600 dark:text-zinc-400 block">Due date
-              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={inp} />
+              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={inp} disabled={recurring} />
             </label>
           </div>
+          {/* Only meaningful for work someone else owes you. (BEA-1123) */}
+          {(partyId || party.trim()) && (
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+              <input type="checkbox" checked={recurring} onChange={(e) => setRecurring(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-600" />
+              <span className="text-sm">
+                <b>They owe this every day</b> — a standing report, not a one-off
+                <span className="mt-0.5 block text-[11px] text-zinc-500">
+                  {recurring
+                    ? 'It never gets ticked off. Each day they send it, that day is marked done and it is asked for again tomorrow. Lives in the Daily tab.'
+                    : 'Turn on for things like a daily production update or an OT report.'}
+                </span>
+              </span>
+            </label>
+          )}
           <div className="mt-3">
             <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-1">Which life is this for?</p>
             <div className="flex gap-1.5">

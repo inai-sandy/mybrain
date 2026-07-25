@@ -20,3 +20,34 @@ describe('the personal board excludes delegated work (BEA-1029)', () => {
     expect(matchesWhere(theirs, rule({ ownerContactId: null }))).toBe(false);
   });
 });
+
+/**
+ * BEA-1123: a standing daily report is never finished, so it would sit in Delegated forever,
+ * inflate the count, age meaninglessly, and — because its claims had to be rejected before
+ * BEA-1118 — read as "said it was done, but it wasn't". It belongs in its own tab, not here.
+ */
+describe('recurring reports are not delegated work', () => {
+  it('asks the database for assignments only', async () => {
+    let asked: any = null;
+    const prisma: any = {
+      task: { findMany: async (q: any) => { asked = q.where; return []; } },
+      reminderMessage: { findMany: async () => [] },
+      setting: { findUnique: async () => null },
+    };
+    const svc: any = new (require('./tasks.service').TasksService)(prisma, {} as any, {} as any, {} as any);
+    await svc.delegated().catch(() => undefined);
+    expect(asked?.kind).toEqual({ not: 'recurring' });
+  });
+
+  it('excludes them from stalling too — a daily report can never be stalled', async () => {
+    let asked: any = null;
+    const prisma: any = {
+      task: { findMany: async (q: any) => { asked = q.where; return []; } },
+      reminderMessage: { findMany: async () => [] },
+      setting: { findUnique: async () => null },
+    };
+    const svc: any = new (require('./tasks.service').TasksService)(prisma, {} as any, {} as any, {} as any);
+    await svc.stalling().catch(() => undefined);
+    expect(asked?.kind).toEqual({ not: 'recurring' });
+  });
+});
