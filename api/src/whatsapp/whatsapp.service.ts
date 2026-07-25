@@ -48,12 +48,29 @@ export class WhatsappService {
           : t.status !== 'APPROVED'
             ? 'Not approved yet — sends fall back to plain text inside the 24h window.'
             : null;
-        return { name: t.name, language: t.language || null, status: t.status || 'UNKNOWN', category: t.category || null, warning };
+        return { name: t.name, language: t.language || null, status: t.status || 'UNKNOWN', category: t.category || null, body: t.bodyText || null, warning };
       });
       return { configured: true, templates };
     } catch (e: any) {
       this.log.warn(`templates: ${e?.message}`);
       return { configured: true, templates: this.usedTemplateNames().map((name) => ({ name, status: 'UNREACHABLE', warning: 'Could not reach the WhatsApp gateway right now.' })) };
+    }
+  }
+
+  /** The WhatsApp number(s) My Brain SENDS from — label match first, else the gateway default. */
+  async numbers(): Promise<{ configured: boolean; numbers: any[] }> {
+    if (!this.configured()) return { configured: false, numbers: [] };
+    try {
+      const all: any[] = await this.admin('/admin/numbers');
+      const mine = all.filter((n) => /brain/i.test(String(n?.label || '')));
+      const pick = mine.length ? mine : all.filter((n) => n?.isDefault);
+      return {
+        configured: true,
+        numbers: pick.map((n) => ({ number: n.wanumber, label: n.label || null, isDefault: !!n.isDefault, messages: n.messages ?? null })),
+      };
+    } catch (e: any) {
+      this.log.warn(`numbers: ${e?.message}`);
+      return { configured: true, numbers: [] };
     }
   }
 

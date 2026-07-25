@@ -2973,6 +2973,7 @@ function WhatsAppSection() {
   const toast = useToast();
   const [cfg, setCfg] = useState<any>(null);
   const [templates, setTemplates] = useState<any[] | null>(null);
+  const [sendNumbers, setSendNumbers] = useState<any[] | null>(null); // the number(s) My Brain sends FROM
   const [waConfigured, setWaConfigured] = useState(true);
   const [rows, setRows] = useState<any[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -2984,6 +2985,7 @@ function WhatsAppSection() {
   useEffect(() => { fetch('/api/agent/settings').then((r) => r.json()).then(setCfg).catch(() => setCfg({})); }, []);
   useEffect(() => {
     fetch('/api/whatsapp/templates').then((r) => r.json()).then((d) => { setWaConfigured(d.configured !== false); setTemplates(d.templates || []); }).catch(() => setTemplates([]));
+    fetch('/api/whatsapp/numbers').then((r) => r.json()).then((d) => setSendNumbers(d.numbers || [])).catch(() => setSendNumbers([]));
   }, []);
   useEffect(() => {
     const t = setTimeout(() => {
@@ -3020,6 +3022,13 @@ function WhatsAppSection() {
       {/* Number & delivery — moved here from Agent Engine */}
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold">Number & delivery</h2>
+        {sendNumbers && sendNumbers.length > 0 && (
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
+            Sending from <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">+{sendNumbers[0].number}</span>
+            {sendNumbers[0].label && <span className="text-zinc-400"> · {sendNumbers[0].label}</span>}
+            {sendNumbers[0].messages != null && <span className="text-xs text-zinc-400"> · {sendNumbers[0].messages} messages sent</span>}
+          </p>
+        )}
         {cfg === null ? <div className="mt-2 h-16 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" /> : (
           <div className="mt-2 space-y-2">
             <input value={cfg.alertsWhatsappNumber ?? ''} onChange={(e) => setCfg((c: any) => ({ ...c, alertsWhatsappNumber: e.target.value }))} onBlur={(e) => save({ alertsWhatsappNumber: e.target.value.replace(/[^\d+]/g, '') })} placeholder="Your WhatsApp number e.g. 9198…" className="w-56 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
@@ -3050,6 +3059,11 @@ function WhatsAppSection() {
                   {t.language && <span className="text-xs text-zinc-400">{t.language}</span>}
                   <span className={'ml-auto rounded-full px-2 py-0.5 text-xs font-medium ' + (T_BADGE[t.status] || 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800')}>{t.status === 'NOT_FOUND' ? 'not found' : (t.status || '').toLowerCase()}</span>
                 </div>
+                {t.body && (
+                  <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-emerald-50/60 px-3 py-2 text-sm leading-relaxed text-zinc-700 dark:bg-emerald-500/5 dark:text-zinc-300">
+                    {t.body.split(/(\{\{\d+\}\})/g).map((part: string, i: number) => /^\{\{\d+\}\}$/.test(part) ? <span key={i} className="rounded bg-violet-100 px-1 font-mono text-xs text-violet-700 dark:bg-violet-500/15 dark:text-violet-300">{part}</span> : part)}
+                  </p>
+                )}
                 {t.warning && <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">⚠ {t.warning}</p>}
               </li>
             ))}

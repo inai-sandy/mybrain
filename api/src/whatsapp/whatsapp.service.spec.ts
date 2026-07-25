@@ -17,14 +17,25 @@ describe('WhatsappService', () => {
   it('templates: only the used ones, with category-flip and missing warnings', async () => {
     process.env.POSTBOX_ADMIN_TOKEN = 't';
     mock({ '/admin/templates': { templates: [
-      { name: 'reminder_nudge_v3', language: 'en', status: 'APPROVED', category: 'MARKETING' },
+      { name: 'reminder_nudge_v3', language: 'en', status: 'APPROVED', category: 'MARKETING', bodyText: 'Hi {{1}}, following up about {{2}}.' },
       { name: 'rfq_requirement', language: 'en', status: 'APPROVED', category: 'UTILITY' }, // another app's — excluded
     ] } });
     const out = await new WhatsappService().templates();
     expect(out.configured).toBe(true);
     expect(out.templates.map((t: any) => t.name)).toEqual(['reminder_nudge_v3', 'task_list_v1']);
     expect(out.templates[0].warning).toContain('MARKETING'); // the flip is called out
+    expect(out.templates[0].body).toContain('following up'); // the full message text ships too
     expect(out.templates[1].status).toBe('NOT_FOUND'); // missing shown honestly
+  });
+
+  it('numbers: the sending number, by label match with default fallback', async () => {
+    process.env.POSTBOX_ADMIN_TOKEN = 't';
+    mock({ '/admin/numbers': [
+      { wanumber: '919000607141', label: 'KIOT vendors', isDefault: true, messages: 27 },
+      { wanumber: '917893820808', label: 'My Brain reminders', isDefault: false, messages: 341 },
+    ] });
+    const out = await new WhatsappService().numbers();
+    expect(out.numbers).toEqual([{ number: '917893820808', label: 'My Brain reminders', isDefault: false, messages: 341 }]);
   });
 
   it('messages: scoped to the My Brain app id, passthrough filters', async () => {

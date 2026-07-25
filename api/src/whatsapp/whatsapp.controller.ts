@@ -6,6 +6,11 @@ import { WhatsappService } from './whatsapp.service';
 export class WhatsappController {
   constructor(private readonly wa: WhatsappService) {}
 
+  @Get('numbers')
+  numbers() {
+    return this.wa.numbers();
+  }
+
   @Get('templates')
   templates() {
     return this.wa.templates();
