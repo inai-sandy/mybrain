@@ -1,4 +1,4 @@
-import { fixOwnerVocative, needsFirstAck, needsAck, ackLine, watchdogAction } from './reminder-agent.service';
+import { fixOwnerVocative, needsFirstAck, needsAck, ackLine, watchdogAction, trimThread, THREAD_KEEP } from './reminder-agent.service';
 
 describe('needsFirstAck — never leave a first "yes/ok" on read (BEA-902)', () => {
   const reminder = { direction: 'out', body: 'Hi Rakesh, a gentle reminder about the production update.' };
@@ -88,5 +88,62 @@ describe('watchdogAction — self-healing decision (BEA-953)', () => {
   it('honours the grace/escalate thresholds', () => {
     expect(watchdogAction(8 * 60_000)).toBe('retry'); // exactly grace
     expect(watchdogAction(45 * 60_000)).toBe('escalate'); // exactly escalate
+  });
+});
+
+/**
+ * BEA-1115: the agent used to read EVERY message ever exchanged, so the prompt grew forever.
+ * It now keeps the tail — the last few of THEIR messages plus our replies in between, so it can
+ * still read its own questions and answer "yes" / "the second one".
+ */
+describe('trimThread — keep the recent exchange, not the whole history', () => {
+  const inn = (body: string) => ({ direction: 'in', body });
+  const out = (body: string) => ({ direction: 'out', body });
+
+  it('keeps our replies sitting between their messages', () => {
+    const thread = [
+      inn('old one'), out('old answer'),
+      inn('q1'), out('a1'), inn('q2'), out('a2'), inn('q3'), out('a3'), inn('q4'), out('a4'),
+    ];
+    const kept = trimThread(thread);
+    expect(kept.filter((m) => m.direction === 'in')).toHaveLength(4);
+    expect(kept.some((m) => m.direction === 'out')).toBe(true); // our side survives
+    expect(kept.map((m) => m.body)).not.toContain('old one'); // the ancient part is dropped
+  });
+
+  it('reads its own question, so a bare "the second one" is still answerable', () => {
+    const thread = [
+      out('Which of the 3 do you mean?'),
+      inn('the second one'),
+    ];
+    const kept = trimThread(thread);
+    expect(kept.map((m) => m.body)).toContain('Which of the 3 do you mean?');
+  });
+
+  it('a burst of their messages cannot swallow the whole window', () => {
+    // 12 messages fired seconds apart, then the cap must still hold
+    const burst = Array.from({ length: 20 }, (_, i) => inn(`burst ${i}`));
+    const kept = trimThread([out('earlier question'), ...burst]);
+    expect(kept.length).toBeLessThanOrEqual(12);
+  });
+
+  it('keeps everything when the conversation is still short', () => {
+    const thread = [inn('hi'), out('hello'), inn('done?')];
+    expect(trimThread(thread)).toHaveLength(3);
+  });
+
+  it('handles an empty thread', () => {
+    expect(trimThread([])).toEqual([]);
+  });
+
+  it('always ends on the newest message', () => {
+    const thread = Array.from({ length: 40 }, (_, i) => (i % 2 ? out(`a${i}`) : inn(`q${i}`)));
+    const kept = trimThread(thread);
+    expect(kept[kept.length - 1]).toBe(thread[thread.length - 1]);
+  });
+
+  it('never returns more than the cap, however long the history', () => {
+    const thread = Array.from({ length: 500 }, (_, i) => (i % 2 ? out(`a${i}`) : inn(`q${i}`)));
+    expect(trimThread(thread).length).toBeLessThanOrEqual(THREAD_KEEP.maxMessages);
   });
 });

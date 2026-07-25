@@ -73,6 +73,49 @@ export function ackLine(name: string, lastIn: string): string {
 }
 
 /**
+ * How much the agent reads before it answers (BEA-1115). It used to read EVERY message ever
+ * exchanged with a contact, so the prompt grew forever — cost and delay climbing every day, and
+ * months-old settled chat competing with today's for the model's attention. Tune here; these are
+ * the only knobs.
+ */
+export const THREAD_KEEP = {
+  /** Keep going back until this many of THEIR messages are in view. */
+  inbound: 4,
+  /** Hard cap on the kept slice. Contacts often fire 2-3 messages seconds apart, so a burst must
+   *  not be able to swallow the whole window and leave the agent with no prior exchange. */
+  maxMessages: 12,
+  /** Rows loaded from the DB. Wider than the prompt slice on purpose: the duplicate-reply guard
+   *  looks across this span, so trimming the prompt does not weaken anti-repeat protection. */
+  recentWindow: 30,
+  /** Work they finished this recently is still named, flagged "do not chase again". */
+  doneDays: 7,
+  doneMax: 6,
+  /** Briefings carrying an open task; the most recent one is always added on top of these. */
+  briefs: 3,
+};
+
+/**
+ * The tail of the conversation: walk back from the newest message until `inbound` of THEIR
+ * messages are in view, keeping our own replies in between so the agent can still read its own
+ * questions. Without our side, "yes" and "the second one" are unanswerable. Pure/testable.
+ */
+export function trimThread<T extends { direction: string }>(
+  messages: T[],
+  keep: { inbound: number; maxMessages: number } = THREAD_KEEP,
+): T[] {
+  let seenIn = 0;
+  let start = messages.length; // nothing kept yet
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const isIn = messages[i].direction === 'in';
+    if (isIn && seenIn >= keep.inbound) break; // one of theirs too many — stop before it
+    if (messages.length - i > keep.maxMessages) break; // burst guard
+    if (isIn) seenIn++;
+    start = i;
+  }
+  return messages.slice(start);
+}
+
+/**
  * The two-way "replies like you" reminder agent (BEA-730 / Postbox C2). When a contact
  * replies (stored by the Postbox callback), it reads the whole thread, answers back in the
  * user's voice (Indian English), and — when the matter is clearly resolved — records the
@@ -177,6 +220,31 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     return next;
   }
 
+  /**
+   * What the owner has told the agent about this person. Briefings carrying an OPEN task are what
+   * the agent actually reasons about; the most recent briefing is always added on top, so general
+   * context ("she's handling the Focus ERP migration") isn't lost just because no task hangs off
+   * it. Read directly rather than via BriefingsService — that module depends on this one, and a
+   * circular dependency breaks startup. (BEA-1023, BEA-1115)
+   */
+  private async briefsFor(contactId: string): Promise<string> {
+    const pick = { id: true, rawText: true, createdAt: true };
+    const [withOpenTask, latest] = await Promise.all([
+      this.prisma.briefing
+        .findMany({ where: { contactId, tasks: { some: { status: { not: 'done' } } } }, orderBy: { createdAt: 'desc' }, take: THREAD_KEEP.briefs, select: pick })
+        .catch(() => [] as any[]),
+      this.prisma.briefing
+        .findMany({ where: { contactId }, orderBy: { createdAt: 'desc' }, take: 1, select: pick })
+        .catch(() => [] as any[]),
+    ]);
+    const byId = new Map<string, any>();
+    for (const b of [...withOpenTask, ...latest]) byId.set(b.id, b);
+    return [...byId.values()]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((r) => `[${new Date(r.createdAt).toISOString().slice(0, 10)}] ${r.rawText}`)
+      .join('\n\n');
+  }
+
   private async processContactReply(contactId: string): Promise<void> {
     const contact: any = await this.prisma.contact.findUnique({ where: { id: contactId } });
     if (!contact) return;
@@ -192,9 +260,17 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       .filter((r) => r.status === 'active' || r.status === 'paused') // open items to chase
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); // same numbering as the message (BEA-1041)
     const anchorReminderId: string = (reminders[0] || allReminders[allReminders.length - 1]).id; // where to attach our outbound
-    const messages: any[] = await this.prisma.reminderMessage.findMany({ where: { contactId }, orderBy: { createdAt: 'asc' } });
+    // Only the recent window comes out of the DB — the full history used to be loaded and pasted
+    // into every prompt, growing forever. (BEA-1115)
+    const recent: any[] = await this.prisma.reminderMessage.findMany({ where: { contactId }, orderBy: { createdAt: 'desc' }, take: THREAD_KEEP.recentWindow });
+    // Newest-first out of the DB (so `take` keeps the RECENT end), then put it back in reading
+    // order. Sorted explicitly rather than reversed: the order everything below depends on must not
+    // rest on the driver's orderBy. Missing timestamps compare equal, so a given order is kept.
+    const at = (m: any) => (m?.createdAt ? new Date(m.createdAt).getTime() : 0);
+    const messages: any[] = [...recent].sort((a, b) => at(a) - at(b));
     const name = (contact.name || 'them').trim();
-    const thread = messages.map((m) => `${m.direction === 'out' ? 'Me' : name}: ${m.body}`).join('\n');
+    // The model sees a tighter slice than the duplicate-reply guard below, which uses `messages`.
+    const thread = trimThread(messages).map((m) => `${m.direction === 'out' ? 'Me' : name}: ${m.body}`).join('\n');
 
     const todayKey = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); // IST, for date wording
 
@@ -203,10 +279,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const [briefText, work] = await Promise.all([
       // Read the briefings directly rather than through BriefingsService — that module already
       // depends on this one, and a circular dependency would break the app at startup. (BEA-1023)
-      this.prisma.briefing
-        .findMany({ where: { contactId }, orderBy: { createdAt: 'desc' }, take: 3, select: { rawText: true, createdAt: true } })
-        .then((rs) => rs.map((r) => `[${r.createdAt.toISOString().slice(0, 10)}] ${r.rawText}`).join('\n\n'))
-        .catch(() => ''),
+      this.briefsFor(contactId),
       this.prisma.task.findMany({
         where: { ownerContactId: contactId },
         orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
@@ -219,9 +292,11 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       }).catch(() => [] as any[]),
     ]);
     const openWork = (work as any[]).filter((t) => t.status !== 'done');
+    // Recently finished work is still named so the agent cannot chase something they just did —
+    // narrowed from 21 days to 7, since older completions are noise by now. (BEA-1115)
     const doneRecently = (work as any[])
-      .filter((t) => t.status === 'done' && t.completedAt && Date.now() - new Date(t.completedAt).getTime() < 21 * 86400000)
-      .slice(0, 6);
+      .filter((t) => t.status === 'done' && t.completedAt && Date.now() - new Date(t.completedAt).getTime() < THREAD_KEEP.doneDays * 86400000)
+      .slice(0, THREAD_KEEP.doneMax);
     const days = (d: any) => Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000));
     const workLines = openWork
       .map((t) => {
