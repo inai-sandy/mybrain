@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { localDayKey, weekdayOf } from '../common/localday';
+import { localDayKey, localHour, weekdayOf } from '../common/localday';
 
 /** Weekday names a rest day can be set to. */
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -92,6 +92,50 @@ export class RecurringService {
       .create({ data: { taskId, day, status: 'missed', contactId: contactId || null } })
       .catch(() => undefined);
     return true;
+  }
+
+  /** The hour (owner's time) after which a day is closed and the miss summary goes out. */
+  async digestHour(): Promise<number> {
+    const row = await this.prisma.setting.findUnique({ where: { key: 'recurring.digestHour' } }).catch(() => null);
+    const n = Number(row?.value);
+    return Number.isFinite(n) && n >= 0 && n <= 23 ? Math.floor(n) : 20; // 20:00 local by default
+  }
+
+  /**
+   * Close today once its last slot has passed: anything still outstanding becomes a recorded miss,
+   * and the list of misses is returned for ONE summary to the owner. Runs at most once per day
+   * (tracked in a setting), and never on a rest day — nothing was owed, so nothing was missed.
+   * Returns null when there is nothing to say. (BEA-1121)
+   */
+  async closeDay(now: Date = new Date()): Promise<{ day: string; missed: { title: string; contact: string | null }[] } | null> {
+    const day = this.today(now);
+    if (localHour(now) < (await this.digestHour())) return null; // the day is not over yet
+    const already = await this.prisma.setting.findUnique({ where: { key: 'recurring.closedDay' } }).catch(() => null);
+    if (already?.value === day) return null; // already closed — one summary a day, never a repeat
+    const markClosed = async () => {
+      await this.prisma.setting
+        .upsert({ where: { key: 'recurring.closedDay' }, create: { key: 'recurring.closedDay', value: day }, update: { value: day } })
+        .catch(() => undefined);
+    };
+    if (await this.isRestDay(day)) { await markClosed(); return null; }
+
+    const tasks = await this.prisma.task
+      .findMany({
+        where: { kind: 'recurring', status: { not: 'done' } },
+        select: { id: true, title: true, ownerContact: { select: { name: true } } },
+        orderBy: { createdAt: 'asc' },
+      })
+      .catch(() => [] as any[]);
+    const missed: { title: string; contact: string | null }[] = [];
+    for (const t of tasks as any[]) {
+      if (await this.isReceived(t.id, day)) continue;
+      const fresh = await this.markMissed(t.id, day);
+      if (fresh) missed.push({ title: t.title, contact: t.ownerContact?.name || null });
+    }
+    await markClosed();
+    if (!missed.length) return null;
+    this.log.log(`closed ${day}: ${missed.length} daily report(s) missed`);
+    return { day, missed };
   }
 
   /** The day's ledger for the Review tab: who owed what, and whether it came in. */

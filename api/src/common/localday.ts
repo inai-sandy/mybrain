@@ -31,3 +31,8 @@ export function dayKeyBefore(dayKey: string, days = 1): string {
   d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString().slice(0, 10);
 }
+
+/** The hour (0-23) it is right now in the owner's timezone. */
+export function localHour(now: Date = new Date(), offsetMin = TZ_OFFSET_MIN): number {
+  return new Date(now.getTime() + offsetMin * 60000).getUTCHours();
+}
