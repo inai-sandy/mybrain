@@ -330,3 +330,38 @@ describe('DocumentsService', () => {
     expect(raw?.content).toBe('# Hi');
   });
 });
+
+/** BEA-1101: outputs stay out of the brain until "Add to my Brain" — which uses the proven
+ *  convert-to-capture path and flips the marker exactly once. */
+describe('addToBrain (BEA-1101)', () => {
+  function build(row: any) {
+    const updates: any[] = [];
+    const stored: any[] = [];
+    const prisma: any = {
+      document: {
+        findUnique: jest.fn(async () => row),
+        update: jest.fn(async (args: any) => { updates.push(args); return row; }),
+      },
+    };
+    const items: any = { store: jest.fn(async (content: string) => { stored.push(content); return { item: { id: 'it1' }, deduped: false }; }) };
+    const { DocumentsService } = require('./documents.service');
+    const svc = new (DocumentsService as any)(prisma, {} as any, items, {} as any);
+    return { svc, updates, stored };
+  }
+
+  it('indexes on demand and clears the marker', async () => {
+    const { svc, updates, stored } = build({ id: 'd1', noIndex: true, title: 'Report', contentText: 'the findings', tags: '["agent"]', sourceUrl: null });
+    const r = await svc.addToBrain('d1');
+    expect(r).toEqual({ ok: true });
+    expect(stored[0]).toContain('the findings'); // really went to Capture/RAG
+    expect(updates[0].data.noIndex).toBe(false);
+  });
+
+  it('is a no-op when the output was already added', async () => {
+    const { svc, updates, stored } = build({ id: 'd1', noIndex: false, title: 'Report', contentText: 'x', tags: '[]' });
+    const r = await svc.addToBrain('d1');
+    expect(r).toEqual({ ok: true, already: true });
+    expect(stored.length).toBe(0);
+    expect(updates.length).toBe(0);
+  });
+});

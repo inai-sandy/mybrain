@@ -245,7 +245,12 @@ export function AgentApp() {
             <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />Latest result · {timeAgo(latest.endedAt || latest.startedAt)}
               {latest.grade?.verdict && <span className="rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">{latest.grade.verdict} · {latest.grade.score}</span>}
-              {latest.outputDocId && <button onClick={() => nav(`/documents/${latest.outputDocId}`)} className="ml-auto inline-flex items-center gap-1 text-emerald-600 hover:underline"><FileText className="h-3.5 w-3.5" />document</button>}
+              {latest.outputDocId && (
+              <span className="ml-auto flex items-center gap-2.5">
+                <button onClick={async () => { const r = await fetch(`/api/documents/${latest.outputDocId}/add-to-brain`, { method: 'POST' }); const d = await r.json().catch(() => ({})); if (r.ok) toast('success', d.already ? 'Already in your brain' : 'Added — it will appear in your brain within a few minutes'); else toast('error', 'Could not add'); }} className="inline-flex items-center gap-1 text-violet-600 hover:underline dark:text-violet-400">🧠 Add to my Brain</button>
+                <button onClick={() => nav(`/documents/${latest.outputDocId}`)} className="inline-flex items-center gap-1 text-emerald-600 hover:underline"><FileText className="h-3.5 w-3.5" />document</button>
+              </span>
+            )}
             </div>
             {spec.view === 'brief' ? (
               <div>

@@ -660,7 +660,7 @@ export class FlowRunnerService implements OnModuleInit {
   private async saveDoc(title: string, content: string, flowName: string, isPart = false): Promise<{ id: string; slug: string; title: string } | null> {
     try {
       // pass description + tags so DocumentsService skips its (paid) AI summarise pass
-      const doc: any = await this.documents.create({ title: title.slice(0, 180), contentText: content, kind: 'md', description: content.replace(/\s+/g, ' ').slice(0, 180), tags: ['flow', flowName.slice(0, 40), ...(isPart ? ['flow-part'] : [])] });
+      const doc: any = await this.documents.create({ title: title.slice(0, 180), contentText: content, kind: 'md', description: content.replace(/\s+/g, ' ').slice(0, 180), tags: ['flow', flowName.slice(0, 40), ...(isPart ? ['flow-part'] : [])], noIndex: true });
       return { id: doc.id, slug: doc.slug, title: doc.title };
     } catch (e: any) { this.log.warn(`flow doc save failed: ${e?.message || e}`); return null; }
   }

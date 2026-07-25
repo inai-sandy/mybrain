@@ -45,6 +45,12 @@ export class DocumentsController {
   }
 
   /** Stream a zip of the chosen documents (or all when ids is empty). */
+  /** "Add to my Brain" (BEA-1101) — index a job output on purpose. */
+  @Post(':id/add-to-brain')
+  addToBrain(@Param('id') id: string) {
+    return this.docs.addToBrain(id);
+  }
+
   @Post('export')
   async export(@Body() body: { ids?: string[] }, @Res() res: Response) {
     const rows = await this.docs.forExport(body?.ids);

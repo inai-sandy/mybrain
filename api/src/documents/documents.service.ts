@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import AdmZip from 'adm-zip';
@@ -45,6 +45,7 @@ export type DocInput = {
   kind?: string;
   tags?: string[];
   collectionId?: string | null;
+  noIndex?: boolean; // agent/flow outputs stay OUT of the brain until "Add to my Brain" (BEA-1101)
 };
 
 // A cheap, fast model is plenty for a one-line summary + tags. (BEA-533)
@@ -331,11 +332,25 @@ export class DocumentsService {
       contentText: content,
       bytes: Buffer.byteLength(content, 'utf8'),
       tags,
+      noIndex: !!input.noIndex,
     });
   }
 
+  /**
+   * "Add to my Brain" (BEA-1101): the ONLY way a job output enters the brain. Flips noIndex off;
+   * the memory reconcile picks it up on its next sweep (within ~15 minutes).
+   */
+  async addToBrain(id: string): Promise<{ ok: boolean; already?: boolean }> {
+    const row: any = await this.prisma.document.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Document not found');
+    if (!row.noIndex) return { ok: true, already: true }; // noIndex=false ⇒ it was already added
+    await this.convertToCapture(id); // the proven on-demand path: Capture item → RAG + SuperMemory, deduped (BEA-540)
+    await this.prisma.document.update({ where: { id }, data: { noIndex: false } as any });
+    return { ok: true };
+  }
+
   /** Shared insert — text docs and uploaded files both land here. */
-  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null; siteEntry?: string | null }) {
+  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null; siteEntry?: string | null; noIndex?: boolean }) {
     const row = await this.prisma.document.create({
       data: {
         slug: this.slugify(data.title),
@@ -349,6 +364,7 @@ export class DocumentsService {
         bytes: data.bytes ?? null,
         siteEntry: data.siteEntry ?? null,
         tags: JSON.stringify(data.tags),
+        noIndex: !!data.noIndex,
       },
     });
     return this.full(row);

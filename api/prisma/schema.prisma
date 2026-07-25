@@ -319,6 +319,7 @@ model Document {
   originServer  String? // when landed from another server (later step)
   collectionId  String? // folder/collection (later step)
   tags          String    @default("[]") // JSON string array
+  noIndex       Boolean   @default(false) // agent/flow outputs stay OUT of the brain until "Add to my Brain" (BEA-1101)
   shared        Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

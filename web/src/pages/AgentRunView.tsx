@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Markdown } from '../ui/markdown';
 import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, Info, FileText, RotateCw, Sparkles, Terminal, ChevronDown } from 'lucide-react';
 import { StatusBadge } from './Agents';
+import { useToast } from '../ui/Toast';
 
 /** Seconds → m:ss for the live elapsed timer. */
 function mmss(sec: number): string {
@@ -81,6 +82,7 @@ function FreeTextAnswer({ onSubmit, disabled }: { onSubmit: (v: string) => void;
 export function AgentRunView() {
   const { id } = useParams();
   const nav = useNavigate();
+  const toast = useToast();
   const [run, setRun] = useState<Run | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -269,6 +271,7 @@ export function AgentRunView() {
             <div className="flex items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
               <FileText className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
               <div className="flex-1 text-sm font-medium text-emerald-800 dark:text-emerald-200">Saved to Documents.</div>
+              <button onClick={async () => { const r = await fetch(`/api/documents/${run.outputDocId}/add-to-brain`, { method: 'POST' }); const d = await r.json().catch(() => ({})); if (r.ok) toast('success', d.already ? 'Already in your brain' : 'Added — it will appear in your brain within a few minutes'); else toast('error', 'Could not add'); }} className="shrink-0 rounded-lg border border-violet-300 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10">🧠 Add to my Brain</button>
               <button onClick={() => nav(`/documents/${run.outputDocId}`)} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500">Open</button>
             </div>
           )}

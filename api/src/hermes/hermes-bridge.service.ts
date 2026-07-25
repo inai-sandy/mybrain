@@ -774,6 +774,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
           kind: 'md',
           collectionId: input.saveCollectionId ?? cfg.outputCollectionId ?? (await this.defaultCollectionId()),
           tags: ['agent'],
+          noIndex: true, // outputs stay out of the brain until "Add to my Brain" (BEA-1101)
         });
         await this.agent.attachOutput(runId, doc.id);
         await this.agent.appendStep(runId, { label: 'Saved to Documents', status: 'done', detail: doc.title });
