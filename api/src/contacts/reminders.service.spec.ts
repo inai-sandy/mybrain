@@ -1,4 +1,4 @@
-import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes, topicFromMessage, chatWindowOpen, CHAT_WINDOW_MS } from './reminders.service';
+import { spreadTimes, localTimesToUtc, scheduleNudges, scheduleOnDay, RemindersService, looksCommandLike, stripCommandLead, sanitizeTimes, topicFromMessage, chatWindowOpen, CHAT_WINDOW_MS, dailySubject } from './reminders.service';
 
 describe('update() reschedule (BEA-883)', () => {
   const todayIST = () => new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
@@ -644,5 +644,30 @@ describe('sendManual — falls back to the approved template outside the window 
     const out: any = await svc.sendManual('r1', 'first contact');
     expect(calls.text).toHaveLength(0);
     expect(out.viaTemplate).toBe(true);
+  });
+});
+
+/**
+ * BEA-1119: a standing daily report must be asked for as today's copy. "Where does 'Send the daily
+ * production update' stand?" reads like it has never been sent, when he sent one yesterday too.
+ */
+describe('dailySubject — asking for today\'s copy', () => {
+  it('turns Jayanth\'s real titles into a natural daily ask', () => {
+    expect(dailySubject('Send the daily production update')).toBe("today's production update");
+    expect(dailySubject('Send the OT update')).toBe("today's OT update");
+    expect(dailySubject('Share the status of hiring and work delegation')).toBe("today's status of hiring and work delegation");
+  });
+
+  it('drops a leading article without a command verb', () => {
+    expect(dailySubject('The morning headcount')).toBe("today's morning headcount");
+  });
+
+  it('leaves an already-clean topic alone', () => {
+    expect(dailySubject('dispatch numbers')).toBe("today's dispatch numbers");
+  });
+
+  it('never returns a bare "today\'s"', () => {
+    expect(dailySubject('')).toBe("today's update");
+    expect(dailySubject('   ')).toBe("today's update");
   });
 });

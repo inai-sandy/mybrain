@@ -1,6 +1,9 @@
 import { ReminderSenderService, joinSubjects } from './reminder-sender.service';
 import { PostboxService } from './postbox.service';
 
+/** No recurring work involved — every task in these fixtures is a plain assignment. (BEA-1119) */
+const RECURRING_OFF: any = { today: () => '2026-07-27', isRestDay: async () => false, isReceived: async () => false };
+
 // The real renderer — reused in tests so the expected chat body is never a
 // second hardcoded copy of the template. (BEA-753)
 const renderReminderTemplate = (fn: string, subj: string) => new PostboxService().renderReminderTemplate(fn, subj);
@@ -46,7 +49,7 @@ describe('rollDay — one-day auto-pause (BEA-764)', () => {
       },
       reminderSend: { count: async () => 0, deleteMany: async () => { deleted++; return {}; } },
     };
-    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any).rollDay();
+    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).rollDay();
     expect(updates).toEqual([
       { id: 'r1', status: 'paused', pausedAuto: true },
       { id: 'r2', status: 'paused', pausedAuto: true },
@@ -64,7 +67,7 @@ describe('rollDay — one-day auto-pause (BEA-764)', () => {
       // one future send is still queued → mid-lifecycle, must be left active
       reminderSend: { count: async ({ where }: any) => (where?.at?.gt ? 1 : 0), deleteMany: async () => ({}) },
     };
-    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any).rollDay();
+    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).rollDay();
     expect(updates).toHaveLength(0); // not paused, sends not deleted
   });
 });
@@ -115,7 +118,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       sendTaskListTemplate: async (_to: string, fn: string, n: number, list: string, slug: string) => { got = { fn, n, list, slug }; return { wamid: 'w', status: 'sent', error: null }; },
       sendReminderTemplate: async () => { throw new Error('must not fall back when the list template works'); },
     };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'srikar-4x2k' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'srikar-4x2k' }) } as any, RECURRING_OFF).tick();
     // Numbered in reminder-age order — the SAME numbers the agent uses, so "2 is done" means the
     // same task on both sides.
     expect(got).toEqual({ fn: 'Srikar', n: 2, list: '1) the Zigbee testing 2) the socket pins', slug: 'srikar-4x2k' });
@@ -138,7 +141,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       sendTaskListTemplate: async () => ({ wamid: null, status: 'failed', error: 'template not approved' }),
       sendReminderTemplate: async (_to: string, _fn: string, subj: string) => { fallbackSubject = subj; return { wamid: 'w' }; },
     };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 's' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 's' }) } as any, RECURRING_OFF).tick();
     expect(fallbackSubject).toBe('A and B'); // the old combined wording still goes out
     expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(2);
   });
@@ -153,7 +156,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       sendTaskListTemplate: async () => { throw new Error('must not use the list template for one task'); },
       sendReminderTemplate: async (_to: string, _fn: string, subj: string) => { single = subj; return { wamid: 'w' }; },
     };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 's' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 's' }) } as any, RECURRING_OFF).tick();
     expect(single).toBe('the Zigbee testing');
     expect(state.msgs).toHaveLength(1);
   });
@@ -163,7 +166,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     const { prisma, state } = makePrisma(sends, new Date(Date.now() - 30 * 60 * 1000)); // replied 30 min ago
     let sent = 0;
     const postbox: any = { isConfigured: () => true, sendText: async () => { sent++; return {}; }, sendReminderTemplate: async () => { sent++; return {}; } };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(sent).toBe(0);
     expect(state.updates[0].status).toBe('skipped');
   });
@@ -181,7 +184,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       sendReminderTemplate: async () => { throw new Error('must not fire the template inside an open chat'); },
       sendTaskListTemplate: async () => { throw new Error('must not fire the template inside an open chat'); },
     };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(plain).toContain('checking in again about the OT update');
     expect(state.updates[0].status).toBe('sent');
     expect(state.msgs[0].body).toBe(plain); // the chat mirror shows exactly what went out
@@ -200,7 +203,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       sendText: async (_to: string, body: string) => { plain = body; return { wamid: 'w', status: 'sent', error: null }; },
       sendTaskListTemplate: async () => { throw new Error('must not fire the template inside an open chat'); },
     };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'madhuri-4x2k' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'madhuri-4x2k' }) } as any, RECURRING_OFF).tick();
     expect(plain).toContain('1) A 2) B');
     expect(plain).toContain('https://mybrain.1site.ai/t/madhuri-4x2k');
     expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(2);
@@ -217,7 +220,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
       sendText: async () => ({ wamid: null, status: 'failed', error: 're-engagement required' }),
       sendReminderTemplate: async () => { templated++; return { wamid: 'w' }; },
     };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(templated).toBe(1); // the chase never silently dies
     expect(state.updates[0].status).toBe('sent');
   });
@@ -227,7 +230,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     const { prisma, state } = makePrisma(sends, new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)); // replied 3 days ago
     let sent = 0;
     const postbox: any = { isConfigured: () => true, renderReminderTemplate, sendReminderTemplate: async () => { sent++; return { wamid: 'w' }; } };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(sent).toBe(1); // the stale conversation must not block a fresh reminder
     expect(state.updates[0].status).toBe('sent');
   });
@@ -243,7 +246,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     // record the claim before the send by wrapping updateMany
     const origUpdateMany = prisma.reminderSend.updateMany;
     prisma.reminderSend.updateMany = async (a: any) => { order.push('claim'); return origUpdateMany(a); };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(state.claims).toContain('sending'); // rows were claimed
     expect(order).toEqual(['claim', 'send']); // claim happens first, so an overlapping tick can't re-send
   });
@@ -255,7 +258,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     const gate = new Promise<void>((r) => { release = r; });
     let sent = 0;
     const postbox: any = { isConfigured: () => true, renderReminderTemplate, sendReminderTemplate: async () => { sent++; await gate; return { wamid: 'w' }; } };
-    const svc = new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any);
+    const svc = new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF);
     const p1 = svc.tick();          // sets sending=true synchronously, then blocks in the send
     const p2 = svc.tick();          // sees sending=true → returns immediately, no send
     await p2;
@@ -267,7 +270,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
   it('fails orphaned in-flight sends on boot, never re-sending (BEA-775)', async () => {
     let failed: any = null;
     const prisma: any = { reminderSend: { updateMany: async ({ where, data }: any) => { failed = { where, data }; return { count: 2 }; } } };
-    const n = await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any).reclaimOrphanSends();
+    const n = await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).reclaimOrphanSends();
     expect(n).toBe(2);
     expect(failed.where).toEqual({ status: 'sending' });
     expect(failed.data.status).toBe('failed');
@@ -276,7 +279,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
   it('does nothing (no DB query) when Postbox is not configured', async () => {
     let queried = false;
     const prisma: any = { reminder: { findMany: async () => [], update: async () => ({}) }, reminderSend: { findMany: async () => { queried = true; return []; }, deleteMany: async () => ({}) } };
-    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(queried).toBe(false);
   });
 
@@ -284,7 +287,7 @@ describe('ReminderSenderService.tick — combine per contact (BEA-742)', () => {
     const sends = [{ id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', subject: 'x', contact: { name: 'X', whatsappNumber: null } } }];
     const { prisma, state } = makePrisma(sends);
     const postbox: any = { isConfigured: () => true, sendReminderTemplate: async () => ({}) };
-    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any).tick();
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).tick();
     expect(state.updates[0]).toMatchObject({ id: 's1', status: 'failed' });
   });
 });
@@ -310,7 +313,7 @@ describe('rollDay — a daily chase repeats instead of pausing (BEA-1021)', () =
       },
       task: { findUnique: async () => task },
     };
-    return { svc: new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any), updates, created, get deleted() { return deleted; } };
+    return { svc: new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF), updates, created, get deleted() { return deleted; } };
   }
 
   it('re-arms a daily chase for the new day instead of pausing it', async () => {
@@ -357,5 +360,68 @@ describe('rollDay — a daily chase repeats instead of pausing (BEA-1021)', () =
     const armed = h.updates.find((u: any) => u.armedDay);
     expect(armed).toBeTruthy();
     expect(armed.pausedAuto).toBe(false);
+  });
+});
+
+/**
+ * BEA-1119: a standing daily report is owed on working days only, and once today's has arrived the
+ * chasing stops until tomorrow. Neither ends the chase — it returns on the next working day.
+ */
+describe('the sender honours rest days and today\'s status (BEA-1119)', () => {
+  function dailyPrisma() {
+    const sends = [
+      { id: 's1', reminder: { id: 'r1', status: 'active', contactId: 'c1', taskId: 't9', subject: 'the daily production update', createdAt: new Date(1), contact: { name: 'Jayanth', whatsappNumber: '919812345678' } } },
+    ];
+    const state: any = { updates: [], msgs: [], claims: [] };
+    const prisma: any = {
+      contact: { findUnique: async () => null },
+      reminder: { findMany: async () => [], update: async () => ({}) },
+      reminderSend: {
+        findMany: async ({ where }: any = {}) => (where?.status === 'queued' && where?.at ? sends : []),
+        update: async ({ where, data }: any) => state.updates.push({ id: where.id, ...data }),
+        updateMany: async () => ({ count: 1 }),
+        deleteMany: async () => ({}),
+      },
+      reminderMessage: { findFirst: async () => null, create: async ({ data }: any) => state.msgs.push(data) },
+      taskClaim: { count: async () => 0 },
+      task: { findUnique: async () => ({ title: 'Send the daily production update', kind: 'recurring' }) },
+    };
+    return { prisma, state };
+  }
+  const noSend: any = {
+    isConfigured: () => true,
+    renderReminderTemplate,
+    sendReminderTemplate: async () => { throw new Error('must not chase — nothing is owed'); },
+    sendText: async () => { throw new Error('must not chase — nothing is owed'); },
+  };
+
+  it('sends nothing on a rest day, and says why', async () => {
+    const { prisma, state } = dailyPrisma();
+    const recurring: any = { today: () => '2026-07-26', isRestDay: async () => true, isReceived: async () => false };
+    await new ReminderSenderService(prisma, noSend, { share: async () => ({ slug: 'j-1' }) } as any, recurring).tick();
+    expect(state.updates).toHaveLength(1);
+    expect(state.updates[0]).toMatchObject({ id: 's1', status: 'skipped', error: 'nothing owed today — rest day' });
+  });
+
+  it("sends nothing once today's update has already come in", async () => {
+    const { prisma, state } = dailyPrisma();
+    const recurring: any = { today: () => '2026-07-27', isRestDay: async () => false, isReceived: async () => true };
+    await new ReminderSenderService(prisma, noSend, { share: async () => ({ slug: 'j-1' }) } as any, recurring).tick();
+    expect(state.updates).toHaveLength(1);
+    expect(state.updates[0]).toMatchObject({ id: 's1', status: 'skipped', error: "today's update already came in" });
+  });
+
+  it("chases on a working day when today's has NOT arrived, asking for today's copy", async () => {
+    const { prisma, state } = dailyPrisma();
+    let asked: any = null;
+    const postbox: any = {
+      isConfigured: () => true,
+      renderReminderTemplate,
+      sendReminderTemplate: async (_to: string, fn: string, subject: string) => { asked = { fn, subject }; return { wamid: 'w', status: 'sent', error: null }; },
+    };
+    const recurring: any = { today: () => '2026-07-27', isRestDay: async () => false, isReceived: async () => false };
+    await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'j-1' }) } as any, recurring).tick();
+    expect(asked).toEqual({ fn: 'Jayanth', subject: "today's production update" });
+    expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(1);
   });
 });
