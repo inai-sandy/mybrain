@@ -170,7 +170,7 @@ function RunningCard({ r }: { r: RunningItem }) {
 }
 
 /** Paste a GitHub link → agents found there + the install plan (BEA-1081). Nothing installs without the tap. */
-function ImportGithubModal({ onDone, onClose }: { onDone: () => void; onClose: () => void }) {
+function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void; onClose: () => void }) {
   const toast = useToast();
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
@@ -201,7 +201,7 @@ function ImportGithubModal({ onDone, onClose }: { onDone: () => void; onClose: (
       const mcpOk = (d.installed?.mcp || []).filter((x: any) => x.ok).length;
       const cliOk = (d.installed?.clis || []).filter((x: any) => x.ok).length;
       toast('success', `Imported ${d.imported.length} agent${d.imported.length === 1 ? '' : 's'}${mcpOk || cliOk ? ` · installed ${mcpOk} MCP + ${cliOk} CLI` : ''}`);
-      onDone();
+      onDone(d.url); // v2: the repo landed as ONE agent — open it (BEA-1105)
     } catch (e: any) { toast('error', e?.message || 'Import failed'); setBusy(false); }
   }
 
@@ -745,7 +745,7 @@ export function Agents() {
             <button onClick={() => setShowBuilder(true)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New agent</button>
           </div>
         </div>
-        {showImport && <ImportGithubModal onDone={() => { setShowImport(false); loadHome(); loadAreas(); }} onClose={() => setShowImport(false)} />}
+        {showImport && <ImportGithubModal onDone={(url) => { setShowImport(false); loadHome(); loadAreas(); if (url) nav(url); }} onClose={() => setShowImport(false)} />}
         {showBuilder && <AgentBuilder onCreated={(url) => { setShowBuilder(false); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); setShowNew(true); }} onClose={() => setShowBuilder(false)} />}
         {showNew && <NewAgentForm initial={starterPick} onCreated={() => { setShowNew(false); setStarterPick(null); loadHome(); loadAreas(); }} onCancel={() => { setShowNew(false); setStarterPick(null); }} />}
         {areasList === null ? (

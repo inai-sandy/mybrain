@@ -60,3 +60,37 @@ describe('toolsFromImport (BEA-1100)', () => {
     expect(svc.toolsFromImport({ tools: [] }, { mcpServers: [], clis: ['x'], notes: [] }, true)[0].status).toBe('installed');
   });
 });
+
+/** BEA-1105: the whole repo becomes ONE agent (area); picked definitions are jobs inside it. */
+describe('confirm builds one area per repo (BEA-1105)', () => {
+  it('creates the repo area, puts jobs inside, aggregates deduped tools', async () => {
+    const { AgentsImportService } = await import('./agents-import.service');
+    const created: any[] = [];
+    const areaCalls: any[] = [];
+    const agent: any = { createAgent: jest.fn(async (i: any) => { created.push(i); return { id: 'j' + created.length, areaId: i.areaId }; }) };
+    const areas: any = {
+      create: jest.fn(async (i: any) => { areaCalls.push(['create', i]); return { id: 'ar-repo', ...i }; }),
+      update: jest.fn(async (id: string, patch: any) => { areaCalls.push(['update', id, patch]); return {}; }),
+    };
+    const svc: any = new (AgentsImportService as any)(agent, areas);
+    jest.spyOn(svc, 'preview').mockResolvedValue({
+      url: 'https://github.com/acme/news-agents',
+      readme: '# News agents\nA pack of news agents for daily briefs.\n',
+      agents: [
+        { name: 'tech-news', description: 'tech', body: 'do tech news', tools: ['WebSearch'], color: null },
+        { name: 'ai-news', description: 'ai', body: 'do ai news', tools: ['WebSearch'], color: null },
+      ],
+      deps: { mcpServers: [{ name: 'tavily', command: 'npx', args: [] }], clis: [], notes: [] },
+    });
+    const out = await svc.confirm('https://github.com/acme/news-agents', ['tech-news', 'ai-news'], false);
+    expect(out.imported).toEqual(['tech-news', 'ai-news']);
+    expect(out.areaId).toBe('ar-repo');
+    expect(out.url).toBe('/agent/ar/ar-repo');
+    expect(areaCalls[0][1].name).toBe('news agents'); // repo name, cleaned
+    expect(areaCalls[0][1].description).toContain('pack of news agents'); // readme first real line
+    expect(created.every((c) => c.areaId === 'ar-repo')).toBe(true); // jobs live INSIDE the repo area
+    const tools = areaCalls.find((c) => c[0] === 'update')![2].tools;
+    expect(tools.filter((t: any) => t.name === 'WebSearch').length).toBe(1); // deduped across jobs
+    expect(tools.some((t: any) => t.name === 'tavily' && t.kind === 'mcp' && t.status === 'needed')).toBe(true);
+  });
+});

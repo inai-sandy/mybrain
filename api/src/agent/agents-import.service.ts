@@ -146,17 +146,24 @@ export class AgentsImportService {
    * Import the picked agents (and, if approved, install the plan via the host runner).
    * The agent's frontmatter tools become part of its plan text; its category is 'Imported'.
    */
-  async confirm(rawUrl: string, pick: string[], installDeps: boolean): Promise<{ imported: string[]; installed?: any; skipped: string[] }> {
+  async confirm(rawUrl: string, pick: string[], installDeps: boolean): Promise<{ imported: string[]; installed?: any; skipped: string[]; areaId?: string; url?: string }> {
     const prev = await this.preview(rawUrl);
     const wanted = prev.agents.filter((a) => pick.includes(a.name));
     if (!wanted.length) throw new BadRequestException('Pick at least one agent to import.');
     const imported: string[] = [];
     const skipped: string[] = [];
-    const createdAreas: { areaId: string; def: (typeof wanted)[number] }[] = [];
+    // v2 (BEA-1105): the whole repo becomes ONE agent (area); every picked definition is a job inside it.
+    const repoName = ((rawUrl.match(/github\.com\/[^/]+\/([^/#?]+)/) || [])[1] || 'Imported agent').replace(/[-_]+/g, ' ').trim();
+    const readmeLine = (prev.readme || '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#') && !l.startsWith('!')) || '';
+    let repoArea: any = null;
+    try {
+      repoArea = await this.areas?.create({ name: repoName.slice(0, 80), icon: '📦', description: readmeLine.slice(0, 200) || `Imported from GitHub`, sourceUrl: rawUrl });
+    } catch { repoArea = null; }
     for (const a of wanted) {
       try {
         const toolsLine = a.tools.length ? `\n\nTools it expects: ${a.tools.join(', ')}. Use my brain tools (search_brain, save_document, ask_user) where they fit.` : '';
         const created: any = await this.agent.createAgent({
+          ...(repoArea?.id ? { areaId: repoArea.id } : {}),
           name: a.name,
           icon: '📦',
           color: a.color && a.color.startsWith('#') ? a.color : undefined,
@@ -167,7 +174,6 @@ export class AgentsImportService {
           defaultDepth: 'standard',
           sourceUrl: rawUrl,
         } as any);
-        if (created?.areaId) createdAreas.push({ areaId: created.areaId, def: a });
         imported.push(a.name);
       } catch (e: any) {
         skipped.push(`${a.name}: ${e?.message || 'could not save'}`);
@@ -177,12 +183,15 @@ export class AgentsImportService {
     if (installDeps && (prev.deps.mcpServers.length || prev.deps.clis.length)) {
       installed = await this.installOnHost(prev.deps).catch((e) => ({ ok: false, error: e?.message || 'install failed' }));
     }
-    // Fill each new agent's Tools section from the repo analysis (BEA-1100). Never blocks the import.
-    for (const c of createdAreas) {
-      const tools = this.toolsFromImport(c.def, prev.deps, !!installed?.ok);
-      if (tools.length) await this.areas?.update(c.areaId, { tools }).catch(() => undefined);
+    // The repo area's Tools = every picked definition's declared tools + the repo's MCP/CLI deps,
+    // deduped, with honest install status (BEA-1100/1105). Never blocks the import.
+    if (repoArea?.id) {
+      const seen = new Set<string>();
+      const tools = wanted.flatMap((a) => this.toolsFromImport(a, prev.deps, !!installed?.ok))
+        .filter((t) => { const k = t.kind + ':' + t.name; if (seen.has(k)) return false; seen.add(k); return true; });
+      if (tools.length) await this.areas?.update(repoArea.id, { tools }).catch(() => undefined);
     }
-    return { imported, installed, skipped };
+    return { imported, installed, skipped, ...(repoArea?.id ? { areaId: repoArea.id, url: `/agent/ar/${repoArea.id}` } : {}) };
   }
 
   /** Hand the approved plan to the host runner (config.toml MCP entries + npm -g CLIs only). */
