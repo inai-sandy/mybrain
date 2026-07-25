@@ -28,7 +28,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-4 right-4 left-4 md:left-auto flex flex-col items-end gap-2 z-[70] pointer-events-none">
+      {/* Sits above the floating action button (bottom-24 + its height) on desktop and above the
+          nav on mobile — a long error toast used to cover the FAB in the corner (BEA-1093). */}
+      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-36 right-4 left-4 md:left-auto flex flex-col items-end gap-2 z-[70] pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
             <motion.div
