@@ -9,7 +9,7 @@ import { TZ_OFFSET_MIN } from '../common/localday';
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
 /** Verbs that mark a subject as a task/command sentence rather than a clean topic. (BEA-754) */
-const COMMAND_LEAD =
+export const COMMAND_LEAD =
   /^(tell|ask|remind|instruct|get|follow[\s-]?up(\s+with)?|check(\s+with)?|nudge|inform|make sure|have|let|chase|push|ping|discuss|share|send|create|prepare|arrange|coordinate|confirm|collect|provide|review|update|finali[sz]e|schedule|organi[sz]e|complete|submit|upload|call|email|message|escalate|clarify|sort out|figure out)\b/i;
 
 /**
@@ -88,6 +88,23 @@ export function sanitizeTimes(times: unknown): string[] {
     seen.add(`${String(h).padStart(2, '0')}:${m[2]}`);
   }
   return [...seen].sort().slice(0, 8); // up to 8 send times a day (3 presets + custom, BEA-920)
+}
+
+/**
+ * How a standing daily report should be asked for. "Where does 'Send the daily production update'
+ * stand?" reads wrong for something owed again every day — it is today's copy that is wanted. So
+ * the command lead, any article and a redundant "daily" come off, and "today's" goes on:
+ * "Send the daily production update" -> "today's production update". (BEA-1119)
+ */
+export function dailySubject(title: string): string {
+  // "Send the daily production update" -> drop the instruction verb, then the article, then a
+  // redundant "daily". stripCommandLead only handles "Tell <Name> to …" forms, so the bare leading
+  // verb is taken off here with the same verb list.
+  let s = stripCommandLead(String(title || '').trim()).replace(COMMAND_LEAD, '').trim();
+  s = s.replace(/^(the|a|an)\s+/i, '');
+  s = s.replace(/^daily\s+/i, '');
+  s = s.trim();
+  return s ? `today's ${s}` : "today's update";
 }
 
 /** The user's timezone offset in minutes east of UTC (IST = +330). Configurable. (BEA-734)

@@ -2,7 +2,8 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { ContactsService } from './contacts.service';
-import { CHAT_WINDOW_MS, REMINDER_TZ_OFFSET, scheduleOnDay, topicFromMessage } from './reminders.service';
+import { RecurringService } from '../tasks/recurring.service';
+import { CHAT_WINDOW_MS, REMINDER_TZ_OFFSET, dailySubject, scheduleOnDay, topicFromMessage } from './reminders.service';
 
 /** Join subject phrases into one natural list: "A" / "A and B" / "A, B and C". (BEA-742) */
 export function joinSubjects(subjects: string[]): string {
@@ -31,6 +32,7 @@ export class ReminderSenderService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
     private readonly contacts: ContactsService,
+    private readonly recurring: RecurringService,
   ) {}
 
   onModuleInit() {
@@ -55,8 +57,10 @@ export class ReminderSenderService implements OnModuleInit {
     // snapshot taken when the reminder was created, so editing the task left the message saying
     // the old thing forever. The live title wins. (BEA-1021)
     if (r.taskId) {
-      const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true } }).catch(() => null);
-      if (t?.title?.trim()) return t.title.trim();
+      const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true, kind: true } }).catch(() => null);
+      // A daily report is asked for as "today's production update", not "the daily production
+      // update" — otherwise the chase reads like it has never been sent before. (BEA-1119)
+      if (t?.title?.trim()) return t.kind === 'recurring' ? dailySubject(t.title) : t.title.trim();
     }
     if (r.subject?.trim()) return r.subject.trim();
     return topicFromMessage(r.message);
@@ -191,6 +195,23 @@ export class ReminderSenderService implements OnModuleInit {
       if (r.taskId && (await this.prisma.taskClaim.count({ where: { taskId: r.taskId, status: 'pending' } })) > 0) {
         await this.mark(send.id, 'skipped', null, 'they reported it done — waiting on your review');
         continue;
+      }
+      // A standing daily report: nothing is owed on a rest day, and once today's has arrived we go
+      // quiet until tomorrow. Neither ends the chase — it comes back on the next working day.
+      // (BEA-1119)
+      if (r.taskId) {
+        const task = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { kind: true } }).catch(() => null);
+        if (task?.kind === 'recurring') {
+          const today = this.recurring.today();
+          if (await this.recurring.isRestDay(today)) {
+            await this.mark(send.id, 'skipped', null, 'nothing owed today — rest day');
+            continue;
+          }
+          if (await this.recurring.isReceived(r.taskId, today)) {
+            await this.mark(send.id, 'skipped', null, "today's update already came in");
+            continue;
+          }
+        }
       }
       let g = groups.get(r.contactId);
       if (!g) {
