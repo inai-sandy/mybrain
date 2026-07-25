@@ -335,11 +335,12 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         autonomy: a.autonomy || 'cautious', depth: a.defaultDepth || 'standard',
         schedule: a.schedule || null, scheduleText: a.scheduleText || null,
       });
-      const out = await this.llm.complete(
-        tpl.replaceAll('{{agent}}', current).replaceAll('{{message}}', (message || '').slice(0, 600)),
-        900,
-        'agent-chat-edit',
-      );
+      // Chat-to-edit runs on Claude Sonnet for reliable JSON-patch instruction-following (BEA-1094);
+      // falls back to the app's shared default model if Sonnet is ever unreachable, so it never dies.
+      const filled = tpl.replaceAll('{{agent}}', current).replaceAll('{{message}}', (message || '').slice(0, 600));
+      const CHAT_MODEL = { provider: 'openrouter' as const, model: 'anthropic/claude-sonnet-4.6' };
+      const out = (await this.llm.completeWith(CHAT_MODEL, filled, 900, 'agent-chat-edit'))
+        || (await this.llm.complete(filled, 900, 'agent-chat-edit'));
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (!m) return cantDo;
       const g = JSON.parse(m[0]);

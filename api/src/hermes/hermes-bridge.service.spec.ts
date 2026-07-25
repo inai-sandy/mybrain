@@ -28,7 +28,7 @@ function fakeAgent(opts: { answer?: string; cfg?: any } = {}) {
 const fakeDocs = () => ({ create: jest.fn(async (i: any) => ({ id: 'doc-1', slug: 'x', title: i.title })) });
 const fakeTg = () => ({ pushAgentQuestion: jest.fn(async () => undefined), notifyAgentPaused: jest.fn(async () => undefined) });
 const fakeMem = (hits: any[] = []) => ({ searchBrain: jest.fn(async () => hits), enqueue: jest.fn(async () => undefined) });
-const fakeLlm = (out = '') => ({ complete: jest.fn(async () => out) });
+const fakeLlm = (out = '') => ({ complete: jest.fn(async () => out), completeWith: jest.fn(async () => out) });
 const fakePush = () => ({ send: jest.fn(async () => ({ sent: 1, pruned: 0 })) });
 
 // The engine is the host codex-runner, reached over HTTP. Mock global.fetch to drive a turn.
@@ -492,6 +492,18 @@ describe('chatEdit — change an agent by chatting (BEA-1065)', () => {
     expect(out.patch.defaultDepth).toBeUndefined(); // clamp: invalid depth dropped
     expect(out.changes[0]).toMatch(/^Added:/);
     expect(agent.updateAgent).not.toHaveBeenCalled(); // proposal only — the UI applies on confirm
+    // BEA-1094: the chat runs on Claude Sonnet, not the shared default model
+    expect(llm.completeWith).toHaveBeenCalled();
+    expect(llm.completeWith.mock.calls[0][0]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' });
+  });
+
+  it('falls back to the shared default model if Sonnet is unavailable (BEA-1094)', async () => {
+    const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn() };
+    const llm = { completeWith: jest.fn(async () => null), complete: jest.fn(async () => JSON.stringify({ patch: { task: 'x' }, changes: ['Changed: it'], note: 'ok' })) };
+    const out = await buildChat(llm, agent).chatEdit('a1', 'tweak it');
+    expect(llm.completeWith).toHaveBeenCalled(); // tried Sonnet first
+    expect(llm.complete).toHaveBeenCalled();     // then fell back to the default
+    expect(out.patch.prompt).toBe('x');
   });
 
   it('a plain question comes back as an answer with no patch', async () => {
