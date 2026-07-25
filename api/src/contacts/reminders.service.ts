@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ContactsService } from './contacts.service';
 import { PostboxService } from './postbox.service';
+import { TZ_OFFSET_MIN } from '../common/localday';
 
 /** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -89,8 +90,10 @@ export function sanitizeTimes(times: unknown): string[] {
   return [...seen].sort().slice(0, 8); // up to 8 send times a day (3 presets + custom, BEA-920)
 }
 
-/** The user's timezone offset in minutes east of UTC (IST = +330). Configurable. (BEA-734) */
-export const REMINDER_TZ_OFFSET = Number(process.env.REMINDER_TZ_OFFSET_MINUTES) || 330;
+/** The user's timezone offset in minutes east of UTC (IST = +330). Configurable. (BEA-734)
+ *  Re-exported from the shared day helper so the scheduler, the recurring ledger and the
+ *  end-of-day summary can never disagree about when a local day starts. (BEA-1117) */
+export const REMINDER_TZ_OFFSET = TZ_OFFSET_MIN;
 
 /**
  * WhatsApp only carries free text for 24h after the person's last message; after that ONLY an

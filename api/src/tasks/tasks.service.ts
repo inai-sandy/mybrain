@@ -918,7 +918,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(row);
   }
 
-  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number; party?: string | null; dueDate?: string | null; ownerContactId?: string | null; mentions?: string[] }) {
+  async update(id: string, data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; progress?: number; party?: string | null; dueDate?: string | null; ownerContactId?: string | null; mentions?: string[]; kind?: string }) {
     const t = await this.prisma.task.findUnique({ where: { id } });
     if (!t) return null;
     // Owner + @mentions. Only recomputed when something that could carry a name actually changed,
@@ -966,6 +966,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         party: owner.party,
         dueDate: data.dueDate !== undefined ? (data.dueDate ? new Date(data.dueDate) : null) : t.dueDate,
         progress,
+        // assignment | recurring — anything else is ignored rather than guessed, so a stray value
+        // can never silently turn a daily report into work that can be closed. (BEA-1117)
+        ...(data.kind === 'assignment' || data.kind === 'recurring' ? { kind: data.kind } : {}),
         ...statusFromProgress,
       },
     });

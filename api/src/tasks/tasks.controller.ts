@@ -1,12 +1,14 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { ClaimsService } from './claims.service';
+import { RecurringService } from './recurring.service';
 
 @Controller('tasks')
 export class TasksController {
   constructor(
     private readonly tasks: TasksService,
     private readonly claims: ClaimsService,
+    private readonly recurring: RecurringService,
   ) {}
 
   /** Morning brain-dump -> tasks. */
@@ -56,6 +58,17 @@ export class TasksController {
   @Get('claims')
   async listClaims() {
     return { claims: await this.claims.pending() };
+  }
+
+  /** Days no daily report is owed — no chasing, and no "missed" recorded. (BEA-1117) */
+  @Get('recurring/rest-days')
+  async getRestDays() {
+    return { days: await this.recurring.restDays() };
+  }
+
+  @Put('recurring/rest-days')
+  async setRestDays(@Body() body: { days?: unknown }) {
+    return this.recurring.setRestDays(body?.days);
   }
 
   /** Confirm or reject one claim. Confirming is the ONLY way a claim becomes a completion. */
