@@ -77,6 +77,45 @@ export class LlmService {
     }
   }
 
+  /** The agent-helper jobs whose model is owner-pickable in Settings → Models (BEA-1106).
+   *  null default = follow the app's default text model. */
+  static readonly HELPERS: Record<string, LlmConfig | null> = {
+    'chat-edit': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }, // BEA-1094
+    'sync-words': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
+    'draft': null,
+    'ui-spec': null,
+    'flow-plan': null,
+    'draft-check': null,
+  };
+
+  async helperModel(key: string): Promise<LlmConfig | null> {
+    if (!(key in LlmService.HELPERS)) return null;
+    const row = await this.prisma.setting.findUnique({ where: { key: `helper.${key}.llm` } }).catch(() => null);
+    if (row) { try { const v = JSON.parse((row as any).value); if (v?.provider && v?.model) return v; } catch { /* fall through */ } }
+    return LlmService.HELPERS[key];
+  }
+
+  async setHelperModel(key: string, model: string): Promise<LlmConfig | null> {
+    if (!(key in LlmService.HELPERS)) throw new Error('Unknown helper');
+    const cfg = model ? this.agentConfig(undefined, model) : null;
+    await this.prisma.setting.upsert({
+      where: { key: `helper.${key}.llm` },
+      create: { key: `helper.${key}.llm`, value: cfg ? JSON.stringify(cfg) : '' },
+      update: { value: cfg ? JSON.stringify(cfg) : '' },
+    });
+    return cfg;
+  }
+
+  /** Complete on a helper's own model (or its default), falling back to the app default model. */
+  async completeHelper(key: string, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
+    const cfg = await this.helperModel(key);
+    if (cfg) {
+      const { text } = await this.completeWithModel(cfg, prompt, maxTokens, label);
+      if (text) return text;
+    }
+    return this.complete(prompt, maxTokens, label);
+  }
+
   /** Single-shot completion via the app's default provider+model. Returns text, or null if unavailable. */
   async complete(prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
     return this.completeWith(await this.getConfig(), prompt, maxTokens, label);

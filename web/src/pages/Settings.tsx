@@ -1306,6 +1306,19 @@ function ModelsSection() {
         desc="The mini mental model that learns your patterns from your tasks + stories each night. Sonnet (default) does the deep reasoning, or run it FREE on your Codex/Gemini subscription with Sonnet auto-fallback." />
       <EngineModelCard title="Documents summary model" icon={FileText} base="/api/documents/model" agents
         desc="Writes the title, description and tags for documents you upload or create. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      {/* Agent-helper jobs (BEA-1106) — each little AI job around agents has its own model. */}
+      <EngineModelCard title="Agent chat-edit model" icon={Bot} base="/api/llm-config/helper/chat-edit"
+        desc="Powers 'Change it by chatting' on every job — turns your sentence into a safe proposed change. Sonnet (default) follows the JSON rules most reliably." />
+      <EngineModelCard title="Canvas → words sync model" icon={Bot} base="/api/llm-config/helper/sync-words"
+        desc="Rewrites a job's plain-words Task after you drag-edit its flow, shown as a diff you confirm. Sonnet (default) keeps your wording best." />
+      <EngineModelCard title="Agent describe-it model" icon={Bot} base="/api/llm-config/helper/draft"
+        desc="Turns your one-line idea into a complete agent draft (name, plan, schedule, tools). Follows the app default until you pick one." />
+      <EngineModelCard title="Mini-screen designer model" icon={Bot} base="/api/llm-config/helper/ui-spec"
+        desc="Designs each job's own small run screen from the approved blocks. A small job — the app default is fine." />
+      <EngineModelCard title="Flow auto-plan model" icon={Bot} base="/api/llm-config/helper/flow-plan"
+        desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
+      <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
+        desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
       <VoiceModelCard />
     </div>
   );

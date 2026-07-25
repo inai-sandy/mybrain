@@ -226,11 +226,8 @@ export class FlowsService {
     try {
       const tpl = (await this.promptsSvc?.get('flow.syncWords').catch(() => '')) || '';
       if (tpl) {
-        const out = await this.llm.complete(
-          tpl.replaceAll('{{task}}', (agent.prompt || '(empty)').slice(0, 2000)).replaceAll('{{flow}}', flowWords.slice(0, 3000)),
-          900,
-          'flow-sync-words',
-        );
+        const syncPrompt = tpl.replaceAll('{{task}}', (agent.prompt || '(empty)').slice(0, 2000)).replaceAll('{{flow}}', flowWords.slice(0, 3000));
+        const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('sync-words', syncPrompt, 900, 'flow-sync-words') : await this.llm.complete(syncPrompt, 900, 'flow-sync-words');
         const m = (out || '').match(/\{[\s\S]*\}/);
         if (m) {
           const g = JSON.parse(m[0]);
@@ -310,11 +307,8 @@ export class FlowsService {
       // tune it. Its default deliberately does NOT add search_brain unless explicitly asked (BEA-1096).
       const tpl = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
       if (!tpl) return this.buildGraph(q, null, skillById, toolById);
-      const out = await this.llm.complete(
-        tpl.replaceAll('{{question}}', q.slice(0, 800)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)'),
-        1100,
-        'flow-plan',
-      );
+      const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, 800)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
+      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 1100, 'flow-plan') : await this.llm.complete(planPrompt, 1100, 'flow-plan');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (m) plan = JSON.parse(m[0]);
     } catch { plan = null; }

@@ -37,6 +37,7 @@ export function AgentApp() {
   const [histQ, setHistQ] = useState(''); // dated-history search + filter (BEA-1099)
   const [histFilter, setHistFilter] = useState<'all' | 'done' | 'failed'>('all');
   const [areas, setAreas] = useState<any[] | null>(null); // for move-to-agent
+  const [runModels, setRunModels] = useState<{ value: string; label: string }[] | null>(null); // per-job engine model (BEA-1106)
   const [moveTo, setMoveTo] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initialMode = (params.get('mode') as Mode) || 'run';
@@ -425,6 +426,17 @@ export function AgentApp() {
                 <option value="365">1 year</option>
               </select>
               <p className="mt-1 text-[11px] text-zinc-400">Only finished entries are cleared. Saved documents are never touched.</p>
+            </div>
+            <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <h2 className="text-sm font-semibold">Model for this job</h2>
+              {runModels === null ? (
+                <button onClick={() => fetch('/api/agent/models').then((r) => r.json()).then((d) => setRunModels(Array.isArray(d) ? d : []))} className="mt-1.5 text-xs text-emerald-600 hover:underline">{a.engine?.model ? `Using ${a.engine.model} — change…` : 'Using the engine default — change…'}</button>
+              ) : (
+                <select value={a.engine?.model || ''} onChange={async (e) => { const v = e.target.value; const d = await patch({ engine: v ? { provider: 'codex', model: v } : null }); if (d) toast('success', v ? `This job runs on ${v}` : 'Back to the engine default'); }} className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900">
+                  {runModels.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+              )}
+              <p className="mt-1 text-[11px] text-zinc-400">Overrides the global agent model for this job's runs only.</p>
             </div>
             <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
               <h2 className="text-sm font-semibold">Move to another agent</h2>

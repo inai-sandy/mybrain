@@ -492,17 +492,16 @@ describe('chatEdit — change an agent by chatting (BEA-1065)', () => {
     expect(out.patch.defaultDepth).toBeUndefined(); // clamp: invalid depth dropped
     expect(out.changes[0]).toMatch(/^Added:/);
     expect(agent.updateAgent).not.toHaveBeenCalled(); // proposal only — the UI applies on confirm
-    // BEA-1094: the chat runs on Claude Sonnet, not the shared default model
-    expect(llm.completeWith).toHaveBeenCalled();
-    expect((llm.completeWith as jest.Mock).mock.calls[0][0]).toEqual({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' });
   });
 
-  it('falls back to the shared default model if Sonnet is unavailable (BEA-1094)', async () => {
+  it('runs on its own pickable helper model, defaulting to Claude Sonnet (BEA-1094/1106)', async () => {
+    const { LlmService } = await import('../llm/llm.service');
+    expect((LlmService as any).HELPERS['chat-edit']).toEqual({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' });
     const agent = { getAgent: jest.fn(async () => agentRow), updateAgent: jest.fn() };
-    const llm = { completeWith: jest.fn(async () => null), complete: jest.fn(async () => JSON.stringify({ patch: { task: 'x' }, changes: ['Changed: it'], note: 'ok' })) };
+    const llm = { completeHelper: jest.fn(async () => JSON.stringify({ patch: { task: 'x' }, changes: ['Changed: it'], note: 'ok' })), complete: jest.fn() };
     const out = await buildChat(llm, agent).chatEdit('a1', 'tweak it');
-    expect(llm.completeWith).toHaveBeenCalled(); // tried Sonnet first
-    expect(llm.complete).toHaveBeenCalled();     // then fell back to the default
+    expect(llm.completeHelper).toHaveBeenCalledWith('chat-edit', expect.any(String), 900, 'agent-chat-edit');
+    expect(llm.complete).not.toHaveBeenCalled();
     expect(out.patch.prompt).toBe('x');
   });
 

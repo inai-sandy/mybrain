@@ -256,7 +256,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       const prompt = tpl
         ? tpl.replaceAll('{{idea}}', idea.slice(0, 600))
         : `Turn this idea into a config for a small AI agent. The user said:\n"${idea.slice(0, 600)}"\nReply with ONLY JSON: {"name":"...","task":"...","outcome":["..."],"evals":["..."]}`;
-      const out = await this.llm.complete(prompt, 1100, 'agent-draft');
+      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('draft', prompt, 1100, 'agent-draft') : await this.llm.complete(prompt, 1100, 'agent-draft');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (!m) return fallback;
       const g = JSON.parse(m[0]);
@@ -297,11 +297,8 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     try {
       const tpl = (await this.prompts?.get('agent.uiSpec').catch(() => '')) || '';
       if (!tpl) return this.saveUi(agentId, fallback);
-      const out = await this.llm.complete(
-        tpl.replaceAll('{{name}}', a.name || '').replaceAll('{{description}}', a.description || '').replaceAll('{{task}}', (a.prompt || '').slice(0, 800)),
-        400,
-        'agent-ui-spec',
-      );
+      const uiPrompt = tpl.replaceAll('{{name}}', a.name || '').replaceAll('{{description}}', a.description || '').replaceAll('{{task}}', (a.prompt || '').slice(0, 800));
+      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('ui-spec', uiPrompt, 400, 'agent-ui-spec') : await this.llm.complete(uiPrompt, 400, 'agent-ui-spec');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (!m) return this.saveUi(agentId, fallback);
       const g = JSON.parse(m[0]);
@@ -345,12 +342,12 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         autonomy: a.autonomy || 'cautious', depth: a.defaultDepth || 'standard',
         schedule: a.schedule || null, scheduleText: a.scheduleText || null,
       });
-      // Chat-to-edit runs on Claude Sonnet for reliable JSON-patch instruction-following (BEA-1094);
-      // falls back to the app's shared default model if Sonnet is ever unreachable, so it never dies.
+      // Chat-to-edit runs on its own pickable model — default Claude Sonnet (BEA-1094/1106);
+      // completeHelper falls back to the app's default model, so it never dies.
       const filled = tpl.replaceAll('{{agent}}', current).replaceAll('{{message}}', (message || '').slice(0, 600));
-      const CHAT_MODEL = { provider: 'openrouter' as const, model: 'anthropic/claude-sonnet-4.6' };
-      const out = (await this.llm.completeWith(CHAT_MODEL, filled, 900, 'agent-chat-edit'))
-        || (await this.llm.complete(filled, 900, 'agent-chat-edit'));
+      const out = (this.llm as any).completeHelper
+        ? await (this.llm as any).completeHelper('chat-edit', filled, 900, 'agent-chat-edit')
+        : await this.llm.complete(filled, 900, 'agent-chat-edit');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (!m) return cantDo;
       const g = JSON.parse(m[0]);
@@ -709,8 +706,11 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     }, 15_000);
 
     let result;
+    // Per-job engine override (BEA-1106): a job with its own codex model runs on it.
+    const jobEngine: any = input.agentId ? ((await this.agent.getAgent(input.agentId).catch(() => null)) as any)?.engine : null;
+    const jobModel: string | undefined = jobEngine?.provider === 'codex' && jobEngine.model && jobEngine.model !== 'codex' ? jobEngine.model : undefined;
     try {
-      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: cfg.model || undefined, sessionId, skill: input.skill });
+      result = await this.runViaCodex(prompt, handlers, { title: input.title, model: jobModel || cfg.model || undefined, sessionId, skill: input.skill });
     } catch (e: any) {
       clearInterval(heartbeat);
       await this.agent.finishRun(runId, { status: 'failed', error: friendlyError(e?.message) });
@@ -756,7 +756,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       if (g && g.verdict === 'fail') {
         await this.agent.appendStep(runId, { label: 'Revising once to meet your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
         const revisePrompt = `Your previous answer did NOT meet the user's definition of done. Fix it.\n\nThe Outcome (definition of done):\n${input.rubric}\n\nWhat was wrong: ${g.notes || 'it fell short of the Outcome'}\n\nYour previous answer:\n${text}\n\nProduce a better answer that fully meets every part of the Outcome. Keep the inline citations/sources.`;
-        const r2 = await this.runViaCodex(revisePrompt, handlers, { title: input.title, model: cfg.model || undefined }).catch(() => null);
+        const r2 = await this.runViaCodex(revisePrompt, handlers, { title: input.title, model: jobModel || cfg.model || undefined }).catch(() => null);
         const text2 = (r2?.finalText || '').trim();
         if (text2) {
           const g2 = await this.gradeRun(input.rubric, text2);
