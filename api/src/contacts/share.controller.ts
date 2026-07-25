@@ -41,7 +41,12 @@ export class ShareController {
       await this.claims.withdraw(taskId);
       return { ok: true, claimed: false };
     }
-    const row = await this.claims.claim({ taskId, contactId: contact.id, quote: String(body?.note || '').trim() || 'Ticked it off on their page', source: 'page' });
+    // A daily report can't be "ticked off" — claim() records today's instead and returns null, so
+    // the response has to say which of the two actually happened. (BEA-1118)
+    const kind = await this.contacts.taskKind(taskId);
+    const words = String(body?.note || '').trim() || (kind === 'recurring' ? "Sent today's update" : 'Ticked it off on their page');
+    const row = await this.claims.claim({ taskId, contactId: contact.id, quote: words, source: 'page' });
+    if (kind === 'recurring') return { ok: true, claimed: false, recordedToday: true };
     return { ok: true, claimed: !!row };
   }
 }

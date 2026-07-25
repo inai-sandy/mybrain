@@ -11,6 +11,10 @@ type Item = {
   completedAt?: string | null;
   promisedFor?: string | null;
   claimed?: { at: string; note: string } | null;
+  /** assignment | recurring — a daily report is owed again tomorrow, so it is never "done". (BEA-1118) */
+  kind?: 'assignment' | 'recurring';
+  /** Daily items only: has today's update already been sent? */
+  sentToday?: boolean | null;
 };
 type Board = { off: boolean; name: string; open?: Item[]; done?: Item[] };
 
@@ -102,6 +106,7 @@ export function TaskShare() {
 
 function OpenRow({ item, slug, onChanged }: { item: Item; slug: string; onChanged: () => void }) {
   const overdue = item.dueDate && new Date(item.dueDate) < new Date();
+  const daily = item.kind === 'recurring';
   const [asking, setAsking] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
@@ -137,7 +142,14 @@ function OpenRow({ item, slug, onChanged }: { item: Item; slug: string; onChange
           </span>
         )}
       </div>
-      {item.claimed ? (
+      {daily && item.sentToday ? (
+        /* A daily report isn't waiting on anyone's check — it is simply in for today, and owed
+           again tomorrow. No "Undo": there is nothing to withdraw. (BEA-1118) */
+        <div className="mt-3 rounded-xl bg-emerald-500/10 px-3 py-2.5">
+          <p className="text-xs text-emerald-700 dark:text-emerald-300">✓ Today's update is in. Thanks!</p>
+          <p className="mt-1 text-[11px] text-emerald-600/80 dark:text-emerald-400/80">Sandeep will need this again tomorrow.</p>
+        </div>
+      ) : item.claimed ? (
         <div className="mt-3 rounded-xl bg-violet-500/10 px-3 py-2.5">
           <p className="text-xs text-violet-700 dark:text-violet-300">
             ✓ Sent to Sandeep for his check on {day(item.claimed.at)}.
@@ -156,7 +168,7 @@ function OpenRow({ item, slug, onChanged }: { item: Item; slug: string; onChange
             onChange={(e) => setNote(e.target.value)}
             rows={2}
             autoFocus
-            placeholder="Anything to add? e.g. sent it to the CA yesterday (optional)"
+            placeholder={daily ? "Today's update — figures, hours, anything Sandeep should know" : 'Anything to add? e.g. sent it to the CA yesterday (optional)'}
             className="w-full resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
           />
           <div className="mt-2 flex gap-2">
@@ -168,7 +180,7 @@ function OpenRow({ item, slug, onChanged }: { item: Item; slug: string; onChange
         </div>
       ) : (
         <button onClick={() => setAsking(true)} className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-emerald-500/50 bg-emerald-500/5 px-4 py-3 text-sm font-medium text-emerald-700 active:bg-emerald-500/15 dark:text-emerald-400">
-          <Check size={15} /> I've done this
+          <Check size={15} /> {daily ? "Send today's update" : "I've done this"}
         </button>
       )}
       {failed && <p className="mt-2 text-xs text-rose-600 dark:text-rose-400">That didn't go through — check your connection and try again.</p>}

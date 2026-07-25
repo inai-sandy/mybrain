@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RecurringService } from './recurring.service';
 
 /**
  * Claims — someone SAYING a piece of work is finished. (BEA-1024)
@@ -14,17 +15,30 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ClaimsService {
   private readonly log = new Logger('ClaimsService');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly recurring: RecurringService,
+  ) {}
 
   /**
    * Record that someone says a task is done. Idempotent per task: a second "it's done" while one
    * is already waiting updates the words rather than stacking duplicate rows in the review list.
    */
   async claim(input: { taskId: string; contactId?: string | null; quote: string; source?: string }) {
-    const task = await this.prisma.task.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, title: true } });
+    const task = await this.prisma.task.findUnique({ where: { id: input.taskId }, select: { id: true, status: true, title: true, kind: true } });
     if (!task) return null;
     if (task.status === 'done') return null; // already finished — nothing to claim
     const quote = String(input.quote || '').trim().slice(0, 1000) || '(no message)';
+    // A recurring report CANNOT be claimed. Confirming one done would stop its chase forever and
+    // tomorrow's update would never be asked for — which is why the owner had to keep rejecting
+    // Jayanth's ticks by hand. So "done" on a daily item means "today's is in": stamp the day and
+    // return null, i.e. nothing lands in the review list. This is the single choke point every
+    // caller goes through — the contact's page, the agent, anything future. (BEA-1118)
+    if (task.kind === 'recurring') {
+      await this.recurring.markReceived(task.id, this.recurring.today(), quote, input.contactId || null);
+      this.log.log(`daily report received: "${task.title}" — no review needed`);
+      return null;
+    }
     const source = ['whatsapp', 'page', 'owner'].includes(String(input.source)) ? String(input.source) : 'whatsapp';
 
     const open = await this.prisma.taskClaim.findFirst({ where: { taskId: input.taskId, status: 'pending' } });

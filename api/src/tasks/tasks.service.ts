@@ -495,6 +495,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       tags: t.tags ? (() => { try { return JSON.parse(t.tags); } catch { return []; } })() : [],
       priority: t.priority,
       sphere: t.sphere || 'work',
+      // assignment | recurring — a daily report can never be closed, so the UI must tell them
+      // apart. (BEA-1118)
+      kind: t.kind || 'assignment',
       pinned: t.pinned,
       estimateMin: t.estimateMin,
       actualMin: t.actualMin,
