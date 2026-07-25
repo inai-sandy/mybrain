@@ -262,7 +262,7 @@ function ImportGithubModal({ onDone, onClose }: { onDone: () => void; onClose: (
   );
 }
 
-function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | null; onCreated: () => void; onCancel: () => void }) {
+export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial?: Starter | null; areaId?: string; onCreated: () => void; onCancel: () => void }) {
   const toast = useToast();
   const [step, setStep] = useState<'describe' | 'form'>('describe');
   const [idea, setIdea] = useState('');
@@ -327,6 +327,7 @@ function NewAgentForm({ initial, onCreated, onCancel }: { initial?: Starter | nu
         body: JSON.stringify({
           name: name.trim(), prompt: task.trim(), rubric: rubric.trim() || undefined, defaultDepth, evals: evalCases, schedule, scheduleText,
           icon, color: color || undefined, category: category || undefined, description: description.trim() || undefined, autonomy,
+          ...(areaId ? { areaId } : {}), // creating a job inside an existing agent (BEA-1098)
         }),
       });
       if (!r.ok) throw new Error('Could not save');
@@ -571,6 +572,10 @@ export function Agents() {
   const running = home?.running || [];
   const landed = home?.landed || [];
   const agents = home?.agents || null;
+  // Areas (BEA-1098): the home now shows agents-as-areas; jobs live inside each area's page.
+  const [areasList, setAreasList] = useState<any[] | null>(null);
+  const loadAreas = useCallback(() => fetch('/api/agent/areas').then((r) => r.json()).then((d) => setAreasList(Array.isArray(d) ? d : [])).catch(() => setAreasList([])), []);
+  useEffect(() => { loadAreas(); }, [loadAreas]);
 
   const greet = home
     ? [
@@ -714,7 +719,7 @@ export function Agents() {
       {/* 🗂 Your agents — the shelf (BEA-1083 + BEA-1087 + BEA-1091) */}
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-bold">Your agents{agents && agents.length > 0 ? <span className="ml-1 text-sm font-normal text-zinc-400">· {agents.length}</span> : null}</h2>
+          <h2 className="text-base font-bold">Your agents{areasList && areasList.length > 0 ? <span className="ml-1 text-sm font-normal text-zinc-400">· {areasList.length}</span> : null}</h2>
           <div className="flex items-center gap-1.5">
             <button onClick={() => nav('/agent/saved')} title="Everything agents have saved" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><ShieldCheck className="h-4 w-4" /><span className="hidden sm:inline">Saves</span></button>
             <button onClick={() => nav('/agent/history')} title="All past runs" className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><HistoryIcon className="h-4 w-4" /><span className="hidden sm:inline">All runs</span></button>
@@ -722,101 +727,57 @@ export function Agents() {
             <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New agent</button>
           </div>
         </div>
-        {showImport && <ImportGithubModal onDone={() => { setShowImport(false); loadHome(); }} onClose={() => setShowImport(false)} />}
-        {showNew && <NewAgentForm initial={starterPick} onCreated={() => { setShowNew(false); setStarterPick(null); loadHome(); }} onCancel={() => { setShowNew(false); setStarterPick(null); }} />}
-        {agents === null ? (
+        {showImport && <ImportGithubModal onDone={() => { setShowImport(false); loadHome(); loadAreas(); }} onClose={() => setShowImport(false)} />}
+        {showNew && <NewAgentForm initial={starterPick} onCreated={() => { setShowNew(false); setStarterPick(null); loadHome(); loadAreas(); }} onCancel={() => { setShowNew(false); setStarterPick(null); }} />}
+        {areasList === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
-        ) : agents.length === 0 ? (
+        ) : areasList.length === 0 ? (
           !showNew && (
             <div className="rounded-2xl border border-dashed border-zinc-300 p-5 dark:border-zinc-700">
-              <p className="mb-3 text-center text-sm text-zinc-500">No saved agents yet — start from a template (the first run uses YOUR real brain):</p>
+              <p className="mb-3 text-center text-sm text-zinc-500">No agents yet — start from a template (the first run uses YOUR real brain):</p>
               <div className="grid gap-2 sm:grid-cols-2">
                 {STARTERS.map((s) => <StarterCard key={s.key} s={s} onPick={(st) => { setStarterPick(st); setShowNew(true); }} />)}
               </div>
             </div>
           )
         ) : (() => {
-          const cats = CATEGORY_ORDER.filter((c) => agents.some((a) => a.category === c));
-          const filtered = agents
-            .filter((a) => catFilter === 'All' || a.category === catFilter)
-            .filter((a) => !q || (a.name + ' ' + (a.description || '') + ' ' + (a.prompt || '')).toLowerCase().includes(q.toLowerCase()))
-            .slice()
-            .sort((a, b) => (agentSort === 'name' ? a.name.localeCompare(b.name) : 0)); // 'recent' keeps API order (newest first)
-          const groups = catFilter === 'All'
-            ? cats.map((c) => ({ cat: c, list: filtered.filter((a) => a.category === c) })).filter((g) => g.list.length)
-            : [{ cat: catFilter, list: filtered }];
-
-          const card = (a: ShelfAgent) => {
-            const evs = a.evals || [];
-            const passed = evs.filter((e: any) => e.lastVerdict === 'pass').length;
-            const scored = evs.filter((e: any) => e.lastVerdict).length;
-            const passCls = passed === evs.length ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' : passed === 0 ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400' : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400';
-            const lr = a.lastRun;
-            return (
-              <div key={a.id} onClick={() => nav(`/agent/a/${a.id}`)} style={{ borderLeftColor: a.color }} className="group flex cursor-pointer flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900" >
-                <div className="flex items-start gap-2.5">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: a.color + '22' }}>{a.icon || '🤖'}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium group-hover:text-emerald-600">{a.name}</div>
-                    <p className="mt-0.5 line-clamp-2 text-xs text-zinc-500">{a.description || a.prompt || 'No task set'}</p>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                  {lr ? (
-                    lr.status === 'done' ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />ran {timeAgo(lr.at)}</span>
-                    : lr.status === 'failed' ? <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs text-rose-700 dark:bg-rose-500/10 dark:text-rose-400"><XCircle className="h-3 w-3" />failed {timeAgo(lr.at)}</span>
-                    : (lr.status === 'awaiting_input') ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><PauseCircle className="h-3 w-3" />waiting on you</span>
-                    : lr.status === 'running' ? <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"><Loader2 className="h-3 w-3 animate-spin" />running</span>
-                    : null
-                  ) : <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">never ran</span>}
-                  {scored > 0 && <span className={'rounded-full px-2 py-0.5 text-xs font-bold ' + passCls}>{passed}/{evs.length} pass</span>}
-                  {a.scheduleText ? <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800"><CalendarClock className="h-3 w-3" />{a.scheduleText}</span> : null}
-                  {a.sourceUrl && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-700 dark:bg-violet-500/10 dark:text-violet-300" title={a.sourceUrl}>from GitHub</span>}
-                  {!a.enabled && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500 dark:bg-zinc-800">paused</span>}
-                </div>
-                <div className="mt-3 flex items-center gap-1 border-t border-zinc-100 pt-2 dark:border-zinc-800">
-                  <button onClick={(e) => { e.stopPropagation(); runSaved(a.id); }} disabled={!!runningId} title="Run now" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-500/10">{runningId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}Run</button>
-                  <button onClick={(e) => { e.stopPropagation(); toggleSaved(a); }} title={a.enabled ? 'Pause schedule' : 'Resume schedule'} className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Power className="h-3.5 w-3.5" /></button>
-                  <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`Delete "${a.name}"?`)) delSaved(a.id); }} title="Delete" className="ml-auto rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-              </div>
-            );
-          };
-
+          // Areas grid (BEA-1098): each tile is a whole agent; its jobs live inside.
+          const filtered = areasList.filter((ar) => !q || (ar.name + ' ' + (ar.description || '') + ' ' + ar.jobs.map((j: any) => j.name).join(' ')).toLowerCase().includes(q.toLowerCase()));
           return (
-            <div className="space-y-4">
-              {(agents.length > 3 || cats.length > 1) && (
-                <div className="space-y-2">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <div className="flex flex-1 items-center gap-2 rounded-lg border border-zinc-200 px-3 py-1.5 dark:border-zinc-700">
-                      <Search className="h-4 w-4 shrink-0 text-zinc-400" />
-                      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents…" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
-                      <span className="shrink-0 text-xs text-zinc-400">{filtered.length}</span>
-                    </div>
-                    <select value={agentSort} onChange={(e) => setAgentSort(e.target.value as 'recent' | 'name')} className="rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-sm outline-none dark:border-zinc-700 dark:bg-zinc-900">
-                      <option value="recent">Newest</option>
-                      <option value="name">Name A–Z</option>
-                    </select>
-                  </div>
-                  {cats.length > 1 && (
-                    <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                      {['All', ...cats].map((c) => (
-                        <button key={c} onClick={() => setCatFilter(c)} className={'shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors ' + (catFilter === c ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-zinc-200 text-zinc-500 hover:border-zinc-400 dark:border-zinc-700')}>{c}</button>
-                      ))}
-                    </div>
-                  )}
+            <div className="space-y-3">
+              {areasList.length > 3 && (
+                <div className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-1.5 dark:border-zinc-700">
+                  <Search className="h-4 w-4 shrink-0 text-zinc-400" />
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents and their jobs…" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+                  <span className="shrink-0 text-xs text-zinc-400">{filtered.length}</span>
                 </div>
               )}
-              {groups.map((g) => (
-                <div key={g.cat} className="space-y-2">
-                  {groups.length > 1 && <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{g.cat} <span className="font-normal">· {g.list.length}</span></h3>}
-                  {/* Big groups (a grown import shelf) show 9 and expand — the page stays scannable. (BEA-1083) */}
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{(expanded.has(g.cat) ? g.list : g.list.slice(0, 9)).map(card)}</div>
-                  {g.list.length > 9 && !expanded.has(g.cat) && (
-                    <button onClick={() => setExpanded((p) => new Set(p).add(g.cat))} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 dark:border-zinc-700">Show all {g.list.length}</button>
-                  )}
-                </div>
-              ))}
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {filtered.map((ar) => {
+                  const color = ar.color || '#818cf8';
+                  const runningJob = ar.jobs.find((j: any) => j.lastRun?.status === 'running');
+                  const waitingJob = ar.jobs.find((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
+                  const lastDone = ar.jobs.map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
+                  return (
+                    <button key={ar.id} onClick={() => nav(`/agent/ar/${ar.id}`)} style={{ borderLeftColor: color }} className="group flex flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
+                      <div className="flex items-start gap-2.5">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: color + '22' }}>{ar.icon || '🤖'}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium group-hover:text-emerald-600">{ar.name}</span>
+                          <span className="mt-0.5 line-clamp-2 block text-xs text-zinc-500">{ar.description || (ar.jobCount === 1 && ar.jobs[0]?.name && ar.jobs[0].name !== ar.name ? ar.jobs[0].name : 'Your agent')}</span>
+                        </span>
+                      </div>
+                      <span className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-zinc-100 pt-2 text-xs text-zinc-500 dark:border-zinc-800">
+                        <span className="font-medium">{ar.jobCount} job{ar.jobCount === 1 ? '' : 's'}</span>
+                        {waitingJob && <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"><PauseCircle className="h-3 w-3" />needs you</span>}
+                        {runningJob && <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"><Loader2 className="h-3 w-3 animate-spin" />running</span>}
+                        {!runningJob && !waitingJob && lastDone && <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />ran {timeAgo(lastDone.at)}</span>}
+                        {(ar.tools || []).length > 0 && <span className="ml-auto">🔧 {ar.tools.length}</span>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
               {filtered.length === 0 && <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">No agents match.</div>}
             </div>
           );
