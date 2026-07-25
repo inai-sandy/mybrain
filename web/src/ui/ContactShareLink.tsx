@@ -67,7 +67,10 @@ export function ContactShareLink({ contactId, contactName, chaseId }: { contactI
       const r = await fetch(`/api/reminders/${chaseId}/message`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
       });
-      toast(r.ok ? 'success' : 'error', r.ok ? 'Link sent on WhatsApp' : 'Could not send — open the chat');
+      const d = r.ok ? await r.json().catch(() => null) : null;
+      // Outside the 24h window the link can't be carried — the approved reminder goes instead. (BEA-1112)
+      if (d?.viaTemplate && d?.note) toast('error', d.note);
+      else toast(r.ok ? 'success' : 'error', r.ok ? 'Link sent on WhatsApp' : 'Could not send — open the chat');
     } finally { setBusy(false); }
   }
 

@@ -196,7 +196,12 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
 
 function sendBack(chaseId: string, body: string, toast: (k: any, m: string) => void) {
   fetch(`/api/reminders/${chaseId}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) })
-    .then((r) => { if (!r.ok) toast('error', 'Sent back, but the message did not go — open the chat'); })
+    .then(async (r) => {
+      if (!r.ok) { toast('error', 'Sent back, but the message did not go — open the chat'); return; }
+      // The 24h window was shut, so the approved template went instead of your words. (BEA-1112)
+      const d = await r.json().catch(() => null);
+      if (d?.viaTemplate && d?.note) toast('error', d.note);
+    })
     .catch(() => toast('error', 'Sent back, but the message did not go — open the chat'));
 }
 
