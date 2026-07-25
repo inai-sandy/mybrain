@@ -19,7 +19,17 @@ function make(tasks: any[]) {
       findUnique: async ({ where }: any) => claims.find((c) => c.id === where.id) || null,
     },
   };
-  return { svc: new ClaimsService(prisma), claims, tasks };
+  // The recurring ledger the claim guard writes to instead of creating a review item.
+  const days: any[] = [];
+  const recurring: any = {
+    today: () => '2026-07-27',
+    markReceived: async (taskId: string, day: string, quote?: string | null, contactId?: string | null) => {
+      const i = days.findIndex((d) => d.taskId === taskId && d.day === day);
+      const row = { taskId, day, status: 'received', quote: quote || null, contactId: contactId || null };
+      if (i >= 0) days[i] = row; else days.push(row);
+    },
+  };
+  return { svc: new ClaimsService(prisma, recurring), claims, tasks, days };
 }
 
 const OPEN = [{ id: 't1', status: 'open', title: 'Send the vendor list' }];
@@ -89,5 +99,48 @@ describe('pending / isPending — what keeps the chase quiet (BEA-1024)', () => 
   it('pendingFor returns nothing for an empty list without hitting the database', async () => {
     const { svc } = make(OPEN);
     expect((await svc.pendingFor([])).size).toBe(0);
+  });
+});
+
+
+/**
+ * BEA-1118: a recurring daily report can NEVER be claimed. Confirming one done would stop its
+ * chase forever and tomorrow's update would never be asked for — the exact failure the owner was
+ * working around by rejecting Jayanth's ticks by hand every day.
+ */
+const DAILY = [{ id: 't9', status: 'open', title: 'Send the daily production update', kind: 'recurring' }];
+
+describe('a daily report can never be claimed (BEA-1118)', () => {
+  it('creates NO review item — nothing for the owner to confirm or reject', async () => {
+    const { svc, claims } = make(DAILY);
+    const row = await svc.claim({ taskId: 't9', contactId: 'c1', quote: "Ticked it off on their page" });
+    expect(row).toBeNull();
+    expect(claims).toHaveLength(0);
+  });
+
+  it('records it against TODAY instead, keeping their words', async () => {
+    const { svc, days } = make(DAILY);
+    await svc.claim({ taskId: 't9', contactId: 'c1', quote: 'OT 8 members, 2 on fitting' });
+    expect(days).toEqual([{ taskId: 't9', day: '2026-07-27', status: 'received', quote: 'OT 8 members, 2 on fitting', contactId: 'c1' }]);
+  });
+
+  it('leaves the task open, so the chase returns tomorrow', async () => {
+    const { svc, tasks } = make(DAILY);
+    await svc.claim({ taskId: 't9', quote: 'done' });
+    expect(tasks[0].status).toBe('open');
+  });
+
+  it('still claims normally for an assignment — the other kind is untouched', async () => {
+    const { svc, claims, days } = make([{ id: 't1', status: 'open', title: 'Upload the BOMs', kind: 'assignment' }]);
+    const row = await svc.claim({ taskId: 't1', contactId: 'c1', quote: 'uploaded' });
+    expect(row).not.toBeNull();
+    expect(claims).toHaveLength(1);
+    expect(days).toHaveLength(0);
+  });
+
+  it('treats a task with no kind set as an assignment (nothing existing changes)', async () => {
+    const { svc, claims } = make([{ id: 't1', status: 'open', title: 'Old task with no kind' }]);
+    expect(await svc.claim({ taskId: 't1', quote: 'done' })).not.toBeNull();
+    expect(claims).toHaveLength(1);
   });
 });

@@ -508,12 +508,13 @@ Rules:
 - If they ask something you don't know, that needs Sandeep's own decision, or is outside these items: set "needsSandeep": true, and reply that you'll pass it to Sandeep and he'll get back to them. NEVER make up an answer.
 - ALWAYS reply to their message — set "send": true. NEVER leave them on read; a plain "yes"/"ok"/"thanks" or a shared file/link still gets a brief warm reply.
 - Set "send": false ONLY in the rare case where your OWN immediately-previous message was already a short acknowledgment AND their new message adds literally nothing — otherwise ALWAYS send.
+- DAILY REPORTS: an item tagged [daily report] is a standing update they owe EVERY working day — it is never "finished", so NEVER put it in "done". If their latest message contains today's actual report for such an item (real content: figures, names, hours, quantities, a genuine status or a clear "nothing to report today"), list those numbers in "statusToday". A bare "ok", "yes", "sure" or "will send" is NOT a report — leave it out and ask them for the actual update.
 - FINISHED WORK: if {{name}}'s LATEST message clearly says one of the numbered items above is COMPLETE, list those numbers in "done". Be strict — only when they plainly state it is finished/sent/paid/submitted/handed over. A promise ("I'll do it tomorrow"), a partial update ("almost there", "working on it") or a question is NOT finished, so leave "done" empty. If it is not obvious WHICH numbered item they mean, put nothing in "done" and ASK them which one in your reply — never guess.
 - Never tell them the work is closed. Sandeep confirms it himself; you can say you have passed it to him to check.
 - A PROMISED DATE: if they commit to a specific day for one of the numbered items ("I'll do it Friday", "by the 5th", "tomorrow"), put it in "promise" as {"item": <number>, "date": "YYYY-MM-DD"}. Today is {{today}}. Only a REAL date — "soon", "will do", "as early as possible" are NOT dates, so leave "promise" null. Never a date in the past.
 
 Reply with ONLY this JSON, nothing else:
-{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "done": [<numbers of items they say are finished, or empty>], "promise": null or {"item": <number>, "date": "YYYY-MM-DD"}}`,
+{"send": true or false, "reply": "<one message — only if send is true>", "needsSandeep": true or false, "done": [<numbers of items they say are finished, or empty>], "statusToday": [<numbers of [daily report] items whose actual update is in this message, or empty>], "promise": null or {"item": <number>, "date": "YYYY-MM-DD"}}`,
   },
   {
     key: 'people.briefingTidy',

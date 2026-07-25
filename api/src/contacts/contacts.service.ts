@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { localDayKey } from '../common/localday';
 import { matchContact, matchContactsAll, contactSpellings, similarity, norm } from './person-identity';
 
 /** Contacts — people you can send WhatsApp reminders to (BEA-719). */
@@ -270,6 +271,12 @@ export class ContactsService {
    * What the contact sees. PUBLIC — no login — so it returns only what they already know: their
    * own work. Never the owner's private notes, never anyone else's tasks. (BEA-1027)
    */
+  /** assignment | recurring — so a caller can tell a one-off deliverable from a daily report. */
+  async taskKind(taskId: string): Promise<string> {
+    const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { kind: true } }).catch(() => null);
+    return t?.kind || 'assignment';
+  }
+
   async publicBoard(slug: string) {
     const c = await this.prisma.contact.findUnique({ where: { shareSlug: String(slug || '') } });
     if (!c) throw new NotFoundException('This link is not valid');
@@ -280,19 +287,25 @@ export class ContactsService {
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       take: 300,
       select: {
-        id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true, promisedFor: true,
+        id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true, promisedFor: true, kind: true,
         claims: { where: { status: 'pending' }, take: 1, select: { id: true, quote: true, createdAt: true } },
+        // For a daily report the only question is whether TODAY's is in — "tick it off" makes no
+        // sense for something owed again tomorrow. (BEA-1118)
+        statusDays: { where: { day: localDayKey(), status: 'received' }, take: 1, select: { createdAt: true } },
       },
     });
     const shape = (t: any) => ({
       id: t.id,
       title: t.title,
       note: t.note,
+      kind: t.kind || 'assignment',
       givenAt: t.createdAt,
       dueDate: t.dueDate,
       promisedFor: t.promisedFor,
       completedAt: t.completedAt,
       claimed: t.claims?.[0] ? { at: t.claims[0].createdAt, note: t.claims[0].quote } : null,
+      // Daily items: has today's update already been sent?
+      sentToday: t.kind === 'recurring' ? !!t.statusDays?.[0] : null,
     });
     return {
       off: false,

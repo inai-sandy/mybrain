@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
+import { RecurringService } from '../tasks/recurring.service';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService, topicFromMessage } from './reminders.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -134,6 +135,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     private readonly postbox: PostboxService,
     private readonly reminders: RemindersService,
     private readonly claims: ClaimsService,
+    private readonly recurring: RecurringService,
     private readonly tasks: TasksService,
     private readonly prompts: PromptsService,
   ) {}
@@ -308,10 +310,28 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         return `- ${t.title}${t.note ? ` (${t.note})` : ''} [${bits.join('; ')}]`;
       })
       .join('\n');
-    const items: { n: number; reminderId: string; taskId: string | null; subject: string }[] = [];
-    for (let i = 0; i < reminders.length; i++) items.push({ n: i + 1, reminderId: reminders[i].id, taskId: reminders[i].taskId || null, subject: await this.subjectFor(reminders[i]) });
+    // Which of these are standing daily reports? They can never be "done", so the model must be
+    // told which numbers they are — otherwise it reports one finished and the chase dies. (BEA-1118)
+    const itemTaskIds = reminders.map((r: any) => r.taskId).filter(Boolean) as string[];
+    const recurringTaskIds = new Set<string>();
+    if (itemTaskIds.length) {
+      const rows = await this.prisma.task
+        .findMany({ where: { id: { in: itemTaskIds }, kind: 'recurring' }, select: { id: true } })
+        .catch(() => [] as { id: string }[]);
+      for (const r of rows) recurringTaskIds.add(r.id);
+    }
+    const items: { n: number; reminderId: string; taskId: string | null; subject: string; recurring: boolean }[] = [];
+    for (let i = 0; i < reminders.length; i++) {
+      items.push({
+        n: i + 1,
+        reminderId: reminders[i].id,
+        taskId: reminders[i].taskId || null,
+        subject: await this.subjectFor(reminders[i]),
+        recurring: !!reminders[i].taskId && recurringTaskIds.has(reminders[i].taskId),
+      });
+    }
     const itemList = items.length
-      ? items.map((it, i) => `${it.n}. ${it.subject}${reminders[i].notes?.trim() ? ` — context Sandeep gave: ${reminders[i].notes.trim()}` : ''}`).join('\n')
+      ? items.map((it, i) => `${it.n}. ${it.subject}${it.recurring ? ' [daily report — owed every working day, never "done"]' : ''}${reminders[i].notes?.trim() ? ` — context Sandeep gave: ${reminders[i].notes.trim()}` : ''}`).join('\n')
       : '(no open reminders right now — this is an ongoing conversation; keep it warm, acknowledge what they share, and pass anything important to Sandeep)';
 
     // Sandeep's transparent AI assistant — identifies itself, uses the notes as context, and
@@ -333,10 +353,31 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // numbers the model was sure about arrive here; anything ambiguous it asks about instead. (BEA-1024)
     const lastIn = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
     const claimed: string[] = [];
+    // A daily report satisfies TODAY, and is owed again tomorrow. Recorded against the day, never
+    // as a claim — so it never reaches the owner's review list and can never close the chase.
+    // Independent of "done": Jayanth's real updates are figures and names, they never say
+    // "finished". (BEA-1118)
+    const reported: string[] = [];
+    if (Array.isArray(parsed.statusToday) && parsed.statusToday.length && lastIn) {
+      const today = this.recurring.today();
+      for (const n of parsed.statusToday) {
+        const item = items.find((it) => it.n === Number(n));
+        if (!item?.taskId || !item.recurring) continue; // only daily items have a day to satisfy
+        await this.recurring.markReceived(item.taskId, today, lastIn, contactId);
+        reported.push(item.subject);
+      }
+      if (reported.length) this.log.log(`agent: ${name} sent today's ${reported.join('; ')}`);
+    }
     if (Array.isArray(parsed.done) && parsed.done.length && lastIn) {
       for (const n of parsed.done) {
         const item = items.find((it) => it.n === Number(n));
         if (!item?.taskId) continue; // a chase with no task behind it has nothing to claim
+        // The model was told never to mark a daily report finished. If it does anyway, treat it as
+        // today's status instead of a completion — a wrong call must not be able to end the chase.
+        if (item.recurring) {
+          await this.recurring.markReceived(item.taskId, this.recurring.today(), lastIn, contactId);
+          continue;
+        }
         const row = await this.claims.claim({ taskId: item.taskId, contactId, quote: lastIn, source: 'whatsapp' }).catch(() => null);
         if (row) claimed.push(item.subject);
       }

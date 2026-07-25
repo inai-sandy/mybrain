@@ -20,7 +20,7 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
   };
   const postbox: any = { isConfigured: () => true, sendText: async (to: string, body: string) => { state.texts.push({ to, body }); state.sent++; return { wamid: 'w1' }; } };
   const remindersSvc: any = { voiceComplete: async () => voice };
-  return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any), state };
+  return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any), state };
 }
 
 describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
@@ -98,7 +98,7 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
     // the LLM turn tracks how many run at once
     const remindersSvc: any = { voiceComplete: async () => { active++; maxActive = Math.max(maxActive, active); await new Promise((r) => setTimeout(r, 20)); active--; return '{"send":true,"reply":"ok","items":[]}'; } };
-    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
     await Promise.all([svc.onContactReply('c1'), svc.onContactReply('c1')]);
     expect(maxActive).toBe(1); // the two turns never overlapped
   });
@@ -128,7 +128,7 @@ describe('the agent reads the whole picture (BEA-1023)', () => {
     };
     const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
     const remindersSvc: any = { voiceComplete: async (p: string) => { seen = p; return '{"send":true,"reply":"ok","needsSandeep":false,"done":[]}'; } };
-    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
     return svc.onContactReply('c1').then(() => seen);
   }
 
@@ -199,7 +199,7 @@ describe('the owner is told BEFORE anything is promised for him (BEA-1026)', () 
       sendReminderTemplate: async () => (opts.ownerReachable ? { wamid: 't' } : { error: 'failed' }),
     };
     const remindersSvc: any = { voiceComplete: async () => '{"send":true,"reply":"I\'ll pass this to Sandeep and he\'ll get back to you.","needsSandeep":true,"done":[]}' };
-    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
+    const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
     return svc.onContactReply('c1').then(() => ({ order, texts }));
   }
 
@@ -225,5 +225,69 @@ describe('the owner is told BEFORE anything is promised for him (BEA-1026)', () 
     const { texts } = await run({ ownerReachable: true });
     const toOwner = texts.find((t) => t.to === '9198');
     expect(toOwner!.body).not.toMatch(/I said you'll get back/i);
+  });
+});
+
+
+/**
+ * BEA-1118: Jayanth's daily production/OT update never finishes. His real messages are figures and
+ * names — they never say "done" — so the agent reports them as today's status, which satisfies the
+ * DAY and is owed again tomorrow. And if the model wrongly calls a daily item finished, that must
+ * not be able to end the chase: the owner was rejecting those ticks by hand every day.
+ */
+function dailySetup(voice: string) {
+  const contact = { id: 'c1', name: 'Jayanth', whatsappNumber: '919812345678' };
+  const reminders = [{ id: 'r1', status: 'active', subject: 'the daily production update', taskId: 't9' }];
+  const messages = [{ direction: 'in', body: '24/07 OT from 7:00 to 10:30 PM, 8 members: 2 fitting, 2 mounting' }];
+  const state: any = { out: [], updated: {}, sent: 0, texts: [], claims: [], received: [] };
+  const prisma: any = {
+    contact: { findUnique: async () => contact },
+    reminder: { findMany: async () => reminders, update: async () => undefined, updateMany: async () => undefined },
+    reminderMessage: { findMany: async () => messages, create: async ({ data }: any) => state.out.push(data) },
+    setting: { findUnique: async () => ({ value: '919885698665' }) },
+    task: {
+      findUnique: async () => ({ title: 'Send the daily production update', kind: 'recurring', status: 'open' }),
+      // the kind lookup for the numbered items — t9 IS recurring
+      findMany: async ({ where }: any) => (where?.kind === 'recurring' ? [{ id: 't9' }] : []),
+    },
+    briefing: { findMany: async () => [] },
+  };
+  const postbox: any = { isConfigured: () => true, sendText: async () => { state.sent++; return { wamid: 'w1' }; } };
+  const remindersSvc: any = { voiceComplete: async () => voice };
+  const claims: any = { claim: async (i: any) => { state.claims.push(i); return { id: 'k1' }; }, isPending: async () => false };
+  const recurring: any = {
+    today: () => '2026-07-27',
+    markReceived: async (taskId: string, day: string, quote?: string) => { state.received.push({ taskId, day, quote }); },
+    isReceived: async () => false,
+  };
+  const svc = new ReminderAgentService(prisma, postbox, remindersSvc, claims, recurring, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any);
+  return { svc, state };
+}
+
+describe("a daily report satisfies today, never the task (BEA-1118)", () => {
+  it("records today's status when the reply carries the actual update", async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Thanks Jayanth — noted.","needsSandeep":false,"statusToday":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.received).toEqual([{ taskId: 't9', day: '2026-07-27', quote: expect.stringContaining('8 members') }]);
+    expect(state.claims).toHaveLength(0); // nothing for the owner to review
+  });
+
+  it('never claims a daily item even when the model wrongly says "done"', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Thanks!","needsSandeep":false,"done":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.claims).toHaveLength(0); // a wrong call cannot end the chase
+    expect(state.received).toHaveLength(1); // treated as today's status instead
+  });
+
+  it('ignores a status number that is not a daily item', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Thanks!","needsSandeep":false,"statusToday":[7]}');
+    await svc.onContactReply('c1');
+    expect(state.received).toHaveLength(0);
+  });
+
+  it('still replies to them either way', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Thanks Jayanth — noted.","needsSandeep":false,"statusToday":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.sent).toBe(1);
   });
 });
