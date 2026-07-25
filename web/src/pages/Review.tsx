@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, X, Loader2, Quote, Search, CheckCheck, Hand, Send } from 'lucide-react';
+import { Check, X, Loader2, Quote, Search, CheckCheck, Hand, Send, CalendarCheck } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { Sheet } from '../ui/Sheet';
 import { useUrlState } from '../ui/useUrlState';
+import { DailyStatus } from '../ui/DailyStatus';
 
 type Claim = {
   id: string;
@@ -40,6 +41,11 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
   const [rejecting, setRejecting] = useState<Claim | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
+  // Two different jobs on one screen: claims are decisions, daily reports are a log. Kept in the
+  // URL so a refresh or a back-swipe returns to the same tab. (BEA-1120)
+  // NOT 'tab' — the Tasks page that hosts this owns that key, so sharing it made the Daily tab
+  // unreachable. Its own key keeps both levels independent in the URL. (BEA-1120)
+  const [tab, setTab] = useUrlState('rtab', 'claims');
   const PAGE = 10;
   const toast = useToast();
 
@@ -100,15 +106,36 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
           {/* As a Tasks tab the page header is the Tasks header — no second title. (BEA-1044) */}
           {!embedded && <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Hand className="text-violet-500" /> To review</h1>}
           <p className="text-sm text-zinc-500">
-            {claims === null ? 'Loading…' : claims.length === 0 ? 'Nothing waiting on you' : `${claims.length} thing${claims.length === 1 ? '' : 's'} someone says ${claims.length === 1 ? 'is' : 'are'} finished`}
+            {tab === 'daily'
+              ? 'Standing daily reports — what came in and what did not'
+              : claims === null ? 'Loading…' : claims.length === 0 ? 'Nothing waiting on you' : `${claims.length} thing${claims.length === 1 ? '' : 's'} someone says ${claims.length === 1 ? 'is' : 'are'} finished`}
           </p>
         </div>
-        {!!picked.size && (
+        {tab === 'claims' && !!picked.size && (
           <button onClick={confirmPicked} disabled={busy === 'bulk'} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
             {busy === 'bulk' ? <Loader2 size={14} className="animate-spin" /> : <CheckCheck size={14} />} Confirm {picked.size}
           </button>
         )}
       </div>
+
+      {/* Claims are things to decide; daily reports are a log with nothing to confirm. (BEA-1120) */}
+      <div className="flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/60">
+        {([['claims', 'To review', Hand], ['daily', 'Daily status', CalendarCheck]] as const).map(([key, label, Icon]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            aria-current={tab === key}
+            className={'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ' + (tab === key ? 'bg-white shadow-sm dark:bg-zinc-900' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
+          >
+            <Icon size={14} /> {label}
+            {key === 'claims' && !!claims?.length && (
+              <span className="rounded-full bg-violet-500/15 px-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">{claims.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'daily' ? <DailyStatus /> : (<>
 
       {!!(claims && claims.length) && (
         <div className="relative">
@@ -188,6 +215,8 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
           <button disabled={safePage >= pages - 1} onClick={() => setPage(safePage + 1)} className="rounded-lg border border-zinc-300 px-3 py-1.5 disabled:opacity-40 dark:border-zinc-700">Next →</button>
         </div>
       )}
+
+      </>)}
 
       {rejecting && <RejectSheet claim={rejecting} onClose={() => setRejecting(null)} onDone={(reason, message) => decide(rejecting, false, reason).then((ok) => { if (ok && message && rejecting.chaseId) sendBack(rejecting.chaseId, message, toast); setRejecting(null); })} />}
     </div>
