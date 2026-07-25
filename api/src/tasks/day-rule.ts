@@ -9,6 +9,11 @@
  */
 export function whereForDayRule(day: string, start: Date, end: Date): any {
   return {
+    // A recurring daily report is never finished and never leaves — it would appear in every day's
+    // record forever, in Today, in History and in every nightly prompt. It is a standing
+    // arrangement someone else owes, not your work for the day, so it is excluded here rather than
+    // screen by screen, keeping the one shared definition honest. (BEA-1123)
+    kind: { not: 'recurring' },
     OR: [
       { completedAt: { gte: start, lt: end } },
       { day: { lte: day }, OR: [{ status: { not: 'done' } }, { completedAt: { gte: end } }] },
