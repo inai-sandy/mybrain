@@ -71,7 +71,13 @@ export async function enablePush(): Promise<Result> {
       } catch { resolve(Notification.permission); }
     });
     const perm = await withTimeout(askPermission(), T.permission);
-    if (perm === TIMED_OUT) return { ok: false, message: 'Your browser never answered the permission request. Look for a bell or lock icon next to the address bar and choose Allow, then try again. (step: permission)' };
+    if (perm === TIMED_OUT) {
+      return { ok: false, message: isSafari()
+        // On a Mac (Safari or a desktop-shortcut web app) the prompt is a SYSTEM dialog and can be
+        // silently suppressed — the fix lives in macOS System Settings, not in the page (BEA-1111).
+        ? 'The permission dialog never appeared. On a Mac: System Settings → Notifications → find "My Brain" (or mybrain.1site.ai) → allow it; also turn off Focus/Do Not Disturb. Then reopen the app and tap again. (step: permission)'
+        : 'Your browser never answered the permission request. Look for a bell or lock icon next to the address bar and choose Allow, then try again. (step: permission)' };
+    }
     if (perm !== 'granted') return { ok: false, message: 'Notifications were not allowed.' };
 
     // serviceWorker.ready can wait forever if the app is still installing — cap it so the tap can't hang.
