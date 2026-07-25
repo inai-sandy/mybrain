@@ -43,7 +43,9 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
   const [page, setPage] = useState(0);
   // Two different jobs on one screen: claims are decisions, daily reports are a log. Kept in the
   // URL so a refresh or a back-swipe returns to the same tab. (BEA-1120)
-  const [tab, setTab] = useUrlState('tab', 'claims');
+  // NOT 'tab' — the Tasks page that hosts this owns that key, so sharing it made the Daily tab
+  // unreachable. Its own key keeps both levels independent in the URL. (BEA-1120)
+  const [tab, setTab] = useUrlState('rtab', 'claims');
   const PAGE = 10;
   const toast = useToast();
 
