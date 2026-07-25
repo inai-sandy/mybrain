@@ -197,12 +197,18 @@ export class AgentAreasService {
     return this.shape(area);
   }
 
-  /** Delete an EMPTY area only — jobs (and their history) are never deleted implicitly. */
-  async remove(id: string) {
-    const jobs = await this.prisma.agent.count({ where: { areaId: id } as any });
-    if (jobs > 0) throw new BadRequestException('This agent still has jobs. Move or delete them first — their history is precious.');
+  /** Delete an area. Jobs (and their history) go ONLY with the explicit withJobs flag (BEA-1109). */
+  async remove(id: string, opts: { withJobs?: boolean } = {}) {
+    const jobs = await this.prisma.agent.findMany({ where: { areaId: id } as any, select: { id: true } });
+    if (jobs.length > 0 && !opts.withJobs) throw new BadRequestException('This agent still has jobs. Move or delete them first — their history is precious.');
+    if (opts.withJobs) {
+      for (const j of jobs as any[]) {
+        await this.prisma.agentRun.deleteMany({ where: { agentId: j.id } }).catch(() => undefined);
+        await this.prisma.agent.delete({ where: { id: j.id } }).catch(() => undefined);
+      }
+    }
     await (this.prisma as any).agentArea.delete({ where: { id } }).catch(() => { throw new NotFoundException('Agent not found'); });
-    return { ok: true };
+    return { ok: true, jobsDeleted: opts.withJobs ? jobs.length : 0 };
   }
 
   /** Move a job into another area (the owner regrouping — e.g. OKF under Research Agent). */

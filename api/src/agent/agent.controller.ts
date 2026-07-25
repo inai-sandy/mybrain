@@ -69,8 +69,8 @@ export class AgentController {
   }
 
   @Delete('areas/:id')
-  deleteArea(@Param('id') id: string) {
-    return this.areas.remove(id);
+  deleteArea(@Param('id') id: string, @Query('withJobs') withJobs?: string) {
+    return this.areas.remove(id, { withJobs: withJobs === '1' || withJobs === 'true' });
   }
 
   /** Move a job into another agent (regrouping — e.g. OKF under a Research Agent). */

@@ -52,8 +52,8 @@ export function AgentAreaPage() {
     const r = await fetch(`/api/agent/areas/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, description: desc }) });
     if (r.ok) { setEditing(false); load(); toast('success', 'Saved'); } else toast('error', 'Could not save');
   }
-  async function removeArea() {
-    const r = await fetch(`/api/agent/areas/${id}`, { method: 'DELETE' });
+  async function removeArea(withJobs: boolean) {
+    const r = await fetch(`/api/agent/areas/${id}${withJobs ? '?withJobs=1' : ''}`, { method: 'DELETE' });
     const d = await r.json().catch(() => ({}));
     if (r.ok) { toast('success', 'Agent removed'); nav('/agent'); }
     else toast('error', d.message || 'Could not remove');
@@ -92,7 +92,12 @@ export function AgentAreaPage() {
         {!editing && (
           <div className="flex shrink-0 gap-1">
             <button onClick={() => setEditing(true)} title="Rename" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>
-            {jobs.length === 0 && <button onClick={() => { if (window.confirm(`Remove "${area.name}"? It has no jobs.`)) removeArea(); }} title="Remove this empty agent" className="rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>}
+            <button onClick={() => {
+              const msg = jobs.length === 0
+                ? `Remove "${area.name}"? It has no jobs.`
+                : `Delete "${area.name}" and its ${jobs.length} job${jobs.length === 1 ? '' : 's'}? All their run history goes too. Saved documents are kept.`;
+              if (window.confirm(msg)) removeArea(jobs.length > 0);
+            }} title="Delete this agent" className="rounded-lg p-1.5 text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
           </div>
         )}
       </header>

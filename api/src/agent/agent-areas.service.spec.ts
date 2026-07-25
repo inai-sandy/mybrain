@@ -51,6 +51,17 @@ describe('AgentAreasService (BEA-1095)', () => {
     await expect(new AgentAreasService(prisma as any).remove('ar1')).rejects.toThrow(/still has jobs/);
   });
 
+  it('withJobs deletes each job WITH its runs, then the area (BEA-1109)', async () => {
+    const { prisma, calls } = fakePrisma();
+    const runDels: any[] = [];
+    (prisma as any).agentRun = { deleteMany: jest.fn(async (args: any) => { runDels.push(args.where.agentId); return { count: 1 }; }) };
+    (prisma.agent as any).delete = jest.fn(async () => ({}));
+    const r = await new AgentAreasService(prisma as any).remove('ar1', { withJobs: true });
+    expect(r).toEqual({ ok: true, jobsDeleted: 1 });
+    expect(runDels).toEqual(['j1']); // the job's history went with it
+    expect(calls.areaDeletes).toContain('ar1');
+  });
+
   it('moveJob regroups a job and quietly removes the emptied one-job wrapper area', async () => {
     const { prisma, calls } = fakePrisma();
     // moving j1 (only job of ar1) into ar2 → after the move ar1 has 0 jobs left

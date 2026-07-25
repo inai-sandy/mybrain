@@ -458,6 +458,18 @@ export function AgentApp() {
             </div>
           </section>
 
+          {/* Danger zone (BEA-1109) */}
+          <section className="rounded-2xl border border-rose-200 bg-white p-4 dark:border-rose-500/30 dark:bg-zinc-900">
+            <h2 className="text-sm font-semibold text-rose-600 dark:text-rose-400">Delete this job</h2>
+            <p className="mt-0.5 text-[11px] text-zinc-400">Its run history goes with it. Saved documents are kept.</p>
+            <button onClick={async () => {
+              if (!window.confirm(`Delete "${a.name}" and its run history? Saved documents are kept.`)) return;
+              const r = await fetch(`/api/agent/agents/${id}`, { method: 'DELETE' });
+              if (r.ok) { toast('success', 'Job deleted'); nav(a.areaId ? `/agent/ar/${a.areaId}` : '/agent'); }
+              else toast('error', 'Could not delete');
+            }} className="mt-2 rounded-lg border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:hover:bg-rose-500/10">Delete job</button>
+          </section>
+
           {/* Links out to the deeper views */}
           <section className="rounded-2xl border border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900">
             {[
