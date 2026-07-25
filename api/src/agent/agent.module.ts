@@ -4,6 +4,7 @@ import { AgentService } from './agent.service';
 import { AgentToolsController } from './agent-tools.controller';
 import { AgentToolsService } from './agent-tools.service';
 import { AgentsImportService } from './agents-import.service';
+import { AgentAreasService } from './agent-areas.service';
 import { DocumentsModule } from '../documents/documents.module';
 import { MemoryModule } from '../memory/memory.module';
 import { LlmModule } from '../llm/llm.module';
@@ -19,7 +20,7 @@ import { PromptsModule } from '../prompts/prompts.module';
 @Module({
   imports: [DocumentsModule, MemoryModule, LlmModule, PromptsModule],
   controllers: [AgentController, AgentToolsController],
-  providers: [AgentService, AgentToolsService, AgentsImportService],
-  exports: [AgentService, AgentToolsService, AgentsImportService],
+  providers: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService],
+  exports: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService],
 })
 export class AgentModule {}

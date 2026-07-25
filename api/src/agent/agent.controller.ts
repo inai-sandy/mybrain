@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadRequestException } from '@nestjs/common';
 import { AgentService, AskInput } from './agent.service';
 import { AgentsImportService } from './agents-import.service';
+import { AgentAreasService, AreaTool } from './agent-areas.service';
 
 type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[] };
 
@@ -14,7 +15,48 @@ export class AgentController {
   constructor(
     private readonly agent: AgentService,
     private readonly agentsImport: AgentsImportService,
+    private readonly areas: AgentAreasService,
   ) {}
+
+  // ---- agent AREAS (BEA-1095): agent = area, job = the real unit ----
+
+  @Get('areas')
+  listAreas() {
+    return this.areas.list();
+  }
+
+  @Post('areas')
+  createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+    return this.areas.create(body || {});
+  }
+
+  @Get('areas/:id')
+  getArea(@Param('id') id: string) {
+    return this.areas.get(id);
+  }
+
+  @Patch('areas/:id')
+  updateArea(@Param('id') id: string, @Body() body: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+    return this.areas.update(id, body || {});
+  }
+
+  @Delete('areas/:id')
+  deleteArea(@Param('id') id: string) {
+    return this.areas.remove(id);
+  }
+
+  /** Move a job into another agent (regrouping — e.g. OKF under a Research Agent). */
+  @Post('agents/:id/move')
+  moveJob(@Param('id') id: string, @Body() body: { areaId?: string }) {
+    if (!body?.areaId) throw new BadRequestException('Which agent should it move to?');
+    return this.areas.moveJob(id, body.areaId);
+  }
+
+  /** A job's persisted chat history — clear it (BEA-1097). */
+  @Delete('agents/:id/chat-log')
+  clearChat(@Param('id') id: string) {
+    return this.agent.clearChat(id);
+  }
 
   // ---- GitHub agent import (BEA-1081) ----
 

@@ -250,8 +250,20 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         defaultDepth: this.normDepth(input.defaultDepth),
         collectionId: input.collectionId ?? null,
         enabled: input.enabled ?? true,
+        ...((input as any).areaId ? { areaId: (input as any).areaId } : {}),
       },
     });
+    // Areas invariant (BEA-1095): every job belongs to an area. A job created without one gets
+    // its own area (same identity) — exactly like the migration did for the pre-areas agents.
+    if (!(a as any).areaId) {
+      try {
+        const area = await (this.prisma as any).agentArea.create({
+          data: { name: a.name, icon: a.icon, color: a.color, description: a.description, sourceUrl: (a as any).sourceUrl ?? null },
+        });
+        await this.prisma.agent.update({ where: { id: a.id }, data: { areaId: area.id } as any });
+        (a as any).areaId = area.id;
+      } catch { /* area creation must never block agent creation */ }
+    }
     return this.shapeAgent(a);
   }
 
@@ -291,8 +303,33 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (patch.collectionId !== undefined) data.collectionId = patch.collectionId ?? null;
     if (patch.enabled !== undefined) data.enabled = patch.enabled;
     if (patch.defaultDepth !== undefined) data.defaultDepth = this.normDepth(patch.defaultDepth);
+    // Per-job settings (BEA-1095) — each job is fully independent.
+    const p: any = patch;
+    if (p.areaId !== undefined) data.areaId = p.areaId || null;
+    if (p.notifyWhatsApp !== undefined) data.notifyWhatsApp = !!p.notifyWhatsApp;
+    if (p.keepDays !== undefined) data.keepDays = p.keepDays == null ? null : Math.max(1, Math.min(3650, Number(p.keepDays) || 0)) || null;
+    if (p.engine !== undefined) data.engine = p.engine && typeof p.engine === 'object' ? JSON.stringify(p.engine) : null;
+    if (p.indexToBrain !== undefined) data.indexToBrain = !!p.indexToBrain;
     const updated = await this.prisma.agent.update({ where: { id }, data });
     return this.shapeAgent(updated);
+  }
+
+  /** Append messages to a job's persisted chat history (BEA-1097). Server-side only. */
+  async appendChat(id: string, msgs: { who: 'you' | 'ai'; text: string }[]) {
+    const a = await this.prisma.agent.findUnique({ where: { id }, select: { chatLog: true } });
+    if (!a) throw new NotFoundException('Agent not found');
+    const log = this.parse((a as any).chatLog, [] as any[]);
+    const at = new Date().toISOString();
+    for (const m of msgs) log.push({ who: m.who, text: String(m.text).slice(0, 4000), at });
+    const trimmed = log.slice(-200); // keep the last 200 messages
+    await this.prisma.agent.update({ where: { id }, data: { chatLog: JSON.stringify(trimmed) } as any });
+    return trimmed;
+  }
+
+  /** Clear a job's chat history (BEA-1097). */
+  async clearChat(id: string) {
+    await this.prisma.agent.update({ where: { id }, data: { chatLog: '[]' } as any }).catch(() => { throw new NotFoundException('Agent not found'); });
+    return { ok: true };
   }
 
   async deleteAgent(id: string) {
@@ -317,7 +354,15 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   private shapeAgent(a: any) {
-    return { ...a, skills: this.parse(a.skills, [] as unknown), schedule: a.schedule ? this.parse(a.schedule, null) : null, evals: this.parse(a.evals, [] as unknown), ui: a.ui ? this.parse(a.ui, null) : null };
+    return {
+      ...a,
+      skills: this.parse(a.skills, [] as unknown),
+      schedule: a.schedule ? this.parse(a.schedule, null) : null,
+      evals: this.parse(a.evals, [] as unknown),
+      ui: a.ui ? this.parse(a.ui, null) : null,
+      engine: a.engine ? this.parse(a.engine, null) : null, // this job's own model (BEA-1106)
+      chatLog: this.parse(a.chatLog, [] as unknown), // persisted change-by-chatting history (BEA-1097)
+    };
   }
 
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */

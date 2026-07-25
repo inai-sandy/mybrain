@@ -577,8 +577,24 @@ model AgentActionLog {
 }
 
 /// A configured agent the user can run (flagship Agent feature). Runs on Hermes; My Brain is the shell.
+/// An agent AREA (BEA-1095): the container the owner thinks of as "an agent" — Research Agent,
+/// Daily News… It holds a Tools list and many jobs (Agent rows). Jobs stay in the Agent table so
+/// every run/flow/waitpoint reference keeps working.
+model AgentArea {
+  id          String   @id @default(uuid())
+  name        String
+  icon        String? // emoji
+  color       String? // card colour
+  description String?
+  tools       String   @default("[]") // JSON [{kind: skill|api|mcp|cli, name, note?, status: installed|needed}] — the visible toolbox
+  sourceUrl   String? // GitHub origin when imported
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model Agent {
   id           String     @id @default(uuid())
+  areaId       String? // the AgentArea this job belongs to (BEA-1095); null only transiently pre-migration
   name         String
   icon         String? // emoji
   description  String?
@@ -597,6 +613,12 @@ model Agent {
   sourceUrl    String? // where an imported agent came from (the GitHub link) — the origin badge (BEA-1081/1083)
   ui           String? // JSON mini-interface spec {inputs:[{key,label,type,options?,placeholder?}], view, headline} (BEA-1082)
   color        String? // card/stripe colour (hex or named, the Claude-agent `color:` convention) — null = palette by category (BEA-1087)
+  // Per-job settings (BEA-1095): each job is fully independent.
+  notifyWhatsApp Boolean  @default(false) // send this job's finished output to WhatsApp (BEA-1102)
+  keepDays     Int? // dated-history retention in days; null = keep forever (BEA-1099)
+  engine       String? // JSON {provider, model} — this job's own model, overrides the global agent model (BEA-1106)
+  chatLog      String     @default("[]") // JSON [{who: you|ai, text, at}] — the persisted change-by-chatting history (BEA-1097)
+  indexToBrain Boolean    @default(false) // outputs are NEVER auto-indexed; the "Add to my Brain" tap flips per output (BEA-1101)
   enabled      Boolean    @default(true)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
