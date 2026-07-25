@@ -71,6 +71,15 @@ export class TasksController {
     return this.recurring.setRestDays(body?.days);
   }
 
+  /**
+   * A day's standing reports: who owed what, and whether it came in. This is what the owner reads
+   * instead of a review queue — a daily report is never confirmed, only received or missed. (BEA-1120)
+   */
+  @Get('recurring/day-log')
+  async dayLog(@Query('day') day?: string) {
+    return this.recurring.dayLog(day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined);
+  }
+
   /** Confirm or reject one claim. Confirming is the ONLY way a claim becomes a completion. */
   @Post('claims/:id/decide')
   async decideClaim(@Param('id') id: string, @Body() body: { confirm?: boolean; reason?: string }) {
