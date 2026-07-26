@@ -58,7 +58,7 @@ export function TodayCard() {
       <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400 flex items-center gap-1.5"><Sun size={13} /> Today</div>
 
       {d.focus && (
-        <Link to="/lab?tab=mentor" className="flex items-start gap-2 text-sm hover:underline">
+        <Link to="/lab?tab=plan" className="flex items-start gap-2 text-sm hover:underline">
           <Compass size={15} className="text-emerald-500 shrink-0 mt-0.5" />
           <span><span className="text-zinc-400">Focus — </span>{d.focus}</span>
         </Link>
@@ -96,7 +96,7 @@ export function TodayCard() {
             <span className="text-xs text-zinc-400 transition-transform group-open:rotate-90">›</span>
           </summary>
           <p className="mt-1.5 pl-[23px] text-sm leading-relaxed text-emerald-700 dark:text-emerald-300">{d.lever.lever}</p>
-          <Link to="/lab?tab=situation" className="mt-1 inline-block pl-[23px] text-xs text-zinc-400 hover:text-emerald-600">Open in the Lab →</Link>
+          <Link to="/lab?tab=plan" className="mt-1 inline-block pl-[23px] text-xs text-zinc-400 hover:text-emerald-600">Open in the Lab →</Link>
         </details>
       )}
     </section>
