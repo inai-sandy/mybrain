@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from '../contacts/postbox.service';
 
+const clean = (s: unknown) => String(s || '').trim();
+
 /**
  * Failure alerts (BEA-1071) — "tell me on WhatsApp when an automation breaks". One plain message
  * per failure: name + one-line reason + link. Per-name cooldown so a storm can't spam the owner.
@@ -60,6 +62,25 @@ export class AlertsService {
       r = await this.postbox.sendReminderTemplate(to, 'Sandy', `${missed.length} daily update${missed.length === 1 ? '' : 's'} missing for ${day}`);
     }
     if (r.status === 'failed') this.log.warn(`miss digest not delivered: ${r.error}`);
+    return { sent: r.status !== 'failed' };
+  }
+
+  /**
+   * The Lab's one line a week (BEA-1144). Sent only when something crossed the bar — the caller
+   * decides that; this just delivers. Same template fallback as everything else here, so it still
+   * lands when the 24-hour window is shut. (BEA-1112)
+   */
+  async labWeekly(body: string, subject: string): Promise<{ sent: boolean; why?: string }> {
+    if (!clean(body)) return { sent: false, why: 'nothing to say' };
+    const [enabled, to] = await Promise.all([this.setting('whatsapp.outputs'), this.setting('alerts.whatsappNumber')]);
+    if (enabled === 'false') return { sent: false, why: 'off' };
+    if (!to) return { sent: false, why: 'no number' };
+    if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
+    let r = await this.postbox.sendText(to, body);
+    if (r.status === 'failed') {
+      r = await this.postbox.sendReminderTemplate(to, 'Sandy', subject.slice(0, 80));
+    }
+    if (r.status === 'failed') this.log.warn(`weekly Lab line not delivered: ${r.error}`);
     return { sent: r.status !== 'failed' };
   }
 
