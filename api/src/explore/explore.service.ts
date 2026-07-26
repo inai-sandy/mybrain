@@ -16,6 +16,8 @@ const SYSTEM = `You are the owner's second brain. You answer their questions usi
 type Source = {
   n: number;
   sourceType: string;
+  /** For tasks: 'open' or 'done'. An open task must never read as finished work. (BEA-1127) */
+  state?: 'open' | 'done';
   title: string;
   snippet: string;
   when?: string;
@@ -196,11 +198,22 @@ export class ExploreService {
 
     // Resolve brain hits to real app rows, so sources deep-link to the actual item.
     const resolved = hits.length ? await this.memory.resolveRefs(hits.map((h) => h.memId).filter(Boolean) as string[]) : {};
+    // Open tasks are indexed alongside finished ones, so a source could look identical either way and
+    // an answer could state pending work as done. Look up the real status. (BEA-1127)
+    const taskIds = Object.values(resolved).filter((e: any) => e?.type === 'task').map((e: any) => e.id);
+    const taskState: Record<string, 'open' | 'done'> = {};
+    if (taskIds.length) {
+      const rows = await this.prisma.task
+        .findMany({ where: { id: { in: [...new Set(taskIds)] } }, select: { id: true, status: true } })
+        .catch(() => [] as { id: string; status: string }[]);
+      for (const r of rows) taskState[r.id] = r.status === 'done' ? 'done' : 'open';
+    }
     const brainItems = hits.map((h) => {
       const ent = h.memId ? resolved[h.memId] : undefined;
       const tagType = this.typeOf(h.tags);
       const { link, sourceType } = ent ? this.resolvedLink(ent) : { link: this.sectionLink(tagType), sourceType: tagType };
-      const src: Source = { n: 0, sourceType, title: h.title || 'Source', snippet: h.content.slice(0, 400), when: h.when, link, source: h.source, score: h.score };
+      const state = ent?.type === 'task' ? taskState[ent.id] : undefined;
+      const src: Source = { n: 0, sourceType, title: h.title || 'Source', snippet: h.content.slice(0, 400), when: h.when, link, source: h.source, score: h.score, state };
       return { src, content: h.content.slice(0, 1500) };
     });
 
@@ -221,7 +234,7 @@ export class ExploreService {
     const usedWeb = webItems.length > 0;
 
     const context = items
-      .map((it) => `[${it.src.n}] (${it.src.sourceType}${it.src.when ? `, ${String(it.src.when).slice(0, 10)}` : ''}) ${it.src.title}\n${it.content}`)
+      .map((it) => `[${it.src.n}] (${it.src.sourceType}${it.src.state === 'open' ? ', STILL OPEN — NOT finished' : it.src.state === 'done' ? ', finished' : ''}${it.src.when ? `, ${String(it.src.when).slice(0, 10)}` : ''}) ${it.src.title}\n${it.content}`)
       .join('\n\n---\n\n');
 
     // The answering instructions are an EDITABLE prompt (Settings → Prompts → "EMO / Explore"), so the
