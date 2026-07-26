@@ -27,15 +27,28 @@ export function wrapTitle(title: string, max = 26, maxLines = 3): string[] {
 
 const KIND_LABEL: Record<string, string> = { md: 'Document', html: 'Web page', site: 'Web page', pdf: 'PDF', image: 'Image', other: 'Document' };
 
-/** Build the 1200×630 title-card SVG. */
-export function buildTitleCardSvg(opts: { title: string; kind?: string }): string {
-  const lines = wrapTitle(opts.title);
-  const fs = lines.length >= 3 ? 66 : lines.length === 2 ? 74 : 82;
+/** Where the type label and the title block sit, for a title of `lineCount` lines.
+ *  The eyebrow is fixed just below the brand row; the title is centred BUT pushed down when a tall
+ *  (2–3 line) title would otherwise ride up into the eyebrow and the brand mark. */
+export function cardLayout(lineCount: number): { fs: number; lh: number; startY: number; eyebrowY: number } {
+  const fs = lineCount >= 3 ? 66 : lineCount === 2 ? 74 : 82;
   const lh = Math.round(fs * 1.18);
-  const blockH = lines.length * lh;
-  const startY = 300 - blockH / 2 + fs; // vertically centred-ish block, baseline of first line
+  const eyebrowY = 200;
+  const centred = 300 - (lineCount * lh) / 2 + fs; // baseline of the first line if perfectly centred
+  const startY = Math.max(centred, eyebrowY + 40 + fs); // never overlap the eyebrow
+  return { fs, lh, startY, eyebrowY };
+}
+
+/** Build the 1200×630 title-card SVG.
+ *  `label` names the KIND of thing being shared (Skill, Meeting, Bookmark…) and is drawn as a small
+ *  eyebrow above the title. `kind` is the document-specific shorthand kept for existing callers. */
+export function buildTitleCardSvg(opts: { title: string; kind?: string; label?: string }): string {
+  const lines = wrapTitle(opts.title);
+  const { fs, lh, startY, eyebrowY } = cardLayout(lines.length);
   const tspans = lines.map((l, i) => `<text x="90" y="${startY + i * lh}" fill="#f2f4f8" font-family="'DejaVu Sans',Arial,sans-serif" font-size="${fs}" font-weight="800" letter-spacing="-1">${escapeXml(l)}</text>`).join('');
-  const kind = KIND_LABEL[opts.kind || 'md'] || 'Document';
+  const kind = (opts.label || KIND_LABEL[opts.kind || 'md'] || 'Document').toUpperCase();
+  // Eyebrow: the type, directly above the title block, so a shared card reads as what it is.
+  const eyebrow = `<text x="90" y="${eyebrowY}" fill="#34d399" font-family="'DejaVu Sans',Arial,sans-serif" font-size="28" font-weight="700" letter-spacing="5">${escapeXml(kind)}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
   <defs>
     <radialGradient id="glow" cx="18%" cy="12%" r="75%">
@@ -48,9 +61,9 @@ export function buildTitleCardSvg(opts: { title: string; kind?: string }): strin
     <rect x="0" y="0" width="40" height="40" rx="11" fill="#34d399"/>
     <text x="56" y="29" fill="#aeb4c2" font-family="'DejaVu Sans',Arial,sans-serif" font-size="24" font-weight="700" letter-spacing="4">MY BRAIN</text>
   </g>
+  ${eyebrow}
   ${tspans}
   <line x1="90" y1="500" x2="1110" y2="500" stroke="#20232e" stroke-width="2"/>
-  <text x="90" y="548" fill="#7b8394" font-family="'DejaVu Sans',Arial,sans-serif" font-size="26" font-weight="600">${escapeXml(kind)}</text>
   <text x="1110" y="548" text-anchor="end" fill="#34d399" font-family="'DejaVu Sans',Arial,sans-serif" font-size="26" font-weight="700">mybrain.1site.ai</text>
 </svg>`;
 }

@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>My Brain</title>
     <meta name="description" content="Your private second brain — research, bookmarks, ideas, tasks, activity & chat in one place." />
+    <!-- Link preview (Open Graph). Crawlers don't run JS, so these must be in the served HTML.
+         Everything between the og markers is REPLACED server-side for a shared item's own card
+         (see api/src/og/link-previews.ts) — keep the markers. (BEA-1133) -->
+    <!--og-->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="My Brain" />
+    <meta property="og:title" content="My Brain" />
+    <meta property="og:description" content="Your private second brain — research, bookmarks, ideas, tasks, activity &amp; chat in one place." />
+    <meta property="og:url" content="https://mybrain.1site.ai/" />
+    <meta property="og:image" content="https://mybrain.1site.ai/og-default.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="My Brain" />
+    <meta name="twitter:description" content="Your private second brain — research, bookmarks, ideas, tasks, activity &amp; chat in one place." />
+    <meta name="twitter:image" content="https://mybrain.1site.ai/og-default.png" />
+    <!--/og-->
     <link rel="icon" type="image/png" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
     <meta name="theme-color" content="#059669" />
