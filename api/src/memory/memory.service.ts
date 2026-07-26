@@ -389,6 +389,77 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * What is actually in the brain, read from the APP's own rows rather than SuperMemory's paged
+   * list (BEA-1128). The store could only ever hand back the first 100 of ~1,500 with no search,
+   * no per-type counts and no way to remove one thing. Every indexed row carries a ragId, so the
+   * app itself is the honest answer to "what does my brain know?".
+   */
+  private static readonly TITLE_FIELD: Record<string, string> = {
+    email: 'subject', daysummary: 'day', daystory: 'day', monthstory: 'month', yearstory: 'year',
+  };
+
+  /** How many indexed items of each type. Powers the counts on Explore. */
+  async brainCounts(): Promise<{ total: number; types: { type: string; label: string; count: number }[] }> {
+    const types: { type: string; label: string; count: number }[] = [];
+    let total = 0;
+    for (const [type, meta] of Object.entries(SOURCE_META)) {
+      const model = (this.prisma as any)[meta.model];
+      if (!model?.count) continue;
+      const count = await model.count({ where: { ragId: { not: null } } }).catch(() => 0);
+      if (!count) continue;
+      total += count;
+      types.push({ type, label: meta.label, count });
+    }
+    types.sort((a, b) => b.count - a.count);
+    return { total, types };
+  }
+
+  /** One page of indexed items, optionally filtered by type and searched by title. */
+  async brainItems(opts: { type?: string; q?: string; page?: number; pageSize?: number } = {}) {
+    const pageSize = Math.min(100, Math.max(5, Math.round(opts.pageSize || 20)));
+    const page = Math.max(1, Math.round(opts.page || 1));
+    const needle = (opts.q || '').trim().toLowerCase();
+    const wanted = opts.type && SOURCE_META[opts.type] ? [opts.type] : Object.keys(SOURCE_META);
+
+    const rows: { type: string; label: string; id: string; title: string; when: string | null }[] = [];
+    for (const type of wanted) {
+      const meta = SOURCE_META[type];
+      const model = (this.prisma as any)[meta.model];
+      if (!model?.findMany) continue;
+      const titleField = MemoryService.TITLE_FIELD[type] || 'title';
+      const found = await model
+        .findMany({ where: { ragId: { not: null } }, take: 2000 })
+        .catch(() => [] as any[]);
+      for (const r of found) {
+        const title = String(r[titleField] ?? r.title ?? r.subject ?? r.day ?? r.id ?? '').trim();
+        if (needle && !title.toLowerCase().includes(needle)) continue;
+        rows.push({ type, label: meta.label, id: String(r[meta.pk] ?? r.id), title: title || '(untitled)', when: r.createdAt ? new Date(r.createdAt).toISOString() : null });
+      }
+    }
+    rows.sort((a, b) => (b.when || '').localeCompare(a.when || ''));
+    const start = (page - 1) * pageSize;
+    return { total: rows.length, page, pageSize, items: rows.slice(start, start + pageSize) };
+  }
+
+  /**
+   * Remove ONE item from the brain: delete its docs from both stores and clear the pointers, so the
+   * reconcile sweep does not simply put it back. The underlying task/email/document is untouched —
+   * this forgets it, it does not delete the owner's data. (BEA-1128)
+   */
+  async forgetItem(type: string, id: string): Promise<{ ok: boolean; message?: string }> {
+    const meta = SOURCE_META[type];
+    if (!meta) return { ok: false, message: 'Unknown type' };
+    const model = (this.prisma as any)[meta.model];
+    if (!model?.findUnique) return { ok: false, message: 'Unknown type' };
+    const row = await model.findUnique({ where: { [meta.pk]: id } }).catch(() => null);
+    if (!row) return { ok: false, message: 'Not found' };
+    await this.deleteDoc(row.supermemoryId, row.ragId);
+    await model.update({ where: { [meta.pk]: id }, data: { supermemoryId: null, ragId: null } }).catch(() => undefined);
+    this.log.log(`forgot ${type} ${id} — removed from the brain, source row kept`);
+    return { ok: true };
+  }
+
   /** Delete a doc from both stores (best-effort; never throws). */
   async deleteDoc(supermemoryId?: string | null, ragId?: string | null): Promise<void> {
     if (supermemoryId) await this.sm.delete(supermemoryId).catch(() => undefined);

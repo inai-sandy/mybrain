@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { MemoryService } from './memory.service';
 
 @Controller('memory')
@@ -41,6 +41,24 @@ export class MemoryController {
   }
 
   /** Browse the user's existing SuperMemory documents + total count. */
+  /** Counts per type — what your brain actually holds. (BEA-1128) */
+  @Get('counts')
+  async counts() {
+    return this.mem.brainCounts();
+  }
+
+  /** One page of indexed items, filterable by type and searchable. (BEA-1128) */
+  @Get('items')
+  async items(@Query('type') type?: string, @Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.mem.brainItems({ type, q, page: Number(page) || 1, pageSize: Number(pageSize) || 20 });
+  }
+
+  /** Forget ONE item — removes it from the brain, keeps the underlying task/email. (BEA-1128) */
+  @Delete('items/:type/:id')
+  async forget(@Param('type') type: string, @Param('id') id: string) {
+    return this.mem.forgetItem(type, id);
+  }
+
   @Get('browse')
   async browse(@Query('page') page?: string, @Query('limit') limit?: string) {
     return this.mem.browseSuperMemory(Number(limit) || 50, Number(page) || 1);

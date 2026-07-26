@@ -1,15 +1,17 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Brain, Search, Sparkles, ArrowRight, Bookmark, Trash2, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { mdComponents } from '../ui/markdown';
-import { DataTable, Column, SortOption } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
+import { useUrlState } from '../ui/useUrlState';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { EmailSendersSheet } from '../ui/EmailSenders';
 
-type SMDoc = { id: string; title: string; summary: string; tags: string[]; createdAt: string; status: string };
+/** One thing the brain knows, read from the app's own rows rather than the store's paged list. (BEA-1128) */
+type BrainItem = { type: string; label: string; id: string; title: string; when: string | null };
+type BrainCounts = { total: number; types: { type: string; label: string; count: number }[] };
 type Source = { n: number; sourceType: string; title: string; snippet: string; when?: string; link: string; source: string; score?: number };
 type AskResult = { answer: string; sources: Source[]; matches: number };
 type Saved = { id: string; question: string; answer: string; sources: Source[]; createdAt: string };
@@ -26,13 +28,6 @@ const TYPE_STYLE: Record<string, string> = {
   document: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
 };
 
-function Chip({ t }: { t: string }) {
-  return (
-    <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
-      {t}
-    </span>
-  );
-}
 
 function SourceCard({ s }: { s: Source }) {
   return (
@@ -212,21 +207,44 @@ export function Find() {
   const [saved, setSaved] = useState(false);
   const [senders, setSenders] = useState(false); // who fills the brain with email (BEA-1126)
 
-  // Secondary: browse everything already in the brain.
-  const [docs, setDocs] = useState<SMDoc[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Everything in the brain — read from the app itself, so counts, search and paging are honest. (BEA-1128)
+  const [counts, setCounts] = useState<BrainCounts | null>(null);
+  const [items, setItems] = useState<BrainItem[] | null>(null);
+  const [itemTotal, setItemTotal] = useState(0);
+  const [fType, setFType] = useUrlState('type', '');
+  const [bq, setBq] = useUrlState('bq', '');
+  const [page, setPage] = useState(1);
+  const [forgetting, setForgetting] = useState<BrainItem | null>(null);
 
-  useEffect(() => {
-    fetch('/api/memory/browse?limit=100')
-      .then((r) => r.json())
-      .then((d) => {
-        setDocs(d.docs || []);
-        setTotal(d.total || 0);
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
+  const loadCounts = useCallback(() => {
+    fetch('/api/memory/counts').then((r) => (r.ok ? r.json() : null)).then(setCounts).catch(() => setCounts(null));
   }, []);
+  const loadItems = useCallback(() => {
+    setItems(null);
+    const p = new URLSearchParams({ page: String(page), pageSize: '20' });
+    if (fType) p.set('type', fType);
+    if (bq.trim()) p.set('q', bq.trim());
+    fetch(`/api/memory/items?${p}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { setItems(d?.items || []); setItemTotal(d?.total || 0); })
+      .catch(() => setItems([]));
+  }, [page, fType, bq]);
+
+  useEffect(() => { loadCounts(); }, [loadCounts]);
+  useEffect(() => { if (tab === 'everything') loadItems(); }, [tab, loadItems]);
+  useEffect(() => { setPage(1); }, [fType, bq]);
+
+  async function forget(it: BrainItem) {
+    try {
+      const r = await fetch(`/api/memory/items/${encodeURIComponent(it.type)}/${encodeURIComponent(it.id)}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error();
+      toast('success', 'Removed from your brain — the original is untouched');
+      loadItems();
+      loadCounts();
+    } catch {
+      toast('error', 'Could not remove that');
+    }
+  }
 
   async function ask(e?: FormEvent) {
     e?.preventDefault();
@@ -268,39 +286,6 @@ export function Find() {
     }
   }
 
-  const cols: Column<SMDoc>[] = [
-    { key: 'title', label: 'Title' },
-    { key: 'summary', label: 'Summary' },
-  ];
-  const sortOptions: SortOption[] = [
-    { label: 'Newest', key: 'createdAt', dir: -1 },
-    { label: 'Title A–Z', key: 'title', dir: 1 },
-  ];
-
-  function card(r: SMDoc) {
-    return (
-      <div className="h-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 hover:border-emerald-500/40 hover:shadow-md transition-all">
-        <div className="flex items-start gap-2.5">
-          <div className="shrink-0 rounded-lg p-2 bg-emerald-500/10 text-emerald-600">
-            <Brain size={16} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="font-semibold leading-snug line-clamp-1">{r.title}</h3>
-            {r.summary && <p className="text-sm text-zinc-500 mt-0.5 line-clamp-3">{r.summary}</p>}
-            {r.tags?.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {r.tags.slice(0, 5).map((t) => (
-                  <Chip key={t} t={t} />
-                ))}
-              </div>
-            )}
-            <div className="mt-2 text-xs text-zinc-400">{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : ''}</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-5">
       <div>
@@ -335,19 +320,63 @@ export function Find() {
       {tab === 'saved' ? (
         <SavedResources />
       ) : tab === 'everything' ? (
-        <div className="pt-2">
-          <h2 className="text-sm font-bold text-zinc-500 mb-2">
-            Everything in your brain — {total} item{total === 1 ? '' : 's'}
-          </h2>
-          <DataTable<SMDoc>
-            columns={cols}
-            rows={docs}
-            loading={loading}
-            sortOptions={sortOptions}
-            renderCard={card}
-            cardsOnly
-            pageSize={12}
-            emptyText="Nothing here yet."
+        <div className="space-y-3 pt-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button onClick={() => setFType('')} className={'rounded-full px-3 py-1 text-xs font-medium transition-colors ' + (!fType ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300')}>
+              All {counts ? counts.total : ''}
+            </button>
+            {(counts?.types || []).map((t) => (
+              <button key={t.type} onClick={() => setFType(t.type)} className={'rounded-full px-3 py-1 text-xs font-medium transition-colors ' + (fType === t.type ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300')}>
+                {t.label} {t.count}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input value={bq} onChange={(e) => setBq(e.target.value)} placeholder="Search everything in your brain…" className="w-full rounded-xl border border-zinc-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900" />
+          </div>
+
+          <p className="text-xs text-zinc-500">{itemTotal} item{itemTotal === 1 ? '' : 's'}{fType || bq.trim() ? ' match' : ' in your brain'}</p>
+
+          {items === null ? (
+            <div className="space-y-2">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="h-14 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
+          ) : items.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
+              {bq.trim() || fType ? 'Nothing matches that.' : 'Nothing in your brain yet.'}
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {items.map((it) => (
+                <li key={`${it.type}:${it.id}`} className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+                  <span className={'mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[10px] ' + (TYPE_STYLE[it.type] || TYPE_STYLE.document)}>{it.label}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block break-words text-sm font-medium leading-snug">{it.title}</span>
+                    {it.when && <span className="mt-0.5 block text-[11px] text-zinc-400">{new Date(it.when).toLocaleDateString()}</span>}
+                  </span>
+                  <button onClick={() => setForgetting(it)} aria-label="Remove from brain" title="Remove from your brain" className="shrink-0 rounded-lg p-1.5 text-zinc-400 transition hover:bg-red-500/10 hover:text-red-500">
+                    <Trash2 size={15} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {itemTotal > 20 && (
+            <div className="flex items-center justify-between text-xs text-zinc-500">
+              <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="rounded-lg border border-zinc-300 px-3 py-1.5 disabled:opacity-40 dark:border-zinc-700">← Prev</button>
+              <span>Page {page} of {Math.max(1, Math.ceil(itemTotal / 20))}</span>
+              <button disabled={page >= Math.ceil(itemTotal / 20)} onClick={() => setPage(page + 1)} className="rounded-lg border border-zinc-300 px-3 py-1.5 disabled:opacity-40 dark:border-zinc-700">Next →</button>
+            </div>
+          )}
+
+          <ConfirmDialog
+            open={!!forgetting}
+            title="Remove from your brain?"
+            message={`"${forgetting?.title || ''}" will stop being used to answer questions. The original ${forgetting?.label?.toLowerCase() || 'item'} itself is NOT deleted — only the brain's copy.`}
+            confirmLabel="Remove"
+            onCancel={() => setForgetting(null)}
+            onConfirm={() => { const it = forgetting!; setForgetting(null); forget(it); }}
           />
         </div>
       ) : (
