@@ -13,7 +13,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 | 2 | EMO | `/emo` · `emo/` · ask/talk/capture router, 6 card lanes, device turn + TTS | — | | |
 | 3 | Activity, Day Close & Story | `/activity`, CloseDay, DailyStory · `daily/` · day summary, story, month/year, personality | built | BEA-1051→1057 flagship + BEA-1058 close-day polish + BEA-1059 prompts + BEA-1060 insights + BEA-1061 book + BEA-1062 calendar | 2026-07-23 |
 | 4 | Capture & Items | `/capture`, `/doc/:id`, `/view/:id` · `items/` · upload, URL, Notion, Supermemory import, share | — | | |
-| 5 | Explore | `/explore` · `explore/` · whole-brain + web ask (Tavily), saved answers, sources, rechunk | — | | |
+| 5 | Explore | `/explore` · `explore/` · whole-brain + web ask (Tavily), saved answers, sources, rechunk | filed | BEA-1124 → 1129 | 2026-07-26 |
 | 6 | Chat | `/chat`, `/chat/:id` · `chat/` · sessions, streaming, star/pin, retention, per-doc chat | — | | |
 | 7 | Documents | `/documents`, `/d/:slug`, `/s/:code` · `documents/` · library, collections, public pages, export | — | | |
 | 8 | Notes & Ideas | `/notes`, `/ideas` · `notes/`, `ideas/` · CRUD, AI format, idea workflow docs | — | | |
