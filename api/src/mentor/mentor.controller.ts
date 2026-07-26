@@ -76,7 +76,7 @@ export class MentorController {
   // ---- daily read ----
   @Post('run')
   async run(@Body() body: { day?: string; force?: boolean }) {
-    const r = await this.mentor.runMentorDay(body?.day || (await this.mentor.overview()).latest?.day || todayKey(), !!body?.force);
+    const r = await this.mentor.runMentorDay(body?.day || (await this.mentor.overview()).latest?.day || todayKey(), !!body?.force, true);
     return r || { ok: false, message: 'Nothing to mentor on yet — tell your story or finish a task first.' };
   }
 

@@ -116,7 +116,7 @@ export class MindController {
   /** Run the mental model. With {day}: that day. Without: learn any closed days not yet learned (BEA-458). */
   @Post('run')
   async run(@Body() body: { day?: string }) {
-    if (body?.day) return this.engine.run(body.day);
+    if (body?.day) return this.engine.run(body.day, undefined, true); // a named day = the owner asked (BEA-1140)
     return this.engine.runNow();
   }
 

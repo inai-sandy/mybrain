@@ -202,10 +202,22 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Compare the day to the active focus areas, write guidance + an adherence score. */
-  async runMentorDay(day: string, force = false) {
-    if (!force) {
-      const existing = await this.prisma.mentorDay.findUnique({ where: { day } });
-      if (existing) return this.shapeMentorDay(existing);
+  /**
+   * `force` used to mean "pay for another one". Three paths passed it — closing a day, re-weaving
+   * the Story of the Day, and the 60-second catch-up — so a day that got closed and re-told cost
+   * the same essay several times over. Measured: 24 paid runs on 21 July, 4.9/day across 43 days,
+   * for something that should run once a night.
+   *
+   * A day now gets at most TWO paid runs whatever asks — the nightly read, plus one refresh
+   * once the Story of the Day lands. `manual` is the single exception: the owner
+   * pressing regenerate is a deliberate act, not a side effect. (BEA-1140)
+   */
+  async runMentorDay(day: string, force = false, manual = false) {
+    const existing = await this.prisma.mentorDay.findUnique({ where: { day } });
+    // The cheap path: something is already written and nobody asked for a refresh.
+    if (existing && !force && !manual) return this.shapeMentorDay(existing);
+    if (!manual && (await this.paidToday(day))) {
+      return existing ? this.shapeMentorDay(existing) : null; // today's allowance is spent
     }
     const [dayStory, told, dayTasks, focus, recent] = await Promise.all([
       this.prisma.dayStory.findUnique({ where: { day } }),
@@ -242,6 +254,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `=== YOUR EARLIER NOTES ===\n${recentGuide.join('\n') || '(none)'}` +
       (bigger ? `\n\n${bigger}` : '');
 
+    await this.stampPaid(day); // stamped BEFORE the call, so a failure can't be retried in a loop
     const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200, 'mentor-guidance'))?.trim() || '';
     // Robustly pull guidance + score — never store a raw JSON blob if parsing hiccups (BEA-884).
     const guidance = narrativeField(raw, 'guidance');
@@ -439,6 +452,32 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     ]);
     if (read && (!story || new Date(read.updatedAt) >= new Date(story.createdAt))) return; // already fresh
     await this.runMentorDay(day, true).catch(() => undefined);
+  }
+
+  /** Has this day already used up its two paid guidance runs? */
+  private async paidToday(day: string): Promise<boolean> {
+    // Defensive: if the lookup can't run, treat the day as UNPAID so guidance still gets written.
+    // Failing closed here would silently stop the Lab working. (BEA-1140)
+    try {
+      const row = await this.prisma.setting?.findUnique({ where: { key: 'mentor.paidDay' } });
+      const [d, n] = String(row?.value || '').split(':');
+      return d === day && Number(n || 0) >= 2;
+    } catch {
+      return false;
+    }
+  }
+
+  private async stampPaid(day: string): Promise<void> {
+    // Must never throw — this sits directly in front of the paid call, so a failure here would
+    // stop guidance being written at all. (BEA-1140)
+    try {
+      const cur = await this.prisma.setting?.findUnique({ where: { key: 'mentor.paidDay' } });
+      const [pd, pn] = String(cur?.value || '').split(':');
+      const next = `${day}:${pd === day ? Number(pn || 0) + 1 : 1}`;
+      await this.prisma.setting?.upsert({ where: { key: 'mentor.paidDay' }, create: { key: 'mentor.paidDay', value: next }, update: { value: next } });
+    } catch {
+      /* the ceiling is a cost guard, not a correctness one */
+    }
   }
 
   async nightlyTick(): Promise<void> {
