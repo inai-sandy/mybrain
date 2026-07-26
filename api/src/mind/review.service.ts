@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MIN_DAYS_TO_SURFACE, surfacedWhere } from './surfacing';
 
 // Your ✓/✗/almost taps are the experiment that makes the model trustworthy. (BEA-449)
 @Injectable()
@@ -12,11 +13,18 @@ export class MindReviewService {
 
   /** Everything the brain understood that you haven't judged yet, plus fading ones asking "still you?". */
   async review() {
+    // Only ask about things that held up on 3+ separate days. Asking the owner to judge a guess
+    // drawn from a single Tuesday is exactly how 16 of 23 ended up refuted. (BEA-1142)
     const pending = await this.prisma.mindFinding.findMany({
-      where: { validated: null, status: { in: ['proposed', 'emerging', 'established'] } },
+      where: { ...surfacedWhere, validated: null, status: { in: ['proposed', 'emerging', 'established'] } },
       orderBy: [{ confidence: 'desc' }],
       take: 100,
       include: { evidence: { take: 4, orderBy: { createdAt: 'desc' } } },
+    });
+    // Not shown, not asked about — still collecting evidence. Reported as a number so the screen can
+    // say "I'm watching 7 more" instead of looking empty.
+    const watching = await this.prisma.mindFinding.count({
+      where: { validated: null, status: { in: ['proposed', 'emerging'] }, pinned: false, daysSeen: { lt: MIN_DAYS_TO_SURFACE } },
     });
     const fading = await this.prisma.mindFinding.findMany({
       where: { status: 'fading', pinned: false },
@@ -24,7 +32,7 @@ export class MindReviewService {
       take: 20,
       include: { evidence: { take: 2, orderBy: { createdAt: 'desc' } } },
     });
-    return { pending, fading };
+    return { pending, fading, watching, minDays: MIN_DAYS_TO_SURFACE };
   }
 
   /** ✓ — confirm: boost confidence, mark validated, and RIPPLE a small boost to related findings. */
