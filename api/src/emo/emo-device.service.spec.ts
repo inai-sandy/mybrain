@@ -1,4 +1,4 @@
-import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, normalizePcm } from './emo-device.service';
+import { EmoDeviceService, wavWrap, resample24to16, decodeOpusStream, normalizePcm, clampForDevice, DEVICE_BODY_BUDGET } from './emo-device.service';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const OpusScript = require('opusscript');
 import * as fs from 'fs';
@@ -72,6 +72,56 @@ describe('EmoDeviceService (BEA-926)', () => {
 
   it('rejects empty audio', async () => {
     await expect(svc.turn(Buffer.alloc(0))).rejects.toThrow();
+  });
+
+  // BEA-1139: the firmware parses the response out of a fixed 1600-byte buffer filled by ONE
+  // read. An oversized body arrives truncated, fails to parse, and the device speaks an error
+  // clip ("I missed that.") even though the capture landed with HTTP 201. Story and dump are
+  // exempt from the 3-minute cap, so their transcripts are always long enough to trip it.
+  it('a long story turn stays inside the device parse buffer', async () => {
+    const longTranscript = 'today I walked to the market and thought about the vendor list. '.repeat(120); // ~7.5k chars
+    const v: any = { ...voice, transcribeWith: jest.fn(async () => longTranscript) };
+    const r: any = { route: jest.fn(async () => ({ cards: [{ id: 'c9', lane: 'story', summary: longTranscript }] })) };
+    const s = new EmoDeviceService(v, r, ask, talk, prisma, notes, { decide: async () => ({ ok: true }) } as any, { setDone: async () => undefined } as any);
+    const out = await s.turn(pcm, { mode: 'story' });
+    expect(Buffer.byteLength(JSON.stringify(out))).toBeLessThanOrEqual(DEVICE_BODY_BUDGET);
+    // and it must still be a SUCCESS the device can act on, not an empty husk
+    expect(out.ok).toBe(true);
+    expect((out.say || '').length).toBeGreaterThan(0);
+    expect((out.reply || '').length).toBeGreaterThan(0);
+    expect((out.heard || '').length).toBeGreaterThan(0);
+  });
+
+  it('clampForDevice keeps short turns byte-identical', () => {
+    const small: any = { ok: true, mode: 'note', heard: 'buy milk', reply: '• Buy milk', say: 'Got it. Buy milk' };
+    expect(clampForDevice(small)).toEqual(small);
+  });
+
+  // Review catch: shrinking only `reply` was not enough. ask/talk put the whole unbounded answer
+  // in `say`, and non-ASCII costs up to 3 bytes per character — so a long Hindi answer with a
+  // SHORT reply sailed past the old character-based caps and still overflowed the device.
+  it('clamps a long non-ASCII spoken answer even when the reply is tiny', () => {
+    const hindi: any = {
+      ok: true, mode: 'ask',
+      heard: 'मुझे कल के काम के बारे में बताओ '.repeat(20),
+      reply: 'ठीक है',
+      say: 'आपके कल के काम में वेंडर सूची भेजना और बीओएम पूरा करना शामिल है। '.repeat(30),
+    };
+    const out = clampForDevice(hindi);
+    expect(Buffer.byteLength(JSON.stringify(out))).toBeLessThanOrEqual(DEVICE_BODY_BUDGET);
+    expect((out.say || '').length).toBeGreaterThan(0); // still says something useful
+    expect(Buffer.from(out.say || '', 'utf8').toString('utf8')).toBe(out.say); // never split a character
+  });
+
+  it('clampForDevice never makes a body bigger than it was', () => {
+    const justOver: any = { ok: true, mode: 'note', heard: 'x'.repeat(151), reply: 'y'.repeat(481), say: 'z'.repeat(481) };
+    const before = Buffer.byteLength(JSON.stringify(justOver));
+    expect(Buffer.byteLength(JSON.stringify(clampForDevice(justOver)))).toBeLessThanOrEqual(before);
+  });
+
+  it('clampForDevice survives multi-byte bullets without blowing the budget', () => {
+    const bullets: any = { ok: true, mode: 'capture', heard: 'x'.repeat(4000), reply: '• ünïcødé item ✓\n'.repeat(300), say: 'y'.repeat(4000) };
+    expect(Buffer.byteLength(JSON.stringify(clampForDevice(bullets)))).toBeLessThanOrEqual(DEVICE_BODY_BUDGET);
   });
 
   // BEA-1116: the morning brain-dump must hit the REAL tasks.dump pipeline (app/Telegram
