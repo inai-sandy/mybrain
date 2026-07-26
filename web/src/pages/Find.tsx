@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Brain, Search, Sparkles, ArrowRight, Bookmark, Trash2, ChevronDown } from 'lucide-react';
+import { Brain, Search, Sparkles, ArrowRight, Bookmark, Trash2, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,6 +7,7 @@ import { mdComponents } from '../ui/markdown';
 import { DataTable, Column, SortOption } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { EmailSendersSheet } from '../ui/EmailSenders';
 
 type SMDoc = { id: string; title: string; summary: string; tags: string[]; createdAt: string; status: string };
 type Source = { n: number; sourceType: string; title: string; snippet: string; when?: string; link: string; source: string; score?: number };
@@ -209,6 +210,7 @@ export function Find() {
   const [result, setResult] = useState<AskResult | null>(null);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const [senders, setSenders] = useState(false); // who fills the brain with email (BEA-1126)
 
   // Secondary: browse everything already in the brain.
   const [docs, setDocs] = useState<SMDoc[]>([]);
@@ -306,7 +308,14 @@ export function Find() {
           <Sparkles size={22} className="text-emerald-500" /> Explore
         </h1>
         <p className="text-zinc-500">Ask your brain anything — it answers from your tasks, stories, documents, bookmarks and research.</p>
+        <button
+          onClick={() => setSenders(true)}
+          className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 underline underline-offset-2 hover:text-emerald-500"
+        >
+          <SlidersHorizontal size={13} /> What's being captured from email
+        </button>
       </div>
+      {senders && <EmailSendersSheet onClose={() => setSenders(false)} />}
 
       <div className="flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
         {(['ask', 'everything', 'saved'] as const).map((t) => (
