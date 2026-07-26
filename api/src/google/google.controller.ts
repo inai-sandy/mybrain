@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, 
 import { GoogleService } from './google.service';
 import { GmailBriefService } from './gmail-brief.service';
 import { GmailRequestService } from './gmail-request.service';
+import { EmailMemoryService } from './email-memory.service';
 import { Public } from '../auth/public.decorator';
 
 /** Map internal gws errors to friendly HTTP errors. */
@@ -18,7 +19,36 @@ export class GoogleController {
     private readonly google: GoogleService,
     private readonly brief: GmailBriefService,
     private readonly requests: GmailRequestService,
+    private readonly emailMemory: EmailMemoryService,
   ) {}
+
+  /**
+   * Email senders in the brain, with counts — the owner's decision surface. Gmail's "important"
+   * flag decided this on its own until now. (BEA-1126)
+   */
+  @Get('email-memory/senders')
+  async emailSenders() {
+    return this.emailMemory.senderBreakdown();
+  }
+
+  /** What the sender rules would remove, WITHOUT removing it. Report before delete. (BEA-1125) */
+  @Get('email-memory/purge-preview')
+  async emailPurgePreview() {
+    return this.emailMemory.purgeBlocked(true);
+  }
+
+  /** Sweep out mail the rules now refuse. Deletion-only — no AI cost. (BEA-1125) */
+  @Post('email-memory/purge')
+  async emailPurge() {
+    return this.emailMemory.purgeBlocked(false);
+  }
+
+  /** Block or unblock one sender; blocking also clears their mail from the brain. (BEA-1126) */
+  @Post('email-memory/senders/block')
+  async blockSender(@Body() body: { from?: string; blocked?: boolean }) {
+    if (!body?.from?.trim()) throw new BadRequestException('Which sender?');
+    return this.emailMemory.setSenderBlocked(body.from, body?.blocked !== false);
+  }
 
   // ---- Gmail Requests (public shared read first so it isn't shadowed) ----
   @Public()
