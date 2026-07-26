@@ -86,11 +86,18 @@ export function TodayCard() {
         </div>
       )}
 
+      {/* The lever is a paragraph, and the dashboard is a page of facts — so it stays, but closed.
+          It was also the block showing a sentence cut off mid-word. (BEA-1137) */}
       {d.lever && (
-        <Link to="/lab?tab=situation" className="flex items-start gap-2 text-sm hover:underline">
-          <Wrench size={15} className="text-emerald-500 shrink-0 mt-0.5" />
-          <span><span className="text-zinc-400">Lever — </span><span className="text-emerald-700 dark:text-emerald-300 font-medium">{d.lever.lever}</span></span>
-        </Link>
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm">
+            <Wrench size={15} className="shrink-0 text-emerald-500" />
+            <span className="flex-1 text-zinc-400">Today’s lever</span>
+            <span className="text-xs text-zinc-400 transition-transform group-open:rotate-90">›</span>
+          </summary>
+          <p className="mt-1.5 pl-[23px] text-sm leading-relaxed text-emerald-700 dark:text-emerald-300">{d.lever.lever}</p>
+          <Link to="/lab?tab=situation" className="mt-1 inline-block pl-[23px] text-xs text-zinc-400 hover:text-emerald-600">Open in the Lab →</Link>
+        </details>
       )}
     </section>
   );

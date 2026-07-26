@@ -8,6 +8,19 @@ import { PromptsService } from '../prompts/prompts.service';
 const PARSE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
 
 /** The Situation model (BEA-515): the user's Goal → Blocker → Lever chains. */
+/**
+ * Cut long model text to a length WITHOUT slicing a word in half. A raw slice(0,200) stored the
+ * situation lever mid-word — the dashboard was literally showing "…send it back to all three same d".
+ * (BEA-1137)
+ */
+export function clip(text: string, max = 200): string {
+  const t = (text || '').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:.-]+$/, '') + '…';
+}
+
 @Injectable()
 export class MindChainService {
   constructor(
@@ -31,7 +44,7 @@ export class MindChainService {
   async create(data: { goal?: string; blocker?: string; lever?: string; note?: string; source?: string; provenance?: string }) {
     const goal = (data.goal || '').trim().slice(0, 200);
     const blocker = (data.blocker || '').trim().slice(0, 200);
-    const lever = (data.lever || '').trim().slice(0, 200);
+    const lever = clip(data.lever || '');
     if (!goal && !blocker && !lever) return null;
     const engine = data.source === 'engine';
 
@@ -93,7 +106,7 @@ export class MindChainService {
 
   async update(id: string, patch: { goal?: string; blocker?: string; lever?: string; note?: string; status?: string }) {
     const data: Record<string, unknown> = { lastSeenDay: this.today(), shifted: false }; // the user touched it → no longer needs a "did it shift?" look
-    for (const k of ['goal', 'blocker', 'lever'] as const) if (typeof patch[k] === 'string') data[k] = patch[k]!.trim().slice(0, 200);
+    for (const k of ['goal', 'blocker', 'lever'] as const) if (typeof patch[k] === 'string') data[k] = clip(patch[k]!);
     if (typeof patch.note === 'string') data.note = patch.note.trim().slice(0, 400) || null;
     if (patch.status && ['active', 'resolved', 'retired'].includes(patch.status)) data.status = patch.status;
     return this.prisma.mindChain.update({ where: { id }, data }).catch(() => null);
@@ -127,7 +140,7 @@ export class MindChainService {
       return {
         goal: String(j?.goal || '').trim().slice(0, 200),
         blocker: String(j?.blocker || '').trim().slice(0, 200),
-        lever: String(j?.lever || '').trim().slice(0, 200),
+        lever: clip(String(j?.lever || '')),
       };
     } catch {
       return { goal: '', blocker: '', lever: '' };
