@@ -15,7 +15,7 @@ This is the agreement. Claude reads it at the start of every project and follows
 
 ## The three unbreakable rules
 1. **Flat issues, never sub-tickets.** Every task is its own normal Linear issue. Many small issues is fine — Claude *clubs* them to work together — but never nested sub-tickets, because tomorrow I need to trace everything in one flat list.
-2. **"Done" means merged AND deployed live, and confirmed running.** A task that is coded but not deployed is *not* done. (The project is pre-users, so deploying straight to the live server is fine.)
+2. **"Done" means committed, pushed to GitHub, deployed live, and confirmed running.** Coded but not deployed is *not* done. Live but not committed is *not* done either — that work is one rebuild away from disappearing, and I can't see it on GitHub. (The project is pre-users, so deploying straight to the live server is fine.)
 3. **No per-issue begging.** I approve a batch of issues once; Claude then runs the whole batch unattended (overnight is the point). It only checks in at the batch's edges or before a big/risky issue.
 
 ## What "tested" means
@@ -35,10 +35,11 @@ For every issue in the batch, back to back, **no per-issue acknowledgement**, an
 3. **BRANCH** — open a fresh work-branch for this one issue.
 4. **CODE** — build *only* what this issue asks. No extra, no drifting into other things.
 5. **TEST** — confirm it works *and* automated tests pass. Fix anything red (try a stubborn bug up to 3 times).
-6. **MERGE + DEPLOY** — merge it, deploy to the VPS, and **confirm it is live.** *(The exact server steps are captured once and locked as a checklist — see below — so this step can never be "forgotten.")*
-7. **CLOSE** the Linear issue and clean up the branch.
-8. **SIGN-OFF NOTE** — Claude writes "what I did / what I didn't do" and posts it to the Linear issue.
-9. → **NEXT** issue automatically.
+6. **REVIEW** — a second, fresh pair of eyes (the code-reviewer agent) reads the change before it goes anywhere. Anything critical gets fixed first; nothing critical ever ships. *(Cheap, and it catches what the writer can't see.)*
+7. **FINISH IT — one command, fixed order.** `ship.sh` does the whole ending so no part of it can be forgotten: **save the work (commit) → deploy to the VPS → confirm it is live → merge → push to GitHub → write it in the ship log → delete the work branch.** It then refuses to finish if anything at all is left uncommitted or unpushed. *(Commit happens before deploy so what's live provably matches a saved commit. Merge and push happen only after it's confirmed live, so a bad deploy never reaches the main branch.)*
+8. **CLOSE** the Linear issue.
+9. **SIGN-OFF NOTE** — Claude writes "what I did / what I didn't do", plus the commit reference, and posts it to the Linear issue.
+10. → **NEXT** issue automatically.
 
 ## When something goes wrong overnight
 - **A coding problem** (a bug, a failing test) → try hard (up to 3 real attempts), then **park that one issue** with a note and **keep going** with the rest. The night is never wasted spinning on one blocker.
@@ -61,12 +62,17 @@ When the batch is done (or stopped), Claude delivers:
 - **Every rule comes with its reason** (reasons stick better than shouting).
 - **Gates log-and-continue**, they don't hang (the "try 3 times then note it and move on" rule).
 - **State is re-read at verify time** — Claude re-checks the issue's requirements before shipping.
-- **The exact VPS deploy steps are captured once and locked** as a checklist (merge → put on server → restart → confirm live), so deploy is a fixed routine, not a memory.
+- **The exact VPS deploy steps are captured once and locked** as a checklist (put on server → restart → confirm live), so deploy is a fixed routine, not a memory.
+- **Git is never done by hand.** Saving, merging and pushing live inside the one finish command, in a fixed order. Claude doesn't get to commit "later" — and the command won't report success while anything is unsaved or unpushed.
+- **A ship log** — every finished issue appends one line (when, which issue, the commit, the live URL). So "where are we" can be answered from facts instead of from what the board claims.
+- **Reality beats the board.** Status is read from the live server and from git first, and only then compared against Linear. A ticket marked done that never went through the finish command gets flagged.
 
 ---
 
 # PART 2 — THE STANDARDS
 *What every piece of software must include and look like. Claude applies these automatically; I never ask for them again. They become part of every relevant issue's checklist and are checked before deploy.*
+
+*One sensible exception: if a project genuinely doesn't have a thing (a private single-user tool has no accounts or roles), those items don't apply. Claude says so plainly rather than inventing scope to satisfy a checklist.*
 
 ## On every list or table
 - Pagination
