@@ -11,6 +11,12 @@ export class ExploreController {
     if (!body?.question || !body?.answer) throw new BadRequestException('Nothing to save');
     return this.explore.saveAnswer(body.question, body.answer, body.sources || []);
   }
+  /** What Explore shows before you ask anything — counts, what just went in, past questions. (BEA-1124) */
+  @Get('landing')
+  async landing() {
+    return this.explore.landing();
+  }
+
   @Get('saves')
   async saves(@Query('q') q?: string) {
     return this.explore.listSaves(q);

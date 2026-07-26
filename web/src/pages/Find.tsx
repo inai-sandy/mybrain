@@ -12,6 +12,7 @@ import { EmailSendersSheet } from '../ui/EmailSenders';
 /** One thing the brain knows, read from the app's own rows rather than the store's paged list. (BEA-1128) */
 type BrainItem = { type: string; label: string; id: string; title: string; when: string | null };
 type BrainCounts = { total: number; types: { type: string; label: string; count: number }[] };
+type Landing = { counts: BrainCounts; recent: BrainItem[]; questions: string[]; suggestions: string[] };
 type Source = { n: number; sourceType: string; title: string; snippet: string; when?: string; link: string; source: string; score?: number };
 type AskResult = { answer: string; sources: Source[]; matches: number };
 type Saved = { id: string; question: string; answer: string; sources: Source[]; createdAt: string };
@@ -215,6 +216,11 @@ export function Find() {
   const [bq, setBq] = useUrlState('bq', '');
   const [page, setPage] = useState(1);
   const [forgetting, setForgetting] = useState<BrainItem | null>(null);
+  // What the page shows before you have asked anything. (BEA-1124)
+  const [landing, setLanding] = useState<Landing | null>(null);
+  useEffect(() => {
+    fetch('/api/explore/landing').then((r) => (r.ok ? r.json() : null)).then(setLanding).catch(() => setLanding(null));
+  }, []);
 
   const loadCounts = useCallback(() => {
     fetch('/api/memory/counts').then((r) => (r.ok ? r.json() : null)).then(setCounts).catch(() => setCounts(null));
@@ -431,10 +437,66 @@ export function Find() {
           )}
 
           {!result && !asking && !error && (
-            <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-5 text-sm text-zinc-500">
-              Try: <span className="text-zinc-600 dark:text-zinc-300">“what tasks did I do this week?”</span> ·{' '}
-              <span className="text-zinc-600 dark:text-zinc-300">“summarise my pricing research”</span> ·{' '}
-              <span className="text-zinc-600 dark:text-zinc-300">“the day I argued pricing with Diksha”</span>
+            <div className="space-y-5">
+              {/* Your brain at a glance — the page used to open completely empty. (BEA-1124) */}
+              <div>
+                <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">
+                  Your brain knows {landing ? landing.counts.total.toLocaleString() : '…'} things
+                </h2>
+                <div className="flex flex-wrap gap-1.5">
+                  {(landing?.counts.types || []).map((t) => (
+                    <button
+                      key={t.type}
+                      onClick={() => { setFType(t.type); setTab('everything'); }}
+                      className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    >
+                      {t.label} <span className="tabular-nums text-zinc-400">{t.count}</span>
+                    </button>
+                  ))}
+                  {!landing && [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-6 w-28 animate-pulse rounded-full bg-zinc-100 dark:bg-zinc-800" />)}
+                </div>
+              </div>
+
+              {!!landing?.questions.length && (
+                <div>
+                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">You asked before</h2>
+                  <div className="flex flex-wrap gap-1.5">
+                    {landing.questions.map((qq) => (
+                      <button key={qq} onClick={() => { setQ(qq); ask(); }} className="max-w-full truncate rounded-lg border border-zinc-300 px-3 py-1.5 text-left text-xs text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-300">
+                        {qq}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!!landing?.suggestions.length && (
+                <div>
+                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">Try asking</h2>
+                  <div className="space-y-1.5">
+                    {landing.suggestions.map((sq) => (
+                      <button key={sq} onClick={() => { setQ(sq); ask(); }} className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-600 transition hover:border-emerald-500/50 hover:text-emerald-600 dark:border-zinc-800 dark:text-zinc-300">
+                        <Sparkles size={13} className="shrink-0 text-emerald-500" /> <span className="min-w-0 flex-1 break-words">{sq}</span>
+                        <ArrowRight size={13} className="shrink-0 text-zinc-400" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!!landing?.recent.length && (
+                <div>
+                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">Just went in</h2>
+                  <ul className="space-y-1.5">
+                    {landing.recent.map((it) => (
+                      <li key={`${it.type}:${it.id}`} className="flex items-start gap-2 text-sm">
+                        <span className={'mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[10px] ' + (TYPE_STYLE[it.type] || TYPE_STYLE.document)}>{it.label}</span>
+                        <span className="min-w-0 flex-1 break-words text-zinc-600 dark:text-zinc-300">{it.title}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </>
