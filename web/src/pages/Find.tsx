@@ -501,7 +501,9 @@ export function Find() {
                 )}
               </div>
 
-              <div className="space-y-4 lg:col-span-2">
+              {/* On a phone the stat is orientation — it belongs under the ask box, not at the very
+                  bottom. On desktop it stays the right-hand sidebar. (BEA-1130) */}
+              <div className="order-first space-y-4 lg:order-none lg:col-span-2">
                 <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
                   <h2 className="mb-0.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Your brain</h2>
                   <p className="mb-2.5 text-2xl font-extrabold tabular-nums leading-none">
