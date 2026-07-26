@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
+import { RecurringService } from '../tasks/recurring.service';
+import { MemoryService } from '../memory/memory.service';
 
 type NeedItem = { kind: string; icon: string; title: string; sub: string; href: string; action: string };
 type CookItem = { icon: string; label: string; href: string };
@@ -14,7 +16,29 @@ export class HomeService {
     private readonly prisma: PrismaService,
     private readonly tasks: TasksService,
     private readonly daily: DailyService,
+    private readonly recurring: RecurringService,
+    private readonly memory: MemoryService,
   ) {}
+
+  /**
+   * A count that can never take the landing page down. Home is the first screen of the app; one
+   * unavailable table must not turn the whole dashboard into an error. (BEA-1136)
+   */
+  private async safeCount(model: string, where: any): Promise<number> {
+    try {
+      const m = (this.prisma as any)[model];
+      if (!m?.count) return 0;
+      return (await m.count({ where })) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** How many things the brain knows — the same number Explore shows. (BEA-1136) */
+  private async brainSize(): Promise<number> {
+    const r = await this.memory.brainCounts();
+    return r.total;
+  }
 
   /** Everything the Home command-center needs, in one call. */
   async summary() {
@@ -111,6 +135,28 @@ export class HomeService {
     if (remQueuedToday) cooking.push({ icon: '⏰', label: `${remQueuedToday} reminder${s(remQueuedToday)} queued today`, href: '/contacts' });
     if (meetTranscribing) cooking.push({ icon: '🎧', label: `${meetTranscribing} meeting${s(meetTranscribing)} transcribing`, href: '/meetings' });
 
+    // ---- The facts the dashboard runs on (BEA-1136) ----
+    // Home only ever fetched INVENTORY — documents, bookmarks, skills. None of it is something the
+    // owner acts on. These are the numbers he actually runs his day from; every one already exists
+    // somewhere in the app, Home simply never asked. All indexed counts, gathered in parallel.
+    const restDays = await this.recurring?.restDays().catch(() => ['Sun']) ?? ['Sun'];
+    const isRestDay = restDays.includes(new Date(dayKey + 'T00:00:00Z').toUTCString().slice(0, 3));
+    const [
+      toReview, delegatedOpen, dailyOwed, dailyIn, dailyMissed, overdueCount, carriedOver, doneToday, openTasks, brainSize,
+    ] = await Promise.all([
+      this.safeCount('taskClaim', { status: 'pending' }),
+      this.safeCount('task', { status: { not: 'done' }, kind: { not: 'recurring' }, NOT: { ownerContactId: null } }),
+      this.safeCount('task', { kind: 'recurring', status: { not: 'done' } }),
+      this.safeCount('taskStatusDay', { day: dayKey, status: 'received' }),
+      this.safeCount('taskStatusDay', { day: dayKey, status: 'missed' }),
+      this.safeCount('task', { status: { not: 'done' }, dueDate: { lt: todayStart } }),
+      this.safeCount('task', { status: { not: 'done' }, rolloverCount: { gt: 0 } }),
+      this.safeCount('task', { status: 'done', completedAt: { gte: todayStart, lt: todayEnd } }),
+      this.safeCount('task', { status: { not: 'done' }, kind: { not: 'recurring' } }),
+      this.brainSize().catch(() => 0),
+    ]);
+    const stalling = await (this.tasks.stalling?.() ?? Promise.resolve([])).then((r: any[]) => r.length).catch(() => 0);
+
     // Day summary: today's once it exists, otherwise yesterday's (mornings shouldn't show empty).
     let summaryText: string | null = activity.summary?.text || null;
     let summaryFor: 'today' | 'yesterday' | null = summaryText ? 'today' : null;
@@ -137,7 +183,13 @@ export class HomeService {
         guidanceDay: guidanceRow?.day || null,
       },
       personality: { unlocked: personality.unlocked, summary: personality.summary, daysCovered: personality.daysCovered, minDays: personality.minDays },
-      counts: { documents, bookmarks, ideas, skills, notes, contacts, meetings, emoCards },
+      counts: { documents, bookmarks, ideas, skills, notes, contacts, meetings, emoCards, brain: brainSize },
+      // Grouped exactly as the dashboard bands render them, so the page does no arithmetic. (BEA-1136)
+      facts: {
+        needsYou: { needsYou: rankedNeedsYou.length, toReview, missedToday: dailyMissed, overdue: overdueCount },
+        yourDay: { open: openTasks, doneToday, carriedOver, dumped: today.dumped, storyDone: dailyToday.storyDone },
+        owed: { delegatedOpen, stalling, dailyIn, dailyOwed, restDay: isRestDay, remindersQueued: remQueuedToday },
+      },
       countsNew: { documents: nDocs, bookmarks: nBook, ideas: nIdeas, skills: nSkills, notes: nNotes, contacts: nCont, meetings: nMeet, emoCards: nEmo },
       needsYou: rankedNeedsYou,
       cooking,

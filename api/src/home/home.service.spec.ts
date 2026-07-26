@@ -33,7 +33,13 @@ function makeSvc() {
     activity: async () => ({ day: '2026-07-06', summary: { text: 'A good day.' }, stats: { minutesSpent: 192 } }),
     getPersonality: async () => ({ unlocked: true, summary: 'You focus well alone.', daysCovered: 10, minDays: 7 }),
   };
-  return new HomeService(prisma, tasks, daily);
+  return new HomeService(
+    prisma,
+    tasks,
+    daily,
+    { restDays: async () => ['Sun'] } as any,
+    { brainCounts: async () => ({ total: 0, types: [] }) } as any,
+  );
 }
 
 describe('HomeService — command center (BEA-897)', () => {
