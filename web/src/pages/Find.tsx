@@ -13,7 +13,7 @@ import { EmailSendersSheet } from '../ui/EmailSenders';
 type BrainItem = { type: string; label: string; id: string; title: string; when: string | null };
 type BrainCounts = { total: number; types: { type: string; label: string; count: number }[] };
 type Landing = { counts: BrainCounts; recent: BrainItem[]; questions: string[]; suggestions: string[] };
-type Source = { n: number; sourceType: string; title: string; snippet: string; when?: string; link: string; source: string; score?: number };
+type Source = { n: number; sourceType: string; title: string; snippet: string; when?: string; link: string; source: string; score?: number; state?: 'open' | 'done' };
 type AskResult = { answer: string; sources: Source[]; matches: number };
 type Saved = { id: string; question: string; answer: string; sources: Source[]; createdAt: string };
 
@@ -39,6 +39,9 @@ function SourceCard({ s }: { s: Source }) {
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-semibold tabular-nums text-zinc-400">[{s.n}]</span>
         <span className={'text-[10px] px-2 py-0.5 rounded-full border ' + (TYPE_STYLE[s.sourceType] || TYPE_STYLE.document)}>{s.sourceType}</span>
+        {/* An open task must never be mistaken for finished work. (BEA-1127) */}
+        {s.state === 'open' && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">still open</span>}
+        {s.state === 'done' && <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">done</span>}
         {s.when && <span className="text-[10px] text-zinc-400">{new Date(s.when).toLocaleDateString()}</span>}
       </div>
       <h4 className="font-semibold text-sm mt-1.5 line-clamp-1">{s.title}</h4>
