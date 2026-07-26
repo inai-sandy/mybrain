@@ -30,7 +30,7 @@ function day(): DaySignals {
 }
 
 const GOOD = {
-  statement: 'Update user manuals has been carried 43 days and Sales Executive Portal session 40. Both need someone else to show up.',
+  statement: 'You have carried Update user manuals 43 days and Sales Executive Portal session 40. Both need someone else to show up.',
   subject: 'Update user manuals',
   action: 'Give both away or kill them this week.',
   evidence: [{ snippet: 'Update user manuals (deferred 43x)' }],
@@ -54,15 +54,33 @@ describe('the bar a finding has to clear (BEA-1141)', () => {
     expect(g.reason).toContain('abstract');
   });
 
+  it('refuses a finding written about you instead of to you', () => {
+    const g = gradeFinding(
+      { ...GOOD, statement: "Sandeep's attention is captured by Update user manuals, deferred 43 times." },
+      day(),
+    );
+    expect(g.ok).toBe(false);
+    expect(g.reason).toContain('not to them');
+  });
+
+  it('refuses a rambling paragraph', () => {
+    const long = 'You keep putting off Update user manuals, 43 days now, and the Sales Executive Portal session 40 days, ' +
+      'and both of these need someone else to turn up before anything can move; meanwhile the rest of your list keeps ' +
+      'turning over normally, which suggests the blocker is other people rather than the work itself in every case here.';
+    const g = gradeFinding({ ...GOOD, statement: long }, day());
+    expect(g.ok).toBe(false);
+    expect(g.reason).toContain('too long');
+  });
+
   it('refuses a finding with no number in it', () => {
-    const g = gradeFinding({ ...GOOD, statement: 'Update user manuals keeps getting pushed back.', evidence: [{ snippet: 'manuals again' }] }, day());
+    const g = gradeFinding({ ...GOOD, statement: 'You keep pushing Update user manuals back.', evidence: [{ snippet: 'manuals again' }] }, day());
     expect(g.ok).toBe(false);
     expect(g.reason).toContain('number');
   });
 
   it('refuses a finding about nothing in the actual day', () => {
     const g = gradeFinding(
-      { statement: 'Your gym sessions dropped to 2 this month.', subject: 'gym', action: 'Book 3 slots for next week.', evidence: [] },
+      { statement: 'Your swimming sessions dropped to 2 this month.', subject: 'swimming', action: 'Book 3 slots for next week.', evidence: [] },
       day(),
     );
     expect(g.ok).toBe(false);

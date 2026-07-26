@@ -508,7 +508,7 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
             <span className="text-[11px] text-zinc-400 tabular-nums">
               Seen on {f.daysSeen ?? 1} day{(f.daysSeen ?? 1) === 1 ? '' : 's'} {trendArrow(f.trend)}
             </span>
-            {!quiet && <TrustLadder confidence={f.confidence} validated={f.validated} />}
+            {!quiet && f.validated !== 'confirmed' && <TrustLadder confidence={f.confidence} validated={f.validated} />}
             {f.pinned && <Pin size={11} className="text-amber-500 fill-amber-400" />}
             <div className="flex-1" />
             {f.validated === 'confirmed' ? (
@@ -519,7 +519,7 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
                 <button onClick={() => onRefute(f.id)} className="inline-flex items-center gap-1 rounded-lg bg-rose-500/15 text-rose-600 dark:text-rose-400 px-2.5 py-1 text-xs font-medium hover:bg-rose-500/25"><X size={13} /> No</button>
               </div>
             )}
-            <button title="Almost \u2014 fix the wording" onClick={() => { setEditing(f.id); setDraft(f.statement); }} className="grid place-items-center h-7 w-7 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={13} /></button>
+            <button title="Almost — fix the wording" onClick={() => { setEditing(f.id); setDraft(f.statement); }} className="grid place-items-center h-7 w-7 rounded-lg text-zinc-400 hover:text-violet-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={13} /></button>
             <button title={f.pinned ? 'Unpin' : 'Pin \u2014 keep this forever'} onClick={() => onPin(f.id, !f.pinned)} className={'grid place-items-center h-7 w-7 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (f.pinned ? 'text-amber-500' : 'text-zinc-400 hover:text-amber-500')}><Pin size={13} className={f.pinned ? 'fill-amber-400' : ''} /></button>
             <button title="Remove" onClick={() => setConfirmDel(f)} className="grid place-items-center h-7 w-7 rounded-lg text-zinc-400 hover:text-rose-600 hover:bg-rose-500/10"><Trash2 size={13} /></button>
           </div>
@@ -535,7 +535,7 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
         {findings.length > 4 && (
           <div className="relative w-full sm:w-56">
             <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search\u2026" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-8 pr-3 py-1.5 text-sm outline-none focus:border-violet-500" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-8 pr-3 py-1.5 text-sm outline-none focus:border-violet-500" />
           </div>
         )}
       </div>
