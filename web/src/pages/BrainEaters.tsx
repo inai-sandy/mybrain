@@ -68,15 +68,10 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-fuchsia-400/30 bg-gradient-to-br from-fuchsia-500/10 via-violet-500/5 to-transparent p-4">
-        <h2 className="flex items-center gap-2 font-bold"><Brain size={18} className="text-fuchsia-500" /> Brain Eaters</h2>
-        <p className="mt-0.5 text-xs text-zinc-500">The things that circle your head and keep getting skipped. Finish them for a peaceful sleep — each finish is celebrated in your night story.</p>
-      </div>
-
       {/* Auto-spotted: work that keeps rolling over is exactly what eats the brain. Owner confirms. */}
       {candidates.length > 0 && (
-        <section className="rounded-xl border border-amber-300/50 bg-amber-500/5 p-3 dark:border-amber-500/30">
-          <p className="mb-2 text-xs font-medium text-amber-700 dark:text-amber-300">These keep slipping — are they brain eaters?</p>
+        <section className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">These keep slipping — are they brain eaters?</p>
           <ul className="space-y-1.5">
             {candidates.map((c) => (
               <li key={c.id} className="flex items-center gap-2">
@@ -84,8 +79,10 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
                   <p className="truncate text-sm">{c.title}</p>
                   <p className="text-[11px] text-zinc-400">carried {c.carried} days</p>
                 </div>
-                <button onClick={() => adopt(c.id, true)} className="shrink-0 rounded-lg bg-fuchsia-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-fuchsia-500">Yes, move it</button>
-                <button onClick={() => adopt(c.id, false)} className="shrink-0 rounded-lg border border-zinc-300 px-2 py-1 text-xs text-zinc-500 dark:border-zinc-700">No</button>
+                {/* A suggestion is a question, not a call to action — these stay quiet until you reach for
+                    them. Eleven filled buttons down the page shouted louder than the tasks. (BEA-1131) */}
+                <button onClick={() => adopt(c.id, true)} className="shrink-0 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-600 transition-colors hover:border-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-300">Yes, move it</button>
+                <button onClick={() => adopt(c.id, false)} className="shrink-0 rounded-lg px-2 py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200">No</button>
               </li>
             ))}
           </ul>
@@ -96,8 +93,21 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
         <div className="space-y-2.5">{[0, 1].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
       ) : open.length === 0 && done.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center dark:border-zinc-700">
-          <p className="text-sm font-medium">Nothing is eating your brain right now 🎉</p>
-          <p className="mt-1 text-xs text-zinc-500">When something starts circling, dump it here and it can't escape.</p>
+          {/* Don't celebrate an empty page while suggestions sit above it — the screen was
+              contradicting itself. (BEA-1131) */}
+          {candidates.length > 0 ? (
+            <>
+              <p className="text-sm font-medium">Nothing moved here yet</p>
+              <p className="mx-auto mt-1 max-w-sm text-xs text-zinc-500">
+                {candidates.length} thing{candidates.length === 1 ? '' : 's'} above keep{candidates.length === 1 ? 's' : ''} slipping — say yes to any of them and they land here.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium">Nothing is eating your brain right now 🎉</p>
+              <p className="mt-1 text-xs text-zinc-500">When something starts circling, dump it here and it can't escape.</p>
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -121,7 +131,10 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
         </>
       )}
 
-      <button onClick={() => setDumping(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-fuchsia-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-fuchsia-500 md:bottom-8 md:right-24">
+      {/* Reserve room so the floating button can never sit on top of the content below it. (BEA-1131) */}
+      <div aria-hidden className="h-20" />
+
+      <button onClick={() => setDumping(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg transition-colors hover:bg-emerald-500 md:bottom-8 md:right-24">
         <Plus className="h-4 w-4" /> Dump brain eaters
       </button>
 
@@ -146,7 +159,7 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
       {/* The celebration — finishing one of these deserves noise. */}
       {celebrate && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-6" onClick={() => setCelebrate(null)}>
-          <div className="animate-bounce rounded-2xl border border-fuchsia-400/50 bg-white p-6 text-center shadow-2xl dark:bg-zinc-900">
+          <div className="animate-bounce rounded-2xl border border-emerald-500/40 bg-white p-6 text-center shadow-2xl dark:bg-zinc-900">
             <div className="text-5xl">🧠⚡</div>
             <p className="mt-2 text-lg font-extrabold">Brain eater destroyed!</p>
             <p className="mt-1 max-w-xs text-sm text-zinc-500">“{celebrate}” has been circling your head — not any more. Sleep well tonight. It goes in your story.</p>
@@ -188,17 +201,17 @@ function EaterDumpModal({ onClose, onDone }: { onClose: () => void; onDone: () =
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={() => !busy && onClose()}>
       <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-zinc-900" onClick={(e) => e.stopPropagation()}>
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 font-bold"><Brain size={17} className="text-fuchsia-500" /> Dump the brain eaters</h3>
+          <h3 className="flex items-center gap-2 font-bold"><Brain size={17} className="text-emerald-500" /> Dump the brain eaters</h3>
           <button onClick={onClose} disabled={busy} className="p-1 text-zinc-400 hover:text-zinc-700 disabled:opacity-50 dark:hover:text-zinc-200"><X size={18} /></button>
         </div>
         <p className="mb-3 text-xs text-zinc-500">Speak or type everything that keeps circling — the AI splits it into separate items.</p>
         <div className="relative">
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} autoFocus
             placeholder="The insurance renewal keeps nagging me… I still haven't called the CA about the filing… that broken door at the factory…"
-            className="w-full resize-y rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 pr-12 text-sm outline-none focus:border-fuchsia-500 dark:border-zinc-700 dark:bg-zinc-950" />
+            className="w-full resize-y rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 pr-12 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950" />
           <DictateButton onText={appendText} className="absolute right-2 top-2" />
         </div>
-        <button onClick={submit} disabled={!text.trim() || busy} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-fuchsia-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-fuchsia-500 disabled:opacity-50">
+        <button onClick={submit} disabled={!text.trim() || busy} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
           {busy ? (<><Loader2 size={15} className="animate-spin" /> Splitting…</>) : (<><Sparkles size={15} /> Capture them</>)}
         </button>
       </div>
