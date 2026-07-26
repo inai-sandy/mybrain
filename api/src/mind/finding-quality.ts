@@ -174,3 +174,20 @@ export function gradeFinding(f: FindingDraft, signals: DaySignals): Grade {
 
   return { ok: true };
 }
+
+/** Every number in `text`, as strings. */
+export function numbersIn(text: string): string[] {
+  return (String(text || '').match(/\d+/g) || []);
+}
+
+/**
+ * A rewrite may drop a number but must never invent one. (BEA-1145)
+ *
+ * This is the whole safety of the rewrite pass: it is allowed to change the words, and nothing else.
+ * A model that helpfully rounds "deferred 20-36 times" up to "deferred 40 times" has fabricated
+ * evidence about the owner's own life, and he would have no way to tell.
+ */
+export function keepsNumbers(original: string, rewritten: string): boolean {
+  const had = new Set(numbersIn(original));
+  return numbersIn(rewritten).every((n) => had.has(n));
+}

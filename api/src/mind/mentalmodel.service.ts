@@ -6,7 +6,7 @@ import { MindLifecycleService } from './lifecycle.service';
 import { MindChainService } from './chain.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { DaySignals } from './mind.types';
-import { gradeFinding } from './finding-quality';
+import { gradeFinding, keepsNumbers, addressesYou, MAX_STATEMENT, looksLikeAction } from './finding-quality';
 import { surfacedWhere } from './surfacing';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
@@ -347,6 +347,60 @@ export class MentalModelService implements OnModuleInit {
     if (rejected) this.log.log(`mind: ${rejected} finding(s) did not clear the bar for ${day}`);
     if (proposed) await this.lifecycle.consolidate().catch((e) => this.log.warn(`mind consolidate: ${e?.message ?? e}`));
     return { proposed, reinforced };
+  }
+
+  /**
+   * Rewrite findings written before the current bar so they read like something you can act on.
+   * (BEA-1145)
+   *
+   * This changes WORDS ONLY. Ids, evidence, day counts, pins and your yes/no all stay exactly as
+   * they are, and a rewrite is rejected outright if it invents a number the original didn't have —
+   * fabricated evidence about your own life is the one failure you'd have no way to catch.
+   * One model call for the whole batch.
+   */
+  async rewriteExisting(): Promise<{ rewritten: number; skipped: number; total: number }> {
+    const rows = await this.prisma.mindFinding.findMany({
+      where: surfacedWhere,
+      orderBy: [{ daysSeen: 'desc' }],
+      take: 30,
+      select: { id: true, statement: true, action: true },
+    });
+    // Only the ones that actually fall short — never spend a call re-writing what already reads well.
+    const needy = rows.filter((r) => !r.action || !addressesYou(r.statement) || r.statement.length > MAX_STATEMENT);
+    if (!needy.length) return { rewritten: 0, skipped: 0, total: rows.length };
+
+    const tmpl = await this.prompts.get('lab.rewrite');
+    const list = needy.map((r, i) => `${i + 1}. ${r.statement}`).join('\n\n');
+    const raw = (await this.llm.completeWith(await this.model(), `${tmpl}\n\n=== THE FINDINGS ===\n${list}`, 3000, 'mind-rewrite'))?.trim() || '';
+
+    let parsed: { n?: number; statement?: string; action?: string }[] = [];
+    try {
+      const start = raw.indexOf('{');
+      const o = JSON.parse(raw.slice(start, raw.lastIndexOf('}') + 1));
+      if (Array.isArray(o?.rewritten)) parsed = o.rewritten;
+    } catch {
+      return { rewritten: 0, skipped: needy.length, total: rows.length };
+    }
+
+    let rewritten = 0;
+    for (const r of parsed) {
+      const src = needy[Number(r.n) - 1];
+      if (!src) continue;
+      const statement = String(r.statement || '').trim();
+      const action = String(r.action || '').trim();
+      // Every guard the new findings face, plus the no-invented-numbers rule. Fail any one and the
+      // original is left exactly as it was — a mangled finding is worse than an ugly one.
+      if (!statement || statement.length > MAX_STATEMENT) continue;
+      if (!addressesYou(statement)) continue;
+      if (!looksLikeAction(action, statement)) continue;
+      if (!keepsNumbers(src.statement, statement)) {
+        this.log.warn(`mind rewrite: refused \u2014 invented a number not in the original ("${statement.slice(0, 70)}")`);
+        continue;
+      }
+      await this.prisma.mindFinding.update({ where: { id: src.id }, data: { statement, action: action.slice(0, 200) } });
+      rewritten++;
+    }
+    return { rewritten, skipped: needy.length - rewritten, total: rows.length };
   }
 
   private normSignal(s?: string): string {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, ChevronDown, Search, Target, Wrench, Plus, Sparkles, Eye, Ban } from 'lucide-react';
+import { FlaskConical, RefreshCw, Loader2, Check, X, Pencil, Pin, Trash2, ChevronDown, Search, Target, Wrench, Plus, Sparkles, Eye, Ban, Wand2 } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useSearchParams } from 'react-router-dom';
@@ -129,7 +129,7 @@ export function Lab() {
       ) : (
         <div className="space-y-8">
           <Picture stats={stats} findings={findings} chains={chains} />
-          <FindingsFeed findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onRemove={onRemove} onAmend={onAmend} onOpen={setInfo} />
+          <FindingsFeed findings={findings} onConfirm={onConfirm} onRefute={onRefute} onPin={onPin} onRemove={onRemove} onAmend={onAmend} onOpen={setInfo} onReload={load} />
           <HeatmapsView stats={stats} />
           <div>
             <h2 className="text-sm font-semibold">About you</h2>
@@ -526,9 +526,11 @@ function ChainForm({ chain, onSaved, onCancel }: { chain: MindChain | null; onSa
  * Yes/no lives on the card itself. The separate Review tab is gone: judging a finding is the same
  * act as reading it, and making it a different screen is why he never knew what Review was for.
  */
-function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend, onOpen }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onRemove: (id: string) => void; onAmend: (id: string, s: string) => void; onOpen: (v: FindingView) => void }) {
+function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend, onOpen, onReload }: { findings: Finding[]; onConfirm: (id: string) => void; onRefute: (id: string) => void; onPin: (id: string, p: boolean) => void; onRemove: (id: string) => void; onAmend: (id: string, s: string) => void; onOpen: (v: FindingView) => void; onReload: () => void }) {
   const [q, setQ] = useState('');
   const [showWatching, setShowWatching] = useState(false);
+  const [tidying, setTidying] = useState(false);
+  const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmDel, setConfirmDel] = useState<Finding | null>(null);
@@ -538,6 +540,8 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
   const match = (f: Finding) => !q.trim() || `${f.statement} ${f.action || ''} ${f.subject} ${f.object}`.toLowerCase().includes(q.toLowerCase());
   const shown = believed.filter(match).sort((a, b) => (b.daysSeen ?? 1) - (a.daysSeen ?? 1));
   const shownWatching = watching.filter(match);
+  // A finding falls short if it has no action, talks about you in the third person, or rambles.
+  const needsRewrite = believed.filter((f) => !f.action || !/\b(you|your)\b/i.test(f.statement) || f.statement.length > 240).length;
 
   const card = (f: Finding, quiet = false) => (
     <div key={f.id} className={'rounded-xl border p-3.5 ' + (quiet ? 'border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50 dark:bg-zinc-900/40' : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900')}>
@@ -583,7 +587,27 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">What I’m sure about <span className="text-zinc-400 font-normal tabular-nums">· {believed.length}</span></h2>
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-sm font-semibold">What I’m sure about <span className="text-zinc-400 font-normal tabular-nums">· {believed.length}</span></h2>
+          {/* Findings written before the current bar read like case notes about a stranger. (BEA-1145) */}
+          {needsRewrite > 0 && (
+            <button
+              onClick={async () => {
+                setTidying(true);
+                try {
+                  const r = await mindApi.rewrite();
+                  toast('success', r.rewritten ? `Rewrote ${r.rewritten} of ${needsRewrite} in plain English` : 'Nothing could be rewritten safely — left as they were');
+                  onReload();
+                } catch { toast('error', 'Could not rewrite those'); } finally { setTidying(false); }
+              }}
+              disabled={tidying}
+              title="Rewrite the older ones so they talk to you and say what to do"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 px-2.5 py-1 text-xs font-medium hover:bg-violet-500/5 disabled:opacity-50"
+            >
+              {tidying ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Rewrite {needsRewrite} in plain English
+            </button>
+          )}
+        </div>
         {findings.length > 4 && (
           <div className="relative w-full sm:w-56">
             <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
