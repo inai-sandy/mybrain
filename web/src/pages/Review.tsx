@@ -105,11 +105,13 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
         <div>
           {/* As a Tasks tab the page header is the Tasks header — no second title. (BEA-1044) */}
           {!embedded && <h1 className="flex items-center gap-2 text-2xl font-extrabold"><Hand className="text-violet-500" /> To review</h1>}
-          <p className="text-sm text-zinc-500">
-            {tab === 'daily'
-              ? 'Standing daily reports — what came in and what did not'
-              : claims === null ? 'Loading…' : claims.length === 0 ? 'Nothing waiting on you' : `${claims.length} thing${claims.length === 1 ? '' : 's'} someone says ${claims.length === 1 ? 'is' : 'are'} finished`}
-          </p>
+          {/* Only say it when there IS something. The empty state already covers the empty case, and
+              the page subtitle already covers the general one. (BEA-1132) */}
+          {tab === 'daily' ? (
+            <p className="text-sm text-zinc-500">Standing daily reports — what came in and what did not</p>
+          ) : claims && claims.length > 0 ? (
+            <p className="text-sm text-zinc-500">{claims.length} thing{claims.length === 1 ? '' : 's'} someone says {claims.length === 1 ? 'is' : 'are'} finished</p>
+          ) : null}
         </div>
         {tab === 'claims' && !!picked.size && (
           <button onClick={confirmPicked} disabled={busy === 'bulk'} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
@@ -119,15 +121,17 @@ export function Review({ embedded = false, onCountChange }: { embedded?: boolean
       </div>
 
       {/* Claims are things to decide; daily reports are a log with nothing to confirm. (BEA-1120) */}
-      <div className="flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/60">
+      {/* Compact and clearly SECONDARY: as a full-bleed block this out-weighed the real page tabs
+          above it, so a sub-control looked more important than its parent. (BEA-1132) */}
+      <div className="inline-flex gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800/60">
         {([['claims', 'To review', Hand], ['daily', 'Daily status', CalendarCheck]] as const).map(([key, label, Icon]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
             aria-current={tab === key}
-            className={'inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ' + (tab === key ? 'bg-white shadow-sm dark:bg-zinc-900' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
+            className={'inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-colors ' + (tab === key ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-900 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
           >
-            <Icon size={14} /> {label}
+            <Icon size={12} /> {label}
             {key === 'claims' && !!claims?.length && (
               <span className="rounded-full bg-violet-500/15 px-1.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">{claims.length}</span>
             )}
