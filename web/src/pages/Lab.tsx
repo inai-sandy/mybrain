@@ -301,11 +301,23 @@ function LabRecap({ onGoSituation }: { onGoSituation: () => void }) {
   );
 }
 
+/**
+ * The situations list. (BEA-1143)
+ *
+ * It rendered every chain the Lab had ever inferred, in one unbroken column with no count, no
+ * search and no way to put the finished ones away — dozens of cards deep. Live it was a wall.
+ * Now it opens on what's still live, says how many there are, and the resolved ones are one tap away.
+ */
+const PAGE = 8;
+
 function SituationView() {
   const [chains, setChains] = useState<MindChain[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<MindChain | null>(null);
   const [tidying, setTidying] = useState(false);
+  const [q, setQ] = useState('');
+  const [show, setShow] = useState<'active' | 'resolved' | 'all'>('active');
+  const [limit, setLimit] = useState(PAGE);
   const toast = useToast();
   const load = () => chainApi.list().then(setChains).catch(() => setChains([]));
   useEffect(() => { load(); }, []);
@@ -324,6 +336,13 @@ function SituationView() {
   }
 
   if (chains === null) return <div className="flex justify-center py-12 text-zinc-400"><Loader2 className="animate-spin" size={20} /></div>;
+
+  const isResolved = (c: MindChain) => c.status === 'resolved';
+  const counts = { active: chains.filter((c) => !isResolved(c)).length, resolved: chains.filter(isResolved).length, all: chains.length };
+  const filtered = chains
+    .filter((c) => (show === 'all' ? true : show === 'resolved' ? isResolved(c) : !isResolved(c)))
+    .filter((c) => !q.trim() || `${c.goal} ${c.blocker} ${c.lever} ${c.note || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const visible = filtered.slice(0, limit);
 
   return (
     <div className="space-y-4">
@@ -344,7 +363,40 @@ function SituationView() {
           Nothing here yet. Tell me one thing you're stuck on — your goal, what's blocking it, and the one lever that would unblock it. I'll use it to guide your day.
         </div>
       ) : (
-        <div className="space-y-3">{chains.map((c) => <ChainCard key={c.id} c={c} onEdit={() => setEditing(c)} onChange={load} />)}</div>
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-800 p-0.5">
+              {([['active', 'Still live'], ['resolved', 'Sorted'], ['all', 'All']] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => { setShow(k); setLimit(PAGE); }}
+                  className={'px-2.5 py-1 text-xs font-medium rounded-md transition-colors ' + (show === k ? 'bg-violet-500/15 text-violet-600 dark:text-violet-400' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
+                >
+                  {label} <span className="tabular-nums opacity-70">{counts[k]}</span>
+                </button>
+              ))}
+            </div>
+            {chains.length > 4 && (
+              <div className="relative flex-1 min-w-[9rem]">
+                <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                <input value={q} onChange={(e) => { setQ(e.target.value); setLimit(PAGE); }} placeholder="Search what you're stuck on…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 pl-8 pr-3 py-1.5 text-sm outline-none focus:border-violet-500" />
+              </div>
+            )}
+          </div>
+
+          {filtered.length === 0 ? (
+            <p className="text-sm text-zinc-400 py-6 text-center">{q.trim() ? `Nothing matches “${q}”.` : show === 'resolved' ? 'Nothing sorted out yet.' : 'Nothing live right now.'}</p>
+          ) : (
+            <>
+              <div className="space-y-3">{visible.map((c) => <ChainCard key={c.id} c={c} onEdit={() => setEditing(c)} onChange={load} />)}</div>
+              {filtered.length > visible.length && (
+                <button onClick={() => setLimit((n) => n + PAGE)} className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 px-4 py-2.5 text-sm text-zinc-500 hover:border-violet-400 hover:text-violet-600">
+                  Show {Math.min(PAGE, filtered.length - visible.length)} more · {visible.length} of {filtered.length}
+                </button>
+              )}
+            </>
+          )}
+        </>
       )}
     </div>
   );
