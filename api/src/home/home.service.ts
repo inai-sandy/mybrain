@@ -150,7 +150,7 @@ export class HomeService {
       this.safeCount('taskStatusDay', { day: dayKey, status: 'received' }),
       this.safeCount('taskStatusDay', { day: dayKey, status: 'missed' }),
       this.safeCount('task', { status: { not: 'done' }, dueDate: { lt: todayStart } }),
-      this.safeCount('task', { status: { not: 'done' }, rolloverCount: { gt: 0 } }),
+      this.safeCount('task', { status: { not: 'done' }, rolloverCount: { gt: 0 }, kind: { not: 'recurring' } }), // carried over must be a subset of open
       this.safeCount('task', { status: 'done', completedAt: { gte: todayStart, lt: todayEnd } }),
       this.safeCount('task', { status: { not: 'done' }, kind: { not: 'recurring' } }),
       this.brainSize().catch(() => 0),
