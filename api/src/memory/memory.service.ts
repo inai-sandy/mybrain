@@ -497,7 +497,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       storeDocs: store.length,
       known: known.size,
       leftovers: orphans.length,
-      sample: orphans.slice(0, 12).map((d) => d.title || d.id),
+      sample: orphans.map((d) => d.title || d.id), // the FULL list — the owner reads it before anything goes
       removed: 0,
     };
     if (!remove || !orphans.length) return out;
