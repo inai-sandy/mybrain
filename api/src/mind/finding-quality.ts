@@ -123,6 +123,18 @@ export function looksLikeAction(action: string | null | undefined, statement = '
   return true;
 }
 
+/**
+ * A finding has to talk TO you. The Lab was writing case notes: "Sandeep's emotional energy and
+ * narrative attention are disproportionately captured by a child's developmental milestone" — true
+ * or not, nobody can act on a paragraph written about them in the third person. (BEA-1143)
+ */
+export function addressesYou(text: string): boolean {
+  return /\b(you|your|you're|yours)\b/i.test(String(text || ''));
+}
+
+/** Two sentences at most. The rambling ones ran past 250 characters with semicolons holding them together. */
+export const MAX_STATEMENT = 240;
+
 export function usesAbstractLanguage(text: string): string | null {
   const t = String(text || '').toLowerCase();
   for (const p of ABSTRACT_PHRASES) if (t.includes(p)) return p;
@@ -137,8 +149,13 @@ export function gradeFinding(f: FindingDraft, signals: DaySignals): Grade {
   const statement = String(f.statement || '').trim();
   if (!statement) return { ok: false, reason: 'no statement' };
 
+  // Order matters only for the message: a sentence can fail several ways at once, and the most
+  // specific diagnosis is the most useful one in the log.
   const abstract = usesAbstractLanguage(statement);
   if (abstract) return { ok: false, reason: `reads like a research abstract ("${abstract}")` };
+
+  if (statement.length > MAX_STATEMENT) return { ok: false, reason: `too long to act on (${statement.length} characters)` };
+  if (!addressesYou(statement)) return { ok: false, reason: 'written about them, not to them' };
 
   // The number may live in the statement or in the evidence it cites — both are the owner's data.
   const evidenceText = (f.evidence || []).map((e) => e?.snippet || '').join(' ');
