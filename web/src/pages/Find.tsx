@@ -486,6 +486,19 @@ export function Find() {
                     </div>
                   </section>
                 )}
+                {!!landing?.recent.length && (
+                  <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                    <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Just went in</h2>
+                    <ul className="space-y-2">
+                      {landing.recent.map((it) => (
+                        <li key={`${it.type}:${it.id}`} className="flex items-start gap-2 text-sm">
+                          <span className={'mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ' + (DOT[COUNT_STYLE[it.type] || 'document'] || DOT.document)} />
+                          <span className="min-w-0 flex-1 break-words leading-snug text-zinc-600 dark:text-zinc-300">{it.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
               </div>
 
               <div className="space-y-4 lg:col-span-2">
@@ -509,19 +522,6 @@ export function Find() {
                   </div>
                 </section>
 
-                {!!landing?.recent.length && (
-                  <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-                    <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Just went in</h2>
-                    <ul className="space-y-2">
-                      {landing.recent.map((it) => (
-                        <li key={`${it.type}:${it.id}`} className="flex items-start gap-2 text-sm">
-                          <span className={'mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ' + (DOT[COUNT_STYLE[it.type] || 'document'] || DOT.document)} />
-                          <span className="min-w-0 flex-1 break-words leading-snug text-zinc-600 dark:text-zinc-300">{it.title}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
               </div>
             </div>
           )}
