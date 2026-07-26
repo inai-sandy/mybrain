@@ -173,7 +173,7 @@ function AuthedApp() {
         <Route path="chat" element={<Chat />} />
         <Route path="activity" element={<Activity />} />
         {/* Mentor now lives inside the Lab — keep the old URL working (BEA-465) */}
-        <Route path="mentor" element={<Navigate to="/lab?tab=mentor" replace />} />
+        <Route path="mentor" element={<Navigate to="/lab?tab=plan" replace />} />
         <Route path="notes" element={<Notes />} />
         <Route path="notes/:id" element={<NoteView />} />
         <Route path="documents" element={<Documents />} />
