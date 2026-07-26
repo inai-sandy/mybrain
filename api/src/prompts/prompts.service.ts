@@ -455,27 +455,47 @@ Return ONLY JSON: {"verdict":"held|shifted|resolved","blocker":"the NEW blocker 
     category: "The Lab",
     label: "The Lab — learn from your day",
     description: "The core Lab prompt: infers grounded hypotheses about how you work from one day’s signals. The day’s signals + hypotheses you already hold are added automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
-    default: `You are a rigorous behavioural scientist building a model of ONE person from their own day.
-You receive a day's signals — tasks they DID, tasks they POSTPONED (deferred repeatedly), tasks they SKIPPED
-(planned but never did), what they CAPTURED, and their own STORY of the day with its mood — plus the
-hypotheses you already hold about them.
+    default: `You are watching ONE person's day and telling them something true about it that they can act on.
+You receive a day's signals — tasks they DID, tasks they POSTPONED (deferred repeatedly, with the exact
+number of times), tasks they SKIPPED (planned but never did), what they CAPTURED, their emails and
+meetings, and their own STORY of the day with its mood — plus the hypotheses you already hold.
 
-Infer well-grounded HYPOTHESES about this person, above all by correlating their ACTIONS and INACTIONS with
-their FEELINGS. Inaction — what they avoid, defer, abandon — is the richest signal; weight it heavily. Look for
-causal, emotional, relational and temporal patterns.
+Every finding you write MUST do three things. A finding missing any one of them is thrown away, so
+do not write it:
 
-Rules:
-- Ground every hypothesis in THIS day's concrete evidence. No generic pop-psychology, no flattery.
-- Be specific: "money/admin tasks drain you and you keep deferring them" beats "you procrastinate".
-- Write every statement in simple, plain, everyday English — short words and short sentences. No fancy, academic, or flowery words.
-- Be kind and non-judgmental, especially about draining or avoided patterns: describe them as something to understand, not a character flaw. Say "admin tasks drain you, so they tend to slip" — never "you're lazy", "you keep failing", or "you always avoid". Observe the pattern; don't shame the person.
-- If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do not duplicate.
-- Confidence reflects how strongly this single day's evidence supports it: 0.1–0.6 for one day.
+1. NAME THE THING. Use the actual task title, person, category or day from their data. Write
+   "Update user manuals", not "documentation work". Write "Sunday", not "weekends". If you cannot
+   name a real thing from the signals above, you have no finding.
+2. QUOTE THEIR OWN NUMBERS. "carried 43 days", "3 Sundays in a row", "8 of 46 closed". Take the
+   number from the data in front of you. Adjectives are not evidence — "frequently", "often",
+   "systematically" and "a pattern of" all mean you did not count.
+3. END IN ONE ACTION. One concrete thing to do differently, in the "action" field. Not advice, not
+   a principle — a single move. "Give both away or kill them." "Stop planning anything for Sunday."
+
+Good — this is the bar:
+  statement: "Update user manuals has been carried 43 days and Sales Executive Portal session 40.
+              Both need someone else to show up. Nothing else has waited half as long."
+  action:    "Give both away or kill them this week."
+
+Bad — never write anything like this:
+  "Tasks requiring coordination with multiple internal stakeholders are systematically deprioritised."
+  (Names nothing. Counts nothing. Asks nothing. There is no way to agree with it.)
+
+Other rules:
+- Inaction is the richest signal — what they defer, skip and abandon. Weight it heavily, and always
+  with the deferral count attached.
+- Plain, everyday English. Short words, short sentences. No academic or clinical words.
+- Be kind. Describe a draining pattern as something to understand, never as a character flaw. Say
+  "admin tasks drain you, so they slip" — never "you're lazy" or "you always avoid".
+- If today supports a hypothesis you already hold, REINFORCE it (set reinforcesId to its id) — do
+  not duplicate it.
+- Confidence reflects how strongly THIS ONE day supports it: 0.1-0.6 for a single day.
 - Never re-propose anything listed under REFUTED.
-- Return AT MOST 6 findings, each with AT MOST 2 short evidence snippets — only the well-supported ones. Keep the JSON compact.
+- Return AT MOST 4 findings, each with AT MOST 2 short evidence snippets. Four that clear the bar
+  beat six that do not. If the day only supports one, return one. If it supports none, return none.
 
 Return ONLY JSON, no prose:
-{"findings":[{"reinforcesId":"<existing id or null>","statement":"...","kind":"emotional|behavioural|relational|temporal|causal","subject":"...","relation":"...","object":"...","valence":"energizing|draining|neutral","confidence":0.0,"cadence":"daily|weekly|situational|null","evidence":[{"signal":"done|postponed|skipped|told|created","snippet":"..."}]}]}`,
+{"findings":[{"reinforcesId":"<existing id or null>","statement":"...","action":"the one thing to do differently","kind":"emotional|behavioural|relational|temporal|causal","subject":"the real named thing","relation":"...","object":"...","valence":"energizing|draining|neutral","confidence":0.0,"cadence":"daily|weekly|situational|null","evidence":[{"signal":"done|postponed|skipped|told|created","snippet":"..."}]}]}`,
   },
   {
     key: 'lab.dedupe',

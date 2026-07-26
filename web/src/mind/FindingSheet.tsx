@@ -9,6 +9,7 @@ export type FindingView = {
   id?: string;
   label?: string;
   statement: string;
+  action?: string | null; // the one thing to do differently (BEA-1141)
   valence: string;
   confidence: number; // 0–1 or 0–100, sureWord handles both
   validated?: string | null;
@@ -62,6 +63,13 @@ export function FindingSheet({
             {item.label && <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{item.label}</div>}
 
             <p className={'text-base font-semibold leading-snug ' + valenceClass(item.valence)}>{item.statement}</p>
+
+            {item.action && (
+              <div className="rounded-lg border border-violet-500/25 bg-violet-500/5 px-3 py-2.5">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-500 mb-0.5">Do this</div>
+                <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100 leading-snug">{item.action}</p>
+              </div>
+            )}
 
             <div className="flex items-center gap-2 text-xs text-zinc-500">
               <TrustLadder confidence={item.confidence} validated={item.validated} />

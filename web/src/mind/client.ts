@@ -3,6 +3,7 @@ export type Evidence = { id: string; signal: string; snippet: string | null; day
 export type Finding = {
   id: string;
   statement: string;
+  action?: string | null; // the ONE thing to do differently (BEA-1141)
   kind: string; // emotional | behavioural | relational | temporal | causal
   subject: string;
   relation: string;
