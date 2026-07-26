@@ -5,6 +5,7 @@ import { MindReviewService } from './review.service';
 import { MindStatsService } from './stats.service';
 import { MindChainService } from './chain.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { isSurfaced } from './surfacing';
 
 // "The Lab" API. Run the engine + lifecycle, inspect findings, and review them with ✓/✗/almost. (BEA-447/448/449)
 @Controller('mind')
@@ -243,11 +244,15 @@ export class MindController {
   /** The current mind graph — findings ordered by confidence (retired hidden). */
   @Get('findings')
   async findings() {
-    return this.prisma.mindFinding.findMany({
+    const rows = await this.prisma.mindFinding.findMany({
       where: { NOT: { status: 'retired' } },
       orderBy: [{ confidence: 'desc' }],
       take: 200,
       include: { evidence: { take: 6, orderBy: { createdAt: 'desc' } } }, // for the tap-to-read popup (BEA-462)
     });
+    // Everything still comes back — hiding rows outright would make the Lab feel broken. Instead each
+    // row says whether the Lab believes it yet, so the screen can separate what it knows from what
+    // it is still watching. (BEA-1142)
+    return rows.map((f) => ({ ...f, surfaced: isSurfaced(f) }));
   }
 }

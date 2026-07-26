@@ -11,6 +11,8 @@ export type Finding = {
   valence: string; // energizing | draining | neutral
   confidence: number; // 0–1
   evidenceCount: number;
+  daysSeen?: number; // how many SEPARATE days back it (BEA-1142)
+  surfaced?: boolean; // does the Lab believe it yet — 3+ days, or you confirmed/pinned it
   status: string; // proposed | emerging | established | fading | retired
   cadence: string | null;
   trend: string; // rising | steady | fading

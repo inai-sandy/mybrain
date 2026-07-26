@@ -7,12 +7,16 @@ import { MindChainService } from './chain.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { DaySignals } from './mind.types';
 import { gradeFinding } from './finding-quality';
+import { surfacedWhere } from './surfacing';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
 const MODEL_KEY = 'mind.llm';
 const LEARNED_KEY = 'mind.learnedDays'; // closed days the Lab has already reflected on (BEA-458)
 const ABOUT_KEY = 'mind.aboutMe'; // the user's own words about who they are (BEA-463)
-const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+// Haiku, not Sonnet. This job reads one day of structured signals and fills a fixed JSON shape —
+// and since BEA-1141 a vague answer is thrown away in code anyway, so the expensive model was
+// buying prose, not correctness. It was $0.038 a call, the priciest in the app. (BEA-1142)
+const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
 
 type RawFinding = {
   reinforcesId?: string | null;
@@ -199,7 +203,7 @@ export class MentalModelService implements OnModuleInit {
   async summaryForMentor(limit = 12): Promise<string> {
     const about = await this.aboutMe();
     const rows = await this.prisma.mindFinding.findMany({
-      where: { status: { in: ['established', 'emerging'] }, NOT: { validated: 'refuted' } },
+      where: { ...surfacedWhere, status: { in: ['established', 'emerging'] } }, // only what holds up on 3+ days (BEA-1142)
       orderBy: [{ confidence: 'desc' }],
       take: limit,
       select: { statement: true, valence: true, confidence: true },
@@ -237,7 +241,7 @@ export class MentalModelService implements OnModuleInit {
 
     const existing = await this.prisma.mindFinding.findMany({
       where: { status: { in: ['proposed', 'emerging', 'established'] }, NOT: { validated: 'refuted' } },
-      select: { id: true, statement: true, confidence: true, evidenceCount: true, status: true, lastSeenDay: true },
+      select: { id: true, statement: true, confidence: true, evidenceCount: true, daysSeen: true, status: true, lastSeenDay: true },
       orderBy: { confidence: 'desc' },
       take: 60,
     });
@@ -304,6 +308,9 @@ export class MentalModelService implements OnModuleInit {
           data: {
             confidence: newConf,
             evidenceCount: cur.evidenceCount + 1,
+            // Only a NEW day counts. Two runs on the same day are one day of evidence, not two,
+            // or a single Tuesday could talk its way to "seen on 3 days". (BEA-1142)
+            daysSeen: cur.lastSeenDay === day ? cur.daysSeen : (cur.daysSeen ?? 1) + 1,
             // Never move freshness backwards when reflecting on an older day, or a daily-cadence
             // finding would falsely start to decay. Keep the later of the two. (BEA-780)
             lastSeenDay: cur.lastSeenDay && cur.lastSeenDay > day ? cur.lastSeenDay : day,

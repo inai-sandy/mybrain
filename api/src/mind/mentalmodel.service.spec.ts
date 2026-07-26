@@ -209,3 +209,23 @@ describe('a vague finding never gets stored (BEA-1141)', () => {
     expect(updated[0].id).toBe('f1');
   });
 });
+
+/** BEA-1142: two runs on the SAME day are one day of evidence, not two. */
+describe('counting separate days (BEA-1142)', () => {
+  const bump = { reinforcesId: 'f1', statement: 'Same thing again.', kind: 'behavioural', subject: 'x', relation: 'y', object: 'z', valence: 'draining', confidence: 0.3, evidence: [] };
+
+  it('counts a new day', async () => {
+    const existing = [{ id: 'f1', statement: 'A finding.', confidence: 0.3, evidenceCount: 2, daysSeen: 2, status: 'emerging', lastSeenDay: '2026-06-19' }];
+    const { svc, updated } = harness({ llmJson: JSON.stringify({ findings: [bump] }), existing });
+    await svc.run('2026-06-20');
+    expect(updated[0].data.daysSeen).toBe(3);
+  });
+
+  it('does NOT count a second run on the same day', async () => {
+    const existing = [{ id: 'f1', statement: 'A finding.', confidence: 0.3, evidenceCount: 2, daysSeen: 2, status: 'emerging', lastSeenDay: '2026-06-20' }];
+    const { svc, updated } = harness({ llmJson: JSON.stringify({ findings: [bump] }), existing });
+    await svc.run('2026-06-20');
+    expect(updated[0].data.daysSeen).toBe(2); // same day — still two days of evidence
+    expect(updated[0].data.evidenceCount).toBe(3); // but the evidence itself is recorded
+  });
+});

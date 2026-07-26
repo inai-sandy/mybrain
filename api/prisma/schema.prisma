@@ -886,6 +886,7 @@ model MindFinding {
   valence       String   @default("neutral") // energizing | draining | neutral
   confidence    Float    @default(0.2) // 0–1
   evidenceCount Int      @default(1) // n
+  daysSeen      Int      @default(1) // how many SEPARATE days backed it — nothing surfaces under 3 (BEA-1142)
   status        String   @default("proposed") // proposed | emerging | established | fading | retired
   cadence       String? // daily | weekly | situational | null
   trend         String   @default("rising") // rising | steady | fading
