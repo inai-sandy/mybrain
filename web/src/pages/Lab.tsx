@@ -97,7 +97,7 @@ export function Lab() {
             <FlaskConical size={22} className="text-violet-500" /> The Lab
           </h1>
           <p className="text-zinc-500 text-sm">What your days say about you.</p>
-          {lastLearn && <p className="text-xs text-zinc-400 mt-0.5" title={fmtWhen(lastLearn.at)}>Last learned {fmtRelative(lastLearn.at)} \u00b7 {lastLearn.detail}</p>}
+          {lastLearn && <p className="text-xs text-zinc-400 mt-0.5" title={fmtWhen(lastLearn.at)}>Last learned {fmtRelative(lastLearn.at)} · {lastLearn.detail}</p>}
         </div>
         <button onClick={runNow} disabled={running} className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">
           {running ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} Run now
@@ -133,7 +133,7 @@ export function Lab() {
           <HeatmapsView stats={stats} />
           <div>
             <h2 className="text-sm font-semibold">About you</h2>
-            <p className="text-xs text-zinc-500 mb-2">Tell me who you are in your own words. I use it from day one \u2014 it shapes what I notice and the guidance you get.</p>
+            <p className="text-xs text-zinc-500 mb-2">Tell me who you are in your own words. I use it from day one — it shapes what I notice and the guidance you get.</p>
             <AboutMe />
           </div>
         </div>
@@ -148,7 +148,7 @@ export function Lab() {
  * The joined-up picture, in sentences. (BEA-1143)
  *
  * This is the direct answer to "I don't see any dot connecting". Every line is one fact with its
- * own number next to it, and a line only appears when there is real data behind it \u2014 no
+ * own number next to it, and a line only appears when there is real data behind it — no
  * placeholders, no "not enough data yet" filler pretending to be an insight.
  */
 function Picture({ stats, findings, chains }: { stats: Stats | null; findings: Finding[]; chains: MindChain[] }) {
@@ -183,7 +183,7 @@ function Picture({ stats, findings, chains }: { stats: Stats | null; findings: F
       <div className="rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 p-6 text-center">
         <FlaskConical size={20} className="mx-auto mb-2 text-violet-500" />
         <p className="text-sm font-medium">Nothing solid to tell you yet.</p>
-        <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">I only speak up once something has been true on three separate days. Keep closing days and telling your story \u2014 the picture builds itself.</p>
+        <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">I only speak up once something has been true on three separate days. Keep closing days and telling your story — the picture builds itself.</p>
       </div>
     );
   }
@@ -199,7 +199,7 @@ function Picture({ stats, findings, chains }: { stats: Stats | null; findings: F
             <span className="min-w-0">
               {l.icon === 'do' && <span className="font-semibold text-violet-600 dark:text-violet-400">Do this: </span>}
               {l.text}
-              {l.strong && <span className="text-[11px] text-zinc-400 ml-1.5">\u00b7 {l.strong}</span>}
+              {l.strong && <span className="text-[11px] text-zinc-400 ml-1.5">· {l.strong}</span>}
             </span>
           </li>
         ))}
@@ -531,7 +531,7 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">What I\u2019m sure about <span className="text-zinc-400 font-normal tabular-nums">\u00b7 {believed.length}</span></h2>
+        <h2 className="text-sm font-semibold">What I’m sure about <span className="text-zinc-400 font-normal tabular-nums">· {believed.length}</span></h2>
         {findings.length > 4 && (
           <div className="relative w-full sm:w-56">
             <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -542,7 +542,7 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
 
       {shown.length === 0 ? (
         q.trim() ? (
-          <p className="text-sm text-zinc-400 py-4">Nothing matches \u201c{q}\u201d.</p>
+          <p className="text-sm text-zinc-400 py-4">Nothing matches “{q}”.</p>
         ) : (
           <div className="rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-6 text-center text-sm text-zinc-500">
             Nothing has held up on three separate days yet. {watching.length > 0 ? `I\u2019m watching ${watching.length} idea${watching.length === 1 ? '' : 's'} below.` : 'Close a few more days and I\u2019ll start.'}
@@ -555,12 +555,12 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
       {watching.length > 0 && (
         <div className="pt-1">
           <button onClick={() => setShowWatching((v) => !v)} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
-            <Eye size={14} /> I\u2019m watching {watching.length} more \u2014 not sure enough to say yet
+            <Eye size={14} /> I’m watching {watching.length} more — not sure enough to say yet
             <ChevronDown size={14} className={'transition-transform ' + (showWatching ? 'rotate-180' : '')} />
           </button>
           {showWatching && (
             <div className="mt-2 space-y-2">
-              <p className="text-xs text-zinc-400">These turned up on one or two days only. I need three before I\u2019ll claim them \u2014 but you can settle it now.</p>
+              <p className="text-xs text-zinc-400">These turned up on one or two days only. I need three before I’ll claim them — but you can settle it now.</p>
               {shownWatching.map((f) => card(f, true))}
             </div>
           )}
@@ -582,7 +582,7 @@ function moodCell(avg: number | null): string {
  * The two charts the owner said were useful but unreadable. (BEA-1143)
  *
  * The fix isn't a prettier chart, it's a sentence. Each one now states its own conclusion above the
- * squares \u2014 "Wednesday lifts you most" \u2014 so the chart becomes the proof rather than the puzzle.
+ * squares — "Wednesday lifts you most" — so the chart becomes the proof rather than the puzzle.
  * A grey square used to mean "no data", which read as a bad mood; it now says so.
  */
 function HeatmapsView({ stats }: { stats: Stats | null }) {
@@ -614,7 +614,7 @@ function HeatmapsView({ stats }: { stats: Stats | null }) {
                   className="rounded-lg h-11 grid place-items-center text-sm font-semibold tabular-nums"
                   style={{ background: moodCell(d.avg) }}
                 >
-                  {d.avg ?? <span className="text-[10px] font-normal text-zinc-400">\u2013</span>}
+                  {d.avg ?? <span className="text-[10px] font-normal text-zinc-400">–</span>}
                 </div>
                 <div className="text-[10px] text-zinc-400 mt-1">{DOW[d.dow]}</div>
               </div>
@@ -628,14 +628,14 @@ function HeatmapsView({ stats }: { stats: Stats | null }) {
         <section className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
           <h3 className="text-sm font-semibold">Where you get stuck</h3>
           <p className="text-xs text-zinc-500 mt-0.5 mb-3 leading-snug">
-            {stall ? <>You put off <b>{stall.category}</b> more than anything else \u2014 {stall.deferred} pushed back against {stall.done} finished.</> : <>How often you push a kind of task back instead of finishing it.</>}
+            {stall ? <>You put off <b>{stall.category}</b> more than anything else — {stall.deferred} pushed back against {stall.done} finished.</> : <>How often you push a kind of task back instead of finishing it.</>}
           </p>
           <div className="space-y-2.5">
             {cats.map((c) => (
               <div key={c.category}>
                 <div className="flex items-baseline justify-between gap-2 mb-1">
                   <span className="text-sm font-medium truncate">{c.category}</span>
-                  <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{c.deferred} put off \u00b7 {c.done} done</span>
+                  <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{c.deferred} put off · {c.done} done</span>
                 </div>
                 <div className="h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
                   <div className="h-full rounded-full" style={{ width: `${Math.max(3, c.avoidance)}%`, background: `rgba(244,63,94,${(0.35 + (c.avoidance / 100) * 0.5).toFixed(2)})` }} />
