@@ -169,6 +169,7 @@ export class ExploreService {
   async ask(question: string, opts: { web?: WebMode; model?: LlmConfig; withSummary?: boolean; ragOnly?: boolean } = {}): Promise<{ answer: string; sources: Source[]; matches: number; usedWeb: boolean; summary?: string }> {
     const raw0 = (question || '').trim().slice(0, 1000);
     if (!raw0) return { answer: '', sources: [], matches: 0, usedWeb: false };
+    void this.rememberQuestion(raw0); // for the landing page's "ask again" (BEA-1124)
 
     // Understand the question BEFORE searching — no LLM call (BEA-1011). Strip the asking-wrapper
     // ("how many times did I tell you…") and spot which of his real people it's about, so we can
@@ -311,5 +312,63 @@ ${context}
   async deleteSave(id: string) {
     await this.prisma.exploreSave.delete({ where: { id } }).catch(() => null);
     return { ok: true };
+  }
+
+  /** The last handful of questions asked, newest first. Kept in a setting — no migration. (BEA-1124) */
+  async recentQuestions(): Promise<string[]> {
+    try {
+      const row = await this.prisma.setting?.findUnique({ where: { key: 'explore.recentQuestions' } }).catch(() => null);
+      const a = row?.value ? JSON.parse(row.value) : [];
+      return Array.isArray(a) ? a.filter((x: unknown) => typeof x === 'string').slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async rememberQuestion(q: string): Promise<void> {
+    try {
+      const now = (await this.recentQuestions()).filter((x) => x.toLowerCase() !== q.toLowerCase());
+      const next = [q, ...now].slice(0, 8);
+      await this.prisma.setting?.upsert({
+        where: { key: 'explore.recentQuestions' },
+        create: { key: 'explore.recentQuestions', value: JSON.stringify(next) },
+        update: { value: JSON.stringify(next) },
+      });
+    } catch {
+      /* never let bookkeeping break an answer */
+    }
+  }
+
+  /**
+   * What Explore shows before you have asked anything (BEA-1124). The page used to open on an empty
+   * box and three invented example questions — "completely blank", in the owner's words, with no
+   * sign that a brain of 1,255 items was behind it.
+   *
+   * Suggestions are built from his REAL rows, deterministically — no LLM call, so opening the page
+   * costs nothing and the questions always refer to work that actually exists.
+   */
+  async landing() {
+    const [counts, recent, questions, suggestions] = await Promise.all([
+      this.memory.brainCounts().catch(() => ({ total: 0, types: [] as any[] })),
+      this.memory.brainItems({ page: 1, pageSize: 6 }).then((r) => r.items).catch(() => [] as any[]),
+      this.recentQuestions(),
+      this.buildSuggestions().catch(() => [] as string[]),
+    ]);
+    return { counts, recent, questions, suggestions };
+  }
+
+  /** Questions grounded in real recent work — never invented examples. */
+  private async buildSuggestions(): Promise<string[]> {
+    const out: string[] = [];
+    const [doneTask, person, story] = await Promise.all([
+      this.prisma.task.findFirst({ where: { status: 'done' }, orderBy: { completedAt: 'desc' }, select: { title: true } }).catch(() => null),
+      this.prisma.contact.findFirst({ where: { ownedTasks: { some: { status: { not: 'done' } } } }, orderBy: { updatedAt: 'desc' }, select: { name: true } }).catch(() => null),
+      this.prisma.story.findFirst({ orderBy: { createdAt: 'desc' }, select: { day: true } }).catch(() => null),
+    ]);
+    if (person?.name) out.push(`Where does ${person.name} stand right now?`);
+    if (doneTask?.title) out.push(`What happened with "${doneTask.title.slice(0, 60)}"?`);
+    if (story?.day) out.push(`What did I say about my day on ${story.day}?`);
+    out.push('What did I get done this week?');
+    return out.slice(0, 4);
   }
 }
