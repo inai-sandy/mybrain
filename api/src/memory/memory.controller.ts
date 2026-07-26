@@ -42,6 +42,18 @@ export class MemoryController {
 
   /** Browse the user's existing SuperMemory documents + total count. */
   /** Counts per type — what your brain actually holds. (BEA-1128) */
+  /** What is in the store that the app no longer knows about. Reports only. (BEA-1129) */
+  @Get('leftovers')
+  async leftovers() {
+    return this.mem.brainLeftovers(false);
+  }
+
+  /** Clear those leftovers. Only ids no row points at — never a bulk wipe. (BEA-1129) */
+  @Post('leftovers/clear')
+  async clearLeftovers() {
+    return this.mem.brainLeftovers(true);
+  }
+
   @Get('counts')
   async counts() {
     return this.mem.brainCounts();

@@ -460,6 +460,55 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
+  /**
+   * Docs sitting in the store that no app row points at any more (BEA-1129). Explore reported 1,516
+   * documents while only 1,326 rows carried an index id — the brain could be answering from things
+   * the owner has since deleted, and the number on screen could not be reconciled with anything.
+   *
+   * Reports by default. Deletes ONLY on an explicit call, and only ids no row references — never a
+   * bulk wipe. Deletion-only, so no AI cost either way.
+   */
+  async brainLeftovers(remove = false, cap = 4000): Promise<{ storeDocs: number; known: number; leftovers: number; sample: string[]; removed: number }> {
+    // 1. Everything the app itself points at.
+    const known = new Set<string>();
+    for (const meta of Object.values(SOURCE_META)) {
+      const model = (this.prisma as any)[meta.model];
+      if (!model?.findMany) continue;
+      const rows = await model.findMany({ where: { supermemoryId: { not: null } }, select: { supermemoryId: true } }).catch(() => [] as any[]);
+      for (const r of rows) if (r.supermemoryId) known.add(String(r.supermemoryId));
+    }
+
+    // 2. Everything the store holds, walked page by page (the list tool caps each page).
+    const store: { id: string; title: string }[] = [];
+    const pageSize = 100;
+    for (let page = 1; store.length < cap; page++) {
+      const res = await this.browseSuperMemory(pageSize, page).catch(() => ({ total: 0, docs: [] as any[] }));
+      const docs = res?.docs || [];
+      if (!docs.length) break;
+      for (const d of docs) {
+        const id = String(d?.id ?? d?.docId ?? '');
+        if (id) store.push({ id, title: String(d?.title || '') });
+      }
+      if (docs.length < pageSize) break;
+    }
+
+    const orphans = store.filter((d) => !known.has(d.id));
+    const out = {
+      storeDocs: store.length,
+      known: known.size,
+      leftovers: orphans.length,
+      sample: orphans.slice(0, 12).map((d) => d.title || d.id),
+      removed: 0,
+    };
+    if (!remove || !orphans.length) return out;
+    for (const d of orphans) {
+      await this.sm.delete(d.id).catch(() => undefined);
+      out.removed++;
+    }
+    this.log.log(`cleared ${out.removed} leftover doc(s) from the store`);
+    return out;
+  }
+
   /** Delete a doc from both stores (best-effort; never throws). */
   async deleteDoc(supermemoryId?: string | null, ragId?: string | null): Promise<void> {
     if (supermemoryId) await this.sm.delete(supermemoryId).catch(() => undefined);
