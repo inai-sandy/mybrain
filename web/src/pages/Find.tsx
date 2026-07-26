@@ -30,6 +30,21 @@ const TYPE_STYLE: Record<string, string> = {
 };
 
 
+/** Count types -> the palette already used on answer sources, so one colour means one thing. (BEA-1130) */
+const COUNT_STYLE: Record<string, string> = {
+  email: 'email', gmailbrief: 'email', gmailrequest: 'email',
+  task: 'task', item: 'document', idea: 'idea', meeting: 'meeting',
+  story: 'story', daystory: 'story', daysummary: 'story', monthstory: 'story', yearstory: 'story',
+  contact: 'skill', briefing: 'skill', note: 'document', vault: 'vault',
+};
+
+/** The same palette as a dot, for the compact recent list. */
+const DOT: Record<string, string> = {
+  task: 'bg-blue-500', story: 'bg-purple-500', bookmark: 'bg-amber-500', idea: 'bg-pink-500',
+  meeting: 'bg-teal-500', skill: 'bg-indigo-500', email: 'bg-rose-500', vault: 'bg-emerald-600',
+  document: 'bg-emerald-500',
+};
+
 function SourceCard({ s }: { s: Source }) {
   return (
     <Link
@@ -304,7 +319,7 @@ export function Find() {
         <p className="text-zinc-500">Ask your brain anything — it answers from your tasks, stories, documents, bookmarks and research.</p>
         <button
           onClick={() => setSenders(true)}
-          className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 underline underline-offset-2 hover:text-emerald-500"
+          className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-300"
         >
           <SlidersHorizontal size={13} /> What's being captured from email
         </button>
@@ -440,66 +455,74 @@ export function Find() {
           )}
 
           {!result && !asking && !error && (
-            <div className="space-y-5">
-              {/* Your brain at a glance — the page used to open completely empty. (BEA-1124) */}
-              <div>
-                <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">
-                  Your brain knows {landing ? landing.counts.total.toLocaleString() : '…'} things
-                </h2>
-                <div className="flex flex-wrap gap-1.5">
-                  {(landing?.counts.types || []).map((t) => (
-                    <button
-                      key={t.type}
-                      onClick={() => { setFType(t.type); setTab('everything'); }}
-                      className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                    >
-                      {t.label} <span className="tabular-nums text-zinc-400">{t.count}</span>
-                    </button>
-                  ))}
-                  {!landing && [0, 1, 2, 3, 4].map((i) => <div key={i} className="h-6 w-28 animate-pulse rounded-full bg-zinc-100 dark:bg-zinc-800" />)}
-                </div>
+            /* Two columns on a wide screen, stacked on a phone. As one full-width list this was four
+               sections of identical weight with half the desktop empty. (BEA-1130) */
+            <div className="grid gap-4 lg:grid-cols-5">
+              <div className="space-y-4 lg:col-span-3">
+                {!!landing?.suggestions.length && (
+                  <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                    <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Try asking</h2>
+                    <div className="space-y-1.5">
+                      {landing.suggestions.map((sq) => (
+                        <button key={sq} onClick={() => { setQ(sq); ask(); }} className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-zinc-600 transition-colors hover:bg-emerald-500/5 hover:text-emerald-600 dark:text-zinc-300">
+                          <Sparkles size={13} className="shrink-0 text-emerald-500" />
+                          <span className="min-w-0 flex-1 break-words">{sq}</span>
+                          <ArrowRight size={13} className="shrink-0 text-zinc-300 transition-colors group-hover:text-emerald-500 dark:text-zinc-600" />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {!!landing?.questions.length && (
+                  <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                    <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-400">You asked before</h2>
+                    <div className="flex flex-wrap gap-1.5">
+                      {landing.questions.map((qq) => (
+                        <button key={qq} onClick={() => { setQ(qq); ask(); }} className="max-w-full truncate rounded-lg border border-zinc-200 px-2.5 py-1.5 text-left text-xs text-zinc-600 transition-colors hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-300">
+                          {qq}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
               </div>
 
-              {!!landing?.questions.length && (
-                <div>
-                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">You asked before</h2>
+              <div className="space-y-4 lg:col-span-2">
+                <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                  <h2 className="mb-0.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Your brain</h2>
+                  <p className="mb-2.5 text-2xl font-extrabold tabular-nums leading-none">
+                    {landing ? landing.counts.total.toLocaleString() : '—'}
+                    <span className="ml-1.5 text-xs font-medium text-zinc-400">things</span>
+                  </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {landing.questions.map((qq) => (
-                      <button key={qq} onClick={() => { setQ(qq); ask(); }} className="max-w-full truncate rounded-lg border border-zinc-300 px-3 py-1.5 text-left text-xs text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-300">
-                        {qq}
+                    {(landing?.counts.types || []).map((t) => (
+                      <button
+                        key={t.type}
+                        onClick={() => { setFType(t.type); setTab('everything'); }}
+                        className={'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-opacity hover:opacity-80 ' + (TYPE_STYLE[COUNT_STYLE[t.type] || 'document'] || TYPE_STYLE.document)}
+                      >
+                        {t.label} <span className="tabular-nums opacity-70">{t.count}</span>
                       </button>
                     ))}
+                    {!landing && [0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="h-6 w-24 animate-pulse rounded-full bg-zinc-100 dark:bg-zinc-800" />)}
                   </div>
-                </div>
-              )}
+                </section>
 
-              {!!landing?.suggestions.length && (
-                <div>
-                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">Try asking</h2>
-                  <div className="space-y-1.5">
-                    {landing.suggestions.map((sq) => (
-                      <button key={sq} onClick={() => { setQ(sq); ask(); }} className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-left text-sm text-zinc-600 transition hover:border-emerald-500/50 hover:text-emerald-600 dark:border-zinc-800 dark:text-zinc-300">
-                        <Sparkles size={13} className="shrink-0 text-emerald-500" /> <span className="min-w-0 flex-1 break-words">{sq}</span>
-                        <ArrowRight size={13} className="shrink-0 text-zinc-400" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {!!landing?.recent.length && (
-                <div>
-                  <h2 className="mb-2 text-xs font-bold uppercase tracking-wide text-zinc-400">Just went in</h2>
-                  <ul className="space-y-1.5">
-                    {landing.recent.map((it) => (
-                      <li key={`${it.type}:${it.id}`} className="flex items-start gap-2 text-sm">
-                        <span className={'mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[10px] ' + (TYPE_STYLE[it.type] || TYPE_STYLE.document)}>{it.label}</span>
-                        <span className="min-w-0 flex-1 break-words text-zinc-600 dark:text-zinc-300">{it.title}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                {!!landing?.recent.length && (
+                  <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                    <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Just went in</h2>
+                    <ul className="space-y-2">
+                      {landing.recent.map((it) => (
+                        <li key={`${it.type}:${it.id}`} className="flex items-start gap-2 text-sm">
+                          <span className={'mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ' + (DOT[COUNT_STYLE[it.type] || 'document'] || DOT.document)} />
+                          <span className="min-w-0 flex-1 break-words leading-snug text-zinc-600 dark:text-zinc-300">{it.title}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
             </div>
           )}
         </>
