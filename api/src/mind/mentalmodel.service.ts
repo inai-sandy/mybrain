@@ -6,6 +6,7 @@ import { MindLifecycleService } from './lifecycle.service';
 import { MindChainService } from './chain.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { DaySignals } from './mind.types';
+import { gradeFinding } from './finding-quality';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
 const MODEL_KEY = 'mind.llm';
@@ -16,6 +17,7 @@ const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/cla
 type RawFinding = {
   reinforcesId?: string | null;
   statement?: string;
+  action?: string | null; // the ONE thing to do differently (BEA-1141)
   kind?: string;
   subject?: string;
   relation?: string;
@@ -214,7 +216,6 @@ export class MentalModelService implements OnModuleInit {
       .join('\n\n');
   }
 
-  /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
   /** At most two paid model runs a day — it was hitting 15. (BEA-1140) */
   private async paidToday(day: string): Promise<boolean> {
     // Defensive: if the lookup can't run, treat the day as UNPAID so guidance still gets written.
@@ -228,6 +229,7 @@ export class MentalModelService implements OnModuleInit {
     }
   }
 
+  /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
   async run(day: string, skippedOverride?: any[], manual = false): Promise<{ proposed: number; reinforced: number }> {
     if (!manual && (await this.paidToday(day))) return { proposed: 0, reinforced: 0 };
     const signals = await this.ingestion.gatherDaySignals(day, undefined, skippedOverride);
@@ -273,8 +275,21 @@ export class MentalModelService implements OnModuleInit {
     const existingIds = new Set(existing.map((e) => e.id));
     let proposed = 0;
     let reinforced = 0;
+    let rejected = 0;
     for (const f of findings.slice(0, 8)) {
       if (!f.statement || !f.subject || !f.relation || !f.object) continue;
+      // A NEW finding has to name something real, quote a number and end in one action. Reinforcing
+      // an existing one is exempt — that finding already cleared the bar when it was proposed, and
+      // the reinforcement only adds evidence to it. (BEA-1141)
+      const isNew = !(f.reinforcesId && existingIds.has(f.reinforcesId));
+      if (isNew) {
+        const grade = gradeFinding(f, signals);
+        if (!grade.ok) {
+          rejected++;
+          this.log.log(`mind: dropped a finding — ${grade.reason}: "${String(f.statement).slice(0, 90)}"`);
+          continue;
+        }
+      }
       const kind = KINDS.includes(String(f.kind)) ? (f.kind as string) : 'behavioural';
       const valence = VALENCE.includes(String(f.valence)) ? (f.valence as string) : 'neutral';
       const cadence = f.cadence && ['daily', 'weekly', 'situational'].includes(String(f.cadence)) ? (f.cadence as string) : null;
@@ -302,6 +317,7 @@ export class MentalModelService implements OnModuleInit {
         const created = await this.prisma.mindFinding.create({
           data: {
             statement: f.statement.slice(0, 400),
+            action: String(f.action || '').trim().slice(0, 200) || null,
             kind,
             subject: f.subject.slice(0, 120),
             relation: f.relation.slice(0, 60),
@@ -321,6 +337,7 @@ export class MentalModelService implements OnModuleInit {
       }
     }
     // Fold any near-duplicates the model just created into existing ones, so the list never piles up. (BEA-459)
+    if (rejected) this.log.log(`mind: ${rejected} finding(s) did not clear the bar for ${day}`);
     if (proposed) await this.lifecycle.consolidate().catch((e) => this.log.warn(`mind consolidate: ${e?.message ?? e}`));
     return { proposed, reinforced };
   }

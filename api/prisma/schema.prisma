@@ -878,6 +878,7 @@ model EmailMemory {
 model MindFinding {
   id            String   @id @default(uuid())
   statement     String // human-readable hypothesis, e.g. "Money/deep-work tasks tend to drain you"
+  action        String? // the ONE concrete thing to do differently — a finding without one isn't shown (BEA-1141)
   kind          String // emotional | behavioural | relational | temporal | causal
   subject       String // the "from" node, e.g. "money tasks"
   relation      String // e.g. drains | energizes | precedes | avoids | co-occurs

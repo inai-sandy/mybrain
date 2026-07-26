@@ -763,6 +763,8 @@ function FindingsFeed({ findings, onConfirm, onRefute, onPin, onRemove, onAmend,
                     ) : (
                       <button onClick={() => onOpen(f)} className="text-left w-full">
                         <p className="text-sm leading-snug"><span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span></p>
+                        {/* The one thing to do differently — a finding you can't act on is noise. (BEA-1141) */}
+                        {f.action && <p className="mt-1 text-sm text-violet-600 dark:text-violet-400"><span className="font-semibold">Do this: </span>{f.action}</p>}
                       </button>
                     )}
                     <div className="text-[10px] text-zinc-400 tabular-nums mt-1 flex items-center gap-2">

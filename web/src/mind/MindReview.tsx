@@ -98,9 +98,13 @@ export function MindReview({ onChange }: { onChange?: (remaining: number) => voi
       {editing === f.id ? (
         <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-emerald-500 mb-2" />
       ) : (
-        <p className="text-sm leading-snug">
-          <span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span>
-        </p>
+        <>
+          <p className="text-sm leading-snug">
+            <span className={'font-medium ' + valenceClass(f.valence)}>{f.statement}</span>
+          </p>
+          {/* The one thing to do differently — the whole point of the finding. (BEA-1141) */}
+          {f.action && <p className="mt-1.5 text-sm text-violet-600 dark:text-violet-400"><span className="font-semibold">Do this: </span>{f.action}</p>}
+        </>
       )}
       {noting === f.id && (
         <textarea autoFocus rows={2} value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Tell me in your own words — what's right, what's off, what I'm missing…" className="w-full text-sm rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 outline-none focus:border-violet-500 mt-2" />

@@ -109,7 +109,7 @@ describe('MentalModelService.run (BEA-447)', () => {
   it('creates new findings and reinforces existing ones from the LLM output', async () => {
     const llmJson = JSON.stringify({
       findings: [
-        { reinforcesId: null, statement: 'Exercise reliably lifts your mood', kind: 'causal', subject: 'gym', relation: 'energizes', object: 'you', valence: 'energizing', confidence: 0.4, cadence: 'situational', evidence: [{ signal: 'done', snippet: 'Gym felt great' }] },
+        { reinforcesId: null, statement: 'Gym was the 1 thing you finished today, and the story says it felt great.', action: 'Book tomorrow morning at the gym before you plan anything else.', kind: 'causal', subject: 'gym', relation: 'energizes', object: 'you', valence: 'energizing', confidence: 0.4, cadence: 'situational', evidence: [{ signal: 'done', snippet: 'Gym felt great' }] },
         { reinforcesId: 'exist-1', statement: 'Admin/contract work drains you and you defer it', kind: 'behavioural', subject: 'admin tasks', relation: 'drains', object: 'you', valence: 'draining', confidence: 0.5, cadence: 'situational', evidence: [{ signal: 'postponed', snippet: 'put it off again' }] },
       ],
     });
@@ -135,7 +135,7 @@ describe('MentalModelService.run (BEA-447)', () => {
   it('salvages complete findings from a TRUNCATED (token-capped) LLM response', async () => {
     const truncated =
       '{"findings":[' +
-      '{"reinforcesId":null,"statement":"Gym lifts you","kind":"causal","subject":"gym","relation":"energizes","object":"you","valence":"energizing","confidence":0.4,"cadence":"situational","evidence":[{"signal":"done","snippet":"Gym felt great"}]},' +
+      '{"reinforcesId":null,"statement":"Gym was the 1 thing you finished today.","action":"Book tomorrow morning at the gym.","kind":"causal","subject":"gym","relation":"energizes","object":"you","valence":"energizing","confidence":0.4,"cadence":"situational","evidence":[{"signal":"done","snippet":"Gym felt great"}]},' +
       '{"reinforcesId":null,"statement":"Admin drains you","kind":"behavioural","subject":"admin","relation":"drains","object":"you","valence":"draining","confidence":0.5,"cadence":"situational","evidence":[{"signal":"postponed","snippet":"put it o'; // cut off mid-second finding
     const { svc, created } = harness({ llmJson: truncated });
     const r = await svc.run('2026-06-20');
@@ -157,5 +157,55 @@ describe('MentalModelService.run (BEA-447)', () => {
     const r = await svc.run('2026-06-20');
     expect(r).toEqual({ proposed: 0, reinforced: 0 });
     expect(llm.completeWith).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * BEA-1141: the gate has to hold at the point of storage, not just as a pure function. A vague
+ * finding must never reach the database, whatever the model returns.
+ */
+describe('a vague finding never gets stored (BEA-1141)', () => {
+  const good = {
+    statement: 'Read vendor contract has been deferred 5 times — nothing else on your list has waited that long.',
+    action: 'Read the first two pages tomorrow morning, or hand it to someone.',
+    kind: 'behavioural', subject: 'Read vendor contract', relation: 'avoids', object: 'you',
+    valence: 'draining', confidence: 0.3,
+    evidence: [{ signal: 'postponed', snippet: 'Read vendor contract (deferred 5x)' }],
+  };
+
+  it('stores the one that clears the bar and drops the one that does not', async () => {
+    const vague = {
+      statement: 'Tasks requiring coordination with multiple internal stakeholders are systematically deprioritised.',
+      action: 'Be more aware of this.',
+      kind: 'behavioural', subject: 'coordination', relation: 'avoids', object: 'you', valence: 'draining', confidence: 0.3, evidence: [],
+    };
+    const { svc, created } = harness({ llmJson: JSON.stringify({ findings: [good, vague] }) });
+    const r = await svc.run('2026-06-20');
+    expect(r.proposed).toBe(1);
+    expect(created).toHaveLength(1);
+    expect(created[0].statement).toContain('Read vendor contract');
+  });
+
+  it('saves the action alongside the finding', async () => {
+    const { svc, created } = harness({ llmJson: JSON.stringify({ findings: [good] }) });
+    await svc.run('2026-06-20');
+    expect(created[0].action).toBe('Read the first two pages tomorrow morning, or hand it to someone.');
+  });
+
+  it('stores nothing at all when the day only produces vague findings', async () => {
+    const junk = { statement: 'You have an overall pattern of avoidance.', action: 'Reflect on it.', kind: 'behavioural', subject: 'avoidance', relation: 'is', object: 'you', valence: 'draining', confidence: 0.3, evidence: [] };
+    const { svc, created } = harness({ llmJson: JSON.stringify({ findings: [junk] }) });
+    const r = await svc.run('2026-06-20');
+    expect(r.proposed).toBe(0);
+    expect(created).toHaveLength(0);
+  });
+
+  it('still lets an existing finding be reinforced — it already cleared the bar once', async () => {
+    const existing = [{ id: 'f1', statement: 'An older finding.', confidence: 0.3, evidenceCount: 2, status: 'emerging', lastSeenDay: '2026-06-19' }];
+    const bump = { reinforcesId: 'f1', statement: 'Same thing again.', kind: 'behavioural', subject: 'x', relation: 'y', object: 'z', valence: 'draining', confidence: 0.3, evidence: [] };
+    const { svc, updated } = harness({ llmJson: JSON.stringify({ findings: [bump] }), existing });
+    const r = await svc.run('2026-06-20');
+    expect(r.reinforced).toBe(1);
+    expect(updated[0].id).toBe('f1');
   });
 });
