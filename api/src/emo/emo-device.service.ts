@@ -102,6 +102,61 @@ export type DeviceTurn = {
 };
 
 /**
+ * Keep a device turn inside the firmware's parse buffer. (BEA-1139)
+ *
+ * The device reads this JSON into a fixed 1600-byte buffer in ONE read, so an oversized body
+ * arrives truncated and unparseable — and the firmware then treats a perfectly good 201 as a
+ * failure and speaks an error clip. Field caps match what the device stores anyway
+ * (heard[160]/reply[512]/say[512]); the byte-budget loop is the hard guarantee, because
+ * bullets ("•") and other non-ASCII cost 3 bytes each and character counts alone can lie.
+ */
+export const DEVICE_BODY_BUDGET = 1200; // bytes; the device's buffer is 1600 — leave real headroom
+
+/**
+ * Truncate to a BYTE budget, never a character count. The device's limit is a byte buffer and
+ * non-ASCII costs up to 3 bytes per character (a Hindi answer, an emoji, even the "•" bullets we
+ * send), so character caps let an oversized body straight through. Iterating by code point also
+ * guarantees we never split a character in half and hand the device invalid UTF-8.
+ */
+function cutBytes(s: string | undefined, maxBytes: number): string | undefined {
+  if (typeof s !== 'string' || Buffer.byteLength(s) <= maxBytes) return s;
+  const ELL = '…';
+  const room = Math.max(0, maxBytes - Buffer.byteLength(ELL));
+  let end = 0;
+  let used = 0;
+  for (const ch of s) {
+    const b = Buffer.byteLength(ch);
+    if (used + b > room) break;
+    used += b;
+    end += ch.length;
+  }
+  return `${s.slice(0, end).trimEnd()}${ELL}`;
+}
+
+export function clampForDevice(t: DeviceTurn): DeviceTurn {
+  const out: DeviceTurn = {
+    ...t,
+    heard: cutBytes(t.heard, 150) as string,
+    reply: cutBytes(t.reply, 480) as string,
+    say: cutBytes(t.say, 480) as string,
+  };
+  // Hard guarantee: shrink whichever field is currently biggest until the serialised body fits.
+  // Shrinking only `reply` was not enough — ask/talk put a long unbounded answer in `say`.
+  const FIELDS: ('reply' | 'say' | 'heard')[] = ['reply', 'say', 'heard'];
+  for (let guard = 0; guard < 64 && Buffer.byteLength(JSON.stringify(out)) > DEVICE_BODY_BUDGET; guard++) {
+    let biggest: 'reply' | 'say' | 'heard' | null = null;
+    let biggestBytes = 0;
+    for (const f of FIELDS) {
+      const b = Buffer.byteLength(String(out[f] || ''));
+      if (b > biggestBytes) { biggestBytes = b; biggest = f; }
+    }
+    if (!biggest || biggestBytes <= 24) break; // nothing meaningful left to give back
+    out[biggest] = cutBytes(String(out[biggest]), Math.floor(biggestBytes * 0.75)) as string;
+  }
+  return out;
+}
+
+/**
  * EMO hardware (BEA-926) — one streamed voice turn from the device:
  * raw PCM in → transcribe → route per mode → short reply text + speakable sentence out.
  */
@@ -178,7 +233,24 @@ export class EmoDeviceService {
     return { ok: true };
   }
 
+  /**
+   * One device turn, with the response trimmed to what the hardware can actually swallow.
+   *
+   * BEA-1139: the firmware parses this JSON out of a fixed `char body[1600]` filled by ONE
+   * read (EMO_Net/emo_turn.c parse_turn_response) — no loop, no Content-Length. A longer body
+   * arrives truncated, cJSON_Parse fails, the result struct stays zeroed, and the device then
+   * SPEAKS an error clip ("I missed that.") even though the capture landed with HTTP 201.
+   * Long modes always tripped it: story and dump are exempt from the 3-minute recording cap,
+   * so their transcripts run to thousands of characters.
+   *
+   * Trimming costs nothing: the device only ever keeps heard[160]/reply[512]/say[512]
+   * (emo_turn.h), so everything past that was discarded on arrival anyway.
+   */
   async turn(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
+    return clampForDevice(await this.turnInner(body, opts));
+  }
+
+  private async turnInner(body: Buffer, opts: { mode?: string; conversationId?: string; sampleRate?: number; codec?: string; capped?: boolean } = {}): Promise<DeviceTurn> {
     if (!body?.length) throw new BadRequestException('No audio received');
     const mode: DeviceMode = MODES.includes(opts.mode as DeviceMode) ? (opts.mode as DeviceMode) : 'capture';
     const sr = opts.sampleRate && opts.sampleRate >= 8000 && opts.sampleRate <= 48000 ? opts.sampleRate : 16000;
