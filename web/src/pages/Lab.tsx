@@ -199,7 +199,8 @@ function Picture({ stats, findings, chains }: { stats: Stats | null; findings: F
             <span className="min-w-0">
               {l.icon === 'do' && <span className="font-semibold text-violet-600 dark:text-violet-400">Do this: </span>}
               {l.text}
-              {l.strong && <span className="text-[11px] text-zinc-400 ml-1.5">· {l.strong}</span>}
+              {/* Its own line: inline, the separator dot ends up orphaned at a wrap. */}
+              {l.strong && <span className="block text-[11px] text-zinc-400 mt-0.5">{l.strong}</span>}
             </span>
           </li>
         ))}
