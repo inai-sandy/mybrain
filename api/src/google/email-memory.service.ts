@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleService } from './google.service';
 import { MemoryService } from '../memory/memory.service';
+import { isBlockedSender, senderAddress } from './email-senders';
 
 // Stores each important email (full body) in memory — RAG + SuperMemory — for whole-brain recall. (BEA-439)
 type Meta = { id: string; threadId: string; from: string; subject: string; date: string; snippet: string };
@@ -37,6 +38,9 @@ export class EmailMemoryService implements OnModuleInit {
   /** Store + index ONE important email (full body). Upsert by Gmail message id so re-syncs don't dupe. */
   async syncOne(day: string, m: Meta): Promise<boolean> {
     if (!this.memory.sourceEnabled('email')) return false;
+    // Gmail's "important" flag is Google's guess, not the owner's. If a human cannot receive a
+    // reply, or the owner has blocked that sender, it never enters the brain. (BEA-1125/1126)
+    if (isBlockedSender(m.from, await this.blockedSenders())) return false;
     try {
       const existing = await this.prisma.emailMemory.findUnique({ where: { id: m.id } });
       const body = await this.google.gmailMessageFull(m.id).catch(() => existing?.body || m.snippet || '');
@@ -95,5 +99,78 @@ export class EmailMemoryService implements OnModuleInit {
       return;
     }
     void this.backfill(30);
+  }
+
+  /** Addresses the owner has blocked by hand, on top of the automatic no-reply rule. (BEA-1126) */
+  async blockedSenders(): Promise<string[]> {
+    // Defensive on purpose: a lookup failure must never stop mail being captured, and must never
+    // throw synchronously into the sync path.
+    try {
+      const row = await this.prisma.setting?.findUnique({ where: { key: 'email.blockedSenders' } }).catch(() => null);
+      if (!row?.value) return [];
+      const a = JSON.parse(row.value);
+      return Array.isArray(a) ? a.filter((x: unknown) => typeof x === 'string').map((x: string) => senderAddress(x)).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Sweep out email already in the brain that the rules would now refuse. Reports first when
+   * `dryRun`, so nothing of the owner's is deleted before he has seen exactly what goes.
+   * Deletion-only — no AI cost. (BEA-1125)
+   */
+  async purgeBlocked(dryRun = false): Promise<{ removed: number; senders: { from: string; count: number }[] }> {
+    const blocked = await this.blockedSenders();
+    const rows = await this.prisma.emailMemory.findMany({ select: { id: true, fromAddr: true, supermemoryId: true, ragId: true } });
+    const doomed = rows.filter((r) => isBlockedSender(r.fromAddr, blocked));
+    const bySender = new Map<string, number>();
+    for (const r of doomed) {
+      const a = senderAddress(r.fromAddr) || '(unknown)';
+      bySender.set(a, (bySender.get(a) || 0) + 1);
+    }
+    const senders = [...bySender.entries()].map(([from, count]) => ({ from, count })).sort((a, b) => b.count - a.count);
+    if (dryRun) return { removed: doomed.length, senders };
+    for (const r of doomed) {
+      await this.memory.deleteDoc(r.supermemoryId, r.ragId).catch(() => undefined);
+      await this.prisma.emailMemory.delete({ where: { id: r.id } }).catch(() => undefined);
+    }
+    if (doomed.length) this.log.log(`purged ${doomed.length} blocked email(s) from ${senders.length} sender(s)`);
+    return { removed: doomed.length, senders };
+  }
+
+  /** Every sender in the brain with how many of theirs are stored — the owner's decision surface. */
+  async senderBreakdown(): Promise<{ total: number; blocked: string[]; senders: { from: string; count: number; blocked: boolean }[] }> {
+    const [rows, blocked] = await Promise.all([
+      this.prisma.emailMemory.findMany({ select: { fromAddr: true } }),
+      this.blockedSenders(),
+    ]);
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const a = senderAddress(r.fromAddr) || '(unknown)';
+      counts.set(a, (counts.get(a) || 0) + 1);
+    }
+    const senders = [...counts.entries()]
+      .map(([from, count]) => ({ from, count, blocked: blocked.includes(from) }))
+      .sort((a, b) => b.count - a.count);
+    return { total: rows.length, blocked, senders };
+  }
+
+  /** Block or unblock one sender. Blocking also sweeps their mail out of the brain. (BEA-1126) */
+  async setSenderBlocked(from: string, on: boolean): Promise<{ blocked: string[]; removed: number }> {
+    const addr = senderAddress(from);
+    if (!addr) return { blocked: await this.blockedSenders(), removed: 0 };
+    const current = new Set(await this.blockedSenders());
+    if (on) current.add(addr);
+    else current.delete(addr);
+    const next = [...current];
+    await this.prisma.setting.upsert({
+      where: { key: 'email.blockedSenders' },
+      create: { key: 'email.blockedSenders', value: JSON.stringify(next) },
+      update: { value: JSON.stringify(next) },
+    });
+    // Blocking removes what is already stored; unblocking never resurrects it (we don't keep it).
+    const removed = on ? (await this.purgeBlocked()).removed : 0;
+    return { blocked: next, removed };
   }
 }
