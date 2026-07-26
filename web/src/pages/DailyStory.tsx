@@ -130,7 +130,7 @@ export function StorySection() {
     <div className="space-y-3">
       {/* Daytime quick notes */}
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
-        <h2 className="flex items-center gap-2 font-semibold text-sm mb-2"><MessageSquare size={15} className="text-emerald-500" /> Quick notes <span className="text-xs font-normal text-zinc-400">— capture what you're doing</span></h2>
+        <h2 className="flex items-center gap-2 font-semibold text-sm mb-2"><MessageSquare size={15} className="text-emerald-500" /> Quick notes</h2>
         <div className="flex items-end gap-2">
           <GrowTextarea
             value={note}
@@ -166,12 +166,12 @@ export function StorySection() {
           <p className="text-sm text-zinc-600 dark:text-zinc-300 whitespace-pre-wrap line-clamp-4">{story.text}</p>
         </section>
       ) : (
-        <button onClick={() => setEditing(true)} className="w-full rounded-xl border border-dashed border-indigo-400/40 bg-indigo-500/5 hover:bg-indigo-500/10 p-4 text-left transition-colors flex items-center gap-3">
-          <Moon className="text-indigo-400 shrink-0" size={22} />
-          <div>
-            <div className="font-semibold text-sm">🌙 Tell tonight's story</div>
-            <p className="text-xs text-zinc-500">Your account of the day — type or speak it. This is how the AI learns who you are.</p>
-          </div>
+        /* A solid card like everything else, and no sales pitch — the owner knows what the story is
+           for. Was the last dashed hero with a paragraph under it. (BEA-1138) */
+        <button onClick={() => setEditing(true)} className="flex w-full items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 text-left transition-colors hover:border-emerald-500/50 dark:border-zinc-800 dark:bg-zinc-900">
+          <Moon className="shrink-0 text-indigo-400" size={18} />
+          <span className="flex-1 text-sm font-medium">Tell tonight's story</span>
+          <span className="text-xs text-zinc-400">not told yet</span>
         </button>
       )}
 
