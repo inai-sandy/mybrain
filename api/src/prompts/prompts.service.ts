@@ -7,7 +7,7 @@ export type PromptKey =
   // Migrated inline prompts (BEA-1059)
   | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMine' | 'daily.insightsWritten'
   | 'tasks.autoNote'
-  | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe'
+  | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe' | 'lab.rewrite'
   | 'people.chaseAgent' | 'people.briefingTidy'
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
@@ -500,6 +500,34 @@ Other rules:
 
 Return ONLY JSON, no prose:
 {"findings":[{"reinforcesId":"<existing id or null>","statement":"...","action":"the one thing to do differently","kind":"emotional|behavioural|relational|temporal|causal","subject":"the real named thing","relation":"...","object":"...","valence":"energizing|draining|neutral","confidence":0.0,"cadence":"daily|weekly|situational|null","evidence":[{"signal":"done|postponed|skipped|told|created","snippet":"..."}]}]}`,
+  },
+  {
+    key: 'lab.rewrite',
+    category: "The Lab",
+    label: "The Lab \u2014 rewrite old findings in plain English",
+    description: "Rewrites findings written before the current bar so they address you directly, stay short, keep their numbers and end in one action. The numbered findings are added automatically. \u26a0\ufe0f Keep the JSON shape intact \u2014 use Reset if unsure.",
+    default: `Below are things a journal app worked out about ONE person. They are true \u2014 do not change what they mean.
+They are just badly written: they talk ABOUT the person in the third person, they ramble, and they don't say what to do.
+
+Rewrite each one so it:
+- Talks TO them. "You" and "your" \u2014 never their name, never "he" or "she".
+- Fits in ONE or TWO short sentences, under 240 characters.
+- KEEPS every number that was already in it. If it said 43 days, the rewrite says 43 days. Never invent a number that wasn't there.
+- Keeps the same names of real things \u2014 people, projects, tasks.
+- Gains an "action": ONE concrete thing to do differently, a single move, under 120 characters.
+
+Plain, everyday English. Short words. Be kind about draining patterns \u2014 describe them, never judge.
+
+Example.
+  IN:  "When the Beakn backlog is very large (many tasks deferred 20-36 times), he does not try to do
+        it all himself. Instead he writes the list down, sorts it, and hands pieces to Dharmendra and Ashish."
+  OUT: statement: "When Beakn tasks pile up \u2014 some deferred 20 to 36 times \u2014 you don't grind through them alone. You write the list out, sort it, and hand pieces to Dharmendra and Ashish."
+       action: "Do that sooner: hand the oldest three over this week."
+
+If you cannot rewrite one honestly without changing its meaning or making up a number, leave it out entirely.
+
+Return ONLY JSON, no prose:
+{"rewritten":[{"n":<the number of the finding>,"statement":"...","action":"..."}]}`,
   },
   {
     key: 'lab.dedupe',

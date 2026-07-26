@@ -127,6 +127,12 @@ export class MindController {
     return this.lifecycle.runDaily(new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10)); // IST today (BEA-813)
   }
 
+  /** Rewrite older findings so they address you directly and end in one action. (BEA-1145) */
+  @Post('findings/rewrite')
+  async rewriteFindings() {
+    return this.engine.rewriteExisting();
+  }
+
   /** Merge duplicate findings now (lexical + semantic). (BEA-459) */
   @Post('dedupe')
   async dedupe() {

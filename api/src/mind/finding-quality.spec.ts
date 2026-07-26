@@ -1,5 +1,5 @@
 import { DaySignals } from './mind.types';
-import { gradeFinding, dayVocabulary, quotesNumber, looksLikeAction, usesAbstractLanguage } from './finding-quality';
+import { gradeFinding, dayVocabulary, quotesNumber, looksLikeAction, usesAbstractLanguage, keepsNumbers, numbersIn } from './finding-quality';
 
 /**
  * BEA-1141. The owner refuted 16 of the 23 Lab findings he judged — 70%. These tests use the real
@@ -126,5 +126,35 @@ describe('the pieces of the bar', () => {
   it('spots abstract writing', () => {
     expect(usesAbstractLanguage('This is systematically avoided')).toBe('systematically');
     expect(usesAbstractLanguage('Update user manuals waited 43 days')).toBeNull();
+  });
+});
+
+/**
+ * BEA-1145. The rewrite pass may change WORDS ONLY. A model that helpfully rounds "deferred 20-36
+ * times" up to "40 times" has fabricated evidence about the owner's own life, and he has no way
+ * to catch it — so an invented number kills the rewrite outright.
+ */
+describe('a rewrite may never invent a number (BEA-1145)', () => {
+  const orig = 'When the Beakn backlog is very large (many tasks deferred 20-36 times), he hands pieces to Dharmendra.';
+
+  it('accepts a rewrite that keeps the numbers', () => {
+    expect(keepsNumbers(orig, 'When Beakn tasks pile up — some deferred 20 to 36 times — you hand pieces to Dharmendra.')).toBe(true);
+  });
+
+  it('accepts a rewrite that drops a number', () => {
+    expect(keepsNumbers(orig, 'When Beakn tasks pile up, you hand pieces to Dharmendra.')).toBe(true);
+  });
+
+  it('rejects a rewrite that invents one', () => {
+    expect(keepsNumbers(orig, 'When Beakn tasks pile up — some deferred 40 times — you hand pieces to Dharmendra.')).toBe(false);
+  });
+
+  it('rejects a plausible-looking rounding', () => {
+    expect(keepsNumbers('You carried this 43 days.', 'You have carried this for 6 weeks.')).toBe(false);
+  });
+
+  it('lists the numbers it found', () => {
+    expect(numbersIn('43 days and 40 days, 8 of 46')).toEqual(['43', '40', '8', '46']);
+    expect(numbersIn('no digits here')).toEqual([]);
   });
 });

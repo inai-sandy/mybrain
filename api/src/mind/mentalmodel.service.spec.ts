@@ -229,3 +229,55 @@ describe('counting separate days (BEA-1142)', () => {
     expect(updated[0].data.evidenceCount).toBe(3); // but the evidence itself is recorded
   });
 });
+
+/** BEA-1145: rewriting old findings changes the words and nothing else. */
+describe('rewriting findings written before the bar (BEA-1145)', () => {
+  const OLD = 'When the Beakn backlog is very large (many tasks deferred 36 times), he hands pieces to Dharmendra.';
+  const GOOD_JSON = JSON.stringify({ rewritten: [{ n: 1, statement: 'When Beakn tasks pile up — some deferred 36 times — you hand pieces to Dharmendra rather than grinding alone.', action: 'Hand the oldest three over this week.' }] });
+
+  const withRows = (llmJson: string, rows: any[]) => {
+    const h = harness({ llmJson });
+    (h.svc as any).prisma.mindFinding.findMany = async () => rows;
+    const updates: any[] = [];
+    (h.svc as any).prisma.mindFinding.update = async ({ where, data }: any) => { updates.push({ id: where.id, data }); return {}; };
+    return { ...h, updates };
+  };
+
+  it('rewrites a third-person finding and gives it an action', async () => {
+    const { svc, updates } = withRows(GOOD_JSON, [{ id: 'f1', statement: OLD, action: null }]);
+    const r = await svc.rewriteExisting();
+    expect(r.rewritten).toBe(1);
+    expect(updates[0].id).toBe('f1');
+    expect(updates[0].data.statement).toContain('you hand pieces');
+    expect(updates[0].data.action).toBe('Hand the oldest three over this week.');
+  });
+
+  it('leaves the original alone when the rewrite invents a number', async () => {
+    const bad = JSON.stringify({ rewritten: [{ n: 1, statement: 'Beakn tasks get deferred 99 times before you hand them on to Dharmendra.', action: 'Hand the oldest three over this week.' }] });
+    const { svc, updates } = withRows(bad, [{ id: 'f1', statement: OLD, action: null }]);
+    const r = await svc.rewriteExisting();
+    expect(r.rewritten).toBe(0);
+    expect(updates).toHaveLength(0);
+  });
+
+  it('leaves the original alone when the rewrite is still third person, or has no action', async () => {
+    const stillThird = JSON.stringify({ rewritten: [{ n: 1, statement: 'He hands Beakn pieces to Dharmendra after 36 deferrals.', action: 'Hand the oldest three over.' }] });
+    expect((await withRows(stillThird, [{ id: 'f1', statement: OLD, action: null }]).svc.rewriteExisting()).rewritten).toBe(0);
+    const noAction = JSON.stringify({ rewritten: [{ n: 1, statement: 'You hand Beakn pieces to Dharmendra after 36 deferrals.', action: '' }] });
+    expect((await withRows(noAction, [{ id: 'f1', statement: OLD, action: null }]).svc.rewriteExisting()).rewritten).toBe(0);
+  });
+
+  it('spends nothing when everything already reads well', async () => {
+    const h = withRows('{}', [{ id: 'f1', statement: 'You carried this 43 days.', action: 'Give it away this week.' }]);
+    const r = await h.svc.rewriteExisting();
+    expect(r).toEqual({ rewritten: 0, skipped: 0, total: 1 });
+    expect(h.llm.completeWith).not.toHaveBeenCalled();
+  });
+
+  it('survives a garbage response without touching anything', async () => {
+    const { svc, updates } = withRows('sorry, I cannot', [{ id: 'f1', statement: OLD, action: null }]);
+    const r = await svc.rewriteExisting();
+    expect(r.rewritten).toBe(0);
+    expect(updates).toHaveLength(0);
+  });
+});

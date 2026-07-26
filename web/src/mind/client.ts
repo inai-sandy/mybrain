@@ -97,6 +97,7 @@ export const mindApi = {
   note: (id: string, text: string) => post(`/api/mind/findings/${id}/note`, { text }),
   remove: (id: string) => fetch(`/api/mind/findings/${id}`, { method: 'DELETE' }).then((r) => j(r)),
   run: (day?: string) => post('/api/mind/run', day ? { day } : {}),
+  rewrite: () => post('/api/mind/findings/rewrite') as Promise<{ rewritten: number; skipped: number; total: number }>,
   runs: () => fetch('/api/mind/runs').then((r) => j<RunStatus>(r)),
   recap: () => fetch('/api/mind/recap').then((r) => j<Recap>(r)),
   activity: (days = 30) => fetch(`/api/mind/activity?days=${days}`).then((r) => j<Activity>(r)),
