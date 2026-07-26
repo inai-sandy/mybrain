@@ -246,3 +246,51 @@ describe('MentorService', () => {
     expect(prompt).not.toContain('Old same-day draft'); // ...never its own earlier draft
   });
 });
+
+/**
+ * BEA-1140: `force` meant "pay for another one", and three paths passed it — closing a day,
+ * re-weaving the Story of the Day, and the 60-second catch-up. Measured on the owner's real usage:
+ * 24 paid guidance runs on 21 July, 4.9/day across 43 days, for something that runs once a night.
+ * Two a day is the ceiling: the nightly read plus one refresh once the story lands.
+ */
+describe('a day can only be paid for twice (BEA-1140)', () => {
+  it('stops a third forced run on the same day', async () => {
+    const { svc, llm, mentorDays, dayStories } = makeService('{"adherenceScore":70,"guidance":"A read."}');
+    dayStories.push({ day: '2026-06-10', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-10T18:00:00Z') });
+    await svc.runMentorDay('2026-06-10', true);
+    await svc.runMentorDay('2026-06-10', true);
+    await svc.runMentorDay('2026-06-10', true);
+    await svc.runMentorDay('2026-06-10', true);
+    expect(llm.completeWith).toHaveBeenCalledTimes(2); // not four
+    expect(mentorDays.filter((m) => m.day === '2026-06-10').length).toBeGreaterThan(0);
+  });
+
+  it('still allows the legitimate refresh after the story arrives', async () => {
+    const { svc, llm, mentorDays, dayStories } = makeService('{"adherenceScore":70,"guidance":"Fresh."}');
+    mentorDays.push({ day: '2026-06-11', adherenceScore: 72, moodScore: null, guidance: 'Stale.', updatedAt: new Date('2026-06-10T19:30:00Z') });
+    dayStories.push({ day: '2026-06-11', text: 'The real day.', moodScore: 60, createdAt: new Date('2026-06-11T18:28:00Z') });
+    await svc.ensureFreshRead('2026-06-11');
+    expect(llm.completeWith).toHaveBeenCalledTimes(1);
+    expect(mentorDays.find((m) => m.day === '2026-06-11')!.guidance).toContain('Fresh');
+  });
+
+  it('a new day gets its own allowance', async () => {
+    const { svc, llm, dayStories } = makeService('{"adherenceScore":70,"guidance":"A read."}');
+    dayStories.push({ day: '2026-06-12', text: 'Day A.', moodScore: 60, createdAt: new Date('2026-06-12T18:00:00Z') });
+    dayStories.push({ day: '2026-06-13', text: 'Day B.', moodScore: 60, createdAt: new Date('2026-06-13T18:00:00Z') });
+    await svc.runMentorDay('2026-06-12', true);
+    await svc.runMentorDay('2026-06-12', true);
+    await svc.runMentorDay('2026-06-12', true); // blocked
+    await svc.runMentorDay('2026-06-13', true); // new day, allowed
+    expect(llm.completeWith).toHaveBeenCalledTimes(3);
+  });
+
+  it('a manual regenerate is still allowed past the ceiling', async () => {
+    const { svc, llm, dayStories } = makeService('{"adherenceScore":70,"guidance":"A read."}');
+    dayStories.push({ day: '2026-06-14', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-14T18:00:00Z') });
+    await svc.runMentorDay('2026-06-14', true);
+    await svc.runMentorDay('2026-06-14', true);
+    await svc.runMentorDay('2026-06-14', true, true); // the owner pressed the button
+    expect(llm.completeWith).toHaveBeenCalledTimes(3);
+  });
+});

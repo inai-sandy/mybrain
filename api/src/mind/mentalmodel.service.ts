@@ -215,7 +215,21 @@ export class MentalModelService implements OnModuleInit {
   }
 
   /** Run the mental model for one day: ingest → reason (LLM) → reconcile into the mind graph. */
-  async run(day: string, skippedOverride?: any[]): Promise<{ proposed: number; reinforced: number }> {
+  /** At most two paid model runs a day — it was hitting 15. (BEA-1140) */
+  private async paidToday(day: string): Promise<boolean> {
+    // Defensive: if the lookup can't run, treat the day as UNPAID so guidance still gets written.
+    // Failing closed here would silently stop the Lab working. (BEA-1140)
+    try {
+      const row = await this.prisma.setting?.findUnique({ where: { key: 'mind.paidDay' } });
+      const [d, n] = String(row?.value || '').split(':');
+      return d === day && Number(n || 0) >= 2;
+    } catch {
+      return false;
+    }
+  }
+
+  async run(day: string, skippedOverride?: any[], manual = false): Promise<{ proposed: number; reinforced: number }> {
+    if (!manual && (await this.paidToday(day))) return { proposed: 0, reinforced: 0 };
     const signals = await this.ingestion.gatherDaySignals(day, undefined, skippedOverride);
     if (!signals.hasSignal) return { proposed: 0, reinforced: 0 };
 
@@ -243,6 +257,15 @@ export class MentalModelService implements OnModuleInit {
       (existing.length ? existing.map((e) => `${e.id}: ${e.statement}${noteBy.has(e.id) ? ` — the user told you in their own words: "${noteBy.get(e.id)!.join('; ')}"` : ''}`).join('\n') : '(none yet)') +
       (refuted.length ? `\n\n=== REFUTED (never re-propose) ===\n${refuted.map((r) => `- ${r.statement}`).join('\n')}` : '');
 
+    // Must never throw — it sits in front of the paid call. (BEA-1140)
+    try {
+      const cur = await this.prisma.setting?.findUnique({ where: { key: 'mind.paidDay' } });
+      const [pd, pn] = String(cur?.value || '').split(':');
+      const next = `${day}:${pd === day ? Number(pn || 0) + 1 : 1}`;
+      await this.prisma.setting?.upsert({ where: { key: 'mind.paidDay' }, create: { key: 'mind.paidDay', value: next }, update: { value: next } });
+    } catch {
+      /* cost guard only */
+    }
     const raw = (await this.llm.completeWith(await this.model(), prompt, 4000, 'mind-model'))?.trim() || '';
     const findings = this.parse(raw);
     if (!findings.length) return { proposed: 0, reinforced: 0 };
