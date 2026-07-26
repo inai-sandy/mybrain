@@ -9,11 +9,11 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 
 | # | Module | What it covers | Status | Issues | Date |
 |---|--------|----------------|--------|--------|------|
-| 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | built | BEA-1019✅ 1029✅ 1038✅ | 2026-07-21 |
+| 1 | Today & Tasks | `/today`, `/tasks` · `tasks/` · brain-dump parse, rollover, duplicates, by-person | built | BEA-1019✅ 1029✅ 1038✅ · Daily tab BEA-1123✅ · UI polish 2026-07-26: 1131✅ Brain Eaters, 1132✅ Review+Daily | 2026-07-26 |
 | 2 | EMO | `/emo` · `emo/` · ask/talk/capture router, 6 card lanes, device turn + TTS | — | | |
 | 3 | Activity, Day Close & Story | `/activity`, CloseDay, DailyStory · `daily/` · day summary, story, month/year, personality | built | BEA-1051→1057 flagship + BEA-1058 close-day polish + BEA-1059 prompts + BEA-1060 insights + BEA-1061 book + BEA-1062 calendar | 2026-07-23 |
 | 4 | Capture & Items | `/capture`, `/doc/:id`, `/view/:id` · `items/` · upload, URL, Notion, Supermemory import, share | — | | |
-| 5 | Explore | `/explore` · `explore/` · whole-brain + web ask (Tavily), saved answers, sources, rechunk | built | BEA-1124✅ 1125✅ 1126✅ 1127✅ 1128✅ 1129✅ (leftovers reported, owner chose to keep) | 2026-07-26 |
+| 5 | Explore | `/explore` · `explore/` · whole-brain + web ask (Tavily), saved answers, sources, rechunk | built | BEA-1124✅ 1125✅ 1126✅ 1127✅ 1128✅ 1129✅ (leftovers reported, owner chose to keep) · UI REDESIGN 2026-07-26: 1130✅ two-column composition | 2026-07-26 |
 | 6 | Chat | `/chat`, `/chat/:id` · `chat/` · sessions, streaming, star/pin, retention, per-doc chat | — | | |
 | 7 | Documents | `/documents`, `/d/:slug`, `/s/:code` · `documents/` · library, collections, public pages, export | — | | |
 | 8 | Notes & Ideas | `/notes`, `/ideas` · `notes/`, `ideas/` · CRUD, AI format, idea workflow docs | — | | |
