@@ -9,6 +9,7 @@ function makeService(llmText: string | null) {
   const tasks: any[] = [];
   const summaries: any[] = [];
   const weeklies: any[] = [];
+  const mindFindings: any[] = [];
   const settings: Record<string, string> = {};
   let seq = 0;
   const prisma: any = {
@@ -67,6 +68,7 @@ function makeService(llmText: string | null) {
     },
     daySummary: { findMany: async ({ where }: any = {}) => summaries.filter((s) => (!where?.day?.gte || s.day >= where.day.gte) && (!where?.day?.lte || s.day <= where.day.lte)) },
     personMention: { findMany: async () => [] },
+    mindFinding: { findMany: async () => mindFindings }, // BEA-1144
     dayClose: { findUnique: async () => null },
     weeklyReview: {
       findUnique: async ({ where }: any) => weeklies.find((w) => w.weekStart === where.weekStart) || null,
@@ -110,7 +112,10 @@ function makeService(llmText: string | null) {
   };
   const tasksSvc: any = { listModels: async () => [], ...taskDayApi };
   const mind: any = { summaryForMentor: async () => '' }; // The Lab grounding stub (BEA-454)
-  return { svc: new MentorService(prisma, llm, prompts, tasksSvc, mind), llm, focus, mentorDays, dayStories, stories, tasks, summaries, weeklies, settings };
+  // BEA-1144: the Lab's one line a week goes out through Alerts. Captured, not sent, in tests.
+  const sentWeekly: { body: string; subject: string }[] = [];
+  const alerts: any = { labWeekly: jest.fn(async (body: string, subject: string) => { sentWeekly.push({ body, subject }); return { sent: true }; }) };
+  return { svc: new MentorService(prisma, llm, prompts, tasksSvc, mind, alerts), llm, focus, mentorDays, dayStories, stories, tasks, summaries, weeklies, settings, alerts, sentWeekly, mindFindings };
 }
 
 describe('MentorService', () => {
@@ -292,5 +297,77 @@ describe('a day can only be paid for twice (BEA-1140)', () => {
     await svc.runMentorDay('2026-06-14', true);
     await svc.runMentorDay('2026-06-14', true, true); // the owner pressed the button
     expect(llm.completeWith).toHaveBeenCalledTimes(3);
+  });
+});
+
+/**
+ * BEA-1144. The Lab comes to you once a week — but only when it has something. The guard that
+ * matters most is the quiet one: a nothing-week must send nothing, and must not keep re-checking
+ * every minute until Monday.
+ */
+describe("the Lab's one line a week (BEA-1144)", () => {
+  it('sends the action from the finding with the most days behind it', async () => {
+    const h = makeService('{}');
+    h.mindFindings.push({ action: 'Give the manuals away or kill them.', statement: 'x', daysSeen: 40, validated: null });
+    const r = await h.svc.sendWeeklyLine('2026-07-20');
+    expect(r.sent).toBe(true);
+    expect(h.sentWeekly).toHaveLength(1);
+    expect(h.sentWeekly[0].body).toContain('Give the manuals away or kill them.');
+    expect(h.sentWeekly[0].body).toContain('https://mybrain.1site.ai/lab');
+  });
+
+  it('sends NOTHING on a week with nothing to say', async () => {
+    const h = makeService('{}');
+    const r = await h.svc.sendWeeklyLine('2026-07-20');
+    expect(r.sent).toBe(false);
+    expect(h.sentWeekly).toHaveLength(0);
+    // ...and marks the week so the minute-by-minute tick stops re-checking it.
+    expect(h.settings['mentor.weeklyPinged']).toBe('2026-07-20');
+  });
+
+  it('sends once a week, not once a minute — even with plenty more it could say', async () => {
+    // Two strong candidates on purpose: the never-repeat rule would let a second line through, so
+    // the ONLY thing holding the line here is the once-a-week guard. Without it this sends 3 times.
+    const h = makeService('{}');
+    h.mindFindings.push(
+      { action: 'Give the manuals away or kill them.', statement: 'x', daysSeen: 40, validated: null },
+      { action: 'Block Tuesday morning for the portal work.', statement: 'y', daysSeen: 30, validated: null },
+    );
+    h.weeklies.push({ weekStart: '2026-07-20', text: 'A week.', pattern: 'You start strong on Monday.', experiment: 'Try a 90-minute block.' });
+    await h.svc.sendWeeklyLine('2026-07-20');
+    await h.svc.sendWeeklyLine('2026-07-20');
+    await h.svc.sendWeeklyLine('2026-07-20');
+    expect(h.sentWeekly).toHaveLength(1);
+  });
+
+  it('force overrides the once-a-week guard, for a manual send', async () => {
+    const h = makeService('{}');
+    h.mindFindings.push(
+      { action: 'Give the manuals away or kill them.', statement: 'x', daysSeen: 40, validated: null },
+      { action: 'Block Tuesday morning for the portal work.', statement: 'y', daysSeen: 30, validated: null },
+    );
+    await h.svc.sendWeeklyLine('2026-07-20');
+    await h.svc.sendWeeklyLine('2026-07-20', true);
+    expect(h.sentWeekly).toHaveLength(2);
+    expect(h.sentWeekly[1].body).toContain('Block Tuesday morning');
+  });
+
+  it('a new week gets its own line', async () => {
+    const h = makeService('{}');
+    h.mindFindings.push({ action: 'Give the manuals away or kill them.', statement: 'x', daysSeen: 40, validated: null });
+    await h.svc.sendWeeklyLine('2026-07-20');
+    h.mindFindings.length = 0;
+    h.mindFindings.push({ action: 'Block Tuesday morning for the portal work.', statement: 'x', daysSeen: 12, validated: null });
+    await h.svc.sendWeeklyLine('2026-07-27');
+    expect(h.sentWeekly).toHaveLength(2);
+    expect(h.sentWeekly[1].body).toContain('Block Tuesday morning');
+  });
+
+  it('does not repeat last week word for word', async () => {
+    const h = makeService('{}');
+    h.mindFindings.push({ action: 'Give the manuals away or kill them.', statement: 'x', daysSeen: 40, validated: null });
+    await h.svc.sendWeeklyLine('2026-07-20');
+    await h.svc.sendWeeklyLine('2026-07-27'); // same finding still the strongest
+    expect(h.sentWeekly).toHaveLength(1);
   });
 });

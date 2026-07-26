@@ -5,6 +5,9 @@ import { PromptsService } from '../prompts/prompts.service';
 import { looseJsonParse, narrativeField } from '../common/llm-json';
 import { MentalModelService } from '../mind/mentalmodel.service';
 import { TasksService } from '../tasks/tasks.service';
+import { AlertsService } from '../push/alerts.service';
+import { pickWeeklyLine, weeklyMessage } from './weekly-line';
+import { surfacedWhere } from '../mind/surfacing';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const MENTOR_AT = '23:59'; // runs just after the Story of the Day (23:58)
@@ -21,6 +24,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     private readonly prompts: PromptsService,
     private readonly tasks: TasksService,
     private readonly mind: MentalModelService,
+    private readonly alerts: AlertsService,
   ) {}
 
   onModuleInit() {
@@ -506,6 +510,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     if (dow === 0 && this.localHM(tz) >= '21:45') {
       await this.setSetting('mentor.weeklyTry', day);
       await this.generateWeeklyReview(this.weekStartOf(day)).catch(() => undefined);
+      await this.sendWeeklyLine(this.weekStartOf(day)).catch(() => undefined);
     } else {
       const lastWeek = this.dayAdd(this.weekStartOf(day), -7);
       if (!(await this.prisma.weeklyReview.findUnique({ where: { weekStart: lastWeek } }))) {
@@ -513,5 +518,37 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
         await this.generateWeeklyReview(lastWeek).catch(() => undefined);
       }
     }
+  }
+
+  /**
+   * The Lab's one line a week on WhatsApp. (BEA-1144)
+   *
+   * Picks from what the weekly review already wrote plus the findings the Lab believes — no extra
+   * AI call. Sends nothing at all when nothing crossed the bar; a message every Sunday regardless
+   * of content is how you teach someone to ignore you.
+   */
+  async sendWeeklyLine(weekStart: string, force = false): Promise<{ sent: boolean; why?: string; line?: string }> {
+    const already = (await this.prisma.setting.findUnique({ where: { key: 'mentor.weeklyPinged' } }).catch(() => null))?.value;
+    if (!force && already === weekStart) return { sent: false, why: 'already sent this week' };
+
+    const [review, findings, lastSent] = await Promise.all([
+      this.prisma.weeklyReview.findUnique({ where: { weekStart } }).catch(() => null),
+      this.prisma.mindFinding.findMany({
+        where: surfacedWhere,
+        orderBy: [{ daysSeen: 'desc' }],
+        take: 10,
+        select: { action: true, statement: true, daysSeen: true, validated: true },
+      }).catch(() => [] as any[]),
+      this.prisma.setting.findUnique({ where: { key: 'mentor.weeklyPingedText' } }).catch(() => null),
+    ]);
+
+    const pick = pickWeeklyLine({ findings: findings as any, review, lastSent: (lastSent as any)?.value ?? null });
+    // Stamp the week either way, so a quiet week doesn't get re-checked every minute until Monday.
+    await this.setSetting('mentor.weeklyPinged', weekStart).catch(() => undefined);
+    if (!pick) return { sent: false, why: 'nothing worth saying this week' };
+
+    const res = await this.alerts.labWeekly(weeklyMessage(pick), 'what the Lab noticed this week');
+    if (res.sent) await this.setSetting('mentor.weeklyPingedText', pick.line).catch(() => undefined);
+    return { ...res, line: pick.line };
   }
 }
