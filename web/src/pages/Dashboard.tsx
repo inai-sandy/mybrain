@@ -109,7 +109,9 @@ export function Dashboard() {
               <>
                 <b className={F.needsYou.needsYou ? 'text-rose-500' : 'text-emerald-500'}>{F.needsYou.needsYou} need you</b>
                 <span className="mx-1.5 text-zinc-300 dark:text-zinc-600">·</span>
-                <span className="tabular-nums">{F.yourDay.doneToday}/{F.yourDay.open + F.yourDay.doneToday}</span> done today
+                {/* The SAME definition the Today page uses, or the two screens disagree — Home said
+                    8/52 while Today said 8/46 for the same day. (BEA-1138) */}
+                <span className="tabular-nums">{c ? `${c.done}/${c.total}` : '—'}</span> done today
               </>
             ) : <Skeleton className="h-3.5 w-40" />}
           </p>
@@ -161,8 +163,8 @@ export function Dashboard() {
         cols={3}
         navigate={navigate}
         tiles={F ? [
-          { n: F.yourDay.open, label: 'Open', to: '/tasks' },
-          { n: F.yourDay.doneToday, label: 'Done today', to: '/tasks', tone: 'emerald' },
+          { n: c?.open ?? F.yourDay.open, label: 'Open today', to: '/today' },
+          { n: c?.done ?? F.yourDay.doneToday, label: 'Done today', to: '/today', tone: 'emerald' },
           { n: F.yourDay.carriedOver, label: 'Carried over', to: '/tasks', tone: F.yourDay.carriedOver ? 'amber' : undefined },
         ] : []}
         after={
