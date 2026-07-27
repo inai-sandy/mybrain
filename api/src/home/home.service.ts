@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isOwedOn } from '../tasks/schedule';
+import { weekdayOf } from '../common/localday';
 import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
 import { RecurringService } from '../tasks/recurring.service';
@@ -24,6 +26,23 @@ export class HomeService {
    * A count that can never take the landing page down. Home is the first screen of the app; one
    * unavailable table must not turn the whole dashboard into an error. (BEA-1136)
    */
+  /**
+   * How many standing reports are genuinely due today. Counting all of them made the number wrong
+   * on any day a weekly report existed — a Friday report is not owed on a Monday. (BEA-1147)
+   */
+  private async dailyOwedToday(dayKey: string, restDays: string[]): Promise<number> {
+    try {
+      const rows = await this.prisma.task.findMany({
+        where: { kind: 'recurring', status: { not: 'done' } },
+        select: { scheduleDays: true },
+      });
+      const weekday = weekdayOf(dayKey);
+      return rows.filter((t: any) => isOwedOn(t.scheduleDays, weekday, restDays)).length;
+    } catch {
+      return 0;
+    }
+  }
+
   private async safeCount(model: string, where: any): Promise<number> {
     try {
       const m = (this.prisma as any)[model];
@@ -146,7 +165,7 @@ export class HomeService {
     ] = await Promise.all([
       this.safeCount('taskClaim', { status: 'pending' }),
       this.safeCount('task', { status: { not: 'done' }, kind: { not: 'recurring' }, NOT: { ownerContactId: null } }),
-      this.safeCount('task', { kind: 'recurring', status: { not: 'done' } }),
+      this.dailyOwedToday(dayKey, restDays), // only reports actually due today (BEA-1147)
       this.safeCount('taskStatusDay', { day: dayKey, status: 'received' }),
       this.safeCount('taskStatusDay', { day: dayKey, status: 'missed' }),
       this.safeCount('task', { status: { not: 'done' }, dueDate: { lt: todayStart } }),

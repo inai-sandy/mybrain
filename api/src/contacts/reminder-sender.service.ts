@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isOwedOn } from '../tasks/schedule';
+import { weekdayOf } from '../common/localday';
 import { PostboxService } from './postbox.service';
 import { ContactsService } from './contacts.service';
 import { RecurringService } from '../tasks/recurring.service';
@@ -200,11 +202,13 @@ export class ReminderSenderService implements OnModuleInit {
       // quiet until tomorrow. Neither ends the chase — it comes back on the next working day.
       // (BEA-1119)
       if (r.taskId) {
-        const task = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { kind: true } }).catch(() => null);
+        const task = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { kind: true, scheduleDays: true } }).catch(() => null);
         if (task?.kind === 'recurring') {
           const today = this.recurring.today();
-          if (await this.recurring.isRestDay(today)) {
-            await this.mark(send.id, 'skipped', null, 'nothing owed today — rest day');
+          // Its OWN days decide, not the global rest day. A Friday report chased on a Monday is the
+          // exact message that went to Rakesh at 05:30 on 27 Jul. (BEA-1147)
+          if (!isOwedOn(task.scheduleDays, weekdayOf(today), await this.recurring.restDays())) {
+            await this.mark(send.id, 'skipped', null, 'not owed today');
             continue;
           }
           if (await this.recurring.isReceived(r.taskId, today)) {
