@@ -23,6 +23,11 @@ function makeSvc(opts: { restDays?: string | null; rows?: any[] } = {}) {
       },
       create: async ({ data }: any) => { rows.push({ ...data }); return data; },
       findMany: async ({ where }: any) => rows.filter((r) => r.day === where.day),
+      // BEA-1152: un-marking a day removes the row, so it goes back to waiting and the chase resumes.
+      delete: async ({ where }: any) => {
+        const i = rows.findIndex((r) => r.taskId === where.taskId_day.taskId && r.day === where.taskId_day.day);
+        return i >= 0 ? rows.splice(i, 1)[0] : null;
+      },
     },
     // A mutable task list, so a test can set up the owner's real mix of daily and weekday-specific
     // reports. Honours the scheduleDays filter the seeder uses. (BEA-1147)
@@ -279,3 +284,52 @@ describe('only what is due today counts (BEA-1147)', () => {
     expect(tasks.find((t: any) => t.id === 'day').scheduleDays).toBeNull();
   });
 });
+
+/**
+ * BEA-1152, replaying the real 27 July sequence: tick at 05:42:56, then "Update sheet sending
+ * 12 clock" at 05:43:50. The board said received all day; he had not sent it.
+ */
+describe('a later message beats an earlier tick (BEA-1152)', () => {
+  const at = (s: string) => new Date(`2026-07-27T${s}+05:30`);
+
+  it("the tick is undone by what he said next", async () => {
+    const { svc, rows } = makeSvc();
+    await svc.markReceived('t1', '2026-07-27', "Sent today's update", 'c1', { source: 'page', at: at('05:42:56') });
+    expect(await svc.isReceived('t1', '2026-07-27')).toBe(true);
+
+    const undone = await svc.markNotReceived('t1', '2026-07-27', 'Update sheet sending 12 clock', 'c1', { source: 'whatsapp', at: at('05:43:50') });
+    expect(undone).toBe(true);
+    expect(await svc.isReceived('t1', '2026-07-27')).toBe(false);
+    expect(rows()).toHaveLength(0); // back to waiting, so the chase resumes
+  });
+
+  it('an older signal cannot undo a newer one', async () => {
+    const { svc } = makeSvc();
+    await svc.markReceived('t1', '2026-07-27', 'Real report: 45 BOMs uploaded', 'c1', { source: 'whatsapp', at: at('09:00:00') });
+    const undone = await svc.markNotReceived('t1', '2026-07-27', 'sending later', 'c1', { source: 'page', at: at('08:00:00') });
+    expect(undone).toBe(false);
+    expect(await svc.isReceived('t1', '2026-07-27')).toBe(true);
+  });
+
+  it('a stale repeat of the same signal never flips a settled day', async () => {
+    const { svc } = makeSvc();
+    await svc.markReceived('t1', '2026-07-27', 'the report', 'c1', { source: 'whatsapp', at: at('09:00:00') });
+    await svc.markReceived('t1', '2026-07-27', 'a different quote', 'c1', { source: 'page', at: at('08:00:00') });
+    expect(rowQuote(await svc.dayLog('2026-07-27'))).toBe('the report');
+  });
+
+  it('records which signal set it', async () => {
+    const { svc, rows } = makeSvc();
+    await svc.markReceived('t1', '2026-07-27', 'the report', 'c1', { source: 'whatsapp', at: at('09:00:00') });
+    expect(rows()[0].source).toBe('whatsapp');
+  });
+
+  it('un-marking something that was never received is a no-op', async () => {
+    const { svc } = makeSvc();
+    expect(await svc.markNotReceived('t1', '2026-07-27', 'sending later', 'c1', { at: at('09:00:00') })).toBe(false);
+  });
+});
+
+function rowQuote(log: any): string | null {
+  return log.items[0]?.quote ?? null;
+}

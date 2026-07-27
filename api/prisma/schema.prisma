@@ -477,6 +477,11 @@ model TaskStatusDay {
   /// Their own words that satisfied the day — evidence, never rewritten.
   quote     String?
   contactId String?
+  /// Where the signal came from — "page" (their share link) or "whatsapp" (a real reply). (BEA-1152)
+  source    String?
+  /// When that signal happened. A LATER signal always overrides an earlier one, so a tick followed
+  /// by "sending at 12" ends up not-received rather than received. (BEA-1152)
+  signalAt  DateTime?
   createdAt DateTime @default(now())
 
   @@unique([taskId, day])
