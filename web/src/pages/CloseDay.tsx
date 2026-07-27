@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Check, Moon, X, Lock, ChevronLeft, ChevronRight, Loader2, Sparkles, Clock, ArrowRight, Trash2, Radio, HeartPulse, CalendarDays, Lightbulb, Hand } from 'lucide-react';
+import { Check, Moon, X, Lock, ChevronLeft, ChevronRight, ChevronDown, Loader2, Sparkles, Clock, ArrowRight, Trash2, Radio, HeartPulse, CalendarDays, Lightbulb, Hand } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
 import { isDictating } from '../ui/useDictation';
@@ -39,7 +40,7 @@ const STEPS: { id: StepId; label: string }[] = [
   { id: 'story', label: 'Story' },
   { id: 'findings', label: 'Found' },
   { id: 'hours', label: 'Hours' },
-  { id: 'carry', label: 'Carry' },
+  { id: 'carry', label: 'Finished' }, // the step now closes tasks, not just carries them (BEA-1146)
 ];
 
 export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose: () => void; onClosed: () => void }) {
@@ -63,9 +64,14 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   // step 3 — hours
   const [hours, setHours] = useState(DEFAULT_HOURS);
 
-  // step 4 — carry
-  const [openTasks, setOpenTasks] = useState<{ id: string; title: string }[]>([]);
-  const [carry, setCarry] = useState<Record<string, 'roll' | 'drop' | undefined>>({});
+  // step 4 — what did you finish? (BEA-1146)
+  type OpenTask = { id: string; title: string; carried: number; owner: string | null };
+  const [openTasks, setOpenTasks] = useState<OpenTask[]>([]);
+  const [doneIds, setDoneIds] = useState<Record<string, boolean>>({}); // ticked = finished
+  const [preTicked, setPreTicked] = useState<Record<string, boolean>>({}); // the story said so
+  const [carry, setCarry] = useState<Record<string, 'drop' | undefined>>({});
+  const [showOld, setShowOld] = useState(false);
+  const [confirmDrop, setConfirmDrop] = useState<OpenTask | null>(null);
 
   useEffect(() => {
     fetch(`/api/daily/activity?day=${day}`)
@@ -139,7 +145,14 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
     if (!openTasks.length) {
       fetch('/api/daily/wrap-up-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
         .then((r) => (r.ok ? r.json() : { openTasks: [] }))
-        .then((d) => setOpenTasks(d.openTasks || []))
+        .then((d) => {
+          setOpenTasks(d.openTasks || []);
+          // Your story already said you did these — tick them, and say why. (BEA-1146)
+          const pre: Record<string, boolean> = {};
+          for (const id of d.finishedOpenIds || []) pre[id] = true;
+          setPreTicked(pre);
+          setDoneIds(pre);
+        })
         .catch(() => undefined);
     }
   }
@@ -164,13 +177,15 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
       }
       const h = parseFloat(hours);
       const workedMinutes = Number.isFinite(h) && h > 0 ? Math.round(h * 60) : 14 * 60; // the box can be emptied, the day still gets hours
-      const roll = Object.entries(carry).filter(([, v]) => v === 'roll').map(([id]) => id);
       const drop = Object.entries(carry).filter(([, v]) => v === 'drop').map(([id]) => id);
-      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: [], workedMinutes, roll, drop }) }).catch(() => undefined);
+      const done = Object.entries(doneIds).filter(([, v]) => v).map(([id]) => id);
+      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: [], workedMinutes, roll: [], drop, done }) }).catch(() => undefined);
       const r = await fetch('/api/daily/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) });
       if (r.ok) {
         const j = await r.json().catch(() => ({} as any));
-        toast('success', wasClosed ? 'Day updated — its story and verdict are re-weaving ✨' : j.rolled ? `Day sealed ✓ · ${j.rolled} unfinished moved forward` : 'Day sealed ✓');
+        const nClosed = Object.values(doneIds).filter(Boolean).length;
+        const bits = [nClosed && `${nClosed} finished`, j.rolled && `${j.rolled} moved forward`].filter(Boolean).join(' · ');
+        toast('success', wasClosed ? 'Day updated — its story and verdict are re-weaving ✨' : bits ? `Day sealed ✓ · ${bits}` : 'Day sealed ✓');
         onClosed();
         close();
       } else toast('error', 'Could not close the day');
@@ -183,6 +198,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   const tickCount = Object.values(ticked).filter(Boolean).length;
 
   return (
+    <>
     <Sheet onClose={onClose} canClose={() => !isDictating()} blockBackdropClose={() => true}>
       {(close) => (
         <>
@@ -282,36 +298,101 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
 
           {step === 'carry' && (
             <>
-              <p className="mb-3 text-xs text-zinc-500">Still unfinished — everything moves forward on its own. Drop what no longer matters.</p>
-              {openTasks.length ? (
-                <ul className="max-h-[40vh] space-y-1.5 overflow-y-auto pr-1">
-                  {openTasks.map((t) => {
-                    const c = carry[t.id];
-                    return (
-                      <li key={t.id} className={'flex items-center gap-2 rounded-lg border px-3 py-2 ' + (c === 'drop' ? 'border-rose-300/60 opacity-60 dark:border-rose-500/30' : c === 'roll' ? 'border-emerald-400/60' : 'border-zinc-200 dark:border-zinc-800')}>
-                        <div className={'min-w-0 flex-1 truncate text-sm ' + (c === 'drop' ? 'text-zinc-400 line-through' : '')}>{t.title}</div>
-                        <button onClick={() => setCarry((m) => ({ ...m, [t.id]: m[t.id] === 'roll' ? undefined : 'roll' }))} title="Carry forward" className={'inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] ' + (c === 'roll' ? 'border-emerald-500 text-emerald-600' : 'border-zinc-300 text-zinc-500 hover:border-emerald-500 dark:border-zinc-700')}>
-                          <ArrowRight size={12} /> Keep
-                        </button>
-                        <button onClick={() => setCarry((m) => ({ ...m, [t.id]: m[t.id] === 'drop' ? undefined : 'drop' }))} title="Drop" className={'shrink-0 rounded-md p-1 ' + (c === 'drop' ? 'text-rose-600' : 'text-zinc-400 hover:text-rose-600')}><Trash2 size={14} /></button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <p className="py-6 text-center text-sm text-zinc-400">Nothing left open — clean sweep. 🎉</p>
-              )}
-              <div className="mt-4 flex items-center justify-between gap-2">
-                <button onClick={() => setStep('hours')} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"><ChevronLeft size={15} /> Back</button>
-                <button onClick={() => finish(close)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
-                  {busy ? <><Loader2 size={15} className="animate-spin" /> Sealing…</> : <><Lock size={15} /> {wasClosed ? 'Update this day' : 'Close the day'} ✓</>}
-                </button>
-              </div>
+              {(() => {
+                /**
+                 * "What did you finish?" (BEA-1146)
+                 *
+                 * This step used to offer only Keep and a trash icon, so closing a day could never
+                 * finish a task — the only way was to go to Tasks and tick it by hand. On the
+                 * owner's real list that meant 49 open tasks, 38 of them carried a week or more,
+                 * with the oldest at 48 days. Work he had genuinely done just kept ageing.
+                 *
+                 * Ticked = done. Untouched = carries forward, exactly as before. The default is
+                 * still the safe one, so a rushed midnight close changes nothing by accident.
+                 */
+                const recent = openTasks.filter((t) => t.carried < 7);
+                const older = openTasks.filter((t) => t.carried >= 7);
+                const dropped = (t: OpenTask) => carry[t.id] === 'drop';
+                const nDone = Object.values(doneIds).filter(Boolean).length;
+
+                const row = (t: OpenTask) => (
+                  <li key={t.id} className={'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 ' + (dropped(t) ? 'border-rose-300/60 opacity-50 dark:border-rose-500/30' : doneIds[t.id] ? 'border-emerald-400/70 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
+                    <button
+                      onClick={() => setDoneIds((m) => ({ ...m, [t.id]: !m[t.id] }))}
+                      aria-label={doneIds[t.id] ? `Not finished: ${t.title}` : `Finished: ${t.title}`}
+                      className={'mt-0.5 grid h-[19px] w-[19px] shrink-0 place-items-center rounded border transition-colors ' + (doneIds[t.id] ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-300 hover:border-emerald-500 dark:border-zinc-600')}
+                    >
+                      {doneIds[t.id] && <Check size={13} />}
+                    </button>
+                    <button onClick={() => setDoneIds((m) => ({ ...m, [t.id]: !m[t.id] }))} className="min-w-0 flex-1 text-left">
+                      <span className={'block text-sm leading-snug ' + (dropped(t) ? 'text-zinc-400 line-through' : '')}>{t.title}</span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
+                        <span className="tabular-nums">{t.carried === 0 ? 'added today' : `carried ${t.carried} day${t.carried === 1 ? '' : 's'}`}</span>
+                        {t.owner && <span className="text-amber-600 dark:text-amber-500">with {t.owner}</span>}
+                        {preTicked[t.id] && <span className="text-emerald-600 dark:text-emerald-400">your story says you did this</span>}
+                      </span>
+                    </button>
+                    <button onClick={() => (dropped(t) ? setCarry((m) => ({ ...m, [t.id]: undefined })) : setConfirmDrop(t))} title={dropped(t) ? 'Keep it after all' : 'Delete for good'} className={'mt-0.5 shrink-0 rounded-md p-1 ' + (dropped(t) ? 'text-rose-600' : 'text-zinc-400 hover:text-rose-600')}>
+                      <Trash2 size={14} />
+                    </button>
+                  </li>
+                );
+
+                return (
+                  <>
+                    <p className="mb-3 text-xs text-zinc-500">
+                      Tick what you finished — I'll mark those done. Anything you leave alone moves to tomorrow on its own.
+                      {openTasks.some((t) => t.owner) && ' Closing one you gave to someone also stops their WhatsApp chase.'}
+                    </p>
+
+                    {openTasks.length ? (
+                      <div className="max-h-[42vh] space-y-3 overflow-y-auto pr-1">
+                        {recent.length > 0 && (
+                          <div>
+                            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">This week · {recent.length}</div>
+                            <ul className="space-y-1.5">{recent.map(row)}</ul>
+                          </div>
+                        )}
+                        {older.length > 0 && (
+                          <div>
+                            <button onClick={() => setShowOld((v) => !v)} className="mb-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+                              <ChevronDown size={13} className={'transition-transform ' + (showOld ? 'rotate-180' : '-rotate-90')} />
+                              {older.length} older — carried 7+ days
+                            </button>
+                            {showOld && <ul className="space-y-1.5">{older.map(row)}</ul>}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="py-6 text-center text-sm text-zinc-400">Nothing left open — clean sweep. 🎉</p>
+                    )}
+
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <button onClick={() => setStep('hours')} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"><ChevronLeft size={15} /> Back</button>
+                      <button onClick={() => finish(close)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+                        {busy ? <><Loader2 size={15} className="animate-spin" /> Sealing…</> : <><Lock size={15} /> {nDone ? `Close ${nDone} · ` : ''}{wasClosed ? 'Update this day' : 'Seal the day'} ✓</>}
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
             </>
           )}
+
         </>
       )}
     </Sheet>
+
+      {/* Deleting is permanent and sat one tap away from the tick box — it now asks first. (BEA-1146) */}
+      <ConfirmDialog
+        open={!!confirmDrop}
+        title="Delete this task?"
+        message={`“${confirmDrop?.title || ''}” will be deleted for good — this does not mark it finished, and it cannot be undone. To finish it instead, tick it.`}
+        confirmLabel="Delete for good"
+        onCancel={() => setConfirmDrop(null)}
+        onConfirm={() => { if (confirmDrop) setCarry((m) => ({ ...m, [confirmDrop.id]: 'drop' })); setConfirmDrop(null); }}
+      />
+    </>
   );
 }
 

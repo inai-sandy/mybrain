@@ -77,6 +77,9 @@ function makeService(opts: { llmText?: string | null } = {}) {
           if (oc !== undefined) { if (oc === null) { if (t.ownerContactId) return false; } else if (oc.not === null && !t.ownerContactId) return false; }
           if (where?.promisedFor?.not === null && !t.promisedFor) return false;
           if (where?.brainEater !== undefined && !!t.brainEater !== where.brainEater) return false;
+          // kind (eq or {not}) — recurring tasks are excluded from the wrap-up list. (BEA-1146)
+          const k = where?.kind;
+          if (k !== undefined) { if (typeof k === 'string') { if ((t.kind ?? 'assignment') !== k) return false; } else if (k.not !== undefined && (t.kind ?? 'assignment') === k.not) return false; }
           const d = where?.day;
           if (d !== undefined) {
             if (typeof d === 'string') return t.day === d;
@@ -281,6 +284,18 @@ function makeService(opts: { llmText?: string | null } = {}) {
     getModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }),
     listModels: async () => [],
     create: async (data: any) => { const row = { id: `t${tasks.length + 1}`, status: 'open', ...data }; tasks.push(row); return row; },
+    // BEA-1146: ticking a task off in the last step goes through the real done path.
+    setDone: async (id: string, done: boolean) => {
+      const t = tasks.find((x) => x.id === id);
+      if (!t) return null;
+      t.status = done ? 'done' : 'open';
+      return t;
+    },
+    createDoneTask: async (title: string, category: string | null, day: string) => {
+      const row = { id: `t${tasks.length + 1}`, title, category, day, status: 'done' };
+      tasks.push(row);
+      return row;
+    },
     rollDayForward: async (fromDay: string, toDay: string) => {
       rolledCalls.push({ fromDay, toDay });
       // Matches the real rule: everything still open by then is carried, and the date NEVER moves.
@@ -1010,5 +1025,61 @@ describe('DailyService', () => {
       dayCloses.push({ day: y, auto: false });
       expect(await svc.wrapDayNow(y)).toBe(false);
     });
+  });
+});
+
+/**
+ * BEA-1146. Closing a day could never finish a task — the last step offered only "keep" and a
+ * trash icon, so the owner's list grew to 49 open tasks with the oldest carried 48 days, including
+ * work he had genuinely done. Ticking one off now closes it for real.
+ */
+describe('ticking off what you finished when you close the day (BEA-1146)', () => {
+  const seed = (h: any) => {
+    h.tasks.push(
+      { id: 't1', title: 'Update user manuals for Beakn Portal', status: 'open', day: '2026-07-01', rolloverCount: 44 },
+      { id: 't2', title: 'Check the Sunday dispatch list', status: 'open', day: '2026-07-25', rolloverCount: 2 },
+      { id: 't3', title: 'Send the daily production update', status: 'open', day: '2026-07-01', kind: 'recurring', rolloverCount: 30 },
+    );
+    return h;
+  };
+
+  it('marks the ticked task done and leaves the rest open', async () => {
+    const h = seed(makeService());
+    const r = await h.svc.wrapUp('2026-07-27', [], 8 * 60, [], [], ['t1']);
+    expect(r.closed).toBe(1);
+    expect(h.tasks.find((t: any) => t.id === 't1').status).toBe('done');
+    expect(h.tasks.find((t: any) => t.id === 't2').status).toBe('open');
+  });
+
+  it('a ticked task is never also carried forward', async () => {
+    const h = seed(makeService());
+    // The UI shouldn't send both, but a stale client could — closing must win.
+    const r = await h.svc.wrapUp('2026-07-27', [], 8 * 60, ['t1'], [], ['t1']);
+    expect(h.tasks.find((t: any) => t.id === 't1').status).toBe('done');
+    expect(r.rolled).toBe(0);
+  });
+
+  it('a ticked task is never also deleted — finished beats binned', async () => {
+    const h = seed(makeService());
+    const r = await h.svc.wrapUp('2026-07-27', [], 8 * 60, [], ['t1'], ['t1']);
+    expect(r.dropped).toBe(0);
+    expect(h.tasks.find((t: any) => t.id === 't1')).toBeTruthy();
+    expect(h.tasks.find((t: any) => t.id === 't1').status).toBe('done');
+  });
+
+  it('ticking nothing changes nothing — the safe default holds', async () => {
+    const h = seed(makeService());
+    const r = await h.svc.wrapUp('2026-07-27', [], 8 * 60, [], [], []);
+    expect(r.closed).toBe(0);
+    expect(h.tasks.filter((t: any) => t.status === 'open').length).toBe(3);
+  });
+
+  it('the wrap-up list hides recurring tasks and reports how long each was carried', async () => {
+    const h = seed(makeService());
+    const d = await h.svc.wrapUpData('2026-07-27');
+    const ids = d.openTasks.map((t: any) => t.id);
+    expect(ids).toContain('t1');
+    expect(ids).not.toContain('t3'); // recurring is never completed by design
+    expect(d.openTasks.find((t: any) => t.id === 't1').carried).toBe(44);
   });
 });
