@@ -2,7 +2,7 @@ import { ReminderSenderService, joinSubjects } from './reminder-sender.service';
 import { PostboxService } from './postbox.service';
 
 /** No recurring work involved — every task in these fixtures is a plain assignment. (BEA-1119) */
-const RECURRING_OFF: any = { today: () => '2026-07-27', isRestDay: async () => false, isReceived: async () => false };
+const RECURRING_OFF: any = { today: () => '2026-07-27', isRestDay: async () => false, restDays: async () => [], isReceived: async () => false };
 
 // The real renderer — reused in tests so the expected chat body is never a
 // second hardcoded copy of the template. (BEA-753)
@@ -397,15 +397,15 @@ describe('the sender honours rest days and today\'s status (BEA-1119)', () => {
 
   it('sends nothing on a rest day, and says why', async () => {
     const { prisma, state } = dailyPrisma();
-    const recurring: any = { today: () => '2026-07-26', isRestDay: async () => true, isReceived: async () => false };
+    const recurring: any = { today: () => '2026-07-26', isRestDay: async () => true, restDays: async () => ['Sun'], isReceived: async () => false };
     await new ReminderSenderService(prisma, noSend, { share: async () => ({ slug: 'j-1' }) } as any, recurring).tick();
     expect(state.updates).toHaveLength(1);
-    expect(state.updates[0]).toMatchObject({ id: 's1', status: 'skipped', error: 'nothing owed today — rest day' });
+    expect(state.updates[0]).toMatchObject({ id: 's1', status: 'skipped', error: 'not owed today' });
   });
 
   it("sends nothing once today's update has already come in", async () => {
     const { prisma, state } = dailyPrisma();
-    const recurring: any = { today: () => '2026-07-27', isRestDay: async () => false, isReceived: async () => true };
+    const recurring: any = { today: () => '2026-07-27', isRestDay: async () => false, restDays: async () => ['Sun'], isReceived: async () => true };
     await new ReminderSenderService(prisma, noSend, { share: async () => ({ slug: 'j-1' }) } as any, recurring).tick();
     expect(state.updates).toHaveLength(1);
     expect(state.updates[0]).toMatchObject({ id: 's1', status: 'skipped', error: "today's update already came in" });
@@ -419,7 +419,7 @@ describe('the sender honours rest days and today\'s status (BEA-1119)', () => {
       renderReminderTemplate,
       sendReminderTemplate: async (_to: string, fn: string, subject: string) => { asked = { fn, subject }; return { wamid: 'w', status: 'sent', error: null }; },
     };
-    const recurring: any = { today: () => '2026-07-27', isRestDay: async () => false, isReceived: async () => false };
+    const recurring: any = { today: () => '2026-07-27', isRestDay: async () => false, restDays: async () => ['Sun'], isReceived: async () => false };
     await new ReminderSenderService(prisma, postbox, { share: async () => ({ slug: 'j-1' }) } as any, recurring).tick();
     expect(asked).toEqual({ fn: 'Jayanth', subject: "today's production update" });
     expect(state.updates.filter((u: any) => u.status === 'sent')).toHaveLength(1);

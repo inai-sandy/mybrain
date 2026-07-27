@@ -75,6 +75,18 @@ export class TasksController {
    * A day's standing reports: who owed what, and whether it came in. This is what the owner reads
    * instead of a review queue — a daily report is never confirmed, only received or missed. (BEA-1120)
    */
+  /** Set which weekdays a standing report is owed on. (BEA-1147) */
+  @Put('recurring/:id/schedule')
+  async setSchedule(@Param('id') id: string, @Body() body: { days?: unknown }) {
+    return this.recurring.setSchedule(id, body?.days);
+  }
+
+  /** One-time: read the days out of each existing report's own title. Reports back for correction. */
+  @Post('recurring/seed-schedules')
+  async seedSchedules() {
+    return this.recurring.seedSchedulesFromTitles();
+  }
+
   @Get('recurring/day-log')
   async dayLog(@Query('day') day?: string) {
     return this.recurring.dayLog(day && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : undefined);

@@ -430,6 +430,9 @@ model Task {
   /// Times someone said this was finished. A claim is NOT done — the owner confirms. (BEA-1024)
   claims        TaskClaim[]
   /// For a recurring task: one row per day, did today's status arrive? (BEA-1117)
+  /// For a recurring task: which weekdays it is owed on, as JSON ["Mon","Wed"]. Null = every
+  /// working day (the old behaviour). A Friday report must not be chased on a Monday. (BEA-1147)
+  scheduleDays  String?
   statusDays    TaskStatusDay[]
   /// The date they promised. Slows the chase to once a day until then — never pauses it, because
   /// silence must always still reach the owner. (BEA-1022)

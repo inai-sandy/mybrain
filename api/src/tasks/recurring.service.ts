@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { localDayKey, localHour, weekdayOf } from '../common/localday';
+import { isOwedOn, parseSchedule, serialiseSchedule, daysFromTitle, scheduleLabel } from './schedule';
 
 /** Weekday names a rest day can be set to. */
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -117,17 +118,23 @@ export class RecurringService {
         .upsert({ where: { key: 'recurring.closedDay' }, create: { key: 'recurring.closedDay', value: day }, update: { value: day } })
         .catch(() => undefined);
     };
-    if (await this.isRestDay(day)) { await markClosed(); return null; }
+    // A task with its own schedule overrides the global rest day, so the rest-day shortcut can no
+    // longer skip the whole close — a Sunday report is real if the owner set one. (BEA-1147)
+    const rest = await this.restDays();
+    const weekday = weekdayOf(day);
 
     const tasks = await this.prisma.task
       .findMany({
         where: { kind: 'recurring', status: { not: 'done' } },
-        select: { id: true, title: true, ownerContact: { select: { name: true } } },
+        select: { id: true, title: true, scheduleDays: true, ownerContact: { select: { name: true } } },
         orderBy: { createdAt: 'asc' },
       })
       .catch(() => [] as any[]);
+    const owed = (tasks as any[]).filter((t) => isOwedOn(t.scheduleDays, weekday, rest));
+    if (!owed.length) { await markClosed(); return null; } // nothing was due — nothing can be missed
+
     const missed: { title: string; contact: string | null }[] = [];
-    for (const t of tasks as any[]) {
+    for (const t of owed) {
       if (await this.isReceived(t.id, day)) continue;
       const fresh = await this.markMissed(t.id, day);
       if (fresh) missed.push({ title: t.title, contact: t.ownerContact?.name || null });
@@ -138,35 +145,78 @@ export class RecurringService {
     return { day, missed };
   }
 
+  /** Set the days a standing report is owed on. Empty clears it back to every working day. */
+  async setSchedule(taskId: string, days: unknown): Promise<{ taskId: string; schedule: string[] | null; label: string }> {
+    const value = serialiseSchedule(days);
+    await this.prisma.task.update({ where: { id: taskId }, data: { scheduleDays: value } }).catch((e) => this.log.warn(`setSchedule: ${e?.message}`));
+    return { taskId, schedule: parseSchedule(value), label: scheduleLabel(value) };
+  }
+
+  /**
+   * One-time seed: read each existing report's own title for the day it names. Only titles that
+   * actually name a day are touched — nothing is guessed, because a wrong guess chases a colleague
+   * on the wrong day, which is the bug this exists to end. (BEA-1147)
+   */
+  async seedSchedulesFromTitles(): Promise<{ set: { title: string; days: string[] }[]; untouched: string[] }> {
+    const tasks = await this.prisma.task
+      .findMany({ where: { kind: 'recurring', status: { not: 'done' }, scheduleDays: null }, select: { id: true, title: true } })
+      .catch(() => [] as any[]);
+    const set: { title: string; days: string[] }[] = [];
+    const untouched: string[] = [];
+    for (const t of tasks as any[]) {
+      const days = daysFromTitle(t.title);
+      if (!days) { untouched.push(t.title); continue; }
+      await this.prisma.task.update({ where: { id: t.id }, data: { scheduleDays: JSON.stringify(days) } }).catch(() => undefined);
+      set.push({ title: t.title, days });
+    }
+    if (set.length) this.log.log(`seeded ${set.length} report schedule(s) from their titles`);
+    return { set, untouched };
+  }
+
   /** The day's ledger for the Review tab: who owed what, and whether it came in. */
   async dayLog(day?: string) {
     const key = day || this.today();
     const [tasks, rows, rest] = await Promise.all([
       this.prisma.task.findMany({
         where: { kind: 'recurring', status: { not: 'done' } },
-        select: { id: true, title: true, ownerContact: { select: { id: true, name: true } } },
+        select: { id: true, title: true, scheduleDays: true, ownerContact: { select: { id: true, name: true } } },
         orderBy: { createdAt: 'asc' },
       }).catch(() => [] as any[]),
       this.prisma.taskStatusDay.findMany({ where: { day: key } }).catch(() => [] as any[]),
-      this.isRestDay(key),
+      this.restDays(),
     ]);
     const byTask = new Map<string, any>((rows as any[]).map((r) => [r.taskId, r]));
+    const weekday = weekdayOf(key);
+    // Reports not due today are listed separately, never counted as waiting or missed. Counting a
+    // Friday report as outstanding on a Monday is what made this number meaningless. (BEA-1147)
+    const all = (tasks as any[]).map((t) => {
+      const r = byTask.get(t.id);
+      const due = isOwedOn(t.scheduleDays, weekday, rest as string[]);
+      return {
+        taskId: t.id,
+        title: t.title,
+        contact: t.ownerContact ? { id: t.ownerContact.id, name: t.ownerContact.name } : null,
+        schedule: parseSchedule(t.scheduleDays),
+        scheduleLabel: scheduleLabel(t.scheduleDays),
+        due,
+        status: !due ? 'off' : r?.status || 'waiting',
+        quote: r?.quote || null,
+        at: r?.createdAt || null,
+      };
+    });
+    const items = all.filter((i) => i.due);
     return {
       day: key,
-      weekday: weekdayOf(key),
-      restDay: rest,
-      items: (tasks as any[]).map((t) => {
-        const r = byTask.get(t.id);
-        return {
-          taskId: t.id,
-          title: t.title,
-          contact: t.ownerContact ? { id: t.ownerContact.id, name: t.ownerContact.name } : null,
-          // On a rest day nothing is owed, so an absent row is 'off', never a miss.
-          status: r?.status || (rest ? 'off' : 'waiting'),
-          quote: r?.quote || null,
-          at: r?.createdAt || null,
-        };
-      }),
+      weekday,
+      restDay: (rest as string[]).includes(weekday),
+      items,
+      notDueToday: all.filter((i) => !i.due),
+      counts: {
+        due: items.length,
+        received: items.filter((i) => i.status === 'received').length,
+        missed: items.filter((i) => i.status === 'missed').length,
+        waiting: items.filter((i) => i.status === 'waiting').length,
+      },
     };
   }
 }

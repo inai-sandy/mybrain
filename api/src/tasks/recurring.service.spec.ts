@@ -7,6 +7,7 @@ import { DEFAULT_REST_DAYS, RecurringService } from './recurring.service';
  */
 function makeSvc(opts: { restDays?: string | null; rows?: any[] } = {}) {
   const rows: any[] = opts.rows ? [...opts.rows] : [];
+  const tasks: any[] = [{ id: 't1', title: 'Send the daily production update', kind: 'recurring', status: 'open', scheduleDays: null, ownerContact: { id: 'c1', name: 'Jayanth' } }];
   const prisma: any = {
     setting: {
       findUnique: async () => (opts.restDays === undefined ? { value: JSON.stringify(['Sun']) } : opts.restDays === null ? null : { value: opts.restDays }),
@@ -23,9 +24,19 @@ function makeSvc(opts: { restDays?: string | null; rows?: any[] } = {}) {
       create: async ({ data }: any) => { rows.push({ ...data }); return data; },
       findMany: async ({ where }: any) => rows.filter((r) => r.day === where.day),
     },
-    task: { findMany: async () => [{ id: 't1', title: 'Send the daily production update', ownerContact: { id: 'c1', name: 'Jayanth' } }] },
+    // A mutable task list, so a test can set up the owner's real mix of daily and weekday-specific
+    // reports. Honours the scheduleDays filter the seeder uses. (BEA-1147)
+    task: {
+      findMany: async ({ where }: any = {}) =>
+        tasks.filter((t) => (where?.scheduleDays === null ? t.scheduleDays == null : true)),
+      update: async ({ where, data }: any) => {
+        const t = tasks.find((x) => x.id === where.id);
+        if (t) Object.assign(t, data);
+        return t;
+      },
+    },
   };
-  return { svc: new RecurringService(prisma), rows: () => rows };
+  return { svc: new RecurringService(prisma), rows: () => rows, tasks, statusDays: rows };
 }
 
 describe('rest days — nothing is owed, so nothing is missed', () => {
@@ -114,11 +125,15 @@ describe('the day log the owner reads', () => {
     expect(log.items[0].contact).toMatchObject({ name: 'Jayanth' });
   });
 
-  it('shows "off" rather than a miss on a rest day', async () => {
+  it('keeps a rest day out of the count entirely, rather than calling it a miss', async () => {
+    // BEA-1147: nothing owed means nothing outstanding. It used to appear as an item marked "off",
+    // which still read as a row on the board.
     const { svc } = makeSvc();
     const log = await svc.dayLog('2026-07-26'); // Sunday
     expect(log.restDay).toBe(true);
-    expect(log.items[0].status).toBe('off');
+    expect(log.items).toHaveLength(0);
+    expect(log.counts.due).toBe(0);
+    expect(log.notDueToday[0].status).toBe('off');
   });
 
   it('shows what arrived, with the words', async () => {
@@ -139,6 +154,7 @@ describe('closing the day and the miss summary', () => {
 
   function svcFor(opts: { rows?: any[]; closedDay?: string; restDays?: string } = {}) {
     const rows: any[] = opts.rows ? [...opts.rows] : [];
+  const tasks: any[] = [{ id: 't1', title: 'Send the daily production update', kind: 'recurring', status: 'open', scheduleDays: null, ownerContact: { id: 'c1', name: 'Jayanth' } }];
     const settings: Record<string, string> = {};
     if (opts.closedDay) settings['recurring.closedDay'] = opts.closedDay;
     settings['recurring.restDays'] = opts.restDays ?? JSON.stringify(['Sun']);
@@ -209,5 +225,57 @@ describe('closing the day and the miss summary', () => {
     const { svc, rows } = svcFor({ restDays: JSON.stringify(['Mon']) }); // make the test day a rest day
     expect(await svc.closeDay(EVENING)).toBeNull();
     expect(rows()).toHaveLength(0);
+  });
+});
+
+/**
+ * BEA-1147, with the owner's real tasks. Monday 27 July: a Friday report and a Wednesday report
+ * were both counted as owed, and the chase asked Rakesh for "today's Monday night production
+ * status update". The board read "4 received / 4 not received" and meant nothing.
+ */
+describe('only what is due today counts (BEA-1147)', () => {
+  it('leaves a Friday report out of a Monday entirely', async () => {
+    const { svc, tasks } = makeSvc();
+    tasks.length = 0;
+    tasks.push(
+      { id: 'fri', title: 'Send Friday night production status update', kind: 'recurring', status: 'open', scheduleDays: JSON.stringify(['Fri']), ownerContact: { id: 'c1', name: 'Rakesh' } },
+      { id: 'daily', title: 'Send the daily production update', kind: 'recurring', status: 'open', scheduleDays: null, ownerContact: { id: 'c1', name: 'Rakesh' } },
+    );
+    const log = await svc.dayLog('2026-07-27'); // Monday
+    expect(log.items.map((i: any) => i.taskId)).toEqual(['daily']);
+    expect(log.counts.due).toBe(1);
+    expect(log.notDueToday.map((i: any) => i.taskId)).toEqual(['fri']);
+  });
+
+  it('and includes it on a Friday', async () => {
+    const { svc, tasks } = makeSvc();
+    tasks.length = 0;
+    tasks.push({ id: 'fri', title: 'Send Friday night production status update', kind: 'recurring', status: 'open', scheduleDays: JSON.stringify(['Fri']), ownerContact: { id: 'c1', name: 'Rakesh' } });
+    const log = await svc.dayLog('2026-07-31'); // Friday
+    expect(log.items.map((i: any) => i.taskId)).toEqual(['fri']);
+    expect(log.counts.due).toBe(1);
+  });
+
+  it('never records a miss for a report that was not due', async () => {
+    const { svc, tasks, statusDays } = makeSvc();
+    tasks.length = 0;
+    tasks.push({ id: 'fri', title: 'Send Friday night production status update', kind: 'recurring', status: 'open', scheduleDays: JSON.stringify(['Fri']), ownerContact: { id: 'c1', name: 'Rakesh' } });
+    const r = await svc.closeDay(new Date('2026-07-27T21:00:00+05:30')); // Monday evening
+    expect(r).toBeNull();
+    expect(statusDays.filter((s: any) => s.status === 'missed')).toHaveLength(0);
+  });
+
+  it('seeds a schedule from the title, and leaves a title with no day alone', async () => {
+    const { svc, tasks } = makeSvc();
+    tasks.length = 0;
+    tasks.push(
+      { id: 'fri', title: 'Send Friday night production status update', kind: 'recurring', status: 'open', scheduleDays: null },
+      { id: 'wed', title: "Share the production plan at Wednesday's meeting", kind: 'recurring', status: 'open', scheduleDays: null },
+      { id: 'day', title: 'Send daily Haasya production update by 7PM', kind: 'recurring', status: 'open', scheduleDays: null },
+    );
+    const r = await svc.seedSchedulesFromTitles();
+    expect(r.set.map((x: any) => x.days)).toEqual([['Fri'], ['Wed']]);
+    expect(r.untouched).toEqual(['Send daily Haasya production update by 7PM']);
+    expect(tasks.find((t: any) => t.id === 'day').scheduleDays).toBeNull();
   });
 });
