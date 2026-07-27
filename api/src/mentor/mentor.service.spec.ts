@@ -371,3 +371,47 @@ describe("the Lab's one line a week (BEA-1144)", () => {
     expect(h.sentWeekly).toHaveLength(1);
   });
 });
+
+/**
+ * BEA-844. The story row is upserted, so re-weaving your day never moves its createdAt. The
+ * freshness check compared against createdAt, so once a read existed it looked fresh forever —
+ * while reflecting a story you had since rewritten. The whole point of the nightly read is that
+ * it reads the story you actually told.
+ */
+describe('re-telling your story refreshes that night\'s read (BEA-844)', () => {
+  const read = (updatedAt: string) => ({ day: '2026-06-09', adherenceScore: 70, moodScore: null, guidance: 'The old read.', updatedAt: new Date(updatedAt) });
+  const story = (createdAt: string, updatedAt: string) => ({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date(createdAt), updatedAt: new Date(updatedAt) });
+
+  it('re-runs when the story was rewritten after the read', async () => {
+    const h = makeService('{"adherenceScore":72,"guidance":"A read of the new story."}');
+    h.mentorDays.push(read('2026-06-09T18:30:00Z'));
+    // written at 17:00, rewritten at 19:00 — createdAt still says 17:00, which is the trap.
+    h.dayStories.push(story('2026-06-09T17:00:00Z', '2026-06-09T19:00:00Z'));
+    await h.svc.ensureFreshRead('2026-06-09');
+    expect(h.llm.completeWith).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a read alone when the story has not moved since', async () => {
+    const h = makeService('{"adherenceScore":72,"guidance":"Should not run."}');
+    h.mentorDays.push(read('2026-06-09T19:30:00Z'));
+    h.dayStories.push(story('2026-06-09T17:00:00Z', '2026-06-09T19:00:00Z'));
+    await h.svc.ensureFreshRead('2026-06-09');
+    expect(h.llm.completeWith).not.toHaveBeenCalled();
+  });
+
+  it('falls back to createdAt for an older story row that has no updatedAt', async () => {
+    const h = makeService('{"adherenceScore":72,"guidance":"A read."}');
+    h.mentorDays.push(read('2026-06-09T18:30:00Z'));
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    await h.svc.ensureFreshRead('2026-06-09');
+    expect(h.llm.completeWith).toHaveBeenCalledTimes(1);
+  });
+
+  it('a rewrite storm still cannot run away — the two-a-day ceiling holds', async () => {
+    const h = makeService('{"adherenceScore":72,"guidance":"A read."}');
+    h.mentorDays.push(read('2026-06-09T18:30:00Z'));
+    h.dayStories.push(story('2026-06-09T17:00:00Z', '2026-06-09T19:00:00Z'));
+    for (let i = 0; i < 6; i++) await h.svc.ensureFreshRead('2026-06-09');
+    expect(h.llm.completeWith.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+});

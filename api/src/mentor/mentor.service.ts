@@ -454,7 +454,11 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       this.prisma.mentorDay.findUnique({ where: { day } }),
       this.prisma.dayStory.findUnique({ where: { day } }),
     ]);
-    if (read && (!story || new Date(read.updatedAt) >= new Date(story.createdAt))) return; // already fresh
+    // Against the story's updatedAt, NOT its createdAt. The story row is upserted, so re-weaving it
+    // leaves createdAt on the original write — and the read looked fresh forever while reflecting a
+    // story you had since rewritten. (BEA-844)
+    const storyAt = story ? new Date((story as any).updatedAt ?? story.createdAt) : null;
+    if (read && (!storyAt || new Date(read.updatedAt) >= storyAt)) return; // already fresh
     await this.runMentorDay(day, true).catch(() => undefined);
   }
 
