@@ -5,6 +5,7 @@ import { Task, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday } 
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { StorySection } from './DailyStory';
 import { CloseDaySheet, OpenDaysBanner, MissedDayPicker } from './CloseDay';
+import { ClaimsStrip } from '../ui/ClaimsStrip';
 
 /** Delegated open, for the facts strip. Used to be a lone pill of its own. (BEA-1138) */
 function useDelegated() {
@@ -121,6 +122,10 @@ export function Today() {
 
       {/* Finish an earlier un-closed day (the morning-after catch-up) */}
       <OpenDaysBanner key={bannerKey} onPick={setCloseDay} />
+
+      {/* "Someone says they finished something" used to be a whole screen he never visited because
+          it was empty most days. It now appears here, only when there is something. (BEA-1150) */}
+      <ClaimsStrip onChanged={load} />
 
       {/* Compact actions instead of a full-width dashed hero that was mostly empty space. (BEA-1138) */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">

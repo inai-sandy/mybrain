@@ -7,7 +7,6 @@ import { useUrlState, useUrlBool } from '../ui/useUrlState';
 import { Task, TaskCard, DumpModal, DumpReviewSheet, TaskFormModal, DoneModal, useToday, mins, sortTasksBy } from './taskShared';
 import { UnlinkedPeople } from '../ui/UnlinkedPeople';
 import { DelegatedTab } from './Delegated';
-import { Review } from './Review';
 import { BrainEatersTab } from './BrainEaters';
 import { DailyTab } from './DailyTab';
 
@@ -16,12 +15,10 @@ export function Tasks() {
   // One page, three tabs — Delegated and To review fold in here instead of crowding the sidebar. (BEA-1044)
   const [tab, setTab] = useUrlState('tab', 'mine');
   const [delegatedOpen, setDelegatedOpen] = useState<number | null>(null);
-  const [reviewCount, setReviewCount] = useState<number | null>(null);
   const [eaterCount, setEaterCount] = useState<number | null>(null); // BEA-1056
   const [dailyCount, setDailyCount] = useState<number | null>(null); // standing daily reports (BEA-1123)
   useEffect(() => {
     fetch('/api/tasks/delegated').then((r) => (r.ok ? r.json() : null)).then((d) => setDelegatedOpen(d?.summary?.open ?? 0)).catch(() => setDelegatedOpen(0));
-    fetch('/api/tasks/claims').then((r) => (r.ok ? r.json() : null)).then((d) => setReviewCount((d?.claims || []).length)).catch(() => setReviewCount(0));
     fetch('/api/tasks/brain-eaters').then((r) => (r.ok ? r.json() : null)).then((d) => setEaterCount(d?.openCount ?? 0)).catch(() => setEaterCount(0));
     fetch('/api/tasks/recurring/day-log').then((r) => (r.ok ? r.json() : null)).then((d) => setDailyCount((d?.items || []).length)).catch(() => setDailyCount(0));
   }, [tab]);
@@ -142,7 +139,7 @@ export function Tasks() {
         <div>
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><CheckSquare className="text-emerald-500" /> Tasks</h1>
           <p className="text-zinc-500 text-sm">
-            {tab === 'eaters' ? 'The things that circle your head — finish them for a peaceful sleep.' : tab === 'daily' ? 'Standing reports someone owes you every working day.' : tab === 'delegated' ? 'What other people owe you.' : tab === 'review' ? 'What they say is finished — your call.' : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
+            {tab === 'eaters' ? 'The things that circle your head — finish them for a peaceful sleep.' : tab === 'daily' ? 'Standing reports someone owes you every working day.' : tab === 'delegated' ? 'What other people owe you.' : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
           </p>
         </div>
         {tab === 'mine' && (<div className="flex items-center gap-1">
@@ -167,7 +164,7 @@ export function Tasks() {
 
       {/* The three tabs. Same page, same look — different lists. (BEA-1044) */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
-        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['daily', '🔁 Daily', dailyCount], ['review', 'To review', reviewCount], ['eaters', '🧠 Brain Eaters', eaterCount]] as const).map(([id, label, n]) => (
+        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['daily', '🔁 Daily', dailyCount], ['eaters', '🧠 Brain Eaters', eaterCount]] as const).map(([id, label, n]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -175,7 +172,7 @@ export function Tasks() {
           >
             {label}
             {n !== null && n !== undefined && n > 0 && (
-              <span className={'rounded-full px-1.5 text-[10px] ' + (id === 'review' ? 'bg-violet-500/15 text-violet-600 dark:text-violet-300' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800')}>{n}</span>
+              <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{n}</span>
             )}
           </button>
         ))}
@@ -184,7 +181,6 @@ export function Tasks() {
       {tab === 'eaters' && <BrainEatersTab onCountChange={setEaterCount} />}
       {tab === 'delegated' && <DelegatedTab onCountChange={setDelegatedOpen} />}
       {tab === 'daily' && <DailyTab onCountChange={setDailyCount} />}
-      {tab === 'review' && <Review embedded onCountChange={setReviewCount} />}
 
       {tab === 'mine' && (<>
       {history && <TaskHistory />}

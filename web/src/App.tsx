@@ -164,7 +164,8 @@ function AuthedApp() {
         <Route path="today" element={<Today />} />
         <Route path="tasks" element={<Tasks />} />
         {/* Old destinations fold into the Tasks tabs — deep links and habits keep working. (BEA-1044) */}
-        <Route path="review" element={<Navigate to="/tasks?tab=review" replace />} />
+        {/* Review is no longer a place — old links land on Today, where claims now appear. (BEA-1150) */}
+        <Route path="review" element={<Navigate to="/today" replace />} />
         <Route path="delegated" element={<Navigate to="/tasks?tab=delegated" replace />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="meeting/:id" element={<MeetingDetail />} />

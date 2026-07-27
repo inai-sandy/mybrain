@@ -109,7 +109,7 @@ export function DailyTab({ onCountChange }: { onCountChange?: (n: number) => voi
       </div>
 
       <div className="flex justify-end">
-        <Link to="/tasks?tab=review&rtab=daily" className="text-xs text-zinc-500 underline underline-offset-2 hover:text-emerald-600">See the day-by-day record</Link>
+        <Link to="/tasks?tab=daily" className="text-xs text-zinc-500 underline underline-offset-2 hover:text-emerald-600">See the day-by-day record</Link>
       </div>
 
       <ul className="grid gap-2 sm:grid-cols-2">

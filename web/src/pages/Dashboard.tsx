@@ -92,7 +92,7 @@ export function Dashboard() {
   const F = d?.facts;
   const needBand = F ? [
     { n: F.needsYou.needsYou, label: 'Needs you', to: '/agent', tone: 'rose' as const },
-    { n: F.needsYou.toReview, label: 'To review', to: '/tasks?tab=review', tone: 'violet' as const },
+    { n: F.needsYou.toReview, label: 'To review', to: '/today', tone: 'violet' as const },
     { n: F.needsYou.missedToday, label: 'Missed today', to: '/tasks?tab=daily', tone: 'rose' as const },
     { n: F.needsYou.overdue, label: 'Overdue', to: '/tasks', tone: 'amber' as const },
   ] : [];
