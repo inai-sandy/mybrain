@@ -1,4 +1,4 @@
-import { gradeBriefDraft, inventedTemporal, cadenceFromWords, mustKeepTerms, summaryContradicts, temporalTokens } from './brief-guard';
+import { gradeBriefDraft, inventedTemporal, cadenceFromWords, mustKeepTerms, summaryContradicts, temporalTokens, chaseTimesFrom, DEFAULT_CHASE_TIMES } from './brief-guard';
 
 /**
  * BEA-1151. The fixture is the owner's real briefing of 27 July, word for word, and the tasks the
@@ -57,7 +57,7 @@ describe('what counts as invented', () => {
   });
 
   it('a clock time he never said', () => {
-    expect(inventedTemporal('send it in the evening', 'Send it by 7pm')).toEqual(['time:7pm']);
+    expect(inventedTemporal('send it in the evening', 'Send it by 7pm')).toEqual(['time:19:00']);
     expect(inventedTemporal('send it by 7pm', 'Send it by 7 pm')).toEqual([]);
   });
 
@@ -105,7 +105,35 @@ describe('cadence and constraints come from his words', () => {
 
   it('reads a clock time as a time, not as a stray number', () => {
     const t = temporalTokens('send it at 7pm');
-    expect(t.has('time:7pm')).toBe(true);
+    expect(t.has('time:19:00')).toBe(true);
     expect(t.has('num:7')).toBe(false);
+  });
+});
+
+/**
+ * BEA-1148. The brief lane created tasks and then told him: "Set their chase times on their contact
+ * page." The chase now starts itself — but the times still have to come from his words, or we are
+ * straight back to BEA-1151.
+ */
+describe('when to chase, from his words (BEA-1148)', () => {
+  it('uses a time he actually named', () => {
+    expect(chaseTimesFrom('Karthik must send the Haasya production update by 7PM')).toEqual(['19:00']);
+    expect(chaseTimesFrom('send it at 9:30 am')).toEqual(['09:30']);
+    expect(chaseTimesFrom('updates at 11:00 and 17:30')).toEqual(['11:00', '17:30']);
+  });
+
+  it('falls back to the standard two slots when he named none', () => {
+    expect(chaseTimesFrom(RAKESH_BRIEF)).toEqual(DEFAULT_CHASE_TIMES);
+    expect(chaseTimesFrom('just chase him')).toEqual(DEFAULT_CHASE_TIMES);
+  });
+
+  it('never invents a time — every slot it returns is one he said', () => {
+    const raw = 'send the update by 7pm';
+    for (const t of chaseTimesFrom(raw)) expect(inventedTemporal(raw, `chase at ${t}`)).toEqual([]);
+  });
+
+  it('handles midnight and noon without wrapping wrongly', () => {
+    expect(chaseTimesFrom('at 12pm')).toEqual(['12:00']);
+    expect(chaseTimesFrom('at 12am')).toEqual(['00:00']);
   });
 });

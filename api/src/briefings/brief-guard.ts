@@ -60,9 +60,14 @@ export function temporalTokens(text: string): Set<string> {
   const out = new Set<string>();
   const t = String(text || '').toLowerCase();
 
-  // clock times: "5pm", "5 pm", "17:30", "5:30pm"
-  for (const m of t.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/g)) out.add(`time:${m[1]}${m[2] ? ':' + m[2] : ''}${m[3]}`);
-  for (const m of t.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) out.add(`time:${m[1]}:${m[2]}`);
+  // Clock times, always normalised to 24-hour, so "7pm" and "19:00" are recognised as the same
+  // time. Without this the chase time derived from "by 7PM" would look invented. (BEA-1148)
+  for (const m of t.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/g)) {
+    let h = Number(m[1]) % 12;
+    if (m[3] === 'pm') h += 12;
+    out.add(`time:${String(h).padStart(2, '0')}:${m[2] || '00'}`);
+  }
+  for (const m of t.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) out.add(`time:${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
 
   for (const w of t.replace(/[^a-z0-9:]+/g, ' ').split(' ')) {
     if (!w) continue;
@@ -153,4 +158,30 @@ export function summaryContradicts(raw: string, summary: string): boolean {
   const said = cadenceFromWords(raw);
   const wrote = cadenceFromWords(summary);
   return !!said && !!wrote && said !== wrote;
+}
+
+/** Where a chase lands when the owner named no time: one mid-morning nudge, one late afternoon. */
+export const DEFAULT_CHASE_TIMES = ['10:00', '17:30'];
+
+/**
+ * When to chase, taken from HIS words. (BEA-1148)
+ *
+ * If he said a time — "send it by 7PM" — chase at that time, because that is when it is actually
+ * late. Anything else would be a time he never said, which BEA-1151 exists to prevent. With no
+ * time given, fall back to the same two slots the close-day path already uses, so a chase set by
+ * voice behaves like a chase set by hand.
+ */
+export function chaseTimesFrom(raw: string): string[] {
+  const t = String(raw || '').toLowerCase();
+  const found: string[] = [];
+  for (const m of t.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/g)) {
+    let h = Number(m[1]) % 12;
+    if (m[3] === 'pm') h += 12;
+    found.push(`${String(h).padStart(2, '0')}:${m[2] || '00'}`);
+  }
+  for (const m of t.matchAll(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g)) {
+    found.push(`${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
+  }
+  const clean = [...new Set(found)].filter((x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x)).sort();
+  return clean.length ? clean.slice(0, 4) : DEFAULT_CHASE_TIMES;
 }

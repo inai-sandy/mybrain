@@ -255,3 +255,29 @@ describe('a briefing may not invent days you never said (BEA-1151)', () => {
     expect(b.created[0].kind).toBeUndefined();
   });
 });
+
+/**
+ * BEA-1148. Nothing may reach a teammate in the same second the owner finishes speaking — he sees
+ * the card first. `scheduleNudges` only queues strictly-future slots, and this pins that promise.
+ */
+describe('the chase starts itself, but never fires immediately (BEA-1148)', () => {
+  it('creates the chase with the briefing, in one step', async () => {
+    const { svc, chases } = make(JSON.stringify({ summary: 'x', tasks: [{ title: 'Send the update' }] }));
+    await svc.create('c1', { text: 'Rakesh sends the update', summary: 'x', tasks: [{ title: 'Send the update' }], chase: { times: ['10:00', '17:30'] } });
+    expect(chases).toHaveLength(1);
+    expect(chases[0]).toMatchObject({ times: ['10:00', '17:30'], repeat: 'daily' });
+    expect(chases[0].taskId).toBeTruthy(); // tied to the task, so finishing it stops the chase
+  });
+
+  it('creates no chase when no times are given', async () => {
+    const { svc, chases } = make(JSON.stringify({ summary: 'x', tasks: [{ title: 'Send the update' }] }));
+    await svc.create('c1', { text: 'Rakesh sends the update', summary: 'x', tasks: [{ title: 'Send the update' }] });
+    expect(chases).toHaveLength(0);
+  });
+
+  it('a rubbish time is refused rather than chased at midnight', async () => {
+    const { svc, chases } = make(JSON.stringify({ summary: 'x', tasks: [{ title: 'Send the update' }] }));
+    await svc.create('c1', { text: 'x', summary: 'x', tasks: [{ title: 'Send the update' }], chase: { times: ['25:99', 'later'] as any } });
+    expect(chases).toHaveLength(0);
+  });
+});
