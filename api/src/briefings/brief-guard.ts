@@ -62,12 +62,16 @@ export function temporalTokens(text: string): Set<string> {
 
   // Clock times, always normalised to 24-hour, so "7pm" and "19:00" are recognised as the same
   // time. Without this the chase time derived from "by 7PM" would look invented. (BEA-1148)
+  // The am/pm forms are read FIRST and then blanked out, so "5:30 pm" is one time (17:30) and not
+  // also a bare 05:30. Reading it twice made a legitimate time look invented. (BEA-1148)
+  let rest = t;
   for (const m of t.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/g)) {
     let h = Number(m[1]) % 12;
     if (m[3] === 'pm') h += 12;
     out.add(`time:${String(h).padStart(2, '0')}:${m[2] || '00'}`);
+    rest = rest.replace(m[0], ' ');
   }
-  for (const m of t.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) out.add(`time:${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
+  for (const m of rest.matchAll(/\b(\d{1,2}):(\d{2})\b/g)) out.add(`time:${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
 
   for (const w of t.replace(/[^a-z0-9:]+/g, ' ').split(' ')) {
     if (!w) continue;
@@ -174,12 +178,16 @@ export const DEFAULT_CHASE_TIMES = ['10:00', '17:30'];
 export function chaseTimesFrom(raw: string): string[] {
   const t = String(raw || '').toLowerCase();
   const found: string[] = [];
+  // Same rule as temporalTokens: consume the am/pm forms before looking for bare HH:MM, or
+  // "5:30 pm" becomes both 17:30 and an imaginary 05:30 chase. (BEA-1148)
+  let rest = t;
   for (const m of t.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/g)) {
     let h = Number(m[1]) % 12;
     if (m[3] === 'pm') h += 12;
     found.push(`${String(h).padStart(2, '0')}:${m[2] || '00'}`);
+    rest = rest.replace(m[0], ' ');
   }
-  for (const m of t.matchAll(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g)) {
+  for (const m of rest.matchAll(/\b([01]?\d|2[0-3]):([0-5]\d)\b/g)) {
     found.push(`${String(Number(m[1])).padStart(2, '0')}:${m[2]}`);
   }
   const clean = [...new Set(found)].filter((x) => /^([01]\d|2[0-3]):[0-5]\d$/.test(x)).sort();
