@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EmoCardsService } from './emo-cards.service';
 import { BriefingsService } from '../briefings/briefings.service';
+import { chaseTimesFrom } from '../briefings/brief-guard';
 import { ContactsService } from '../contacts/contacts.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -104,7 +105,17 @@ export class EmoBriefService {
       // monthly have nowhere to store their schedule until BEA-1147, and a weekly report filed as
       // a daily one is exactly the bug this lane just caused. (BEA-1151)
       const kind = draft.cadence === 'daily' ? 'recurring' : undefined;
-      const saved: any = await this.briefings.create(contact.id, { text, summary: draft.summary, tasks: draft.tasks, kind });
+      // The chase starts by itself. This lane used to file the tasks and then tell him to go and
+      // set the times on the contact page — a manual step written into the product. Times come from
+      // his own words where he gave one ("by 7PM"), never invented. (BEA-1148)
+      const chaseTimes = chaseTimesFrom(text);
+      const saved: any = await this.briefings.create(contact.id, {
+        text,
+        summary: draft.summary,
+        tasks: draft.tasks,
+        kind,
+        chase: { times: chaseTimes },
+      });
       const tasks = saved?.tasks || [];
       this.log.log(`briefed ${contact.name} by voice: ${tasks.length} task(s)`);
 
@@ -122,7 +133,7 @@ export class EmoBriefService {
             ? ['', `⚠️ I left out ${draft.dropped.length} thing${draft.dropped.length === 1 ? '' : 's'} because ${draft.dropped.length === 1 ? 'it named' : 'they named'} a day or number you didn't say: ${draft.dropped.map((d: any) => `"${d.title}"`).join(', ')}. Say it again with the day if you meant it.`]
             : []),
           '',
-          '_Set their chase times on their contact page._',
+          `_Chasing at ${chaseTimes.join(' and ')}${draft.cadence === 'daily' ? ', every working day' : ''} — change it on their page._`,
         ].join('\n'),
         links: [{ kind: 'contact', id: contact.id, label: contact.name }, ...tasks.slice(0, 8).map((t: any) => ({ kind: 'task', id: t.id, label: String(t.title).slice(0, 60) }))],
       });
