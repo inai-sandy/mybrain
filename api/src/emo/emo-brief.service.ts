@@ -100,7 +100,11 @@ export class EmoBriefService {
 
       // Spoken briefings are saved straight away — you're talking, often walking, so there is no
       // review sheet. Everything is on the card and editable.
-      const saved: any = await this.briefings.create(contact.id, { text, summary: draft.summary, tasks: draft.tasks });
+      // Cadence comes from HIS words. Only "daily" becomes a standing report for now — weekly and
+      // monthly have nowhere to store their schedule until BEA-1147, and a weekly report filed as
+      // a daily one is exactly the bug this lane just caused. (BEA-1151)
+      const kind = draft.cadence === 'daily' ? 'recurring' : undefined;
+      const saved: any = await this.briefings.create(contact.id, { text, summary: draft.summary, tasks: draft.tasks, kind });
       const tasks = saved?.tasks || [];
       this.log.log(`briefed ${contact.name} by voice: ${tasks.length} task(s)`);
 
@@ -108,7 +112,18 @@ export class EmoBriefService {
         status: 'done',
         contactId: contact.id, // so this card shows on their page (BEA-1034)
         summary: `Briefed ${contact.name} — ${tasks.length} task${tasks.length === 1 ? '' : 's'}`,
-        detail: [`**${contact.name}** now owes you:`, ...tasks.map((t: any) => `- ${t.title}`), '', '_Set their chase times on their contact page._'].join('\n'),
+        // A spoken briefing has no review sheet, so anything the guard refused has to be said out
+        // loud here. Silently filing three tasks and dropping a fourth is how this went wrong. (BEA-1151)
+        detail: [
+          `**${contact.name}** now owes you:`,
+          ...tasks.map((t: any) => `- ${t.title}`),
+          ...(draft.cadence ? ['', `_Every ${draft.cadence === 'daily' ? 'day' : draft.cadence === 'weekly' ? 'week' : 'month'} — from your words._`] : []),
+          ...(draft.dropped?.length
+            ? ['', `⚠️ I left out ${draft.dropped.length} thing${draft.dropped.length === 1 ? '' : 's'} because ${draft.dropped.length === 1 ? 'it named' : 'they named'} a day or number you didn't say: ${draft.dropped.map((d: any) => `"${d.title}"`).join(', ')}. Say it again with the day if you meant it.`]
+            : []),
+          '',
+          '_Set their chase times on their contact page._',
+        ].join('\n'),
         links: [{ kind: 'contact', id: contact.id, label: contact.name }, ...tasks.slice(0, 8).map((t: any) => ({ kind: 'task', id: t.id, label: String(t.title).slice(0, 60) }))],
       });
     } catch (e: any) {
