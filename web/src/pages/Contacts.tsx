@@ -59,6 +59,9 @@ function ContactDetail({ contactId }: { contactId: string }) {
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [editContact, setEditContact] = useState(false);
   const [tab, setTab] = useState<'reminders' | 'briefings' | 'tasks' | 'mentions'>('reminders');
+  // The conversation, opened from THIS page. Having to leave for Chats and find the person again
+  // was half of the four-screen hunt. (BEA-1149)
+  const [chatOpen, setChatOpen] = useState(false);
   const [briefing, setBriefing] = useState(false);
   const [briefReload, setBriefReload] = useState(0);
   const [tasks, setTasks] = useState<{ id: string; title: string; status: string; day?: string | null }[] | null>(null);
@@ -144,6 +147,13 @@ function ContactDetail({ contactId }: { contactId: string }) {
 
       {/* Tabs: everything about this person in one place (BEA-762) */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
+        <button
+          onClick={() => setChatOpen(true)}
+          disabled={!contact}
+          className="-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"
+        >
+          <MessageSquare className="h-3.5 w-3.5" /> Chat
+        </button>
         {([['reminders', 'Reminders', reminders?.length], ['briefings', 'Briefings', undefined], ['tasks', 'Tasks', tasks?.length], ['mentions', 'Mentions', mentions?.mentions]] as const).map(([id, label, n]) => (
           <button key={id} onClick={() => setTab(id)} className={'-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{label}{n ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{n}</span> : null}</button>
         ))}
@@ -220,6 +230,8 @@ function ContactDetail({ contactId }: { contactId: string }) {
       {tab === 'reminders' && <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50"><Plus className="h-4 w-4" />Add reminder</button>}
 
       {openThread && (() => { const r = reminders?.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}
+      {/* Their whole WhatsApp thread, opened from their own page. (BEA-1149) */}
+      {chatOpen && contact && <ReminderChat reminder={{ id: 'thread', contactId: contact.id, contact } as any} onClose={() => setChatOpen(false)} />}
       {showForm && <NewReminderForm reminder={editingReminder} prefill={editingReminder ? null : { contactId, contactName: contact?.name || '', message: '' }} onClose={() => { setShowForm(false); setEditingReminder(null); }} onSaved={() => { setShowForm(false); setEditingReminder(null); load(); }} />}
       {editContact && contact && <ContactForm contact={contact} onClose={() => setEditContact(false)} onSaved={() => { setEditContact(false); load(); }} />}
     </div>
