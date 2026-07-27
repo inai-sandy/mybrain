@@ -180,3 +180,78 @@ describe('the chase is set in the same step (BEA-1021)', () => {
     expect(created).toHaveLength(1);
   });
 });
+
+/**
+ * BEA-1151, with the owner's real 27 July briefing and the exact tasks the AI produced from it.
+ * That morning those three fabricated tasks drove a WhatsApp message to a real colleague asking
+ * for "today's Monday night production status update". The gate has to hold here, in the service,
+ * not only in the pure helper.
+ */
+describe('a briefing may not invent days you never said (BEA-1151)', () => {
+  const BRIEF =
+    'This is to Rakesh. So every day rakesh has to send production updates based the plan. ' +
+    'He has to clearly communicate if we are going according to plan. ' +
+    'He has to send updates without missing both Haasya and MIC.';
+
+  const FABRICATED = JSON.stringify({
+    summary: 'Rakesh must send Sandeep regular production status updates every week.',
+    tasks: [
+      { title: 'Send Monday night production status update' },
+      { title: "Share the production plan at Wednesday's meeting" },
+      { title: 'Send Friday night production status update' },
+    ],
+  });
+
+  it('refuses all three invented weekdays and keeps his words instead', async () => {
+    const { svc } = make(FABRICATED);
+    const d = await svc.draft('c1', BRIEF);
+    const text = d.tasks.map((t: any) => `${t.title} ${t.note || ''}`).join(' ').toLowerCase();
+    expect(text).not.toContain('monday');
+    expect(text).not.toContain('wednesday');
+    expect(text).not.toContain('friday');
+    expect(d.dropped).toHaveLength(3);
+    expect(d.tasks.length).toBeGreaterThan(0); // never evaporates
+  });
+
+  it('does not repeat the summary that turned every day into every week', async () => {
+    const { svc } = make(FABRICATED);
+    const d = await svc.draft('c1', BRIEF);
+    expect(d.summary.toLowerCase()).not.toContain('every week');
+  });
+
+  it('reads the cadence he actually said', async () => {
+    const { svc } = make(FABRICATED);
+    expect((await svc.draft('c1', BRIEF)).cadence).toBe('daily');
+  });
+
+  it('keeps an honest draft, and re-attaches the constraint that was dropped', async () => {
+    const honest = JSON.stringify({
+      summary: 'Rakesh sends a daily production update.',
+      tasks: [{ title: 'Send the daily production update', note: 'Say whether we are going to plan.' }],
+    });
+    const { svc } = make(honest);
+    const d = await svc.draft('c1', BRIEF);
+    expect(d.tasks).toHaveLength(1);
+    expect(d.dropped).toHaveLength(0);
+    // "without missing both Haasya and MIC" was the whole point — it must survive.
+    expect(`${d.tasks[0].note}`).toContain('Haasya');
+    expect(`${d.tasks[0].note}`).toContain('MIC');
+  });
+
+  it('a task with a day he DID say is kept', async () => {
+    const said = 'Rakesh must send the production status every Friday night.';
+    const { svc } = make(JSON.stringify({ summary: 'Friday report', tasks: [{ title: 'Send Friday night production status update' }] }));
+    const d = await svc.draft('c1', said);
+    expect(d.dropped).toHaveLength(0);
+    expect(d.tasks[0].title).toContain('Friday');
+  });
+
+  it('only a daily cadence becomes a standing report — weekly has nowhere to store its schedule yet', async () => {
+    const { svc, created } = make(JSON.stringify({ summary: 'x', tasks: [{ title: 'Send the production update' }] }));
+    await svc.create('c1', { text: BRIEF, summary: 'x', tasks: [{ title: 'Send the production update' }], kind: 'recurring' });
+    expect(created[0].kind).toBe('recurring');
+    const b = make(JSON.stringify({ summary: 'x', tasks: [{ title: 'Send the update' }] }));
+    await b.svc.create('c1', { text: 'send it every week', summary: 'x', tasks: [{ title: 'Send the update' }] });
+    expect(b.created[0].kind).toBeUndefined();
+  });
+});

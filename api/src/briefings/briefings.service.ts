@@ -6,6 +6,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { RemindersService } from '../contacts/reminders.service';
 import { MemoryService } from '../memory/memory.service';
 import { looseJsonParse } from '../common/llm-json';
+import { gradeBriefDraft, summaryContradicts, cadenceFromWords, type Cadence } from './brief-guard';
 
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
@@ -76,7 +77,7 @@ export class BriefingsService {
   }
 
   /** Propose the tasks hidden in a briefing. Saves NOTHING — the owner reviews first. */
-  async draft(contactId: string, text: string): Promise<{ summary: string; tasks: DraftTask[] }> {
+  async draft(contactId: string, text: string): Promise<{ summary: string; tasks: DraftTask[]; cadence: Cadence; dropped: { title: string; invented: string[] }[] }> {
     const contact = await this.contactOrThrow(contactId);
     const raw = String(text || '').trim();
     if (!raw) throw new BadRequestException('Tell me what is going on with them first');
@@ -94,7 +95,7 @@ export class BriefingsService {
     // The AI being unavailable must never lose what you said. Fall back to one task holding the
     // whole briefing — you can split it by hand, and nothing is dropped on the floor.
     if (!out || !Array.isArray(out.tasks) || !out.tasks.length) {
-      return { summary: raw.replace(/\s+/g, ' ').slice(0, 140), tasks: [{ title: raw.replace(/\s+/g, ' ').slice(0, 160), note: raw.slice(0, 500) }] };
+      return { summary: raw.replace(/\s+/g, ' ').slice(0, 140), tasks: [{ title: raw.replace(/\s+/g, ' ').slice(0, 160), note: raw.slice(0, 500) }], cadence: cadenceFromWords(raw), dropped: [] };
     }
 
     const tasks: DraftTask[] = out.tasks
@@ -108,13 +109,46 @@ export class BriefingsService {
       .filter((t: DraftTask) => !!t.title)
       .slice(0, 20);
 
-    if (!tasks.length) return { summary: raw.replace(/\s+/g, ' ').slice(0, 140), tasks: [{ title: raw.replace(/\s+/g, ' ').slice(0, 160), note: raw.slice(0, 500) }] };
-    const summary = String(out.summary || '').trim().slice(0, 200) || `${tasks.length} thing${tasks.length === 1 ? '' : 's'} for ${contact.name}`;
-    return { summary, tasks };
+    // THE GATE (BEA-1151). A task may only commit to a day, date, time or figure the owner actually
+    // said. On 27 Jul this exact path invented Monday, Wednesday and Friday from a briefing that
+    // said "every day", and those tasks went out to a real colleague on WhatsApp the same morning.
+    const graded = gradeBriefDraft(raw, tasks);
+    for (const d of graded.dropped) {
+      this.log.warn(`briefing: dropped "${d.title}" — invented ${d.invented.join(', ')}, never said`);
+    }
+    let kept = graded.kept;
+
+    // Nothing survived: keep his own words rather than let the briefing evaporate.
+    if (!kept.length) {
+      return {
+        summary: raw.replace(/\s+/g, ' ').slice(0, 140),
+        tasks: [{ title: raw.replace(/\s+/g, ' ').slice(0, 160), note: raw.slice(0, 500) }],
+        cadence: graded.cadence,
+        dropped: graded.dropped,
+      };
+    }
+
+    // A constraint he stated that no task carries is appended rather than lost — "without missing
+    // both Haasya and MIC" was the entire point of that briefing and it vanished.
+    if (graded.missingTerms.length) {
+      const add = `Don't miss: ${graded.missingTerms.join(', ')}.`;
+      this.log.warn(`briefing: re-attached dropped constraint — ${add}`);
+      kept = kept.map((t, i) => (i === 0 ? { ...t, note: [t.note, add].filter(Boolean).join(' ') } : t));
+    }
+
+    let summary = String(out.summary || '').trim().slice(0, 200);
+    // "every day" must never come back as "every week".
+    if (summary && summaryContradicts(raw, summary)) {
+      this.log.warn(`briefing: summary contradicted the briefing (said ${cadenceFromWords(raw)}), using his words instead`);
+      summary = '';
+    }
+    if (!summary) summary = raw.replace(/\s+/g, ' ').slice(0, 140);
+
+    return { summary, tasks: kept, cadence: graded.cadence, dropped: graded.dropped };
   }
 
   /** Save the briefing and create exactly the tasks the owner approved. */
-  async create(contactId: string, input: { text?: string; summary?: string; tasks?: DraftTask[]; chase?: { times?: string[] } | null }) {
+  async create(contactId: string, input: { text?: string; summary?: string; tasks?: DraftTask[]; chase?: { times?: string[] } | null; kind?: 'assignment' | 'recurring' }) {
     const contact = await this.contactOrThrow(contactId);
     const raw = String(input?.text || '').trim();
     if (!raw) throw new BadRequestException('Tell me what is going on with them first');
@@ -137,6 +171,7 @@ export class BriefingsService {
         priority: t.priority,
         estimateMin: t.estimateMin,
         ownerContactId: contactId, // every task from a briefing belongs to that person (BEA-1019)
+        ...(input?.kind ? { kind: input.kind } : {}), // a standing report, only when HE said so (BEA-1151)
         briefingId: briefing.id,
         auto: true,
       });
