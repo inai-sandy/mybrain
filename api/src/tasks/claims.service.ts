@@ -35,7 +35,7 @@ export class ClaimsService {
     // return null, i.e. nothing lands in the review list. This is the single choke point every
     // caller goes through — the contact's page, the agent, anything future. (BEA-1118)
     if (task.kind === 'recurring') {
-      await this.recurring.markReceived(task.id, this.recurring.today(), quote, input.contactId || null);
+      await this.recurring.markReceived(task.id, this.recurring.today(), quote, input.contactId || null, { source: input.source === 'page' ? 'page' : 'whatsapp' });
       this.log.log(`daily report received: "${task.title}" — no review needed`);
       return null;
     }

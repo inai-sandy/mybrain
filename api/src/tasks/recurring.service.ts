@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { localDayKey, localHour, weekdayOf } from '../common/localday';
 import { isOwedOn, parseSchedule, serialiseSchedule, daysFromTitle, scheduleLabel } from './schedule';
+import { laterWins } from '../contacts/promise-later';
 
 /** Weekday names a rest day can be set to. */
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -68,15 +69,38 @@ export class RecurringService {
    * Today's report arrived. Idempotent per task per day, and a later arrival always upgrades a
    * "missed" to "received" — the ledger records what actually happened, not what we guessed first.
    */
-  async markReceived(taskId: string, day: string, quote?: string | null, contactId?: string | null) {
+  async markReceived(taskId: string, day: string, quote?: string | null, contactId?: string | null, opts?: { source?: string; at?: Date }) {
     const words = (quote || '').trim().slice(0, 1000) || null;
+    const at = opts?.at ?? new Date();
+    const source = opts?.source ?? null;
+    // The LATER signal wins. A share-page tick followed by "sending at 12" must not stay received,
+    // and a stale retry must never flip a settled day back. (BEA-1152)
+    const existing = await this.prisma.taskStatusDay.findUnique({ where: { taskId_day: { taskId, day } }, select: { signalAt: true } }).catch(() => null);
+    if (existing && !laterWins(existing.signalAt, at)) return;
     await this.prisma.taskStatusDay
       .upsert({
         where: { taskId_day: { taskId, day } },
-        create: { taskId, day, status: 'received', quote: words, contactId: contactId || null },
-        update: { status: 'received', quote: words ?? undefined, contactId: contactId || undefined },
+        create: { taskId, day, status: 'received', quote: words, contactId: contactId || null, source, signalAt: at },
+        update: { status: 'received', quote: words ?? undefined, contactId: contactId || undefined, source: source ?? undefined, signalAt: at },
       })
       .catch((e) => this.log.warn(`markReceived: ${e?.message}`));
+  }
+
+  /**
+   * Today's report did NOT arrive after all — they said so themselves, after an earlier tick.
+   * The day goes back to waiting and the chase resumes. (BEA-1152)
+   */
+  async markNotReceived(taskId: string, day: string, quote?: string | null, contactId?: string | null, opts?: { source?: string; at?: Date }): Promise<boolean> {
+    const at = opts?.at ?? new Date();
+    const existing = await this.prisma.taskStatusDay.findUnique({ where: { taskId_day: { taskId, day } }, select: { status: true, signalAt: true } }).catch(() => null);
+    if (!existing) return false; // nothing recorded — already waiting
+    if (!laterWins(existing.signalAt, at)) return false; // an older signal cannot undo a newer one
+    if (existing.status !== 'received') return false;
+    await this.prisma.taskStatusDay
+      .delete({ where: { taskId_day: { taskId, day } } })
+      .catch((e) => this.log.warn(`markNotReceived: ${e?.message}`));
+    this.log.log(`un-marked ${taskId} for ${day} — they said it is still coming`);
+    return true;
   }
 
   /** Has today's report already arrived? Drives "stop chasing for the rest of today". */

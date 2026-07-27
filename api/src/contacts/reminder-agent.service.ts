@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { promisesLater } from './promise-later';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { RecurringService } from '../tasks/recurring.service';
@@ -400,12 +401,25 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // Independent of "done": Jayanth's real updates are figures and names, they never say
     // "finished". (BEA-1118)
     const reported: string[] = [];
+    // "Update sheet sending 12 clock" is a promise, not a report. On 27 Jul that message arrived
+    // 50 seconds AFTER a share-page tick and the board still said received. The later message
+    // wins, so it un-marks the day and the chase resumes. (BEA-1152)
+    if (lastIn && promisesLater(lastIn)) {
+      const today = this.recurring.today();
+      for (const it of items) {
+        if (!it.taskId || !it.recurring) continue;
+        const undone = await this.recurring.markNotReceived(it.taskId, today, lastIn, contactId, { source: 'whatsapp' });
+        if (undone) this.log.log(`agent: ${name} said "${lastIn.slice(0, 60)}" — ${it.subject} is still owed today`);
+      }
+    }
     if (Array.isArray(parsed.statusToday) && parsed.statusToday.length && lastIn) {
       const today = this.recurring.today();
       for (const n of parsed.statusToday) {
         const item = items.find((it) => it.n === Number(n));
         if (!item?.taskId || !item.recurring) continue; // only daily items have a day to satisfy
-        await this.recurring.markReceived(item.taskId, today, lastIn, contactId);
+        // A message promising it for later is never today's report, whatever the model decided.
+        if (promisesLater(lastIn)) continue;
+        await this.recurring.markReceived(item.taskId, today, lastIn, contactId, { source: 'whatsapp' });
         reported.push(item.subject);
       }
       if (reported.length) this.log.log(`agent: ${name} sent today's ${reported.join('; ')}`);
@@ -417,7 +431,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         // The model was told never to mark a daily report finished. If it does anyway, treat it as
         // today's status instead of a completion — a wrong call must not be able to end the chase.
         if (item.recurring) {
-          await this.recurring.markReceived(item.taskId, this.recurring.today(), lastIn, contactId);
+          if (!promisesLater(lastIn)) await this.recurring.markReceived(item.taskId, this.recurring.today(), lastIn, contactId, { source: 'whatsapp' });
           continue;
         }
         // A second, deterministic opinion before a claim silences the chase. (BEA-1122)
