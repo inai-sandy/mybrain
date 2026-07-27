@@ -66,7 +66,8 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
 
   // step 4 — what did you finish? (BEA-1146)
   type OpenTask = { id: string; title: string; carried: number; owner: string | null };
-  const [openTasks, setOpenTasks] = useState<OpenTask[]>([]);
+  const [openTasks, setOpenTasks] = useState<OpenTask[] | null>(null); // null = still loading or failed (BEA-1146)
+  const [loadErr, setLoadErr] = useState(false);
   const [doneIds, setDoneIds] = useState<Record<string, boolean>>({}); // ticked = finished
   const [preTicked, setPreTicked] = useState<Record<string, boolean>>({}); // the story said so
   const [carry, setCarry] = useState<Record<string, 'drop' | undefined>>({});
@@ -142,9 +143,10 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   /** Step 3 → 4: load the day's still-open tasks for carry choices. */
   async function toCarry() {
     setStep('carry');
-    if (!openTasks.length) {
+    if (!openTasks?.length) {
+      setLoadErr(false);
       fetch('/api/daily/wrap-up-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
-        .then((r) => (r.ok ? r.json() : { openTasks: [] }))
+        .then((r) => { if (!r.ok) throw new Error('load failed'); return r.json(); })
         .then((d) => {
           setOpenTasks(d.openTasks || []);
           // Your story already said you did these — tick them, and say why. (BEA-1146)
@@ -153,7 +155,9 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
           setPreTicked(pre);
           setDoneIds(pre);
         })
-        .catch(() => undefined);
+        // A failed load used to fall through to "Nothing left open — clean sweep 🎉" with 44 tasks
+        // still open. Sealing the day on that lie is worse than any error message. (BEA-1146)
+        .catch(() => setLoadErr(true));
     }
   }
 
@@ -310,8 +314,9 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                  * Ticked = done. Untouched = carries forward, exactly as before. The default is
                  * still the safe one, so a rushed midnight close changes nothing by accident.
                  */
-                const recent = openTasks.filter((t) => t.carried < 7);
-                const older = openTasks.filter((t) => t.carried >= 7);
+                const rows = openTasks ?? [];
+                const recent = rows.filter((t) => t.carried < 7);
+                const older = rows.filter((t) => t.carried >= 7);
                 const dropped = (t: OpenTask) => carry[t.id] === 'drop';
                 const nDone = Object.values(doneIds).filter(Boolean).length;
 
@@ -342,10 +347,18 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                   <>
                     <p className="mb-3 text-xs text-zinc-500">
                       Tick what you finished — I'll mark those done. Anything you leave alone moves to tomorrow on its own.
-                      {openTasks.some((t) => t.owner) && ' Closing one you gave to someone also stops their WhatsApp chase.'}
+                      {rows.some((t) => t.owner) && ' Closing one you gave to someone also stops their WhatsApp chase.'}
                     </p>
 
-                    {openTasks.length ? (
+                    {loadErr ? (
+                      <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
+                        I couldn’t load your open tasks, so I can’t show what to tick.
+                        <button onClick={toCarry} className="ml-2 rounded-md border border-amber-400/60 px-2 py-0.5 text-xs font-medium hover:bg-amber-500/10">Try again</button>
+                        <p className="mt-1 text-[11px]">Sealing now still carries everything forward — nothing is lost, and nothing gets marked done.</p>
+                      </div>
+                    ) : openTasks === null ? (
+                      <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-14 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />)}</div>
+                    ) : rows.length ? (
                       <div className="max-h-[42vh] space-y-3 overflow-y-auto pr-1">
                         {recent.length > 0 && (
                           <div>
