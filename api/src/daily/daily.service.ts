@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { matchFinishedToOpen } from './finished-match';
 import { AppEventsService } from '../events/events.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { MemoryService } from '../memory/memory.service';
@@ -207,17 +208,22 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   // ---- daily wrap-up: finished tasks from the story + working hours ----
 
   /** Read the day's story and surface concrete tasks the user MENTIONS having finished but never logged. */
-  async doneCandidates(dayInput?: string): Promise<{ day: string; candidates: { title: string; category: string | null }[] }> {
+  async doneCandidates(dayInput?: string): Promise<{ day: string; candidates: { title: string; category: string | null }[]; finishedOpenIds: string[] }> {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
     const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const text = (story?.rawText || '').trim();
-    if (text.length < 15) return { day, candidates: [] };
+    if (text.length < 15) return { day, candidates: [], finishedOpenIds: [] };
 
     // Everything already on that day's record, carried tasks included — keyed to `day` this missed
     // anything added earlier, so the AI re-suggested work already logged. (BEA-1018)
     const existing = await this.prisma.task.findMany({ where: await this.tasks.whereForDay(day), select: { title: true } });
     const existingTitles = existing.map((e) => e.title);
+    // Still-open tasks, so an overlap can TICK ONE OFF instead of being silently dropped. (BEA-1146)
+    const openNow = await this.prisma.task.findMany({
+      where: { status: { not: 'done' }, day: { lte: day }, kind: { not: 'recurring' } },
+      select: { id: true, title: true },
+    });
     const tmpl = await this.prompts.get('daily.doneExtract');
     const prompt =
       `${tmpl}\n\n` +
@@ -249,7 +255,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       .map((t) => ({ title: String(t?.title || '').trim().slice(0, 160), category: t?.category ? String(t.category).trim().slice(0, 40) : null }))
       .filter((t) => t.title && !isDup(t.title) && !seen.has(t.title.toLowerCase()) && seen.add(t.title.toLowerCase()))
       .slice(0, 12);
-    return { day, candidates };
+    // Everything the model said was finished — including what the dedupe above removed, because
+    // those removals are exactly the open tasks worth ticking off. (BEA-1146)
+    const saidFinished = list.map((t) => String(t?.title || '').trim()).filter(Boolean);
+    const finishedOpenIds = matchFinishedToOpen(saidFinished, openNow);
+    return { day, candidates, finishedOpenIds };
   }
 
   /** Forward to-dos the user mentioned in their story (things still TO DO), to add to the tasks sheet in the flow. (BEA-513) */
@@ -347,13 +357,19 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
   async wrapUpData(dayInput?: string) {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
-    const [{ candidates }, { todos }, feed, open] = await Promise.all([
+    const [{ candidates, finishedOpenIds }, { todos }, feed, open] = await Promise.all([
       this.doneCandidates(day),
       this.todoCandidates(day),
       this.feed(day, tz),
       // Everything still open by that day — keyed to `day` a task carried two or more nights could
       // never be rolled or dropped from Wrap-up again. (BEA-1018)
-      this.prisma.task.findMany({ where: { status: { not: 'done' }, day: { lte: day } }, orderBy: { createdAt: 'asc' }, select: { id: true, title: true } }),
+      // Recurring tasks are left out: they are never completed by design, so asking to close them
+      // every single night is pure noise. Their record is the per-day received/missed stamp. (BEA-1146)
+      this.prisma.task.findMany({
+        where: { status: { not: 'done' }, day: { lte: day }, kind: { not: 'recurring' } },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, title: true, rolloverCount: true, ownerContact: { select: { name: true } } },
+      }),
     ]);
     // Suggest hours from the span between the first and last thing the user did in the app that day.
     let suggestedMinutes: number | null = null;
@@ -365,12 +381,26 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       const span = Math.round((times[times.length - 1] - times[0]) / 60000);
       suggestedMinutes = Math.max(30, Math.min(16 * 60, span));
     }
-    return { day, candidates, todos, suggestedMinutes, openTasks: open };
+    return {
+      day,
+      candidates,
+      todos,
+      suggestedMinutes,
+      openTasks: open.map((t: any) => ({ id: t.id, title: t.title, carried: t.rolloverCount || 0, owner: t.ownerContact?.name ?? null })),
+      finishedOpenIds, // pre-ticked: your story says you did these (BEA-1146)
+    };
   }
 
   /** Wrap up the day: log the approved finished tasks as DONE, save the stated working minutes,
    *  and carry-forward unfinished tasks (roll to tomorrow / drop). */
-  async wrapUp(dayInput: string | undefined, tasks: { title?: string; category?: string | null }[], workedMinutes?: number, roll: string[] = [], drop: string[] = []) {
+  async wrapUp(
+    dayInput: string | undefined,
+    tasks: { title?: string; category?: string | null }[],
+    workedMinutes?: number,
+    roll: string[] = [],
+    drop: string[] = [],
+    done: string[] = [], // open tasks the owner ticked off in the last step (BEA-1146)
+  ) {
     const tz = await this.tz();
     const day = dayInput && /^\d{4}-\d{2}-\d{2}$/.test(dayInput) ? dayInput : this.dayKey(tz);
     let created = 0;
@@ -393,17 +423,29 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // Carry-forward: the chosen unfinished tasks STAY on the day they were added — we only count the
     // carry and make sure they're open. Today's list picks them up with `day <= today`, so they remain
     // visible and workable without pretending they were created today. (BEA-1014, was BEA-781)
+    // Tick-offs FIRST, before the carry-forward below: a task the owner just finished must not also
+    // have its carried count bumped, or a task closed tonight would read "carried 45 days" forever.
+    // Goes through the normal setDone path so the brain indexes it and any chase for it stops. (BEA-1146)
+    let closed = 0;
+    for (const id of (done || []).slice(0, 100)) {
+      const r = await this.tasks.setDone(id, true).catch(() => null);
+      if (r) closed++;
+    }
+    const closedSet = new Set((done || []).slice(0, 100));
+
     let rolled = 0;
     let dropped = 0;
     for (const id of (roll || []).slice(0, 50)) {
+      if (closedSet.has(id)) continue; // just closed — never re-open it
       const r = await this.prisma.task.update({ where: { id }, data: { status: 'open', rolloverCount: { increment: 1 } } }).catch(() => null);
       if (r) rolled++;
     }
     for (const id of (drop || []).slice(0, 50)) {
+      if (closedSet.has(id)) continue; // closed beats deleted — never bin work he just finished
       const r = await this.prisma.task.delete({ where: { id } }).catch(() => null);
       if (r) dropped++;
     }
-    return { day, created, workedMinutes: wm, rolled, dropped };
+    return { day, created, workedMinutes: wm, rolled, dropped, closed };
   }
 
   // ---- daytime notes ----

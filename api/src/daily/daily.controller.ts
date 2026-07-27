@@ -139,8 +139,8 @@ export class DailyController {
   }
 
   @Post('wrap-up')
-  async wrapUp(@Body() body: { day?: string; tasks?: { title?: string; category?: string | null }[]; workedMinutes?: number; roll?: string[]; drop?: string[] }) {
-    return this.daily.wrapUp(body?.day, body?.tasks || [], body?.workedMinutes, body?.roll || [], body?.drop || []);
+  async wrapUp(@Body() body: { day?: string; tasks?: { title?: string; category?: string | null }[]; workedMinutes?: number; roll?: string[]; drop?: string[]; done?: string[] }) {
+    return this.daily.wrapUp(body?.day, body?.tasks || [], body?.workedMinutes, body?.roll || [], body?.drop || [], body?.done || []);
   }
 
   /** Add the to-dos spotted in the story as open tasks (today). (BEA-513) */
