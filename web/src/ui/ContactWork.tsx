@@ -5,7 +5,18 @@ import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TaskFormModal, type Task } from '../pages/taskShared';
 
-type State = { open: number; done: number; awaitingYou: number; chasing: number; oldestOpenDays: number | null; lastHeardAt: string | null };
+type Report = {
+  taskId: string; title: string; schedule: string[] | null; scheduleLabel: string;
+  due: boolean; status: 'received' | 'waiting' | 'missed' | 'off'; quote: string | null;
+  source: string | null; at: string | null;
+};
+
+type State = {
+  open: number; done: number; awaitingYou: number; chasing: number;
+  oldestOpenDays: number | null; lastHeardAt: string | null;
+  /** Their standing reports for today, so the answer is on this page. (BEA-1149) */
+  today?: { day: string; weekday: string; due: Report[]; notDue: Report[]; counts: { due: number; received: number } };
+};
 type Row = Task & { who: string; openDays: number; chaseStatus: string; chaseCount: number; chaseId: string | null };
 
 const ago = (iso: string | null) => {
@@ -31,17 +42,92 @@ export function ContactState({ contactId, reload }: { contactId: string; reload:
   if (!s.open && !s.done && !s.awaitingYou) return null;
 
   return (
+    <div className="space-y-2">
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <Cell icon={<Circle size={13} />} n={s.open} label="still open" hint={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? `oldest ${s.oldestOpenDays}d` : undefined} tone={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? 'rose' : undefined} />
-      <Link to="/tasks?tab=review" className="contents">
-        <Cell icon={<Hand size={13} />} n={s.awaitingYou} label="waiting on you" tone={s.awaitingYou ? 'violet' : undefined} />
-      </Link>
+      {/* No longer a link out to Review — everything about this person is answered on this page.
+          Bouncing between four screens to know where one person stands was the complaint. (BEA-1149) */}
+      <Cell icon={<Hand size={13} />} n={s.awaitingYou} label="waiting on you" tone={s.awaitingYou ? 'violet' : undefined} />
       <Cell icon={<Radio size={13} />} n={s.chasing} label="being chased" />
       <div className="rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
         <div className="flex items-center gap-1.5 text-zinc-500"><MessageSquare size={13} /><span className="text-[11px]">last heard</span></div>
         <p className="mt-0.5 text-sm font-semibold">{ago(s.lastHeardAt)}</p>
       </div>
     </div>
+    <TodayReports today={s.today} onChanged={() => fetch(`/api/contacts/${contactId}/state`).then((r) => (r.ok ? r.json() : null)).then(setS).catch(() => undefined)} />
+    </div>
+  );
+}
+
+/**
+ * Their standing reports for today — due, arrived, or still waiting, with the words that settled it.
+ * (BEA-1149)
+ *
+ * This lived on a different screen, so answering "did Jayanth's update come in?" meant leaving the
+ * person you were looking at. It also shows WHERE the answer came from: a tick on their own page is
+ * not the same as them telling you, and on 27 July that difference was the whole problem. (BEA-1152)
+ */
+export function TodayReports({ today, onChanged }: { today: State['today']; onChanged?: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  if (!today || (!today.due.length && !today.notDue.length)) return null;
+
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  async function setDays(taskId: string, days: string[]) {
+    setBusy(taskId);
+    try {
+      await fetch(`/api/tasks/recurring/${taskId}/schedule`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }),
+      });
+      onChanged?.();
+    } finally { setBusy(null); setEditing(null); }
+  }
+
+  const row = (r: Report) => (
+    <li key={r.taskId} className={'rounded-lg border px-3 py-2.5 ' + (r.status === 'received' ? 'border-emerald-400/50 bg-emerald-500/5' : r.status === 'missed' ? 'border-rose-400/50 bg-rose-500/5' : r.due ? 'border-zinc-200 dark:border-zinc-800' : 'border-zinc-200/60 opacity-60 dark:border-zinc-800/60')}>
+      <div className="flex items-start gap-2">
+        <span className={'mt-0.5 shrink-0 text-xs ' + (r.status === 'received' ? 'text-emerald-600' : r.status === 'missed' ? 'text-rose-600' : 'text-zinc-400')}>
+          {r.status === 'received' ? '✓' : r.status === 'missed' ? '✕' : r.due ? '•' : '—'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm leading-snug">{r.title}</p>
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
+            <button onClick={() => setEditing(editing === r.taskId ? null : r.taskId)} className="underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">{r.scheduleLabel}</button>
+            {r.due ? <span>{r.status === 'received' ? 'came in' : r.status === 'missed' ? 'missed' : 'still waiting'}</span> : <span>not due today</span>}
+            {r.source && <span className={r.source === 'page' ? 'text-amber-600 dark:text-amber-500' : 'text-emerald-600 dark:text-emerald-400'}>{r.source === 'page' ? 'ticked on their page' : 'said on WhatsApp'}</span>}
+          </div>
+          {r.quote && <p className="mt-1 border-l-2 border-zinc-200 pl-2 text-xs italic text-zinc-500 dark:border-zinc-700">“{r.quote.slice(0, 180)}”</p>}
+          {editing === r.taskId && (
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              {DAYS.map((d) => {
+                const on = r.schedule ? r.schedule.includes(d) : false;
+                return (
+                  <button key={d} disabled={busy === r.taskId}
+                    onClick={() => setDays(r.taskId, on ? (r.schedule || []).filter((x) => x !== d) : [...(r.schedule || []), d])}
+                    className={'rounded-md border px-2 py-0.5 text-[11px] ' + (on ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>{d}</button>
+                );
+              })}
+              <button disabled={busy === r.taskId} onClick={() => setDays(r.taskId, [])} className="rounded-md px-2 py-0.5 text-[11px] text-zinc-500 underline">every working day</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+
+  return (
+    <section className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+      <h3 className="mb-2 text-xs font-semibold text-zinc-500">
+        Today’s reports {today.counts.due > 0 && <span className="font-normal text-zinc-400">· {today.counts.received} of {today.counts.due} in</span>}
+      </h3>
+      {today.due.length ? <ul className="space-y-1.5">{today.due.map(row)}</ul> : <p className="text-sm text-zinc-400">Nothing due from them today.</p>}
+      {today.notDue.length > 0 && (
+        <>
+          <p className="mt-2.5 mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Not due today</p>
+          <ul className="space-y-1.5">{today.notDue.map(row)}</ul>
+        </>
+      )}
+    </section>
   );
 }
 

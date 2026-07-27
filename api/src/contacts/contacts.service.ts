@@ -1,8 +1,11 @@
 import { randomBytes } from 'crypto';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { localDayKey } from '../common/localday';
+import { isOwedOn, parseSchedule, scheduleLabel } from '../tasks/schedule';
+import { localDayKey, weekdayOf } from '../common/localday';
 import { matchContact, matchContactsAll, contactSpellings, similarity, norm } from './person-identity';
+
+const todayKey = () => localDayKey(new Date());
 
 /** Contacts — people you can send WhatsApp reminders to (BEA-719). */
 @Injectable()
@@ -233,17 +236,44 @@ export class ContactsService {
   async state(id: string) {
     const c = await this.prisma.contact.findUnique({ where: { id } });
     if (!c) throw new NotFoundException('Contact not found');
-    const [tasks, claims, chasing, lastIn] = await Promise.all([
+    const [tasks, claims, chasing, lastIn, reports, restDays] = await Promise.all([
       this.prisma.task.findMany({ where: { ownerContactId: id }, select: { status: true, createdAt: true } }),
       this.prisma.taskClaim.count({ where: { contactId: id, status: 'pending' } }),
       this.prisma.reminder.count({ where: { contactId: id, status: 'active' } }),
       this.prisma.reminderMessage.findFirst({ where: { contactId: id, direction: 'in' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
+      // Their standing reports, so "did today's come in?" is answered HERE rather than on a
+      // different screen. (BEA-1149)
+      this.prisma.task
+        .findMany({
+          where: { ownerContactId: id, kind: 'recurring', status: { not: 'done' } },
+          select: { id: true, title: true, scheduleDays: true, statusDays: { where: { day: todayKey() }, take: 1 } },
+          orderBy: { createdAt: 'asc' },
+        })
+        .catch(() => [] as any[]),
+      this.restDaysSafe(),
     ]);
     const open = tasks.filter((t) => t.status !== 'done');
     const oldest = open.reduce<number | null>((m, t) => {
       const d = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 86400000);
       return m === null || d > m ? d : m;
     }, null);
+    const weekday = weekdayOf(todayKey());
+    const today = (reports as any[]).map((t) => {
+      const row = t.statusDays?.[0] || null;
+      const due = isOwedOn(t.scheduleDays, weekday, restDays);
+      return {
+        taskId: t.id,
+        title: t.title,
+        schedule: parseSchedule(t.scheduleDays),
+        scheduleLabel: scheduleLabel(t.scheduleDays),
+        due,
+        status: !due ? 'off' : row?.status || 'waiting',
+        quote: row?.quote || null,
+        source: row?.source || null, // 'page' = they ticked it; 'whatsapp' = they said it (BEA-1152)
+        at: row?.signalAt || row?.createdAt || null,
+      };
+    });
+    const dueToday = today.filter((r) => r.due);
     return {
       open: open.length,
       done: tasks.length - open.length,
@@ -251,7 +281,26 @@ export class ContactsService {
       chasing,
       oldestOpenDays: oldest,
       lastHeardAt: lastIn?.createdAt || null,
+      today: {
+        day: todayKey(),
+        weekday,
+        due: dueToday,
+        notDue: today.filter((r) => !r.due),
+        counts: { due: dueToday.length, received: dueToday.filter((r) => r.status === 'received').length },
+      },
     };
+  }
+
+  /** Rest days, defensively — a broken setting must never hide a report. */
+  private async restDaysSafe(): Promise<string[]> {
+    try {
+      const row = await this.prisma.setting.findUnique({ where: { key: 'recurring.restDays' } });
+      if (!row?.value) return ['Sun'];
+      const a = JSON.parse(row.value);
+      return Array.isArray(a) ? a.filter((d: unknown) => typeof d === 'string') : ['Sun'];
+    } catch {
+      return ['Sun'];
+    }
   }
 
   /** Resolve a share link to its contact, refusing a bad or turned-off one. (BEA-1028) */

@@ -77,3 +77,61 @@ describe('ContactsService (BEA-719)', () => {
     expect(await svc.findByName('')).toBeNull();
   });
 });
+
+/**
+ * BEA-1149. "Did today's update come in?" was answered on a different screen from the person it was
+ * about — one of the four the owner was bouncing between. It is answered here now, and it says
+ * WHERE the answer came from, because a tick on their own page is not them telling you. (BEA-1152)
+ */
+describe("a person's page answers today (BEA-1149)", () => {
+  const day = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(day + 'T12:00:00Z').getUTCDay()];
+  const other = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].filter((d) => d !== weekday)[0];
+
+  function withReports(reports: any[]) {
+    const p: any = fakePrisma();
+    p.contact.findUnique = async () => ({ id: 'c1', name: 'Rakesh' });
+    p.taskClaim = { count: async () => 0 };
+    p.reminder = { count: async () => 1 };
+    p.reminderMessage = { findFirst: async () => null };
+    p.setting = { findUnique: async () => ({ value: JSON.stringify(['Sun']) }) };
+    p.task = { findMany: async ({ where }: any) => (where?.kind === 'recurring' ? reports : []) };
+    return new ContactsService(p);
+  }
+
+  it("shows a report due today, and what settled it", async () => {
+    const svc = withReports([
+      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [{ status: 'received', quote: 'OT 8 members', source: 'whatsapp', signalAt: new Date() }] },
+    ]);
+    const s: any = await svc.state('c1');
+    expect(s.today.due).toHaveLength(1);
+    expect(s.today.due[0]).toMatchObject({ status: 'received', quote: 'OT 8 members', source: 'whatsapp' });
+    expect(s.today.counts).toEqual({ due: 1, received: 1 });
+  });
+
+  it("keeps a report that isn't due today out of the count", async () => {
+    const svc = withReports([
+      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [] },
+      { id: 't2', title: 'Other-day report', scheduleDays: JSON.stringify([other]), statusDays: [] },
+    ]);
+    const s: any = await svc.state('c1');
+    expect(s.today.due.map((r: any) => r.taskId)).toEqual(['t1']);
+    expect(s.today.notDue.map((r: any) => r.taskId)).toEqual(['t2']);
+    expect(s.today.counts.due).toBe(1);
+  });
+
+  it('says a tick on their page is a tick, not a message', async () => {
+    const svc = withReports([
+      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [{ status: 'received', quote: "Sent today's update", source: 'page', signalAt: new Date() }] },
+    ]);
+    const s: any = await svc.state('c1');
+    expect(s.today.due[0].source).toBe('page');
+  });
+
+  it('a person with no standing reports still gets a clean answer', async () => {
+    const svc = withReports([]);
+    const s: any = await svc.state('c1');
+    expect(s.today.due).toEqual([]);
+    expect(s.today.counts).toEqual({ due: 0, received: 0 });
+  });
+});
