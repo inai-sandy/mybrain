@@ -137,3 +137,24 @@ describe('when to chase, from his words (BEA-1148)', () => {
     expect(chaseTimesFrom('at 12am')).toEqual(['00:00']);
   });
 });
+
+/**
+ * Found by running the shipped code against a real phrasing rather than trusting the tests:
+ * "5:30 pm" was read twice — correctly as 17:30, and again as a bare 05:30. A chase would have
+ * gone out at half past five in the morning.
+ */
+describe('a 12-hour time is one time, not two', () => {
+  it('does not also read 5:30 pm as 05:30', () => {
+    expect(chaseTimesFrom('send at 11 am and 5:30 pm')).toEqual(['11:00', '17:30']);
+    expect(chaseTimesFrom('by 7:15pm')).toEqual(['19:15']);
+  });
+
+  it('and the guard agrees, so a legitimate time never looks invented', () => {
+    expect(inventedTemporal('send it at 5:30 pm', 'Send the update at 5:30 pm')).toEqual([]);
+    expect(inventedTemporal('send it at 17:30', 'Send the update at 5:30 pm')).toEqual([]);
+  });
+
+  it('a genuine bare time is still read', () => {
+    expect(chaseTimesFrom('send at 17:30')).toEqual(['17:30']);
+  });
+});
