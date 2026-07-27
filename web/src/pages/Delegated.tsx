@@ -85,7 +85,7 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
       {/* The four numbers that matter, in one glance. */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat icon={<Clock size={14} />} n={summary.open} label="still open" />
-        <Link to="/tasks?tab=review" className="contents"><Stat icon={<Hand size={14} />} n={summary.awaitingYou} label="waiting on you" tone={summary.awaitingYou ? 'violet' : undefined} /></Link>
+        <Stat icon={<Hand size={14} />} n={summary.awaitingYou} label="waiting on you" tone={summary.awaitingYou ? 'violet' : undefined} />
         <Stat icon={<Radio size={14} />} n={summary.chasing} label="being chased" />
         <Stat icon={<Timer size={14} />} n={summary.stalling || 0} label="not moving" tone={summary.stalling ? 'amber' : undefined} />
       </div>
