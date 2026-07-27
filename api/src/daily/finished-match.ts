@@ -10,14 +10,24 @@
  * marked done from this alone — it only decides what comes up pre-ticked for the owner to confirm.
  */
 
-/** Words worth matching on: long enough to carry meaning. */
+/**
+ * Filler that is long enough to slip past a plain length check. A pre-tick that fires wrongly
+ * closes a task the owner never did, so the words that carry no meaning must not vote.
+ */
+const FILLER = new Set([
+  'with', 'from', 'that', 'this', 'them', 'then', 'they', 'their', 'have', 'been', 'were', 'will',
+  'about', 'into', 'over', 'some', 'more', 'also', 'just', 'when', 'what', 'your', 'ours', 'thing',
+  'things', 'today', 'work', 'task', 'tasks', 'done', 'finish', 'finished', 'complete', 'completed',
+]);
+
+/** Words worth matching on: long enough to carry meaning, and not filler. */
 export function sig(text: string): Set<string> {
   return new Set(
     String(text || '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
       .split(' ')
-      .filter((w) => w.length > 3),
+      .filter((w) => w.length > 3 && !FILLER.has(w)),
   );
 }
 

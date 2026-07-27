@@ -51,3 +51,22 @@ describe('matching what your story finished to what is still open (BEA-1146)', (
     expect(sig('the a of it').size).toBe(0); // nothing to match on
   });
 });
+
+/**
+ * A wrong pre-tick closes a task the owner never did, so filler words must not carry a match.
+ * "with", "from", "that" are all 4+ letters and would otherwise vote like real words.
+ */
+describe('filler words cannot cause a false tick', () => {
+  it('two unrelated jobs that merely share "with" do not match', () => {
+    expect(sameWork('Deal with the invoice', 'Speak with the captains')).toBe(false);
+    expect(sameWork('Finished work with Srikar today', 'Complete work with Madhuri today')).toBe(false);
+  });
+
+  it('the word "finished" in a story line does not count as evidence', () => {
+    expect(sig('Finished the work today').size).toBe(0);
+  });
+
+  it('real shared subjects still match', () => {
+    expect(sameWork('Updated the user manuals', 'Update user manuals for Beakn Portal')).toBe(true);
+  });
+});
