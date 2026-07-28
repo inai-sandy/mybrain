@@ -434,6 +434,7 @@ model Task {
   /// working day (the old behaviour). A Friday report must not be chased on a Monday. (BEA-1147)
   scheduleDays  String?
   statusDays    TaskStatusDay[]
+  teamUpdates   TeamUpdate[]
   /// The date they promised. Slows the chase to once a day until then — never pauses it, because
   /// silence must always still reach the owner. (BEA-1022)
   promisedFor   String? // local day key YYYY-MM-DD
@@ -912,6 +913,42 @@ model MindFinding {
   @@index([status])
 }
 
+/// Everything a staff member says, from either channel, as ONE record. (BEA-1159)
+///
+/// Before this, what they said lived in three places and only one of them was ever shown: a
+/// WhatsApp reply became a ReminderMessage, a share-link note was welded to a TaskClaim quote, and
+/// a report arriving became a TaskStatusDay. So half of every conversation was invisible, and a
+/// blocker like "we didn't receive the sense PCB" was recorded as a green tick.
+///
+/// A review item IS an update — one that needs him. It opens when they say it, and closes ONLY when
+/// he closes it. Nothing a person says afterwards can erase that they asked for help.
+model TeamUpdate {
+  id         String    @id @default(uuid())
+  contactId  String
+  contact    Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  taskId     String?
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  /// whatsapp | link — how it reached him
+  channel    String
+  /// Their words, exactly. Never rewritten.
+  text       String
+  /// JSON array: done | needs_you | status | promise | chat. A message can be several at once.
+  reads      String
+  /// Does this need him? Derived from reads, stored so the inbox is one cheap query.
+  needsYou   Boolean   @default(false)
+  /// Plain English for why it reached him.
+  why        String?
+  /// When THEY said it (not when we wrote the row).
+  at         DateTime
+  /// Null while open. Set only by the owner closing it.
+  closedAt   DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([contactId])
+  @@index([needsYou, closedAt])
+  @@index([at])
+}
+
 /// A concrete piece of evidence behind a MindFinding — the task/story/activity/idea that supports it.
 model MindEvidence {
   id         String      @id @default(uuid())
@@ -1016,6 +1053,7 @@ model Contact {
   taskLinks      TaskPerson[] // tasks they're @mentioned on (BEA-1019)
   briefings      Briefing[] // the situations you've told me about them (BEA-1020)
   claims         TaskClaim[] // work they say they've finished, waiting on you (BEA-1024)
+  teamUpdates    TeamUpdate[] // everything they've said, both channels (BEA-1159)
 
   @@index([name])
 }

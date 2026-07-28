@@ -1,9 +1,13 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { RemindersService } from './reminders.service';
+import { TeamUpdatesService } from './team-updates.service';
 
 @Controller('reminders')
 export class RemindersController {
-  constructor(private readonly reminders: RemindersService) {}
+  constructor(
+    private readonly reminders: RemindersService,
+    private readonly updates: TeamUpdatesService,
+  ) {}
 
   @Get()
   list(@Query('status') status?: string) {
@@ -100,6 +104,35 @@ export class RemindersController {
   @Post(':id/resend-template')
   resendTemplate(@Param('id') id: string) {
     return this.reminders.resendTemplate(id);
+  }
+
+  /** One-time: bring in everything already said, so the inbox is not empty on day one. (BEA-1159) */
+  @Post('review/backfill')
+  reviewBackfill() {
+    return this.updates.backfill();
+  }
+
+  /** Everything the team said that needs him — the review inbox. (BEA-1159) */
+  @Get('review')
+  review() {
+    return this.updates.inbox();
+  }
+
+  /** He answers from inside review; it goes out on WhatsApp and lands in their thread. */
+  @Post('review/:id/reply')
+  reviewReply(@Param('id') id: string, @Body() body: { text?: string }) {
+    return this.updates.reply(id, String(body?.text || ''));
+  }
+
+  /** Only he closes it — the problem is solved. */
+  @Post('review/:id/close')
+  reviewClose(@Param('id') id: string) {
+    return this.updates.close(id);
+  }
+
+  @Post('review/:id/reopen')
+  reviewReopen(@Param('id') id: string) {
+    return this.updates.reopen(id);
   }
 
   /** Chases the app switched off by itself, for the owner to resume. (BEA-1160) */
