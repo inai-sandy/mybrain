@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { isOwedOn } from '../tasks/schedule';
+import { TASK_SETTING_KEYS, parseClaimGraceDays, claimGraceExpired } from '../tasks/task-settings';
 import { weekdayOf } from '../common/localday';
 import { PostboxService } from './postbox.service';
 import { ContactsService } from './contacts.service';
@@ -113,35 +114,58 @@ export class ReminderSenderService implements OnModuleInit {
     this.log.log(`chase ${id} stopped — ${why}`);
   }
 
-  /** One-day lifecycle: at each new local day, auto-pause reminders armed on an earlier day so
-   *  "active" always means "will send today". They stay put until the user re-arms them. (BEA-764) */
+  /**
+   * A new day: re-arm every live chase. (BEA-1160)
+   *
+   * This used to PAUSE any chase armed on an earlier day, and delete its queued sends — the comment
+   * said "active always means will send today". The effect was that someone who simply did not
+   * answer stopped being chased, which is the one thing a chase exists to prevent. On the owner's
+   * live data it had switched off 23 chases; he had switched off 1.
+   *
+   * BEA-1021 already fixed this for daily chases — *"A real chase does not die at midnight — that
+   * was the whole problem"* — and the same reasoning was never applied to the rest. It is now.
+   *
+   * The owner's rule: a chase stops when HE stops it, when the task is marked done, or when a claim
+   * he hasn't reviewed has sat for his grace period. Never because a day ended.
+   */
   async rollDay() {
     const now = new Date();
     const todayKey = new Date(now.getTime() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10);
     const stale = await this.prisma.reminder.findMany({ where: { status: 'active', OR: [{ armedDay: null }, { armedDay: { lt: todayKey } }] } });
-    let paused = 0;
     let rearmed = 0;
+    let stopped = 0;
     for (const r of stale) {
-      // A real chase does not die at midnight — that was the whole problem. Re-arm it for the new
-      // day and keep going until the work is confirmed done or the owner stops it. (BEA-1021)
-      if (r.repeat === 'daily') {
-        const done = await this.chaseFinished(r);
-        if (done) { await this.stopChase(r.id, done); continue; }
-        await this.rearmChase(r, todayKey, now);
-        rearmed++;
-        continue;
-      }
-      // Never pause a reminder that still has a FUTURE send queued — it's mid-lifecycle (just armed,
-      // or spilling to a later day). This also protects a freshly-created reminder whose armedDay write
-      // was swallowed (null), which used to get auto-paused within 60s and its sends deleted. (BEA-790)
+      const done = await this.chaseFinished(r);
+      if (done) { await this.stopChase(r.id, done); stopped++; continue; }
+      const stale2 = await this.claimWentUnreviewed(r, now);
+      if (stale2) { await this.stopChase(r.id, stale2); stopped++; continue; }
+      // Still has a future send queued — mid-lifecycle (just armed, or spilling to a later day).
+      // Leave it alone rather than re-arming on top of itself. (BEA-790)
       const pending = await this.prisma.reminderSend.count({ where: { reminderId: r.id, status: 'queued', at: { gt: now } } });
       if (pending > 0) continue;
-      await this.prisma.reminder.update({ where: { id: r.id }, data: { status: 'paused', pausedAuto: true } }).catch(() => undefined);
-      await this.prisma.reminderSend.deleteMany({ where: { reminderId: r.id, status: 'queued' } }).catch(() => undefined);
-      paused++;
+      await this.rearmChase(r, todayKey, now);
+      rearmed++;
     }
-    if (paused) this.log.log(`auto-paused ${paused} reminder(s) at day rollover`);
-    if (rearmed) this.log.log(`re-armed ${rearmed} daily chase(s) for ${todayKey}`);
+    if (stopped) this.log.log(`stopped ${stopped} chase(s) — finished, or a claim you didn't review`);
+    if (rearmed) this.log.log(`re-armed ${rearmed} chase(s) for ${todayKey}`);
+  }
+
+  /**
+   * Has a claim sat waiting for the owner past his grace period? (BEA-1160)
+   *
+   * His rule: *"If I am not marking it as done for two straight days, then you can stop it."* This
+   * is the ONLY time-based stop, and it applies solely to a chase already quiet behind a claim —
+   * never to one that is merely unanswered. Silence from the other person is not consent.
+   */
+  private async claimWentUnreviewed(r: any, now: Date): Promise<string | null> {
+    if (!r.taskId) return null;
+    const graceDays = parseClaimGraceDays((await this.prisma.setting.findUnique({ where: { key: TASK_SETTING_KEYS.claimGraceDays } }).catch(() => null))?.value);
+    if (!graceDays) return null; // "never" — wait for him however long it takes
+    const claim = await this.prisma.taskClaim
+      .findFirst({ where: { taskId: r.taskId, status: 'pending' }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } })
+      .catch(() => null);
+    if (!claim || !claimGraceExpired(claim.createdAt, graceDays, now)) return null;
+    return `they reported it done ${graceDays} day${graceDays === 1 ? '' : 's'} ago and it wasn't reviewed`;
   }
 
   async tick() {

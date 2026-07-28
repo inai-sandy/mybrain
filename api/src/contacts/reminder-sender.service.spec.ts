@@ -34,41 +34,81 @@ describe('PostboxService.renderProgressNudge — the plain-chat chase (BEA-1045)
   });
 });
 
-describe('rollDay — one-day auto-pause (BEA-764)', () => {
-  it('pauses active reminders armed on a past day (or never armed) and clears their queued sends', async () => {
-    const updates: any[] = [];
-    let deleted = 0;
-    const prisma: any = {
-      reminder: {
-        // real prisma applies the where; the mock returns the stale set it would match
-        findMany: async () => [
-          { id: 'r1', status: 'active', armedDay: null },
-          { id: 'r2', status: 'active', armedDay: '2000-01-01' },
-        ],
-        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
-      },
-      reminderSend: { count: async () => 0, deleteMany: async () => { deleted++; return {}; } },
-    };
-    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).rollDay();
-    expect(updates).toEqual([
-      { id: 'r1', status: 'paused', pausedAuto: true },
-      { id: 'r2', status: 'paused', pausedAuto: true },
-    ]);
-    expect(deleted).toBe(2); // stale queued sends cleared for each
+/**
+ * BEA-1160. This block used to assert the opposite: that rollDay PAUSED any chase armed on an
+ * earlier day. That was the bug — on the owner's live data it had switched off 23 chases while he
+ * had switched off 1. Someone who simply does not answer must keep being chased.
+ *
+ * His rule: a chase stops when HE stops it, when the task is marked done, or when a claim he never
+ * reviewed has sat for his grace period. Never because a day ended.
+ */
+function rollPrisma(opts: { stale: any[]; claimAt?: Date | null; graceDays?: string; taskStatus?: string } = { stale: [] }) {
+  const updates: any[] = [];
+  const created: any[] = [];
+  const prisma: any = {
+    reminder: {
+      findMany: async () => opts.stale,
+      update: async ({ where, data }: any) => { updates.push({ id: where.id, ...data }); return {}; },
+    },
+    reminderSend: {
+      count: async ({ where }: any) => (where?.at?.gt ? 0 : 0),
+      deleteMany: async () => ({}),
+      createMany: async ({ data }: any) => { created.push(...data); return { count: data.length }; },
+      create: async ({ data }: any) => { created.push(data); return data; },
+    },
+    setting: { findUnique: async () => (opts.graceDays === undefined ? null : { value: opts.graceDays }) },
+    taskClaim: { findFirst: async () => (opts.claimAt ? { createdAt: opts.claimAt } : null) },
+    task: { findUnique: async () => ({ promisedFor: null, status: opts.taskStatus || 'open' }) },
+  };
+  const svc = new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF);
+  return { svc, updates, created };
+}
+
+describe('a chase does not die at midnight (BEA-1160)', () => {
+  it('re-arms an unanswered chase instead of pausing it', async () => {
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["10:00","17:30"]', taskId: 't1' }] });
+    await svc.rollDay();
+    expect(updates.find((u) => u.status === 'paused')).toBeUndefined();
+    expect(updates.some((u) => u.armedDay)).toBe(true); // armed for the new day
   });
 
-  it('does NOT pause a reminder that still has a future send queued (BEA-790)', async () => {
-    const updates: any[] = [];
-    const prisma: any = {
-      reminder: {
-        findMany: async () => [{ id: 'fresh', status: 'active', armedDay: null }], // null armedDay (e.g. swallowed write)
-        update: async ({ where, data }: any) => updates.push({ id: where.id, ...data }),
-      },
-      // one future send is still queued → mid-lifecycle, must be left active
-      reminderSend: { count: async ({ where }: any) => (where?.at?.gt ? 1 : 0), deleteMany: async () => ({}) },
-    };
-    await new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF).rollDay();
-    expect(updates).toHaveLength(0); // not paused, sends not deleted
+  it('never writes pausedAuto again — that flag meant the app switched it off unasked', async () => {
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: null, times: '["09:00"]', taskId: null }] });
+    await svc.rollDay();
+    expect(updates.some((u) => u.pausedAuto)).toBe(false);
+  });
+
+  it('stops a chase whose task is already done', async () => {
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["09:00"]', taskId: 't1' }], taskStatus: 'done' });
+    await svc.rollDay();
+    expect(updates).toContainEqual({ id: 'r1', status: 'done' });
+  });
+
+  it("stops a chase whose claim the owner hasn't reviewed for two days", async () => {
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400000);
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["09:00"]', taskId: 't1' }], claimAt: threeDaysAgo, graceDays: '2' });
+    await svc.rollDay();
+    expect(updates).toContainEqual({ id: 'r1', status: 'done' });
+  });
+
+  it('keeps chasing while a fresh claim is still within his grace period', async () => {
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["09:00"]', taskId: 't1' }], claimAt: new Date(), graceDays: '2' });
+    await svc.rollDay();
+    expect(updates.find((u) => u.status === 'done')).toBeUndefined();
+  });
+
+  it('"never" means a claim can wait forever without stopping the chase', async () => {
+    const ancient = new Date(Date.now() - 400 * 86400000);
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["09:00"]', taskId: 't1' }], claimAt: ancient, graceDays: '0' });
+    await svc.rollDay();
+    expect(updates.find((u) => u.status === 'done')).toBeUndefined();
+  });
+
+  it('leaves a chase alone while it still has a future send queued (BEA-790)', async () => {
+    const { svc, updates } = rollPrisma({ stale: [{ id: 'fresh', status: 'active', armedDay: null, times: '["09:00"]', taskId: null }] });
+    (svc as any).prisma.reminderSend.count = async ({ where }: any) => (where?.at?.gt ? 1 : 0);
+    await svc.rollDay();
+    expect(updates).toHaveLength(0);
   });
 });
 
@@ -312,6 +352,9 @@ describe('rollDay — a daily chase repeats instead of pausing (BEA-1021)', () =
         create: async ({ data }: any) => { created.push(data); return data; },
       },
       task: { findUnique: async () => task },
+      // BEA-1160: rollDay now reads the grace setting and looks for a pending claim.
+      setting: { findUnique: async () => null },
+      taskClaim: { findFirst: async () => null },
     };
     return { svc: new ReminderSenderService(prisma, { isConfigured: () => false } as any, { share: async () => ({ slug: 'x-1234' }) } as any, RECURRING_OFF), updates, created, get deleted() { return deleted; } };
   }
@@ -346,10 +389,13 @@ describe('rollDay — a daily chase repeats instead of pausing (BEA-1021)', () =
     expect(h.updates).toEqual([{ id: 'c1', status: 'done' }]);
   });
 
-  it('leaves ordinary reminders on the old one-day behaviour', async () => {
+  it('a ONE-OFF chase is re-armed too, not paused (BEA-1160)', async () => {
+    // This used to expect { status: 'paused', pausedAuto: true } — the bug. A one-off chase that
+    // nobody answered was switched off at midnight, which is exactly when it should keep going.
     const h = harness([{ id: 'r1', status: 'active', armedDay: '2000-01-01', repeat: 'none', times: '["09:00"]', taskId: null }], null);
     await h.svc.rollDay();
-    expect(h.updates).toEqual([{ id: 'r1', status: 'paused', pausedAuto: true }]);
+    expect(h.updates.find((u: any) => u.status === 'paused')).toBeUndefined();
+    expect(h.updates.some((u: any) => u.armedDay)).toBe(true);
   });
 
   it('a chase with no usable times is still RE-ARMED with the 09:00 fallback rather than going silent', async () => {
