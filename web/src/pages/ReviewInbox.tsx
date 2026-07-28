@@ -17,6 +17,8 @@ type Item = {
   canReply: boolean;
   /** Set when they claimed a task finished — then this is a yes/no, not just something to read. */
   claimId: string | null;
+  /** One row per job, because they may only have done one of them. (BEA-1159) */
+  perTask?: boolean;
 };
 
 /**
@@ -136,6 +138,12 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
 
       {shown.length === 0 && <p className="py-6 text-center text-sm text-zinc-400">Nothing matches “{q}”.</p>}
 
+      {shown.some((i) => i.perTask) && (
+        <p className="text-[11px] text-zinc-400">
+          One message can cover more than one job, and they may only have done one — so each is here on its own.
+        </p>
+      )}
+
       <ul className="space-y-2.5">
         {shown.map((it) => (
           <li key={it.id} className="rounded-xl border border-zinc-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900">
@@ -152,10 +160,15 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
               {it.chasePaused && <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><Radio size={11} /> their chase is off</span>}
             </div>
 
-            {it.task && <p className="mt-1.5 text-[11px] text-zinc-500">on “{it.task.title}”</p>}
+            {/* On a split row the TASK is the question, so it leads — their words are the evidence. */}
+            {it.task && (
+              <p className={it.perTask ? 'mt-1 text-sm font-medium' : 'mt-1.5 text-[11px] text-zinc-500'}>
+                {it.perTask ? it.task.title : `on “${it.task.title}”`}
+              </p>
+            )}
 
             {/* Their exact words. Never rewritten, never summarised. */}
-            <p className="mt-1 whitespace-pre-wrap border-l-2 border-zinc-200 pl-2.5 text-sm dark:border-zinc-700">{it.text}</p>
+            <p className="mt-1 whitespace-pre-wrap border-l-2 border-zinc-200 pl-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{it.text}</p>
 
             {replyTo === it.id ? (
               <div className="mt-2.5 space-y-2">
@@ -180,10 +193,10 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                 {it.claimId ? (
                   <>
                     <button onClick={() => decide(it, true)} disabled={busy === it.id} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-400">
-                      {busy === it.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Yes, it's done
+                      {busy === it.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} {it.perTask ? 'Yes, this one is done' : "Yes, it's done"}
                     </button>
                     <button onClick={() => decide(it, false)} disabled={busy === it.id} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/15 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-500/25 disabled:opacity-50 dark:text-rose-400">
-                      <X size={14} /> No — keep chasing
+                      <X size={14} /> {it.perTask ? 'Not this one — keep chasing' : 'No — keep chasing'}
                     </button>
                   </>
                 ) : (
