@@ -1,12 +1,16 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { RemindersService } from './reminders.service';
 import { TeamUpdatesService } from './team-updates.service';
+import { ClaimsService } from '../tasks/claims.service';
+import { TasksService } from '../tasks/tasks.service';
 
 @Controller('reminders')
 export class RemindersController {
   constructor(
     private readonly reminders: RemindersService,
     private readonly updates: TeamUpdatesService,
+    private readonly claims: ClaimsService,
+    private readonly tasks: TasksService,
   ) {}
 
   @Get()
@@ -122,6 +126,22 @@ export class RemindersController {
   @Post('review/:id/reply')
   reviewReply(@Param('id') id: string, @Body() body: { text?: string }) {
     return this.updates.reply(id, String(body?.text || ''));
+  }
+
+  /**
+   * Yes it's done / no it isn't. A "no" puts the chase straight back on. (BEA-1159)
+   *
+   * The decision runs through the existing claims path so the task and the chase move together —
+   * confirming marks it done and stops the chase, rejecting reopens it and the chase resumes.
+   */
+  @Post('review/:id/decide')
+  async reviewDecide(@Param('id') id: string, @Body() body: { confirm?: boolean }) {
+    const confirm = body?.confirm !== false;
+    return this.updates.decide(id, confirm, async (claimId, ok) => {
+      const r = await this.claims.decide(claimId, ok);
+      if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
+      return r;
+    });
   }
 
   /** Only he closes it — the problem is solved. */
