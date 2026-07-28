@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ReviewInbox } from './ReviewInbox';
 import { CheckSquare, Plus, Sparkles, Search, X, CalendarDays, CheckCircle2, Circle, Star, StickyNote, ChevronDown, Copy, Loader2, Check } from 'lucide-react';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Sheet } from '../ui/Sheet';
@@ -15,10 +16,12 @@ export function Tasks() {
   // One page, three tabs — Delegated and To review fold in here instead of crowding the sidebar. (BEA-1044)
   const [tab, setTab] = useUrlState('tab', 'mine');
   const [delegatedOpen, setDelegatedOpen] = useState<number | null>(null);
+  const [reviewCount, setReviewCount] = useState<number | null>(null); // what the team needs you for (BEA-1159)
   const [eaterCount, setEaterCount] = useState<number | null>(null); // BEA-1056
   const [dailyCount, setDailyCount] = useState<number | null>(null); // standing daily reports (BEA-1123)
   useEffect(() => {
     fetch('/api/tasks/delegated').then((r) => (r.ok ? r.json() : null)).then((d) => setDelegatedOpen(d?.summary?.open ?? 0)).catch(() => setDelegatedOpen(0));
+    fetch('/api/reminders/review').then((r) => (r.ok ? r.json() : null)).then((d) => setReviewCount(d?.count ?? 0)).catch(() => setReviewCount(0));
     fetch('/api/tasks/brain-eaters').then((r) => (r.ok ? r.json() : null)).then((d) => setEaterCount(d?.openCount ?? 0)).catch(() => setEaterCount(0));
     fetch('/api/tasks/recurring/day-log').then((r) => (r.ok ? r.json() : null)).then((d) => setDailyCount((d?.items || []).length)).catch(() => setDailyCount(0));
   }, [tab]);
@@ -139,7 +142,7 @@ export function Tasks() {
         <div>
           <h1 className="text-2xl font-extrabold flex items-center gap-2"><CheckSquare className="text-emerald-500" /> Tasks</h1>
           <p className="text-zinc-500 text-sm">
-            {tab === 'eaters' ? 'The things that circle your head — finish them for a peaceful sleep.' : tab === 'daily' ? 'Standing reports someone owes you every working day.' : tab === 'delegated' ? 'What other people owe you.' : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
+            {tab === 'eaters' ? 'The things that circle your head — finish them for a peaceful sleep.' : tab === 'daily' ? 'Standing reports someone owes you every working day.' : tab === 'delegated' ? 'What other people owe you.' : tab === 'review' ? "What your team is stuck on, or says is finished — your call, and it stays here until you close it." : `${openCount} to do${data && data.counts.done ? ` · ${data.counts.done} done today` : ''}`}
           </p>
         </div>
         {tab === 'mine' && (<div className="flex items-center gap-1">
@@ -164,7 +167,7 @@ export function Tasks() {
 
       {/* The three tabs. Same page, same look — different lists. (BEA-1044) */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
-        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['daily', '🔁 Daily', dailyCount], ['eaters', '🧠 Brain Eaters', eaterCount]] as const).map(([id, label, n]) => (
+        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['review', 'Needs you', reviewCount], ['daily', '🔁 Daily', dailyCount], ['eaters', '🧠 Brain Eaters', eaterCount]] as const).map(([id, label, n]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -180,6 +183,7 @@ export function Tasks() {
 
       {tab === 'eaters' && <BrainEatersTab onCountChange={setEaterCount} />}
       {tab === 'delegated' && <DelegatedTab onCountChange={setDelegatedOpen} />}
+      {tab === 'review' && <ReviewInbox onCountChange={setReviewCount} />}
       {tab === 'daily' && <DailyTab onCountChange={setDailyCount} />}
 
       {tab === 'mine' && (<>
