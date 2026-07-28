@@ -7,11 +7,23 @@ import { DEFAULT_REST_DAYS, RecurringService } from './recurring.service';
  */
 function makeSvc(opts: { restDays?: string | null; rows?: any[] } = {}) {
   const rows: any[] = opts.rows ? [...opts.rows] : [];
+  const settings: Record<string, string> = {};
   const tasks: any[] = [{ id: 't1', title: 'Send the daily production update', kind: 'recurring', status: 'open', scheduleDays: null, ownerContact: { id: 'c1', name: 'Jayanth' } }];
   const prisma: any = {
+    // A real key-value store: the old double answered every key with the same value and never
+    // persisted, so a setting could not be saved and read back. (BEA-1161)
     setting: {
-      findUnique: async () => (opts.restDays === undefined ? { value: JSON.stringify(['Sun']) } : opts.restDays === null ? null : { value: opts.restDays }),
-      upsert: async ({ create }: any) => create,
+      findUnique: async ({ where }: any) => {
+        if (where.key === 'recurring.restDays') {
+          if (opts.restDays === null) return null;
+          if (opts.restDays !== undefined) return { key: where.key, value: opts.restDays };
+        }
+        return where.key in settings ? { key: where.key, value: settings[where.key] } : (where.key === 'recurring.restDays' ? { key: where.key, value: JSON.stringify(['Sun']) } : null);
+      },
+      upsert: async ({ where, create, update }: any) => {
+        settings[where.key] = update?.value ?? create.value;
+        return { key: where.key, value: settings[where.key] };
+      },
     },
     taskStatusDay: {
       findUnique: async ({ where }: any) => rows.find((r) => r.taskId === where.taskId_day.taskId && r.day === where.taskId_day.day) || null,
@@ -159,7 +171,6 @@ describe('closing the day and the miss summary', () => {
 
   function svcFor(opts: { rows?: any[]; closedDay?: string; restDays?: string } = {}) {
     const rows: any[] = opts.rows ? [...opts.rows] : [];
-  const tasks: any[] = [{ id: 't1', title: 'Send the daily production update', kind: 'recurring', status: 'open', scheduleDays: null, ownerContact: { id: 'c1', name: 'Jayanth' } }];
     const settings: Record<string, string> = {};
     if (opts.closedDay) settings['recurring.closedDay'] = opts.closedDay;
     settings['recurring.restDays'] = opts.restDays ?? JSON.stringify(['Sun']);
@@ -333,3 +344,46 @@ describe('a later message beats an earlier tick (BEA-1152)', () => {
 function rowQuote(log: any): string | null {
   return log.items[0]?.quote ?? null;
 }
+
+/**
+ * BEA-1161. Every one of these rules used to be out of the owner's reach — rest days and the digest
+ * hour had API endpoints and no screen, and chase times were hardcoded in three files. He could not
+ * change his own rest days without someone calling the API for him.
+ */
+describe('the chase rules are his to set (BEA-1161)', () => {
+  it('reads back what each rule currently MEANS, not just its value', async () => {
+    const { svc } = makeSvc();
+    const s: any = await svc.taskSettings();
+    expect(s.restDays.says).toContain('Sunday'.slice(0, 3)); // "No reports are owed on Sun."
+    expect(s.claimGraceDays.says).toMatch(/2 days|however long/);
+    expect(s.digestHour.says).toContain(':00');
+    expect(s.chaseTimes.says).toContain('10:00');
+  });
+
+  it('saves a rule and reads it straight back', async () => {
+    const { svc } = makeSvc();
+    const s: any = await svc.setTaskSettings({ claimGraceDays: 5, digestHour: 18 });
+    expect(s.claimGraceDays.value).toBe(5);
+    expect(s.claimGraceDays.says).toContain('5 days');
+  });
+
+  it('"never stop" is a real choice, and says so plainly', async () => {
+    const { svc } = makeSvc();
+    const s: any = await svc.setTaskSettings({ claimGraceDays: 0 });
+    expect(s.claimGraceDays.value).toBe(0);
+    expect(s.claimGraceDays.says).toContain('however long');
+  });
+
+  it('refuses to store an empty chase — a chase with no times never fires', async () => {
+    const { svc } = makeSvc();
+    const s: any = await svc.setTaskSettings({ chaseTimes: [] });
+    expect(s.chaseTimes.value.length).toBeGreaterThan(0);
+  });
+
+  it('ignores a nonsense hour rather than closing the day at a random time', async () => {
+    const { svc } = makeSvc();
+    const before: any = await svc.taskSettings();
+    const after: any = await svc.setTaskSettings({ digestHour: 99 });
+    expect(after.digestHour.value).toBe(before.digestHour.value);
+  });
+});

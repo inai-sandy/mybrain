@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { localDayKey, localHour, weekdayOf } from '../common/localday';
 import { isOwedOn, parseSchedule, serialiseSchedule, daysFromTitle, scheduleLabel } from './schedule';
 import { laterWins } from '../contacts/promise-later';
+import { TASK_SETTING_KEYS, TASK_DEFAULTS, parseChaseTimes, parseClaimGraceDays } from './task-settings';
 
 /** Weekday names a rest day can be set to. */
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -167,6 +168,62 @@ export class RecurringService {
     if (!missed.length) return null;
     this.log.log(`closed ${day}: ${missed.length} daily report(s) missed`);
     return { day, missed };
+  }
+
+  /**
+   * Every rule that decides how the team gets chased, in one place for the Tasks settings screen.
+   * Each value carries a plain-English reading of what it currently means — a bare weekday picker
+   * tells the owner nothing about what it does. (BEA-1161)
+   */
+  async taskSettings() {
+    const get = async (k: string) => (await this.prisma.setting.findUnique({ where: { key: k } }).catch(() => null))?.value ?? null;
+    const [restRaw, hourRaw, timesRaw, graceRaw] = await Promise.all([
+      get(TASK_SETTING_KEYS.restDays),
+      get(TASK_SETTING_KEYS.digestHour),
+      get(TASK_SETTING_KEYS.chaseTimes),
+      get(TASK_SETTING_KEYS.claimGraceDays),
+    ]);
+    const rest = await this.restDays();
+    const hour = await this.digestHour();
+    const times = parseChaseTimes(timesRaw);
+    const grace = parseClaimGraceDays(graceRaw);
+    return {
+      chaseTimes: { value: times, says: `A new chase nudges at ${times.join(' and ')}.` },
+      claimGraceDays: {
+        value: grace,
+        says: grace
+          ? `If you haven't reviewed what someone says they finished for ${grace} day${grace === 1 ? '' : 's'}, the chase stops.`
+          : 'A chase keeps going until you review it, however long that takes.',
+      },
+      restDays: {
+        value: rest,
+        says: rest.length ? `No reports are owed on ${rest.join(', ')}.` : 'Reports are owed every day of the week.',
+      },
+      digestHour: { value: hour, says: `The day closes at ${String(hour).padStart(2, '0')}:00 — anything not in by then is a miss.` },
+      weekdays: WEEKDAYS,
+    };
+  }
+
+  /** Save one or more of those rules. Anything absent is left alone. */
+  async setTaskSettings(input: { chaseTimes?: unknown; claimGraceDays?: unknown; restDays?: unknown; digestHour?: unknown }) {
+    const put = async (key: string, value: string) => {
+      await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } }).catch((e) => this.log.warn(`setTaskSettings ${key}: ${e?.message}`));
+    };
+    if (input.chaseTimes !== undefined) {
+      const clean = Array.isArray(input.chaseTimes) ? input.chaseTimes.filter((t) => typeof t === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t)) : [];
+      // Never store an empty set: a chase with no times never fires, which reads as "it's broken".
+      await put(TASK_SETTING_KEYS.chaseTimes, JSON.stringify(clean.length ? [...new Set(clean)].sort() : TASK_DEFAULTS.chaseTimes));
+    }
+    if (input.claimGraceDays !== undefined) {
+      const n = Number(input.claimGraceDays);
+      await put(TASK_SETTING_KEYS.claimGraceDays, String(Number.isFinite(n) && n >= 0 && n <= 365 ? Math.floor(n) : 0));
+    }
+    if (input.restDays !== undefined) await this.setRestDays(input.restDays);
+    if (input.digestHour !== undefined) {
+      const n = Number(input.digestHour);
+      if (Number.isFinite(n) && n >= 0 && n <= 23) await put(TASK_SETTING_KEYS.digestHour, String(Math.floor(n)));
+    }
+    return this.taskSettings();
   }
 
   /** Set the days a standing report is owed on. Empty clears it back to every working day. */

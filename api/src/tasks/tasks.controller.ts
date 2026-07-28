@@ -61,6 +61,17 @@ export class TasksController {
   }
 
   /** Days no daily report is owed — no chasing, and no "missed" recorded. (BEA-1117) */
+  /** Every rule that governs the chase, for the Tasks settings screen. (BEA-1161) */
+  @Get('settings')
+  taskSettings() {
+    return this.recurring.taskSettings();
+  }
+
+  @Put('settings')
+  setTaskSettings(@Body() body: { chaseTimes?: unknown; claimGraceDays?: unknown; restDays?: unknown; digestHour?: unknown }) {
+    return this.recurring.setTaskSettings(body || {});
+  }
+
   @Get('recurring/rest-days')
   async getRestDays() {
     return { days: await this.recurring.restDays() };

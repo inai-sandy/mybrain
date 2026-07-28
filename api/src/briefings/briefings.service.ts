@@ -6,7 +6,8 @@ import { TasksService } from '../tasks/tasks.service';
 import { RemindersService } from '../contacts/reminders.service';
 import { MemoryService } from '../memory/memory.service';
 import { looseJsonParse } from '../common/llm-json';
-import { gradeBriefDraft, summaryContradicts, cadenceFromWords, type Cadence } from './brief-guard';
+import { gradeBriefDraft, summaryContradicts, cadenceFromWords, chaseTimesFrom, DEFAULT_CHASE_TIMES, type Cadence } from './brief-guard';
+import { TASK_SETTING_KEYS, parseChaseTimes } from '../tasks/task-settings';
 
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
@@ -145,6 +146,17 @@ export class BriefingsService {
     if (!summary) summary = raw.replace(/\s+/g, ' ').slice(0, 140);
 
     return { summary, tasks: kept, cadence: graded.cadence, dropped: graded.dropped };
+  }
+
+  /**
+   * When to chase, for a spoken briefing. A time he named in his own words wins; otherwise his
+   * default from Settings. Neither is invented, and neither is hardcoded here. (BEA-1148/1161)
+   */
+  async chaseTimesFor(rawText: string): Promise<string[]> {
+    const said = chaseTimesFrom(rawText);
+    if (said !== DEFAULT_CHASE_TIMES) return said; // he named a time — use it
+    const row = await this.prisma.setting.findUnique({ where: { key: TASK_SETTING_KEYS.chaseTimes } }).catch(() => null);
+    return parseChaseTimes(row?.value);
   }
 
   /** Save the briefing and create exactly the tasks the owner approved. */
