@@ -434,3 +434,23 @@ describe('split only into the jobs they named', () => {
     expect(items).toHaveLength(4);
   });
 });
+
+/**
+ * From Deepthi's real message: she wrote "PCBs also sent for prop…" about a job called "Send status
+ * update on the PCB order". Without matching the plural it named nothing, and the job would never
+ * have appeared for a ruling.
+ */
+describe('plurals are the same word', () => {
+  it('"PCBs" names the "PCB order" job', async () => {
+    const { svc } = make();
+    const tasks = [
+      { id: 'pcb', title: 'Send status update on the PCB order', status: 'open' },
+      { id: 'geyser', title: 'Send status update on the geyser components order', status: 'open' },
+    ];
+    (svc as any).prisma.task = { findMany: async () => tasks, count: async () => tasks.length, findUnique: async ({ where }: any) => tasks.find((t) => t.id === where.id) || null };
+    (svc as any).prisma.taskClaim = { findFirst: async () => null, findMany: async () => [] };
+    await svc.record({ contactId: 'c1', text: 'All geyser components received. PCBs also sent for prototyping, done', channel: 'whatsapp' });
+    const ids = (await svc.inbox()).items.map((i: any) => i.task.id).sort();
+    expect(ids).toEqual(['geyser', 'pcb']);
+  });
+});

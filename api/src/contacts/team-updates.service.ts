@@ -407,14 +407,19 @@ const FILLER = new Set([
   'day', 'today', 'work', 'task', 'tasks', 'plan', 'details', 'report',
 ]);
 
-/** Words worth matching on. Three letters, not four: PCB, OT, QC and KYC are all real job names. */
+/**
+ * Words worth matching on. Three letters, not four: PCB, OT, QC and KYC are all real job names.
+ * A trailing "s" is dropped on both sides — Deepthi wrote "PCBs also sent" about a job called
+ * "Send status update on the PCB order", and without this it matched nothing at all.
+ */
 function words(text: string): Set<string> {
   return new Set(
     String(text || '')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, ' ')
       .split(' ')
-      .filter((w) => w.length >= 3 && !FILLER.has(w)),
+      .filter((w) => w.length >= 3 && !FILLER.has(w))
+      .map((w) => (w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)),
   );
 }
 
