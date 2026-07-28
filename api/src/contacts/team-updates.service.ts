@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
 import { readUpdate, readLabel, type Read } from './update-read';
 
+
 /**
  * Everything the owner's team says, and the inbox of what needs him. (BEA-1159)
  *
@@ -94,7 +95,18 @@ export class TeamUpdatesService {
           .catch(() => [] as any[]);
         if (theirTasks.length > 1) {
           const done = new Set(safeIds((u as any).answered));
-          for (const t of (theirTasks as any[]).filter((t) => !done.has(t.id))) {
+          /**
+           * Only the jobs they actually named. Srikar has four open — one "done" from him should
+           * not put four rows in front of the owner, three of them about work nobody mentioned.
+           * Reuses the same title-overlap test the close-day tick-off uses. (BEA-1146)
+           *
+           * When nothing matches we have no signal at all, so every job is shown rather than
+           * silently dropping the lot. And a job wrongly left out simply keeps being chased, which
+           * is the safe way for this to be wrong.
+           */
+          const named = (theirTasks as any[]).filter((t) => messageNames(u.text, t.title));
+          const scope = named.length ? named : (theirTasks as any[]);
+          for (const t of scope.filter((t) => !done.has(t.id))) {
             const c = await this.prisma.taskClaim
               .findFirst({ where: { taskId: t.id, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
               .catch(() => null);
@@ -382,6 +394,40 @@ export class TeamUpdatesService {
 }
 
 /** A corrupt reads column must never break the inbox — an unreadable row is just "they said something". */
+/**
+ * Does this message actually talk about that job? (BEA-1159)
+ *
+ * Two of the job's own distinctive words have to appear. One is not enough: Srikar's four jobs all
+ * start "Share a clear update on…", so a single shared word would match every one of them and put
+ * four rows in front of the owner for a message about one.
+ */
+const FILLER = new Set([
+  'all', 'and', 'the', 'for', 'with', 'from', 'that', 'this', 'send', 'share', 'update', 'updates',
+  'status', 'clear', 'give', 'please', 'done', 'finished', 'completed', 'received', 'next', 'month',
+  'day', 'today', 'work', 'task', 'tasks', 'plan', 'details', 'report',
+]);
+
+/** Words worth matching on. Three letters, not four: PCB, OT, QC and KYC are all real job names. */
+function words(text: string): Set<string> {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(' ')
+      .filter((w) => w.length >= 3 && !FILLER.has(w)),
+  );
+}
+
+function messageNames(text: string, title: string): boolean {
+  const said = words(text);
+  const job = [...words(title)];
+  if (!job.length || !said.size) return false;
+  const shared = job.filter((w) => said.has(w)).length;
+  // Two shared words for a job with a wordy title, but a short one like "Send status update on the
+  // PCB order" only has "pcb" and "order" to give — demanding two there would hide it completely.
+  return shared >= Math.min(2, Math.ceil(job.length / 2));
+}
+
 /** Task ids he has already ruled on for this message. Unreadable means none — he sees it again. */
 function safeIds(raw: string | null | undefined): string[] {
   try {

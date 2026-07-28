@@ -393,3 +393,44 @@ describe('one row per job when they say something is done (BEA-1159)', () => {
     expect(inbox.items[0].perTask).toBeUndefined();
   });
 });
+
+/**
+ * Srikar has four open jobs. One "done" from him must not put four rows in front of the owner,
+ * three of them about work nobody mentioned — an inbox with noise in it stops being read.
+ */
+describe('split only into the jobs they named', () => {
+  const FOUR = [
+    { id: 'zigbee', title: 'Share a clear update on ZigBee protocol testing status', status: 'open' },
+    { id: 'curtains', title: 'Share a clear update on Wi-Fi curtains and blinds testing', status: 'open' },
+    { id: 'pins', title: 'Share a clear update on the smart plug socket pins plan', status: 'open' },
+    { id: 'collections', title: "Share next month's payment collection details", status: 'open' },
+  ];
+
+  function svc4() {
+    const { svc } = make();
+    (svc as any).prisma.task = { findMany: async () => FOUR, count: async () => FOUR.length, findUnique: async ({ where }: any) => FOUR.find((t) => t.id === where.id) || null };
+    (svc as any).prisma.taskClaim = { findFirst: async () => null, findMany: async () => [] };
+    return svc;
+  }
+
+  it('one job named, one row', async () => {
+    const svc = svc4();
+    await svc.record({ contactId: 'c1', text: 'ZigBee protocol testing is done', channel: 'whatsapp' });
+    const items: any[] = (await svc.inbox()).items;
+    expect(items.map((i) => i.task.id)).toEqual(['zigbee']);
+  });
+
+  it('two named, two rows', async () => {
+    const svc = svc4();
+    await svc.record({ contactId: 'c1', text: 'ZigBee protocol testing done, and the socket pins plan is finished', channel: 'whatsapp' });
+    const items: any[] = (await svc.inbox()).items;
+    expect(items.map((i) => i.task.id).sort()).toEqual(['pins', 'zigbee']);
+  });
+
+  it('names nothing recognisable — shows them all rather than dropping the lot', async () => {
+    const svc = svc4();
+    await svc.record({ contactId: 'c1', text: 'all done', channel: 'whatsapp' });
+    const items: any[] = (await svc.inbox()).items;
+    expect(items).toHaveLength(4);
+  });
+});
