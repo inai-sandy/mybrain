@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, Send, Loader2, MessageSquare, Link2, Radio, Search } from 'lucide-react';
+import { Check, X, Send, Loader2, MessageSquare, Link2, Radio, Search } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Item = {
@@ -15,6 +15,8 @@ type Item = {
   task: { id: string; title: string; status: string } | null;
   chasePaused: boolean;
   canReply: boolean;
+  /** Set when they claimed a task finished — then this is a yes/no, not just something to read. */
+  claimId: string | null;
 };
 
 /**
@@ -60,6 +62,29 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
       toast('success', `Sent to ${it.contact?.name || 'them'} — still open until you close it`);
       setDraft('');
       setReplyTo(null);
+    } catch {
+      toast('error', 'Could not reach the server');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Yes it's done, or no it isn't. (BEA-1159)
+   *
+   * Saying no is the important half: a pending claim keeps the chase quiet, so an undecided claim
+   * left the task open forever with nobody being chased. "No" puts the chase straight back on.
+   */
+  async function decide(it: Item, confirm: boolean) {
+    setBusy(it.id);
+    try {
+      const r = await fetch(`/api/reminders/review/${it.id}/decide`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm }),
+      });
+      const d = await r.json().catch(() => ({ ok: false }));
+      if (!d.ok) { toast('error', d.message || 'Could not save that'); return; }
+      toast('success', confirm ? 'Marked done — no more chasing for it' : `Sent back — ${it.contact?.name || 'they'} will be chased again`);
+      setItems((xs) => { const next = (xs || []).filter((x) => x.id !== it.id); onCountChange?.(next.length); return next; });
     } catch {
       toast('error', 'Could not reach the server');
     } finally {
@@ -151,6 +176,21 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
               </div>
             ) : (
               <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                {/* They claimed a task finished — this is a decision, and "No" restarts the chase. */}
+                {it.claimId ? (
+                  <>
+                    <button onClick={() => decide(it, true)} disabled={busy === it.id} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-400">
+                      {busy === it.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Yes, it's done
+                    </button>
+                    <button onClick={() => decide(it, false)} disabled={busy === it.id} className="inline-flex items-center gap-1.5 rounded-lg bg-rose-500/15 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-500/25 disabled:opacity-50 dark:text-rose-400">
+                      <X size={14} /> No — keep chasing
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => close(it)} disabled={busy === it.id} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-400">
+                    {busy === it.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Sorted, close it
+                  </button>
+                )}
                 <button
                   onClick={() => { setReplyTo(it.id); setDraft(''); }}
                   disabled={!it.canReply}
@@ -158,9 +198,6 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                   className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
                 >
                   <Send size={14} /> Message them
-                </button>
-                <button onClick={() => close(it)} disabled={busy === it.id} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/15 px-3 py-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-500/25 disabled:opacity-50 dark:text-emerald-400">
-                  {busy === it.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Sorted, close it
                 </button>
               </div>
             )}

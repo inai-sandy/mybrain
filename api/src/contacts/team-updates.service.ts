@@ -77,7 +77,16 @@ export class TeamUpdatesService {
         ? await this.prisma.reminder.count({ where: { taskId: u.taskId, status: 'paused' } }).catch(() => 0)
         : 0;
       const reads = safeReads(u.reads);
+      // A "they say it's done" item is a DECISION, not just something to read: he has to say yes
+      // or no, and saying no is what puts the chase back on. Without the claim id the screen can
+      // only offer "close it", which decides nothing and leaves the task open for good. (BEA-1159)
+      const claim = u.taskId
+        ? await this.prisma.taskClaim
+            .findFirst({ where: { taskId: u.taskId, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+            .catch(() => null)
+        : null;
       items.push({
+        claimId: claim?.id || null,
         id: u.id,
         text: u.text,
         channel: u.channel,
@@ -119,6 +128,30 @@ export class TeamUpdatesService {
       .catch(() => undefined);
     // Replying does NOT close it. Only he closes it, when the problem is actually solved.
     return { ok: true };
+  }
+
+  /**
+   * He rules on a claim: yes it's done, or no it isn't. (BEA-1159)
+   *
+   * His rule: *"If I say it's done, that means you don't need to chase them again."* And the other
+   * way round — saying it isn't finished must put the chase straight back on. A pending claim keeps
+   * the chase quiet, so leaving one undecided is what made "quiet" indistinguishable from "finished".
+   *
+   * The decision itself runs through the existing claims path, which already marks the task done on
+   * a yes and reopens it on a no. This only connects the review screen to it and closes the item.
+   */
+  async decide(id: string, confirm: boolean, decider: (claimId: string, confirm: boolean) => Promise<any>) {
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, taskId: true } });
+    if (!u) return { ok: false, message: 'That is not there any more' };
+    if (!u.taskId) return { ok: false, message: 'There is no task behind this one' };
+    const claim = await this.prisma.taskClaim
+      .findFirst({ where: { taskId: u.taskId, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+      .catch(() => null);
+    if (!claim) return { ok: false, message: 'That has already been decided' };
+    await decider(claim.id, confirm);
+    // Either way the question is answered, so it leaves his inbox.
+    await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: new Date() } }).catch(() => undefined);
+    return { ok: true, confirmed: confirm };
   }
 
   /** He closes it — the only way an item leaves the inbox. */

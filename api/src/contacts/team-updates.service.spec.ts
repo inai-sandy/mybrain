@@ -159,3 +159,62 @@ describe("one person's whole story, both channels (BEA-1159)", () => {
     expect(rows[0].closedAt).toBeTruthy();
   });
 });
+
+/**
+ * BEA-1159. The owner asked where the yes/no was, and he was right that it wasn't there — the
+ * screen shipped with only "Sorted, close it", which decided nothing. A pending claim keeps the
+ * chase quiet, so an undecided claim left the task open forever with nobody chasing it.
+ *
+ * His rule: *"If I say it's done, that means you don't need to chase them again."* And the other
+ * half — saying it isn't finished has to put the chase back on.
+ */
+describe('yes it is done / no it is not (BEA-1159)', () => {
+  function withClaim(claim: any | null) {
+    const { svc, rows } = make();
+    (svc as any).prisma.taskClaim = { findFirst: async () => claim, findMany: async () => [] };
+    return { svc, rows };
+  }
+
+  it('offers the decision when they claimed a task finished', async () => {
+    const { svc } = withClaim({ id: 'cl1' });
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
+    const inbox: any = await svc.inbox();
+    expect(inbox.items[0].claimId).toBe('cl1');
+  });
+
+  it('a problem is not a yes/no — there is nothing to confirm', async () => {
+    const { svc } = withClaim(null);
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp', taskId: 't1' });
+    expect((await svc.inbox()).items[0].claimId).toBeNull();
+  });
+
+  it('"yes" decides the claim and takes it out of his inbox', async () => {
+    const { svc } = withClaim({ id: 'cl1' });
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
+    const id = (await svc.inbox()).items[0].id;
+    const calls: any[] = [];
+    const r: any = await svc.decide(id, true, async (claimId, ok) => { calls.push({ claimId, ok }); return { ok: true }; });
+    expect(r.ok).toBe(true);
+    expect(calls).toEqual([{ claimId: 'cl1', ok: true }]);
+    expect((await svc.inbox()).count).toBe(0);
+  });
+
+  it('"no" rejects the claim — which is what puts the chase back on', async () => {
+    const { svc } = withClaim({ id: 'cl1' });
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
+    const id = (await svc.inbox()).items[0].id;
+    const calls: any[] = [];
+    await svc.decide(id, false, async (claimId, ok) => { calls.push({ claimId, ok }); return { ok: true }; });
+    expect(calls).toEqual([{ claimId: 'cl1', ok: false }]);
+  });
+
+  it('an already-decided claim says so rather than deciding twice', async () => {
+    const { svc } = withClaim(null);
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
+    const id = (await svc.inbox()).items[0].id;
+    let called = false;
+    const r: any = await svc.decide(id, true, async () => { called = true; return { ok: true }; });
+    expect(r.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+});
