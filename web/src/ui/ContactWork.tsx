@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, Circle, Hand, Radio, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
+import { PersonTimeline } from './PersonTimeline';
 import { TaskFormModal, type Task } from '../pages/taskShared';
 
 type Report = {
@@ -55,6 +56,8 @@ export function ContactState({ contactId, reload }: { contactId: string; reload:
       </div>
     </div>
     <TodayReports today={s.today} onChanged={() => fetch(`/api/contacts/${contactId}/state`).then((r) => (r.ok ? r.json() : null)).then(setS).catch(() => undefined)} />
+    {/* Both channels in one thread, so half the conversation is no longer invisible. (BEA-1159) */}
+    <PersonTimeline contactId={contactId} reload={reload} />
     </div>
   );
 }

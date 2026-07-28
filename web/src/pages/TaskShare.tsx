@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Clock, Loader2, CircleAlert, CheckCircle2, Undo2 } from 'lucide-react';
+import { Check, Clock, Loader2, CircleAlert, CheckCircle2, Undo2, Send } from 'lucide-react';
 
 type Item = {
   id: string;
@@ -147,6 +147,9 @@ export function TaskShare() {
         </section>
       )}
 
+      {/* Say something without having to claim a task is finished. (BEA-1159) */}
+      <MessageBox slug={slug} name={board.name} />
+
       <footer className="py-10 text-center text-[11px] text-zinc-400">
         Sent by My Brain on behalf of Sandeep.
       </footer>
@@ -254,5 +257,71 @@ function Message({ icon, title, body, action }: { icon: React.ReactNode; title: 
       <p className="mt-1 text-sm text-zinc-500">{body}</p>
       {action}
     </div>
+  );
+}
+
+/**
+ * A plain message to Sandeep. (BEA-1159)
+ *
+ * Before this the only way to say anything was to tick a task and attach a note — so someone with a
+ * problem had to mark work finished in order to report it. Every note ever left on a share page
+ * turned out to be a real message, and none of them were visible in the conversation.
+ */
+function MessageBox({ slug, name }: { slug: string; name: string }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function send() {
+    const body = text.trim();
+    if (!body) return;
+    setBusy(true); setFailed(false);
+    try {
+      const r = await fetch(`/api/t/${encodeURIComponent(slug)}/message`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }),
+      });
+      if (!r.ok) { setFailed(true); return; }
+      setSent(true); setText('');
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (sent) {
+    return (
+      <section className="mt-8 rounded-2xl border border-emerald-300/60 bg-emerald-500/5 p-4 dark:border-emerald-500/30">
+        <p className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+          <CheckCircle2 className="h-4 w-4" /> Sent to Sandeep.
+        </p>
+        <button onClick={() => setSent(false)} className="mt-1.5 text-xs text-emerald-700 underline dark:text-emerald-400">Say something else</button>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-semibold">Tell Sandeep something</h2>
+      <p className="mb-2 mt-0.5 text-xs text-zinc-500">
+        Anything at all — a problem, a question, or what is holding you up. You do not have to tick something off to write here.
+      </p>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        placeholder={`e.g. the material hasn't arrived, so ${name.split(/\s+/)[0] || 'we'} can't start`}
+        className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+      />
+      {failed && <p className="mt-1 text-xs text-rose-600">That did not go through — try again.</p>}
+      <button
+        onClick={send}
+        disabled={busy || !text.trim()}
+        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50 sm:w-auto"
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send to Sandeep
+      </button>
+    </section>
   );
 }
