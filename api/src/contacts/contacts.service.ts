@@ -331,12 +331,14 @@ export class ContactsService {
     if (!c) throw new NotFoundException('This link is not valid');
     if (c.shareEnabled === false) return { off: true, name: c.name };
 
+    const rest = await this.restDaysSafe();
+    const weekday = weekdayOf(localDayKey());
     const rows = await this.prisma.task.findMany({
       where: { ownerContactId: c.id },
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       take: 300,
       select: {
-        id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true, promisedFor: true, kind: true,
+        id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true, promisedFor: true, kind: true, scheduleDays: true,
         claims: { where: { status: 'pending' }, take: 1, select: { id: true, quote: true, createdAt: true } },
         // For a daily report the only question is whether TODAY's is in — "tick it off" makes no
         // sense for something owed again tomorrow. (BEA-1118)
@@ -355,11 +357,22 @@ export class ContactsService {
       claimed: t.claims?.[0] ? { at: t.claims[0].createdAt, note: t.claims[0].quote } : null,
       // Daily items: has today's update already been sent?
       sentToday: t.kind === 'recurring' ? !!t.statusDays?.[0] : null,
+      // When it is owed, in their words — so nobody has to guess. (BEA-1156)
+      schedule: t.kind === 'recurring' ? scheduleLabel(t.scheduleDays) : null,
+      dueToday: t.kind === 'recurring' ? isOwedOn(t.scheduleDays, weekday, rest) : null,
     });
+
+    const open = rows.filter((t) => t.status !== 'done').map(shape);
+    // A standing report is only asked for on ITS OWN days. BEA-1147 fixed this for the owner's board
+    // and the chase, and never reached the page his team actually looks at — on a Tuesday Rakesh was
+    // being asked for Friday's, Wednesday's AND Monday's updates, all at once. (BEA-1156)
     return {
       off: false,
       name: c.name,
-      open: rows.filter((t) => t.status !== 'done').map(shape),
+      // What they owe right now: their assignments, plus only the reports due today.
+      open: open.filter((t) => t.kind !== 'recurring' || t.dueToday),
+      // Their standing reports, so they can see what is coming without being asked for it today.
+      reports: open.filter((t) => t.kind === 'recurring'),
       done: rows.filter((t) => t.status === 'done').map(shape),
     };
   }
