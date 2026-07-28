@@ -73,7 +73,11 @@ export function TaskShare() {
         <p className="text-xs font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">For {board.name}</p>
         <h1 className="mt-1 text-2xl font-extrabold">What Sandeep is waiting on</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          {open.length === 0 ? "Nothing outstanding — you're all clear." : `${open.length} thing${open.length === 1 ? '' : 's'} still open.`}
+          {open.length === 0
+            ? later.length > 0
+              ? 'Nothing to send today.'
+              : "Nothing outstanding — you're all clear."
+            : `${open.length} thing${open.length === 1 ? '' : 's'} still open.`}
         </p>
       </header>
 
@@ -118,7 +122,7 @@ export function TaskShare() {
         </section>
       )}
 
-      {open.length === 0 && (
+      {open.length === 0 && later.length === 0 && (
         <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center dark:border-zinc-700">
           <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
           <p className="font-medium">All clear</p>
