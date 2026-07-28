@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AutoStoppedChases } from '../ui/AutoStoppedChases';
 import { Link } from 'react-router-dom';
 import { Hand, Radio, Clock, Plus, Search, Timer } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -89,6 +90,9 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
         <Stat icon={<Radio size={14} />} n={summary.chasing} label="being chased" />
         <Stat icon={<Timer size={14} />} n={summary.stalling || 0} label="not moving" tone={summary.stalling ? 'amber' : undefined} />
       </div>
+
+      {/* Chases the app switched off by itself, waiting to be turned back on. (BEA-1160) */}
+      <AutoStoppedChases />
 
       {/* Filter row in the board's own style. */}
       <div className="flex flex-wrap items-center gap-2">
