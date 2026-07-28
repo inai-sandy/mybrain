@@ -30,7 +30,7 @@ function make(opts: { sendFails?: boolean; number?: string | null } = {}) {
     },
     reminder: { count: async () => 0 },
     reminderMessage: { create: async ({ data }: any) => { thread.push(data); return data; } },
-    taskClaim: { findMany: async () => [] },
+    taskClaim: { findMany: async () => [], findFirst: async () => null },
     taskStatusDay: { findMany: async () => [] },
   };
   const postbox: any = {
@@ -171,9 +171,15 @@ describe("one person's whole story, both channels (BEA-1159)", () => {
 describe('yes it is done / no it is not (BEA-1159)', () => {
   function withClaim(claim: any | null, contactClaims: any[] = claim ? [claim] : []) {
     const { svc, rows } = make();
-    (svc as any).prisma.taskClaim = { findFirst: async () => claim, findMany: async () => contactClaims };
+    // Deciding really does take the claim out of "pending", so the double has to as well —
+    // otherwise the orphan sweep would keep re-adding a claim that has been answered.
+    const state = { decided: false };
+    (svc as any).prisma.taskClaim = {
+      findFirst: async () => (state.decided ? null : claim),
+      findMany: async () => (state.decided ? [] : contactClaims),
+    };
     (svc as any).prisma.task = { findUnique: async () => ({ id: 't1', title: 'Send the geyser update', status: 'open' }) };
-    return { svc, rows };
+    return { svc, rows, state };
   }
 
   it('offers the decision when they claimed a task finished', async () => {
@@ -190,11 +196,11 @@ describe('yes it is done / no it is not (BEA-1159)', () => {
   });
 
   it('"yes" decides the claim and takes it out of his inbox', async () => {
-    const { svc } = withClaim({ id: 'cl1' });
+    const { svc, state } = withClaim({ id: 'cl1' });
     await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
     const id = (await svc.inbox()).items[0].id;
     const calls: any[] = [];
-    const r: any = await svc.decide(id, true, async (claimId, ok) => { calls.push({ claimId, ok }); return { ok: true }; });
+    const r: any = await svc.decide(id, true, async (claimId, ok) => { calls.push({ claimId, ok }); state.decided = true; return { ok: true }; });
     expect(r.ok).toBe(true);
     expect(calls).toEqual([{ claimId: 'cl1', ok: true }]);
     expect((await svc.inbox()).count).toBe(0);
@@ -256,5 +262,48 @@ describe('finding the claim when the message names no task', () => {
     const r: any = await svc.decide(id, true, async () => { called = true; return { ok: true }; });
     expect(r.ok).toBe(false);
     expect(called).toBe(false);
+  });
+});
+
+/**
+ * Found live, an hour after shipping: the owner closed an item without deciding, and its claim
+ * stayed pending. A pending claim keeps the chase quiet, so Deepthi sat un-chased with no way for
+ * him to rule on it. A claim must always be answerable, whatever happened to the message.
+ */
+describe('a pending claim can never be orphaned (BEA-1159)', () => {
+  function svcWithOrphan() {
+    const { svc } = make();
+    const claim = { id: 'cl7', taskId: 't7', quote: 'Task 1 all finished', createdAt: new Date(Date.now() - 2 * 86400000), source: 'whatsapp', contact: { id: 'c1', name: 'Deepthi', whatsappNumber: '9190' }, task: { id: 't7', title: 'Send the geyser update', status: 'open' } };
+    (svc as any).prisma.taskClaim = {
+      findFirst: async ({ where }: any) => (where?.id === 'cl7' && where?.status === 'pending' ? claim : null),
+      findMany: async () => [claim],
+    };
+    (svc as any).prisma.task = { findUnique: async () => claim.task };
+    return svc;
+  }
+
+  it('shows the claim even when no message is open for it', async () => {
+    const svc = svcWithOrphan();
+    const inbox: any = await svc.inbox();
+    const item = inbox.items.find((i: any) => i.claimId === 'cl7');
+    expect(item).toBeTruthy();
+    expect(item.task.title).toBe('Send the geyser update');
+    expect(item.openDays).toBe(2);
+  });
+
+  it('and it can be decided from there', async () => {
+    const svc = svcWithOrphan();
+    const id = (await svc.inbox()).items.find((i: any) => i.claimId === 'cl7').id;
+    const calls: any[] = [];
+    const r: any = await svc.decide(id, false, async (claimId, ok) => { calls.push({ claimId, ok }); return { ok: true }; });
+    expect(r.ok).toBe(true);
+    expect(calls).toEqual([{ claimId: 'cl7', ok: false }]); // "no" — the chase resumes
+  });
+
+  it('a claim already decided elsewhere says so rather than deciding twice', async () => {
+    const svc = svcWithOrphan();
+    (svc as any).prisma.taskClaim.findFirst = async () => null;
+    const r: any = await svc.decide('claim:cl7', true, async () => ({ ok: true }));
+    expect(r.ok).toBe(false);
   });
 });

@@ -97,6 +97,36 @@ export class TeamUpdatesService {
         canReply: !!u.contact?.whatsappNumber,
       });
     }
+    // A pending claim must ALWAYS be answerable. Closing an update without deciding used to orphan
+    // it: the claim stayed pending, which keeps the chase quiet, so the person sat un-chased with
+    // no way for him to rule on it. Any claim not already represented above is added here. (BEA-1159)
+    const covered = new Set(items.map((i) => i.claimId).filter(Boolean));
+    const orphans = await this.prisma.taskClaim
+      .findMany({
+        where: { status: 'pending' },
+        orderBy: { createdAt: 'asc' },
+        include: { contact: { select: { id: true, name: true, whatsappNumber: true } }, task: { select: { id: true, title: true, status: true } } },
+      })
+      .catch(() => [] as any[]);
+    for (const c of orphans as any[]) {
+      if (covered.has(c.id)) continue;
+      items.push({
+        id: `claim:${c.id}`,
+        claimId: c.id,
+        text: c.quote || 'They marked this finished on their page.',
+        channel: c.source === 'page' ? 'link' : 'whatsapp',
+        at: c.createdAt,
+        openDays: Math.max(0, Math.floor((Date.now() - new Date(c.createdAt).getTime()) / 86400000)),
+        reads: ['done'],
+        label: readLabel(['done']),
+        why: 'they say it is finished',
+        contact: c.contact,
+        task: c.task,
+        chasePaused: false,
+        canReply: !!c.contact?.whatsappNumber,
+      });
+    }
+    items.sort((a, b) => +new Date(a.at) - +new Date(b.at));
     return { items, count: items.length };
   }
 
@@ -158,6 +188,14 @@ export class TeamUpdatesService {
    * a yes and reopens it on a no. This only connects the review screen to it and closes the item.
    */
   async decide(id: string, confirm: boolean, decider: (claimId: string, confirm: boolean) => Promise<any>) {
+    // A claim with no update of its own is shown as `claim:<id>` — deciding it needs no row.
+    if (id.startsWith('claim:')) {
+      const claimId = id.slice(6);
+      const still = await this.prisma.taskClaim.findFirst({ where: { id: claimId, status: 'pending' }, select: { id: true } }).catch(() => null);
+      if (!still) return { ok: false, message: 'That has already been decided' };
+      await decider(claimId, confirm);
+      return { ok: true, confirmed: confirm };
+    }
     const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, taskId: true, contactId: true } });
     if (!u) return { ok: false, message: 'That is not there any more' };
     const claim = await this.pendingClaimFor(u.contactId, u.taskId);
