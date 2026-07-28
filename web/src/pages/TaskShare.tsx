@@ -15,8 +15,12 @@ type Item = {
   kind?: 'assignment' | 'recurring';
   /** Daily items only: has today's update already been sent? */
   sentToday?: boolean | null;
+  /** Daily items only: when it is owed, in plain words — "every working day", "Fri". (BEA-1156) */
+  schedule?: string | null;
+  /** Daily items only: is it actually owed today? */
+  dueToday?: boolean | null;
 };
-type Board = { off: boolean; name: string; open?: Item[]; done?: Item[] };
+type Board = { off: boolean; name: string; open?: Item[]; done?: Item[]; reports?: Item[] };
 
 const day = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '';
@@ -55,6 +59,13 @@ export function TaskShare() {
 
   const open = board.open || [];
   const done = board.done || [];
+  // Their standing reports, split into what is owed today and what is not. Before this the page
+  // asked for every report every day — on a Tuesday, Rakesh was being asked for Friday's,
+  // Wednesday's and Monday's updates at once. (BEA-1156)
+  const reports = board.reports || [];
+  const dueNow = reports.filter((r) => r.dueToday);
+  const later = reports.filter((r) => !r.dueToday);
+  const jobs = open.filter((t) => t.kind !== 'recurring');
 
   return (
     <Shell>
@@ -66,10 +77,45 @@ export function TaskShare() {
         </p>
       </header>
 
-      {open.length > 0 && (
-        <ul className="space-y-3">
-          {open.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
-        </ul>
+      {/* Daily reports are their own thing and people need telling — most of the team open this on a
+          phone between jobs and will not work out the rhythm on their own. (BEA-1156) */}
+      {dueNow.length > 0 && (
+        <section className="mb-6">
+          <h2 className="text-sm font-semibold">Today's update{dueNow.length > 1 ? 's' : ''}</h2>
+          <p className="mb-2.5 mt-0.5 text-xs text-zinc-500">
+            Please send these every working day — even a short line, or “nothing new today”, is enough.
+          </p>
+          <ul className="space-y-3">
+            {dueNow.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
+          </ul>
+        </section>
+      )}
+
+      {jobs.length > 0 && (
+        <>
+          {dueNow.length > 0 && <h2 className="mb-2 text-sm font-semibold">Other things</h2>}
+          <ul className="space-y-3">
+            {jobs.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
+          </ul>
+        </>
+      )}
+
+      {/* Not owed today — shown so they know it exists, never asking for an update. */}
+      {later.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold text-zinc-500">Coming up</h2>
+          <ul className="space-y-2">
+            {later.map((t) => (
+              <li key={t.id} className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
+                <span className="min-w-0">
+                  <span className="block text-sm text-zinc-600 dark:text-zinc-300">{t.title}</span>
+                  <span className="text-[11px] text-zinc-400">{t.schedule ? `Due ${t.schedule}` : 'Not due today'} — nothing needed right now</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {open.length === 0 && (

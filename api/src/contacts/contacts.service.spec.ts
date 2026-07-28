@@ -135,3 +135,52 @@ describe("a person's page answers today (BEA-1149)", () => {
     expect(s.today.counts).toEqual({ due: 0, received: 0 });
   });
 });
+
+/**
+ * BEA-1156. BEA-1147 gave each standing report its own days and fixed the owner's board and the
+ * chase — and never reached the page his team looks at. Live, on a Tuesday, Rakesh's link asked him
+ * for Friday's, Wednesday's AND Monday's updates, all offering a "Send today's update" box.
+ */
+describe("the team's own page only asks for what's due (BEA-1156)", () => {
+  const day = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const today = WD[new Date(day + 'T12:00:00Z').getUTCDay()];
+  const other = WD.filter((d) => d !== today && d !== 'Sun')[0];
+
+  function board(tasks: any[]) {
+    const p: any = fakePrisma();
+    p.contact.findUnique = async () => ({ id: 'c1', name: 'Rakesh', shareSlug: 'rakesh-6npa', shareEnabled: true });
+    p.setting = { findUnique: async () => ({ value: JSON.stringify(['Sun']) }) };
+    p.task = { findMany: async () => tasks };
+    return new ContactsService(p).publicBoard('rakesh-6npa');
+  }
+
+  const report = (id: string, title: string, days: string[] | null) => ({
+    id, title, note: null, status: 'open', dueDate: null, createdAt: new Date(), completedAt: null,
+    promisedFor: null, kind: 'recurring', scheduleDays: days ? JSON.stringify(days) : null, claims: [], statusDays: [],
+  });
+
+  it("does not ask for another day's report", async () => {
+    const b: any = await board([report('t1', 'Send the daily production update', null), report('t2', 'Other-day report', [other])]);
+    expect(b.open.map((t: any) => t.id)).toEqual(['t1']);
+  });
+
+  it('still shows it, under what is coming, with when it is due', async () => {
+    const b: any = await board([report('t2', 'Send Friday night production status update', ['Fri'])]);
+    const notDue = b.reports.filter((r: any) => !r.dueToday);
+    expect(notDue).toHaveLength(1);
+    expect(notDue[0].schedule).toBe('Fri');
+  });
+
+  it('an ordinary job is never hidden by the schedule rule', async () => {
+    const job = { id: 'j1', title: 'Discuss installation charges', note: null, status: 'open', dueDate: null, createdAt: new Date(), completedAt: null, promisedFor: null, kind: 'assignment', scheduleDays: null, claims: [], statusDays: [] };
+    const b: any = await board([job]);
+    expect(b.open.map((t: any) => t.id)).toEqual(['j1']);
+  });
+
+  it('a report with no days set is owed every working day', async () => {
+    const b: any = await board([report('t1', 'Send the daily production update', null)]);
+    expect(b.reports[0].dueToday).toBe(true);
+    expect(b.reports[0].schedule).toBe('every working day');
+  });
+});
