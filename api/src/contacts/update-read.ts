@@ -36,7 +36,13 @@ const TROUBLE = [
   /\b(?:still\s+)?pending\b/i,
   /\bwaiting\s+(?:for|on)\b/i,
   /\b(?:is|are|got|getting)\s+(?:stuck|blocked|delayed|held\s*up)\b/i,
-  /\b(?:problem|issue|trouble|difficulty|shortage|short\s+of|out\s+of\s+stock|breakdown|damaged|defect|reject(?:ed|ion)?)\b/i,
+  // "problem"/"issue" only when it reports trouble, not when it names a thing. Jayanth's nightly OT
+  // report lists "Trinetra Problem Devices For Rework" — a device category. Flagging that would put
+  // a routine report in front of him every night, and an inbox with noise in it stops being read.
+  // No /i flag on purpose: the word must be case-insensitive but the lookahead must NOT be, or
+  // [A-Z] would match any letter and every "problem" would be excluded.
+  /\b(?:[Pp]roblem|[Ii]ssue|[Tt]rouble)s?\b(?!\s+[A-Z])/,
+  /\b(?:difficulty|shortage|short\s+of|out\s+of\s+stock|breakdown|damaged|defect|reject(?:ed|ion)?)\b/i,
   /\bneed\s+(?:your|sandeep|his|approval|permission|budget|payment|help|support|clarity|clarification)\b/i,
   /\bcan\s*n[o']?t\b|\bcannot\b|\bunable\b/i,
   /\bwho\s+(?:will|should)\b|\bshall\s+i\b|\bshould\s+(?:i|we)\b/i,

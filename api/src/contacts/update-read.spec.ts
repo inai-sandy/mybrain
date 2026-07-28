@@ -104,3 +104,25 @@ describe('a quantity is not a claim', () => {
     expect(readUpdate('All 120 BOMs uploaded into the system and completed the verification').reads).toContain('done');
   });
 });
+
+/**
+ * Found by running the backfill over the owner's real messages, not by guessing. Jayanth's nightly
+ * OT report lists "Trinetra Problem Devices For Rework" — a device category, not trouble. Flagging
+ * it would have put a routine report in his review every night, and an inbox with noise in it
+ * stops being read at all.
+ */
+describe('a word that names a thing is not a problem', () => {
+  const JAYANTH_OT = '19/07/2026 (Sunday)\n\nOT From 9:30 to 6:30\n\nTotal members - 5\n\n1 Person For Fitting LPF 4+1 v5\n2 Person For Testing Ageing\n1 Person For Trinetra Problem Devices For Rework\n1 Person For QC';
+
+  it("does not flag Jayanth's OT report", () => {
+    const r = readUpdate(JAYANTH_OT, { isReport: true });
+    expect(r.reads).not.toContain('needs_you');
+    expect(r.reads).toContain('status');
+  });
+
+  it('but still catches a real problem', () => {
+    expect(readUpdate('there is a problem with the socket pins').needsYou).toBe(true);
+    expect(readUpdate('Problem with the PCB order').needsYou).toBe(true);
+    expect(readUpdate('facing issues in testing').needsYou).toBe(true);
+  });
+});
