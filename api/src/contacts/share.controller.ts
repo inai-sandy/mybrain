@@ -17,6 +17,28 @@ export class ShareController {
     private readonly updates: TeamUpdatesService,
   ) {}
 
+  /**
+   * They just want to tell him something. (BEA-1159)
+   *
+   * Until now the only way to speak was to tick a task and attach a note, so the product was
+   * pushing people into marking work finished in order to say "the KIOT thing slipped". Every
+   * share-page note on record turned out to be a real message, not a bare tick.
+   *
+   * Same rate limit as the tick: this needs no login, so a forwarded link must not be able to
+   * flood him.
+   */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post(':slug/message')
+  async message(@Param('slug') slug: string, @Body() body: { text?: string }) {
+    const text = String(body?.text || '').trim();
+    if (!text) throw new BadRequestException('Write something first');
+    const contact = await this.contacts.contactForShare(slug); // 404s on a bad or disabled link
+    const row = await this.updates.record({ contactId: contact.id, text: text.slice(0, 2000), channel: 'link' });
+    return { ok: !!row, needsHim: !!row?.needsYou };
+  }
+
   @Public()
   @Get(':slug')
   board(@Param('slug') slug: string) {

@@ -135,6 +135,12 @@ export class RemindersController {
     return this.updates.reopen(id);
   }
 
+  /** One person's whole story — both channels, in time order. (BEA-1159) */
+  @Get('review/contact/:id')
+  reviewForContact(@Param('id') id: string) {
+    return this.updates.forContact(id);
+  }
+
   /** Chases the app switched off by itself, for the owner to resume. (BEA-1160) */
   @Get('auto-stopped')
   autoStopped() {

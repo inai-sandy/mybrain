@@ -16,8 +16,11 @@ function make(opts: { sendFails?: boolean; number?: string | null } = {}) {
     teamUpdate: {
       findFirst: async ({ where }: any) => rows.find((r) => r.contactId === where.contactId && r.text === where.text) || null,
       findUnique: async ({ where }: any) => { const r = rows.find((x) => x.id === where.id); return r ? { ...r, contact: { id: 'c1', name: 'Radha', whatsappNumber: opts.number === undefined ? '919000000000' : opts.number } } : null; },
-      findMany: async ({ where }: any = {}) =>
-        rows
+      // Honour orderBy the way real prisma does — forContact reads desc then reverses, so a double
+      // that ignores it silently flips the whole thread.
+      findMany: async ({ where, orderBy }: any = {}) =>
+        [...rows]
+          .sort((a, b) => (orderBy?.at === 'desc' ? +new Date(b.at) - +new Date(a.at) : +new Date(a.at) - +new Date(b.at)))
           .filter((r) => (where?.needsYou === undefined || r.needsYou === where.needsYou))
           .filter((r) => (where?.closedAt === undefined || (where.closedAt === null ? !r.closedAt : true)))
           .filter((r) => (where?.contactId === undefined || r.contactId === where.contactId))
@@ -121,5 +124,38 @@ describe('the review loop (BEA-1159)', () => {
     const { svc } = make();
     await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'link' });
     expect((await svc.inbox()).items[0].channel).toBe('link');
+  });
+});
+
+/**
+ * BEA-1159 steps 3 and 4. Swathi wrote three messages on her link in one morning and had sixty
+ * WhatsApp messages on her page — and none of the three appeared there. One thread fixes that.
+ */
+describe("one person's whole story, both channels (BEA-1159)", () => {
+  it('returns their updates oldest-first, so it reads like a conversation', async () => {
+    const { svc } = make();
+    const t = (m: number) => new Date(Date.UTC(2026, 6, 28, 9, m));
+    await svc.record({ contactId: 'c1', text: 'Yes, Everyone is using HRMS', channel: 'link', at: t(12) });
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp', at: t(40) });
+    const rows: any[] = await svc.forContact('c1');
+    expect(rows.map((r) => r.channel)).toEqual(['link', 'whatsapp']);
+    expect(rows[1].needsYou).toBe(true);
+  });
+
+  it('a message with no task attached is still recorded — they can just talk', async () => {
+    const { svc, rows } = make();
+    const r = await svc.record({ contactId: 'c1', text: 'The KIOT thing slipped, here is why', channel: 'link' });
+    expect(r).toBeTruthy();
+    expect(rows[0].taskId).toBeNull();
+  });
+
+  it('keeps a closed one in the story, marked closed, rather than deleting it', async () => {
+    const { svc } = make();
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'link' });
+    const id = (await svc.inbox()).items[0].id;
+    await svc.close(id);
+    const rows: any[] = await svc.forContact('c1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].closedAt).toBeTruthy();
   });
 });
