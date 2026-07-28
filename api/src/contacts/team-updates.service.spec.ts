@@ -31,6 +31,8 @@ function make(opts: { sendFails?: boolean; number?: string | null } = {}) {
     reminder: { count: async () => 0 },
     reminderMessage: { create: async ({ data }: any) => { thread.push(data); return data; } },
     taskClaim: { findMany: async () => [], findFirst: async () => null },
+    // BEA-1159: a "done" update looks up their other open jobs so it can split by task.
+    task: { findMany: async () => [], findUnique: async () => null, count: async () => 0 },
     taskStatusDay: { findMany: async () => [] },
   };
   const postbox: any = {
@@ -178,7 +180,7 @@ describe('yes it is done / no it is not (BEA-1159)', () => {
       findFirst: async () => (state.decided ? null : claim),
       findMany: async () => (state.decided ? [] : contactClaims),
     };
-    (svc as any).prisma.task = { findUnique: async () => ({ id: 't1', title: 'Send the geyser update', status: 'open' }) };
+    (svc as any).prisma.task = { findMany: async () => [], count: async () => 0, findUnique: async () => ({ id: 't1', title: 'Send the geyser update', status: 'open' }) };
     return { svc, rows, state };
   }
 
@@ -236,7 +238,7 @@ describe('finding the claim when the message names no task', () => {
   function svcWith(contactClaims: any[]) {
     const { svc } = make();
     (svc as any).prisma.taskClaim = { findFirst: async () => null, findMany: async () => contactClaims };
-    (svc as any).prisma.task = { findUnique: async () => ({ id: 't9', title: 'Send the geyser update', status: 'open' }) };
+    (svc as any).prisma.task = { findMany: async () => [], count: async () => 0, findUnique: async () => ({ id: 't9', title: 'Send the geyser update', status: 'open' }) };
     return svc;
   }
 
@@ -278,7 +280,7 @@ describe('a pending claim can never be orphaned (BEA-1159)', () => {
       findFirst: async ({ where }: any) => (where?.id === 'cl7' && where?.status === 'pending' ? claim : null),
       findMany: async () => [claim],
     };
-    (svc as any).prisma.task = { findUnique: async () => claim.task };
+    (svc as any).prisma.task = { findMany: async () => [], count: async () => 0, findUnique: async () => claim.task };
     return svc;
   }
 
@@ -305,5 +307,89 @@ describe('a pending claim can never be orphaned (BEA-1159)', () => {
     (svc as any).prisma.taskClaim.findFirst = async () => null;
     const r: any = await svc.decide('claim:cl7', true, async () => ({ ok: true }));
     expect(r.ok).toBe(false);
+  });
+});
+
+/**
+ * BEA-1159. The owner: *"Split by task. They might be only doing one task. You have to split a task."*
+ *
+ * Deepthi has two open jobs — the geyser components and the PCB order — and one message covering
+ * both, with only one claim ever raised. A single yes/no over the whole message means ruling on one
+ * and never seeing the other, so the PCB job would quietly stop being chased.
+ */
+describe('one row per job when they say something is done (BEA-1159)', () => {
+  const TASKS = [
+    { id: 'geyser', title: 'Send status update on the geyser components order', status: 'open' },
+    { id: 'pcb', title: 'Send status update on the PCB order', status: 'open' },
+  ];
+
+  function svcWithTasks(tasks = TASKS, claimFor: string | null = 'geyser') {
+    const { svc, rows } = make();
+    (svc as any).prisma.task = { findMany: async () => tasks, count: async ({ where }: any) => tasks.filter((t) => !(where?.NOT?.id?.in || []).includes(t.id)).length, findUnique: async ({ where }: any) => tasks.find((t) => t.id === where.id) || null };
+    (svc as any).prisma.taskClaim = {
+      findFirst: async ({ where }: any) => (where?.taskId && where.taskId === claimFor ? { id: `cl-${claimFor}`, taskId: claimFor } : null),
+      findMany: async () => [],
+    };
+    return { svc, rows };
+  }
+
+  it('splits one message into one row per job', async () => {
+    const { svc } = svcWithTasks();
+    await svc.record({ contactId: 'c1', text: 'All geyser and PCB components received, done', channel: 'whatsapp' });
+    const inbox: any = await svc.inbox();
+    expect(inbox.items).toHaveLength(2);
+    expect(inbox.items.map((i: any) => i.task.id).sort()).toEqual(['geyser', 'pcb']);
+    expect(inbox.items.every((i: any) => i.perTask)).toBe(true);
+  });
+
+  it('the one with a claim decides that claim; the one without is marked done directly', async () => {
+    const { svc } = svcWithTasks();
+    await svc.record({ contactId: 'c1', text: 'All geyser and PCB components received, done', channel: 'whatsapp' });
+    const inbox: any = await svc.inbox();
+    const geyser = inbox.items.find((i: any) => i.task.id === 'geyser');
+    const pcb = inbox.items.find((i: any) => i.task.id === 'pcb');
+    expect(geyser.claimId).toBe('cl-geyser');
+    expect(pcb.claimId).toBeNull();
+
+    const decided: any[] = [];
+    const doneDirect: any[] = [];
+    await svc.decide(geyser.id, true, async (c, ok) => { decided.push({ c, ok }); return { ok: true }; }, async (t, d) => { doneDirect.push({ t, d }); });
+    await svc.decide(pcb.id, true, async (c, ok) => { decided.push({ c, ok }); return { ok: true }; }, async (t, d) => { doneDirect.push({ t, d }); });
+    expect(decided).toEqual([{ c: 'cl-geyser', ok: true }]);
+    expect(doneDirect).toEqual([{ t: 'pcb', d: true }]);
+  });
+
+  it('saying yes to one does NOT take the other off his list', async () => {
+    const { svc } = svcWithTasks();
+    await svc.record({ contactId: 'c1', text: 'All geyser and PCB components received, done', channel: 'whatsapp' });
+    const geyser = (await svc.inbox()).items.find((i: any) => i.task.id === 'geyser');
+    await svc.decide(geyser.id, true, async () => ({ ok: true }), async () => undefined);
+    const after: any = await svc.inbox();
+    expect(after.items.map((i: any) => i.task.id)).toEqual(['pcb']);
+  });
+
+  it('a decided row does not come back', async () => {
+    const { svc } = svcWithTasks();
+    await svc.record({ contactId: 'c1', text: 'All geyser and PCB components received, done', channel: 'whatsapp' });
+    const pcb = (await svc.inbox()).items.find((i: any) => i.task.id === 'pcb');
+    await svc.decide(pcb.id, false, async () => ({ ok: true }), async () => undefined);
+    const after: any = await svc.inbox();
+    expect(after.items.map((i: any) => i.task.id)).not.toContain('pcb');
+  });
+
+  it('someone with only one open job is not split — there is nothing to split', async () => {
+    const { svc } = svcWithTasks([TASKS[0]]);
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp' });
+    const inbox: any = await svc.inbox();
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0].perTask).toBeUndefined();
+  });
+
+  it('a problem is never split — it is one thing to read, not a decision per job', async () => {
+    const { svc } = svcWithTasks();
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    const inbox: any = await svc.inbox();
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0].perTask).toBeUndefined();
   });
 });

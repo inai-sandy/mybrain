@@ -942,6 +942,9 @@ model TeamUpdate {
   at         DateTime
   /// Null while open. Set only by the owner closing it.
   closedAt   DateTime?
+  /// When one message claims several jobs finished, he rules on each one. JSON array of the task
+  /// ids he has already answered, so a decided row does not come back. (BEA-1159)
+  answered   String?
   createdAt  DateTime  @default(now())
 
   @@index([contactId])

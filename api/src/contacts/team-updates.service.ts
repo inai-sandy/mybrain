@@ -77,6 +77,47 @@ export class TeamUpdatesService {
         ? await this.prisma.reminder.count({ where: { taskId: u.taskId, status: 'paused' } }).catch(() => 0)
         : 0;
       const reads = safeReads(u.reads);
+
+      /**
+       * One row PER TASK when they say something is finished. (BEA-1159)
+       *
+       * The owner: *"Split by task. They might be only doing one task."* Deepthi has two open jobs
+       * — the geyser components and the PCB order — and one message covering both. A single yes/no
+       * over the whole message means ruling on one and never seeing the other. Split, he can say
+       * yes to the geyser and no to the PCB, and the PCB keeps being chased.
+       *
+       * Only for a "done" claim. A problem is one thing to read, not a decision per task.
+       */
+      if (reads.includes('done')) {
+        const theirTasks = await this.prisma.task
+          .findMany({ where: { ownerContactId: u.contactId, status: { not: 'done' }, kind: { not: 'recurring' } }, select: { id: true, title: true, status: true }, orderBy: { createdAt: 'asc' }, take: 12 })
+          .catch(() => [] as any[]);
+        if (theirTasks.length > 1) {
+          const done = new Set(safeIds((u as any).answered));
+          for (const t of (theirTasks as any[]).filter((t) => !done.has(t.id))) {
+            const c = await this.prisma.taskClaim
+              .findFirst({ where: { taskId: t.id, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+              .catch(() => null);
+            items.push({
+              id: `${u.id}::${t.id}`,
+              claimId: c?.id || null,
+              perTask: true,
+              text: u.text,
+              channel: u.channel,
+              at: u.at,
+              openDays: Math.max(0, Math.floor((Date.now() - new Date(u.at).getTime()) / 86400000)),
+              reads,
+              label: 'is this one done?',
+              why: u.why,
+              contact: u.contact,
+              task: t,
+              chasePaused: paused > 0,
+              canReply: !!u.contact?.whatsappNumber,
+            });
+          }
+          continue;
+        }
+      }
       // A "they say it's done" item is a DECISION, not just something to read: he has to say yes
       // or no, and saying no is what puts the chase back on. Without the claim id the screen can
       // only offer "close it", which decides nothing and leaves the task open for good. (BEA-1159)
@@ -187,7 +228,34 @@ export class TeamUpdatesService {
    * The decision itself runs through the existing claims path, which already marks the task done on
    * a yes and reopens it on a no. This only connects the review screen to it and closes the item.
    */
-  async decide(id: string, confirm: boolean, decider: (claimId: string, confirm: boolean) => Promise<any>) {
+  async decide(
+    id: string,
+    confirm: boolean,
+    decider: (claimId: string, confirm: boolean) => Promise<any>,
+    setTaskDone?: (taskId: string, done: boolean) => Promise<any>,
+  ) {
+    /**
+     * A per-task row is `<updateId>::<taskId>`. (BEA-1159)
+     *
+     * "Yes" on a task that has a claim decides that claim. On one that has none — they said "all
+     * done" and only one claim was ever raised — it marks that task done directly, which is the
+     * same end state and the same thing that stops its chase.
+     *
+     * "No" on a task with a claim rejects it, which is what puts the chase back on. On one with no
+     * claim there is nothing to reject: it was never marked done, so the chase is already running.
+     * Either way the row goes, because he has answered it.
+     */
+    if (id.includes('::')) {
+      const [updateId, taskId] = id.split('::');
+      const claim = await this.prisma.taskClaim
+        .findFirst({ where: { taskId, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+        .catch(() => null);
+      if (claim) await decider(claim.id, confirm);
+      else if (confirm && setTaskDone) await setTaskDone(taskId, true);
+      await this.markTaskAnswered(updateId, taskId);
+      return { ok: true, confirmed: confirm };
+    }
+
     // A claim with no update of its own is shown as `claim:<id>` — deciding it needs no row.
     if (id.startsWith('claim:')) {
       const claimId = id.slice(6);
@@ -204,6 +272,27 @@ export class TeamUpdatesService {
     // Either way the question is answered, so it leaves his inbox.
     await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: new Date() } }).catch(() => undefined);
     return { ok: true, confirmed: confirm };
+  }
+
+  /**
+   * He has ruled on one task of a split update. The update itself only closes once every one of
+   * their open tasks has been answered — otherwise answering the geyser job would take the PCB job
+   * off his list too, which is the exact thing splitting exists to prevent.
+   */
+  private async markTaskAnswered(updateId: string, taskId: string) {
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id: updateId }, select: { contactId: true, answered: true } }).catch(() => null);
+    if (!u) return;
+    const answered = new Set(safeIds(u.answered));
+    answered.add(taskId);
+    // Still-open jobs of theirs that he has NOT answered yet. Only when none are left does the
+    // message itself close — otherwise ruling on the geyser job would take the PCB job off his
+    // list too, which is the exact thing splitting exists to prevent.
+    const left = await this.prisma.task
+      .count({ where: { ownerContactId: u.contactId, status: { not: 'done' }, kind: { not: 'recurring' }, NOT: { id: { in: [...answered] } } } })
+      .catch(() => 0);
+    await this.prisma.teamUpdate
+      .update({ where: { id: updateId }, data: { answered: JSON.stringify([...answered]), ...(left === 0 ? { closedAt: new Date() } : {}) } })
+      .catch(() => undefined);
   }
 
   /** He closes it — the only way an item leaves the inbox. */
@@ -293,6 +382,16 @@ export class TeamUpdatesService {
 }
 
 /** A corrupt reads column must never break the inbox — an unreadable row is just "they said something". */
+/** Task ids he has already ruled on for this message. Unreadable means none — he sees it again. */
+function safeIds(raw: string | null | undefined): string[] {
+  try {
+    const a = JSON.parse(String(raw || '[]'));
+    return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function safeReads(raw: string): Read[] {
   try {
     const a = JSON.parse(raw);

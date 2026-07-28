@@ -137,11 +137,18 @@ export class RemindersController {
   @Post('review/:id/decide')
   async reviewDecide(@Param('id') id: string, @Body() body: { confirm?: boolean }) {
     const confirm = body?.confirm !== false;
-    return this.updates.decide(id, confirm, async (claimId, ok) => {
-      const r = await this.claims.decide(claimId, ok);
-      if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
-      return r;
-    });
+    return this.updates.decide(
+      id,
+      confirm,
+      async (claimId, ok) => {
+        const r = await this.claims.decide(claimId, ok);
+        if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
+        return r;
+      },
+      // They said "all done" but only one claim was ever raised — a yes on the others marks them
+      // done directly, which is the same end state and stops their chase the same way. (BEA-1159)
+      async (taskId, done) => this.tasks.setDone(taskId, done),
+    );
   }
 
   /** Only he closes it — the problem is solved. */
