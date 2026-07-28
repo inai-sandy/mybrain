@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarCheck, CircleSlash, Clock, Coffee, Repeat, TriangleAlert } from 'lucide-react';
+import { CalendarCheck, CircleSlash, Clock, Coffee, Repeat, TriangleAlert, Pencil, Trash2 } from 'lucide-react';
+import { DataTable } from '../ui/DataTable';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/Toast';
 
 type Item = {
@@ -10,6 +12,11 @@ type Item = {
   status: 'received' | 'missed' | 'waiting' | 'off';
   quote: string | null;
   at: string | null;
+  /** Which weekdays it is owed on, and how to say that. (BEA-1147) */
+  schedule?: string[] | null;
+  scheduleLabel?: string | null;
+  /** For the table's Person column/filter — DataTable sorts on a plain key. */
+  who?: string;
 };
 type Log = { day: string; weekday: string; restDay: boolean; items: Item[] };
 
@@ -42,12 +49,17 @@ const LOOK: Record<Item['status'], { chip: string; label: string; icon: typeof C
 export function DailyTab({ onCountChange }: { onCountChange?: (n: number) => void } = {}) {
   const [log, setLog] = useState<Log | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [schedFor, setSchedFor] = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState<Item | null>(null);
   const toast = useToast();
 
   const load = useCallback(() => {
     return fetch('/api/tasks/recurring/day-log')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: Log | null) => { setLog(d); onCountChange?.(d?.items.length ?? 0); })
+      // `who` is flattened for the table's sort and filter — DataTable works on plain keys.
+      .then((d: Log | null) => { const withWho = d ? { ...d, items: d.items.map((i) => ({ ...i, who: i.contact?.name || '' })) } : null; setLog(withWho); onCountChange?.(d?.items.length ?? 0); })
       .catch(() => setLog(null));
   }, [onCountChange]);
 
@@ -91,6 +103,111 @@ export function DailyTab({ onCountChange }: { onCountChange?: (n: number) => voi
     );
   }
 
+  const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  async function setDays(it: Item, days: string[]) {
+    setBusy(it.taskId);
+    try {
+      const r = await fetch(`/api/tasks/recurring/${it.taskId}/schedule`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days }),
+      });
+      if (!r.ok) throw new Error();
+      await load();
+    } catch {
+      toast('error', 'Could not change the days');
+    } finally { setBusy(null); }
+  }
+
+  async function rename(it: Item) {
+    const title = draft.trim();
+    if (!title || title === it.title) { setEditing(null); return; }
+    setBusy(it.taskId);
+    try {
+      const r = await fetch(`/api/tasks/${it.taskId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+      });
+      if (!r.ok) throw new Error();
+      toast('success', 'Renamed');
+      setEditing(null);
+      await load();
+    } catch {
+      toast('error', 'Could not rename that');
+    } finally { setBusy(null); }
+  }
+
+  async function remove(it: Item) {
+    setBusy(it.taskId);
+    try {
+      const r = await fetch(`/api/tasks/${it.taskId}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error();
+      toast('success', `Deleted — nobody will be chased for "${it.title}" again`);
+      await load();
+    } catch {
+      toast('error', 'Could not delete that');
+    } finally { setBusy(null); setConfirmDel(null); }
+  }
+
+  const card = (it: Item) => {
+    const look = LOOK[it.status];
+    const Icon = look.icon;
+    return (
+      <div className={'rounded-xl border border-l-4 bg-white p-3 dark:bg-zinc-900 ' + EDGE[it.status] + ' border-zinc-200 dark:border-zinc-800'}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            {editing === it.taskId ? (
+              <div className="space-y-2">
+                <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full rounded-lg border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950" />
+                <div className="flex gap-2">
+                  <button onClick={() => rename(it)} disabled={busy === it.taskId} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-500 disabled:opacity-50">Save</button>
+                  <button onClick={() => setEditing(null)} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs dark:border-zinc-700">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm font-medium leading-snug">{it.title}</p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {it.contact?.name || 'Nobody assigned'}
+                  {it.at ? ` · ${time(it.at)}` : ''}
+                </p>
+              </>
+            )}
+          </div>
+          <span className={'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ' + look.chip}>
+            <Icon size={11} /> {look.label}
+          </span>
+        </div>
+
+        {it.quote && <p className="mt-2 break-words text-xs italic text-zinc-600 dark:text-zinc-400">“{it.quote}”</p>}
+
+        {/* Which days it is owed on — editable here rather than only on the person's page. (BEA-1157) */}
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          <span className="mr-1 text-[11px] text-zinc-400">{it.scheduleLabel || 'every working day'}</span>
+          {schedFor === it.taskId ? (
+            <>
+              {DAYS.map((d) => {
+                const on = (it.schedule || []).includes(d);
+                return (
+                  <button key={d} disabled={busy === it.taskId}
+                    onClick={() => setDays(it, on ? (it.schedule || []).filter((x) => x !== d) : [...(it.schedule || []), d])}
+                    className={'rounded-md border px-1.5 py-0.5 text-[11px] ' + (on ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700')}>{d}</button>
+                );
+              })}
+              <button onClick={() => setDays(it, [])} className="text-[11px] text-zinc-500 underline">every working day</button>
+            </>
+          ) : (
+            <button onClick={() => setSchedFor(it.taskId)} className="text-[11px] text-zinc-500 underline underline-offset-2 hover:text-emerald-600">change days</button>
+          )}
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-2.5">
+          <button onClick={() => { setEditing(it.taskId); setDraft(it.title); }} className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-emerald-600"><Pencil size={11} /> Edit</button>
+          <button onClick={() => makeOneOff(it)} disabled={busy === it.taskId} className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"><CircleSlash size={11} /> Not a daily report</button>
+          <button onClick={() => setConfirmDel(it)} className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-rose-600"><Trash2 size={11} /> Delete</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-3">
       {/* The day's shape at a glance, then the detail — a flat list made you count rows. (BEA-1132) */}
@@ -108,42 +225,38 @@ export function DailyTab({ onCountChange }: { onCountChange?: (n: number) => voi
         )}
       </div>
 
-      <div className="flex justify-end">
-        <Link to="/tasks?tab=daily" className="text-xs text-zinc-500 underline underline-offset-2 hover:text-emerald-600">See the day-by-day record</Link>
-      </div>
+      {/* Search, filters, sortable columns, count and paging — the house standard, through the
+          shared table. This list had none of it. (BEA-1157) */}
+      <DataTable<Item>
+        rows={log.items}
+        columns={[
+          { key: 'title', label: 'Report', sortable: true, width: '46%', render: (r) => <span className="font-medium">{r.title}</span> },
+          { key: 'who', label: 'Who', sortable: true, render: (r) => <span className="text-zinc-500">{r.contact?.name || '—'}</span> },
+          { key: 'scheduleLabel', label: 'Days', sortable: true, render: (r) => <span className="text-zinc-500">{r.scheduleLabel || 'every working day'}</span> },
+          { key: 'status', label: 'Today', sortable: true, render: (r) => <span className={'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ' + LOOK[r.status].chip}>{LOOK[r.status].label}</span> },
+        ]}
+        filters={[
+          { key: 'status', label: 'Status', options: [{ value: 'received', label: "Today's is in" }, { value: 'waiting', label: 'Waiting' }, { value: 'missed', label: 'Missed' }] },
+          { key: 'who', label: 'Person', options: [...new Set(log.items.map((i) => i.contact?.name).filter(Boolean))].map((n) => ({ value: String(n), label: String(n) })), match: (row, v) => row.contact?.name === v },
+        ]}
+        sortOptions={[
+          { label: 'Longest waiting', key: 'status', dir: 1 },
+          { label: 'Person A–Z', key: 'who', dir: 1 },
+        ]}
+        pageSize={12}
+        renderCard={card}
+        gridClassName="grid gap-2 sm:grid-cols-2"
+        emptyText="Nothing matches that."
+      />
 
-      <ul className="grid gap-2 sm:grid-cols-2">
-        {log.items.map((it) => {
-          const look = LOOK[it.status];
-          const Icon = look.icon;
-          return (
-            <li key={it.taskId} className={'rounded-xl border border-l-4 bg-white p-3 dark:bg-zinc-900 ' + EDGE[it.status] + ' border-zinc-200 dark:border-zinc-800'}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium leading-snug">{it.title}</p>
-                  <p className="mt-0.5 text-xs text-zinc-500">
-                    {it.contact?.name || 'Nobody assigned'}
-                    {it.at ? ` · ${time(it.at)}` : ''}
-                  </p>
-                </div>
-                <span className={'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ' + look.chip}>
-                  <Icon size={11} /> {look.label}
-                </span>
-              </div>
-              {it.quote && (
-                <p className="mt-2 break-words text-xs italic text-zinc-600 dark:text-zinc-400">“{it.quote}”</p>
-              )}
-              <button
-                onClick={() => makeOneOff(it)}
-                disabled={busy === it.taskId}
-                className="mt-2 inline-flex items-center gap-1 text-[11px] text-zinc-500 underline underline-offset-2 hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"
-              >
-                <CircleSlash size={11} /> {busy === it.taskId ? 'Changing…' : 'Not a daily report'}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <ConfirmDialog
+        open={!!confirmDel}
+        title={`Delete "${confirmDel?.title || ''}"?`}
+        message="This removes the standing report and its whole day-by-day history, and stops the chase. It cannot be undone. To keep the history but stop the daily rhythm, use “Not a daily report” instead."
+        confirmLabel="Delete for good"
+        onCancel={() => setConfirmDel(null)}
+        onConfirm={() => confirmDel && remove(confirmDel)}
+      />
     </div>
   );
 }
