@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { TASK_SETTING_KEYS, parseChaseTimes } from '../tasks/task-settings';
 import { LlmService } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService } from '../contacts/reminders.service';
@@ -186,6 +187,12 @@ export class StoryMiningService {
    * Apply exactly what the owner ticked. Everything goes through the existing doors so indexing,
    * chases and the delegation loop behave as if he had typed each item himself.
    */
+  /** His chase times from Settings, not a constant in this file. (BEA-1161) */
+  private async chaseTimes(): Promise<string[]> {
+    const row = await this.prisma.setting.findUnique({ where: { key: TASK_SETTING_KEYS.chaseTimes } }).catch(() => null);
+    return parseChaseTimes(row?.value);
+  }
+
   async apply(day: string, picked: Partial<MinedPayload>): Promise<Record<string, number>> {
     const counts: Record<string, number> = { done: 0, todos: 0, delegations: 0, myReminders: 0, promises: 0, events: 0, lessons: 0, emotions: 0 };
 
@@ -206,7 +213,7 @@ export class StoryMiningService {
       counts.delegations++;
       if (d.chase && d.contactId) {
         await this.reminders
-          .create({ contactId: d.contactId, taskId: task.id, subject: task.title, message: `Following up on: ${task.title}`, times: ['10:00', '17:30'], repeat: 'daily' })
+          .create({ contactId: d.contactId, taskId: task.id, subject: task.title, message: `Following up on: ${task.title}`, times: await this.chaseTimes(), repeat: 'daily' })
           .catch((e: any) => this.log.warn(`chase for "${d.title}" not created: ${e?.message ?? e}`));
       }
     }

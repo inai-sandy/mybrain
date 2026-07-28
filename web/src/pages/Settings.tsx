@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { TasksSettings } from './settings/TasksSettings';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
+import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
@@ -41,7 +42,7 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity' | 'emo' | 'whatsapp';
+type Tab = 'tasks' | 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity' | 'emo' | 'whatsapp';
 
 type Cat = { id: Tab; label: string; icon: LucideIcon; desc: string; group: string };
 const CATS: Cat[] = [
@@ -53,6 +54,7 @@ const CATS: Cat[] = [
   { id: 'cli', label: 'CLI', icon: Terminal, desc: 'Command-line access', group: 'Connections' },
   { id: 'sync', label: 'Sync', icon: RefreshCw, desc: 'Import & reconcile memory', group: 'Connections' },
   { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, desc: 'My Brain templates & messages', group: 'Connections' },
+  { id: 'tasks', label: 'Tasks', icon: ListChecks, desc: 'Chasing, reviews & reports', group: 'Your work' },
   { id: 'emo', label: 'EMO', icon: Mic, desc: 'Voice device & EMO voice', group: 'AI brain' },
   { id: 'agent', label: 'Agent Engine', icon: Bot, desc: 'How agents run', group: 'AI brain' },
   { id: 'models', label: 'Models', icon: Cpu, desc: 'Which models do what', group: 'AI brain' },
@@ -60,7 +62,7 @@ const CATS: Cat[] = [
   { id: 'index', label: 'Index', icon: Database, desc: "What's in your brain", group: 'AI brain' },
   { id: 'activity', label: 'Activity', icon: FlaskConical, desc: 'The Lab & learning', group: 'AI brain' },
 ];
-const GROUPS = ['You & the app', 'Connections', 'AI brain'];
+const GROUPS = ['Your work', 'You & the app', 'Connections', 'AI brain'];
 
 /** Best-effort live status shown on the tiles. */
 function useSettingsStatus() {
@@ -80,6 +82,7 @@ function useSettingsStatus() {
 function renderSection(id: Tab, email?: string): ReactNode {
   switch (id) {
     case 'account': return <AccountSection email={email} />;
+    case 'tasks': return <TasksSettings />;
     case 'emo': return <EmoSettingsSection />;
     case 'integrations': return <IntegrationsSection />;
     case 'agent': return <AgentEngineSection />;

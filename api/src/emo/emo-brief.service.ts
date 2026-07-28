@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EmoCardsService } from './emo-cards.service';
 import { BriefingsService } from '../briefings/briefings.service';
-import { chaseTimesFrom } from '../briefings/brief-guard';
 import { ContactsService } from '../contacts/contacts.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -108,7 +107,9 @@ export class EmoBriefService {
       // The chase starts by itself. This lane used to file the tasks and then tell him to go and
       // set the times on the contact page — a manual step written into the product. Times come from
       // his own words where he gave one ("by 7PM"), never invented. (BEA-1148)
-      const chaseTimes = chaseTimesFrom(text);
+      // A time HE said in the briefing wins; otherwise his own default from Settings, not a
+      // constant buried in this file. (BEA-1161)
+      const chaseTimes = await this.briefings.chaseTimesFor(text);
       const saved: any = await this.briefings.create(contact.id, {
         text,
         summary: draft.summary,

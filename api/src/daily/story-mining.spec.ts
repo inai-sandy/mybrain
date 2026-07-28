@@ -39,6 +39,8 @@ function make(llmReply: string | null, opts: { existingTitles?: string[] } = {})
       update: async ({ where, data }: any) => { const t = createdTasks.find((x) => x.id === where.id); if (t) Object.assign(t, data); return t; },
     },
     contact: { findMany: async () => [{ id: 'c-mad', name: 'Madhuri', aliases: '[]' }, { id: 'c-sri', name: 'Srikar', aliases: '[]' }] },
+    // BEA-1161: chase times now come from the owner's settings, not a constant in the service.
+    setting: { findUnique: async () => null },
     dayEvent: {
       deleteMany: async () => ({}),
       create: async ({ data }: any) => { dayEvents.push(data); return data; },
