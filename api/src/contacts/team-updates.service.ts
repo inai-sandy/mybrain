@@ -80,11 +80,7 @@ export class TeamUpdatesService {
       // A "they say it's done" item is a DECISION, not just something to read: he has to say yes
       // or no, and saying no is what puts the chase back on. Without the claim id the screen can
       // only offer "close it", which decides nothing and leaves the task open for good. (BEA-1159)
-      const claim = u.taskId
-        ? await this.prisma.taskClaim
-            .findFirst({ where: { taskId: u.taskId, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
-            .catch(() => null)
-        : null;
+      const claim = await this.pendingClaimFor(u.contactId, u.taskId);
       items.push({
         claimId: claim?.id || null,
         id: u.id,
@@ -96,7 +92,7 @@ export class TeamUpdatesService {
         label: readLabel(reads),
         why: u.why,
         contact: u.contact,
-        task: u.task,
+        task: u.task || (claim?.taskId ? await this.prisma.task.findUnique({ where: { id: claim.taskId }, select: { id: true, title: true, status: true } }).catch(() => null) : null),
         chasePaused: paused > 0,
         canReply: !!u.contact?.whatsappNumber,
       });
@@ -131,6 +127,27 @@ export class TeamUpdatesService {
   }
 
   /**
+   * The claim this update is a decision about, if there is one. (BEA-1159)
+   *
+   * By task when we know it. When we don't — a WhatsApp reply often names no task, and the
+   * backfill couldn't know either — fall back to the contact's pending claims, but ONLY when there
+   * is exactly one. With two open, guessing would mark the wrong job finished, and the screen shows
+   * the task title next to the buttons so he can always see what he is ruling on.
+   */
+  private async pendingClaimFor(contactId: string, taskId: string | null) {
+    if (taskId) {
+      const byTask = await this.prisma.taskClaim
+        .findFirst({ where: { taskId, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true, taskId: true } })
+        .catch(() => null);
+      if (byTask) return byTask;
+    }
+    const open = await this.prisma.taskClaim
+      .findMany({ where: { contactId, status: 'pending' }, select: { id: true, taskId: true }, take: 2 })
+      .catch(() => [] as any[]);
+    return open.length === 1 ? open[0] : null;
+  }
+
+  /**
    * He rules on a claim: yes it's done, or no it isn't. (BEA-1159)
    *
    * His rule: *"If I say it's done, that means you don't need to chase them again."* And the other
@@ -141,12 +158,9 @@ export class TeamUpdatesService {
    * a yes and reopens it on a no. This only connects the review screen to it and closes the item.
    */
   async decide(id: string, confirm: boolean, decider: (claimId: string, confirm: boolean) => Promise<any>) {
-    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, taskId: true } });
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, taskId: true, contactId: true } });
     if (!u) return { ok: false, message: 'That is not there any more' };
-    if (!u.taskId) return { ok: false, message: 'There is no task behind this one' };
-    const claim = await this.prisma.taskClaim
-      .findFirst({ where: { taskId: u.taskId, status: 'pending' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
-      .catch(() => null);
+    const claim = await this.pendingClaimFor(u.contactId, u.taskId);
     if (!claim) return { ok: false, message: 'That has already been decided' };
     await decider(claim.id, confirm);
     // Either way the question is answered, so it leaves his inbox.

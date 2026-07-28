@@ -169,9 +169,10 @@ describe("one person's whole story, both channels (BEA-1159)", () => {
  * half — saying it isn't finished has to put the chase back on.
  */
 describe('yes it is done / no it is not (BEA-1159)', () => {
-  function withClaim(claim: any | null) {
+  function withClaim(claim: any | null, contactClaims: any[] = claim ? [claim] : []) {
     const { svc, rows } = make();
-    (svc as any).prisma.taskClaim = { findFirst: async () => claim, findMany: async () => [] };
+    (svc as any).prisma.taskClaim = { findFirst: async () => claim, findMany: async () => contactClaims };
+    (svc as any).prisma.task = { findUnique: async () => ({ id: 't1', title: 'Send the geyser update', status: 'open' }) };
     return { svc, rows };
   }
 
@@ -211,6 +212,45 @@ describe('yes it is done / no it is not (BEA-1159)', () => {
   it('an already-decided claim says so rather than deciding twice', async () => {
     const { svc } = withClaim(null);
     await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
+    const id = (await svc.inbox()).items[0].id;
+    let called = false;
+    const r: any = await svc.decide(id, true, async () => { called = true; return { ok: true }; });
+    expect(r.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+});
+
+/**
+ * Found live: the backfill could not know which task a WhatsApp reply was about, so only 1 of the
+ * owner's open items had a task — and with no task there was no claim and no yes/no. It falls back
+ * to the contact's pending claim, but only when there is exactly one: with two open, guessing would
+ * mark the wrong job finished.
+ */
+describe('finding the claim when the message names no task', () => {
+  function svcWith(contactClaims: any[]) {
+    const { svc } = make();
+    (svc as any).prisma.taskClaim = { findFirst: async () => null, findMany: async () => contactClaims };
+    (svc as any).prisma.task = { findUnique: async () => ({ id: 't9', title: 'Send the geyser update', status: 'open' }) };
+    return svc;
+  }
+
+  it('uses their one pending claim, and says which task it is', async () => {
+    const svc = svcWith([{ id: 'cl9', taskId: 't9' }]);
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp' });
+    const item: any = (await svc.inbox()).items[0];
+    expect(item.claimId).toBe('cl9');
+    expect(item.task.title).toBe('Send the geyser update');
+  });
+
+  it('refuses to guess when they have two open — the wrong one would be marked done', async () => {
+    const svc = svcWith([{ id: 'cl1', taskId: 't1' }, { id: 'cl2', taskId: 't2' }]);
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp' });
+    expect((await svc.inbox()).items[0].claimId).toBeNull();
+  });
+
+  it('and deciding is refused too, not just hidden', async () => {
+    const svc = svcWith([{ id: 'cl1', taskId: 't1' }, { id: 'cl2', taskId: 't2' }]);
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp' });
     const id = (await svc.inbox()).items[0].id;
     let called = false;
     const r: any = await svc.decide(id, true, async () => { called = true; return { ok: true }; });
