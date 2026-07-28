@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { promisesLater } from './promise-later';
+import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { RecurringService } from '../tasks/recurring.service';
@@ -181,6 +182,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     private readonly recurring: RecurringService,
     private readonly tasks: TasksService,
     private readonly prompts: PromptsService,
+    private readonly updates: TeamUpdatesService,
   ) {}
 
   // Self-healing watchdog (BEA-953): every 10 min, catch any contact reply we haven't answered —
@@ -400,6 +402,15 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // as a claim — so it never reaches the owner's review list and can never close the chase.
     // Independent of "done": Jayanth's real updates are figures and names, they never say
     // "finished". (BEA-1118)
+    // Every reply becomes ONE update with a read, so nothing they say is invisible and anything
+    // needing him opens a review item that only HE can close. (BEA-1159)
+    if (lastIn) {
+      const anyReport = items.some((it) => it.recurring);
+      await this.updates
+        .record({ contactId, text: lastIn, channel: 'whatsapp', taskId: items.find((it) => it.taskId)?.taskId || null, isReport: anyReport })
+        .catch(() => undefined);
+    }
+
     const reported: string[] = [];
     // "Update sheet sending 12 clock" is a promise, not a report. On 27 Jul that message arrived
     // 50 seconds AFTER a share-page tick and the board still said received. The later message

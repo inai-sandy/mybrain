@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Post, UseGuards } fr
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { ContactsService } from './contacts.service';
 import { ClaimsService } from '../tasks/claims.service';
+import { TeamUpdatesService } from './team-updates.service';
 import { Public } from '../auth/public.decorator';
 
 /**
@@ -13,6 +14,7 @@ export class ShareController {
   constructor(
     private readonly contacts: ContactsService,
     private readonly claims: ClaimsService,
+    private readonly updates: TeamUpdatesService,
   ) {}
 
   @Public()
@@ -45,6 +47,16 @@ export class ShareController {
     // the response has to say which of the two actually happened. (BEA-1118)
     const kind = await this.contacts.taskKind(taskId);
     const words = String(body?.note || '').trim() || (kind === 'recurring' ? "Sent today's update" : 'Ticked it off on their page');
+    // Whatever they typed on their own link is a MESSAGE, not just a quote welded to a claim.
+    // Every share-page note on record turned out to be a real message — "Yes, 6 Members will work
+    // for KIOT from 1st August", "Will update tomorrow" — and none of them were ever visible in
+    // the conversation. (BEA-1159)
+    const typed = String(body?.note || '').trim();
+    if (typed) {
+      await this.updates
+        .record({ contactId: contact.id, text: typed, channel: 'link', taskId, isReport: kind === 'recurring' })
+        .catch(() => undefined);
+    }
     const row = await this.claims.claim({ taskId, contactId: contact.id, quote: words, source: 'page' });
     if (kind === 'recurring') return { ok: true, claimed: false, recordedToday: true };
     return { ok: true, claimed: !!row };

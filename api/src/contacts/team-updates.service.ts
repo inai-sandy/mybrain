@@ -1,0 +1,218 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { PostboxService } from './postbox.service';
+import { readUpdate, readLabel, type Read } from './update-read';
+
+/**
+ * Everything the owner's team says, and the inbox of what needs him. (BEA-1159)
+ *
+ * His loop, in his words:
+ *
+ *   "We send a WhatsApp reminder. If they need my help, it will land in the review section. I will
+ *    message them in the review section, and if the help is done, I will close it."
+ *
+ * So an update opens when they say something that needs him, he replies from inside review and it
+ * goes out on WhatsApp, and it closes ONLY when he closes it. The old `needsOwner` flag was cleared
+ * by the next reply the agent could handle — a "Kk sir" erased the record that someone asked for
+ * help. Nothing here is ever cleared by a later message.
+ */
+@Injectable()
+export class TeamUpdatesService {
+  private readonly log = new Logger('TeamUpdates');
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly postbox: PostboxService,
+  ) {}
+
+  /**
+   * Record what someone said, whatever channel it came through. Returns the row, or null when
+   * there is nothing worth keeping.
+   */
+  async record(input: { contactId: string; text: string; channel: 'whatsapp' | 'link'; taskId?: string | null; at?: Date; isReport?: boolean }) {
+    const text = String(input.text || '').trim();
+    if (!text || !input.contactId) return null;
+    const at = input.at ?? new Date();
+
+    // Never record the same message twice — the agent and the webhook can both see one reply.
+    const dupe = await this.prisma.teamUpdate
+      .findFirst({ where: { contactId: input.contactId, text, at: { gte: new Date(at.getTime() - 60_000), lte: new Date(at.getTime() + 60_000) } }, select: { id: true } })
+      .catch(() => null);
+    if (dupe) return null;
+
+    const r = readUpdate(text, { isReport: !!input.isReport });
+    const row = await this.prisma.teamUpdate
+      .create({
+        data: {
+          contactId: input.contactId,
+          taskId: input.taskId || null,
+          channel: input.channel,
+          text: text.slice(0, 4000),
+          reads: JSON.stringify(r.reads),
+          needsYou: r.needsYou,
+          why: r.why,
+          at,
+        },
+      })
+      .catch((e) => { this.log.warn(`record: ${e?.message}`); return null; });
+    if (row && r.needsYou) this.log.log(`needs you — ${r.why}: "${text.replace(/\s+/g, ' ').slice(0, 70)}"`);
+    return row;
+  }
+
+  /** Everything waiting on him, oldest first — the ones that have been ignored longest matter most. */
+  async inbox() {
+    const rows = await this.prisma.teamUpdate.findMany({
+      where: { needsYou: true, closedAt: null },
+      orderBy: { at: 'asc' },
+      take: 100,
+      include: {
+        contact: { select: { id: true, name: true, whatsappNumber: true } },
+        task: { select: { id: true, title: true, status: true } },
+      },
+    });
+    const items = [] as any[];
+    for (const u of rows) {
+      // A chase that is paused matters here: he replies, and then nothing follows up. (BEA-1160)
+      const paused = u.taskId
+        ? await this.prisma.reminder.count({ where: { taskId: u.taskId, status: 'paused' } }).catch(() => 0)
+        : 0;
+      const reads = safeReads(u.reads);
+      items.push({
+        id: u.id,
+        text: u.text,
+        channel: u.channel,
+        at: u.at,
+        openDays: Math.max(0, Math.floor((Date.now() - new Date(u.at).getTime()) / 86400000)),
+        reads,
+        label: readLabel(reads),
+        why: u.why,
+        contact: u.contact,
+        task: u.task,
+        chasePaused: paused > 0,
+        canReply: !!u.contact?.whatsappNumber,
+      });
+    }
+    return { items, count: items.length };
+  }
+
+  /**
+   * He replies from inside review. It goes out on WhatsApp and lands in their thread, so the
+   * conversation stays in one place rather than him hopping to Chats to answer.
+   */
+  async reply(id: string, text: string) {
+    const body = String(text || '').trim();
+    if (!body) return { ok: false, message: 'Nothing to send' };
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, include: { contact: { select: { id: true, name: true, whatsappNumber: true } } } });
+    if (!u) return { ok: false, message: 'That is not there any more' };
+    const number = (u.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
+    if (!number) return { ok: false, message: `${u.contact?.name || 'They'} has no WhatsApp number` };
+    if (!this.postbox.isConfigured()) return { ok: false, message: 'WhatsApp is not connected' };
+
+    const res = await this.postbox.sendText(number, body);
+    if (res.status === 'failed') {
+      this.log.warn(`review reply to ${u.contact?.name} failed: ${res.error}`);
+      return { ok: false, message: 'Could not send that — they may be outside the 24-hour window' };
+    }
+    // Into their thread, so the person's page shows it alongside everything else.
+    await this.prisma.reminderMessage
+      .create({ data: { contactId: u.contactId, direction: 'out', body, wamid: res.wamid || null, status: 'sent' } })
+      .catch(() => undefined);
+    // Replying does NOT close it. Only he closes it, when the problem is actually solved.
+    return { ok: true };
+  }
+
+  /** He closes it — the only way an item leaves the inbox. */
+  async close(id: string) {
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, closedAt: true } });
+    if (!u) return { ok: false };
+    if (u.closedAt) return { ok: true, alreadyClosed: true };
+    await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: new Date() } });
+    return { ok: true };
+  }
+
+  /** Re-open, for the times he closes one by mistake. */
+  async reopen(id: string) {
+    await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: null } }).catch(() => undefined);
+    return { ok: true };
+  }
+
+  /**
+   * Everything already said, brought in once. (BEA-1159)
+   *
+   * Without this the inbox opens empty on day one and reads as broken, while Radha's two blockers
+   * and Swathi's three link notes stay exactly as invisible as they have been. Their original
+   * timestamps are kept, so the story reads in the order it actually happened.
+   *
+   * Anything already recorded is skipped, so running it twice is safe.
+   */
+  async backfill(): Promise<{ fromLink: number; fromWhatsApp: number; fromReports: number; needsYou: number }> {
+    let fromLink = 0;
+    let fromWhatsApp = 0;
+    let fromReports = 0;
+    let needsYou = 0;
+    const count = (row: any) => { if (row) { if (row.needsYou) needsYou++; return true; } return false; };
+
+    // Their own words on their link, currently welded to a claim and shown nowhere.
+    const claims = await this.prisma.taskClaim.findMany({
+      where: { source: 'page' },
+      select: { contactId: true, taskId: true, quote: true, createdAt: true, task: { select: { kind: true } } },
+    }).catch(() => [] as any[]);
+    for (const c of claims as any[]) {
+      const words = String(c.quote || '').trim();
+      // The share page's own defaults are not messages — they are what it writes when they type nothing.
+      if (!words || /^(Ticked it off on their page|Sent today's update)$/.test(words)) continue;
+      if (!c.contactId) continue;
+      if (count(await this.record({ contactId: c.contactId, text: words, channel: 'link', taskId: c.taskId, at: c.createdAt, isReport: c.task?.kind === 'recurring' }))) fromLink++;
+    }
+
+    // What satisfied a day's report — Radha's blockers live here, recorded as a green tick.
+    const days = await this.prisma.taskStatusDay.findMany({
+      where: { status: 'received', NOT: { quote: null } },
+      select: { contactId: true, taskId: true, quote: true, signalAt: true, createdAt: true, source: true },
+    }).catch(() => [] as any[]);
+    for (const d of days as any[]) {
+      const words = String(d.quote || '').trim();
+      if (!words || /^(Ticked it off on their page|Sent today's update)$/.test(words)) continue;
+      if (!d.contactId) continue;
+      if (count(await this.record({ contactId: d.contactId, text: words, channel: d.source === 'page' ? 'link' : 'whatsapp', taskId: d.taskId, at: d.signalAt || d.createdAt, isReport: true }))) fromReports++;
+    }
+
+    // Their recent WhatsApp replies, so a person's page reads as one story from day one.
+    const msgs = await this.prisma.reminderMessage.findMany({
+      where: { direction: 'in', NOT: { contactId: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 400,
+      select: { contactId: true, body: true, createdAt: true },
+    }).catch(() => [] as any[]);
+    for (const m of msgs as any[]) {
+      if (!m.contactId || !String(m.body || '').trim()) continue;
+      if (count(await this.record({ contactId: m.contactId, text: m.body, channel: 'whatsapp', at: m.createdAt, isReport: true }))) fromWhatsApp++;
+    }
+
+    this.log.log(`backfill: ${fromLink} from links, ${fromReports} from reports, ${fromWhatsApp} from WhatsApp — ${needsYou} need you`);
+    return { fromLink, fromWhatsApp, fromReports, needsYou };
+  }
+
+  /** One person's whole story, in time order — both channels in one thread. */
+  async forContact(contactId: string, take = 60) {
+    const rows = await this.prisma.teamUpdate.findMany({
+      where: { contactId },
+      orderBy: { at: 'desc' },
+      take,
+      include: { task: { select: { id: true, title: true } } },
+    });
+    return rows
+      .map((u) => ({ id: u.id, text: u.text, channel: u.channel, at: u.at, reads: safeReads(u.reads), label: readLabel(safeReads(u.reads)), needsYou: u.needsYou, closedAt: u.closedAt, task: u.task }))
+      .reverse();
+  }
+}
+
+/** A corrupt reads column must never break the inbox — an unreadable row is just "they said something". */
+function safeReads(raw: string): Read[] {
+  try {
+    const a = JSON.parse(raw);
+    return Array.isArray(a) ? (a as Read[]) : [];
+  } catch {
+    return [];
+  }
+}
