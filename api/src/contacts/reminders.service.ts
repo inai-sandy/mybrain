@@ -785,7 +785,45 @@ export class RemindersService {
 
   /** Pause = reversible off switch: keep the reminder, hold today's sends (BEA-720). */
   async pause(id: string) {
-    return this.update(id, { status: 'paused' });
+    // The owner's hand — recorded as such, so it is never confused with one the app switched off.
+    return this.update(id, { status: 'paused', pausedAuto: false } as any);
+  }
+
+  /**
+   * Chases the APP switched off, never the owner. (BEA-1160)
+   *
+   * `rollDay` used to pause any chase armed on an earlier day. On live data that was 23 of the 24
+   * paused chases. They are listed rather than silently resumed: some belong to work genuinely
+   * finished, and waking 23 chases at once would put messages in front of real people.
+   */
+  async autoStopped() {
+    const rows = await this.prisma.reminder.findMany({
+      where: { status: 'paused', pausedAuto: true },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true, subject: true, times: true, updatedAt: true, needsOwner: true, taskId: true, contact: { select: { id: true, name: true } } },
+    });
+    const items = [] as any[];
+    for (const r of rows) {
+      const task = r.taskId ? await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { title: true, status: true } }).catch(() => null) : null;
+      items.push({
+        id: r.id,
+        subject: r.subject,
+        contact: r.contact,
+        offSince: r.updatedAt,
+        offDays: Math.max(0, Math.floor((Date.now() - new Date(r.updatedAt).getTime()) / 86400000)),
+        needsYou: !!r.needsOwner,
+        // A chase whose task is already done needs no resuming — say so rather than offering it.
+        taskDone: task?.status === 'done',
+        taskTitle: task?.title || null,
+      });
+    }
+    return { items, count: items.length };
+  }
+
+  /** Turn one back on, and stop calling it app-paused. */
+  async resumeAutoStopped(id: string) {
+    await this.prisma.reminder.update({ where: { id }, data: { pausedAuto: false } }).catch(() => undefined);
+    return this.resume(id);
   }
 
   /** Resume a paused reminder — re-queue today's sends. */

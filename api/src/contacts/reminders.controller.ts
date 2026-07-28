@@ -102,6 +102,17 @@ export class RemindersController {
     return this.reminders.resendTemplate(id);
   }
 
+  /** Chases the app switched off by itself, for the owner to resume. (BEA-1160) */
+  @Get('auto-stopped')
+  autoStopped() {
+    return this.reminders.autoStopped();
+  }
+
+  @Post(':id/resume-auto-stopped')
+  resumeAutoStopped(@Param('id') id: string) {
+    return this.reminders.resumeAutoStopped(id);
+  }
+
   @Post('resume-today')
   resumeToday() {
     return this.reminders.resumeToday();
