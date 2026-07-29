@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -11,11 +11,14 @@ import { surfacedWhere } from '../mind/surfacing';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const MENTOR_AT = '23:59'; // runs just after the Story of the Day (23:58)
+/** After an unusable reply, leave that day alone for a while instead of retrying every minute. (BEA-1178) */
+const MENTOR_RETRY_AFTER_MS = 30 * 60_000;
 const DEFAULT_MENTOR_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 const DERIVE_EVERY_MS = 3 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class MentorService implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger('Mentor');
   private tick: NodeJS.Timeout | null = null;
 
   constructor(
@@ -259,13 +262,31 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       (bigger ? `\n\n${bigger}` : '');
 
     await this.stampPaid(day); // stamped BEFORE the call, so a failure can't be retried in a loop
-    const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 1200, 'mentor-guidance'))?.trim() || '';
+
+    /**
+     * The ceiling was 1200 — and 83 of 97 calls in a fortnight came back at exactly 1200, cut off.
+     * A cut-off reply is not readable JSON, so `guidance` was empty and the whole thing was thrown
+     * away silently, with the call already billed. The owner had NO mentor read at all for 27 and
+     * 28 July because of this.
+     *
+     * The prompt asks for six things and "2-4 short paragraphs", and its input has kept growing —
+     * the Lab's validated patterns, the trend block, the personal story, the last four notes. The
+     * output grew with it; the ceiling never moved. An unused ceiling costs nothing. (BEA-1178)
+     */
+    const raw = (await this.llm.completeWith(await this.mentorModel(), prompt, 4000, 'mentor-guidance'))?.trim() || '';
     // Robustly pull guidance + score — never store a raw JSON blob if parsing hiccups (BEA-884).
+    // narrativeField now also rescues a note cut off mid-sentence rather than losing it (BEA-1178).
     const guidance = narrativeField(raw, 'guidance');
     const parsed = looseJsonParse(raw);
     let adherenceScore = dayStory?.moodScore ?? 50;
     if (parsed && Number.isFinite(parsed.adherenceScore)) adherenceScore = Math.max(0, Math.min(100, Math.round(Number(parsed.adherenceScore))));
-    if (!guidance) return null;
+    if (!guidance) {
+      // Never silent again. This returned `null` with no log at all, so two nights went missing
+      // without a trace anywhere. (BEA-1178)
+      this.log.warn(`runMentorDay(${day}): unusable reply (${raw.length} chars) — nothing written`);
+      await this.setSetting('mentor.lastFail', `${day}:${Date.now()}`).catch(() => undefined);
+      return null;
+    }
 
     const row = await this.prisma.mentorDay.upsert({
       where: { day },
@@ -459,7 +480,26 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     // story you had since rewritten. (BEA-844)
     const storyAt = story ? new Date((story as any).updatedAt ?? story.createdAt) : null;
     if (read && (!storyAt || new Date(read.updatedAt) >= storyAt)) return; // already fresh
+    if (await this.failedRecently(day)) return; // don't hammer a failing day once a minute (BEA-1178)
     await this.runMentorDay(day, true).catch(() => undefined);
+  }
+
+  /**
+   * Did this day's read just fail? (BEA-1178)
+   *
+   * The nightly tick runs every 60 seconds and only asks "is there a fresh read?". When the reply
+   * was unusable nothing got written, so the answer stayed no and it tried again the next minute,
+   * and the next. On 27 July that was five paid calls between 00:07 and 00:11 — each one cut off —
+   * until one happened to fit. Wait a while before trying that day again.
+   */
+  private async failedRecently(day: string): Promise<boolean> {
+    try {
+      const row = await this.prisma.setting?.findUnique({ where: { key: 'mentor.lastFail' } });
+      const [d, at] = String(row?.value || '').split(':');
+      return d === day && Date.now() - Number(at || 0) < MENTOR_RETRY_AFTER_MS;
+    } catch {
+      return false; // a lookup problem must never stop guidance being written at all
+    }
   }
 
   /** Has this day already used up its two paid guidance runs? */
