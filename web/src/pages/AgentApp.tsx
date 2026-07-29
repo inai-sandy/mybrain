@@ -208,8 +208,8 @@ export function AgentApp() {
           const Icon = m.icon;
           return (
             <button key={m.k} onClick={() => setMode(m.k)}
-              className={'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ' + (on ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
-              <Icon className="h-4 w-4" style={on && m.k === 'flow' ? { color } : undefined} />{m.label}
+              className={'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-1.5 py-2 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-3 sm:text-sm ' + (on ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
+              <Icon className="h-4 w-4 shrink-0" style={on && m.k === 'flow' ? { color } : undefined} /><span className="truncate">{m.label}</span>
             </button>
           );
         })}
