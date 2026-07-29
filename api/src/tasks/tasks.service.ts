@@ -1129,6 +1129,16 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    * Free and deterministic — the cheap duplicates never depend on the AI's mood. Union-find so
    * "A~B" and "B~C" land in one group.
    */
+  /**
+   * Who a task belongs to, as one comparable value: 'mine' for the owner's own work, otherwise the
+   * person it is delegated to. Two tasks can only be duplicates if these match. (BEA-1185)
+   */
+  private ownerKey(t: any): string {
+    if (t?.ownerContactId) return `c:${t.ownerContactId}`;
+    const party = String(t?.party || '').trim().toLowerCase();
+    return party ? `p:${party}` : 'mine';
+  }
+
   private lexicalGroups(rows: { id: string; title: string }[]): string[][] {
     const sig = (s: string) => new Set(dumpKey(s).split(' ').filter((w) => w.length > 2));
     const sigs = rows.map((r) => sig(r.title));
@@ -1161,12 +1171,15 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.prisma.task.findMany({ where: { status: 'open' }, orderBy: { createdAt: 'asc' }, take: 2000 });
     if (rows.length < 2) return { groups: [], openCount: rows.length, model };
 
+    // Who a task belongs to is part of what it IS (BEA-1185). Without this the model cannot tell
+    // "I must send the report" from "Madhuri must send the report" and merges them.
     const list = rows.map((t) => ({
       id: t.id,
       title: t.title,
       note: t.note ? String(t.note).slice(0, 200) : undefined,
       category: t.category || undefined,
       day: t.day || undefined,
+      delegatedTo: this.ownerKey(t) === 'mine' ? undefined : (t.party || 'someone else'),
     }));
     const tmpl = await this.prompts.get('tasks.dedupe');
     const prompt = `${tmpl}\n\nOPEN TASKS (JSON):\n${JSON.stringify(list)}`;
@@ -1189,6 +1202,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         .filter((id) => byId.has(id) && !used.has(id))
         .map((id) => byId.get(id));
       if (members.length < 2) return;
+      // Server-side guard, not a prompt instruction (BEA-1185): tasks belonging to different people
+      // — or one of yours and one of theirs — are never the same task, whatever the model says.
+      // Merging them would move chases, claims and the owner onto the wrong task.
+      if (new Set(members.map((m) => this.ownerKey(m))).size > 1) return;
       members.forEach((m) => used.add(m.id));
       const keep = this.pickKeeper(members);
       const remove = members.filter((m) => m.id !== keep.id);
