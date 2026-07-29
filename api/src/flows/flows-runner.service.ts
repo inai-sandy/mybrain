@@ -10,6 +10,7 @@ import { AlertsService } from '../push/alerts.service';
 import { SkillsService } from '../skills/skills.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
+import { WebResearchService } from '../tools/web-research.service';
 import { randomBytes } from 'crypto';
 
 type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean };
@@ -47,6 +48,7 @@ export class FlowRunnerService implements OnModuleInit {
     // Optional so older test harnesses that build with 9 args keep working (BEA-1088).
     private readonly push?: PushService,
     private readonly alerts?: AlertsService,
+    private readonly web?: WebResearchService, // real Tavily/Exa research (BEA-1194)
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -749,7 +751,10 @@ export class FlowRunnerService implements OnModuleInit {
   // directly above) falls through to a plain model call — fine for reasoning, wrong for a lookup,
   // so every catalog tool that touches your data or the outside world belongs in this set (BEA-1167).
   private static AGENT_TOOLS = new Set([
-    'web_search', 'web_read', 'gmail', 'calendar', 'drive', 'save_document', 'telegram', 'http',
+    // web_search / web_read / web_search_meaning are NOT here on purpose (BEA-1194): they are real
+    // Tavily/Exa calls handled directly below, in seconds, instead of a multi-minute engine turn
+    // that decided for itself how (or whether) to search.
+    'gmail', 'calendar', 'drive', 'save_document', 'telegram', 'http',
     'docs', 'sheets', 'slides', 'tasks', 'forms', 'meet', 'chat', 'contacts',
     'whatsapp', 'cli', 'remember', 'save_capture', 'create_task', 'search_rag', 'fetch_document',
   ]);
@@ -803,8 +808,19 @@ export class FlowRunnerService implements OnModuleInit {
       case 'output': return input;
       case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal);
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
-      case 'tool':
+      case 'tool': {
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
+        // Real research, direct — no engine turn (BEA-1194). A failure THROWS so the step is marked
+        // failed with the reason, rather than quietly handing back model knowledge.
+        if (refId === 'web_search' || refId === 'web_search_meaning' || refId === 'web_read') {
+          if (!this.web) throw new Error('web research is not available on this server');
+          const q = (input || node.data?.sub || '').trim();
+          if (refId === 'web_read') return this.web.readPage(q);
+          const byMeaning = refId === 'web_search_meaning';
+          const rows = byMeaning ? await this.web.searchByMeaning(q) : await this.web.search(q);
+          onLine?.(`   found ${rows.length} source${rows.length === 1 ? '' : 's'}`);
+          return this.web.asMarkdown(q.slice(0, 120), rows, byMeaning ? 'by meaning' : 'web search');
+        }
         if (FlowRunnerService.AGENT_TOOLS.has(refId)) {
           // Title the branch run by its sub-question, not a generic "Web search". (BEA-772)
           const focus = /THIS BRANCH FOCUSES ON:\s*([^\n]+)/.exec(input || '')?.[1]?.trim();
@@ -812,6 +828,7 @@ export class FlowRunnerService implements OnModuleInit {
           return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), runTitle, agentId, onLine);
         }
         return this.askModel(this.toolPrompt(refId, label, input) + this.guidance(node)); // unknown tool → reason directly
+      }
       // Move A: run the REAL skill in Codex with its folder in the working dir; fall back to the model.
       case 'skill': {
         const slug = await this.skillSlug(refId);
@@ -830,9 +847,20 @@ export class FlowRunnerService implements OnModuleInit {
     }
   }
 
-  /** Direct model call (fast, no engine) for reasoning blocks. */
+  /**
+   * Direct model call for a thinking block. THROWS with the reason when the model cannot answer
+   * (BEA-1194) — this used to swallow every failure into '', which the flow then recorded as
+   * "done, 0 chars". A step that could not think must say so, not look finished.
+   */
   private async askModel(prompt: string): Promise<string> {
-    return (await this.llm.complete(prompt, 1500, 'flow-node').catch(() => '')) || '';
+    // Optional-call: some harnesses build this service with a partial llm stub.
+    const d = await this.llm.completeDetailed?.(prompt, 1500, 'flow-node').catch((e: any) => ({ text: null, error: String(e?.message || e) }));
+    if (d?.text?.trim()) return d.text;
+    if (!d) {
+      const text = await this.llm.complete?.(prompt, 1500, 'flow-node').catch(() => null);
+      if (text?.trim()) return text;
+    }
+    throw new Error(d?.error || 'the thinking step produced nothing');
   }
 
   /** Direct second-brain lookup (RAG + SuperMemory) — fast, replaces the agent-turn that timed out. */
@@ -852,8 +880,6 @@ export class FlowRunnerService implements OnModuleInit {
   private toolPrompt(toolId: string, label: string, input: string): string {
     const map: Record<string, string> = {
       search_brain: `Search my second brain (notes, documents, saved memories) and answer:\n${input}`,
-      web_search: `You are researching one part of a larger goal (stated below). Search the web for THIS part, staying strictly within the overall goal — interpret every ambiguous term the way the goal intends (e.g. a name may be a specific GitHub repo or product named in the goal, not a generic word). Answer concisely and cite the sources (URLs) you actually used.\n\n${input}`,
-      web_read: `Open and read the most relevant page(s) for this — staying within the overall goal stated below — then answer with citations:\n${input}`,
       gmail: `Look at my Gmail and answer:\n${input}`,
       calendar: `Look at my calendar and answer:\n${input}`,
       drive: `Look in my Google Drive and answer:\n${input}`,

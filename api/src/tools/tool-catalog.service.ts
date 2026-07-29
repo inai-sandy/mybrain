@@ -78,7 +78,7 @@ export class ToolCatalogService {
 
     const tools: CatalogTool[] = [
       ...BUILT_IN,
-      ...this.webTools(has('tavily')),
+      ...this.webTools(has('tavily'), has('exa')),
       ...this.googleTools(googleOn),
       ...this.messagingTools(has('telegram')),
       ...this.skillTools(skills),
@@ -113,12 +113,15 @@ export class ToolCatalogService {
 
   // ---- groups that depend on something being connected ----------------------------------------
 
-  private webTools(tavily: boolean): CatalogTool[] {
-    const hint = tavily ? undefined : 'Add your Tavily key in Settings → Connections';
-    const path = tavily ? undefined : '/settings#connections';
+  private webTools(tavily: boolean, exa: boolean): CatalogTool[] {
+    const tHint = tavily ? undefined : 'Add your Tavily key in Settings → Connections';
+    const eHint = exa ? undefined : 'Add your Exa key in Settings → Connections';
+    const path = '/settings#connections';
     return [
-      { id: 'web_search', name: 'Web search', group: 'Web', kind: 'tool', connected: tavily, description: 'Search the live web', connectHint: hint, connectPath: path },
-      { id: 'web_read', name: 'Read a page', group: 'Web', kind: 'tool', connected: tavily, description: 'Open a link and read what it says', connectHint: hint, connectPath: path },
+      { id: 'web_search', name: 'Web search', group: 'Web', kind: 'tool', connected: tavily, description: 'Search the live web by keyword, with sources (Tavily)', connectHint: tHint, connectPath: tavily ? undefined : path },
+      { id: 'web_read', name: 'Read a page', group: 'Web', kind: 'tool', connected: tavily, description: 'Open a link and read what it says (Tavily)', connectHint: tHint, connectPath: tavily ? undefined : path },
+      // Semantic search (BEA-1194) — for the questions where you don't know the right keywords.
+      { id: 'web_search_meaning', name: 'Search by meaning', group: 'Web', kind: 'tool', connected: exa, description: 'Finds pages about an idea, even when you do not know the right words (Exa)', connectHint: eHint, connectPath: exa ? undefined : path },
     ];
   }
 

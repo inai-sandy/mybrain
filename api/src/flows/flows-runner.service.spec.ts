@@ -65,8 +65,9 @@ describe('FlowRunnerService.execute — failure propagation (BEA-800)', () => {
     const telegram: any = { notifyFlowDone: async () => undefined };
     const svc = new FlowRunnerService(prisma, bridge, agent, {} as any, {} as any, {} as any, {} as any, telegram, {} as any);
 
-    // one web_search tool node (an agent-engine tool) that will fail; no output node → it's the terminal
-    const flow = { id: 'f1', name: 'F', graph: JSON.stringify({ nodes: [{ id: 't1', data: { kind: 'tool', refId: 'web_search', label: 'Web' } }], edges: [] }) };
+    // one gmail tool node (still an agent-engine tool) that will fail; no output node → it's the terminal
+    // (web_search became a direct Tavily call in BEA-1194, so it no longer exercises the engine path)
+    const flow = { id: 'f1', name: 'F', graph: JSON.stringify({ nodes: [{ id: 't1', data: { kind: 'tool', refId: 'gmail', label: 'Web' } }], edges: [] }) };
     await (svc as any).execute('r1', flow);
 
     expect(saved.status).toBe('failed');       // NOT 'done'
@@ -123,7 +124,7 @@ describe('FlowRunnerService — answering early with a sibling branch still runn
     // Graph: tool A (slow engine call) and ask B feed output O. B pauses while A is mid-flight.
     const graph = JSON.stringify({
       nodes: [
-        { id: 'A', data: { kind: 'tool', refId: 'web_search', label: 'Research' } },
+        { id: 'A', data: { kind: 'tool', refId: 'gmail', label: 'Research' } },
         { id: 'B', data: { kind: 'ask_user', question: 'Continue?', label: 'Ask me' } },
         { id: 'O', data: { kind: 'output', label: 'Answer' } },
       ],
@@ -227,7 +228,12 @@ describe('FlowRunnerService — on-failure paths + retries (BEA-1071)', () => {
     };
     const agent: any = { createRun: jest.fn(async () => ({ id: 'ar' + Math.random() })), getRun: jest.fn(async () => ({ status: 'failed', error: 'engine boom' })) };
     const telegram: any = { notifyFlowDone: async () => undefined, notifyFlowWaiting: async () => undefined };
-    const llm: any = { complete: jest.fn(async (p: string) => 'AI: ' + p.slice(0, 40)) };
+    // completeDetailed is what a thinking step uses now — it reports WHY it came back empty
+    // instead of returning '' and letting the flow record "done, 0 chars" (BEA-1194).
+    const llm: any = {
+      complete: jest.fn(async (p: string) => 'AI: ' + p.slice(0, 40)),
+      completeDetailed: jest.fn(async (p: string) => ({ text: 'AI: ' + p.slice(0, 40), error: null })),
+    };
     const svc = new FlowRunnerService(prisma, bridgeImpl, agent, llm, {} as any, {} as any, {} as any, telegram, {} as any);
     (svc as any).saveDocuments = async () => [];
     return { svc, row, agent };
@@ -237,7 +243,7 @@ describe('FlowRunnerService — on-failure paths + retries (BEA-1071)', () => {
     // A (tool, will fail) → O (output, normal edge); A → F (ask_ai fallback, error edge) → O
     const graph = JSON.stringify({
       nodes: [
-        { id: 'A', data: { kind: 'tool', refId: 'web_search', label: 'Research' } },
+        { id: 'A', data: { kind: 'tool', refId: 'gmail', label: 'Research' } },
         { id: 'F', data: { kind: 'ask_ai', label: 'Fallback', sub: 'Explain what went wrong in one line.' } },
         { id: 'O', data: { kind: 'output', label: 'Answer' } },
       ],
@@ -283,7 +289,7 @@ describe('FlowRunnerService — on-failure paths + retries (BEA-1071)', () => {
     const bridge: any = { execute: async () => { calls++; if (calls === 1) throw new Error('flaky'); } };
     const graph = JSON.stringify({
       nodes: [
-        { id: 'A', data: { kind: 'tool', refId: 'web_search', label: 'Flaky', retries: 2 } },
+        { id: 'A', data: { kind: 'tool', refId: 'gmail', label: 'Flaky', retries: 2 } },
         { id: 'O', data: { kind: 'output', label: 'Answer' } },
       ],
       edges: [{ source: 'A', target: 'O' }],
@@ -489,9 +495,9 @@ describe('FlowRunnerService.testToNode — run to here + pins (BEA-1072)', () =>
     let engineCalls = 0;
     const graph = JSON.stringify({
       nodes: [
-        { id: 'R', data: { kind: 'tool', refId: 'web_search', label: 'Research', pin: { output: 'FROZEN RESEARCH RESULT' } } }, // pinned — must NOT re-run
+        { id: 'R', data: { kind: 'tool', refId: 'gmail', label: 'Research', pin: { output: 'FROZEN RESEARCH RESULT' } } }, // pinned — must NOT re-run
         { id: 'T', data: { kind: 'text', text: '', label: 'Shape it' } }, // the target (pass-through of input)
-        { id: 'ELSEWHERE', data: { kind: 'tool', refId: 'web_search', label: 'Unrelated' } }, // NOT upstream — must not run
+        { id: 'ELSEWHERE', data: { kind: 'tool', refId: 'gmail', label: 'Unrelated' } }, // NOT upstream — must not run
         { id: 'O', data: { kind: 'output', label: 'Answer' } },
       ],
       edges: [{ source: 'R', target: 'T' }, { source: 'T', target: 'O' }, { source: 'ELSEWHERE', target: 'O' }],

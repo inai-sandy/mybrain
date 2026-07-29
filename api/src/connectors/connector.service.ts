@@ -2,9 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
-export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify';
+export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify';
 
-export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify'];
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify'];
 
 export function isKnownConnector(n: string): n is ConnectorName {
   return (KNOWN_CONNECTORS as string[]).includes(n);
@@ -95,6 +95,18 @@ export class ConnectorService implements OnModuleInit {
         if (r.ok) return { ok: true, message: 'Tavily key works — pages can be read.' };
         if (r.status === 401) return { ok: false, message: 'Tavily rejected that key. Double-check it.' };
         return { ok: false, message: `Tavily returned an error (HTTP ${r.status}).` };
+      }
+      if (name === 'exa') {
+        const r = await fetch('https://api.exa.ai/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': secrets.apiKey },
+          body: JSON.stringify({ query: 'ping', numResults: 1, type: 'auto' }),
+        });
+        if (r.ok) return { ok: true, message: 'Exa key works — searching by meaning is on.' };
+        if (r.status === 401) return { ok: false, message: 'Exa rejected that key. Double-check it.' };
+        // Exa's free plan throttles rather than refusing outright — a 429 still proves the key is real.
+        if (r.status === 429) return { ok: true, message: 'Exa key works, but it is rate-limited right now (free plan).' };
+        return { ok: false, message: `Exa returned an error (HTTP ${r.status}).` };
       }
       return { ok: false, message: 'No live test available for this connector.' };
     } catch {
