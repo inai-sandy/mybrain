@@ -167,6 +167,11 @@ model Story {
   emotions        String? // JSON {lifted[], drained[], energy, worry, feeling} mined from his own words (BEA-1051)
   supermemoryId   String? // Explore index doc ids (so re-index replaces, no dupes)
   ragId           String?
+  // The deep read of this story, kept so step 2 of the Close-day wizard never pays for the same
+  // call twice. minedHash fingerprints the text it was read from, so an edit is visible. (BEA-1164)
+  mined           String? // JSON MinedPayload
+  minedHash       String?
+  minedAt         DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

@@ -46,9 +46,9 @@ export class DailyController {
 
   /** Deep-mine a day's story: every proposal for the Close-day wizard. Creates NOTHING. (BEA-1051) */
   @Post('mine')
-  async mine(@Body() body: { day?: string }) {
+  async mine(@Body() body: { day?: string; force?: boolean }) {
     if (!body?.day || !/^\d{4}-\d{2}-\d{2}$/.test(body.day)) throw new BadRequestException('Give the day as YYYY-MM-DD');
-    return this.mining.mine(body.day);
+    return this.mining.mine(body.day, { force: !!body.force });
   }
 
   /** Create exactly what the owner ticked from the mined proposals. (BEA-1051) */
