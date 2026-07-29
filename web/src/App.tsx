@@ -44,7 +44,6 @@ import Emo from './pages/Emo';
 import { AgentRunView } from './pages/AgentRunView';
 import { AgentHistory } from './pages/AgentHistory';
 import { SavedByAgents } from './pages/SavedByAgents';
-import { AgentDetail } from './pages/AgentDetail';
 import { AgentApp } from './pages/AgentApp';
 import { AgentAreaPage } from './pages/AgentAreaPage';
 import { FlowsList } from './pages/FlowsList';
@@ -142,7 +141,7 @@ function AuthedApp() {
         <Route path="agent" element={<Agents />} />
         <Route path="agent/history" element={<AgentHistory />} />
         <Route path="agent/saved" element={<SavedByAgents />} />
-        <Route path="agent/agents/:id" element={<AgentDetail />} />
+        <Route path="agent/agents/:id" element={<AgentApp />} />
         <Route path="agent/a/:id" element={<AgentApp />} />
         <Route path="agent/ar/:id" element={<AgentAreaPage />} />
         <Route path="agent/runs/:id" element={<AgentRunView />} />
