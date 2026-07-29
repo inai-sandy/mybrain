@@ -8,7 +8,7 @@ import { ToolPicker, type CatalogTool } from '../ui/ToolPicker';
 
 // `id` is the catalog id (BEA-1167). Older saved tools have no id — they were typed by hand and
 // still render fine; picking from the catalog is how new ones are added.
-type AreaTool = { id?: string; kind: string; name: string; note?: string; status?: string };
+type AreaTool = { id?: string; kind: string; group?: string; name: string; note?: string; status?: string };
 
 const TOOL_KIND: Record<string, { label: string; cls: string }> = {
   skill: { label: 'Skill', cls: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' },
@@ -16,6 +16,26 @@ const TOOL_KIND: Record<string, { label: string; cls: string }> = {
   mcp: { label: 'MCP', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' },
   cli: { label: 'CLI', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300' },
 };
+
+/**
+ * Badge per catalog group (BEA-1167). Before this every picked tool read "API", which was plainly
+ * wrong for "Search my brain". Hand-typed tools have no group and keep the old kind badge.
+ */
+const TOOL_GROUP: Record<string, string> = {
+  Brain: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300',
+  Web: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300',
+  Google: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300',
+  Messaging: 'bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300',
+  Output: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
+  AI: 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',
+  Skills: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300',
+  'MCP servers': 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300',
+  Advanced: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
+};
+function toolBadge(t: { kind: string; group?: string }) {
+  if (t.group && TOOL_GROUP[t.group]) return { label: t.group === 'MCP servers' ? 'MCP' : t.group, cls: TOOL_GROUP[t.group] };
+  return TOOL_KIND[t.kind] || TOOL_KIND.api;
+}
 
 /**
  * One agent AREA (BEA-1098): the container the owner calls "an agent" — its identity, its Tools
@@ -47,7 +67,7 @@ export function AgentAreaPage() {
   /** Replace every catalog-backed tool with the new pick; hand-typed customs are left alone. */
   function savePicked(_ids: string[], picked: CatalogTool[]) {
     const customs = (area?.tools || []).filter((t: AreaTool) => !t.id);
-    const next: AreaTool[] = picked.map((t) => ({ id: t.id, kind: kindOf(t.kind), name: t.name, note: t.description, status: t.connected ? 'installed' : 'needed' }));
+    const next: AreaTool[] = picked.map((t) => ({ id: t.id, kind: kindOf(t.kind), group: t.group, name: t.name, note: t.description, status: t.connected ? 'installed' : 'needed' }));
     saveTools([...next, ...customs]);
   }
 
@@ -128,7 +148,7 @@ export function AgentAreaPage() {
         ) : (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {tools.map((t, i) => {
-              const k = TOOL_KIND[t.kind] || TOOL_KIND.api;
+              const k = toolBadge(t);
               return (
                 <span key={i} title={t.note || ''} className={'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ' + k.cls}>
                   <span className="opacity-60">{k.label}</span>{t.name}

@@ -6,7 +6,7 @@ import { PromptsService } from '../prompts/prompts.service';
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
-export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; name: string; note?: string; status?: 'installed' | 'needed' };
+export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; group?: string; name: string; note?: string; status?: 'installed' | 'needed' };
 
 /**
  * Agent AREAS (BEA-1095) — the container the owner thinks of as "an agent" (Research Agent,
@@ -255,6 +255,7 @@ export class AgentAreasService {
     return tools.slice(0, 40).map((t: any): AreaTool => ({
       // Keep the catalog id — without it a picked tool is just a label again (BEA-1167).
       ...(t?.id ? { id: String(t.id).slice(0, 120) } : {}),
+      ...(t?.group ? { group: String(t.group).slice(0, 40) } : {}), // the catalog group, for the badge
       kind: KINDS.includes(t?.kind) ? t.kind : 'api',
       name: String(t?.name || '').slice(0, 80),
       ...(t?.note ? { note: String(t.note).slice(0, 200) } : {}),
