@@ -4,6 +4,7 @@ import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
+import { AgentService } from '../agent/agent.service';
 
 /** Generic building blocks (n8n-style utility nodes). `kind` drives the node's look/behaviour. */
 const GENERIC_PALETTE = [
@@ -46,6 +47,7 @@ export class FlowsService {
     private readonly llm: LlmService,
     private readonly promptsSvc?: PromptsService, // optional + LAST — spec files construct positionally
     private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167)
+    private readonly agentSvc?: AgentService, // to narrow planning to the job's toolbox (BEA-1174)
   ) {}
 
   private parse(s?: string | null): any {
@@ -269,7 +271,12 @@ export class FlowsService {
   async planAndSave(id: string) {
     const f = await this.prisma.flow.findUnique({ where: { id } });
     if (!f) throw new NotFoundException('Flow not found');
-    const graph = await this.planFlow(f.question || f.name || '');
+    // Plan within the job's toolbox (BEA-1174): a drawn step the job isn't allowed to run would be
+    // a picture that lies — it would simply be refused at run time.
+    const allowed = (f as any).agentId
+      ? (await this.agentSvc?.allowedTools?.((f as any).agentId).catch(() => null))?.ids || null
+      : null;
+    const graph = await this.planFlow(f.question || f.name || '', allowed);
     const updated = await this.prisma.flow.update({ where: { id }, data: { graph: JSON.stringify(graph) } });
     return this.shape(updated);
   }
@@ -316,7 +323,7 @@ export class FlowsService {
    * Plan a COMPLETE flow from a question/task (Agent↔Flow merge ②): independent branches,
    * each a chain of the right tools/skills, into a merge + output. Returns a graph {nodes, edges}.
    */
-  async planFlow(question: string): Promise<{ nodes: any[]; edges: any[] }> {
+  async planFlow(question: string, allowedToolIds?: string[] | null): Promise<{ nodes: any[]; edges: any[] }> {
     const q = (question || '').trim();
     const all = (await this.skills.list().catch(() => [])) as any[];
     // only offer skills actually deployed somewhere, and skip generic build/design skills for research
@@ -325,7 +332,13 @@ export class FlowsService {
     // Only offer tools that are actually connected — planning a Gmail step with no Google account
     // attached just produces a flow that fails halfway (BEA-1167).
     const cat = await this.catalog?.catalog().catch(() => null);
-    const usable = cat ? cat.tools.filter((t) => t.kind === 'tool' && t.connected) : FALLBACK_TOOLS;
+    let usable: any[] = cat ? cat.tools.filter((t) => t.kind === 'tool' && t.connected) : FALLBACK_TOOLS;
+    // Narrow to the job's own toolbox when it has one.
+    if (allowedToolIds && allowedToolIds.length) {
+      const allow = new Set(allowedToolIds);
+      const narrowed = usable.filter((t: any) => allow.has(t.id));
+      if (narrowed.length) usable = narrowed;
+    }
     const toolById = new Map<string, string>(usable.map((t) => [t.id, t.name] as [string, string]));
     const skillList = skills.map((s) => `- skill:${s.id} — ${s.title}: ${(s.description || '').slice(0, 80)}`).join('\n');
     const toolList = usable.map((t) => `- tool:${t.id} — ${t.name}: ${t.description}`).join('\n');
