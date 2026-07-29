@@ -89,6 +89,12 @@ export class AgentController {
     return this.areas.update(id, body || {});
   }
 
+  /** Copy an agent's identity + toolbox as a starting point; its jobs are not copied (BEA-1182). */
+  @Post('areas/:id/duplicate')
+  duplicateArea(@Param('id') id: string) {
+    return this.areas.duplicate(id);
+  }
+
   @Delete('areas/:id')
   deleteArea(@Param('id') id: string, @Query('withJobs') withJobs?: string) {
     return this.areas.remove(id, { withJobs: withJobs === '1' || withJobs === 'true' });

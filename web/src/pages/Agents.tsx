@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil } from 'lucide-react';
+import { Bot, Play, Loader2, FileText, CheckCircle2, AlertTriangle, Clock, XCircle, PauseCircle, Plus, Trash2, Power, History as HistoryIcon, CalendarClock, Sparkles, Search, ShieldCheck, X, Send, Pencil, MoreHorizontal, Copy, Check } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { Sheet } from '../ui/Sheet';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { DictateButton } from '../ui/DictateButton';
 import { DepthDial, type Depth } from '../ui/DepthDial';
@@ -150,6 +151,91 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
 
 /** One live run with its readable last steps. */
 // RunningCard removed with the "Running now" strip (BEA-1181) — History shows live runs.
+
+/**
+ * The ordinary operations on an agent, reachable from the list (BEA-1182) — the owner went looking
+ * for rename and delete and couldn't find them, because they were buried inside the agent's page.
+ */
+function AgentCardMenu({ area, onChanged }: { area: any; onChanged: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(area.name);
+  const [desc, setDesc] = useState(area.description || '');
+  const [icon, setIcon] = useState(area.icon || '🤖');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [open]);
+
+  async function save() {
+    if (!name.trim()) { toast('error', 'It needs a name'); return; }
+    setBusy(true);
+    const r = await fetch(`/api/agent/areas/${area.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), description: desc.trim(), icon }) });
+    setBusy(false);
+    if (r.ok) { setEditing(false); onChanged(); toast('success', 'Saved'); } else toast('error', 'Could not save');
+  }
+  async function duplicate() {
+    setBusy(true);
+    const r = await fetch(`/api/agent/areas/${area.id}/duplicate`, { method: 'POST' });
+    setBusy(false);
+    if (r.ok) { onChanged(); toast('success', `Copied — "${area.name} copy" is ready to edit`); } else toast('error', 'Could not copy');
+  }
+  async function remove() {
+    const n = area.jobCount || 0;
+    const msg = n === 0
+      ? `Delete "${area.name}"? It has no jobs.`
+      : `Delete "${area.name}" and its ${n} job${n === 1 ? '' : 's'}? Their run history goes too. Saved documents are kept.`;
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    const r = await fetch(`/api/agent/areas/${area.id}${n > 0 ? '?withJobs=1' : ''}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (r.ok) { onChanged(); toast('success', 'Agent deleted'); } else toast('error', d.message || 'Could not delete');
+  }
+
+  return (
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        aria-label={`Actions for ${area.name}`}
+        className="absolute right-2 top-2 z-10 rounded-lg p-1.5 text-zinc-400 opacity-100 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 sm:opacity-0 sm:group-hover:opacity-100"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open && (
+        <div onClick={(e) => e.stopPropagation()} className="absolute right-2 top-10 z-20 w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+          <button onClick={() => { setOpen(false); setEditing(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-3.5 w-3.5 text-zinc-400" />Rename &amp; edit</button>
+          <button onClick={() => { setOpen(false); duplicate(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Copy className="h-3.5 w-3.5 text-zinc-400" />Duplicate</button>
+          <button onClick={() => { setOpen(false); remove(); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"><Trash2 className="h-3.5 w-3.5" />Delete</button>
+        </div>
+      )}
+      {editing && (
+        <Sheet onClose={() => setEditing(false)} size="sm">
+          {(close) => (
+            <div className="space-y-3 p-4">
+              <h2 className="text-sm font-semibold">Edit agent</h2>
+              <div className="flex gap-2">
+                <input value={icon} onChange={(e) => setIcon(e.target.value.slice(0, 4))} aria-label="Icon" className="w-14 shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-2 text-center text-lg outline-none focus:border-emerald-400 dark:border-zinc-700" />
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm" />
+              </div>
+              <input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="What is this agent for?" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm" />
+              <div className="flex justify-end gap-2">
+                <button onClick={close} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">Cancel</button>
+                <button onClick={async () => { await save(); close(); }} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Save</button>
+              </div>
+            </div>
+          )}
+        </Sheet>
+      )}
+    </>
+  );
+}
+
 function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void; onClose: () => void }) {
   const toast = useToast();
   const [url, setUrl] = useState('');
@@ -751,7 +837,10 @@ export function Agents() {
                   const waitingJob = ar.jobs.find((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
                   const lastDone = ar.jobs.map((j: any) => j.lastRun).filter((r: any) => r?.status === 'done').sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())[0];
                   return (
-                    <button key={ar.id} onClick={() => nav(`/agent/ar/${ar.id}`)} style={{ borderLeftColor: color }} className="group flex flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 text-left transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
+                    <div key={ar.id} style={{ borderLeftColor: color }} className="group relative flex flex-col rounded-2xl border border-l-4 border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
+                    {/* Rename · duplicate · delete, right where you can see them (BEA-1182). */}
+                    <AgentCardMenu area={ar} onChanged={() => { loadAreas(); loadHome(); }} />
+                    <button onClick={() => nav(`/agent/ar/${ar.id}`)} className="flex flex-1 flex-col text-left">
                       <div className="flex items-start gap-2.5">
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: color + '22' }}>{ar.icon || '🤖'}</span>
                         <span className="min-w-0 flex-1">
@@ -767,6 +856,7 @@ export function Agents() {
                         {(ar.tools || []).length > 0 && <span className="ml-auto">🔧 {ar.tools.length}</span>}
                       </span>
                     </button>
+                    </div>
                   );
                 })}
               </div>

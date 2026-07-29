@@ -338,6 +338,23 @@ export class AgentAreasService {
     for (const j of jobs) j._lastRun = best.get(j.id) || null;
   }
 
+  /**
+   * Copy an agent's identity, toolbox and standing Outcome as a starting point (BEA-1182).
+   * Its JOBS and history are deliberately NOT copied — you want the shape, not the work.
+   */
+  async duplicate(id: string) {
+    const src: any = await (this.prisma as any).agentArea.findUnique({ where: { id } });
+    if (!src) throw new NotFoundException('Agent not found');
+    const existing: any[] = await (this.prisma as any).agentArea.findMany({ select: { name: true } });
+    const taken = new Set(existing.map((a) => String(a.name)));
+    let name = `${src.name} copy`;
+    for (let i = 2; taken.has(name); i++) name = `${src.name} copy ${i}`;
+    const made = await (this.prisma as any).agentArea.create({
+      data: { name: name.slice(0, 120), icon: src.icon, color: src.color, description: src.description, outcome: src.outcome, tools: src.tools || '[]' },
+    });
+    return this.shape(made, []);
+  }
+
   async create(input: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const area = await (this.prisma as any).agentArea.create({
