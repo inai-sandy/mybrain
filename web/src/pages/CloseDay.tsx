@@ -20,6 +20,7 @@ type Mined = {
   day: string;
   hasStory: boolean;
   failed?: boolean;
+  missing?: 'work' | 'day' | null; // one of the two reads came back empty (BEA-1166)
   cached?: boolean; // came from the stored reading — no wait, no call (BEA-1164)
   stale?: boolean; // the story was edited after this reading was made (BEA-1164)
   done: { title: string; category: string | null }[];
@@ -421,6 +422,16 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                     <div className="rounded-lg border border-sky-300/50 bg-sky-500/5 p-2.5 text-xs text-sky-700 dark:border-sky-500/30 dark:text-sky-400">
                       You changed your story after I read this, so the list below is from the earlier version.
                       <button onClick={() => loadMine(true)} className="ml-1.5 font-medium underline underline-offset-2 hover:text-sky-900 dark:hover:text-sky-300">Read it again</button>
+                    </div>
+                  )}
+                  {/* One half of the read came back empty. Half a day is worth showing — pretending
+                      it is a whole one is not. (BEA-1166) */}
+                  {mined.missing && (
+                    <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+                      {mined.missing === 'work'
+                        ? "I got how your day felt, but not the work in it — no tasks or delegations below."
+                        : "I got the work in your day, but not how it felt or what you did hour by hour."}
+                      <button onClick={() => loadMine(true)} className="ml-1.5 font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-300">Read it again</button>
                     </div>
                   )}
                   {/* It was cut off and we kept what was complete. A silent gap in his day's record

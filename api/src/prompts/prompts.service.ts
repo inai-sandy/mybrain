@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export type PromptKey =
   | 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief'
   // Migrated inline prompts (BEA-1059)
-  | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMine' | 'daily.insightsWritten'
+  | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMineWork' | 'daily.storyMineDay' | 'daily.insightsWritten'
   | 'tasks.autoNote'
   | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe' | 'lab.rewrite'
   | 'people.chaseAgent' | 'people.briefingTidy'
@@ -387,25 +387,36 @@ Return ONLY JSON {"breakdown":[{"category":"short label","minutes":N}]} where th
     default: `You are an honest, plain-spoken coach. From the evidence below, write ONE short paragraph (3-5 sentences) telling Sandeep what is REALLY going on this fortnight — the pattern he might not see. Be specific, use his own numbers and names, name one thing to fix. No lists, no preamble, no flattery. Reply with ONLY the paragraph as plain text — NOT JSON, no keys, no code fences, no quotes around it.`,
   },
   {
-    key: 'daily.storyMine',
+    key: 'daily.storyMineWork',
     category: "Daily & Story",
-    label: "Deep story mining (the Close-day read)",
-    description: "The one careful read of your day’s story that proposes finished work, to-dos, delegations, reminders, promises, feelings, events and lessons. Your diary + known names are added automatically. The date fills in where it says {{day}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
-    default: `You are reading Sandeep's diary entry for {{day}}. Extract EVERYTHING useful from it. Plain, short titles. Reply with ONLY JSON:
+    label: "Deep story read — the WORK half",
+    description: "Pulls the work out of your day's story: what you finished, what you still plan to do, what you handed to your team, your reminders and your promises. Runs at the same time as the other half. Your diary + known names are added automatically. The date fills in where it says {{day}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are reading Sandeep's diary entry for {{day}}. Pull out the WORK in it — nothing about feelings. Plain, short titles. Reply with ONLY JSON:
 {
  "done":[{"title":"work he says he FINISHED","category":"1-2 words"}],
  "todos":[{"title":"things HE still plans to do","category":"1-2 words","note":"concrete detail/deadline from the diary or null","priority":"high|medium|low"}],
  "delegations":[{"person":"name exactly as written","title":"what THAT PERSON owes/will do","chase":true}],
  "myReminders":[{"title":"a thing he must remember","date":"YYYY-MM-DD or null"}],
- "promises":[{"to":"who he promised","what":"what he promised","date":"YYYY-MM-DD or null"}],
+ "promises":[{"to":"who he promised","what":"what he promised","date":"YYYY-MM-DD or null"}]
+}
+Rules:
+- done/todos: real concrete work only, never feelings. Do NOT repeat anything already listed as logged.
+- delegations: ONLY when the diary clearly says another person will do / owes / was asked something. Use the name exactly as written.
+- promises: only commitments SANDEEP made to someone. Dates: resolve "tomorrow/Friday" against {{day}}; null when unsure — never invent a date.
+- Empty arrays are fine everywhere.`,
+  },
+  {
+    key: 'daily.storyMineDay',
+    category: "Daily & Story",
+    label: "Deep story read — the DAY half",
+    description: "Reads how the day actually went: how it felt, what you did hour by hour, and what it taught you. Runs at the same time as the work half. Your diary is added automatically. The date fills in where it says {{day}}. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You are reading Sandeep's diary entry for {{day}}. Describe the DAY ITSELF — how it felt, what he actually did, and what it taught him. No task lists. Reply with ONLY JSON:
+{
  "emotions":{"lifted":["what gave him energy"],"drained":["what drained him"],"energy":0-100,"worry":0-100,"feeling":"one honest sentence about how the day felt"},
  "events":[{"at":"morning|afternoon|evening|HH:MM or null","title":"what he actually did, e.g. 'At the factory checking QC'"}],
  "lessons":["a pattern or lesson in HIS life worth remembering, only if the diary really shows one"]
 }
 Rules:
-- done/todos: real concrete work only, never feelings. Do NOT repeat anything from these lists.
-- delegations: ONLY when the diary clearly says another person will do / owes / was asked something. Use the name exactly as written.
-- promises: only commitments SANDEEP made to someone. Dates: resolve "tomorrow/Friday" against {{day}}; null when unsure — never invent a date.
 - events: 3-8 entries covering the real day (factory, meetings, travel, family), in time order.
 - emotions: from his words only; numbers are honest estimates.
 - lessons: max 2; empty array if the day shows none. Empty arrays are fine everywhere.`,
