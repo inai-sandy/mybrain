@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Check, Moon, X, Lock, ChevronLeft, ChevronRight, ChevronDown, Loader2, Sparkles, Clock, ArrowRight, Trash2, Radio, HeartPulse, CalendarDays, Lightbulb, Hand } from 'lucide-react';
+import { Check, Moon, X, Lock, ChevronLeft, ChevronRight, ChevronDown, Loader2, Sparkles, Clock, ArrowRight, Trash2, Radio, HeartPulse, CalendarDays, Lightbulb, Hand, Save } from 'lucide-react';
 import { Sheet } from '../ui/Sheet';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
 import { isDictating } from '../ui/useDictation';
+import { clearDraft, loadObjectDraft, useObjectDraftPersist } from '../ui/useDraft';
 
 /**
  * The ONE Close-the-day wizard (BEA-1052). The old world had two paths and only one asked the
@@ -47,14 +48,69 @@ const STEPS: { id: StepId; label: string }[] = [
   { id: 'carry', label: 'Finished' }, // the step now closes tasks, not just carries them (BEA-1146)
 ];
 
+/**
+ * Everything the wizard is holding, so a crash costs him nothing. (BEA-1165)
+ *
+ * His words: *"can you also provide auto save option. if something goes wrong it has to save at the
+ * exact position."* All of this used to live in browser memory alone — a reload, a dropped
+ * connection or a swap to another app sent him back to a blank box.
+ *
+ * Kept on the device, deliberately. The moment things go wrong is usually the moment the network is
+ * down, and a save that needs the server is no save at all.
+ */
+type Draft = {
+  v: 1;
+  /** Stamped by the auto-save hook when it writes, not by the wizard. */
+  at: number;
+  step: StepId;
+  text: string;
+  mood: string;
+  hours: string;
+  ticked: Record<string, boolean>;
+  doneIds: Record<string, boolean>;
+  carry: Record<string, 'drop' | undefined>;
+};
+const draftKey = (day: string) => `mybrain.draft.closeday.${day}`; // same prefix as the other drafts (BEA-512)
+
+/** "saved 5 minutes ago" — plain words, so the resume line says how stale it is. */
+export function savedAgo(at: number): string {
+  const mins = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+/** Older than this and picking it up would be a surprise, not a rescue. */
+const DRAFT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+
 export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose: () => void; onClosed: () => void }) {
   const toast = useToast();
-  const [step, setStep] = useState<StepId>('story');
+
+  // Read synchronously, BEFORE the first render, so nothing he typed is shown as empty even for a
+  // moment and the server load below knows not to overwrite it. (BEA-1165)
+  const [saved] = useState<Draft | null>(() => {
+    const d = loadObjectDraft<Draft>(draftKey(day));
+    if (!d || d.v !== 1) return null;
+    // Too old to be a rescue — picking it up would be a surprise. Delete it rather than leaving a
+    // key behind for every day he ever opened. (BEA-1165)
+    if (!d.at || Date.now() - d.at > DRAFT_MAX_AGE_MS) {
+      clearDraft(draftKey(day));
+      return null;
+    }
+    return d;
+  });
+  const [resumed, setResumed] = useState(!!saved);
+  /** Once the day is sealed the draft is gone for good — never let a queued save bring it back. */
+  const [sealed, setSealed] = useState(false);
+
+  const [step, setStep] = useState<StepId>(saved?.step || 'story');
   const [busy, setBusy] = useState(false);
 
   // step 1 — story
-  const [text, setText] = useState('');
-  const [mood, setMood] = useState('');
+  const [text, setText] = useState(saved?.text || '');
+  const [mood, setMood] = useState(saved?.mood || '');
   const [storySavedText, setStorySavedText] = useState(''); // what's on the server, to avoid pointless saves
   const [isToday, setIsToday] = useState(true);
   const [wasClosed, setWasClosed] = useState(false);
@@ -63,20 +119,23 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   const [mined, setMined] = useState<Mined | null>(null);
   const [mineErr, setMineErr] = useState(false);
   // ticked[section:index] — everything starts ticked; unticking rejects a proposal
-  const [ticked, setTicked] = useState<Record<string, boolean>>({});
+  const [ticked, setTicked] = useState<Record<string, boolean>>(saved?.ticked || {});
 
   // step 3 — hours
-  const [hours, setHours] = useState(DEFAULT_HOURS);
+  const [hours, setHours] = useState(saved?.hours || DEFAULT_HOURS);
 
   // step 4 — what did you finish? (BEA-1146)
   type OpenTask = { id: string; title: string; carried: number; owner: string | null };
   const [openTasks, setOpenTasks] = useState<OpenTask[] | null>(null); // null = still loading or failed (BEA-1146)
   const [loadErr, setLoadErr] = useState(false);
-  const [doneIds, setDoneIds] = useState<Record<string, boolean>>({}); // ticked = finished
+  const [doneIds, setDoneIds] = useState<Record<string, boolean>>(saved?.doneIds || {}); // ticked = finished
   const [preTicked, setPreTicked] = useState<Record<string, boolean>>({}); // the story said so
-  const [carry, setCarry] = useState<Record<string, 'drop' | undefined>>({});
+  const [carry, setCarry] = useState<Record<string, 'drop' | undefined>>(saved?.carry || {});
   const [showOld, setShowOld] = useState(false);
   const [confirmDrop, setConfirmDrop] = useState<OpenTask | null>(null);
+
+  /** What the server has, kept so "Start fresh" can put everything back. (BEA-1165) */
+  const [server, setServer] = useState<{ text: string; mood: string; hours: string }>({ text: '', mood: '', hours: DEFAULT_HOURS });
 
   useEffect(() => {
     fetch(`/api/daily/activity?day=${day}`)
@@ -85,16 +144,64 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
         if (!a) return;
         setIsToday(!!a.isToday);
         setWasClosed(!!a.closed);
+        const srvHours = a.stats?.workedMinutes ? String(Math.round((a.stats.workedMinutes / 60) * 10) / 10) : DEFAULT_HOURS;
+        setServer({ text: a.story?.text || '', mood: a.story?.mood || '', hours: srvHours });
         if (a.story?.text) {
-          setText(a.story.text);
+          // storySavedText is what the SERVER holds, always — it decides whether a save is needed
+          // and whether the reading has to be asked for again. The draft must not fake it. (BEA-1165)
           setStorySavedText(a.story.text);
-          if (a.story.mood) setMood(a.story.mood);
+          if (!saved) {
+            setText(a.story.text);
+            if (a.story.mood) setMood(a.story.mood);
+          }
         }
-        if (a.stats?.workedMinutes) setHours(String(Math.round((a.stats.workedMinutes / 60) * 10) / 10));
+        if (!saved && a.stats?.workedMinutes) setHours(srvHours);
       })
       .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [day]);
+
+  // Auto-save, debounced. Stops once the day is sealed so a finished wizard leaves nothing behind.
+  // No timestamp here on purpose: the hook stamps `at` when it actually writes. A Date.now() in this
+  // object would change on every single render, so the debounce would restart forever and a busy
+  // form would never save at all. (BEA-1165)
+  useObjectDraftPersist(draftKey(day), { v: 1, step, text, mood, hours, ticked, doneIds, carry }, !sealed);
+
+  /**
+   * He restored onto a later step, so the findings he ticked are in `ticked` but the list they refer
+   * to was never loaded — and `finish()` only applies findings when `mined` is present. Without this
+   * a resumed wizard would seal the day and silently drop everything he had already approved.
+   * The findings re-fetch is free: the reading is stored server-side. (BEA-1165, on top of BEA-1164)
+   *
+   * The last step needs its own reload too, or a resume straight onto it sits on skeleton rows
+   * forever — nothing else ever asks for the open tasks.
+   */
+  useEffect(() => {
+    if (!saved || saved.step === 'story') return;
+    loadMine(false, true);
+    if (saved.step === 'carry') toCarry(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Resumed onto a later step and the findings are still on their way back. Sealing now would drop
+   *  every tick he made before the crash, silently — so the last button waits. (BEA-1165) */
+  const findingsPending = !!saved && saved.step !== 'story' && !mined && !mineErr;
+  const findingsLost = !!saved && saved.step !== 'story' && !mined && mineErr;
+
+  /** Throw the draft away and go back to what the server has. */
+  function startFresh() {
+    clearDraft(draftKey(day));
+    setResumed(false);
+    setStep('story');
+    setText(server.text);
+    setMood(server.mood);
+    setHours(server.hours);
+    setTicked({});
+    setDoneIds({});
+    setCarry({});
+    setMined(null);
+    setMineErr(false);
+  }
 
   const appendText = (chunk: string) => setText((t) => (t ? t + ' ' : '') + chunk);
 
@@ -134,7 +241,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
    * only ever set by HIM pressing "Read it again" — the app never decides on its own to spend
    * another call, which is the whole point of BEA-1164.
    */
-  function loadMine(force = false) {
+  function loadMine(force = false, keepTicks = false) {
     setMineErr(false);
     setMined(null);
     fetch('/api/daily/mine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, force }) })
@@ -150,13 +257,15 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
         m.events.forEach((_, i) => (t[`events:${i}`] = true));
         m.lessons.forEach((_, i) => (t[`lessons:${i}`] = true));
         if (m.emotions) t['emotions'] = true;
-        setTicked(t); // everything starts KEPT — unticking is the rejection
+        // On a resume his own choices win — re-ticking everything would quietly undo the unticking
+        // he had already done before the crash. (BEA-1165)
+        if (!keepTicks) setTicked(t); // everything starts KEPT — unticking is the rejection
       })
       .catch(() => setMineErr(true));
   }
 
   /** Step 3 → 4: load the day's still-open tasks for carry choices. */
-  async function toCarry() {
+  async function toCarry(keepDone = false) {
     setStep('carry');
     if (!openTasks?.length) {
       setLoadErr(false);
@@ -168,7 +277,9 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
           const pre: Record<string, boolean> = {};
           for (const id of d.finishedOpenIds || []) pre[id] = true;
           setPreTicked(pre);
-          setDoneIds(pre);
+          // On a resume his own ticks win — the story's guesses must not overwrite what he already
+          // decided before the crash. (BEA-1165)
+          if (!keepDone) setDoneIds(pre);
         })
         // A failed load used to fall through to "Nothing left open — clean sweep 🎉" with 44 tasks
         // still open. Sealing the day on that lie is worse than any error message. (BEA-1146)
@@ -192,18 +303,34 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
           lessons: mined.lessons.filter((_, i) => ticked[`lessons:${i}`]),
           emotions: ticked['emotions'] ? mined.emotions : null,
         };
-        await fetch('/api/daily/mine/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, picked }) }).catch(() => undefined);
+        // Was: swallowed. Sealing on a failed apply loses every finding he ticked, and now also
+        // clears the draft that held them — so a failure here must STOP, not carry on. (BEA-1165)
+        const ok = await fetch('/api/daily/mine/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, picked }) })
+          .then((r) => r.ok)
+          .catch(() => false);
+        if (!ok) {
+          toast('error', "Couldn't save what you ticked — nothing was sealed, and your picks are safe. Try again.");
+          return;
+        }
       }
       const h = parseFloat(hours);
       const workedMinutes = Number.isFinite(h) && h > 0 ? Math.round(h * 60) : 14 * 60; // the box can be emptied, the day still gets hours
       const drop = Object.entries(carry).filter(([, v]) => v === 'drop').map(([id]) => id);
       const done = Object.entries(doneIds).filter(([, v]) => v).map(([id]) => id);
-      await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: [], workedMinutes, roll: [], drop, done }) }).catch(() => undefined);
+      const wrapped = await fetch('/api/daily/wrap-up', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, tasks: [], workedMinutes, roll: [], drop, done }) })
+        .then((r) => r.ok)
+        .catch(() => false);
+      if (!wrapped) {
+        toast('error', "Couldn't save your hours and finished tasks — nothing was sealed. Try again.");
+        return;
+      }
       const r = await fetch('/api/daily/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) });
       if (r.ok) {
         const j = await r.json().catch(() => ({} as any));
         const nClosed = Object.values(doneIds).filter(Boolean).length;
         const bits = [nClosed && `${nClosed} finished`, j.rolled && `${j.rolled} moved forward`].filter(Boolean).join(' · ');
+        setSealed(true); // stop the auto-save BEFORE clearing, or a queued write puts it straight back
+        clearDraft(draftKey(day)); // sealed for real — leave nothing behind to resume (BEA-1165)
         toast('success', wasClosed ? 'Day updated — its story and verdict are re-weaving ✨' : bits ? `Day sealed ✓ · ${bits}` : 'Day sealed ✓');
         onClosed();
         close();
@@ -232,6 +359,15 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                 className={'h-1.5 flex-1 rounded-full transition-colors ' + (i < stepIdx ? 'bg-emerald-500' : i === stepIdx ? 'bg-emerald-500/60' : 'bg-zinc-200 dark:bg-zinc-800')} aria-label={s.label} />
             ))}
           </div>
+
+          {/* Never restore silently. He should know why the box is not empty, and be one tap from a
+              clean start. (BEA-1165) */}
+          {resumed && (
+            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-emerald-300/50 bg-emerald-500/5 px-2.5 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-400">
+              <span className="inline-flex items-center gap-1.5"><Save size={13} /> Picking up where you left off{saved?.at ? ` — saved ${savedAgo(saved.at)}` : ''}.</span>
+              <button onClick={startFresh} className="font-medium underline underline-offset-2 hover:text-emerald-900 dark:hover:text-emerald-300">Start fresh</button>
+            </div>
+          )}
 
           {step === 'story' && (
             <>
@@ -339,7 +475,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                 </div>
               </div>
               <p className="mt-2 text-[11px] text-zinc-400">The AI splits the hours across what you actually did — you'll see it on the dashboard.</p>
-              <WizardNav back={() => setStep('findings')} next={toCarry} />
+              <WizardNav back={() => setStep('findings')} next={() => toCarry()} />
             </>
           )}
 
@@ -396,7 +532,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                     {loadErr ? (
                       <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
                         I couldn’t load your open tasks, so I can’t show what to tick.
-                        <button onClick={toCarry} className="ml-2 rounded-md border border-amber-400/60 px-2 py-0.5 text-xs font-medium hover:bg-amber-500/10">Try again</button>
+                        <button onClick={() => toCarry()} className="ml-2 rounded-md border border-amber-400/60 px-2 py-0.5 text-xs font-medium hover:bg-amber-500/10">Try again</button>
                         <p className="mt-1 text-[11px]">Sealing now still carries everything forward — nothing is lost, and nothing gets marked done.</p>
                       </div>
                     ) : openTasks === null ? (
@@ -423,10 +559,19 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                       <p className="py-6 text-center text-sm text-zinc-400">Nothing left open — clean sweep. 🎉</p>
                     )}
 
+                    {/* The picks he made before the crash could not be fetched back. Sealing now would
+                        drop them without a word — say so, and give him the way to fix it. (BEA-1165) */}
+                    {findingsLost && (
+                      <div className="mt-3 rounded-lg border border-amber-300/50 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+                        I couldn't get back the findings you'd ticked earlier, so sealing now would skip them.
+                        <button onClick={() => setStep('findings')} className="ml-1.5 font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-300">Go back and reload them</button>
+                      </div>
+                    )}
+
                     <div className="mt-4 flex items-center justify-between gap-2">
                       <button onClick={() => setStep('hours')} className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"><ChevronLeft size={15} /> Back</button>
-                      <button onClick={() => finish(close)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
-                        {busy ? <><Loader2 size={15} className="animate-spin" /> Sealing…</> : <><Lock size={15} /> {nDone ? `Close ${nDone} · ` : ''}{wasClosed ? 'Update this day' : 'Seal the day'} ✓</>}
+                      <button onClick={() => finish(close)} disabled={busy || findingsPending} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+                        {busy ? <><Loader2 size={15} className="animate-spin" /> Sealing…</> : findingsPending ? <><Loader2 size={15} className="animate-spin" /> Getting your picks back…</> : <><Lock size={15} /> {nDone ? `Close ${nDone} · ` : ''}{wasClosed ? 'Update this day' : 'Seal the day'} ✓</>}
                       </button>
                     </div>
                   </>
