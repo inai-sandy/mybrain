@@ -39,13 +39,16 @@ function make(tasks: any[]) {
 const base = { status: 'open', priority: 'medium', progress: 0, note: null, ownerContactId: null, party: null, pinned: false, estimateMin: null, promisedFor: null, briefingId: null, people: [] };
 
 describe('mergeDuplicates — nothing of value is lost (BEA-1057)', () => {
-  it('moves note, progress, owner, priority and people onto the keeper, then removes the copy', async () => {
-    const keep = { ...base, id: 'keep', title: 'Send report to Madhuri' };
+  // Both sides are Madhuri's now. This used to fold a task delegated to her onto one with no owner
+  // at all — which is exactly what the owner reported as broken, and is refused since BEA-1185.
+  // Same-owner merges still carry everything of value across, which is what this test guards.
+  it('moves note, progress, priority and people onto the keeper, then removes the copy', async () => {
+    const keep = { ...base, id: 'keep', title: 'Send report to Madhuri', ownerContactId: 'c1', party: 'Madhuri' };
     const dup = { ...base, id: 'dup', title: 'Get the report sent', note: 'she promised Friday', progress: 30, ownerContactId: 'c1', party: 'Madhuri', priority: 'high', people: ['c9'] };
     const { svc, updates, deleted, reminderMoves, claimMoves, upserts } = make([keep, dup]);
     const r = await svc.mergeDuplicates([{ keepId: 'keep', removeIds: ['dup'] }]);
     expect(r).toEqual({ merged: 1, removed: 1 });
-    expect(updates[0]).toMatchObject({ id: 'keep', note: 'she promised Friday', progress: 30, ownerContactId: 'c1', party: 'Madhuri', priority: 'high' });
+    expect(updates[0]).toMatchObject({ id: 'keep', note: 'she promised Friday', progress: 30, priority: 'high' });
     expect(reminderMoves).toEqual([{ from: 'dup', to: 'keep' }]); // the chase follows the work
     expect(claimMoves).toEqual([{ from: 'dup', to: 'keep' }]);
     expect(upserts).toEqual([{ taskId: 'keep', contactId: 'c9' }]);
