@@ -185,7 +185,7 @@ export function AgentApp() {
     { k: 'chat', label: 'Chat', icon: MessageSquare },
     { k: 'flow', label: 'Flow', icon: Workflow },
     { k: 'evals', label: 'Checks', icon: ListChecks },
-    { k: 'runs', label: 'History', icon: HistoryIcon },
+    { k: 'runs', label: 'Runs', icon: HistoryIcon },
   ];
 
   return (
