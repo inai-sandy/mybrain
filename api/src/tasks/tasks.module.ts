@@ -5,12 +5,11 @@ import { ClaimsService } from './claims.service';
 import { TaskHealthService } from './task-health.service';
 import { RecurringService } from './recurring.service';
 import { MemoryModule } from '../memory/memory.module';
-import { TelegramModule } from '../telegram/telegram.module';
 
 @Module({
-  imports: [MemoryModule, TelegramModule], // Telegram: the nightly health check speaks to the owner (BEA-1190)
+  imports: [MemoryModule],
   controllers: [TasksController],
   providers: [TaskHealthService, TasksService, ClaimsService, RecurringService],
-  exports: [TasksService, ClaimsService, RecurringService],
+  exports: [TasksService, ClaimsService, RecurringService, TaskHealthService], // the notifier lives in telegram (BEA-1190)
 })
 export class TasksModule {}

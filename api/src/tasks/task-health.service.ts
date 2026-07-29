@@ -1,7 +1,5 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TelegramService } from '../telegram/telegram.service';
-import { localDayKey } from '../common/localday';
 import { parseSchedule, daysFromTitle } from './schedule';
 
 /**
@@ -16,6 +14,11 @@ import { parseSchedule, daysFromTitle } from './schedule';
  * and gets ignored — which would be worse than not having it.
  *
  * It reports. It never fixes: a wrong repair applied unattended at 3am beats the bug it was aimed at.
+ *
+ * This service only CHECKS. Telling the owner lives in `TaskHealthNotifier` over in the telegram
+ * module, because that module already depends on this one — wiring it the other way round would be
+ * a circular dependency, and Nest refuses to start on one (it did: the first deploy of this rolled
+ * back on the health check).
  */
 
 export type HealthFinding = {
@@ -32,44 +35,10 @@ export type HealthFinding = {
 const HOUR = 3600_000;
 
 @Injectable()
-export class TaskHealthService implements OnModuleInit {
+export class TaskHealthService {
   private readonly log = new Logger('TaskHealth');
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private lastRunDay = '';
 
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly telegram?: TelegramService, // optional + LAST — spec files construct positionally
-  ) {}
-
-  onModuleInit() {
-    // Checked every 30 minutes, but it only actually runs once per day, after 22:00 local. A fixed
-    // nightly timer would drift with restarts; this survives them.
-    this.timer = setInterval(() => void this.maybeRunNightly().catch(() => undefined), 30 * 60_000);
-    if (typeof this.timer.unref === 'function') this.timer.unref();
-  }
-
-  private async maybeRunNightly() {
-    const now = new Date();
-    const day = localDayKey(now);
-    if (this.lastRunDay === day) return;
-    const localHour = new Date(now.getTime() + 330 * 60_000).getUTCHours();
-    if (localHour < 22) return;
-    this.lastRunDay = day;
-    await this.runAndReport();
-  }
-
-  /** Run every check and tell the owner if — and only if — something is wrong. */
-  async runAndReport(): Promise<{ findings: HealthFinding[]; told: boolean }> {
-    const findings = await this.check();
-    if (!findings.length) {
-      this.log.log('nightly health check: all clear');
-      return { findings, told: false };
-    }
-    const told = await this.tell(findings);
-    this.log.warn(`nightly health check: ${findings.length} problem(s)${told ? ' — owner told' : ''}`);
-    return { findings, told };
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   /** Every invariant that must hold. Plain counts — no AI, cheap enough to run whenever. */
   async check(): Promise<HealthFinding[]> {
@@ -169,17 +138,13 @@ export class TaskHealthService implements OnModuleInit {
     try { return (await fn()) || []; } catch (e: any) { this.log.warn(`health check query failed: ${e?.message ?? e}`); return []; }
   }
 
-  /** One plain-English message. Nothing is sent when everything is fine. */
-  private async tell(findings: HealthFinding[]): Promise<boolean> {
-    if (!this.telegram?.ownerChatId) return false;
-    const owner = await this.telegram.ownerChatId().catch(() => null);
-    if (!owner) return false;
+  /** One plain-English message for the owner. Returns '' when there is nothing worth saying. */
+  message(findings: HealthFinding[]): string {
+    if (!findings.length) return '';
     const lines = findings.map((f) => {
       const eg = f.examples.length ? `\n   ${f.examples.map((e) => `· ${e}`).join('\n   ')}` : '';
       return `• <b>${f.count}</b> ${f.what} — ${f.where}${eg}`;
     });
-    const body = `🩺 <b>Tasks health check</b>\n\nI found ${findings.length === 1 ? 'one thing' : `${findings.length} things`} worth a look:\n\n${lines.join('\n\n')}\n\nI have changed nothing — these are just the ones to check.`;
-    await this.telegram.send(owner, body).catch(() => undefined);
-    return true;
+    return `🩺 <b>Tasks health check</b>\n\nI found ${findings.length === 1 ? 'one thing' : `${findings.length} things`} worth a look:\n\n${lines.join('\n\n')}\n\nI have changed nothing — these are just the ones to check.`;
   }
 }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TasksModule } from '../tasks/tasks.module';
+import { TaskHealthNotifier } from './task-health-notifier.service';
 import { DailyModule } from '../daily/daily.module';
 import { ChatModule } from '../chat/chat.module';
 import { ItemsModule } from '../items/items.module';
@@ -11,7 +12,7 @@ import { TelegramService } from './telegram.service';
 @Module({
   imports: [TasksModule, DailyModule, ChatModule, ItemsModule, VoiceModule, AgentModule],
   controllers: [TelegramController],
-  providers: [TelegramService],
+  providers: [TaskHealthNotifier, TelegramService],
   exports: [TelegramService],
 })
 export class TelegramModule {}
