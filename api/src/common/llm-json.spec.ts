@@ -98,3 +98,41 @@ describe('a reply cut off at the token ceiling (BEA-1163)', () => {
     expect(looseJsonParse(messy).summary).toBe('line one\nline two');
   });
 });
+
+/**
+ * BEA-1178. The mentor wrote nothing on 27 and 28 July: 83 of 97 calls in a fortnight hit the
+ * 1200-token ceiling, the reply was cut off inside the guidance string, and `if (!guidance) return
+ * null` threw it away without a word — with the call already paid for.
+ */
+describe('a cut-off note is kept, not binned (BEA-1178)', () => {
+  const CUT = '{"adherenceScore": 72, "guidance": "Yesterday you were at 45; today you are at 72. The factory work moved properly. What slipped again was the Beakn portal — you said the same thing on Monday. Pull it up tomo';
+
+  it('keeps the note, ending on a finished sentence', () => {
+    const g = narrativeField(CUT, 'guidance');
+    expect(g).toContain('Yesterday you were at 45');
+    expect(g).toContain('same thing on Monday.');
+    expect(g).not.toContain('Pull it up tomo'); // never end mid-word
+    expect(g.endsWith('.')).toBe(true);
+  });
+
+  it('still reads a whole reply the ordinary way', () => {
+    expect(narrativeField('{"adherenceScore":72,"guidance":"All good today."}', 'guidance')).toBe('All good today.');
+  });
+
+  it('a cut-off reply with almost nothing written is NOT dressed up as guidance', () => {
+    expect(narrativeField('{"adherenceScore": 72, "guidance": "Yesterday', 'guidance')).toBe('');
+  });
+
+  it('returns nothing when the field was never started', () => {
+    expect(narrativeField('{"adherenceScore": 72, "someth', 'guidance')).toBe('');
+  });
+
+  it('unescapes the owner\'s own quotes and line breaks', () => {
+    const g = narrativeField('{"guidance": "He said \\"do it now\\" and meant it. That is the whole lesson here today.\\nSo act on it', 'guidance');
+    expect(g).toContain('He said "do it now" and meant it.');
+  });
+
+  it('the score still survives even when the note was cut off', () => {
+    expect(looseJsonParse(CUT)?.adherenceScore).toBe(72);
+  });
+});

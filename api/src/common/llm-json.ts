@@ -96,11 +96,16 @@ export function narrativeField(raw: string | null | undefined, field: string): s
   if (parsed && typeof parsed[field] === 'string' && parsed[field].trim()) return String(parsed[field]).trim();
 
   const s = String(raw ?? '').trim();
-  const looksLikeJson = /^```?\s*\{[\s\S]*\}\s*```?$/.test(s) || (/^\{/.test(s) && new RegExp('"' + field + '"\\s*:').test(s));
+  // A reply that STARTS like JSON is a JSON attempt, whether or not it ever closed. Requiring a
+  // closing brace meant a cut-off reply fell through to the "plain prose" path and the raw
+  // `{"adherenceScore": 72, "someth` blob was handed straight to the user — the exact thing this
+  // file exists to prevent. (BEA-1178)
+  const looksLikeJson =
+    /^```?\s*\{[\s\S]*\}\s*```?$/.test(s) || (/^\{/.test(s) && (new RegExp('"' + field + '"\\s*:').test(s) || /"\s*:/.test(s)));
   if (looksLikeJson) {
     const m = new RegExp('"' + field + '"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,\\s*"[\\w]+"\\s*:|\\}\\s*`?`?`?\\s*$)').exec(s);
     if (m) return m[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\').trim();
-    return ''; // a blob we can't parse — return empty rather than showing braces
+    return salvageNarrative(s, field); // cut off mid-sentence? keep what was written (BEA-1178)
   }
   return s; // plain prose
 }
@@ -109,4 +114,45 @@ export function narrativeField(raw: string | null | undefined, field: string): s
 export function looksLikeRawJsonBlob(s: string | null | undefined): boolean {
   const t = String(s ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   return /^\{[\s\S]*\}$/.test(t) && /"\s*:\s*/.test(t);
+}
+
+/**
+ * Rescue a long text field from a reply that was cut off mid-sentence. (BEA-1178)
+ *
+ * `salvageTruncated` closes a cut-off object at the last COMPLETE element — which is no help when
+ * the cut lands inside the long string itself. The mentor's reply is exactly that shape:
+ *
+ *     {"adherenceScore": 72, "guidance": "Yesterday you were at 45; today you're at 72 …
+ *
+ * so the salvage returns `{"adherenceScore": 72}` and the note is lost. On 28 July that silently
+ * cost the owner two nights of guidance, with the calls already paid for.
+ *
+ * Here we take everything written after the field's opening quote and stop at the last finished
+ * sentence, so he gets a note that ends cleanly rather than nothing at all.
+ */
+export function salvageNarrative(raw: string, field: string): string {
+  const s = String(raw || '');
+  const at = s.search(new RegExp('"' + field + '"\\s*:\\s*"'));
+  if (at === -1) return '';
+  const open = s.indexOf('"', s.indexOf(':', at)) + 1;
+  if (open <= 0) return '';
+
+  // Walk to the real closing quote (ignoring escaped ones). Reaching the end means it was cut off.
+  let body = '';
+  let closed = false;
+  for (let k = open; k < s.length; k++) {
+    const ch = s[k];
+    if (ch === '\\') { body += ch + (s[k + 1] ?? ''); k++; continue; }
+    if (ch === '"') { closed = true; break; }
+    body += ch;
+  }
+  const text = body.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\').trim();
+  if (!text) return '';
+  if (closed) return text; // it was whole after all — the caller's parse just tripped on something else
+
+  // Truncated: end on a finished sentence rather than a half-written word.
+  const stop = Math.max(text.lastIndexOf('. '), text.lastIndexOf('.\n'), text.lastIndexOf('! '), text.lastIndexOf('? '), text.lastIndexOf('\n\n'));
+  const cut = stop > 40 ? text.slice(0, stop + 1).trim() : text;
+  // Too little to be worth showing as his mentor's note for the day.
+  return cut.length >= 40 ? cut : '';
 }

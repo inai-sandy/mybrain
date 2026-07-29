@@ -415,3 +415,60 @@ describe('re-telling your story refreshes that night\'s read (BEA-844)', () => {
     expect(h.llm.completeWith.mock.calls.length).toBeLessThanOrEqual(2);
   });
 });
+
+/**
+ * BEA-1178. The mentor wrote NOTHING for 27 and 28 July. Its ceiling was 1200 and 83 of 97 calls in
+ * a fortnight came back at exactly 1200 — cut off inside the guidance string, so `guidance` read
+ * empty, and `if (!guidance) return null` binned the lot with the call already paid for. Then the
+ * 60-second tick tried again, and again: five paid calls between 00:07 and 00:11 on 27 July.
+ */
+describe('a cut-off mentor note is kept, and a failure is not retried every minute (BEA-1178)', () => {
+  const CUT =
+    '{"adherenceScore": 72, "guidance": "Yesterday you were at 45; today you are at 72. The factory work moved properly and the QC batch cleared. What slipped again is the Beakn portal — the same thing you told me on Monday. Pull it up tomo';
+
+  it('writes the note it managed to get, instead of nothing', async () => {
+    const h = makeService(CUT);
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    const r = await h.svc.runMentorDay('2026-06-09', true);
+    expect(r).toBeTruthy();
+    expect(r!.guidance).toContain('Yesterday you were at 45');
+    expect(r!.guidance).not.toContain('Pull it up tomo'); // never ends mid-word
+    expect(r!.adherenceScore).toBe(72); // the score survived too
+  });
+
+  it('asks for enough room that the note is not cut off in the first place', async () => {
+    const h = makeService('{"adherenceScore":70,"guidance":"A full note that fits comfortably."}');
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    await h.svc.runMentorDay('2026-06-09', true);
+    const ceiling = h.llm.completeWith.mock.calls[0][2];
+    expect(ceiling).toBeGreaterThanOrEqual(3000); // 1200 was the bug
+  });
+
+  it('a truly unusable reply is still refused — never dressed up as guidance', async () => {
+    // Plain prose IS a valid note (a model may answer without JSON), so "unusable" means an empty
+    // reply, or a cut-off blob with too little written to be worth showing as his note for the day.
+    for (const bad of ['', '   ', '{"adherenceScore": 72, "guidance": "Yester']) {
+      const h = makeService(bad);
+      h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+      expect(await h.svc.runMentorDay('2026-06-09', true)).toBeNull();
+    }
+  });
+
+  it('a raw JSON blob is never shown to him as his note', async () => {
+    const h = makeService('{"adherenceScore": 72, "someOtherField": "and then it was cut off');
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    const r = await h.svc.runMentorDay('2026-06-09', true);
+    expect(r?.guidance ?? '').not.toContain('adherenceScore'); // he must never see braces
+  });
+
+  it('after a failure it BACKS OFF instead of trying again a minute later', async () => {
+    const h = makeService('');
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    await h.svc.ensureFreshRead('2026-06-09');
+    const afterFirst = h.llm.completeWith.mock.calls.length;
+    expect(afterFirst).toBe(1);
+    // the tick comes round again, and again, and again
+    for (let i = 0; i < 5; i++) await h.svc.ensureFreshRead('2026-06-09');
+    expect(h.llm.completeWith.mock.calls.length).toBe(afterFirst); // not one extra paid call
+  });
+});
