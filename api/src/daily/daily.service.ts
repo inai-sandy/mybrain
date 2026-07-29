@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { matchFinishedToOpen } from './finished-match';
 import { AppEventsService } from '../events/events.service';
@@ -24,6 +24,7 @@ type TimelineEvent = { type: string; title: string; detail?: string; at: string 
 
 @Injectable()
 export class DailyService implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger('Daily');
   private tick: NodeJS.Timeout | null = null;
 
   constructor(
@@ -145,6 +146,21 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // Telling a past day's story (e.g. the morning after) is allowed; the future is not.
     const day = forDay && /^\d{4}-\d{2}-\d{2}$/.test(forDay) && forDay <= today ? forDay : today;
     const existing = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
+
+    /**
+     * Never let a scrap replace a real story. (BEA-1180)
+     *
+     * On 29 July a stale wizard draft holding a single "." landed on top of the 4,350-character
+     * story he had added from EMO two minutes earlier, and it was gone. The wizard is fixed, but it
+     * is not the only thing that can write here — a second device, a queued request, a retry — so
+     * the door itself refuses the trade. Deliberately narrow: only a near-empty text against a
+     * substantial existing one. Any genuine rewrite is far longer than this and passes untouched.
+     */
+    if (existing && text.length < 15 && existing.rawText.trim().length > 200) {
+      this.log.warn(`submitStory(${day}): refused to replace a ${existing.rawText.length}-char story with ${JSON.stringify(text)}`);
+      return { ...this.shapeStory(existing), rewriting: false, wrapped: false, refused: true };
+    }
+
     const row = existing
       ? await this.prisma.story.update({ where: { id: existing.id }, data: { rawText: text, source, mood: mood ?? existing.mood } })
       : await this.prisma.story.create({ data: { day, rawText: text, source, mood: mood || null } });

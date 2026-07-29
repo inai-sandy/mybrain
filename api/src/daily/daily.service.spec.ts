@@ -731,6 +731,36 @@ describe('DailyService', () => {
     expect(second!.mood).toBe('🤩 Great');
   });
 
+  /**
+   * BEA-1180. On 29 July a stale Close-day draft holding a single "." landed on top of the 4,350
+   * character story he had just added from EMO. The wizard is fixed, but it is not the only thing
+   * that can write here, so the door itself refuses the trade.
+   */
+  it('refuses to replace a real story with a scrap', async () => {
+    const { svc, stories } = makeService();
+    const real = 'x'.repeat(400);
+    await svc.submitStory(real, 'emo-captures');
+    const r: any = await svc.submitStory('.', 'app');
+    expect(r.refused).toBe(true);
+    expect(stories).toHaveLength(1);
+    expect(stories[0].rawText).toBe(real); // his words are still there
+  });
+
+  it('a genuine rewrite is never blocked, however much shorter', async () => {
+    const { svc, stories } = makeService();
+    await svc.submitStory('y'.repeat(400), 'app');
+    const r: any = await svc.submitStory('Short day. Factory, then home early.', 'app');
+    expect(r.refused).toBeUndefined();
+    expect(stories[0].rawText).toBe('Short day. Factory, then home early.');
+  });
+
+  it('a scrap is still allowed when there is nothing to lose', async () => {
+    const { svc, stories } = makeService();
+    const r: any = await svc.submitStory('.', 'app');
+    expect(r.refused).toBeUndefined();
+    expect(stories).toHaveLength(1);
+  });
+
   it('indexes the told story into memory stamped "activity" (Ask-your-life recall)', async () => {
     const { svc, enqueued } = makeService();
     await svc.submitStory('cracked the pricing section today', 'app', '🙂 Good');
