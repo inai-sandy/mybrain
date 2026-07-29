@@ -70,6 +70,15 @@ type Draft = {
   ticked: Record<string, boolean>;
   doneIds: Record<string, boolean>;
   carry: Record<string, 'drop' | undefined>;
+  /**
+   * The story the SERVER held when this draft was written. (BEA-1180)
+   *
+   * Without it a draft has no way to tell "he typed this over the story" from "the story moved on
+   * somewhere else after he typed this" — and on 29 July that difference cost him a 4,350-character
+   * story he had just added from EMO: the wizard restored a near-empty draft and pushed it straight
+   * over the top, two minutes later.
+   */
+  serverText: string;
 };
 const draftKey = (day: string) => `mybrain.draft.closeday.${day}`; // same prefix as the other drafts (BEA-512)
 
@@ -83,6 +92,8 @@ export function savedAgo(at: number): string {
   const days = Math.round(hrs / 24);
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
+/** The deep read needs this much to say anything at all, so the box demands the same. (BEA-1180) */
+export const MIN_STORY_CHARS = 15;
 /** Older than this and picking it up would be a surprise, not a rescue. */
 const DRAFT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -103,6 +114,8 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
     return d;
   });
   const [resumed, setResumed] = useState(!!saved);
+  /** The story changed elsewhere (EMO, another device) after this draft was written. (BEA-1180) */
+  const [storyMovedOn, setStoryMovedOn] = useState(false);
   /** Once the day is sealed the draft is gone for good — never let a queued save bring it back. */
   const [sealed, setSealed] = useState(false);
 
@@ -146,13 +159,31 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
         setIsToday(!!a.isToday);
         setWasClosed(!!a.closed);
         const srvHours = a.stats?.workedMinutes ? String(Math.round((a.stats.workedMinutes / 60) * 10) / 10) : DEFAULT_HOURS;
-        setServer({ text: a.story?.text || '', mood: a.story?.mood || '', hours: srvHours });
-        if (a.story?.text) {
+        const srvText = a.story?.text || '';
+        setServer({ text: srvText, mood: a.story?.mood || '', hours: srvHours });
+
+        /**
+         * Did the story change somewhere ELSE while this draft was sitting here? (BEA-1180)
+         *
+         * If it did, the server is newer and the server wins. He added his 28 July story from EMO
+         * at 11:18 and the wizard put a near-empty draft over it at 11:20 — because a draft with no
+         * memory of what the server held cannot tell "I edited this" from "this moved on without me".
+         *
+         * Only the TEXT defers. His step, ticks and hours are still his, and still restore.
+         */
+        const movedOn = !!saved && srvText.trim() !== String(saved.serverText ?? '').trim();
+        if (movedOn) {
+          setStoryMovedOn(true);
+          setText(srvText);
+          if (a.story?.mood) setMood(a.story.mood);
+        }
+
+        if (srvText) {
           // storySavedText is what the SERVER holds, always — it decides whether a save is needed
           // and whether the reading has to be asked for again. The draft must not fake it. (BEA-1165)
-          setStorySavedText(a.story.text);
+          setStorySavedText(srvText);
           if (!saved) {
-            setText(a.story.text);
+            setText(srvText);
             if (a.story.mood) setMood(a.story.mood);
           }
         }
@@ -166,7 +197,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
   // No timestamp here on purpose: the hook stamps `at` when it actually writes. A Date.now() in this
   // object would change on every single render, so the debounce would restart forever and a busy
   // form would never save at all. (BEA-1165)
-  useObjectDraftPersist(draftKey(day), { v: 1, step, text, mood, hours, ticked, doneIds, carry }, !sealed);
+  useObjectDraftPersist(draftKey(day), { v: 1, step, text, mood, hours, ticked, doneIds, carry, serverText: storySavedText }, !sealed);
 
   /**
    * He restored onto a later step, so the findings he ticked are in `ticked` but the list they refer
@@ -208,8 +239,13 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
 
   /** Step 1 → 2: save the story if it changed, then deep-mine it. */
   async function toFindings() {
-    if (!text.trim()) {
-      toast('error', 'Tell the story first — even a few lines. It drives everything after.');
+    /**
+     * A "." used to be accepted as a day's story: the only check was that the box was not empty.
+     * The deep read needs 15 characters, so it then found nothing and the day looked blank. The
+     * same 15 is the honest floor here, said out loud. (BEA-1180)
+     */
+    if (text.trim().length < MIN_STORY_CHARS) {
+      toast('error', text.trim() ? 'That is too short to read anything from — give me a few lines about your day.' : 'Tell the story first — even a few lines. It drives everything after.');
       return;
     }
     // Captured BEFORE the save below overwrites storySavedText. If he went back and rewrote his
@@ -363,7 +399,13 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
 
           {/* Never restore silently. He should know why the box is not empty, and be one tap from a
               clean start. (BEA-1165) */}
-          {resumed && (
+          {resumed && storyMovedOn && (
+            <div className="mb-3 rounded-lg border border-sky-300/50 bg-sky-500/5 px-2.5 py-2 text-xs text-sky-700 dark:border-sky-500/30 dark:text-sky-400">
+              Your story changed somewhere else — on EMO, or another device — since you were last here.
+              I've kept that newer one. Everything else you'd ticked is still here.
+            </div>
+          )}
+          {resumed && !storyMovedOn && (
             <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-emerald-300/50 bg-emerald-500/5 px-2.5 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:text-emerald-400">
               <span className="inline-flex items-center gap-1.5"><Save size={13} /> Picking up where you left off{saved?.at ? ` — saved ${savedAgo(saved.at)}` : ''}.</span>
               <button onClick={startFresh} className="font-medium underline underline-offset-2 hover:text-emerald-900 dark:hover:text-emerald-300">Start fresh</button>
