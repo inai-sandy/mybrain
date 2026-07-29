@@ -19,6 +19,8 @@ type Mined = {
   day: string;
   hasStory: boolean;
   failed?: boolean;
+  cached?: boolean; // came from the stored reading — no wait, no call (BEA-1164)
+  stale?: boolean; // the story was edited after this reading was made (BEA-1164)
   done: { title: string; category: string | null }[];
   todos: { title: string; category: string | null; note: string | null; priority: string }[];
   delegations: { contactName: string; contactId: string | null; title: string; chase: boolean }[];
@@ -102,9 +104,14 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
       toast('error', 'Tell the story first — even a few lines. It drives everything after.');
       return;
     }
+    // Captured BEFORE the save below overwrites storySavedText. If he went back and rewrote his
+    // story, step 2 must ask the server again — otherwise it silently shows the pre-edit findings
+    // and the "you changed your story" line never appears. The re-ask is free: the server hands
+    // back the stored reading with `stale` set, and spends nothing. (BEA-1164)
+    const storyChanged = text.trim() !== storySavedText.trim();
     setBusy(true);
     try {
-      if (text.trim() !== storySavedText.trim() || mood) {
+      if (storyChanged || mood) {
         // noWrap: the wizard itself seals at the end — saving a past story must not auto-close mid-flow.
         const r = await fetch('/api/daily/story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, mood: mood || undefined, day, noWrap: true }) });
         if (!r.ok) {
@@ -114,17 +121,23 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
         setStorySavedText(text);
       }
       setStep('findings');
-      if (!mined) loadMine();
+      if (!mined || storyChanged) loadMine();
     } finally {
       setBusy(false);
     }
   }
 
-  /** Deep-read the story. Separate so the honest Retry button can call it again. */
-  function loadMine() {
+  /**
+   * Deep-read the story. Separate so the honest Retry button can call it again.
+   *
+   * Without `force` the server hands back the reading it already has, instantly and free. `force` is
+   * only ever set by HIM pressing "Read it again" — the app never decides on its own to spend
+   * another call, which is the whole point of BEA-1164.
+   */
+  function loadMine(force = false) {
     setMineErr(false);
     setMined(null);
-    fetch('/api/daily/mine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day }) })
+    fetch('/api/daily/mine', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day, force }) })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((m: Mined) => {
         setMined(m);
@@ -244,24 +257,43 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
 
           {step === 'findings' && (
             <>
-              <p className="mb-3 text-xs text-zinc-500 flex items-center gap-1.5"><Sparkles size={13} className="text-emerald-500" /> Everything I found in your story — untick anything that's wrong. Nothing is created until the end.</p>
+              <p className="mb-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-zinc-500">
+                <Sparkles size={13} className="text-emerald-500" />
+                <span>Everything I found in your story — untick anything that's wrong. Nothing is created until the end.</span>
+                {/* Saved from the last read, so reopening this step is instant and free. (BEA-1164) */}
+                {mined?.cached && !mined.stale && (
+                  <span className="inline-flex items-center gap-1 text-zinc-400">
+                    · Saved from earlier
+                    <button onClick={() => loadMine(true)} className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">read it again</button>
+                  </span>
+                )}
+              </p>
               {mined === null && !mineErr ? (
                 <div className="py-10 text-center text-sm text-zinc-400"><Loader2 size={18} className="mx-auto mb-2 animate-spin" /> Reading your story deeply — tasks, people, feelings, your whole day…</div>
               ) : mineErr || mined?.failed ? (
                 <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400">
                   The deep read failed — an AI hiccup, not a tidy day.
-                  <button onClick={loadMine} className="ml-2 rounded-md border border-amber-400/60 px-2 py-0.5 text-xs font-medium hover:bg-amber-500/10">Try again</button>
+                  <button onClick={() => loadMine(true)} className="ml-2 rounded-md border border-amber-400/60 px-2 py-0.5 text-xs font-medium hover:bg-amber-500/10">Try again</button>
                   <p className="mt-1 text-[11px]">You can also continue — only the automatic findings are skipped.</p>
                 </div>
               ) : (
                 <div className="max-h-[46vh] space-y-4 overflow-y-auto pr-1">
+                  {/* He edited his story after this was read. The app deliberately does NOT re-run on
+                      its own — "it should not run api calls repeatedly" — so it shows what it has and
+                      hands him the button. (BEA-1164) */}
+                  {mined.stale && (
+                    <div className="rounded-lg border border-sky-300/50 bg-sky-500/5 p-2.5 text-xs text-sky-700 dark:border-sky-500/30 dark:text-sky-400">
+                      You changed your story after I read this, so the list below is from the earlier version.
+                      <button onClick={() => loadMine(true)} className="ml-1.5 font-medium underline underline-offset-2 hover:text-sky-900 dark:hover:text-sky-300">Read it again</button>
+                    </div>
+                  )}
                   {/* It was cut off and we kept what was complete. A silent gap in his day's record
                       is worse than a visible one — never let a partial read look tidy. (BEA-1163) */}
                   {mined.partial && (
                     <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
                       That was a long day — I ran out of room and kept everything I'd read up to that point.
                       Some of the later part may be missing.
-                      <button onClick={loadMine} className="ml-1.5 underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-300">Read it again</button>
+                      <button onClick={() => loadMine(true)} className="ml-1.5 underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-300">Read it again</button>
                     </div>
                   )}
                   <FindSection icon={<Check size={13} className="text-emerald-500" />} title="Finished (will be logged as done)" items={mined.done.map((d, i) => ({ key: `done:${i}`, main: d.title, sub: d.category }))} ticked={ticked} setTicked={setTicked} />

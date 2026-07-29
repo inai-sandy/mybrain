@@ -21,7 +21,7 @@ const RICH = JSON.stringify({
   lessons: ['Late-night rework always eats the next morning'],
 });
 
-function make(llmReply: string | null, opts: { existingTitles?: string[] } = {}) {
+function make(llmReply: string | null, opts: { existingTitles?: string[]; mined?: string | null; minedHash?: string | null; rawText?: string } = {}) {
   const createdTasks: any[] = [];
   const doneTasks: any[] = [];
   const chases: any[] = [];
@@ -31,7 +31,13 @@ function make(llmReply: string | null, opts: { existingTitles?: string[] } = {})
   let seq = 0;
   const prisma: any = {
     story: {
-      findFirst: async () => ({ id: 'st1', day: '2026-07-22', rawText: 'A long real diary entry about the whole day at the factory and beyond.' }),
+      findFirst: async () => ({
+        id: 'st1',
+        day: '2026-07-22',
+        rawText: opts.rawText ?? 'A long real diary entry about the whole day at the factory and beyond.',
+        mined: opts.mined ?? null,
+        minedHash: opts.minedHash ?? null,
+      }),
       update: async ({ data }: any) => { storyUpdates.push(data); return {}; },
     },
     task: {
@@ -49,6 +55,7 @@ function make(llmReply: string | null, opts: { existingTitles?: string[] } = {})
   };
   const asks: string[] = [];
   const llm: any = { completeWith: async (_m: any, prompt: string) => { asks.push(prompt); return llmReply; } };
+  // `asks.length` IS the count of paid calls — the thing BEA-1164 exists to keep at zero.
   const tasks: any = {
     whereForDay: async () => ({}),
     create: async (d: any) => { const t = { id: `t${++seq}`, ...d }; createdTasks.push(t); return t; },
@@ -199,5 +206,108 @@ describe('a long story no longer loses the day (BEA-1163)', () => {
     const h = make('sorry, I cannot');
     const r: any = await h.svc.mine('2026-07-28');
     expect(r.failed).toBe(true);
+  });
+});
+
+/**
+ * BEA-1164. The reading is stored against the story it came from, so reopening step 2 costs him
+ * nothing. His words: *"after story in the popup in the step 2 accidentally if something wrong
+ * happens it has to save the information it should not run api calls repeatedly."*
+ */
+describe('the day\'s reading is paid for once (BEA-1164)', () => {
+  const RAW = 'A long real diary entry about the whole day at the factory and beyond.';
+  const READING = JSON.stringify({ done: [{ title: 'Fixed the QC checklist', category: 'Factory' }], todos: [], delegations: [], myReminders: [], promises: [], emotions: null, events: [], lessons: [] });
+  const { storyFingerprint } = require('./mine-cache');
+
+  it('stores the reading it just paid for', async () => {
+    const h = make(RICH);
+    await h.svc.mine('2026-07-22');
+    const saved = h.storyUpdates.find((u: any) => u.mined);
+    expect(saved).toBeTruthy();
+    expect(JSON.parse(saved.mined).done[0].title).toBe('Fixed the QC checklist');
+    expect(saved.minedHash).toBe(storyFingerprint(RAW));
+  });
+
+  it('serves the stored reading with NO call at all', async () => {
+    const h = make(RICH, { mined: READING, minedHash: storyFingerprint(RAW) });
+    const m: any = await h.svc.mine('2026-07-22');
+    expect(h.asks).toHaveLength(0); // nothing was asked, nothing was charged
+    expect(m.cached).toBe(true);
+    expect(m.stale).toBe(false);
+    expect(m.done[0].title).toBe('Fixed the QC checklist');
+  });
+
+  it('an edited story still costs nothing — it comes back flagged, not re-run', async () => {
+    const h = make(RICH, { mined: READING, minedHash: storyFingerprint('something he wrote earlier') });
+    const m: any = await h.svc.mine('2026-07-22');
+    expect(h.asks).toHaveLength(0);
+    expect(m.stale).toBe(true);
+  });
+
+  it('reads afresh only when HE presses the button', async () => {
+    const h = make(RICH, { mined: READING, minedHash: storyFingerprint(RAW) });
+    const m: any = await h.svc.mine('2026-07-22', { force: true });
+    expect(h.asks).toHaveLength(1);
+    expect(m.cached).toBeFalsy();
+  });
+
+  it('a failed reading is never served back — he is not trapped on a bad read', async () => {
+    const h = make(RICH, { mined: JSON.stringify({ failed: true }), minedHash: storyFingerprint(RAW) });
+    const m: any = await h.svc.mine('2026-07-22');
+    expect(h.asks).toHaveLength(1); // it retries for real
+    expect(m.failed).toBeFalsy();
+  });
+});
+
+/** BEA-1164 review finding: two opens of the same day must not both pay for the read. */
+describe('one read per day, however many tabs are open (BEA-1164)', () => {
+  /**
+   * Hold the model call open until the test says go. The service runs several database awaits
+   * before it ever reaches the model, so the test must WAIT for the call rather than assume it has
+   * already happened — releasing too early is how this test first hung for sixty seconds.
+   */
+  function gate(h: ReturnType<typeof make>) {
+    const releases: ((v: string) => void)[] = [];
+    (h.svc as any).llm.completeWith = (_m: any, prompt: string) => {
+      h.asks.push(prompt);
+      return new Promise<string>((res) => releases.push(res));
+    };
+    return {
+      untilCalled: async (n: number) => {
+        for (let i = 0; i < 500 && releases.length < n; i++) await new Promise((r) => setImmediate(r));
+        expect(releases.length).toBe(n); // fail loudly here rather than time out later
+      },
+      releaseAll: () => releases.forEach((r) => r(RICH)),
+    };
+  }
+
+  it('two callers at once share ONE call', async () => {
+    const h = make(RICH);
+    const g = gate(h);
+    const a = h.svc.mine('2026-07-22');
+    const b = h.svc.mine('2026-07-22');
+    await g.untilCalled(1);
+    g.releaseAll();
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(h.asks).toHaveLength(1); // ONE paid call, not two
+    expect(ra.done[0].title).toBe(rb.done[0].title);
+  });
+
+  it('a finished read does not block the next one', async () => {
+    const h = make(RICH);
+    await h.svc.mine('2026-07-22');
+    await h.svc.mine('2026-07-22', { force: true });
+    expect(h.asks).toHaveLength(2); // the guard is per in-flight read, not a permanent lock
+  });
+
+  it('his "Read it again" is never swallowed by a cached read already running', async () => {
+    const h = make(RICH);
+    const g = gate(h);
+    const cached = h.svc.mine('2026-07-22');
+    const forced = h.svc.mine('2026-07-22', { force: true });
+    await g.untilCalled(2);
+    g.releaseAll();
+    await Promise.all([cached, forced]);
+    expect(h.asks).toHaveLength(2); // a forced re-read is a DIFFERENT request; it must not be deduped away
   });
 });

@@ -8,6 +8,7 @@ import { DailyService } from './daily.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { looseJsonParse } from '../common/llm-json';
 import { matchContact } from '../contacts/person-identity';
+import { cacheDecision, storyFingerprint } from './mine-cache';
 
 /** One mined section item, ready for the owner's tick. Nothing here is saved until applied. */
 export type MinedDelegation = { contactName: string; contactId: string | null; title: string; chase: boolean };
@@ -22,6 +23,10 @@ export type MinedPayload = {
   /** The reply was cut off and we salvaged what was complete — part of his day is genuinely
    *  missing, and the card must say so rather than look tidy. (BEA-1163) */
   partial?: boolean;
+  /** Served from the stored reading — no call was made, and nothing was charged. (BEA-1164) */
+  cached?: boolean;
+  /** The story was edited after this reading was made. Shown, never silently re-run. (BEA-1164) */
+  stale?: boolean;
   done: { title: string; category: string | null }[];
   todos: { title: string; category: string | null; note: string | null; priority: string }[];
   delegations: MinedDelegation[];
@@ -89,10 +94,42 @@ export class StoryMiningService {
   }
 
   /** Mine one day's story. Read-only — returns proposals for the wizard, creates NOTHING. */
-  async mine(day: string): Promise<MinedPayload> {
+  /**
+   * Two opens of the same day must not both pay for the same read. (BEA-1164)
+   *
+   * The cache below only helps once a reading has been WRITTEN — two tabs starting within the same
+   * ~30 seconds would both sail past it and both spend a call, which is a smaller version of the
+   * very bug this fixes. Callers share one in-flight read per day instead.
+   */
+  private inFlight = new Map<string, Promise<MinedPayload>>();
+
+  async mine(day: string, opts: { force?: boolean } = {}): Promise<MinedPayload> {
+    const key = `${day}:${opts.force ? 'force' : 'cached'}`;
+    const running = this.inFlight.get(key);
+    if (running) return running;
+    const p = this.mineOnce(day, opts).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, p);
+    return p;
+  }
+
+  private async mineOnce(day: string, opts: { force?: boolean } = {}): Promise<MinedPayload> {
     const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const text = (story?.rawText || '').trim();
     if (text.length < 15) return this.empty(day, !!story);
+
+    /**
+     * The stored reading, first. (BEA-1164)
+     *
+     * This read cost him ~30 seconds and a paid call, and it used to live only in the browser's
+     * memory — so a reload, a dropped connection or a stumble in the wizard threw it away and
+     * charged him again. On 28 July it ran SIX times for one day.
+     *
+     * His rule: *"it should not run api calls repeatedly."* So a stored reading always wins, even
+     * when the story has since been edited — in that case it comes back flagged `stale` and the
+     * wizard offers him the button. The app never decides on its own to spend another call.
+     */
+    const decision = cacheDecision({ stored: (story as any)?.mined, storedHash: (story as any)?.minedHash, currentText: text, force: opts.force });
+    if (decision.use === 'cached') return { ...decision.payload, day, hasStory: true, cached: true, stale: decision.stale };
 
     // What's already logged, so the model doesn't re-propose known work.
     const [existing, openAll, contacts] = await Promise.all([
@@ -203,7 +240,16 @@ IMPORTANT: keep it SHORT. Only the tasks, to-dos and delegations — skip events
       .slice(0, 10);
     const lessons = arr(j.lessons).map((x: any) => S(x, 300)).filter(Boolean).slice(0, 2);
 
-    return { day, hasStory: true, partial: truncated, done, todos, delegations, myReminders, promises, emotions, events, lessons };
+    const payload: MinedPayload = { day, hasStory: true, partial: truncated, done, todos, delegations, myReminders, promises, emotions, events, lessons };
+
+    // Keep it, so this is the last time this story costs him a call or a wait. Stored against the
+    // exact text it was read from. A failure to store must never lose him the reading he just
+    // waited for, so it is best-effort. (BEA-1164)
+    await this.prisma.story
+      .update({ where: { id: story!.id }, data: { mined: JSON.stringify(payload), minedHash: storyFingerprint(text), minedAt: new Date() } })
+      .catch(() => undefined);
+
+    return payload;
   }
 
   /**
