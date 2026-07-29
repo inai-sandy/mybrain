@@ -457,11 +457,13 @@ export function Agents() {
   const [showNew, setShowNew] = useState(false);
   const [starterPick, setStarterPick] = useState<Starter | null>(null);
   const [showAsk, setShowAsk] = useState(false);
-  const [agentSort, setAgentSort] = useState<'recent' | 'name'>('recent');
-  const [catFilter, setCatFilter] = useState<string>('All');
   // Run popup: after planning a deep research, pick which sub-questions to run. (BEA-773)
   const [planFor, setPlanFor] = useState<{ flowId: string; subs: { id: string; branchIdx: number; sub: string; on: boolean }[] } | null>(null);
   const [q, setQ] = useState('');
+  // Agents list standards (BEA-1183) — always on, 12 per page.
+  const [agentFilter, setAgentFilter] = useState<'all' | 'waiting' | 'ran' | 'never'>('all');
+  const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
+  const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
   const [showBuilder, setShowBuilder] = useState(false); // chat builder (BEA-1104)
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // big shelf groups expanded (BEA-1083)
@@ -695,16 +697,53 @@ export function Agents() {
           )
         ) : (() => {
           // Areas grid (BEA-1098): each tile is a whole agent; its jobs live inside.
-          const filtered = areasList.filter((ar) => !q || (ar.name + ' ' + (ar.description || '') + ' ' + ar.jobs.map((j: any) => j.name).join(' ')).toLowerCase().includes(q.toLowerCase()));
+          // Search · filter · sort · count · pagination — ALWAYS on, never behind a threshold
+          // (BEA-1183). A list with one item still shows its controls.
+          const needle = q.trim().toLowerCase();
+          const matched = areasList.filter((ar) => {
+            if (needle && !(ar.name + ' ' + (ar.description || '') + ' ' + ar.jobs.map((j: any) => j.name).join(' ')).toLowerCase().includes(needle)) return false;
+            const jobs = ar.jobs || [];
+            if (agentFilter === 'waiting') return jobs.some((j: any) => j.lastRun?.status === 'awaiting_input' || j.lastRun?.status === 'paused');
+            if (agentFilter === 'ran') return jobs.some((j: any) => j.lastRun);
+            if (agentFilter === 'never') return jobs.every((j: any) => !j.lastRun);
+            return true;
+          });
+          const lastAt = (ar: any) => Math.max(0, ...(ar.jobs || []).map((j: any) => (j.lastRun?.at ? new Date(j.lastRun.at).getTime() : 0)));
+          const sorted = [...matched].sort((a, b) => {
+            if (agentSort === 'name') return String(a.name).localeCompare(String(b.name));
+            if (agentSort === 'jobs') return (b.jobCount || 0) - (a.jobCount || 0) || String(a.name).localeCompare(String(b.name));
+            return lastAt(b) - lastAt(a) || String(a.name).localeCompare(String(b.name));
+          });
+          const PER = 12;
+          const pages = Math.max(1, Math.ceil(sorted.length / PER));
+          const page = Math.min(agentPage, pages);
+          const filtered = sorted.slice((page - 1) * PER, page * PER);
+          const narrowed = needle || agentFilter !== 'all';
           return (
             <div className="space-y-3">
-              {areasList.length > 3 && (
-                <div className="flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-1.5 dark:border-zinc-700">
-                  <Search className="h-4 w-4 shrink-0 text-zinc-400" />
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search agents and their jobs…" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
-                  <span className="shrink-0 text-xs text-zinc-400">{filtered.length}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative min-w-0 flex-1 basis-48">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    value={q}
+                    onChange={(e) => { setQ(e.target.value); setAgentPage(1); }}
+                    placeholder="Search agents…"
+                    className="w-full rounded-lg border border-zinc-200 bg-transparent py-1.5 pl-8 pr-3 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm"
+                  />
                 </div>
-              )}
+                <select value={agentFilter} onChange={(e) => { setAgentFilter(e.target.value as any); setAgentPage(1); }} aria-label="Filter agents" className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+                  <option value="all">All agents</option>
+                  <option value="waiting">Waiting on you</option>
+                  <option value="ran">Has run</option>
+                  <option value="never">Never run</option>
+                </select>
+                <select value={agentSort} onChange={(e) => setAgentSort(e.target.value as any)} aria-label="Sort agents" className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+                  <option value="recent">Most recent</option>
+                  <option value="name">By name</option>
+                  <option value="jobs">Most jobs</option>
+                </select>
+                <span className="shrink-0 text-xs text-zinc-400">{narrowed ? `${sorted.length} of ${areasList.length}` : `${areasList.length}`}</span>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {filtered.map((ar) => {
                   const color = ar.color || '#818cf8';
@@ -731,7 +770,19 @@ export function Agents() {
                   );
                 })}
               </div>
-              {filtered.length === 0 && <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">No agents match.</div>}
+              {filtered.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-zinc-300 p-6 text-center text-sm text-zinc-500 dark:border-zinc-700">
+                  Nothing matches{needle ? ` “${q}”` : ' that filter'}.{' '}
+                  <button onClick={() => { setQ(''); setAgentFilter('all'); setAgentPage(1); }} className="text-emerald-600 hover:underline">Clear</button>
+                </div>
+              )}
+              {pages > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <button onClick={() => setAgentPage(Math.max(1, page - 1))} disabled={page <= 1} className="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs disabled:opacity-40 dark:border-zinc-700">Back</button>
+                  <span className="text-xs text-zinc-500">Page {page} of {pages}</span>
+                  <button onClick={() => setAgentPage(Math.min(pages, page + 1))} disabled={page >= pages} className="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs disabled:opacity-40 dark:border-zinc-700">Next</button>
+                </div>
+              )}
             </div>
           );
         })()}
