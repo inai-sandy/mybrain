@@ -254,7 +254,9 @@ export function RunsPanel({ id, flow }: { id: string; flow: any }) {
             <RunIcon s={r.status} />
             <span className="font-medium">{r.status === 'running' ? 'Running…' : r.status}</span>
             <span className="truncate text-xs text-zinc-400">{when(r.startedAt)}</span>
-            {r.grade?.verdict && <Verdict v={r.grade.verdict} s={r.grade.score} />}
+            {r.grade?.verdict
+              ? <Verdict v={r.grade.verdict} s={r.grade.score} />
+              : r.status === 'done' && <span className="shrink-0 text-xs text-zinc-400">not graded</span>}
             {r.documents?.length > 0 && <span className="ml-auto inline-flex items-center gap-1 text-xs text-zinc-400"><FileText className="h-3.5 w-3.5" />{r.documents.length}</span>}
           </button>
           {r.status !== 'running' && r.status !== 'awaiting_input' && r.status !== 'waiting' && (

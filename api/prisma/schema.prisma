@@ -630,6 +630,7 @@ model AgentArea {
   color       String? // card colour
   description String?
   tools       String   @default("[]") // JSON [{kind: skill|api|mcp|cli, name, note?, status: installed|needed}] — the visible toolbox
+  outcome     String? // the agent's STANDING definition of done — what any run of it must achieve (BEA-1173); jobs without their own Outcome are graded against this
   sourceUrl   String? // GitHub origin when imported
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

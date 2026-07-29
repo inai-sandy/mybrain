@@ -289,7 +289,7 @@ export class AgentAreasService {
     return this.shape(area, jobs as any[]);
   }
 
-  async create(input: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  async create(input: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const area = await (this.prisma as any).agentArea.create({
       data: {
@@ -304,13 +304,14 @@ export class AgentAreasService {
     return this.shape(area);
   }
 
-  async update(id: string, patch: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  async update(id: string, patch: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     const data: any = {};
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120) || undefined;
     if (patch.icon !== undefined) data.icon = patch.icon || null;
     if (patch.color !== undefined) data.color = patch.color?.trim() || null;
     if (patch.description !== undefined) data.description = patch.description?.trim() || null;
     if (patch.tools !== undefined) data.tools = JSON.stringify(this.cleanTools(patch.tools));
+    if ((patch as any).outcome !== undefined) data.outcome = ((patch as any).outcome || '').trim().slice(0, 2000) || null;
     if (patch.sourceUrl !== undefined) data.sourceUrl = patch.sourceUrl?.trim() || null;
     const area = await (this.prisma as any).agentArea.update({ where: { id }, data }).catch(() => { throw new NotFoundException('Agent not found'); });
     return this.shape(area);
