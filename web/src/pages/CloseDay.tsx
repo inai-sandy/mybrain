@@ -14,6 +14,8 @@ import { isDictating } from '../ui/useDictation';
  */
 
 type Mined = {
+  /** The reply was cut off; what's shown is what survived. (BEA-1163) */
+  partial?: boolean;
   day: string;
   hasStory: boolean;
   failed?: boolean;
@@ -253,6 +255,15 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                 </div>
               ) : (
                 <div className="max-h-[46vh] space-y-4 overflow-y-auto pr-1">
+                  {/* It was cut off and we kept what was complete. A silent gap in his day's record
+                      is worse than a visible one — never let a partial read look tidy. (BEA-1163) */}
+                  {mined.partial && (
+                    <div className="rounded-lg border border-amber-300/50 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:border-amber-500/30 dark:text-amber-400">
+                      That was a long day — I ran out of room and kept everything I'd read up to that point.
+                      Some of the later part may be missing.
+                      <button onClick={loadMine} className="ml-1.5 underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-300">Read it again</button>
+                    </div>
+                  )}
                   <FindSection icon={<Check size={13} className="text-emerald-500" />} title="Finished (will be logged as done)" items={mined.done.map((d, i) => ({ key: `done:${i}`, main: d.title, sub: d.category }))} ticked={ticked} setTicked={setTicked} />
                   <FindSection icon={<ArrowRight size={13} className="text-sky-500" />} title="To-dos for you" items={mined.todos.map((t, i) => ({ key: `todos:${i}`, main: t.title, sub: [t.note, t.priority !== 'medium' ? t.priority : null].filter(Boolean).join(' · ') }))} ticked={ticked} setTicked={setTicked} />
                   <FindSection icon={<Radio size={13} className="text-amber-500" />} title="With your team (chased on WhatsApp)" items={mined.delegations.map((d, i) => ({ key: `delegations:${i}`, main: d.title, sub: d.contactId ? `${d.contactName} — daily chase 10:00 & 17:30` : `${d.contactName} — no matching contact, so no chase` }))} ticked={ticked} setTicked={setTicked} />

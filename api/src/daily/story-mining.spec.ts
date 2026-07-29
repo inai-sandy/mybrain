@@ -47,7 +47,8 @@ function make(llmReply: string | null, opts: { existingTitles?: string[] } = {})
     },
     mindFinding: { create: async ({ data }: any) => { findings.push(data); return { id: 'f1', ...data }; } },
   };
-  const llm: any = { completeWith: async () => llmReply };
+  const asks: string[] = [];
+  const llm: any = { completeWith: async (_m: any, prompt: string) => { asks.push(prompt); return llmReply; } };
   const tasks: any = {
     whereForDay: async () => ({}),
     create: async (d: any) => { const t = { id: `t${++seq}`, ...d }; createdTasks.push(t); return t; },
@@ -56,7 +57,7 @@ function make(llmReply: string | null, opts: { existingTitles?: string[] } = {})
   const reminders: any = { create: async (d: any) => { chases.push(d); return d; } };
   const daily: any = { storyModel: async () => ({ provider: 'openrouter', model: 'x' }) };
   const svc = new StoryMiningService(prisma, llm, tasks, reminders, daily, { get: async () => '' } as any);
-  return { svc, createdTasks, doneTasks, chases, dayEvents, findings, storyUpdates };
+  return { svc, createdTasks, doneTasks, chases, dayEvents, findings, storyUpdates, asks };
 }
 
 describe('mine — proposes everything, creates nothing (BEA-1051)', () => {
@@ -155,5 +156,48 @@ describe('apply — exactly what was ticked, through the real doors (BEA-1051)',
     const counts = await svc.apply('2026-07-22', {});
     expect(Object.values(counts).every((n) => n === 0)).toBe(true);
     expect(createdTasks.length + doneTasks.length + chases.length).toBe(0);
+  });
+});
+
+/**
+ * BEA-1163. On 28 July this failed three times: the reply hit the 2500-token ceiling, was cut off
+ * mid-JSON, and the whole thing was discarded — then the retry sent the identical request and
+ * failed identically, which is why every failure in the log is a pair.
+ */
+describe('a long story no longer loses the day (BEA-1163)', () => {
+  const CUT_OFF = '{"done":[{"title":"Called the CA"},{"title":"Sent the sheet"}],"todos":[{"title":"Chase the vend';
+
+  it('keeps what was read when the reply is cut off, instead of failing', async () => {
+    const h = make(CUT_OFF);
+    const r: any = await h.svc.mine('2026-07-28');
+    expect(r.failed).toBeFalsy();
+    expect(r.done.map((d: any) => d.title)).toEqual(['Called the CA', 'Sent the sheet']);
+  });
+
+  it('says the day was cut short rather than looking tidy', async () => {
+    const h = make(CUT_OFF);
+    const r: any = await h.svc.mine('2026-07-28');
+    expect(r.partial).toBe(true);
+  });
+
+  it('a whole reply is not flagged as partial', async () => {
+    const h = make('{"done":[{"title":"Called the CA"}],"todos":[]}');
+    const r: any = await h.svc.mine('2026-07-28');
+    expect(r.partial).toBeFalsy();
+    expect(r.done).toHaveLength(1);
+  });
+
+  it('the retry asks for something DIFFERENT from the first attempt', async () => {
+    const h = make('not json at all');
+    await h.svc.mine('2026-07-28');
+    expect(h.asks).toHaveLength(2);
+    expect(h.asks[0]).not.toEqual(h.asks[1]);
+    expect(h.asks[1]).toContain('keep it SHORT');
+  });
+
+  it('still fails honestly when nothing usable came back at all', async () => {
+    const h = make('sorry, I cannot');
+    const r: any = await h.svc.mine('2026-07-28');
+    expect(r.failed).toBe(true);
   });
 });
