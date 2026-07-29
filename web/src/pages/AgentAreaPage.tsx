@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Loader2, CheckCircle2, XCircle, PauseCircle, CalendarClock, ChevronRight, Wrench, Trash2, Pencil, Check, X } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
-import { NewAgentForm, timeAgo } from './Agents';
+import { timeAgo } from './Agents';
+import { NewJobChat } from './NewJobChat';
 import { ToolPicker, type CatalogTool } from '../ui/ToolPicker';
 
 // `id` is the catalog id (BEA-1167). Older saved tools have no id — they were typed by hand and
@@ -190,7 +191,7 @@ export function AgentAreaPage() {
           <h2 className="text-sm font-semibold text-zinc-500">Jobs · {jobs.length}</h2>
           <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New job</button>
         </div>
-        {showNew && <NewAgentForm areaId={area.id} onCreated={() => { setShowNew(false); load(); }} onCancel={() => setShowNew(false)} />}
+        {showNew && <NewJobChat areaId={area.id} areaName={area.name} onCreated={(url) => { setShowNew(false); nav(url); }} onClose={() => setShowNew(false)} />}
         {jobs.length === 0 && !showNew ? (
           <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No jobs yet — give this agent its first one.</div>
         ) : (

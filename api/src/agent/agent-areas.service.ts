@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from './agent.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { ToolCatalogService } from '../tools/tool-catalog.service';
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
@@ -20,6 +21,7 @@ export class AgentAreasService {
     private readonly agentSvc?: AgentService, // optional + LAST — spec files construct positionally
     private readonly llm?: LlmService,
     private readonly promptsSvc?: PromptsService,
+    private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167)
   ) {}
 
   /**
@@ -35,6 +37,101 @@ export class AgentAreasService {
       description: 'Deep-dives you ask for — from bookmarks, voice, anywhere. One report per job.',
     });
     return { id: area.id };
+  }
+
+  // ---- The NEW-JOB chat (BEA-1170) --------------------------------------------------------------
+  // Adding a job used to be a silent form: one box, one AI call, then eight pre-filled fields. This
+  // is a real conversation instead — it asks until it understands, and only then builds the job.
+  // Kept per area so two half-finished chats can't overwrite each other.
+
+  private jobKey(areaId: string) { return `agent.jobBuilder.${areaId}`; }
+
+  private async jobLoad(areaId: string): Promise<{ log: any[]; job: any | null }> {
+    const row = await this.prisma.setting.findUnique({ where: { key: this.jobKey(areaId) } }).catch(() => null);
+    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null }; } catch { return { log: [], job: null }; }
+  }
+  private async jobSave(areaId: string, st: { log: any[]; job: any | null }) {
+    const value = JSON.stringify({ log: st.log.slice(-40), job: st.job });
+    await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value }, update: { value } });
+  }
+  async jobBuilderState(areaId: string) { return this.jobLoad(areaId); }
+  async jobBuilderReset(areaId: string) { await this.jobSave(areaId, { log: [], job: null }); return { ok: true }; }
+
+  /** One turn of the new-job conversation. */
+  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null }> {
+    const msg = (message || '').trim().slice(0, 2000);
+    if (!msg) throw new BadRequestException('Say something first.');
+    const area: any = await this.get(areaId);
+    const st = await this.jobLoad(areaId);
+    st.log.push({ who: 'you', text: msg, at: new Date().toISOString() });
+    const cantDo = "I couldn't work that out — try saying it another way.";
+    try {
+      const tpl = (await this.promptsSvc?.get('agent.jobBuilder').catch(() => '')) || '';
+      const convo = st.log.slice(-24).map((m: any) => `${m.who === 'you' ? 'OWNER' : 'YOU'}: ${m.text}`).join('\n');
+      const agentBlurb = [
+        `Name: ${area.name}`,
+        area.description ? `What it is for: ${area.description}` : '',
+        (area.tools || []).length ? `Its usual tools: ${(area.tools || []).map((t: any) => t.name).join(', ')}` : '',
+        (area.jobs || []).length ? `Jobs it already has: ${(area.jobs || []).map((j: any) => j.name).join(', ')}` : '',
+      ].filter(Boolean).join('\n');
+      const cat = await this.catalog?.catalog().catch(() => null);
+      const toolList = (cat?.tools || [])
+        .filter((t: any) => t.connected)
+        .map((t: any) => `- ${t.id} (${t.group}) — ${t.name}: ${t.description}`)
+        .join('\n') || '(none available)';
+      const jobNote = st.job ? `\n\nThe job you last proposed (refine it, don't start over):\n${JSON.stringify(st.job)}` : '';
+      const { text } = (await this.llm?.completeWithModel(
+        { provider: 'codex', model: 'codex' },
+        tpl.replaceAll('{{conversation}}', convo).replaceAll('{{agent}}', agentBlurb).replaceAll('{{tools}}', toolList) + jobNote,
+        1800,
+        'agent-job-builder',
+      )) || { text: null };
+      const m = (text || '').match(/\{[\s\S]*\}/);
+      const g = m ? JSON.parse(m[0]) : null;
+      const reply = String(g?.reply || cantDo).slice(0, 1200);
+      if (g?.job && typeof g.job === 'object' && g.job.name && g.job.task) st.job = g.job;
+      st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
+      await this.jobSave(areaId, st);
+      return { reply, job: st.job };
+    } catch {
+      st.log.push({ who: 'ai', text: cantDo, at: new Date().toISOString() });
+      await this.jobSave(areaId, st);
+      return { reply: cantDo, job: st.job };
+    }
+  }
+
+  /** Build the job the owner just approved. `overrides` carries their tool ticks (BEA-1171). */
+  async jobBuilderCreate(areaId: string, overrides?: { tools?: string[]; checks?: string[] }) {
+    const st = await this.jobLoad(areaId);
+    const j = st.job;
+    if (!j?.name || !j?.task) throw new BadRequestException('There is no job to create yet — keep chatting.');
+    if (!this.agentSvc) throw new BadRequestException('Agent service unavailable.');
+
+    const proposedTools: string[] = Array.isArray(j.tools) ? j.tools.map((t: any) => (typeof t === 'string' ? t : t?.id)).filter(Boolean) : [];
+    const tools = Array.isArray(overrides?.tools) ? overrides!.tools! : proposedTools;
+    const checks: string[] = Array.isArray(overrides?.checks) ? overrides!.checks! : (Array.isArray(j.checks) ? j.checks : []);
+
+    const created: any = await this.agentSvc.createAgent({
+      areaId,
+      name: String(j.name).trim().slice(0, 120),
+      icon: j.icon || undefined,
+      prompt: String(j.task).trim(),
+      rubric: j.outcome ? String(j.outcome).slice(0, 2000) : undefined,
+      defaultDepth: ['quick', 'standard', 'deep'].includes(j.depth) ? j.depth : undefined,
+      schedule: j.schedule && typeof j.schedule === 'object' ? j.schedule : undefined,
+      scheduleText: j.scheduleText || undefined,
+      evals: checks.slice(0, 12).map((input: any) => ({ id: 'ev_' + Math.random().toString(36).slice(2, 9), input: String(input).slice(0, 300) })),
+    } as any);
+
+    const patch: any = {};
+    if (tools.length) patch.tools = tools.slice(0, 60);
+    if (j.notifyWhatsApp != null) patch.notifyWhatsApp = !!j.notifyWhatsApp;
+    if (Object.keys(patch).length) await this.agentSvc.updateAgent(created.id, patch).catch(() => undefined);
+
+    st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
+    st.job = null;
+    await this.jobSave(areaId, st);
+    return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
   }
 
   // ---- The in-app chat builder (BEA-1104): a persisted conversation that designs a new agent. ----

@@ -12,7 +12,7 @@ export type PromptKey =
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
-  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan' | 'agent.builder'
+  | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan' | 'agent.builder' | 'agent.jobBuilder'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
@@ -981,6 +981,50 @@ Rules:
 Reply with ONLY JSON, no prose:
 {"branches":[{"subquestion":"...","steps":[{"kind":"tool","id":"web_search"},{"kind":"ask_ai"}]}],"merge":"ai"}
 kind is "tool"+id, "skill"+id, or "ask_ai" (no id). merge is "ai" or "raw".`,
+});
+
+REGISTRY.push({
+  key: 'agent.jobBuilder',
+  label: 'Agents — the new-job chat',
+  description: 'The conversation that adds a JOB to an agent that already exists. It interviews the owner properly, proposes the tools/skills/servers to use, writes the checks from what they asked for, and only then builds the job. The agent it belongs to and the tool catalog fill in automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
+  category: 'Agents',
+  default: `You are helping the owner of a personal second-brain app add ONE new job to an agent they already have.
+
+The agent this job belongs to:
+{{agent}}
+
+Tools available to pick from (use the exact id):
+{{tools}}
+
+The conversation so far:
+{{conversation}}
+
+Rules for you:
+- INTERVIEW PROPERLY. Ask until you genuinely understand what they want — as many turns as it takes. Do not guess and do not stop at one question. One or two questions per turn.
+- NEVER re-ask something they already told you, and never ask what the agent itself already says (its name, what it is for, its usual tools).
+- Ask about the things that change the result: exactly what they want out of it, how deep, what a good answer must contain, where it should end up, and how often it should run.
+- Once you understand, propose the job. Include the tools you think it needs (ids from the list) with a one-line reason each — the owner will tick them.
+- Turn what they asked for into checks: short, testable statements a good result must satisfy. Draw them from THEIR words, don't invent extras.
+- Never say the job was created — the owner presses Create.
+- Plain, everyday English. Short sentences. No jargon.
+
+Reply with ONLY JSON, no prose:
+{
+ "reply": "<what you say next — your question, or 'Here's the plan — press Create when happy'>",
+ "job": null while you are still interviewing, or the COMPLETE job:
+ {
+  "name": "<short name>",
+  "icon": "<emoji>",
+  "task": "<numbered plain-English steps it runs each time>",
+  "outcome": "<what a good result looks like, in one or two sentences>",
+  "checks": ["<short testable statement>", "..."],
+  "tools": [{"id":"<exact id from the list>","why":"<one line>"}],
+  "schedule": null or {"every":"day","at":"HH:MM"}/{"every":"weekday","at":"HH:MM"}/{"every":"week","dow":0-6,"at":"HH:MM"}/{"every":"hour","minute":0},
+  "scheduleText": "<plain sentence or null>",
+  "depth": "quick|standard|deep",
+  "notifyWhatsApp": true|false
+ }
+}`,
 });
 
 REGISTRY.push({
