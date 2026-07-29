@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -16,6 +16,7 @@ const AGENT_FALLBACK: LlmConfig = { provider: 'openrouter', model: 'anthropic/cl
 
 @Injectable()
 export class LlmService {
+  private readonly log = new Logger('Llm');
   constructor(
     private readonly connectors: ConnectorService,
     private readonly prisma: PrismaService,
@@ -56,12 +57,28 @@ export class LlmService {
   }
 
   /** Public: log usage for a request made outside this service (e.g. a Codex agent run). (BEA-716) */
-  async recordUsage(feature: string, model: string, usage: any): Promise<void> {
-    return this.logUsage(feature, model, usage);
+  async recordUsage(feature: string, model: string, usage: any, ceiling?: number): Promise<void> {
+    return this.logUsage(feature, model, usage, ceiling);
   }
 
   /** Record one AI request's cost (never blocks or fails the actual request). */
-  private async logUsage(feature: string, model: string, usage: any): Promise<void> {
+  /**
+   * @param ceiling the `maxTokens` this call was given, so we can shout when the reply ran into it.
+   */
+  private async logUsage(feature: string, model: string, usage: any, ceiling?: number): Promise<void> {
+    /**
+     * A reply that comes back at EXACTLY its ceiling was cut off mid-sentence, and cut-off replies
+     * are how features die quietly here: the mentor wrote nothing for two nights and the weekly
+     * review missed three weeks, both silently, both paid for. (BEA-1179)
+     *
+     * Prompts grow — a new context block here, a richer input there — and the output grows with
+     * them, while the ceiling is a number written once and never revisited. Nothing noticed. This
+     * is the standing check that makes it impossible to miss next time.
+     */
+    const out = Number(usage?.completion_tokens ?? usage?.output_tokens ?? 0);
+    if (ceiling && out >= ceiling) {
+      this.log.warn(`${feature}: reply hit its ${ceiling}-token ceiling (${out}) — it was CUT OFF. Raise the ceiling; an unused one costs nothing.`);
+    }
     try {
       await this.prisma.usageLog.create({
         data: {
@@ -191,7 +208,7 @@ export class LlmService {
         });
         if (!r.ok) return null;
         const d: any = await r.json();
-        await this.logUsage(label, cfg.model, d?.usage); // tokens only — Anthropic doesn't return $ cost
+        await this.logUsage(label, cfg.model, d?.usage, maxTokens); // tokens only — Anthropic doesn't return $ cost
         return d?.content?.[0]?.text ?? null;
       }
       if (cfg.provider === 'openrouter') {
@@ -207,7 +224,7 @@ export class LlmService {
         });
         if (!r.ok) return null;
         const d: any = await r.json();
-        await this.logUsage(label, cfg.model, d?.usage);
+        await this.logUsage(label, cfg.model, d?.usage, maxTokens);
         return d?.choices?.[0]?.message?.content ?? null;
       }
     } catch {
@@ -231,7 +248,7 @@ export class LlmService {
         });
         if (!r.ok) return null;
         const d: any = await r.json();
-        await this.logUsage(label, cfg.model, d?.usage);
+        await this.logUsage(label, cfg.model, d?.usage, maxTokens);
         return d?.choices?.[0]?.message?.content ?? null;
       }
       if (cfg.provider === 'anthropic') {
@@ -244,7 +261,7 @@ export class LlmService {
         });
         if (!r.ok) return null;
         const d: any = await r.json();
-        await this.logUsage(label, cfg.model, d?.usage);
+        await this.logUsage(label, cfg.model, d?.usage, maxTokens);
         return d?.content?.[0]?.text ?? null;
       }
       // codex/gemini agents or unknown → text-only (no vision); the caller's prompt should still be useful.
@@ -268,7 +285,7 @@ export class LlmService {
         });
         if (!r.ok || !r.body) return null;
         const { full, usage } = await this.readSse(r.body as any, onToken);
-        await this.logUsage(label, cfg.model, usage);
+        await this.logUsage(label, cfg.model, usage, maxTokens);
         return full;
       } catch {
         return null;

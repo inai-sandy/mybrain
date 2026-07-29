@@ -166,7 +166,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       `Days of data available: ${dayStories.length} stories. If this is small (under ~5), be especially cautious and propose at most one focus area, or none.`;
 
     const tmpl = await this.prompts.get('mentor.focus');
-    const raw = (await this.llm.completeWith(await this.mentorModel(), `${tmpl}\n\n${corpus}`, 900, 'mentor-focus'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.mentorModel(), `${tmpl}\n\n${corpus}`, 2500, 'mentor-focus'))?.trim() || '';
     let proposed: { title: string; description?: string }[] = [];
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -284,7 +284,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       // Never silent again. This returned `null` with no log at all, so two nights went missing
       // without a trace anywhere. (BEA-1178)
       this.log.warn(`runMentorDay(${day}): unusable reply (${raw.length} chars) — nothing written`);
-      await this.setSetting('mentor.lastFail', `${day}:${Date.now()}`).catch(() => undefined);
+      // Keyed PER DAY. One shared slot meant a different day failing (a close, a repair) wiped
+      // this day's backoff, and the minute-by-minute retry started again. (BEA-1179)
+      await this.setSetting(`mentor.lastFail.${day}`, String(Date.now())).catch(() => undefined);
       return null;
     }
 
@@ -293,6 +295,8 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       create: { day, adherenceScore, moodScore: dayStory?.moodScore ?? null, guidance },
       update: { adherenceScore, moodScore: dayStory?.moodScore ?? null, guidance },
     });
+    // It worked — drop the backoff so a later story rewrite isn't held back by an old failure.
+    await this.setSetting(`mentor.lastFail.${day}`, '').catch(() => undefined);
     // Flag it for the nightly Telegram push.
     await this.setSetting('telegram.pushMentor', day).catch(() => undefined);
     return this.shapeMentorDay(row);
@@ -412,13 +416,18 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       (labDigest ? `=== WHAT THE LAB IS LEARNING ABOUT HIM (pick ONE fresh, specific insight to surface) ===\n${labDigest}\n\n` : '') +
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
 
-    const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 1400, 'weekly-review'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 4000, 'weekly-review'))?.trim() || '';
     // Robust parse — never store a raw JSON blob as the review (BEA-884).
     const text = narrativeField(raw, 'review');
     const parsed = looseJsonParse(raw);
     const pattern: string | null = parsed?.pattern ? String(parsed.pattern).trim().slice(0, 300) : null;
     const experiment: string | null = parsed?.experiment ? String(parsed.experiment).trim().slice(0, 300) : null;
-    if (!text) return null;
+    if (!text) {
+      // Silent before: three of his last four weekly reviews simply did not exist, 24 calls having
+      // produced 5 reviews, and nothing anywhere said so. (BEA-1179)
+      this.log.warn(`weeklyReview(${weekStart}): unusable reply (${raw.length} chars) — nothing written`);
+      return null;
+    }
 
     const row = await this.prisma.weeklyReview.upsert({
       where: { weekStart },
@@ -494,9 +503,9 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
    */
   private async failedRecently(day: string): Promise<boolean> {
     try {
-      const row = await this.prisma.setting?.findUnique({ where: { key: 'mentor.lastFail' } });
-      const [d, at] = String(row?.value || '').split(':');
-      return d === day && Date.now() - Number(at || 0) < MENTOR_RETRY_AFTER_MS;
+      const row = await this.prisma.setting?.findUnique({ where: { key: `mentor.lastFail.${day}` } });
+      const at = Number(row?.value || 0);
+      return at > 0 && Date.now() - at < MENTOR_RETRY_AFTER_MS;
     } catch {
       return false; // a lookup problem must never stop guidance being written at all
     }
