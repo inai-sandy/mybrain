@@ -56,6 +56,8 @@ export function AgentAreaPage() {
   const [customOpen, setCustomOpen] = useState(false);
   const [customName, setCustomName] = useState('');
   const [customKind, setCustomKind] = useState('api');
+  const [outcome, setOutcome] = useState(''); // the agent's standing definition of done (BEA-1173)
+  const [savingOutcome, setSavingOutcome] = useState(false);
 
   async function saveTools(next: AreaTool[]) {
     const r = await fetch(`/api/agent/areas/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: next }) });
@@ -80,7 +82,7 @@ export function AgentAreaPage() {
   }
 
   function load() {
-    fetch(`/api/agent/areas/${id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { setArea(d); if (d) { setName(d.name); setDesc(d.description || ''); } }).catch(() => setArea(null));
+    fetch(`/api/agent/areas/${id}`).then((r) => (r.ok ? r.json() : null)).then((d) => { setArea(d); if (d) { setName(d.name); setDesc(d.description || ''); setOutcome(d.outcome || ''); } }).catch(() => setArea(null));
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
@@ -182,6 +184,32 @@ export function AgentAreaPage() {
             title={`Tools for ${area.name}`}
             subtitle="This agent can only use what you tick here."
           />
+        )}
+      </section>
+
+      {/* The agent's standing definition of done (BEA-1173) — what a job with none of its own is
+          graded against, so a voice job comes back with a pass or fail for free. */}
+      <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold">What a good result looks like</h2>
+        <p className="mt-0.5 text-[11px] text-zinc-400">Used to grade any job here that has no Outcome of its own — including anything you send in by voice.</p>
+        <textarea
+          value={outcome}
+          onChange={(e) => setOutcome(e.target.value)}
+          rows={2}
+          placeholder="e.g. A short, clearly written answer that names its sources and says plainly what it could not find."
+          className="mt-1.5 w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm"
+        />
+        {outcome !== (area.outcome || '') && (
+          <button
+            onClick={async () => {
+              setSavingOutcome(true);
+              const r = await fetch(`/api/agent/areas/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome }) });
+              setSavingOutcome(false);
+              if (r.ok) { load(); toast('success', 'Saved'); } else toast('error', 'Could not save');
+            }}
+            disabled={savingOutcome}
+            className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >{savingOutcome ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Save</button>
         )}
       </section>
 

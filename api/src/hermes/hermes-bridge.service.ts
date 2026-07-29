@@ -243,10 +243,16 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Grade-and-iterate (BEA-641): score the result against the agent's Outcome (definition of done). */
-  private async gradeRun(rubric: string, result: string): Promise<any | null> {
+  private async gradeRun(rubric: string, result: string, checks?: string[]): Promise<any | null> {
     try {
+      // The owner's own checks (BEA-1173) are the criteria — grading against them beats letting the
+      // grader invent its own, because these are the words they actually used.
+      const checkList = (checks || []).filter(Boolean).slice(0, 12);
+      const checksBlock = checkList.length
+        ? `\n\nJudge it against EXACTLY these checks, one "criteria" entry per check, in this order:\n${checkList.map((c, i) => `${i + 1}. ${c}`).join('\n')}`
+        : '';
       const out = await this.llm.complete(
-        `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
+        `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}${checksBlock}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
         400,
         'agent-grade',
       );
@@ -797,18 +803,23 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     if (result.usage) await this.llm.recordUsage('agent', cfg.model || 'codex', result.usage).catch(() => undefined);
     // Self-check against the Outcome + ONE auto-retry on a fail (BEA-696). Grade the answer; if it
     // fails the user's definition of done, revise once with the grader's notes and keep the better one.
+    // Grade EVERY finished run (BEA-1173), not just the ones that happen to carry a rubric: the job's
+    // own Outcome + checks, else the agent's standing Outcome. Quick runs are graded too — they just
+    // don't get the auto-revise, which would defeat the point of being quick.
     let gradeJson: string | undefined;
-    if (!quick && input.rubric && text) {
+    const graded = (await this.agent.outcomeFor?.(input.agentId).catch(() => null)) || { rubric: input.rubric || '', checks: [] as string[] };
+    const rubric = (input.rubric || graded.rubric || '').trim();
+    if (rubric && text) {
       await this.agent.appendStep(runId, { label: 'Checking against your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
-      let g = await this.gradeRun(input.rubric, text);
+      let g = await this.gradeRun(rubric, text, graded.checks);
       if (g) await this.agent.appendStep(runId, { label: `Outcome: ${g.verdict} · ${g.score}/100`, status: g.verdict === 'fail' ? 'failed' : g.verdict === 'partial' ? 'info' : 'done' }).catch(() => undefined);
-      if (g && g.verdict === 'fail') {
+      if (!quick && g && g.verdict === 'fail') {
         await this.agent.appendStep(runId, { label: 'Revising once to meet your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
-        const revisePrompt = `Your previous answer did NOT meet the user's definition of done. Fix it.\n\nThe Outcome (definition of done):\n${input.rubric}\n\nWhat was wrong: ${g.notes || 'it fell short of the Outcome'}\n\nYour previous answer:\n${text}\n\nProduce a better answer that fully meets every part of the Outcome. Keep the inline citations/sources.`;
+        const revisePrompt = `Your previous answer did NOT meet the user's definition of done. Fix it.\n\nThe Outcome (definition of done):\n${rubric}\n\nWhat was wrong: ${g.notes || 'it fell short of the Outcome'}\n\nYour previous answer:\n${text}\n\nProduce a better answer that fully meets every part of the Outcome. Keep the inline citations/sources.`;
         const r2 = await this.runViaCodex(revisePrompt, handlers, { title: input.title, model: jobModel || cfg.model || undefined }).catch(() => null);
         const text2 = (r2?.finalText || '').trim();
         if (text2) {
-          const g2 = await this.gradeRun(input.rubric, text2);
+          const g2 = await this.gradeRun(rubric, text2, graded.checks);
           if (g2 && (g2.score || 0) >= (g.score || 0)) { text = text2; g = g2; }
           await this.agent.appendStep(runId, { label: `Revised · ${g?.verdict} · ${g?.score}/100`, status: g?.verdict === 'fail' ? 'failed' : 'done' }).catch(() => undefined);
         }

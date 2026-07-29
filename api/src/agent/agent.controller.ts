@@ -54,7 +54,7 @@ export class AgentController {
   }
 
   @Post('areas')
-  createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     return this.areas.create(body || {});
   }
 
@@ -85,7 +85,7 @@ export class AgentController {
   }
 
   @Patch('areas/:id')
-  updateArea(@Param('id') id: string, @Body() body: { name?: string; icon?: string; color?: string; description?: string; tools?: AreaTool[]; sourceUrl?: string }) {
+  updateArea(@Param('id') id: string, @Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     return this.areas.update(id, body || {});
   }
 

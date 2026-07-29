@@ -345,6 +345,28 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     } catch { return []; }
   }
 
+  /**
+   * What this run is graded against (BEA-1173): the job's own Outcome and checks, falling back to
+   * the agent's STANDING Outcome. That fallback is what makes a voice job — created with no setup
+   * of its own — still come back with a pass or fail.
+   */
+  async outcomeFor(agentId?: string | null): Promise<{ rubric: string; checks: string[] }> {
+    if (!agentId) return { rubric: '', checks: [] };
+    const a: any = await this.prisma.agent.findUnique({ where: { id: agentId } }).catch(() => null);
+    if (!a) return { rubric: '', checks: [] };
+    let rubric = (a.rubric || '').trim();
+    let checks: string[] = [];
+    try {
+      const evals = a.evals ? JSON.parse(a.evals) : [];
+      checks = (Array.isArray(evals) ? evals : []).map((e: any) => String(e?.input || '').trim()).filter(Boolean);
+    } catch { checks = []; }
+    if (!rubric && a.areaId) {
+      const area: any = await (this.prisma as any).agentArea.findUnique({ where: { id: a.areaId } }).catch(() => null);
+      rubric = (area?.outcome || '').trim();
+    }
+    return { rubric, checks };
+  }
+
   /** Set the tools this job may use. */
   async setTools(id: string, ids: string[]) {
     const clean = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === 'string' && x).slice(0, 60);
