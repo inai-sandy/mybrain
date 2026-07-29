@@ -76,8 +76,16 @@ export class LlmService {
      * is the standing check that makes it impossible to miss next time.
      */
     const out = Number(usage?.completion_tokens ?? usage?.output_tokens ?? 0);
-    if (ceiling && out >= ceiling) {
-      this.log.warn(`${feature}: reply hit its ${ceiling}-token ceiling (${out}) — it was CUT OFF. Raise the ceiling; an unused one costs nothing.`);
+    /**
+     * EXACTLY at the ceiling, not merely at-or-above it. (BEA-1179)
+     *
+     * Some providers treat `max_tokens` as advisory and come back over it — `emo-router`, capped at
+     * 800, routinely returns 1,200-2,000. Those replies are complete; nothing is wrong with them.
+     * Warning on `>=` made nine healthy features look broken and would have buried the real ones in
+     * noise. A reply that stops on precisely the number it was allowed is the one that was cut off.
+     */
+    if (ceiling && out === ceiling) {
+      this.log.warn(`${feature}: reply stopped exactly at its ${ceiling}-token ceiling — it was CUT OFF. Raise the ceiling; an unused one costs nothing.`);
     }
     try {
       await this.prisma.usageLog.create({

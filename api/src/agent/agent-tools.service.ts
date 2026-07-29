@@ -118,7 +118,7 @@ export class AgentToolsService {
       const tpl = (await this.prompts?.get('agent.draftCheck').catch(() => '')) || '';
       if (!tpl) return;
       const checkPrompt = tpl.replaceAll('{{goal}}', String(run.input).slice(0, 500)).replaceAll('{{draft}}', draft.slice(0, 800));
-      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('draft-check', checkPrompt, 200, 'agent-draft-check') : await this.llm.complete(checkPrompt, 200, 'agent-draft-check');
+      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('draft-check', checkPrompt, 800, 'agent-draft-check') : await this.llm.complete(checkPrompt, 800, 'agent-draft-check');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (!m) return;
       const g = JSON.parse(m[0]);

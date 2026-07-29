@@ -1164,7 +1164,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     }));
     const tmpl = await this.prompts.get('tasks.dedupe');
     const prompt = `${tmpl}\n\nOPEN TASKS (JSON):\n${JSON.stringify(list)}`;
-    const text = await this.llm.completeWith(model, prompt, 2000, 'task-dedupe');
+    const text = await this.llm.completeWith(model, prompt, 4000, 'task-dedupe');
     if (!text) return { groups: [], openCount: rows.length, model, error: 'ai-unavailable' };
 
     let raw: any[] = [];

@@ -272,7 +272,7 @@ export class MentalModelService implements OnModuleInit {
     } catch {
       /* cost guard only */
     }
-    const raw = (await this.llm.completeWith(await this.model(), prompt, 4000, 'mind-model'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.model(), prompt, 10000, 'mind-model'))?.trim() || '';
     const findings = this.parse(raw);
     if (!findings.length) return { proposed: 0, reinforced: 0 };
 
