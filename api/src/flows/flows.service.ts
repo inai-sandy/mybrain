@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { ToolCatalogService } from '../tools/tool-catalog.service';
 
 /** Generic building blocks (n8n-style utility nodes). `kind` drives the node's look/behaviour. */
 const GENERIC_PALETTE = [
@@ -15,19 +16,27 @@ const GENERIC_PALETTE = [
   { type: 'generic', kind: 'ask_user', id: 'ask_user', name: 'Ask me', description: 'Pause and ask you a question, then continue (answer in-app or later)' },
 ];
 
-/** The fixed tool/connector nodes (agent-powered hybrid — every connected tool works via the agent). */
-const TOOL_PALETTE = [
-  { type: 'tool', id: 'search_brain', name: 'Search my brain', group: 'Brain', description: 'RAG + SuperMemory' },
-  { type: 'tool', id: 'web_search', name: 'Web search', group: 'Web', description: 'Search the web' },
-  { type: 'tool', id: 'web_read', name: 'Read a page', group: 'Web', description: 'Open + read a URL' },
-  { type: 'tool', id: 'gmail', name: 'Gmail', group: 'Google', description: 'Read / search email' },
-  { type: 'tool', id: 'calendar', name: 'Calendar', group: 'Google', description: 'Read your calendar' },
-  { type: 'tool', id: 'drive', name: 'Drive', group: 'Google', description: 'Find / read files' },
-  { type: 'tool', id: 'ask_ai', name: 'Ask AI', group: 'AI', description: 'A plain reasoning step' },
-  { type: 'tool', id: 'http', name: 'HTTP request', group: 'API', description: 'Call any external API' },
-  { type: 'tool', id: 'save_document', name: 'Save to Documents', group: 'Output', description: 'Save the result' },
-  { type: 'tool', id: 'telegram', name: 'Send to Telegram', group: 'Output', description: 'Message you on Telegram' },
-];
+/**
+ * The tool nodes come from the ONE catalog now (BEA-1167) — `ToolCatalogService`. This module used
+ * to keep its own hard-coded list, which drifted from the agent's toolbox. Ids are unchanged, so
+ * saved flows keep working.
+ *
+ * This is the safety net for when the catalog can't be reached (its probes call out to Google and
+ * the engine host): the canvas and the planner keep the core tools rather than silently offering
+ * none, which would quietly plan toolless flows.
+ */
+const FALLBACK_TOOLS = [
+  { id: 'search_brain', name: 'Search my brain', group: 'Brain', description: 'Everything you have saved' },
+  { id: 'web_search', name: 'Web search', group: 'Web', description: 'Search the live web' },
+  { id: 'web_read', name: 'Read a page', group: 'Web', description: 'Open a link and read it' },
+  { id: 'gmail', name: 'Gmail', group: 'Google', description: 'Read / search email' },
+  { id: 'calendar', name: 'Calendar', group: 'Google', description: 'Read your calendar' },
+  { id: 'drive', name: 'Drive', group: 'Google', description: 'Find / read files' },
+  { id: 'ask_ai', name: 'Ask AI', group: 'AI', description: 'A plain reasoning step' },
+  { id: 'http', name: 'HTTP request', group: 'Advanced', description: 'Call any external API' },
+  { id: 'save_document', name: 'Save to Documents', group: 'Output', description: 'Save the result' },
+  { id: 'telegram', name: 'Send to Telegram', group: 'Messaging', description: 'Message you on Telegram' },
+].map((t) => ({ ...t, type: 'tool', kind: 'tool' as const, connected: true }));
 
 @Injectable()
 export class FlowsService {
@@ -36,6 +45,7 @@ export class FlowsService {
     private readonly skills: SkillsService,
     private readonly llm: LlmService,
     private readonly promptsSvc?: PromptsService, // optional + LAST — spec files construct positionally
+    private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167)
   ) {}
 
   private parse(s?: string | null): any {
@@ -264,10 +274,25 @@ export class FlowsService {
     return this.shape(updated);
   }
 
-  /** The draggable node palette: your skills + the connected tools. */
+  /**
+   * The draggable node palette. Served from the ONE catalog (BEA-1167) so the canvas and the agent
+   * toolbox can never drift apart. MCP servers are left out: a canvas block for a server (rather
+   * than for a tool it offers) would have nothing to do.
+   */
   async palette() {
-    const skills = (await this.skills.list()).map((s: any) => ({ type: 'skill', id: s.id, name: s.title, description: s.description }));
-    return { generics: GENERIC_PALETTE, tools: TOOL_PALETTE, skills };
+    const cat = await this.catalog?.catalog().catch(() => null);
+    if (!cat) {
+      // Catalog unavailable — fall back to the core tools so the canvas is never empty.
+      const skills = (await this.skills.list().catch(() => [])).map((s: any) => ({ type: 'skill', id: s.id, name: s.title, description: s.description }));
+      return { generics: GENERIC_PALETTE, tools: FALLBACK_TOOLS, skills };
+    }
+    const tools = cat.tools
+      .filter((t) => t.kind === 'tool')
+      .map((t) => ({ type: 'tool', id: t.id, name: t.name, group: t.group, description: t.description, connected: t.connected, connectHint: t.connectHint, connectPath: t.connectPath }));
+    const skills = cat.tools
+      .filter((t) => t.kind === 'skill')
+      .map((t) => ({ type: 'skill', id: t.id, name: t.name, description: t.description, connected: t.connected }));
+    return { generics: GENERIC_PALETTE, tools, skills };
   }
 
   /** Break a question into independent sub-questions for the branches (BEA-644). */
@@ -297,9 +322,13 @@ export class FlowsService {
     // only offer skills actually deployed somewhere, and skip generic build/design skills for research
     const skills = all.filter((s) => (s.deployedTo || []).length);
     const skillById = new Map(skills.map((s) => [s.id, s.title]));
-    const toolById = new Map(TOOL_PALETTE.map((t) => [t.id, t.name]));
+    // Only offer tools that are actually connected — planning a Gmail step with no Google account
+    // attached just produces a flow that fails halfway (BEA-1167).
+    const cat = await this.catalog?.catalog().catch(() => null);
+    const usable = cat ? cat.tools.filter((t) => t.kind === 'tool' && t.connected) : FALLBACK_TOOLS;
+    const toolById = new Map<string, string>(usable.map((t) => [t.id, t.name] as [string, string]));
     const skillList = skills.map((s) => `- skill:${s.id} — ${s.title}: ${(s.description || '').slice(0, 80)}`).join('\n');
-    const toolList = TOOL_PALETTE.map((t) => `- tool:${t.id} — ${t.name}: ${t.description}`).join('\n');
+    const toolList = usable.map((t) => `- tool:${t.id} — ${t.name}: ${t.description}`).join('\n');
 
     let plan: any = null;
     try {

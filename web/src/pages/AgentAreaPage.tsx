@@ -4,8 +4,11 @@ import { ArrowLeft, Plus, Loader2, CheckCircle2, XCircle, PauseCircle, CalendarC
 import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
 import { NewAgentForm, timeAgo } from './Agents';
+import { ToolPicker, type CatalogTool } from '../ui/ToolPicker';
 
-type AreaTool = { kind: string; name: string; note?: string; status?: string };
+// `id` is the catalog id (BEA-1167). Older saved tools have no id — they were typed by hand and
+// still render fine; picking from the catalog is how new ones are added.
+type AreaTool = { id?: string; kind: string; name: string; note?: string; status?: string };
 
 const TOOL_KIND: Record<string, { label: string; cls: string }> = {
   skill: { label: 'Skill', cls: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' },
@@ -28,19 +31,31 @@ export function AgentAreaPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
-  const [addingTool, setAddingTool] = useState(false); // toolbox editing (BEA-1100)
-  const [newToolKind, setNewToolKind] = useState('api');
-  const [newToolName, setNewToolName] = useState('');
+  const [picking, setPicking] = useState(false); // the shared catalog picker (BEA-1167)
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customKind, setCustomKind] = useState('api');
 
   async function saveTools(next: AreaTool[]) {
     const r = await fetch(`/api/agent/areas/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: next }) });
     if (r.ok) load(); else toast('error', 'Could not save the tools');
   }
-  function addTool() {
-    const n = newToolName.trim();
+
+  /** Catalog kinds map onto the badge kinds this page already shows. */
+  function kindOf(k: string) { return k === 'skill' ? 'skill' : k === 'mcp' ? 'mcp' : 'api'; }
+
+  /** Replace every catalog-backed tool with the new pick; hand-typed customs are left alone. */
+  function savePicked(_ids: string[], picked: CatalogTool[]) {
+    const customs = (area?.tools || []).filter((t: AreaTool) => !t.id);
+    const next: AreaTool[] = picked.map((t) => ({ id: t.id, kind: kindOf(t.kind), name: t.name, note: t.description, status: t.connected ? 'installed' : 'needed' }));
+    saveTools([...next, ...customs]);
+  }
+
+  function addCustom() {
+    const n = customName.trim();
     if (!n) return;
-    saveTools([...(area?.tools || []), { kind: newToolKind as any, name: n, status: 'needed' }]);
-    setNewToolName('');
+    saveTools([...(area?.tools || []), { kind: customKind, name: n, status: 'needed' }]);
+    setCustomName(''); setCustomOpen(false);
   }
 
   function load() {
@@ -106,10 +121,10 @@ export function AgentAreaPage() {
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-sm font-semibold"><Wrench className="h-4 w-4 text-zinc-400" />Tools</h2>
-          <button onClick={() => setAddingTool((v) => !v)} className="text-xs text-emerald-600 hover:underline">{addingTool ? 'Close' : '＋ Add tool'}</button>
+          <button onClick={() => setPicking(true)} className="text-xs font-medium text-emerald-600 hover:underline">{tools.length ? 'Choose tools' : '＋ Choose tools'}</button>
         </div>
-        {tools.length === 0 && !addingTool ? (
-          <p className="mt-1.5 text-xs text-zinc-400">No tools listed yet. Imported and described agents fill this in with everything they use — skills, APIs, MCP servers, CLIs.</p>
+        {tools.length === 0 ? (
+          <p className="mt-1.5 text-xs text-zinc-400">Nothing picked yet. Choose from your brain, the web, Google, your skills and MCP servers — this agent can only use what you tick.</p>
         ) : (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {tools.map((t, i) => {
@@ -117,21 +132,35 @@ export function AgentAreaPage() {
               return (
                 <span key={i} title={t.note || ''} className={'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ' + k.cls}>
                   <span className="opacity-60">{k.label}</span>{t.name}
-                  {t.status === 'needed' && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs install</span>}
+                  {t.status === 'needed' && <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs connecting</span>}
                   <button onClick={() => saveTools(tools.filter((_, j) => j !== i))} title="Remove" className="opacity-50 hover:opacity-100">✕</button>
                 </span>
               );
             })}
           </div>
         )}
-        {addingTool && (
+        {/* The escape hatch: something the catalog doesn't know about yet. */}
+        {customOpen ? (
           <div className="mt-2 flex gap-1.5">
-            <select value={newToolKind} onChange={(e) => setNewToolKind(e.target.value)} className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+            <select value={customKind} onChange={(e) => setCustomKind(e.target.value)} className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
               <option value="skill">Skill</option><option value="api">API</option><option value="mcp">MCP</option><option value="cli">CLI</option>
             </select>
-            <input value={newToolName} onChange={(e) => setNewToolName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addTool()} placeholder="e.g. Tavily, deep-research…" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700" />
-            <button onClick={addTool} disabled={!newToolName.trim()} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">Add</button>
+            <input autoFocus value={customName} onChange={(e) => setCustomName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCustom()} placeholder="Name it…" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700" />
+            <button onClick={addCustom} disabled={!customName.trim()} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40">Add</button>
+            <button onClick={() => { setCustomOpen(false); setCustomName(''); }} className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">Cancel</button>
           </div>
+        ) : (
+          <button onClick={() => setCustomOpen(true)} className="mt-2 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">＋ Add something else by name</button>
+        )}
+
+        {picking && (
+          <ToolPicker
+            value={tools.filter((t) => t.id).map((t) => t.id!)}
+            onSave={savePicked}
+            onClose={() => setPicking(false)}
+            title={`Tools for ${area.name}`}
+            subtitle="This agent can only use what you tick here."
+          />
         )}
       </section>
 

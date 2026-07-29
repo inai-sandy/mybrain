@@ -4,7 +4,9 @@ import { AgentService } from './agent.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 
-export type AreaTool = { kind: 'skill' | 'api' | 'mcp' | 'cli'; name: string; note?: string; status?: 'installed' | 'needed' };
+// `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
+// on the older hand-typed entries. It is what makes a toolbox mean something at run time.
+export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; name: string; note?: string; status?: 'installed' | 'needed' };
 
 /**
  * Agent AREAS (BEA-1095) — the container the owner thinks of as "an agent" (Research Agent,
@@ -251,6 +253,8 @@ export class AgentAreasService {
     if (!Array.isArray(tools)) return [];
     const KINDS = ['skill', 'api', 'mcp', 'cli'];
     return tools.slice(0, 40).map((t: any): AreaTool => ({
+      // Keep the catalog id — without it a picked tool is just a label again (BEA-1167).
+      ...(t?.id ? { id: String(t.id).slice(0, 120) } : {}),
       kind: KINDS.includes(t?.kind) ? t.kind : 'api',
       name: String(t?.name || '').slice(0, 80),
       ...(t?.note ? { note: String(t.note).slice(0, 200) } : {}),

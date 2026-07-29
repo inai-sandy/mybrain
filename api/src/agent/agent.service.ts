@@ -283,6 +283,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         const KINDS = ['skill', 'api', 'mcp', 'cli'];
         const tools = Array.isArray((input as any).tools)
           ? (input as any).tools.slice(0, 40).map((t: any) => ({
+              ...(t?.id ? { id: String(t.id).slice(0, 120) } : {}), // catalog id (BEA-1167)
               kind: KINDS.includes(t?.kind) ? t.kind : 'api',
               name: String(t?.name || '').slice(0, 80),
               ...(t?.note ? { note: String(t.note).slice(0, 200) } : {}),
