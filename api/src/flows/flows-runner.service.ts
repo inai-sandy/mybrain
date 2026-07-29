@@ -459,7 +459,16 @@ export class FlowRunnerService implements OnModuleInit {
     const docs = opts.evalMode ? [] : await this.saveDocuments(flow, graph, incoming, results, finalOutput);
     if (!opts.evalMode) term('✓ done');
 
-    await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'done', finalOutput, results: JSON.stringify(results), documentIds: JSON.stringify(docs), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
+    // Grade the finished result against the job's Outcome — or the agent's standing one (BEA-1191).
+    // Deep runs and EVERY voice job come through here, and they were finishing with no verdict at
+    // all, which made the standing Outcome added for exactly those jobs pointless.
+    let gradeJson: string | undefined;
+    if (!opts.evalMode && (flow as any)?.agentId && finalOutput) {
+      const g = await this.bridge.gradeFor?.((flow as any).agentId, finalOutput).catch(() => null);
+      if (g) { gradeJson = JSON.stringify(g); term(`✓ checked against your Outcome — ${g.verdict} ${g.score}/100`); }
+    }
+
+    await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'done', finalOutput, results: JSON.stringify(results), documentIds: JSON.stringify(docs), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...(gradeJson ? { grade: gradeJson } : {}) } as any });
     this.dropDriver(runId, gen);
 
     // Notify on a background/long run so you know it's ready even if you walked away (workspace ⑥).
@@ -823,6 +832,14 @@ export class FlowRunnerService implements OnModuleInit {
         // A thrown execute must never leave the branch run stuck on "running". (BEA-772)
         await this.prisma.agentRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
         throw e;
+      }
+      // `allowAsk:false` only removes the guidance text — the ask_user tool is still mounted for
+      // every run, so the model can park anyway. That used to return '' and the branch carried on as
+      // if the step had simply produced nothing, while a real question waited out of sight. Say it
+      // plainly instead, so the merged answer shows the gap. (BEA-1191)
+      const after: any = await this.agent.getRun(run.id).catch(() => null);
+      if (after && ['awaiting_input', 'paused'].includes(after.status)) {
+        return `This step stopped to ask a question and could not finish on its own. Open the run to answer it.`;
       }
       const r: any = await this.agent.getRun(run.id).catch(() => null);
       if (r?.status === 'failed') throw new Error(r.error || 'node failed');

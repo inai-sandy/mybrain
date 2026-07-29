@@ -217,11 +217,25 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       saveCollectionId: agentRow?.collectionId ?? null,
       depth: run.depth === 'quick' ? 'quick' : 'standard',
     };
+    // The toolbox must survive a resume (BEA-1191). Only `execute()` used to declare it, so a job
+    // that parked on a question came back UNRESTRICTED once answered — and with no check that its
+    // tools still work. That is the path most likely to be used, and it silently lost the guarantee.
+    const box = await this.toolbox(input.agentId);
+    if (box.disconnected.length) {
+      const names = box.disconnected.map((t) => t.name).join(', ');
+      await this.agent.appendStep(run.id, { label: `Stopped — not connected: ${names}`, status: 'failed' }).catch(() => undefined);
+      await this.agent.finishRun(run.id, {
+        status: 'failed',
+        error: `This job needs ${names}, which ${box.disconnected.length === 1 ? 'is' : 'are'} not connected any more. Reconnect ${box.disconnected.length === 1 ? 'it' : 'them'} in Settings, or take ${box.disconnected.length === 1 ? 'it' : 'them'} out of the agent's tools.`,
+      }).catch(() => undefined);
+      return;
+    }
     // With a kept session the engine remembers the task; without one, restate it so the fresh
     // session is self-contained.
     const prompt =
       `${sessionId ? '' : `The task:\n${run.input || ''}\n\n`}You asked the user: "${wp?.question || ''}"\n` +
       `The user answered: "${answer}"\n\nContinue the task from where you stopped, take the answer into account, and complete it.` +
+      box.guidance +
       this.askGuidance(run.id, cfg.autonomy);
     await this.driveTurn(run.id, input, cfg, prompt, sessionId);
   }
@@ -240,6 +254,18 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         await this.agent.appendStep(runId, { label: `Noted ${facts.length} thing${facts.length > 1 ? 's' : ''} I learned`, status: 'done' }).catch(() => undefined);
       }
     } catch { /* learnings are best-effort */ }
+  }
+
+  /**
+   * Grade a finished result against a job's Outcome + checks. Public so the FLOW runner grades its
+   * runs with the same judge (BEA-1191) — deep runs and every voice job go through flows, and they
+   * were coming back with no verdict at all.
+   */
+  async gradeFor(agentId: string | null | undefined, result: string): Promise<any | null> {
+    if (!result?.trim()) return null;
+    const g = (await this.agent.outcomeFor?.(agentId).catch(() => null)) || { rubric: '', checks: [] as string[] };
+    if (!g.rubric) return null; // nothing to grade against — the run still stands
+    return this.gradeRun(g.rubric, result, g.checks);
   }
 
   /** Grade-and-iterate (BEA-641): score the result against the agent's Outcome (definition of done). */

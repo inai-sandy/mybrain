@@ -59,7 +59,10 @@ export class EmoResearchService {
     const prompt = `${quickTmpl}\n\nTopic: ${query}`;
     try {
       const run: any = await this.agent.createRun({ title: `Emo quick research: ${query.slice(0, 50)}`, input: prompt });
-      await this.bridge.execute(run.id, { prompt, title: 'Emo quick research', save: false, depth: 'quick' });
+      // allowAsk:false — a card has no UI to surface a mid-run question (BEA-1191). Without this the
+      // run could park, the card would read the empty result and say "found nothing useful", and a
+      // real question would sit waiting somewhere the card never points to.
+      await this.bridge.execute(run.id, { prompt, title: 'Emo quick research', save: false, depth: 'quick', allowAsk: false });
       const r: any = await this.agent.getRun(run.id).catch(() => null);
       const out = r?.resultText?.trim();
       await this.cards.update(cardId, {
@@ -113,7 +116,11 @@ export class EmoResearchService {
   private async pickTools(text: string): Promise<string[]> {
     const cat = await this.catalog?.catalog().catch(() => null);
     const connected = (cat?.tools || []).filter((t: any) => t.kind === 'tool' && t.connected);
-    if (!connected.length) return [];
+    // If the catalog can't be reached we still hand back the plain research kit (BEA-1191). Returning
+    // nothing looked safe but did the opposite: an empty list means "no job-level toolbox", so the job
+    // fell back to the agent's — or to no restriction at all, which can include the brain tools that
+    // BEA-1184 says are never chosen automatically. A failure has to narrow, never widen.
+    if (!connected.length) return [...EmoResearchService.DEFAULT_KIT];
     const wantsBrain = EmoResearchService.wantsBrain(text);
     // Offer brain tools to the picker ONLY when he asked for his own material (BEA-1184).
     const offerable = connected.filter((t: any) => wantsBrain || !EmoResearchService.BRAIN_TOOLS.has(t.id));

@@ -397,6 +397,10 @@ export class AgentAreasService {
       }
     }
     await (this.prisma as any).agentArea.delete({ where: { id } }).catch(() => { throw new NotFoundException('Agent not found'); });
+    // Its half-finished new-job conversation goes too (BEA-1191). Nothing reads an orphaned one, but
+    // each holds up to 40 messages and they would pile up forever — the same "cleanup happens in one
+    // place and not the parallel one" shape that caused today's task bugs.
+    await Promise.resolve((this.prisma as any).setting?.delete?.({ where: { key: this.jobKey(id) } })).catch(() => undefined);
     return { ok: true, jobsDeleted: opts.withJobs ? jobs.length : 0 };
   }
 

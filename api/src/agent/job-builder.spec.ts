@@ -131,3 +131,38 @@ describe('the checks the chat writes (BEA-1172)', () => {
     expect(created[0].evals.map((e: any) => e.input)).toEqual(['real one']);
   });
 });
+
+/**
+ * BEA-1191 — deleting an agent used to leave its half-finished new-job conversation behind. Nothing
+ * reads an orphaned one, but each holds up to 40 messages and they accumulate forever. Same shape as
+ * the task bugs: cleanup happens in one place and not in the parallel one.
+ */
+describe('deleting an agent takes its new-job chat with it (BEA-1191)', () => {
+  function build() {
+    const settings = new Map<string, string>([['agent.jobBuilder.ar1', JSON.stringify({ log: [{ who: 'you', text: 'hi' }], job: null })]]);
+    const deletedKeys: string[] = [];
+    const prisma: any = {
+      agentArea: { findUnique: async () => ({ id: 'ar1', name: 'A' }), delete: async () => ({}) },
+      agent: { findMany: async () => [] },
+      setting: {
+        findUnique: async ({ where }: any) => (settings.has(where.key) ? { key: where.key, value: settings.get(where.key) } : null),
+        upsert: async () => ({}),
+        delete: async ({ where }: any) => { if (!settings.has(where.key)) throw new Error('not found'); settings.delete(where.key); deletedKeys.push(where.key); return {}; },
+      },
+    };
+    return { svc: new AgentAreasService(prisma), settings, deletedKeys };
+  }
+
+  it('removes the chat state for that agent', async () => {
+    const { svc, settings, deletedKeys } = build();
+    await svc.remove('ar1');
+    expect(deletedKeys).toEqual(['agent.jobBuilder.ar1']);
+    expect(settings.size).toBe(0);
+  });
+
+  it('still deletes the agent when there was no chat to clean up', async () => {
+    const { svc } = build();
+    await svc.remove('ar1');
+    await expect(svc.remove('ar1')).resolves.toMatchObject({ ok: true }); // second pass: nothing to delete, no throw
+  });
+});

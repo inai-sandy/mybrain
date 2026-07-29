@@ -161,3 +161,31 @@ describe('brain tools are never picked on his behalf (BEA-1184)', () => {
     expect(w('research how brain implants work')).toBe(false); // "brain" alone is a topic, not his brain
   });
 });
+
+/**
+ * BEA-1191 — two ways the voice path could quietly go wrong.
+ */
+describe('voice research failure modes (BEA-1191)', () => {
+  const card = { id: 'c1', lane: 'research', rawTranscript: 'quick research the cctv market', summary: 'Research', status: 'cooking', needsAnswer: null };
+
+  it('a quick research can never park — a card has no way to show a question', async () => {
+    const { svc, bridge } = make({ card });
+    await svc.handle('c1');
+    expect(bridge.execute).toHaveBeenCalled();
+    const opts = bridge.execute.mock.calls[0][1];
+    expect(opts.allowAsk).toBe(false);
+  });
+
+  it('a tool-picker failure NARROWS the toolbox instead of widening it', async () => {
+    const deep = { ...card, rawTranscript: 'research the cctv market' };
+    const { svc, agent } = make({ card: deep });
+    // the catalog is unreachable
+    const svcAny: any = svc;
+    svcAny.catalog = { catalog: async () => { throw new Error('engine down'); } };
+    await svc.handle('c1');
+    const tools = agent.createAgent.mock.calls[0][0].tools || [];
+    expect(tools.length).toBeGreaterThan(0);          // it still gets a real, narrow set
+    expect(tools).not.toContain('search_brain');      // and never the brain (BEA-1184)
+    expect(tools).toContain('web_search');
+  });
+});
