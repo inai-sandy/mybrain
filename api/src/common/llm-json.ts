@@ -100,8 +100,13 @@ export function narrativeField(raw: string | null | undefined, field: string): s
   // closing brace meant a cut-off reply fell through to the "plain prose" path and the raw
   // `{"adherenceScore": 72, "someth` blob was handed straight to the user — the exact thing this
   // file exists to prevent. (BEA-1178)
+  // A reply that STARTS like JSON is a JSON attempt, whether or not it ever closed — requiring a
+  // closing brace meant a cut-off reply fell through to the "plain prose" path and the raw
+  // `{"adherenceScore": 72, "someth` blob went straight to the user. But the test has to be
+  // `{"` specifically: prose that merely opens with a brace ("{grateful} today went well") is
+  // still prose, and classifying it as JSON would silently throw it away. (BEA-1178, BEA-1179)
   const looksLikeJson =
-    /^```?\s*\{[\s\S]*\}\s*```?$/.test(s) || (/^\{/.test(s) && (new RegExp('"' + field + '"\\s*:').test(s) || /"\s*:/.test(s)));
+    /^```?\s*\{[\s\S]*\}\s*```?$/.test(s) || (/^\{\s*"/.test(s) && (new RegExp('"' + field + '"\\s*:').test(s) || /"\s*:/.test(s)));
   if (looksLikeJson) {
     const m = new RegExp('"' + field + '"\\s*:\\s*"([\\s\\S]*?)"\\s*(?:,\\s*"[\\w]+"\\s*:|\\}\\s*`?`?`?\\s*$)').exec(s);
     if (m) return m[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\').trim();
@@ -137,22 +142,39 @@ export function salvageNarrative(raw: string, field: string): string {
   const open = s.indexOf('"', s.indexOf(':', at)) + 1;
   if (open <= 0) return '';
 
-  // Walk to the real closing quote (ignoring escaped ones). Reaching the end means it was cut off.
+  /**
+   * Walk to the real end of the string.
+   *
+   * A bare `"` is NOT proof the value ended: models routinely forget to escape a quote inside their
+   * own prose ("He told me "just ship it" and meant it"), and stopping there would return three
+   * words as a complete, fully-trusted note. So a quote only counts as the end when what follows it
+   * is what JSON demands — another key, or the closing brace. (BEA-1179)
+   */
   let body = '';
   let closed = false;
   for (let k = open; k < s.length; k++) {
     const ch = s[k];
     if (ch === '\\') { body += ch + (s[k + 1] ?? ''); k++; continue; }
-    if (ch === '"') { closed = true; break; }
+    if (ch === '"') {
+      const rest = s.slice(k + 1);
+      if (/^\s*(,\s*"|\}|$)/.test(rest)) { closed = true; break; }
+      body += ch; // an unescaped quote inside his own words — keep going
+      continue;
+    }
     body += ch;
   }
   const text = body.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\').trim();
   if (!text) return '';
-  if (closed) return text; // it was whole after all — the caller's parse just tripped on something else
+  if (closed) return text; // genuinely whole — the caller's parse just tripped on something else
 
-  // Truncated: end on a finished sentence rather than a half-written word.
-  const stop = Math.max(text.lastIndexOf('. '), text.lastIndexOf('.\n'), text.lastIndexOf('! '), text.lastIndexOf('? '), text.lastIndexOf('\n\n'));
-  const cut = stop > 40 ? text.slice(0, stop + 1).trim() : text;
-  // Too little to be worth showing as his mentor's note for the day.
+  /**
+   * Truncated. End on a finished sentence — and if there ISN'T one, return nothing.
+   *
+   * Falling back to the raw text here was the bug: a cut-off run-on clause with no full stop in it
+   * would be handed over mid-word as his mentor's note for the day. (BEA-1179)
+   */
+  const upToSentenceEnd = text.match(/^[\s\S]*[.!?](?=\s|$)/);
+  const cut = upToSentenceEnd ? upToSentenceEnd[0].trim() : '';
+  // Too little to be worth showing as his note for the day.
   return cut.length >= 40 ? cut : '';
 }

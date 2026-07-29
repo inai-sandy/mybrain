@@ -132,6 +132,29 @@ describe('a cut-off note is kept, not binned (BEA-1178)', () => {
     expect(g).toContain('He said "do it now" and meant it.');
   });
 
+  it('a run-on with NO full stop is refused, not handed over mid-word', () => {
+    // The trim looks for a sentence end; when there is not one, falling back to the raw text
+    // handed him a half-written word as his note for the day. (found in review, BEA-1179)
+    const runOn = '{"guidance": "you keep pushing the portal back and the same thing happened again this week and I think the reason is that you are trying to do too m';
+    expect(narrativeField(runOn, 'guidance')).toBe('');
+  });
+
+  it('an unescaped quote in his own words does NOT end the note early', () => {
+    // Models forget to escape quotes. Stopping at the first bare one returned three words as a
+    // complete, fully-trusted note. Truncated on purpose, so the salvage — not the ordinary
+    // regex — is the thing under test. (found in review, BEA-1179)
+    const g = narrativeField('{"guidance": "He told me "just ship it" and he meant it, which is the real lesson from today. Now act on it tomorrow morn', 'guidance');
+    expect(g).toContain('just ship it');
+    expect(g).toContain('the real lesson from today.');
+    expect(g).not.toContain('tomorrow morn'); // the cut-off tail is still dropped
+    expect(g).not.toBe('He told me'); // what the first bare quote used to give us
+  });
+
+  it('prose that merely begins with a brace is still shown, not thrown away', () => {
+    const prose = '{grateful} today went "well enough": steady progress on the factory line and a calm evening at home.';
+    expect(narrativeField(prose, 'guidance')).toBe(prose);
+  });
+
   it('the score still survives even when the note was cut off', () => {
     expect(looseJsonParse(CUT)?.adherenceScore).toBe(72);
   });

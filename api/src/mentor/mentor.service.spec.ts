@@ -461,6 +461,29 @@ describe('a cut-off mentor note is kept, and a failure is not retried every minu
     expect(r?.guidance ?? '').not.toContain('adherenceScore'); // he must never see braces
   });
 
+  it('one day failing must not hold back a DIFFERENT day', async () => {
+    // The backoff lives per day. In one shared slot, any recent failure anywhere silences every
+    // other day too — so a perfectly good day would go unread for half an hour because some other
+    // day stumbled. (found in review, BEA-1179)
+    const h = makeService('');
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    h.dayStories.push({ day: '2026-06-10', text: 'Another day.', moodScore: 60, createdAt: new Date('2026-06-10T19:00:00Z') });
+    await h.svc.ensureFreshRead('2026-06-09'); // fails, and backs off for THIS day
+    const afterFirst = h.llm.completeWith.mock.calls.length;
+    await h.svc.ensureFreshRead('2026-06-10'); // a different day — must still get its turn
+    expect(h.llm.completeWith.mock.calls.length).toBe(afterFirst + 1);
+  });
+
+  it('a day that succeeds is not left carrying an old backoff', async () => {
+    const h = makeService('');
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    await h.svc.ensureFreshRead('2026-06-09'); // fails
+    h.llm.completeWith.mockResolvedValue('{"adherenceScore":70,"guidance":"A real note that is long enough to keep."}');
+    await h.svc.runMentorDay('2026-06-09', true, true); // manual run succeeds
+    const cleared = h.settings['mentor.lastFail.2026-06-09'];
+    expect(cleared === '' || cleared === undefined || cleared === null).toBe(true);
+  });
+
   it('after a failure it BACKS OFF instead of trying again a minute later', async () => {
     const h = makeService('');
     h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
