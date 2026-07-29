@@ -58,6 +58,27 @@ export class AgentController {
     return this.areas.create(body || {});
   }
 
+  // ---- the new-job chat, per agent (BEA-1170) ----
+  @Get('areas/:id/job-builder')
+  jobBuilderState(@Param('id') id: string) {
+    return this.areas.jobBuilderState(id);
+  }
+
+  @Post('areas/:id/job-builder/chat')
+  jobBuilderChat(@Param('id') id: string, @Body() body: { message?: string }) {
+    return this.areas.jobBuilderChat(id, body?.message || '');
+  }
+
+  @Post('areas/:id/job-builder/create')
+  jobBuilderCreate(@Param('id') id: string, @Body() body: { tools?: string[]; checks?: string[] }) {
+    return this.areas.jobBuilderCreate(id, body || {});
+  }
+
+  @Delete('areas/:id/job-builder')
+  jobBuilderReset(@Param('id') id: string) {
+    return this.areas.jobBuilderReset(id);
+  }
+
   @Get('areas/:id')
   getArea(@Param('id') id: string) {
     return this.areas.get(id);

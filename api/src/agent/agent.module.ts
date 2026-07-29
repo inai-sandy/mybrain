@@ -8,6 +8,7 @@ import { AgentAreasService } from './agent-areas.service';
 import { DocumentsModule } from '../documents/documents.module';
 import { MemoryModule } from '../memory/memory.module';
 import { LlmModule } from '../llm/llm.module';
+import { ToolCatalogModule } from '../tools/tool-catalog.module';
 import { PromptsModule } from '../prompts/prompts.module';
 
 /**
@@ -18,7 +19,7 @@ import { PromptsModule } from '../prompts/prompts.module';
  * Later: the Hermes bridge (618), live run screen (621), schedule/history (623), etc.
  */
 @Module({
-  imports: [DocumentsModule, MemoryModule, LlmModule, PromptsModule],
+  imports: [DocumentsModule, MemoryModule, LlmModule, PromptsModule, ToolCatalogModule],
   controllers: [AgentController, AgentToolsController],
   providers: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService],
   exports: [AgentService, AgentToolsService, AgentsImportService, AgentAreasService],
