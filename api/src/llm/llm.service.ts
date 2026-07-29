@@ -147,6 +147,26 @@ export class LlmService {
   }
 
   /**
+   * Like complete(), but says WHY it came back empty (BEA-1194).
+   *
+   * `completeWith` returns null on any provider error with nothing logged, callers turn that into
+   * '', and a flow step recorded it as "done, 0 chars". A research run spent 14 minutes and produced
+   * an empty report that way, and the usage log held no trace of the calls at all. A step that could
+   * not think has to be able to say so.
+   */
+  async completeDetailed(prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; error: string | null }> {
+    const cfg = await this.getConfig();
+    if (!cfg?.provider || !cfg?.model) return { text: null, error: 'no AI model is set up — pick one in Settings' };
+    try {
+      const text = await this.completeWith(cfg, prompt, maxTokens, label);
+      if (text && text.trim()) return { text, error: null };
+      return { text: null, error: `${cfg.model} returned nothing — it may be rate-limited, over its context, or briefly unavailable` };
+    } catch (e: any) {
+      return { text: null, error: `${cfg.model} failed: ${String(e?.message || e).slice(0, 160)}` };
+    }
+  }
+
+  /**
    * Map a Settings-picker selection to a real LlmConfig. The picker sends only a model id; the
    * subscription agents are encoded in it: 'codex', 'gemini', or 'gemini::<Antigravity model>'.
    * Anything else is a normal API model id (default provider openrouter).
