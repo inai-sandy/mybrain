@@ -25,6 +25,10 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   const [picked, setPickedState] = useState<string[]>([]);
   const [touched, setTouched] = useState(false);
   const [pickingTools, setPickingTools] = useState(false);
+  // The checks it wrote from your words (BEA-1172) — editable before it builds.
+  const [checks, setChecks] = useState<string[]>([]);
+  const [checksTouched, setChecksTouched] = useState(false);
+  const [newCheck, setNewCheck] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,6 +42,11 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
     const ids = Array.isArray(job?.tools) ? job.tools.map((t: any) => (typeof t === 'string' ? t : t?.id)).filter(Boolean) : [];
     setPickedState(ids);
   }, [job, touched]);
+
+  useEffect(() => {
+    if (checksTouched) return;
+    setChecks(Array.isArray(job?.checks) ? job.checks.map((c: any) => String(c)).filter(Boolean) : []);
+  }, [job, checksTouched]);
 
   async function send() {
     const m = msg.trim();
@@ -59,7 +68,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
     if (!job || creating) return;
     setCreating(true);
     try {
-      const r = await fetch(`/api/agent/areas/${areaId}/job-builder/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: picked }) });
+      const r = await fetch(`/api/agent/areas/${areaId}/job-builder/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: picked, checks }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not create');
       toast('success', 'Job created 🎉');
@@ -142,9 +151,40 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
                     </ul>
                   )}
                 </div>
-                {Array.isArray(job.checks) && job.checks.length > 0 && (
-                  <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-zinc-500"><ListChecks className="h-3 w-3" />{job.checks.length} check{job.checks.length === 1 ? '' : 's'}</p>
-                )}
+                {/* The checks it wrote from what you asked for (BEA-1172) — yours to edit. */}
+                <div className="mt-2 rounded-lg border border-emerald-200 bg-white/70 p-2 dark:border-emerald-500/20 dark:bg-zinc-900/50">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200"><ListChecks className="h-3.5 w-3.5 text-zinc-400" />What a good result must have</span>
+                  {checks.length === 0 ? (
+                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Nothing to check against yet — add at least one so its results can be graded.</p>
+                  ) : (
+                    <ul className="mt-1.5 space-y-1">
+                      {checks.map((c, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <input
+                            value={c}
+                            onChange={(e) => { setChecksTouched(true); setChecks((p) => p.map((x, j) => (j === i ? e.target.value : x))); }}
+                            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs text-zinc-700 outline-none hover:border-zinc-200 focus:border-emerald-400 dark:text-zinc-200 dark:hover:border-zinc-700"
+                          />
+                          <button onClick={() => { setChecksTouched(true); setChecks((p) => p.filter((_, j) => j !== i)); }} aria-label="Remove check" className="shrink-0 text-zinc-400 hover:text-rose-500"><X className="h-3.5 w-3.5" /></button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-1.5 flex gap-1.5">
+                    <input
+                      value={newCheck}
+                      onChange={(e) => setNewCheck(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && newCheck.trim()) { setChecksTouched(true); setChecks((p) => [...p, newCheck.trim()]); setNewCheck(''); } }}
+                      placeholder="Add another…"
+                      className="min-w-0 flex-1 rounded border border-zinc-200 bg-transparent px-2 py-1 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700"
+                    />
+                    <button
+                      onClick={() => { if (newCheck.trim()) { setChecksTouched(true); setChecks((p) => [...p, newCheck.trim()]); setNewCheck(''); } }}
+                      disabled={!newCheck.trim()}
+                      className="shrink-0 rounded border border-zinc-300 px-2 text-xs disabled:opacity-40 dark:border-zinc-700"
+                    >Add</button>
+                  </div>
+                </div>
                 <p className="mt-1 flex items-center gap-1 text-xs text-zinc-500"><CalendarClock className="h-3 w-3" />{job.scheduleText || 'only when you press Run'}</p>
                 <button onClick={create} disabled={creating} className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
                   {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Create this job
