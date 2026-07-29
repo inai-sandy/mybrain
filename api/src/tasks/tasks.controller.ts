@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { ClaimsService } from './claims.service';
+import { TaskHealthService } from './task-health.service';
 import { RecurringService } from './recurring.service';
 
 @Controller('tasks')
@@ -8,6 +9,7 @@ export class TasksController {
   constructor(
     private readonly tasks: TasksService,
     private readonly claims: ClaimsService,
+    private readonly health: TaskHealthService,
     private readonly recurring: RecurringService,
   ) {}
 
@@ -192,6 +194,12 @@ export class TasksController {
   markBrainEaters(@Body() body: { ids?: string[]; on?: boolean }) {
     if (!body?.ids?.length) throw new BadRequestException('Nothing selected');
     return this.tasks.markBrainEater(body.ids, body?.on !== false);
+  }
+
+  /** Run the health check now — the same one that runs nightly. Reports, never changes anything. */
+  @Get('health')
+  async healthCheck() {
+    return { findings: await this.health.check() };
   }
 
   // ---- AI duplicate cleanup ----
