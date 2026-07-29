@@ -981,6 +981,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     });
     this.indexTask(upd);
     this.touchPerson((upd as any).ownerContactId);
+    // Stopping the chase must follow the task becoming done WHEREVER that happens (BEA-1187).
+    // This path flips the status on its own when progress reaches 100, and used to leave the
+    // reminders running — so someone kept being chased about work already finished.
+    if (statusFromProgress.status && statusFromProgress.status !== t.status) {
+      await this.syncChases(id, statusFromProgress.status === 'done');
+    }
     if (!wordsTouched && !ownerTouched) return this.shape(upd);
     const mentioned = [
       ...this.mentionIds(contacts, nextTitle, nextNote),
