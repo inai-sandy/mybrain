@@ -92,20 +92,37 @@ export class EmoResearchService {
 
   // ---- Voice research, hands-off (BEA-1175) ----------------------------------------------------
 
-  /** The kit a spoken research gets when nothing smarter is available. */
-  private static DEFAULT_KIT = ['web_search', 'web_read', 'search_brain', 'save_document'];
+  /**
+   * The kit a spoken research gets when nothing smarter is available.
+   *
+   * NO brain tool here on purpose (BEA-1184): the owner does not want his own notes searched as a
+   * side effect of asking for research — "if required, I'll add it manually". They stay one tick
+   * away in the picker.
+   */
+  private static DEFAULT_KIT = ['web_search', 'web_read', 'save_document'];
+
+  /** Tools that read the owner's own material — never chosen on his behalf. */
+  private static BRAIN_TOOLS = new Set(['search_brain', 'search_rag', 'fetch_document', 'remember']);
+
+  /** Did he actually ask for his own notes to be involved? */
+  private static wantsBrain(text: string): boolean {
+    return /\b(my|our)\s+(notes?|brain|documents?|memory|memories|writing|journal)\b|\bwhat did i\b|\bi wrote\b|\bsecond brain\b/i.test(text || '');
+  }
 
   /** Choose the tools for a spoken topic — from the connected catalog, never anything else. */
   private async pickTools(text: string): Promise<string[]> {
     const cat = await this.catalog?.catalog().catch(() => null);
     const connected = (cat?.tools || []).filter((t: any) => t.kind === 'tool' && t.connected);
     if (!connected.length) return [];
-    const ok = new Set(connected.map((t: any) => t.id));
+    const wantsBrain = EmoResearchService.wantsBrain(text);
+    // Offer brain tools to the picker ONLY when he asked for his own material (BEA-1184).
+    const offerable = connected.filter((t: any) => wantsBrain || !EmoResearchService.BRAIN_TOOLS.has(t.id));
+    const ok = new Set(offerable.map((t: any) => t.id));
     const fallback = EmoResearchService.DEFAULT_KIT.filter((id) => ok.has(id));
     try {
-      const list = connected.map((t: any) => `- ${t.id}: ${t.name} — ${t.description}`).join('\n');
+      const list = offerable.map((t: any) => `- ${t.id}: ${t.name} — ${t.description}`).join('\n');
       const out = await this.llm.complete(
-        `Pick the tools an assistant needs to research this properly. Use ONLY ids from the list.\n\nWhat was asked:\n"${text.slice(0, 500)}"\n\nTools:\n${list}\n\nReply with ONLY a JSON array of ids, e.g. ["web_search","save_document"]. Include a way to search, a way to read sources, and a way to save the result unless the request clearly does not need it.`,
+        `Pick the tools an assistant needs to research this properly. Use ONLY ids from the list.\n\nWhat was asked:\n"${text.slice(0, 500)}"\n\nTools:\n${list}\n\nReply with ONLY a JSON array of ids, e.g. ["web_search","save_document"]. Include a way to search the web, a way to read sources, and a way to save the result unless the request clearly does not need it. Do NOT pick anything that reads the owner's own notes or documents unless he explicitly asked for them.`,
         200,
         'emo-research-tools',
       );

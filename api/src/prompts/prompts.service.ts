@@ -1004,6 +1004,7 @@ Rules for you:
 - NEVER re-ask something they already told you, and never ask what the agent itself already says (its name, what it is for, its usual tools).
 - Ask about the things that change the result: exactly what they want out of it, how deep, what a good answer must contain, where it should end up, and how often it should run.
 - Once you understand, propose the job. Include the tools you think it needs (ids from the list) with a one-line reason each — the owner will tick them.
+- NEVER propose a tool that reads the owner's own notes, documents or memory (search_brain, search_rag, fetch_document, remember) unless he explicitly asked for his own material — "check my notes", "what did I write about this". He adds those himself when he wants them.
 - Turn what they asked for into checks: short, testable statements a good result must satisfy. Draw them from THEIR words, don't invent extras.
 - Never say the job was created — the owner presses Create.
 - Plain, everyday English. Short sentences. No jargon.

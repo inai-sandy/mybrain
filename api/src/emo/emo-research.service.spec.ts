@@ -127,3 +127,37 @@ describe('EmoResearchService — Quick (BEA-871)', () => {
     expect(flows.create).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * BEA-1184 — the owner's own notes are not searched as a side effect of asking for research.
+ * "If required, I'll add it manually." These pin what must NOT happen.
+ */
+describe('brain tools are never picked on his behalf (BEA-1184)', () => {
+  const card = (t: string) => ({ id: 'c1', lane: 'research', rawTranscript: t, summary: 'Research', status: 'cooking', needsAnswer: null });
+
+  it('does not add Search my brain to an ordinary research request', async () => {
+    const { svc, agent } = make({ card: card('research the cctv market in India') });
+    await svc.handle('c1');
+    const tools = agent.createAgent.mock.calls[0][0].tools || [];
+    expect(tools).not.toContain('search_brain');
+    expect(tools).not.toContain('search_rag');
+    expect(tools).not.toContain('fetch_document');
+  });
+
+  it('still gives it real research tools', async () => {
+    const { svc, agent } = make({ card: card('research the cctv market in India') });
+    await svc.handle('c1');
+    const tools = agent.createAgent.mock.calls[0][0].tools || [];
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools).toContain('web_search');
+  });
+
+  it('recognises when he DID ask for his own notes', () => {
+    const w = (EmoResearchService as any).wantsBrain;
+    expect(w('research this and check my notes on it')).toBe(true);
+    expect(w('what did i write about the cctv market')).toBe(true);
+    expect(w('look in my second brain for this')).toBe(true);
+    expect(w('research the cctv market in India')).toBe(false);
+    expect(w('research how brain implants work')).toBe(false); // "brain" alone is a topic, not his brain
+  });
+});
