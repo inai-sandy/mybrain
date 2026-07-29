@@ -442,8 +442,12 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const d = await this.prisma.brainDump.create({ data: { day, rawText: clean, source, taskCount: crafted.tasks.length } });
     // Don't re-create tasks that already exist as open ones — re-dumping the same thing was piling
     // up duplicates. Skip a new task whose normalized title already exists (open, or added just now). (BEA-933)
-    const existingOpen = await this.prisma.task.findMany({ where: { status: 'open' }, select: { title: true } });
-    const seenTitles = new Set(existingOpen.map((t) => dumpKey(t.title)));
+    // Keyed on title AND who it belongs to (BEA-1188). On title alone, two colleagues owing the
+    // same kind of report — "Send the daily production update" — looked like one task, so the
+    // second person's task was silently never created. The person lives in a separate `who` field,
+    // not in the title, so identical wording across people is the everyday case.
+    const existingOpen = await this.prisma.task.findMany({ where: { status: 'open' }, select: { title: true, ownerContactId: true, party: true } });
+    const seenTitles = new Set(existingOpen.map((t) => `${this.ownerKey(t)}|${dumpKey(t.title)}`));
     // Someone else's work goes to that person — the dump learns the same rule as briefings: link
     // ONLY on an exact, unique contact match; anything unclear stays on the owner's board. (BEA-1040)
     const contacts = await this.allContacts();
@@ -452,14 +456,16 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     for (const c of crafted.tasks) {
       const title = String(c.title || '').trim().slice(0, 160);
       if (!title) continue;
-      const key = dumpKey(title);
-      if (key && seenTitles.has(key)) { skipped++; continue; } // duplicate of an existing open task
-      seenTitles.add(key);
-      const pinned = !!c.pinned && pinnedSeen.n < 3;
-      if (pinned) pinnedSeen.n++;
+      // Resolve WHO first — the duplicate check needs it (BEA-1188).
       const who = String((c as any).who || '').trim();
       const hits = who ? exactMatches(contacts, who) : [];
       const owner = hits.length === 1 ? hits[0] : null;
+      const key = dumpKey(title);
+      const ownerScopedKey = `${this.ownerKey({ ownerContactId: owner?.id || null, party: owner ? owner.name : null })}|${key}`;
+      if (key && seenTitles.has(ownerScopedKey)) { skipped++; continue; } // the SAME person already has this open
+      seenTitles.add(ownerScopedKey);
+      const pinned = !!c.pinned && pinnedSeen.n < 3;
+      if (pinned) pinnedSeen.n++;
       const t = await this.prisma.task.create({
         data: {
           title,

@@ -255,7 +255,11 @@ export function DumpModal({ onClose, onDone, onCreated, initialQuestion, followU
         toast('error', 'Need a bit more detail');
         return;
       }
-      toast('success', `${d.tasks?.length || 0} task${d.tasks?.length === 1 ? '' : 's'} created`);
+      // Say when something was dropped as a repeat (BEA-1188). Skipping used to be silent, so a
+      // task that never got created just looked like it had never been said.
+      const n = d.tasks?.length || 0;
+      const skipped = Number(d.skipped) || 0;
+      toast('success', `${n} task${n === 1 ? '' : 's'} created${skipped ? ` · ${skipped} skipped, you already have ${skipped === 1 ? 'it' : 'them'} open` : ''}`);
       clearDraft(draftKey);
       onDone();
       onClose();
