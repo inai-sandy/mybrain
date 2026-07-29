@@ -258,7 +258,7 @@ ${context}
 <<<END SOURCES>>>${opts.withSummary ? '\n\nThen, on a NEW final line, add exactly: SUMMARY: <one short, warm spoken sentence that captures the answer — plain English, no citations, no markdown>' : ''}`;
 
     const model = opts.model || (await this.getModel());
-    const raw = (await this.llm.completeWith(model, prompt, 950, 'explore-ask')) || 'Sorry — I could not generate an answer just now.';
+    const raw = (await this.llm.completeWith(model, prompt, 3000, 'explore-ask')) || 'Sorry — I could not generate an answer just now.';
     // one call gives both the full answer and a spoken summary (SUMMARY: line), parsed apart.
     let answer = raw;
     let summary: string | undefined;

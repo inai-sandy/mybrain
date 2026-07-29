@@ -57,10 +57,12 @@ describe('a reply that hits its ceiling is never silent (BEA-1179)', () => {
     expect(h.said[0]).toContain('CUT OFF');
   });
 
-  it('warns when it somehow came back OVER the ceiling too', async () => {
+  it('stays quiet when the reply came back OVER the ceiling — that one was not cut off', async () => {
+    // Some providers treat max_tokens as advisory. `emo-router`, capped at 800, returns 1,200-2,000
+    // routinely and those replies are complete. Warning on those buried the real cases. (BEA-1179)
     const h = spy();
     await h.log({ completion_tokens: 1500 }, 1400);
-    expect(h.said).toHaveLength(1);
+    expect(h.said).toHaveLength(0);
   });
 
   it('stays quiet when the reply finished with room to spare', async () => {

@@ -584,7 +584,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Other activity in the app:\n${activityLines.join('\n') || '(none)'}\n\n` +
       `His story of the day${story?.mood ? ` (mood: ${story.mood})` : ''}:\n${story?.rawText?.slice(0, 2000) || '(not told)'}`;
 
-    const text = (await this.llm.completeWith(await this.summaryModel(), prompt, 900, 'day-summary'))?.trim() || this.fallbackSummary(st, doneList, openList);
+    const text = (await this.llm.completeWith(await this.summaryModel(), prompt, 2500, 'day-summary'))?.trim() || this.fallbackSummary(st, doneList, openList);
     const stats = JSON.stringify(st);
     const row = await this.prisma.daySummary.upsert({
       where: { day },
@@ -1382,7 +1382,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       `Suggest only NEW, forward-looking tasks for TOMORROW (${forDay}). PREFER concrete next-actions that move a LEVER (the thing that unblocks a stuck goal) or advance a focus area — not the blocked goals themselves. ` +
       `Where it fits, phrase the task as a tiny if-then plan anchored to an everyday cue — "When <a daily cue like after my morning coffee / after lunch / before I leave work>, I'll <one concrete action>" — this makes it far likelier to actually happen. One action each, plain English. Give each a short plain reason.`;
 
-    const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 900, 'suggested-tasks'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.storyModel(), prompt, 3000, 'suggested-tasks'))?.trim() || '';
     let suggestions: { title: string; category?: string; reason?: string }[] = [];
     try {
       const json = JSON.parse(raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1));
@@ -1544,7 +1544,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       (rejected.length ? `Rejected (do not repeat):\n${rejected.join('\n')}\n` : '') +
       `\nEVIDENCE:\n${evidence}`;
 
-    const text = await this.llm.completeWith(await this.tasks.getModel(), prompt, 1500, 'personality');
+    const text = await this.llm.completeWith(await this.tasks.getModel(), prompt, 4000, 'personality');
     let parsed: { summary?: string; insights?: { dimension: string; claim: string; evidence?: string }[] } | null = null;
     try {
       parsed = text ? JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) : null;

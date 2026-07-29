@@ -79,7 +79,7 @@ export class EmoAskService {
   private async actionOffer(answer: string, question: string): Promise<AskOffer | undefined> {
     const offerTmpl = await this.prompts.get('emo.askOffer');
     const prompt = `Sandy asked: "${question}"\nEmo answered: "${answer.slice(0, 800)}"\n\n${offerTmpl}`;
-    const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 120, 'emo-ask-offer').catch(() => '')) || '';
+    const raw = (await this.llm.completeWith({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }, prompt, 300, 'emo-ask-offer').catch(() => '')) || '';
     try {
       const j = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || '{}');
       const spoken = String(j.offer || '').trim();
