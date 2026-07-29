@@ -1,4 +1,19 @@
-import { GROUP_ORDER, ToolCatalogService } from './tool-catalog.service';
+import { clip, GROUP_ORDER, ToolCatalogService } from './tool-catalog.service';
+
+describe('clip', () => {
+  it('leaves a short description alone', () => {
+    expect(clip('short one', 140)).toBe('short one');
+  });
+  it('cuts on a word boundary, never mid-word', () => {
+    const out = clip('Captures how your project is tested and deployed so that nothing is lost', 46);
+    expect(out.endsWith('…')).toBe(true);
+    expect(out).not.toMatch(/\bs…$/); // the "deployed so t…" case
+    expect(out.length).toBeLessThanOrEqual(47);
+  });
+  it('handles empty input', () => {
+    expect(clip(undefined, 20)).toBe('');
+  });
+});
 
 /**
  * The catalog is the single source both the agent toolbox and the flow canvas read (BEA-1167).

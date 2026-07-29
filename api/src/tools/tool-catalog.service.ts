@@ -30,6 +30,15 @@ export type CatalogTool = {
   connectPath?: string;
 };
 
+/** Shorten to a whole word — a description cut mid-word ("deployed so t") reads like a bug. */
+export function clip(s: string | null | undefined, max: number): string {
+  const t = (s || '').trim().replace(/\s+/g, ' ');
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[,;:.\s]+$/, '') + '…';
+}
+
 /** The order groups are shown in — most reached-for first. */
 export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'Google', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
 
@@ -163,7 +172,7 @@ export class ToolCatalogService {
         group: 'Skills' as const,
         kind: 'skill' as const,
         connected: on,
-        description: (s.description || '').slice(0, 140) || 'One of your saved skills',
+        description: clip(s.description, 140) || 'One of your saved skills',
         connectHint: on ? undefined : 'Install this skill on the engine before using it',
         connectPath: on ? undefined : '/skills',
       };
