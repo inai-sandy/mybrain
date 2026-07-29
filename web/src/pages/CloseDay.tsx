@@ -263,7 +263,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                 {/* Saved from the last read, so reopening this step is instant and free. (BEA-1164) */}
                 {mined?.cached && !mined.stale && (
                   <span className="inline-flex items-center gap-1 text-zinc-400">
-                    · Saved from earlier
+                    Saved from earlier —
                     <button onClick={() => loadMine(true)} className="underline underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">read it again</button>
                   </span>
                 )}
