@@ -90,3 +90,44 @@ describe('the new-job chat (BEA-1170)', () => {
     expect(settings.has('agent.jobBuilder.ar2')).toBe(true);
   });
 });
+
+describe('the checks the chat writes (BEA-1172)', () => {
+  function svcWith(job: any) {
+    const settings = new Map<string, string>([['agent.jobBuilder.ar1', JSON.stringify({ log: [], job })]]);
+    const created: any[] = [];
+    const prisma: any = {
+      setting: {
+        findUnique: async ({ where }: any) => (settings.has(where.key) ? { key: where.key, value: settings.get(where.key) } : null),
+        upsert: async ({ where, create, update }: any) => { settings.set(where.key, update?.value ?? create?.value); return {}; },
+      },
+      agentArea: { findUnique: async () => ({ id: 'ar1', name: 'A', tools: '[]' }) },
+    };
+    const agentSvc: any = { createAgent: async (i: any) => { created.push(i); return { id: 'j1', name: i.name }; }, updateAgent: async () => ({}) };
+    return { svc: new AgentAreasService(prisma, agentSvc, {} as any, {} as any, {} as any), created };
+  }
+
+  it('carries the checks straight through to the job', async () => {
+    const { svc, created } = svcWith({ name: 'x', task: 'y', checks: ['names its sources', 'fits on one page'] });
+    await svc.jobBuilderCreate('ar1');
+    expect(created[0].evals.map((e: any) => e.input)).toEqual(['names its sources', 'fits on one page']);
+  });
+
+  it('lets you edit the checks before it builds', async () => {
+    const { svc, created } = svcWith({ name: 'x', task: 'y', checks: ['original'] });
+    await svc.jobBuilderCreate('ar1', { checks: ['mine instead', 'and this'] });
+    expect(created[0].evals.map((e: any) => e.input)).toEqual(['mine instead', 'and this']);
+  });
+
+  it('falls back to the Outcome so a job is never left ungradeable', async () => {
+    const { svc, created } = svcWith({ name: 'x', task: 'y', outcome: 'a one-page brief with sources', checks: [] });
+    await svc.jobBuilderCreate('ar1');
+    expect(created[0].evals.length).toBe(1);
+    expect(created[0].evals[0].input).toBe('a one-page brief with sources');
+  });
+
+  it('drops blank checks rather than saving empty ones', async () => {
+    const { svc, created } = svcWith({ name: 'x', task: 'y', checks: ['  ', 'real one', ''] });
+    await svc.jobBuilderCreate('ar1');
+    expect(created[0].evals.map((e: any) => e.input)).toEqual(['real one']);
+  });
+});

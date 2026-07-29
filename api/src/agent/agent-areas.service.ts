@@ -109,7 +109,12 @@ export class AgentAreasService {
 
     const proposedTools: string[] = Array.isArray(j.tools) ? j.tools.map((t: any) => (typeof t === 'string' ? t : t?.id)).filter(Boolean) : [];
     const tools = Array.isArray(overrides?.tools) ? overrides!.tools! : proposedTools;
-    const checks: string[] = Array.isArray(overrides?.checks) ? overrides!.checks! : (Array.isArray(j.checks) ? j.checks : []);
+    let checks: string[] = Array.isArray(overrides?.checks) ? overrides!.checks! : (Array.isArray(j.checks) ? j.checks : []);
+    checks = checks.map((c: any) => String(c).trim()).filter(Boolean);
+    // A job with nothing to check against can never be graded (BEA-1172/1173). If the conversation
+    // produced an Outcome but no checks, use the Outcome itself as the one check — derived from what
+    // they actually said, not invented.
+    if (!checks.length && j.outcome) checks = [String(j.outcome).trim().slice(0, 300)];
 
     const created: any = await this.agentSvc.createAgent({
       areaId,
