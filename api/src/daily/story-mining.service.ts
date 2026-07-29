@@ -19,6 +19,9 @@ export type MinedPayload = {
   day: string;
   hasStory: boolean;
   failed?: boolean; // the model reply was unusable — the UI must offer a retry, never claim "tidy day" (BEA-1052)
+  /** The reply was cut off and we salvaged what was complete — part of his day is genuinely
+   *  missing, and the card must say so rather than look tidy. (BEA-1163) */
+  partial?: boolean;
   done: { title: string; category: string | null }[];
   todos: { title: string; category: string | null; note: string | null; priority: string }[];
   delegations: MinedDelegation[];
@@ -106,17 +109,37 @@ export class StoryMiningService {
       `Open elsewhere: ${openAll.map((t) => t.title).slice(0, 60).join(' | ') || '(none)'}\n` +
       `Known contact names (for spelling only): ${contactNames || '(none)'}\n\nDIARY:\n${text.slice(0, 6000)}`;
 
-    // One retry: a transient model hiccup must not cost the owner his whole day's findings.
+    /**
+     * The ceiling used to be 2500, and on 28 July the owner's story blew past it three times in a
+     * row — each reply cut off mid-JSON, thrown away whole, surfacing as "The deep read failed".
+     * The day before, the same call returned 973-1301 tokens quite happily.
+     *
+     * The size of this reply scales with how much he says, so a low ceiling fails on exactly the
+     * days most worth capturing. An unused ceiling costs nothing — only generated tokens are
+     * billed — so it is set well clear of a long day. (BEA-1163)
+     */
+    const CEILING = 8000;
     let j: any = null;
+    let truncated = false;
     for (let attempt = 0; attempt < 2 && !j; attempt++) {
-      const raw = (await this.llm.completeWith(await this.daily.storyModel(), prompt, 2500, 'story-mine').catch(() => null)) || '';
+      // The retry must DIFFER from the first go. It used to send the identical prompt at the
+      // identical ceiling, so it failed identically — which is why every failure in his log is a
+      // pair rather than a recovery. Second time, ask for the essentials only.
+      const ask = attempt === 0 ? prompt : `${prompt}
+
+IMPORTANT: keep it SHORT. Only the tasks, to-dos and delegations — skip events, lessons and the emotional read. Fewer items, no long snippets.`;
+      const raw = (await this.llm.completeWith(await this.daily.storyModel(), ask, CEILING, 'story-mine').catch(() => null)) || '';
       j = looseJsonParse(raw);
-      if (!j && attempt === 0) this.log.warn(`mine(${day}): unparseable model reply — retrying once`);
+      // Did we only get an answer because the salvage rescued a cut-off reply? Then part of his day
+      // is genuinely missing, and he has to be told rather than shown a tidy-looking list. (BEA-1163)
+      if (j && raw.trim() && !raw.trim().endsWith('}') && !raw.trim().endsWith('```')) truncated = true;
+      if (!j && attempt === 0) this.log.warn(`mine(${day}): unparseable model reply — retrying with a shorter ask`);
     }
     if (!j) {
       this.log.warn(`mine(${day}): model unusable after retry`);
       return { ...this.empty(day, true), failed: true }; // honest failure — never dressed up as a tidy day
     }
+    if (truncated) this.log.warn(`mine(${day}): reply was cut off — salvaged what was complete`);
 
     const S = (v: any, n = 160) => String(v || '').trim().slice(0, n);
     const dateOk = (v: any): string | null => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
@@ -180,7 +203,7 @@ export class StoryMiningService {
       .slice(0, 10);
     const lessons = arr(j.lessons).map((x: any) => S(x, 300)).filter(Boolean).slice(0, 2);
 
-    return { day, hasStory: true, done, todos, delegations, myReminders, promises, emotions, events, lessons };
+    return { day, hasStory: true, partial: truncated, done, todos, delegations, myReminders, promises, emotions, events, lessons };
   }
 
   /**

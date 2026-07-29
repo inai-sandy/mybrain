@@ -14,9 +14,13 @@ export function looseJsonParse(raw: string | null | undefined): any {
   let s = String(raw).trim();
   s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   const i = s.indexOf('{');
+  if (i === -1) return null;
+  // Everything the model actually wrote, from the opening brace on. A truncated reply has no
+  // closing brace, so slicing to the LAST one would throw away the tail before salvage ever saw
+  // it — keep the full text and let the salvage decide where it can safely stop. (BEA-1163)
+  const whole = s.slice(i);
   const j = s.lastIndexOf('}');
-  if (i === -1 || j === -1 || j < i) return null;
-  s = s.slice(i, j + 1);
+  s = j > i ? s.slice(i, j + 1) : whole;
   try { return JSON.parse(s); } catch { /* try repair */ }
   // Repair: escape control chars that appear INSIDE string values (the common failure).
   let out = '';
@@ -34,7 +38,52 @@ export function looseJsonParse(raw: string | null | undefined): any {
     }
     out += ch;
   }
-  try { return JSON.parse(out); } catch { return null; }
+  try { return JSON.parse(out); } catch { /* fall through to salvage */ }
+
+  // TRUNCATION SALVAGE (BEA-1163). A reply cut off at the token ceiling has no closing braces, so
+  // everything above fails and the whole thing is thrown away — on 28 July that lost the owner a
+  // full day's reading, three times, because the LAST item was incomplete. Everything before it was
+  // perfectly good. `mentalmodel.service` already did this for its own replies; this makes it
+  // available everywhere.
+  return salvageTruncated(whole);
+}
+
+/**
+ * Rebuild a JSON object that was cut off mid-write: walk it, remember the last position where the
+ * structure was safely closable, and shut the open brackets there. Returns null if nothing complete
+ * survived — a partial answer is fine, an invented one is not.
+ */
+export function salvageTruncated(raw: string): any {
+  const s = String(raw || '');
+  const stack: string[] = [];
+  let inStr = false;
+  let esc = false;
+  let safeEnd = -1;
+  let safeDepth: string[] = [];
+
+  for (let k = 0; k < s.length; k++) {
+    const ch = s[k];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{' || ch === '[') stack.push(ch === '{' ? '}' : ']');
+    else if (ch === '}' || ch === ']') stack.pop();
+    // After a complete element — a closed object/array, or the comma that follows one — the text so
+    // far can be closed off cleanly. Remember the newest such point.
+    if (ch === '}' || ch === ']' || ch === ',') {
+      safeEnd = ch === ',' ? k : k + 1;
+      safeDepth = [...stack];
+    }
+  }
+  if (safeEnd <= 0) return null;
+
+  const closed = s.slice(0, safeEnd) + safeDepth.reverse().join('');
+  try {
+    return JSON.parse(closed);
+  } catch {
+    return null;
+  }
 }
 
 /**

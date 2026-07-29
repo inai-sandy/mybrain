@@ -55,3 +55,46 @@ describe('looksLikeRawJsonBlob (backfill detector)', () => {
     expect(looksLikeRawJsonBlob('')).toBe(false);
   });
 });
+
+/**
+ * BEA-1163. On 28 July the owner's day-close deep read failed three times. The log shows why: the
+ * reply hit its 2500-token ceiling and was cut off mid-JSON, so the parser returned null and a
+ * reply containing most of his day was thrown away because the LAST item was incomplete.
+ */
+describe('a reply cut off at the token ceiling (BEA-1163)', () => {
+  it('keeps every complete item when the last one is unfinished', () => {
+    const cut = '{"done":[{"title":"Called the CA"},{"title":"Sent the sheet"},{"title":"Half a th';
+    const r = looseJsonParse(cut);
+    expect(r).toBeTruthy();
+    expect(r.done.map((d: any) => d.title)).toEqual(['Called the CA', 'Sent the sheet']);
+  });
+
+  it('keeps earlier sections when it runs out partway through a later one', () => {
+    const cut = '{"done":[{"title":"A"}],"todos":[{"title":"B"}],"emotions":{"feeling":"tir';
+    const r = looseJsonParse(cut);
+    expect(r.done[0].title).toBe('A');
+    expect(r.todos[0].title).toBe('B');
+  });
+
+  it('is not fooled by a brace inside their own words', () => {
+    const cut = '{"done":[{"title":"Fixed the {weird} label"},{"title":"cut off he';
+    const r = looseJsonParse(cut);
+    expect(r.done).toHaveLength(1);
+    expect(r.done[0].title).toBe('Fixed the {weird} label');
+  });
+
+  it('returns nothing when nothing complete survived — never invents an item', () => {
+    expect(looseJsonParse('{"done":[{"title":"only a fragm')).toBeNull();
+    expect(looseJsonParse('{"do')).toBeNull();
+  });
+
+  it('a whole reply is still parsed normally, untouched', () => {
+    const ok = '{"done":[{"title":"A"}],"todos":[]}';
+    expect(looseJsonParse(ok)).toEqual({ done: [{ title: 'A' }], todos: [] });
+  });
+
+  it('still repairs raw newlines inside a value, as before', () => {
+    const messy = '{"summary":"line one\nline two"}';
+    expect(looseJsonParse(messy).summary).toBe('line one\nline two');
+  });
+});
