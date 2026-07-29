@@ -149,27 +149,7 @@ function WaitingCard({ w, focus, onAnswered }: { w: WaitItem; focus: boolean; on
 }
 
 /** One live run with its readable last steps. */
-function RunningCard({ r }: { r: RunningItem }) {
-  const nav = useNavigate();
-  return (
-    <button onClick={() => nav(runUrl(r.source, r.id))} className="w-full rounded-2xl border border-zinc-200 bg-white p-4 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center gap-2.5">
-        <span className="relative flex h-2.5 w-2.5 shrink-0"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" /></span>
-        <span className="min-w-0 truncate text-sm font-semibold">{r.title}</span>
-        <span className="ml-auto shrink-0 text-xs tabular-nums text-zinc-400">{elapsed(r.startedAt)}</span>
-      </div>
-      {r.steps.length > 0 && (
-        <div className="mt-2.5 space-y-1 rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-950/60">
-          {r.steps.map((s, i) => (
-            <div key={i} className={'truncate text-xs ' + (i === r.steps.length - 1 ? 'text-zinc-700 dark:text-zinc-200' : 'text-zinc-400')}>{s.label}</div>
-          ))}
-        </div>
-      )}
-    </button>
-  );
-}
-
-/** Paste a GitHub link → agents found there + the install plan (BEA-1081). Nothing installs without the tap. */
+// RunningCard removed with the "Running now" strip (BEA-1181) — History shows live runs.
 function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void; onClose: () => void }) {
   const toast = useToast();
   const [url, setUrl] = useState('');
@@ -587,20 +567,19 @@ export function Agents() {
   }
 
   const waiting = home?.waiting || [];
-  const running = home?.running || [];
-  const landed = home?.landed || [];
+  // running / landed are no longer shown here (BEA-1181) — History owns them.
   const agents = home?.agents || null;
   // Areas (BEA-1098): the home now shows agents-as-areas; jobs live inside each area's page.
   const [areasList, setAreasList] = useState<any[] | null>(null);
   const loadAreas = useCallback(() => fetch('/api/agent/areas').then((r) => r.json()).then((d) => setAreasList(Array.isArray(d) ? d : [])).catch(() => setAreasList([])), []);
   useEffect(() => { loadAreas(); }, [loadAreas]);
 
+  // The page is about your agents now (BEA-1181), so the subtitle counts THEM — not today's runs.
   const greet = home
     ? [
-        waiting.length ? `${waiting.length} thing${waiting.length > 1 ? 's' : ''} need${waiting.length > 1 ? '' : 's'} you` : null,
-        running.length ? `${running.length} running` : null,
-        landed.length ? `${landed.length} landed today` : null,
-      ].filter(Boolean).join(' · ') || 'All quiet — your agents are on standby.'
+        areasList ? `${areasList.length} agent${areasList.length === 1 ? '' : 's'}` : null,
+        waiting.length ? `${waiting.length} need${waiting.length > 1 ? '' : 's'} you` : null,
+      ].filter(Boolean).join(' · ') || 'Your agents live here.'
     : ' ';
 
   return (
@@ -689,51 +668,6 @@ export function Agents() {
         </button>
       )}
 
-      {/* ⚡ Needs you — attention first (BEA-1066 + BEA-1087 + BEA-1091) */}
-      {waiting.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400"><PauseCircle className="h-4 w-4" />Needs you<span className="rounded-full bg-amber-100 px-1.5 text-xs font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span></h2>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {waiting.map((w) => (
-              <WaitingCard key={w.waitpointId || w.runId} w={w} focus={!!focusId && (w.waitpointId === focusId || w.runId === focusId)} onAnswered={loadHome} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* 🟢 Running now */}
-      {running.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-500"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" /></span>Running now<span className="text-xs font-normal text-zinc-400">· {running.length}</span></h2>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {running.map((r) => <RunningCard key={r.id} r={r} />)}
-          </div>
-        </section>
-      )}
-
-      {/* 📬 Landed today — only when something actually landed (no empty-state clutter, BEA-1091) */}
-      {landed.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-zinc-500">Landed today<span className="ml-1 text-xs font-normal text-zinc-400">· {landed.length}</span></h2>
-          </div>
-          <ul className="space-y-2">
-            {landed.map((r) => (
-              <li key={r.source + r.id}>
-                <button onClick={() => nav(runUrl(r.source, r.id))} className="group flex w-full items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{r.title}</div>
-                    <div className="text-xs text-zinc-500">{timeAgo(r.endedAt)}{r.source === 'flow' ? ' · flow' : ''}{r.status === 'failed' && r.error ? ` — ${r.error.slice(0, 60)}` : ''}</div>
-                  </div>
-                  {r.outputDocId && <FileText className="h-4 w-4 shrink-0 text-zinc-400" />}
-                  <StatusBadge status={r.status} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {/* 🗂 Your agents — the shelf (BEA-1083 + BEA-1087 + BEA-1091) */}
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -802,6 +736,21 @@ export function Agents() {
           );
         })()}
       </section>
+      {/* ⚡ Needs you — kept below the grid (BEA-1181): a job waiting on your answer is a blocker,
+          so it must never be hidden, but the agents themselves are what this page is for.
+          "Running now" and "Landed today" were removed — they live in History. */}
+      {waiting.length > 0 && (
+        <section className="space-y-2">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-600 dark:text-amber-400"><PauseCircle className="h-4 w-4" />Needs you<span className="rounded-full bg-amber-100 px-1.5 text-xs font-bold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">{waiting.length}</span></h2>
+          <div className="grid gap-3 lg:grid-cols-2">
+            {waiting.map((w) => (
+              <WaitingCard key={w.waitpointId || w.runId} w={w} focus={!!focusId && (w.waitpointId === focusId || w.runId === focusId)} onAnswered={loadHome} />
+            ))}
+          </div>
+        </section>
+      )}
+
+
     </div>
   );
 }
