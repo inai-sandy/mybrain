@@ -45,6 +45,19 @@ export class ClaimsService {
     if (open) {
       return this.prisma.taskClaim.update({ where: { id: open.id }, data: { quote, source, contactId: input.contactId || open.contactId } });
     }
+    // A decision sticks to the MESSAGE, not just to the row (BEA-1186). The chase agent re-reads the
+    // contact's latest inbound on every pass, so without this the same old "yes it's done" was
+    // re-claimed after the owner had already ruled on it — items he cleared kept coming back.
+    const already = await this.prisma.taskClaim.findMany({
+      where: { taskId: input.taskId, status: { in: ['confirmed', 'rejected'] } },
+      select: { quote: true, contactId: true },
+      take: 50,
+    });
+    const same = (a: string, b: string) => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (already.some((c) => same(c.quote || '', quote) && (c.contactId || null) === (input.contactId || null))) {
+      this.log.log(`claim on "${task.title}" ignored — already decided on these exact words`);
+      return null;
+    }
     const row = await this.prisma.taskClaim.create({ data: { taskId: input.taskId, contactId: input.contactId || null, quote, source } });
     this.log.log(`claim on "${task.title}" — waiting for the owner`);
     return row;
