@@ -5,6 +5,9 @@ import { HermesBridgeService } from '../hermes/hermes-bridge.service';
 import { FlowsService } from '../flows/flows.service';
 import { EmoCardsService } from './emo-cards.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { AgentAreasService } from '../agent/agent-areas.service';
+import { FlowRunnerService } from '../flows/flows-runner.service';
+import { ToolCatalogService } from '../tools/tool-catalog.service';
 
 /**
  * EMO Research lanes — the research ladder's two upper tiers:
@@ -22,6 +25,10 @@ export class EmoResearchService {
     private readonly agent: AgentService,
     private readonly bridge: HermesBridgeService,
     private readonly prompts: PromptsService,
+    // Optional + LAST — spec files construct positionally.
+    private readonly areas?: AgentAreasService,
+    private readonly runner?: FlowRunnerService,
+    private readonly catalog?: ToolCatalogService,
   ) {}
 
   private isQuick(text: string): boolean {
@@ -38,12 +45,10 @@ export class EmoResearchService {
       await this.runQuick(cardId, text);
       return;
     }
-    // Deep tier (default): clarify first, then build the flow once answered.
-    if (!card.needsAnswer && card.status !== 'needs_you') {
-      await this.clarify(cardId, text);
-      return;
-    }
-    await this.buildFlow(cardId, card, true);
+    // Deep tier (default, BEA-1175): NO questions. The Research Agent already holds how the owner
+    // likes research done — asking "any angle or time frame?" every single time was asking twice.
+    // It picks its own tools, builds the flow under the Research Agent, and runs it.
+    await this.runUnderResearchAgent(cardId, text);
   }
 
   // ---- Quick research (BEA-871) --------------------------------------------------------------
@@ -76,7 +81,8 @@ export class EmoResearchService {
     if (!card || card.lane !== 'research') return;
     if ((card.links || []).some((l: any) => l.kind === 'flow')) return; // already went deep
     const base = card.rawTranscript || card.summary || '';
-    const flow = await this.createResearchFlow(base);
+    // Same lane, same rule (BEA-1175): never a standalone flow. Go deeper adopts the Research Agent.
+    const flow = await this.createResearchFlow(base, await this.researchJobFor(base));
     if (!flow) return;
     await this.cards.update(cardId, {
       links: [...(card.links || []), { kind: 'flow', id: flow.flowId, label: `Open deep flow: ${flow.topic}` }],
@@ -84,30 +90,135 @@ export class EmoResearchService {
     }).catch(() => undefined);
   }
 
+  // ---- Voice research, hands-off (BEA-1175) ----------------------------------------------------
+
+  /** The kit a spoken research gets when nothing smarter is available. */
+  private static DEFAULT_KIT = ['web_search', 'web_read', 'search_brain', 'save_document'];
+
+  /** Choose the tools for a spoken topic — from the connected catalog, never anything else. */
+  private async pickTools(text: string): Promise<string[]> {
+    const cat = await this.catalog?.catalog().catch(() => null);
+    const connected = (cat?.tools || []).filter((t: any) => t.kind === 'tool' && t.connected);
+    if (!connected.length) return [];
+    const ok = new Set(connected.map((t: any) => t.id));
+    const fallback = EmoResearchService.DEFAULT_KIT.filter((id) => ok.has(id));
+    try {
+      const list = connected.map((t: any) => `- ${t.id}: ${t.name} — ${t.description}`).join('\n');
+      const out = await this.llm.complete(
+        `Pick the tools an assistant needs to research this properly. Use ONLY ids from the list.\n\nWhat was asked:\n"${text.slice(0, 500)}"\n\nTools:\n${list}\n\nReply with ONLY a JSON array of ids, e.g. ["web_search","save_document"]. Include a way to search, a way to read sources, and a way to save the result unless the request clearly does not need it.`,
+        200,
+        'emo-research-tools',
+      );
+      const m = (out || '').match(/\[[\s\S]*\]/);
+      const ids = m ? JSON.parse(m[0]) : [];
+      const picked = (Array.isArray(ids) ? ids : []).map((x: any) => String(x)).filter((x: string) => ok.has(x));
+      return picked.length ? picked : fallback;
+    } catch { return fallback; }
+  }
+
+  /**
+   * Speak it, and it is done. Lands in the Research Agent as a voice job, picks its own tools,
+   * draws a flow and RUNS it — no question is ever asked (BEA-1175).
+   */
+  private async runUnderResearchAgent(cardId: string, text: string): Promise<void> {
+    if (!this.areas || !this.runner) {
+      // Should be impossible — EmoModule provides both. If a future refactor breaks that export we
+      // fall back to the old standalone flow, which violates "never standalone", so say so loudly.
+      this.log.warn('voice research fell back to a standalone flow — AgentAreasService/FlowRunnerService not injected');
+      await this.buildFlow(cardId, await this.cards.get(cardId), true);
+      return;
+    }
+    try {
+      const { id: areaId, created: madeAgent } = await this.areas.ensureResearchAgent();
+      const [{ topic, question }, tools] = await Promise.all([this.briefFor(text), this.pickTools(text)]);
+
+      // The job first, so the flow can be planned INSIDE its toolbox in one pass.
+      const job: any = await this.agent.createAgent({
+        areaId,
+        name: topic.slice(0, 120),
+        icon: '🔬',
+        description: 'Asked for by voice',
+        prompt: question,
+        defaultDepth: 'deep',
+        origin: 'voice',
+        tools,
+      } as any);
+
+      const jobLink = { kind: 'agent', id: job.id, label: `Open the job: ${topic}` };
+      const madeNote = madeAgent ? 'I set up a Research Agent for you and filed this under it.' : 'Filed under your Research Agent.';
+
+      const flow: any = await this.flows.create({ name: `${topic} flow`, question, agentId: job.id }).catch(() => null);
+      const brief = flow?.id ? { flowId: flow.id as string } : null;
+      if (!brief) {
+        // The job is real; only the picture failed. Land the card somewhere honest rather than
+        // leaving it "cooking" forever with nothing coming.
+        await this.cards.update(cardId, {
+          summary: `Research job ready: ${topic}`,
+          detail: `${madeNote} I couldn't draw its steps, so it hasn't started — open the job and press Run.\n\n> ${question}`,
+          links: [jobLink],
+          status: 'done',
+        }).catch(() => undefined);
+        return;
+      }
+      await this.flows.planAndSave(brief.flowId).catch(() => undefined);
+
+      await this.cards.update(cardId, {
+        summary: `Researching: ${topic}`,
+        detail: `${madeNote} Running now — no questions asked.\n\n> ${question}`,
+        links: [jobLink, { kind: 'flow', id: brief.flowId, label: 'See the steps' }],
+        status: 'cooking',
+      }).catch(() => undefined);
+
+      // Full depth, as the owner chose: it runs itself, nothing to press.
+      const started = await this.runner.start(brief.flowId).catch((e: any) => { this.log.warn(`voice research run failed: ${e?.message || e}`); return null; });
+      await this.cards.update(cardId, {
+        status: 'done',
+        summary: started?.runId ? `Researching: ${topic}` : `Research job ready: ${topic}`,
+        detail: started?.runId
+          ? `${madeNote} Running now — no questions asked.\n\n> ${question}`
+          : `${madeNote} It could not start — open the job and press Run.\n\n> ${question}`,
+        links: [jobLink, ...(started?.runId ? [{ kind: 'flowRun', id: started.runId, label: 'Watch it work' }] : [{ kind: 'flow', id: brief.flowId, label: 'See the steps' }])],
+      }).catch(() => undefined);
+    } catch (e: any) {
+      this.log.warn(`voice research failed (${cardId}): ${e?.message || e}`);
+      await this.cards.update(cardId, { status: 'needs_you', needsQuestion: 'I could not set that research up. Reword the topic?' }).catch(() => undefined);
+    }
+  }
+
   // ---- Deep research (BEA-870) ---------------------------------------------------------------
 
-  private async clarify(cardId: string, topic: string): Promise<void> {
-    let questions: string[] = [];
-    let options: string[] = [];
+  // The old clarify() step is GONE (BEA-1175). It asked "any angle, depth, or time frame?" on every
+  // single spoken research, even though the Research Agent already holds how the owner likes
+  // research done — it was asking the same question twice. Its prompt template `emo.researchClarify`
+  // is now unused too.
+
+  /** Topic + a proper research question from what was said. Creates nothing. */
+  private async briefFor(base: string): Promise<{ topic: string; question: string }> {
+    let topic = base.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').slice(0, 60).trim() || 'Research';
+    let question = base;
     try {
-      const clarifyTmpl = await this.prompts.get('emo.researchClarify');
-      const raw = await this.llm.complete(
-        clarifyTmpl.replace(/\{\{topic\}\}/g, topic),
-        300, 'emo-research-clarify',
-      );
+      const briefTmpl = await this.prompts.get('emo.researchBrief');
+      const raw = await this.llm.complete(briefTmpl.replace(/\{\{request\}\}/g, base), 300, 'emo-research-brief');
       const j = JSON.parse((raw || '').match(/\{[\s\S]*\}/)?.[0] || '{}');
-      questions = Array.isArray(j.questions) ? j.questions.map((x: any) => String(x)).filter(Boolean).slice(0, 3) : [];
-      options = Array.isArray(j.options) ? j.options.map((x: any) => String(x)).filter(Boolean).slice(0, 5) : [];
-    } catch { /* generic fallback */ }
-    await this.cards.update(cardId, {
-      needsQuestion: questions.length ? questions.join('\n') : 'Any angle, depth, or time frame to focus the research?',
-      needsOptions: options.length ? options : ['Broad overview', 'Just the essentials'],
-      status: 'needs_you',
-    }).catch(() => undefined);
+      if (j.topic) topic = String(j.topic).slice(0, 60).trim();
+      if (j.question) question = String(j.question).trim();
+    } catch { /* keep fallbacks */ }
+    return { topic, question };
+  }
+
+  /** A job under the Research Agent to hang a flow off — null if areas aren't available. */
+  private async researchJobFor(base: string): Promise<string | null> {
+    if (!this.areas) return null;
+    try {
+      const { id: areaId } = await this.areas.ensureResearchAgent();
+      const topic = base.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').slice(0, 60).trim() || 'Research';
+      const job: any = await this.agent.createAgent({ areaId, name: topic.slice(0, 120), icon: '🔬', description: 'Asked for by voice', prompt: base, defaultDepth: 'deep', origin: 'voice' } as any);
+      return job?.id || null;
+    } catch { return null; }
   }
 
   /** Create + pre-plan (but do NOT run) a research flow from a brief. Returns {flowId, topic}. */
-  private async createResearchFlow(base: string): Promise<{ flowId: string; topic: string; question: string } | null> {
+  private async createResearchFlow(base: string, agentId?: string | null): Promise<{ flowId: string; topic: string; question: string } | null> {
     let topic = base.replace(/^.*?\bresearch\b\s*(on|about|into)?\s*/i, '').slice(0, 60).trim() || 'Research';
     let question = base;
     try {
@@ -121,7 +232,7 @@ export class EmoResearchService {
       if (j.question) question = String(j.question).trim();
     } catch { /* keep fallbacks */ }
     try {
-      const flow: any = await this.flows.create({ name: `Research: ${topic}`, question });
+      const flow: any = await this.flows.create({ name: `Research: ${topic}`, question, ...(agentId ? { agentId } : {}) });
       await this.flows.planAndSave(flow.id).catch((e) => this.log.warn(`planAndSave failed: ${e?.message || e}`));
       return { flowId: flow.id, topic, question };
     } catch (e: any) {

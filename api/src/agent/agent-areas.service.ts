@@ -28,15 +28,15 @@ export class AgentAreasService {
    * The one permanent Research Agent (BEA-1110) — the collector for one-time research jobs from
    * bookmarks, voice, anywhere. Found by name (never duplicated), created on first need.
    */
-  async ensureResearchAgent(): Promise<{ id: string }> {
+  async ensureResearchAgent(): Promise<{ id: string; created?: boolean }> {
     const rows = await (this.prisma as any).agentArea.findMany({ select: { id: true, name: true } });
     const hit = rows.find((r: any) => String(r.name).trim().toLowerCase() === 'research agent');
-    if (hit) return { id: hit.id };
+    if (hit) return { id: hit.id, created: false };
     const area = await this.create({
       name: 'Research Agent', icon: '🔬', color: '#22d3ee',
       description: 'Deep-dives you ask for — from bookmarks, voice, anywhere. One report per job.',
     });
-    return { id: area.id };
+    return { id: area.id, created: true };
   }
 
   // ---- The NEW-JOB chat (BEA-1170) --------------------------------------------------------------

@@ -5,6 +5,7 @@ import { HermesModule } from '../hermes/hermes.module';
 import { TasksModule } from '../tasks/tasks.module';
 import { ContactsModule } from '../contacts/contacts.module';
 import { DailyModule } from '../daily/daily.module';
+import { ToolCatalogModule } from '../tools/tool-catalog.module';
 import { FlowsModule } from '../flows/flows.module';
 import { IdeasModule } from '../ideas/ideas.module';
 import { NotesModule } from '../notes/notes.module';
@@ -32,7 +33,7 @@ import { EmoController } from './emo.controller';
 
 /** EMO — Voice → Cards. Storage/feed/router/capture + lanes: Search, Tasks, Reminders, Story, Meetings, Research. */
 @Module({
-  imports: [BriefingsModule, VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule],
+  imports: [BriefingsModule, VoiceModule, AgentModule, HermesModule, TasksModule, ContactsModule, DailyModule, FlowsModule, ExploreModule, MemoryModule, IdeasModule, NotesModule, ToolCatalogModule],
   controllers: [EmoController],
   providers: [EmoCardsService, EmoRouterService,
     EmoCloseService, EmoBriefService, EmoCaptureService, EmoSearchService, EmoTaskService, EmoIdeaService, EmoReminderService, EmoStoryService, EmoMeetingService, EmoResearchService, EmoAskService, EmoTalkService, EmoSettingsService, EmoDeviceService, EmoAgentLaneService],

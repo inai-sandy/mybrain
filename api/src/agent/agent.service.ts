@@ -253,7 +253,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[] }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
@@ -272,6 +272,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         defaultDepth: this.normDepth(input.defaultDepth),
         collectionId: input.collectionId ?? null,
         enabled: input.enabled ?? true,
+        // Where it came from (BEA-1175/1176) — chat, voice, or an import.
+        origin: ['chat', 'voice', 'import'].includes(String(input.origin)) ? String(input.origin) : 'chat',
+        ...(Array.isArray(input.tools) && input.tools.length ? { tools: JSON.stringify(input.tools.filter((t) => typeof t === 'string').slice(0, 60)) } : {}),
         ...((input as any).areaId ? { areaId: (input as any).areaId } : {}),
       },
     });

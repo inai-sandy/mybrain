@@ -11,26 +11,84 @@ function make(opts: { card: any; brief?: string; clarify?: string; result?: stri
   const flows: any = { create: jest.fn(async () => ({ id: 'f1' })), planAndSave: jest.fn(async () => ({ id: 'f1' })) };
   const agent: any = { createRun: jest.fn(async () => ({ id: 'run1' })), getRun: jest.fn(async () => ({ resultText: opts.result ?? '## CCTV\n- finding [src]', status: 'done' })) };
   const bridge: any = { execute: jest.fn(async () => undefined) };
-  return { svc: new EmoResearchService(llm, cards, flows, agent, bridge, realPrompts as any), cards, flows, agent, bridge, updates };
+  // BEA-1175: voice research lands under the Research Agent, picks tools, and runs itself.
+  const areas: any = { ensureResearchAgent: jest.fn(async () => ({ id: 'ar1' })) };
+  const runner: any = { start: jest.fn(async () => ({ runId: 'fr1' })) };
+  const catalog: any = { catalog: async () => ({ groups: [], tools: [
+    { id: 'web_search', name: 'Web search', group: 'Web', description: 'web', connected: true, kind: 'tool' },
+    { id: 'save_document', name: 'Save to Documents', group: 'Output', description: 'save', connected: true, kind: 'tool' },
+  ] }) };
+  agent.createAgent = jest.fn(async (i: any) => ({ id: 'job1', name: i.name }));
+  agent.updateAgent = jest.fn(async () => ({}));
+  flows.update = jest.fn(async () => ({}));
+  return { svc: new EmoResearchService(llm, cards, flows, agent, bridge, realPrompts as any, areas, runner, catalog), cards, flows, agent, bridge, areas, runner, updates };
 }
 
 describe('EmoResearchService — Deep (BEA-870)', () => {
-  it('clarifies first on a fresh deep-research card', async () => {
-    const { svc, flows, updates } = make({ card: { id: 'c1', lane: 'research', rawTranscript: 'research the cctv market', summary: 'Research: CCTV', status: 'cooking', needsAnswer: null } });
+  const freshCard = { id: 'c1', lane: 'research', rawTranscript: 'research the cctv market', summary: 'Research: CCTV', status: 'cooking', needsAnswer: null };
+
+  it('asks NOTHING — the Research Agent already knows how he likes research done (BEA-1175)', async () => {
+    const { svc, updates } = make({ card: freshCard });
     await svc.handle('c1');
-    expect(flows.create).not.toHaveBeenCalled();
-    expect(updates[0]).toMatchObject({ status: 'needs_you' });
+    expect(updates.some((u) => u.status === 'needs_you')).toBe(false);
+    expect(updates.some((u) => u.needsQuestion)).toBe(false);
   });
 
-  it('builds & saves a flow (does NOT run it) once answered', async () => {
-    const { svc, flows, updates } = make({ card: { id: 'c1', lane: 'research', rawTranscript: 'research the cctv market', summary: 'Research: CCTV', status: 'needs_you', needsAnswer: 'competitors' } });
+  it('files the job under the Research Agent, marked as coming from voice', async () => {
+    const { svc, areas, agent } = make({ card: freshCard });
     await svc.handle('c1');
-    expect(flows.create).toHaveBeenCalled();
+    expect(areas.ensureResearchAgent).toHaveBeenCalled();
+    const created = agent.createAgent.mock.calls[0][0];
+    expect(created.areaId).toBe('ar1');
+    expect(created.origin).toBe('voice');
+    expect(created.defaultDepth).toBe('deep'); // full depth, as the owner chose
+  });
+
+  it('picks its own tools from the connected catalog', async () => {
+    const { svc, agent } = make({ card: freshCard });
+    await svc.handle('c1');
+    const created = agent.createAgent.mock.calls[0][0];
+    expect(Array.isArray(created.tools)).toBe(true);
+    expect(created.tools.length).toBeGreaterThan(0);
+    for (const t of created.tools) expect(['web_search', 'save_document']).toContain(t); // never an unconnected one
+  });
+
+  it('attaches the flow to the job and RUNS it — nothing to press', async () => {
+    const { svc, flows, runner, updates } = make({ card: freshCard });
+    await svc.handle('c1');
+    expect(flows.create).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'job1' }));
     expect(flows.planAndSave).toHaveBeenCalledWith('f1');
+    expect(runner.start).toHaveBeenCalledWith('f1');
     const done = updates[updates.length - 1];
     expect(done.status).toBe('done');
-    expect(done.summary).toBe('Research flow ready: CCTV market');
-    expect(done.links[0]).toMatchObject({ kind: 'flow', id: 'f1' });
+    expect(done.links.some((l: any) => l.kind === 'agent' && l.id === 'job1')).toBe(true);
+  });
+
+  it('never leaves the card stuck mid-flight when the flow cannot be built', async () => {
+    // A card left on "cooking" is invisible-broken: nothing ever revisits it, so the owner waits
+    // for a result that is never coming.
+    const { svc, flows, updates } = make({ card: freshCard });
+    flows.create.mockRejectedValueOnce(new Error('database is locked'));
+    await svc.handle('c1');
+    const last = updates[updates.length - 1];
+    expect(last.status).toBe('done');
+    expect(last.detail).toMatch(/press Run/i);
+    expect(last.links.some((l: any) => l.kind === 'agent')).toBe(true); // the job is real, so link to it
+  });
+
+  it('says it made a Research Agent when there was not one', async () => {
+    const { svc, areas, updates } = make({ card: freshCard });
+    areas.ensureResearchAgent.mockResolvedValueOnce({ id: 'ar1', created: true });
+    await svc.handle('c1');
+    expect(updates[updates.length - 1].detail).toMatch(/set up a Research Agent/i);
+  });
+
+  it('says so plainly if it could not start, instead of pretending', async () => {
+    const { svc, runner, updates } = make({ card: freshCard });
+    runner.start.mockRejectedValueOnce(new Error('engine down'));
+    await svc.handle('c1');
+    const done = updates[updates.length - 1];
+    expect(done.detail).toMatch(/could not start/i);
   });
 });
 
