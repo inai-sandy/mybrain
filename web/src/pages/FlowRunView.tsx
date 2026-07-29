@@ -153,9 +153,28 @@ export function FlowRunView() {
       )}
       {branches.length === 0 && loose.length === 0 && run.status === 'running' && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Starting…</div>}
 
+      {/* What it is doing RIGHT NOW (BEA-1192). A long run used to show a spinner and nothing else,
+          which reads exactly like a broken one — the reason a healthy run was reported as stuck. */}
+      {run.status === 'running' && (run.terminal || []).length > 0 && (() => {
+        const lines = run.terminal as any[];
+        const last = String(lines[lines.length - 1]?.text || '').trim();
+        const searches = lines.filter((l: any) => String(l.text || '').includes('Searched')).length;
+        return (
+          <div className="flex items-start gap-2 rounded-2xl border border-blue-200 bg-blue-50/60 px-3 py-2 text-sm dark:border-blue-500/30 dark:bg-blue-500/10">
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-blue-500" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-blue-900 dark:text-blue-200">{last || 'Working…'}</span>
+              <span className="mt-0.5 block text-xs text-blue-700/70 dark:text-blue-300/70">
+                {lines.length} step{lines.length === 1 ? '' : 's'} so far{searches > 0 ? ` · ${searches} search${searches === 1 ? '' : 'es'}` : ''} · this can take several minutes
+              </span>
+            </span>
+          </div>
+        );
+      })()}
+
       {/* Terminal — the raw engine log, tucked away */}
       {(run.terminal?.length > 0 || run.status === 'running') && (
-        <details open={false} className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
+        <details open={run.status === 'running'} className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
           <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-zinc-400 [&::-webkit-details-marker]:hidden"><TerminalIcon className="h-3.5 w-3.5" />Terminal{run.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-blue-400" />}<span className="ml-auto text-zinc-600">{(run.terminal || []).length} lines</span></summary>
           <div className="max-h-72 overflow-auto border-t border-zinc-800 px-3 py-2 font-mono text-xs leading-relaxed text-zinc-300">
             {(run.terminal || []).map((l: any, i: number) => <div key={i} className="whitespace-pre-wrap">{l.text}</div>)}
