@@ -1,24 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Play, Sparkles, FileText, CheckCircle2, RotateCcw, MessageSquare, Send, Save, Check, Settings as GearIcon, Workflow, Clock, ListChecks, History as HistoryIcon, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Loader2, Play, Sparkles, FileText, CheckCircle2, RotateCcw, MessageSquare, Send, Save, Check, X, Settings as GearIcon, Workflow, Clock, ListChecks, History as HistoryIcon } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { DictateButton } from '../ui/DictateButton';
 import { ToolPicker, useCatalog } from '../ui/ToolPicker';
+import { Sheet } from '../ui/Sheet';
+import { FlowPanel, EvalsPanel, RunsPanel } from './AgentJobPanels';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { SchedulePicker, schedText } from '../ui/SchedulePicker';
 import { StatusBadge, timeAgo } from './Agents';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
-type Mode = 'run' | 'chat' | 'settings';
+type Mode = 'flow' | 'chat' | 'evals' | 'runs';
 
 /**
- * One home per agent (BEA-1090): three clearly-labelled modes — ▶ Run · 💬 Chat · ⚙ Settings.
- * Run is the agent's AI-designed mini-app (BEA-1082); Chat changes the agent in plain words with a
- * confirm-first diff (BEA-1065); Settings holds the task, outcome, skills, schedule and links out to
- * the deeper Flow · Tests · History views. No hidden workshop, no naked icons.
+ * ONE page per job (BEA-1169), four tabs: 💬 Chat · Flow · Checks · History.
+ *
+ * It used to be two pages — this one, plus a separate "workshop" you reached by scrolling to the
+ * bottom and following a link. Everything about a job now lives here:
+ *  • Chat   — change it in plain words, confirm-first (BEA-1065)
+ *  • Flow   — its AI-designed run screen (BEA-1082) AND the picture of its steps; Run lives here
+ *  • Checks — what a good result must contain, graded
+ *  • History— every run with its grade
+ * Settings (task, outcome, skills, schedule, tools, move, delete) is a sheet off the header gear,
+ * so the four tabs stay about the work rather than the plumbing.
  */
 export function AgentApp() {
   const { id } = useParams();
@@ -44,9 +52,13 @@ export function AgentApp() {
   const [runModels, setRunModels] = useState<{ value: string; label: string }[] | null>(null); // per-job engine model (BEA-1106)
   const [moveTo, setMoveTo] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const initialMode = (params.get('mode') as Mode) || 'run';
-  const [mode, setModeState] = useState<Mode>(['run', 'chat', 'settings'].includes(initialMode) ? initialMode : 'run');
-  function setMode(m: Mode) { setModeState(m); const p = new URLSearchParams(params); if (m === 'run') p.delete('mode'); else p.set('mode', m); setParams(p, { replace: true }); }
+  // The tab lives in the URL so Back and refresh land where you were (BEA-1169). `run` and
+  // `settings` are the old names — kept so existing links and bookmarks still work.
+  const raw = (params.get('mode') || params.get('tab') || '').toLowerCase();
+  const initialMode = (raw === 'run' ? 'flow' : raw === 'settings' ? 'flow' : raw) as Mode;
+  const [mode, setModeState] = useState<Mode>((['flow', 'chat', 'evals', 'runs'] as string[]).includes(initialMode) ? initialMode : 'flow');
+  const [settingsOpen, setSettingsOpen] = useState(raw === 'settings');
+  function setMode(m: Mode) { setModeState(m); const p = new URLSearchParams(params); p.delete('tab'); if (m === 'flow') p.delete('mode'); else p.set('mode', m); setParams(p, { replace: true }); }
 
   async function load() {
     const d = await fetch(`/api/agent/agents/${id}`).then((r) => r.json()).catch(() => null);
@@ -170,9 +182,10 @@ export function AgentApp() {
   const cfgInp = 'w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
 
   const MODES: { k: Mode; label: string; icon: any }[] = [
-    { k: 'run', label: 'Run', icon: Play },
     { k: 'chat', label: 'Chat', icon: MessageSquare },
-    { k: 'settings', label: 'Settings', icon: GearIcon },
+    { k: 'flow', label: 'Flow', icon: Workflow },
+    { k: 'evals', label: 'Checks', icon: ListChecks },
+    { k: 'runs', label: 'History', icon: HistoryIcon },
   ];
 
   return (
@@ -185,6 +198,7 @@ export function AgentApp() {
           <h1 className="truncate text-xl font-bold">{a.name}</h1>
           <p className="truncate text-sm text-zinc-500">{a.description || a.scheduleText || 'Your agent'}</p>
         </div>
+        <button onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings" className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><GearIcon className="h-5 w-5" /></button>
       </header>
 
       {/* labelled mode switch — no naked icons, nothing hidden */}
@@ -195,14 +209,14 @@ export function AgentApp() {
           return (
             <button key={m.k} onClick={() => setMode(m.k)}
               className={'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ' + (on ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>
-              <Icon className="h-4 w-4" style={on && m.k === 'run' ? { color } : undefined} />{m.label}
+              <Icon className="h-4 w-4" style={on && m.k === 'flow' ? { color } : undefined} />{m.label}
             </button>
           );
         })}
       </div>
 
-      {/* ===================== RUN ===================== */}
-      {mode === 'run' && (<>
+      {/* ============ FLOW — what it does, and running it ============ */}
+      {mode === 'flow' && (<>
         <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900" style={{ borderTop: `3px solid ${color}` }}>
           <div className="flex items-start justify-between gap-2">
             <h2 className="text-base font-semibold">{spec.headline}</h2>
@@ -314,7 +328,15 @@ export function AgentApp() {
             </section>
           );
         })()}
+        {/* The picture of the steps — this is the map you approve, and where you edit it. */}
+        <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} />
       </>)}
+
+      {/* ===================== CHECKS ===================== */}
+      {mode === 'evals' && <EvalsPanel id={id!} a={a} flow={flow} patch={patch} reload={load} />}
+
+      {/* ===================== HISTORY ===================== */}
+      {mode === 'runs' && <RunsPanel id={id!} flow={flow} />}
 
       {/* ===================== CHAT ===================== */}
       {mode === 'chat' && (
@@ -360,7 +382,13 @@ export function AgentApp() {
       )}
 
       {/* ===================== SETTINGS ===================== */}
-      {mode === 'settings' && (
+      {settingsOpen && (
+        <Sheet onClose={() => setSettingsOpen(false)} size="lg">{(closeSheet) => (
+          <div className="max-h-[86vh] space-y-4 overflow-y-auto p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold">Settings</h2>
+              <button onClick={closeSheet} className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+            </div>
         <div className="space-y-3">
           <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
             <label className="block text-xs font-medium text-zinc-500">What it does — the task it runs each time
@@ -504,22 +532,10 @@ export function AgentApp() {
             }} className="mt-2 rounded-lg border border-rose-300 px-3 py-1.5 text-sm font-medium text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:hover:bg-rose-500/10">Delete job</button>
           </section>
 
-          {/* Links out to the deeper views */}
-          <section className="rounded-2xl border border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-900">
-            {[
-              { icon: Workflow, label: 'Flow — the picture of its steps', right: flow ? `${(flow.graph?.nodes || []).length} blocks` : 'none yet', tab: 'Flow' },
-              { icon: ListChecks, label: 'Tests', right: `${(a.evals || []).length}`, tab: 'Evals' },
-              { icon: HistoryIcon, label: 'History', right: `${(runs || []).length} runs`, tab: 'Runs' },
-            ].map((row) => (
-              <button key={row.tab} onClick={() => nav(`/agent/agents/${id}?tab=${row.tab}`)} className="flex w-full items-center gap-3 border-t border-zinc-100 py-3 text-left text-sm first:border-t-0 dark:border-zinc-800">
-                <row.icon className="h-4 w-4 text-zinc-400" />
-                <span className="flex-1">{row.label}</span>
-                <span className="text-xs text-zinc-400">{row.right}</span>
-                <ChevronRight className="h-4 w-4 text-zinc-300 dark:text-zinc-600" />
-              </button>
-            ))}
-          </section>
-        </div>
+          {/* No links out any more — Flow, Checks and History are tabs on this page (BEA-1169). */}
+          </div>
+          </div>
+        )}</Sheet>
       )}
     </div>
   );
