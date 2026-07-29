@@ -646,6 +646,7 @@ model Agent {
   evals        String     @default("[]") // JSON [{id,input,lastVerdict,lastScore,lastRunId,lastRunAt}] — regression cases (BEA-642)
   autonomy     String     @default("cautious") // cautious | balanced | autopilot
   skills       String     @default("[]") // JSON string array of skill ids/names
+  tools        String     @default("[]") // JSON string array of catalog tool ids this job may use (BEA-1168); empty = inherit the agent's toolbox
   schedule     String? // JSON { every: day|weekday|week|hour, at?: "HH:MM", dow?: 0-6 }; null = manual only
   scheduleText String? // human sentence ("every weekday 7am")
   lastFiredKey String? // "<dayKey>:<HH:MM>" of the last scheduled fire — dedup so a schedule fires once

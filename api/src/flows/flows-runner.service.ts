@@ -292,6 +292,11 @@ export class FlowRunnerService implements OnModuleInit {
     this.gens.set(runId, gen);
     const stale = () => this.gens.get(runId) !== gen;
 
+    // The toolbox this flow's job may use (BEA-1168). null = nobody has picked yet, so nothing is
+    // blocked. This is the HARD half of the toolbox: a step whose tool is not on the list does not
+    // run, whatever ended up on the canvas.
+    const allowed = await this.allowedFor(flow);
+
     const graph = this.parse(flow.graph);
     const nodes = new Map<string, any>((graph.nodes || []).map((n: any) => [n.id, n]));
     const incoming = new Map<string, string[]>();
@@ -387,7 +392,7 @@ export class FlowRunnerService implements OnModuleInit {
           let output = '';
           let lastErr: any = null;
           for (let attempt = 0; attempt <= retries; attempt++) {
-            try { output = await this.runNode(node, input, live); lastErr = null; break; }
+            try { output = await this.runNode(node, input, live, allowed, flow?.agentId); lastErr = null; break; }
             catch (e: any) {
               if (e instanceof PauseSignal) throw e;
               lastErr = e;
@@ -500,6 +505,9 @@ export class FlowRunnerService implements OnModuleInit {
     const graph = this.parse(flow.graph);
     const nodes = new Map<string, any>((graph.nodes || []).map((n: any) => [n.id, n]));
     if (!nodes.has(nodeId)) return { ok: false, message: 'That block is not in the saved flow — Save first, then test.' };
+    // "Run to here" does REAL work (engine turns, real skills), so it obeys the toolbox exactly
+    // like a full run — otherwise this endpoint would be a way around it. (BEA-1168)
+    const allowed = await this.allowedFor(flow);
     const incoming = new Map<string, string[]>();
     for (const n of graph.nodes || []) incoming.set(n.id, []);
     for (const e of graph.edges || []) if (incoming.has(e.target)) incoming.get(e.target)!.push(e.source);
@@ -541,7 +549,8 @@ export class FlowRunnerService implements OnModuleInit {
         if (nid === nodeId) targetInput = input;
         if (kind === 'ask_user') { results[nid] = { status: 'skipped', output: input, kind, label }; return input; } // nobody to answer in a test — pass through
         try {
-          const output = await this.runNode(node, input, live);
+          // "Run to here" performs REAL side effects, so it obeys the toolbox exactly like a full run.
+          const output = await this.runNode(node, input, live, allowed, flow?.agentId);
           const condFalse = kind === 'if' ? !this.evalCond(node.data?.cond, input) : undefined;
           results[nid] = { status: 'done', output, kind, label, ...(condFalse !== undefined ? { condFalse } : {}) };
           return output;
@@ -675,10 +684,23 @@ export class FlowRunnerService implements OnModuleInit {
     'whatsapp', 'cli', 'remember', 'save_capture', 'create_task', 'search_rag', 'fetch_document',
   ]);
 
-  private async runNode(node: any, input: string, inputs: string[]): Promise<string> {
+  /** The tool ids this flow's job may use — null when nobody has chosen, which blocks nothing. */
+  private async allowedFor(flow: any): Promise<Set<string> | null> {
+    const agentId = flow?.agentId;
+    if (!agentId || !this.agent?.allowedTools) return null;
+    const r = await this.agent.allowedTools(agentId).catch(() => null);
+    return r && r.ids.length ? new Set(r.ids) : null;
+  }
+
+  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null): Promise<string> {
     const kind = node.data?.kind;
     const label = node.data?.label || '';
     const refId = node.data?.refId;
+    // A tool or skill the owner did not tick simply does not run (BEA-1168). Saying so beats
+    // quietly doing it anyway, and beats a silent blank that reads like the step worked.
+    if (allowed && (kind === 'tool' || kind === 'skill') && refId && !allowed.has(refId)) {
+      return `This step was skipped: "${label || refId}" is not in this agent's toolbox. Add it on the agent's page if it should be allowed.`;
+    }
     switch (kind) {
       case 'question': return node.data?.sub || input || '';
       // Thread the whole research goal into every branch so a sub-search can't drift off-topic. (BEA-771)
@@ -717,7 +739,7 @@ export class FlowRunnerService implements OnModuleInit {
           // Title the branch run by its sub-question, not a generic "Web search". (BEA-772)
           const focus = /THIS BRANCH FOCUSES ON:\s*([^\n]+)/.exec(input || '')?.[1]?.trim();
           const runTitle = focus ? focus.slice(0, 70) : `Flow · ${label}`;
-          return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), runTitle);
+          return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), runTitle, agentId);
         }
         return this.askModel(this.toolPrompt(refId, label, input) + this.guidance(node)); // unknown tool → reason directly
       // Move A: run the REAL skill in Codex with its folder in the working dir; fall back to the model.
@@ -787,14 +809,16 @@ export class FlowRunnerService implements OnModuleInit {
     return map[toolId] || `Use the ${label} tool for the following:\n${input}`;
   }
 
-  private agentRun(prompt: string, title: string): Promise<string> {
+  private agentRun(prompt: string, title: string, agentId?: string | null): Promise<string> {
     // serialise on the engine so concurrent branches don't stall each other into timeouts
     return this.runOnEngine(async () => {
       const run = await this.agent.createRun({ title, input: prompt });
       try {
         // allowAsk:false — a flow's tool node must never park its helper run on a question; flow
         // HITL happens through the flow's own ask_user NODE, not the agent tool. (BEA-795)
-        await this.bridge.execute(run.id, { prompt, title, save: false, allowAsk: false });
+        // agentId threaded through so the helper run gets this job's toolbox and its
+        // not-connected pre-flight check too, not just direct runs. (BEA-1168)
+        await this.bridge.execute(run.id, { prompt, title, save: false, allowAsk: false, ...(agentId ? { agentId } : {}) });
       } catch (e: any) {
         // A thrown execute must never leave the branch run stuck on "running". (BEA-772)
         await this.prisma.agentRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);

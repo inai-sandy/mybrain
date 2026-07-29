@@ -12,6 +12,7 @@ import { DocumentsService } from '../documents/documents.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
+import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -64,6 +65,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly alerts?: AlertsService,
     private readonly prompts?: PromptsService,
     private readonly skillsSvc?: SkillsService,
+    private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167/1168)
   ) {}
 
   onModuleInit() {
@@ -107,6 +109,39 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       return `\n\nAnswer concisely. Research the topic (don\'t rely on memory alone)${brainAvailable ? '; quickly check the user\'s brain with the search_brain tool if it helps' : ''}.${trust} Keep it short. Do not save anything.`;
     }
     return `\n\n---\nHow to approach this:\n1. Research the topic properly FIRST — use web search and read sources, combined with what you know. Be thorough; don\'t stop at a single search.${brainStep}\n3. Give a clear, well-structured answer. **Cite your sources inline** as [1], [2]… and end with a short "Sources" list (web links + which brain notes you used) so the reader can verify. Don\'t state facts you couldn\'t support.${trust}`;
+  }
+
+  /**
+   * Tell the run what it is allowed to use (BEA-1168). Names come from the one catalog, so this
+   * says the same thing the owner ticked on screen.
+   *
+   * When nobody has picked anything yet we say so rather than silently allowing everything — the
+   * alternative (treating "unset" as "nothing") would break every agent built before the toolbox.
+   */
+  private async toolbox(agentId?: string | null): Promise<{ guidance: string; disconnected: { id: string; name: string }[] }> {
+    // Optional-call: test harnesses build this service with a partial agent stub.
+    const allowed = (await this.agent.allowedTools?.(agentId).catch(() => null)) || { ids: [] as string[], source: 'none' as const };
+    if (!allowed.ids.length) {
+      return { guidance: `\n\nYour toolbox: nothing has been chosen for this job yet, so use your judgment. The owner can pick an exact set of tools on the agent's page.`, disconnected: [] };
+    }
+    const cat = await this.catalog?.catalog().catch(() => null);
+    const byId = new Map((cat?.tools || []).map((t: any) => [t.id, t]));
+    // Only call something disconnected when the catalog actually told us so — if the catalog is
+    // unreachable we let the run proceed rather than blocking it on our own outage.
+    const disconnected = allowed.ids
+      .map((id) => byId.get(id))
+      .filter((t: any) => t && t.connected === false)
+      .map((t: any) => ({ id: t.id, name: t.name }));
+    const lines = allowed.ids.map((id) => {
+      const t: any = byId.get(id);
+      return t ? `- ${t.name} — ${t.description}` : `- ${id}`;
+    });
+    return {
+      guidance:
+        `\n\nYour toolbox — these are the ONLY things you may use for this job:\n${lines.join('\n')}\n` +
+        `Do not use anything outside this list. If the job genuinely cannot be done with these, say exactly which tool is missing and stop, rather than working around it.`,
+      disconnected,
+    };
   }
 
   /**
@@ -625,6 +660,20 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     // consults the user's brain via the search_brain tool and reconciles — trusting the user's own
     // notes for their own terms. cfg.recall just means "the brain is available as a tool".
     let prompt = input.prompt + this.researchGuidance(quick, cfg.recall);
+    // The toolbox (BEA-1168) — the run is told exactly what it may use, and nothing else. If
+    // something it was given has since lost its credentials, stop now and say which: a run that
+    // half-works because Gmail quietly went away is worse than one that refuses and names it.
+    const box = await this.toolbox(input.agentId);
+    if (box.disconnected.length) {
+      const names = box.disconnected.map((t) => t.name).join(', ');
+      await this.agent.appendStep(runId, { label: `Stopped — not connected: ${names}`, status: 'failed' }).catch(() => undefined);
+      await this.agent.finishRun(runId, {
+        status: 'failed',
+        error: `This job needs ${names}, which ${box.disconnected.length === 1 ? 'is' : 'are'} not connected any more. Reconnect ${box.disconnected.length === 1 ? 'it' : 'them'} in Settings, or take ${box.disconnected.length === 1 ? 'it' : 'them'} out of the agent's tools.`,
+      }).catch(() => undefined);
+      return;
+    }
+    prompt += box.guidance;
     // The durable ask_user tool (BEA-795) — offered unless the caller runs headless (flows, evals).
     if (input.allowAsk !== false) prompt += this.askGuidance(runId, cfg.autonomy);
     // Ground the run in "what's fresh" (BEA-1077) — real runs only; flows/evals stay lean.

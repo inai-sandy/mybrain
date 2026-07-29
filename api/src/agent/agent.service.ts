@@ -317,13 +317,50 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeAgent(a);
   }
 
-  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; ui?: unknown }) {
+  /**
+   * The tools this job is ALLOWED to use (BEA-1168): its own picked set, else the agent's toolbox.
+   *
+   * `source: 'none'` means nobody has chosen yet. That is deliberately NOT treated as "nothing" —
+   * every agent built before the toolbox existed would stop working overnight. It is also not
+   * silent: the run prompt says plainly that no toolbox has been set, and the UI says so too.
+   */
+  async allowedTools(agentId?: string | null): Promise<{ ids: string[]; source: 'job' | 'agent' | 'none' }> {
+    if (!agentId) return { ids: [], source: 'none' };
+    const a: any = await this.prisma.agent.findUnique({ where: { id: agentId } }).catch(() => null);
+    if (!a) return { ids: [], source: 'none' };
+    const own = this.parseIds(a.tools);
+    if (own.length) return { ids: own, source: 'job' };
+    if (!a.areaId) return { ids: [], source: 'none' };
+    const area: any = await (this.prisma as any).agentArea.findUnique({ where: { id: a.areaId } }).catch(() => null);
+    let box: any[] = [];
+    try { box = area?.tools ? JSON.parse(area.tools) : []; } catch { box = []; }
+    const ids = (Array.isArray(box) ? box : []).map((t: any) => t?.id).filter((x: any) => typeof x === 'string' && x);
+    return ids.length ? { ids, source: 'agent' } : { ids: [], source: 'none' };
+  }
+
+  private parseIds(s?: string | null): string[] {
+    try {
+      const v = s ? JSON.parse(s) : [];
+      return Array.isArray(v) ? v.filter((x: any) => typeof x === 'string' && x) : [];
+    } catch { return []; }
+  }
+
+  /** Set the tools this job may use. */
+  async setTools(id: string, ids: string[]) {
+    const clean = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === 'string' && x).slice(0, 60);
+    await this.prisma.agent.update({ where: { id }, data: { tools: JSON.stringify(clean) } as any });
+    return this.getAgent(id);
+  }
+
+  async updateAgent(id: string, patch: { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; ui?: unknown; tools?: unknown[] }) {
     const a = await this.prisma.agent.findUnique({ where: { id } });
     if (!a) throw new NotFoundException('Agent not found');
     const data: any = {};
     if (patch.category !== undefined) data.category = patch.category?.trim() || null;
     if (patch.color !== undefined) data.color = patch.color?.trim() || null;
     if (patch.skills !== undefined) data.skills = JSON.stringify(Array.isArray(patch.skills) ? patch.skills.slice(0, 10) : []); // attached skills (BEA-1079)
+    // The tools this job may use (BEA-1168) — ids from the one catalog.
+    if (patch.tools !== undefined) data.tools = JSON.stringify((Array.isArray(patch.tools) ? patch.tools : []).filter((x: any) => typeof x === 'string' && x).slice(0, 60));
     if (patch.ui !== undefined) data.ui = patch.ui ? JSON.stringify(patch.ui) : null; // mini-interface spec (BEA-1082)
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
     if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
@@ -405,6 +442,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       ui: a.ui ? this.parse(a.ui, null) : null,
       engine: a.engine ? this.parse(a.engine, null) : null, // this job's own model (BEA-1106)
       chatLog: this.parse(a.chatLog, [] as unknown), // persisted change-by-chatting history (BEA-1097)
+      tools: this.parse(a.tools, [] as unknown), // catalog tool ids this job may use (BEA-1168)
     };
   }
 

@@ -5,6 +5,7 @@ import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { DictateButton } from '../ui/DictateButton';
+import { ToolPicker, useCatalog } from '../ui/ToolPicker';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { SchedulePicker, schedText } from '../ui/SchedulePicker';
 import { StatusBadge, timeAgo } from './Agents';
@@ -33,6 +34,9 @@ export function AgentApp() {
   const [runs, setRuns] = useState<any[] | null>(null);
   const [redesigning, setRedesigning] = useState(false);
   const [flow, setFlow] = useState<any>(null);
+  const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
+  const catalog = useCatalog();
+  const toolNames: Record<string, string> = Object.fromEntries((catalog?.tools || []).map((t: any) => [t.id, t.name]));
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
   const [histQ, setHistQ] = useState(''); // dated-history search + filter (BEA-1099)
   const [histFilter, setHistFilter] = useState<'all' | 'done' | 'failed'>('all');
@@ -438,6 +442,36 @@ export function AgentApp() {
               )}
               <p className="mt-1 text-[11px] text-zinc-400">Overrides the global agent model for this job's runs only.</p>
             </div>
+            {/* The tools THIS job may use (BEA-1168). Empty = it follows the agent's toolbox. */}
+            <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">Tools this job can use</h2>
+                <button onClick={() => setPickingTools(true)} className="text-xs font-medium text-emerald-600 hover:underline">Choose</button>
+              </div>
+              {(a.tools || []).length === 0 ? (
+                <p className="mt-1 text-[11px] text-zinc-400">Following the agent's toolbox. Choose here to give this job its own, narrower set.</p>
+              ) : (
+                <>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(a.tools || []).map((id: string) => (
+                      <span key={id} className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">{toolNames[id] || id}</span>
+                    ))}
+                  </div>
+                  <button onClick={async () => { const d = await patch({ tools: [] }); if (d) toast('success', "Back to the agent's toolbox"); }} className="mt-1.5 text-[11px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">Clear — follow the agent's toolbox again</button>
+                </>
+              )}
+              <p className="mt-1 text-[11px] text-zinc-400">A run only gets what is listed here. Anything else is refused.</p>
+            </div>
+            {pickingTools && (
+              <ToolPicker
+                value={a.tools || []}
+                onSave={async (ids) => { const d = await patch({ tools: ids }); if (d) toast('success', ids.length ? `${ids.length} tool${ids.length === 1 ? '' : 's'} for this job` : "Following the agent's toolbox"); }}
+                onClose={() => setPickingTools(false)}
+                title={`Tools for ${a.name}`}
+                subtitle="This job can only use what you tick here."
+              />
+            )}
+
             <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800">
               <h2 className="text-sm font-semibold">Move to another agent</h2>
               {areas === null ? (

@@ -3,7 +3,7 @@ import { AgentService, AskInput } from './agent.service';
 import { AgentsImportService } from './agents-import.service';
 import { AgentAreasService, AreaTool } from './agent-areas.service';
 
-type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[] };
+type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[] };
 
 /**
  * Agent HTTP surface (BEA-619). All routes are protected by the global cookie-session guard.

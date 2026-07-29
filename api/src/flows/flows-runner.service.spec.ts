@@ -519,3 +519,56 @@ describe('FlowRunnerService.testToNode — run to here + pins (BEA-1072)', () =>
     expect(r.output).toBe('fresh value'); // not the stale pin
   });
 });
+
+/**
+ * BEA-1168 — the toolbox is enforced, not advisory: a step whose tool the owner never ticked does
+ * not run, and says so instead of returning a blank that reads like it worked.
+ */
+describe('the toolbox is enforced on a flow step (BEA-1168)', () => {
+  const svc = () => new FlowRunnerService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+  const node = (kind: string, refId: string, label: string) => ({ data: { kind, refId, label } });
+
+  it('refuses a tool that is not in the allowed set, and names it', async () => {
+    const out = await (svc() as any).runNode(node('tool', 'gmail', 'Gmail'), 'anything', [], new Set(['web_search']));
+    expect(out).toContain('skipped');
+    expect(out).toContain('Gmail');
+    expect(out).toContain("agent's toolbox");
+  });
+
+  it('refuses a skill that is not in the allowed set', async () => {
+    const out = await (svc() as any).runNode(node('skill', 'sk9', 'deep-research'), 'x', [], new Set(['web_search']));
+    expect(out).toContain('skipped');
+    expect(out).toContain('deep-research');
+  });
+
+  it('lets an allowed step through to its normal handling', async () => {
+    // ask_ai with no input short-circuits to '' — proof it was NOT blocked by the toolbox check.
+    const out = await (svc() as any).runNode(node('ask_ai', 'ask_ai', 'Ask AI'), '', [], new Set(['ask_ai']));
+    expect(out).toBe('');
+  });
+
+  it('blocks nothing when no toolbox has been chosen', async () => {
+    const out = await (svc() as any).runNode(node('ask_ai', 'ask_ai', 'Ask AI'), '', [], null);
+    expect(out).toBe('');
+  });
+
+  it('never blocks a plain building block, only tools and skills', async () => {
+    const out = await (svc() as any).runNode({ data: { kind: 'text', text: 'hello' } }, '', [], new Set(['web_search']));
+    expect(out).toBe('hello');
+  });
+});
+
+/**
+ * BEA-1168 — "Run to here" does real work, so it must obey the toolbox too. This guards the exact
+ * gap a review caught: the test path calling runNode without the allowed set.
+ */
+describe('"Run to here" obeys the toolbox (BEA-1168)', () => {
+  it('passes the allowed set into every runNode call it makes', async () => {
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'flows-runner.service.ts'), 'utf8');
+    const calls = src.match(/this\.runNode\([^)]*\)/g) || [];
+    expect(calls.length).toBeGreaterThan(0);
+    // Every call site must thread `allowed` — a bare runNode(node, input, live) silently disables
+    // enforcement on that path.
+    for (const c of calls) expect(c).toContain('allowed');
+  });
+});

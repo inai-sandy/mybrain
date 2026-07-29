@@ -11,6 +11,7 @@ import { MemoryModule } from '../memory/memory.module';
 import { LlmModule } from '../llm/llm.module';
 import { PushModule } from '../push/push.module';
 import { PromptsModule } from '../prompts/prompts.module';
+import { ToolCatalogModule } from '../tools/tool-catalog.module';
 import { SkillsModule } from '../skills/skills.module';
 
 /**
@@ -18,7 +19,7 @@ import { SkillsModule } from '../skills/skills.module';
  * our AgentRun + Documents. (Was the Hermes WS bridge; Hermes removed BEA-663/667.)
  */
 @Module({
-  imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule, PushModule, PromptsModule, SkillsModule],
+  imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule, PushModule, PromptsModule, SkillsModule, ToolCatalogModule],
   controllers: [HermesController],
   providers: [HermesBridgeService, AgentScheduler, EngineWatchdog, AgentEvents],
   exports: [HermesBridgeService],
