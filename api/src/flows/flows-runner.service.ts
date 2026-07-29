@@ -188,10 +188,39 @@ export class FlowRunnerService implements OnModuleInit {
   // The single Codex engine chokes on concurrent heavy turns (they stall + time out), so agent-node
   // runs are serialised through this chain — branches still merge, they just take the engine in turn (BEA-646).
   private engineChain: Promise<unknown> = Promise.resolve();
+  /** How many engine turns are queued or running right now — a branch uses this to say it is waiting. */
+  private engineQueued = 0;
+
   private runOnEngine<T>(fn: () => Promise<T>): Promise<T> {
+    this.engineQueued++;
     const out = this.engineChain.then(fn, fn);
     this.engineChain = out.then(() => undefined, () => undefined);
+    void out.then(() => { this.engineQueued--; }, () => { this.engineQueued--; });
     return out;
+  }
+
+  /**
+   * Mirror a branch's real work into the FLOW's play-by-play while it happens (BEA-1192).
+   *
+   * A branch turn does dozens of searches over several minutes, but none of it reached the flow —
+   * the flow logged "started" and then nothing until the whole thing finished. A five-minute job
+   * showing a spinner and silence is indistinguishable from a broken one, which is exactly how a
+   * healthy run came to be reported as stuck.
+   */
+  private mirrorSteps(runId: string, onLine?: (t: string) => void): () => void {
+    if (!onLine) return () => undefined;
+    let seen = 0;
+    const timer = setInterval(async () => {
+      const r: any = await this.prisma.agentRun.findUnique({ where: { id: runId }, select: { stepLog: true } }).catch(() => null);
+      const steps = this.parseArr(r?.stepLog);
+      for (const s of steps.slice(seen)) {
+        const label = String(s?.label || '').trim();
+        if (label) onLine(`   ${label.slice(0, 90)}`);
+      }
+      seen = steps.length;
+    }, 4000);
+    if (typeof (timer as any).unref === 'function') (timer as any).unref();
+    return () => clearInterval(timer);
   }
 
   private parse(s?: string | null): any { try { return s ? JSON.parse(s) : {}; } catch { return {}; } }
@@ -392,7 +421,7 @@ export class FlowRunnerService implements OnModuleInit {
           let output = '';
           let lastErr: any = null;
           for (let attempt = 0; attempt <= retries; attempt++) {
-            try { output = await this.runNode(node, input, live, allowed, flow?.agentId); lastErr = null; break; }
+            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }); lastErr = null; break; }
             catch (e: any) {
               if (e instanceof PauseSignal) throw e;
               lastErr = e;
@@ -672,7 +701,39 @@ export class FlowRunnerService implements OnModuleInit {
       }
     }
     if (finalOutput?.trim()) { const d = await this.saveDoc(`${name} — result`, finalOutput, name); if (d) docs.push(d); }
+
+    // ALWAYS keep the research as a markdown document, whatever the last step happened to be
+    // (BEA-1193). The owner's rule, and this run is why: two searches gathered 12,400 characters,
+    // the reasoning steps came back empty, an attached skill produced 125 characters — and every
+    // one of those 12,400 was thrown away, because parts are only saved when they feed the merge
+    // AND have content. A skill at the end must never be able to lose the work behind it.
+    const md = this.researchMarkdown(name, graph, results, finalOutput);
+    if (md) { const d = await this.saveDoc(`${name} — research`, md, name); if (d) docs.push(d); }
     return docs;
+  }
+
+  /**
+   * Everything the run actually produced, in reading order, as one markdown document. Written even
+   * when the merge or the final step returned nothing — especially then.
+   */
+  private researchMarkdown(name: string, graph: any, results: Record<string, NodeResult>, finalOutput: string): string | null {
+    const parts: string[] = [];
+    let kept = 0;
+    for (const n of graph.nodes || []) {
+      const r = results[n.id];
+      const out = (r?.output || '').trim();
+      const kind = n.data?.kind;
+      if (kind === 'question') { if (out) parts.push(`> ${out.replace(/\n+/g, ' ')}`); continue; }
+      if (kind === 'subquestion') { if (out || n.data?.sub) parts.push(`\n## ${String(n.data?.sub || n.data?.label || 'Part').slice(0, 120)}`); continue; }
+      if (!out) continue;
+      if (kind === 'merge' || kind === 'output') continue; // the result is added on its own below
+      parts.push(`\n### ${String(n.data?.label || kind || 'Step').slice(0, 80)}\n\n${out}`);
+      kept++;
+    }
+    if (!kept) return null; // genuinely nothing was gathered — don't save an empty shell
+    const head = `# ${name}\n`;
+    const tail = finalOutput?.trim() ? `\n\n---\n\n## The finished result\n\n${finalOutput.trim()}` : `\n\n---\n\n_The final step produced nothing, so this document is the research it was built from._`;
+    return `${head}${parts.join('\n')}${tail}`.slice(0, 200000);
   }
 
   private async saveDoc(title: string, content: string, flowName: string, isPart = false): Promise<{ id: string; slug: string; title: string } | null> {
@@ -701,7 +762,7 @@ export class FlowRunnerService implements OnModuleInit {
     return r && r.ids.length ? new Set(r.ids) : null;
   }
 
-  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null): Promise<string> {
+  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void): Promise<string> {
     const kind = node.data?.kind;
     const label = node.data?.label || '';
     const refId = node.data?.refId;
@@ -748,7 +809,7 @@ export class FlowRunnerService implements OnModuleInit {
           // Title the branch run by its sub-question, not a generic "Web search". (BEA-772)
           const focus = /THIS BRANCH FOCUSES ON:\s*([^\n]+)/.exec(input || '')?.[1]?.trim();
           const runTitle = focus ? focus.slice(0, 70) : `Flow · ${label}`;
-          return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), runTitle, agentId);
+          return this.agentRun(this.toolPrompt(refId, label, input) + this.guidance(node), runTitle, agentId, onLine);
         }
         return this.askModel(this.toolPrompt(refId, label, input) + this.guidance(node)); // unknown tool → reason directly
       // Move A: run the REAL skill in Codex with its folder in the working dir; fall back to the model.
@@ -818,10 +879,14 @@ export class FlowRunnerService implements OnModuleInit {
     return map[toolId] || `Use the ${label} tool for the following:\n${input}`;
   }
 
-  private agentRun(prompt: string, title: string, agentId?: string | null): Promise<string> {
+  private agentRun(prompt: string, title: string, agentId?: string | null, onLine?: (t: string) => void): Promise<string> {
+    // Only one branch can hold the engine at a time. Say so, rather than looking frozen (BEA-1192).
+    if (this.engineQueued > 0) onLine?.(`⏳ ${title} — waiting its turn on the engine`);
     // serialise on the engine so concurrent branches don't stall each other into timeouts
     return this.runOnEngine(async () => {
       const run = await this.agent.createRun({ title, input: prompt });
+      onLine?.(`▶ ${title} — working`);
+      const stopMirror = this.mirrorSteps(run.id, onLine);
       try {
         // allowAsk:false — a flow's tool node must never park its helper run on a question; flow
         // HITL happens through the flow's own ask_user NODE, not the agent tool. (BEA-795)
@@ -833,6 +898,7 @@ export class FlowRunnerService implements OnModuleInit {
         await this.prisma.agentRun.update({ where: { id: run.id }, data: { status: 'failed', error: String(e?.message || e), endedAt: new Date() } }).catch(() => undefined);
         throw e;
       }
+      finally { stopMirror(); }
       // `allowAsk:false` only removes the guidance text — the ask_user tool is still mounted for
       // every run, so the model can park anyway. That used to return '' and the branch carried on as
       // if the step had simply produced nothing, while a real question waited out of sight. Say it
