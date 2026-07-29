@@ -20,6 +20,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [step, setStep] = useState(''); // what Create is doing right now, in plain words
   // The tool step (BEA-1171). `picked` starts as what the chat proposed and becomes whatever you
   // tick — null means "not touched yet", so a fresh proposal can still flow in.
   const [picked, setPickedState] = useState<string[]>([]);
@@ -64,17 +65,38 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
     setBusy(false);
   }
 
+  /**
+   * Build the job, then DRAW ITS FLOW (BEA-1174). A job that lands with "no flow yet" is exactly
+   * what was wrong before, so the flow is part of pressing Create — not a button to find later.
+   */
   async function create() {
     if (!job || creating) return;
     setCreating(true);
     try {
+      setStep('Building the job…');
       const r = await fetch(`/api/agent/areas/${areaId}/job-builder/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: picked, checks }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not create');
+
+      setStep('Drawing the steps…');
+      try {
+        const fr = await fetch('/api/flows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: `${d.name} flow`, question: job.task || job.name, agentId: d.jobId }),
+        });
+        const fl = await fr.json().catch(() => ({}));
+        if (fl?.id) await fetch(`/api/flows/${fl.id}/plan`, { method: 'POST' });
+      } catch {
+        // The job is real either way — the Flow tab offers "Draw the flow" if this didn't land.
+        toast('error', "Job created, but I couldn't draw the steps — open its Flow tab and press Draw.");
+      }
+
       toast('success', 'Job created 🎉');
       onCreated(d.url);
     } catch (e: any) { toast('error', e?.message || 'Could not create'); }
     setCreating(false);
+    setStep('');
   }
 
   async function reset() {
@@ -187,7 +209,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
                 </div>
                 <p className="mt-1 flex items-center gap-1 text-xs text-zinc-500"><CalendarClock className="h-3 w-3" />{job.scheduleText || 'only when you press Run'}</p>
                 <button onClick={create} disabled={creating} className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
-                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Create this job
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}{creating ? step || 'Creating…' : 'Create this job'}
                 </button>
               </div>
             )}

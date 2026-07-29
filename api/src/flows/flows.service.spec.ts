@@ -121,3 +121,47 @@ describe('planFlow — no search_brain by default (BEA-1096)', () => {
     expect(def).not.toContain("INCLUDE one branch that uses search_brain");
   });
 });
+
+/**
+ * BEA-1174 — the flow drawn for a job may only use tools that job is allowed to run. A step it
+ * would be refused at run time is a picture that lies.
+ */
+describe('planning inside the job toolbox (BEA-1174)', () => {
+  const catalog = {
+    catalog: async () => ({
+      groups: [],
+      tools: [
+        { id: 'web_search', name: 'Web search', group: 'Web', description: 'web', connected: true, kind: 'tool' },
+        { id: 'gmail', name: 'Gmail', group: 'Google', description: 'email', connected: true, kind: 'tool' },
+        { id: 'search_brain', name: 'Search my brain', group: 'Brain', description: 'brain', connected: true, kind: 'tool' },
+      ],
+    }),
+  } as any;
+
+  function svc(seen: string[]) {
+    const llm = { complete: async (p: string) => { seen.push(p); return JSON.stringify({ branches: [{ subquestion: 'q', steps: [{ kind: 'tool', id: 'web_search' }] }], merge: 'ai' }); } };
+    const prompts = { get: async () => 'T={{tools}}' };
+    return new FlowsService({} as any, { list: async () => [] } as any, llm as any, prompts as any, catalog);
+  }
+
+  it('offers every connected tool when the job has no toolbox of its own', async () => {
+    const seen: string[] = [];
+    await svc(seen).planFlow('anything', null);
+    expect(seen[0]).toContain('web_search');
+    expect(seen[0]).toContain('gmail');
+  });
+
+  it('offers ONLY the job\'s tools when it has them', async () => {
+    const seen: string[] = [];
+    await svc(seen).planFlow('anything', ['web_search']);
+    expect(seen[0]).toContain('web_search');
+    expect(seen[0]).not.toContain('gmail');
+    expect(seen[0]).not.toContain('search_brain');
+  });
+
+  it('does not end up with nothing when the toolbox names something unknown', async () => {
+    const seen: string[] = [];
+    await svc(seen).planFlow('anything', ['not_a_real_tool']);
+    expect(seen[0]).toContain('web_search'); // falls back rather than planning a toolless flow
+  });
+});
