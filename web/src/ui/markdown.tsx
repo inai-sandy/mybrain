@@ -60,6 +60,18 @@ export function Markdown({ children, className = '' }: { children?: string | nul
 }
 
 export const mdComponents = {
+  /**
+   * Tables scroll INSIDE their own box (BEA-1169). Without this a wide AI-generated table pushes
+   * the whole page sideways on a phone — the body scrolls horizontally and every other screen is
+   * cut off with it. Caught on a 390px screenshot: 470px of content in a 390px viewport.
+   */
+  table: ({ children }: any) => (
+    <div className="my-2.5 max-w-full overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+      <table className="w-full min-w-[30rem] border-collapse text-left text-xs">{children}</table>
+    </div>
+  ),
+  th: ({ children }: any) => <th className="border-b border-zinc-200 bg-zinc-50 px-2.5 py-2 font-semibold dark:border-zinc-700 dark:bg-zinc-800/60">{children}</th>,
+  td: ({ children }: any) => <td className="border-b border-zinc-100 px-2.5 py-2 align-top dark:border-zinc-800">{children}</td>,
   h1: ({ children }: any) => <h1 id={slugify(nodeText(children))} className="scroll-mt-20">{children}</h1>,
   h2: ({ children }: any) => <h2 id={slugify(nodeText(children))} className="scroll-mt-20">{children}</h2>,
   h3: ({ children }: any) => <h3 id={slugify(nodeText(children))} className="scroll-mt-20">{children}</h3>,
