@@ -416,7 +416,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
       (labDigest ? `=== WHAT THE LAB IS LEARNING ABOUT HIM (pick ONE fresh, specific insight to surface) ===\n${labDigest}\n\n` : '') +
       `=== LAST WEEK'S REVIEW ===\n${prevReview ? `${prevReview.text.slice(0, 700)}\nPattern then: ${prevReview.pattern || '-'}\nExperiment then: ${prevReview.experiment || '-'}` : '(this is the first weekly review)'}`;
 
-    const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 4000, 'weekly-review'))?.trim() || '';
+    const raw = (await this.llm.completeWith(await this.weeklyModel(), prompt, 8000, 'weekly-review'))?.trim() || '';
     // Robust parse — never store a raw JSON blob as the review (BEA-884).
     const text = narrativeField(raw, 'review');
     const parsed = looseJsonParse(raw);
