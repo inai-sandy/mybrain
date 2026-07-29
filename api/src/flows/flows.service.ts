@@ -343,6 +343,17 @@ export class FlowsService {
     const skillList = skills.map((s) => `- skill:${s.id} — ${s.title}: ${(s.description || '').slice(0, 80)}`).join('\n');
     const toolList = usable.map((t) => `- tool:${t.id} — ${t.name}: ${t.description}`).join('\n');
 
+    // A job's task is usually numbered steps with a schedule in front ("1. Every Monday at 8am,
+    // search for…"). The planner handles a GOAL far better than an instruction list, so if the
+    // first attempt comes back with nothing we condense and ask once more. Without this the flow
+    // silently falls back to a single "Ask AI" box — a picture that teaches you nothing. (BEA-1174)
+    const condense = (t: string) =>
+      t.replace(/^\s*\d+[.)]\s*/gm, '')
+        .replace(/\bevery (monday|tuesday|wednesday|thursday|friday|saturday|sunday|day|weekday|week|morning)\b[^,.]*/gi, '')
+        .replace(/\bat \d{1,2}(:\d{2})?\s*(am|pm)\b/gi, '')
+        .split(/[\n.]/).map((x) => x.trim()).filter(Boolean).join('. ')
+        .slice(0, 400);
+
     let plan: any = null;
     try {
       // The planner prompt lives in the registry (Settings → Prompts → Agents) so the owner can
@@ -354,6 +365,19 @@ export class FlowsService {
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (m) plan = JSON.parse(m[0]);
     } catch { plan = null; }
+
+    if (!Array.isArray(plan?.branches) || !plan.branches.length) {
+      const short = condense(q);
+      if (short && short !== q.slice(0, 400)) {
+        try {
+          const tpl2 = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
+          const p2 = tpl2.replaceAll('{{question}}', short).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
+          const out2 = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', p2, 1100, 'flow-plan') : await this.llm.complete(p2, 1100, 'flow-plan');
+          const m2 = (out2 || '').match(/\{[\s\S]*\}/);
+          if (m2) plan = JSON.parse(m2[0]);
+        } catch { /* keep the fallback graph */ }
+      }
+    }
 
     return this.buildGraph(q, plan, skillById, toolById);
   }

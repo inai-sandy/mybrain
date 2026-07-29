@@ -165,3 +165,38 @@ describe('planning inside the job toolbox (BEA-1174)', () => {
     expect(seen[0]).toContain('web_search'); // falls back rather than planning a toolless flow
   });
 });
+
+/**
+ * BEA-1174 — a job's task is an instruction list ("1. Every Monday at 8am, search…"), not a
+ * question. The planner returns nothing useful for that shape, which silently produced a flow that
+ * was one "Ask AI" box. It must condense and try again rather than accept the empty result.
+ */
+describe('planning from a numbered job task (BEA-1174)', () => {
+  const catalog = { catalog: async () => ({ groups: [], tools: [{ id: 'web_search', name: 'Web search', group: 'Web', description: 'web', connected: true, kind: 'tool' }] }) } as any;
+  const TASK = '1. Every Monday at 8:00 AM, search for Indian government rule changes about EV batteries.\n2. Write a one-page brief with sources.';
+
+  it('retries with a condensed goal and ends up with real steps', async () => {
+    const asked: string[] = [];
+    const llm = {
+      complete: async (p: string) => {
+        asked.push(p);
+        // First attempt returns prose (what the real planner does with an instruction list).
+        if (asked.length === 1) return 'Sorry, I need a clearer goal.';
+        return JSON.stringify({ branches: [{ subquestion: 'rule changes', steps: [{ kind: 'tool', id: 'web_search' }] }], merge: 'ai' });
+      },
+    };
+    const svc = new FlowsService({} as any, { list: async () => [] } as any, llm as any, { get: async () => 'T={{question}} {{tools}}' } as any, catalog);
+    const g = await svc.planFlow(TASK);
+    expect(asked.length).toBe(2); // it tried again
+    expect(asked[1]).not.toContain('Every Monday'); // the schedule preamble is gone
+    expect(g.nodes.some((n: any) => n.data.refId === 'web_search')).toBe(true);
+  });
+
+  it('does not retry when the first attempt already worked', async () => {
+    const asked: string[] = [];
+    const llm = { complete: async (p: string) => { asked.push(p); return JSON.stringify({ branches: [{ subquestion: 'x', steps: [{ kind: 'tool', id: 'web_search' }] }], merge: 'ai' }); } };
+    const svc = new FlowsService({} as any, { list: async () => [] } as any, llm as any, { get: async () => 'T={{question}} {{tools}}' } as any, catalog);
+    await svc.planFlow(TASK);
+    expect(asked.length).toBe(1);
+  });
+});
