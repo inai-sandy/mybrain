@@ -64,3 +64,48 @@ describe('duplicates respect who the task belongs to (BEA-1185)', () => {
     expect(seen).toContain('delegatedTo');
   });
 });
+
+/**
+ * The BEA-1185 sweep: the owner rule was enforced when duplicates were PROPOSED but not when they
+ * were actually merged or removed — so a stale page, a retry, or any hand-made call could still
+ * fold a delegated task into someone else's work. A rule that must always hold has to be enforced
+ * where the change happens, not only where it is suggested.
+ */
+describe('the owner rule holds when the merge actually happens', () => {
+  function mergeSvc(rows: any[]) {
+    const updates: any[] = [];
+    const deletes: any[] = [];
+    const prisma: any = {
+      task: {
+        findUnique: async ({ where }: any) => rows.find((r) => r.id === where.id) || null,
+        findMany: async ({ where }: any) => rows.filter((r) => (where.id?.in || []).includes(r.id) && r.id !== (where.id?.notIn || [])[0] && r.status === 'open'),
+        update: async (a: any) => { updates.push(a); return rows[0]; },
+        delete: async (a: any) => { deletes.push(a); return rows[0]; },
+        deleteMany: async (a: any) => { deletes.push(a); return { count: (a.where.id?.in || []).length }; },
+      },
+      reminder: { count: async () => 0, updateMany: async () => ({}) },
+      taskClaim: { updateMany: async () => ({}) },
+      taskPerson: { findMany: async () => [], createMany: async () => ({}) },
+    };
+    const svc: any = new TasksService(prisma, {} as any, {} as any, {} as any);
+    svc.indexTask = () => undefined; svc.unindexTask = () => undefined; svc.shape = (t: any) => t;
+    return { svc, updates, deletes };
+  }
+
+  const mineOpen = { id: 'a', title: 'send the report', status: 'open', ownerContactId: null, party: null, progress: 0 };
+  const hersOpen = { id: 'b', title: 'send the report', status: 'open', ownerContactId: 'c1', party: 'Madhuri', progress: 0 };
+
+  it('refuses to merge a delegated task onto one of mine, even when told to', async () => {
+    const { svc, deletes } = mergeSvc([mineOpen, hersOpen]);
+    const out = await svc.mergeDuplicates([{ keepId: 'a', removeIds: ['b'] }]);
+    expect(out.merged).toBe(0);
+    expect(deletes.length).toBe(0);
+  });
+
+  it('keeps a delegated task out of a duplicate REMOVAL, and says which', async () => {
+    const { svc } = mergeSvc([mineOpen, hersOpen]);
+    const out = await svc.removeDuplicates(['a', 'b']);
+    expect(out.keptDelegated).toEqual(['send the report']); // hers survived
+    expect(out.removed).toBe(1); // only mine went
+  });
+});

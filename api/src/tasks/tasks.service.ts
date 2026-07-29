@@ -1233,6 +1233,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         where: { id: { in: (g?.removeIds || []).map(String).slice(0, 20), notIn: [keeper.id] }, status: 'open' },
       });
       if (!dups.length) continue;
+      // The owner rule is enforced HERE too, not only when the group was proposed (BEA-1185).
+      // A page opened before that guard existed, a retried request, or any hand-made call would
+      // otherwise still fold a delegated task into someone else's work.
+      if (dups.some((d) => this.ownerKey(d) !== this.ownerKey(keeper))) {
+        this.log.warn(`refused a merge across owners onto "${keeper.title}"`);
+        continue;
+      }
       for (const d of dups) {
         const data: Record<string, any> = {};
         if (d.note && !keeper.note) data.note = d.note;
@@ -1270,13 +1277,26 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Delete chosen duplicate ids — but ONLY ones still open, so completed history is never touched. */
+  /**
+   * Delete confirmed duplicates. Like merging, this re-checks the owner rule (BEA-1185): deleting a
+   * delegated copy takes its chases with it, so a stale proposal must not be able to bin someone
+   * else's work.
+   */
   async removeDuplicates(ids: string[]) {
     const clean = (Array.isArray(ids) ? ids : []).map((x) => String(x)).filter(Boolean).slice(0, 2000);
-    if (!clean.length) return { removed: 0 };
-    const doomed = await this.prisma.task.findMany({ where: { id: { in: clean }, status: 'open' } });
+    if (!clean.length) return { removed: 0, keptDelegated: [] as string[] };
+    const candidates = await this.prisma.task.findMany({ where: { id: { in: clean }, status: 'open' } });
+    // Deleting a delegated task takes its chases and claims with it. That is too much to lose to a
+    // duplicate list — especially one proposed before the owner rule existed. Skip them and SAY SO,
+    // so nothing disappears quietly; deleting delegated work stays a deliberate act on the task
+    // itself. (BEA-1185 sweep)
+    const kept = candidates.filter((t) => this.ownerKey(t) !== 'mine');
+    const doomed = candidates.filter((t) => this.ownerKey(t) === 'mine');
+    if (kept.length) this.log.warn(`kept ${kept.length} delegated task(s) out of a duplicate removal`);
+    if (!doomed.length) return { removed: 0, keptDelegated: kept.map((t) => t.title) };
     doomed.forEach((t) => this.unindexTask(t));
-    const res = await this.prisma.task.deleteMany({ where: { id: { in: clean }, status: 'open' } });
-    return { removed: res.count };
+    const res = await this.prisma.task.deleteMany({ where: { id: { in: doomed.map((t) => t.id) } } });
+    return { removed: res.count, keptDelegated: kept.map((t) => t.title) };
   }
 
   /** Index every Task/Story that isn't linked into the brain yet (or re-index all). Idempotent:

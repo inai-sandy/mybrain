@@ -453,6 +453,11 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     let dropped = 0;
     for (const id of (roll || []).slice(0, 50)) {
       if (closedSet.has(id)) continue; // just closed — never re-open it
+      // Carrying a FINISHED task forward re-opens it, and re-opening must resume its chase — the
+      // tick-offs above go through setDone for exactly that reason, so this must too. A direct
+      // status write here would leave a delegated task open with a dead chase. (BEA-1185 sweep)
+      const cur = await Promise.resolve((this.prisma as any).task?.findUnique?.({ where: { id }, select: { status: true } })).catch(() => null);
+      if (cur?.status === 'done') await this.tasks.setDone(id, false).catch(() => undefined);
       const r = await this.prisma.task.update({ where: { id }, data: { status: 'open', rolloverCount: { increment: 1 } } }).catch(() => null);
       if (r) rolled++;
     }
