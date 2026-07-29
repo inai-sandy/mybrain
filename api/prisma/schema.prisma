@@ -1029,6 +1029,7 @@ model FlowRun {
   status       String    @default("running") // running | done | failed
   results      String    @default("{}")
   finalOutput  String?
+  grade        String? // JSON {verdict,score,criteria,notes} vs the job's Outcome (BEA-1191) — deep + voice runs are flows, and were coming back with no verdict at all
   documentIds  String    @default("[]") // documents this run produced: JSON [{id, slug, title}]
   terminal     String    @default("[]") // live play-by-play: JSON [{text, at}]
   error        String?
