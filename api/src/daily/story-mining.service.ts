@@ -23,6 +23,9 @@ export type MinedPayload = {
   /** The reply was cut off and we salvaged what was complete — part of his day is genuinely
    *  missing, and the card must say so rather than look tidy. (BEA-1163) */
   partial?: boolean;
+  /** One of the two reads came back empty. 'work' = tasks are missing, 'day' = feelings and the
+   *  timeline are. Half a day is worth showing; pretending it is whole is not. (BEA-1166) */
+  missing?: 'work' | 'day' | null;
   /** Served from the stored reading — no call was made, and nothing was charged. (BEA-1164) */
   cached?: boolean;
   /** The story was edited after this reading was made. Shown, never silently re-run. (BEA-1164) */
@@ -112,6 +115,48 @@ export class StoryMiningService {
     return p;
   }
 
+  /**
+   * One half of the read, with its own retry. (BEA-1166)
+   *
+   * The ceiling used to be 2500 and on 28 July his story blew past it three times in a row — each
+   * reply cut off mid-JSON and thrown away whole. An unused ceiling costs nothing (only generated
+   * tokens are billed), so it sits well clear of a long day. Split in two, each half needs far less
+   * of it than the single call did. (BEA-1163)
+   *
+   * The retry must ASK FOR SOMETHING DIFFERENT. It used to resend the identical prompt at the
+   * identical ceiling and so failed identically — which is why every failure in his log is a pair
+   * rather than a recovery.
+   */
+  private async readHalf(
+    day: string,
+    half: 'work' | 'day',
+    promptKey: 'daily.storyMineWork' | 'daily.storyMineDay',
+    context: string,
+    model: any,
+  ): Promise<{ json: any; truncated: boolean }> {
+    const CEILING = 6000;
+    const tmpl = await this.prompts.get(promptKey);
+    const prompt = `${tmpl.replace(/\{\{day\}\}/g, day)}\n\n${context}`;
+    const shorter =
+      half === 'work'
+        ? 'IMPORTANT: keep it SHORT. Only the clearest finished work, to-dos and delegations. Fewer items, no long snippets.'
+        : 'IMPORTANT: keep it SHORT. Only how the day felt and the main few events. Skip the lessons.';
+
+    let json: any = null;
+    let truncated = false;
+    for (let attempt = 0; attempt < 2 && !json; attempt++) {
+      const ask = attempt === 0 ? prompt : `${prompt}\n\n${shorter}`;
+      const raw = (await this.llm.completeWith(model, ask, CEILING, `story-mine-${half}`).catch(() => null)) || '';
+      json = looseJsonParse(raw);
+      // Did we only get an answer because the salvage rescued a cut-off reply? Then part of his day
+      // is genuinely missing, and he has to be told rather than shown a tidy-looking list. (BEA-1163)
+      if (json && raw.trim() && !raw.trim().endsWith('}') && !raw.trim().endsWith('```')) truncated = true;
+      if (!json && attempt === 0) this.log.warn(`mine(${day}) ${half}: unparseable model reply — retrying with a shorter ask`);
+    }
+    if (!json) this.log.warn(`mine(${day}) ${half}: unusable after retry`);
+    return { json, truncated };
+  }
+
   private async mineOnce(day: string, opts: { force?: boolean } = {}): Promise<MinedPayload> {
     const story = await this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' } });
     const text = (story?.rawText || '').trim();
@@ -139,43 +184,40 @@ export class StoryMiningService {
     ]);
     const contactNames = contacts.map((c) => c.name).join(', ');
 
-    const tmpl = await this.prompts.get('daily.storyMine');
-    const prompt =
-      `${tmpl.replace(/\{\{day\}\}/g, day)}\n\n` +
+    /**
+     * TWO reads, at the same time. (BEA-1166)
+     *
+     * This used to be one call doing eight jobs, and it took 20-30 seconds — the wait he said was
+     * "bothering me a lot". The two halves share nothing, so neither has to wait for the other and
+     * the wait becomes the slower of the two rather than the sum.
+     *
+     * It is also sturdier. One bad reply used to lose the whole day; now a failure in "the day"
+     * still leaves him every task, and the wizard says which half is missing.
+     */
+    const diary = `DIARY:\n${text.slice(0, 6000)}`;
+    // The task lists and contact names exist to stop the WORK half re-proposing known work and
+    // misspelling a name. The day half reads feelings and a timeline — none of that helps it, and
+    // sending it would spend input tokens on every read for nothing. (BEA-1166)
+    const workContext =
       `Already logged: ${existing.map((t) => t.title).join(' | ') || '(none)'}\n` +
       `Open elsewhere: ${openAll.map((t) => t.title).slice(0, 60).join(' | ') || '(none)'}\n` +
-      `Known contact names (for spelling only): ${contactNames || '(none)'}\n\nDIARY:\n${text.slice(0, 6000)}`;
+      `Known contact names (for spelling only): ${contactNames || '(none)'}\n\n${diary}`;
 
-    /**
-     * The ceiling used to be 2500, and on 28 July the owner's story blew past it three times in a
-     * row — each reply cut off mid-JSON, thrown away whole, surfacing as "The deep read failed".
-     * The day before, the same call returned 973-1301 tokens quite happily.
-     *
-     * The size of this reply scales with how much he says, so a low ceiling fails on exactly the
-     * days most worth capturing. An unused ceiling costs nothing — only generated tokens are
-     * billed — so it is set well clear of a long day. (BEA-1163)
-     */
-    const CEILING = 8000;
-    let j: any = null;
-    let truncated = false;
-    for (let attempt = 0; attempt < 2 && !j; attempt++) {
-      // The retry must DIFFER from the first go. It used to send the identical prompt at the
-      // identical ceiling, so it failed identically — which is why every failure in his log is a
-      // pair rather than a recovery. Second time, ask for the essentials only.
-      const ask = attempt === 0 ? prompt : `${prompt}
+    const model = await this.daily.storyModel();
+    const [workPart, dayPart] = await Promise.all([
+      this.readHalf(day, 'work', 'daily.storyMineWork', workContext, model),
+      this.readHalf(day, 'day', 'daily.storyMineDay', diary, model),
+    ]);
 
-IMPORTANT: keep it SHORT. Only the tasks, to-dos and delegations — skip events, lessons and the emotional read. Fewer items, no long snippets.`;
-      const raw = (await this.llm.completeWith(await this.daily.storyModel(), ask, CEILING, 'story-mine').catch(() => null)) || '';
-      j = looseJsonParse(raw);
-      // Did we only get an answer because the salvage rescued a cut-off reply? Then part of his day
-      // is genuinely missing, and he has to be told rather than shown a tidy-looking list. (BEA-1163)
-      if (j && raw.trim() && !raw.trim().endsWith('}') && !raw.trim().endsWith('```')) truncated = true;
-      if (!j && attempt === 0) this.log.warn(`mine(${day}): unparseable model reply — retrying with a shorter ask`);
-    }
-    if (!j) {
-      this.log.warn(`mine(${day}): model unusable after retry`);
+    // Only a total blank is a failure. Half an answer is still most of his day, and is far better
+    // than throwing the lot away — which is exactly what the single call used to do.
+    if (!workPart.json && !dayPart.json) {
+      this.log.warn(`mine(${day}): both halves unusable after retry`);
       return { ...this.empty(day, true), failed: true }; // honest failure — never dressed up as a tidy day
     }
+    const j: any = { ...(dayPart.json || {}), ...(workPart.json || {}) };
+    const truncated = workPart.truncated || dayPart.truncated;
+    const missing: 'work' | 'day' | null = !workPart.json ? 'work' : !dayPart.json ? 'day' : null;
     if (truncated) this.log.warn(`mine(${day}): reply was cut off — salvaged what was complete`);
 
     const S = (v: any, n = 160) => String(v || '').trim().slice(0, n);
@@ -240,7 +282,7 @@ IMPORTANT: keep it SHORT. Only the tasks, to-dos and delegations — skip events
       .slice(0, 10);
     const lessons = arr(j.lessons).map((x: any) => S(x, 300)).filter(Boolean).slice(0, 2);
 
-    const payload: MinedPayload = { day, hasStory: true, partial: truncated, done, todos, delegations, myReminders, promises, emotions, events, lessons };
+    const payload: MinedPayload = { day, hasStory: true, partial: truncated, missing, done, todos, delegations, myReminders, promises, emotions, events, lessons };
 
     // Keep it, so this is the last time this story costs him a call or a wait. Stored against the
     // exact text it was read from. A failure to store must never lose him the reading he just
