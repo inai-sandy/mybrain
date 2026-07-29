@@ -436,6 +436,18 @@ describe('a cut-off mentor note is kept, and a failure is not retried every minu
     expect(r!.adherenceScore).toBe(72); // the score survived too
   });
 
+  it('the WEEKLY review asks for enough room too — 1400 lost him three weeks', async () => {
+    // Raised to 4000, and the very first backfill run still hit it: the week of 29 June came back
+    // at exactly 4000 and lost its pattern and experiment. The live ceiling warning caught it
+    // within minutes of shipping, which is exactly what that warning is for. (BEA-1179)
+    const h = makeService('{"review":"A full week.","pattern":"A pattern.","experiment":"An experiment."}');
+    h.summaries.push({ day: '2026-06-09', text: 'A day.' });
+    h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
+    await h.svc.generateWeeklyReview('2026-06-08', true);
+    const ceilings = h.llm.completeWith.mock.calls.map((c: any[]) => c[2]);
+    expect(Math.max(...ceilings)).toBeGreaterThanOrEqual(8000);
+  });
+
   it('asks for enough room that the note is not cut off in the first place', async () => {
     const h = makeService('{"adherenceScore":70,"guidance":"A full note that fits comfortably."}');
     h.dayStories.push({ day: '2026-06-09', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-09T19:00:00Z') });
