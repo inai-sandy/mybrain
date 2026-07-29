@@ -12,7 +12,7 @@ import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Save, Loader2, Sparkles, Search, Wand2, Server, Plus, X, Boxes, Play, Trash2, Bot, History, CheckCircle2, AlertCircle, MinusCircle, Clock, ListOrdered } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
-type PaletteItem = { type: 'skill' | 'tool' | 'generic'; kind?: string; id: string; name: string; description?: string; group?: string };
+type PaletteItem = { type: 'skill' | 'tool' | 'generic'; kind?: string; id: string; name: string; description?: string; group?: string; connected?: boolean; connectHint?: string; connectPath?: string };
 type Palette = { generics: PaletteItem[]; tools: PaletteItem[]; skills: PaletteItem[] };
 
 const KIND_STYLE: Record<string, string> = {
@@ -517,6 +517,9 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
   );
 }
 
+/** The catalog's group order (BEA-1167) — anything unrecognised falls into a plain "Tools" heading. */
+const TOOL_GROUPS = ['Brain', 'Web', 'Google', 'Messaging', 'Output', 'AI', 'MCP servers', 'Advanced'];
+
 function BlockPicker({ palette, onPick, onClose }: { palette: Palette; onPick: (i: PaletteItem) => void; onClose: () => void }) {
   const [q, setQ] = useState('');
   const filt = (arr: PaletteItem[]) => (arr || []).filter((x) => !q || (x.name + ' ' + (x.description || '')).toLowerCase().includes(q.toLowerCase()));
@@ -533,7 +536,12 @@ function BlockPicker({ palette, onPick, onClose }: { palette: Palette; onPick: (
         </div>
         <div className="max-h-80 overflow-auto p-2">
           <PickerGroup icon={<Boxes className="h-3.5 w-3.5 text-zinc-500" />} title="Building blocks" items={generics} onPick={onPick} />
-          <PickerGroup icon={<Server className="h-3.5 w-3.5 text-sky-500" />} title="Tools & connectors" items={tools} onPick={onPick} />
+          {/* Tools come from the one catalog now, already carrying their group (BEA-1167) — show
+              them under those headings instead of one long undifferentiated list. */}
+          {TOOL_GROUPS.map((g) => (
+            <PickerGroup key={g} icon={<Server className="h-3.5 w-3.5 text-sky-500" />} title={g} items={tools.filter((t) => (t.group || 'Tools') === g)} onPick={onPick} />
+          ))}
+          <PickerGroup icon={<Server className="h-3.5 w-3.5 text-sky-500" />} title="Tools" items={tools.filter((t) => !TOOL_GROUPS.includes(t.group || 'Tools'))} onPick={onPick} />
           <PickerGroup icon={<Wand2 className="h-3.5 w-3.5 text-violet-500" />} title="Skills" items={skills} onPick={onPick} />
           {!skills.length && !tools.length && !generics.length && <div className="px-2 py-6 text-center text-sm text-zinc-400">No blocks match “{q}”.</div>}
         </div>
@@ -547,12 +555,25 @@ function PickerGroup({ icon, title, items, onPick }: { icon: React.ReactNode; ti
     <div className="mb-2">
       <div className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{icon}{title}</div>
       <div className="space-y-0.5">
-        {items.map((it) => (
-          <button key={it.type + it.id} onClick={() => onPick(it)} className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-300" />
-            <span className="min-w-0"><span className="font-medium">{it.name}</span>{it.description && <span className="ml-1 text-xs text-zinc-500">— {it.description}</span>}</span>
-          </button>
-        ))}
+        {items.map((it) => {
+          // connected is undefined for building blocks — only real catalog tools can be "off".
+          const off = it.connected === false;
+          return (
+            <button
+              key={it.type + it.id}
+              onClick={() => onPick(it)}
+              title={off ? it.connectHint || 'Not connected yet' : undefined}
+              className={'flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 ' + (off ? 'opacity-60' : '')}
+            >
+              <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-300" />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">{it.name}</span>
+                {off && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs connecting</span>}
+                {it.description && <span className="ml-1 text-xs text-zinc-500">— {it.description}</span>}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

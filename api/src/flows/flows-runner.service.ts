@@ -666,7 +666,14 @@ export class FlowRunnerService implements OnModuleInit {
   }
 
   // Tools that genuinely need the agent engine (web/browse/connectors/external actions).
-  private static AGENT_TOOLS = new Set(['web_search', 'web_read', 'gmail', 'calendar', 'drive', 'save_document', 'telegram', 'http']);
+  // Tools that need REAL access and must run on the engine. Anything not in here (and not handled
+  // directly above) falls through to a plain model call — fine for reasoning, wrong for a lookup,
+  // so every catalog tool that touches your data or the outside world belongs in this set (BEA-1167).
+  private static AGENT_TOOLS = new Set([
+    'web_search', 'web_read', 'gmail', 'calendar', 'drive', 'save_document', 'telegram', 'http',
+    'docs', 'sheets', 'slides', 'tasks', 'forms', 'meet', 'chat', 'contacts',
+    'whatsapp', 'cli', 'remember', 'save_capture', 'create_task', 'search_rag', 'fetch_document',
+  ]);
 
   private async runNode(node: any, input: string, inputs: string[]): Promise<string> {
     const kind = node.data?.kind;
@@ -761,6 +768,21 @@ export class FlowRunnerService implements OnModuleInit {
       save_document: `Save the following as a document in my library, then confirm with the title:\n${input}`,
       telegram: `Send the following to me on Telegram, then confirm:\n${input}`,
       http: `Make the appropriate external API / HTTP request to satisfy this, then return the result:\n${input}`,
+      docs: `Look at my Google Docs and answer:\n${input}`,
+      sheets: `Look at my Google Sheets and answer:\n${input}`,
+      slides: `Look at my Google Slides and answer:\n${input}`,
+      tasks: `Look at my Google Tasks and answer:\n${input}`,
+      forms: `Look at my Google Forms and answer:\n${input}`,
+      meet: `Look at my Google Meet meetings and answer:\n${input}`,
+      chat: `Look at my Google Chat messages and answer:\n${input}`,
+      contacts: `Look in my Google Contacts and answer:\n${input}`,
+      whatsapp: `Send the following to me on WhatsApp, then confirm:\n${input}`,
+      cli: `Run the command line tool needed for this and return what it printed:\n${input}`,
+      remember: `Save the key fact(s) below into my long-term memory, then confirm what you saved:\n${input}`,
+      save_capture: `File the following into my capture inbox, then confirm:\n${input}`,
+      create_task: `Add the following to my task list as a to-do, then confirm:\n${input}`,
+      search_rag: `Search my raw notes (no memory layer) and answer:\n${input}`,
+      fetch_document: `Open the document referred to below and return its content:\n${input}`,
     };
     return map[toolId] || `Use the ${label} tool for the following:\n${input}`;
   }

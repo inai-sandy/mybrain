@@ -46,6 +46,23 @@ describe('AgentAreasService (BEA-1095)', () => {
     expect(news.tools[0]).toEqual({ kind: 'api', name: 'Tavily', status: 'needed' });
   });
 
+  it('keeps the catalog id when tools are saved — without it a picked tool is just a label (BEA-1167)', async () => {
+    const { prisma } = fakePrisma();
+    let saved: any = null;
+    (prisma as any).agentArea.update = jest.fn(async (args: any) => { saved = args.data; return { id: 'ar1', name: 'x', tools: args.data.tools }; });
+    await new AgentAreasService(prisma as any).update('ar1', {
+      tools: [
+        { id: 'web_search', kind: 'api', name: 'Web search', status: 'installed' },
+        { kind: 'cli', name: 'something typed by hand', status: 'needed' }, // no id — still allowed
+      ] as any,
+    });
+    const out = JSON.parse(saved.tools);
+    expect(out[0].id).toBe('web_search');
+    expect(out[0].status).toBe('installed');
+    expect(out[1].id).toBeUndefined();
+    expect(out[1].name).toBe('something typed by hand');
+  });
+
   it('refuses to delete an area that still has jobs (history is precious)', async () => {
     const { prisma } = fakePrisma();
     await expect(new AgentAreasService(prisma as any).remove('ar1')).rejects.toThrow(/still has jobs/);
