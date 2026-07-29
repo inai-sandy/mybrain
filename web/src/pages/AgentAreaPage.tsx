@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Loader2, CheckCircle2, XCircle, PauseCircle, CalendarClock, ChevronRight, Wrench, Trash2, Pencil, Check, X } from 'lucide-react';
+import { ArrowLeft, Plus, Loader2, CheckCircle2, XCircle, PauseCircle, CalendarClock, ChevronRight, Wrench, Trash2, Pencil, Check, X, Search } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
 import { useToast } from '../ui/Toast';
 import { timeAgo } from './Agents';
@@ -33,6 +33,13 @@ const TOOL_GROUP: Record<string, string> = {
   'MCP servers': 'bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300',
   Advanced: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300',
 };
+/** Where a job came from (BEA-1176) — you should never have to guess whether you typed it or said it. */
+const ORIGIN: Record<string, { label: string; title: string; cls: string }> = {
+  chat: { label: '💬 chat', title: 'Built in the chat', cls: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' },
+  voice: { label: '🎙 voice', title: 'Came in by voice', cls: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' },
+  import: { label: '⤵ imported', title: 'Imported from GitHub', cls: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300' },
+};
+
 function toolBadge(t: { kind: string; group?: string }) {
   if (t.group && TOOL_GROUP[t.group]) return { label: t.group === 'MCP servers' ? 'MCP' : t.group, cls: TOOL_GROUP[t.group] };
   return TOOL_KIND[t.kind] || TOOL_KIND.api;
@@ -58,6 +65,9 @@ export function AgentAreaPage() {
   const [customKind, setCustomKind] = useState('api');
   const [outcome, setOutcome] = useState(''); // the agent's standing definition of done (BEA-1173)
   const [savingOutcome, setSavingOutcome] = useState(false);
+  // Jobs list standards (BEA-1176): search + sort + count, so a busy agent stays usable.
+  const [jobQ, setJobQ] = useState('');
+  const [jobSort, setJobSort] = useState<'recent' | 'name' | 'origin'>('recent');
 
   async function saveTools(next: AreaTool[]) {
     const r = await fetch(`/api/agent/areas/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: next }) });
@@ -101,7 +111,17 @@ export function AgentAreaPage() {
   if (!area?.id) return <div className="p-6 text-sm text-zinc-500">This agent doesn't exist any more. <button onClick={() => nav('/agent')} className="text-emerald-600 hover:underline">Back to Agents</button></div>;
 
   const color = area.color || '#818cf8';
-  const jobs = area.jobs || [];
+  const allJobs: any[] = area.jobs || [];
+  const needle = jobQ.trim().toLowerCase();
+  const jobs = allJobs
+    .filter((j: any) => !needle || `${j.name} ${j.description || ''} ${j.scheduleText || ''}`.toLowerCase().includes(needle))
+    .sort((a: any, b: any) => {
+      if (jobSort === 'name') return String(a.name).localeCompare(String(b.name));
+      if (jobSort === 'origin') return String(a.origin || 'chat').localeCompare(String(b.origin || 'chat')) || String(a.name).localeCompare(String(b.name));
+      const at = a.lastRun?.at || a.createdAt || 0;
+      const bt = b.lastRun?.at || b.createdAt || 0;
+      return new Date(bt).getTime() - new Date(at).getTime();
+    });
   const tools: AreaTool[] = area.tools || [];
 
   return (
@@ -215,19 +235,37 @@ export function AgentAreaPage() {
 
       {/* Jobs */}
       <section className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-500">Jobs · {jobs.length}</h2>
-          <button onClick={() => setShowNew((v) => !v)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New job</button>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-zinc-500">Jobs · {needle ? `${jobs.length} of ${allJobs.length}` : allJobs.length}</h2>
+          <button onClick={() => setShowNew((v) => !v)} className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500"><Plus className="h-4 w-4" />New job</button>
         </div>
+        {allJobs.length > 3 && (
+          <div className="flex gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+              <input value={jobQ} onChange={(e) => setJobQ(e.target.value)} placeholder="Search jobs…" className="w-full rounded-lg border border-zinc-200 bg-transparent py-1.5 pl-8 pr-3 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm" />
+            </div>
+            <select value={jobSort} onChange={(e) => setJobSort(e.target.value as any)} aria-label="Sort jobs" className="shrink-0 rounded-lg border border-zinc-200 bg-transparent px-2 py-1.5 text-xs outline-none dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="recent">Most recent</option>
+              <option value="name">By name</option>
+              <option value="origin">By where it came from</option>
+            </select>
+          </div>
+        )}
         {showNew && <NewJobChat areaId={area.id} areaName={area.name} onCreated={(url) => { setShowNew(false); nav(url); }} onClose={() => setShowNew(false)} />}
         {jobs.length === 0 && !showNew ? (
-          <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No jobs yet — give this agent its first one.</div>
+          <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
+            {needle ? <>Nothing matches “{jobQ}”. <button onClick={() => setJobQ('')} className="text-emerald-600 hover:underline">Clear</button></> : 'No jobs yet — give this agent its first one.'}
+          </div>
         ) : (
           jobs.map((j: any) => (
             <button key={j.id} onClick={() => nav(`/agent/a/${j.id}`)} className="flex w-full items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-900">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl" style={{ background: (j.color || color) + '22' }}>{j.icon || '📄'}</span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{j.name}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="min-w-0 truncate text-sm font-semibold">{j.name}</span>
+                  <span title={ORIGIN[j.origin || 'chat'].title} className={'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' + ORIGIN[j.origin || 'chat'].cls}>{ORIGIN[j.origin || 'chat'].label}</span>
+                </span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
                   {j.lastRun ? (
                     j.lastRun.status === 'done' ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" />ran {timeAgo(j.lastRun.at)}</span>

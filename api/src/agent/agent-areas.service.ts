@@ -246,6 +246,7 @@ export class AgentAreasService {
       icon: area.icon,
       color: area.color,
       description: area.description,
+      outcome: area.outcome || '', // the agent's standing definition of done (BEA-1173)
       tools: this.parse<AreaTool[]>(area.tools, []),
       sourceUrl: area.sourceUrl,
       createdAt: area.createdAt,
@@ -253,6 +254,8 @@ export class AgentAreasService {
       jobs: jobs.map((j) => ({
         id: j.id, name: j.name, icon: j.icon, color: j.color, description: j.description,
         enabled: j.enabled, scheduleText: j.scheduleText, category: j.category,
+        origin: j.origin || 'chat', // where it came from — chat, voice or an import (BEA-1176)
+        createdAt: j.createdAt,
         lastRun: j._lastRun || null,
       })),
     };
