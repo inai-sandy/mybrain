@@ -1263,7 +1263,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         }
         // Chases follow the work — but only when the keeper has none active, so one task never gets
         // chased twice a day. Otherwise the copy's chase dies with it (cascade).
-        const keeperChases = await this.prisma.reminder.count({ where: { taskId: keeper.id, status: 'active' } }).catch(() => 0);
+        // Any chase that isn't finished counts, not just an active one (BEA-1189). A PAUSED chase on
+        // the keeper used to read as "no chase", so the copy's active one was moved on top of it —
+        // leaving the task with two, and the person named twice in one nudge if the paused one woke.
+        const keeperChases = await this.prisma.reminder.count({ where: { taskId: keeper.id, status: { in: ['active', 'paused'] } } }).catch(() => 0);
         if (!keeperChases) await this.prisma.reminder.updateMany({ where: { taskId: d.id }, data: { taskId: keeper.id } }).catch(() => undefined);
         await this.prisma.taskClaim.updateMany({ where: { taskId: d.id }, data: { taskId: keeper.id } }).catch(() => undefined);
         const links = await this.prisma.taskPerson.findMany({ where: { taskId: d.id } }).catch(() => [] as any[]);

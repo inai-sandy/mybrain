@@ -5,7 +5,7 @@ import { TasksService } from './tasks.service';
  * people-links move onto the keeper before the copies go. And the finder's wording pre-pass must
  * catch heavy-overlap titles without any AI. (BEA-1057)
  */
-function make(tasks: any[]) {
+function make(tasks: any[], opts: { chaseStatuses?: string[] } = {}) {
   const updates: any[] = [];
   const deleted: string[] = [];
   const reminderMoves: any[] = [];
@@ -23,7 +23,12 @@ function make(tasks: any[]) {
       delete: async ({ where }: any) => { deleted.push(where.id); return byId.get(where.id); },
     },
     reminder: {
-      count: async () => tasks.find((t) => t.id === 'keep')?.hasChase ? 1 : 0,
+      // Honours the WHERE clause, so the active-vs-paused distinction is genuinely exercised (BEA-1189).
+      count: async ({ where }: any) => {
+        const statuses = opts.chaseStatuses ?? (tasks.find((t) => t.id === 'keep')?.hasChase ? ['active'] : []);
+        const wanted: string[] = where?.status?.in || (where?.status ? [where.status] : ['active', 'paused']);
+        return statuses.filter((s) => wanted.includes(s)).length;
+      },
       updateMany: async ({ where, data }: any) => { reminderMoves.push({ from: where.taskId, to: data.taskId }); return { count: 1 }; },
     },
     taskClaim: { updateMany: async ({ where, data }: any) => { claimMoves.push({ from: where.taskId, to: data.taskId }); return { count: 1 }; } },
@@ -98,5 +103,20 @@ describe('the wording pre-pass groups heavy-overlap titles without AI (BEA-1057)
       { id: '2', title: 'Send the firmware build to testers' },
     ]);
     expect(groups).toHaveLength(0);
+  });
+});
+
+/**
+ * BEA-1189 — the "don't move a chase onto a keeper that already has one" guard only counted ACTIVE
+ * chases. A paused one read as none, so the copy's active chase was moved on top of it and the task
+ * ended up with two. Resume the paused one and the person is named twice in a single nudge.
+ */
+describe('a merge never leaves a task with two chases', () => {
+  it('does not move the copy\'s chase when the keeper already has a PAUSED one', async () => {
+    const keep = { ...base, id: 'keep', title: 'Send the report' };
+    const dup = { ...base, id: 'dup', title: 'Send the report again' };
+    const { svc, reminderMoves } = make([keep, dup], { chaseStatuses: ['paused'] });
+    await svc.mergeDuplicates([{ keepId: 'keep', removeIds: ['dup'] }]);
+    expect(reminderMoves).toEqual([]);
   });
 });

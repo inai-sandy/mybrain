@@ -327,16 +327,21 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       // Read the briefings directly rather than through BriefingsService — that module already
       // depends on this one, and a circular dependency would break the app at startup. (BEA-1023)
       this.briefsFor(contactId),
-      this.prisma.task.findMany({
-        where: { ownerContactId: contactId },
-        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
-        take: 40,
-        select: {
+      // OPEN work first, explicitly (BEA-1189). `orderBy: { status: 'asc' }` sorts the text, and
+      // 'done' < 'open' alphabetically — so with take: 40 a long-standing colleague's finished work
+      // filled the whole window and their real open tasks never reached the agent at all.
+      (async () => {
+        const sel = {
           id: true, title: true, note: true, status: true, createdAt: true, completedAt: true, promisedFor: true,
-          claims: { where: { status: 'pending' }, take: 1, select: { createdAt: true } },
+          claims: { where: { status: 'pending' as const }, take: 1, select: { createdAt: true } },
           people: { select: { contact: { select: { name: true } } } },
-        },
-      }).catch(() => [] as any[]),
+        };
+        const [openRows, doneRows] = await Promise.all([
+          this.prisma.task.findMany({ where: { ownerContactId: contactId, status: { not: 'done' } }, orderBy: { createdAt: 'desc' }, take: 40, select: sel }),
+          this.prisma.task.findMany({ where: { ownerContactId: contactId, status: 'done' }, orderBy: { completedAt: 'desc' }, take: 20, select: sel }),
+        ]);
+        return [...openRows, ...doneRows];
+      })().catch(() => [] as any[]),
     ]);
     const openWork = (work as any[]).filter((t) => t.status !== 'done');
     // Recently finished work is still named so the agent cannot chase something they just did —
