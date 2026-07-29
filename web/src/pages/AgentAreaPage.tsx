@@ -6,6 +6,7 @@ import { useToast } from '../ui/Toast';
 import { timeAgo } from './Agents';
 import { NewJobChat } from './NewJobChat';
 import { ToolPicker, type CatalogTool } from '../ui/ToolPicker';
+import { GrowTextarea } from '../ui/GrowTextarea';
 
 // `id` is the catalog id (BEA-1167). Older saved tools have no id — they were typed by hand and
 // still render fine; picking from the catalog is how new ones are added.
@@ -212,12 +213,13 @@ export function AgentAreaPage() {
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold">What a good result looks like</h2>
         <p className="mt-0.5 text-[11px] text-zinc-400">Used to grade any job here that has no Outcome of its own — including anything you send in by voice.</p>
-        <textarea
+        <GrowTextarea
           value={outcome}
           onChange={(e) => setOutcome(e.target.value)}
-          rows={2}
           placeholder="e.g. A short, clearly written answer that names its sources and says plainly what it could not find."
-          className="mt-1.5 w-full resize-none rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm"
+          className="mt-1.5 w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm"
+          minHeight={60}
+          maxHeight={220}
         />
         {outcome !== (area.outcome || '') && (
           <button
@@ -273,6 +275,11 @@ export function AgentAreaPage() {
                     : j.lastRun.status === 'running' ? <span className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400"><Loader2 className="h-3 w-3 animate-spin" />running</span>
                     : <span className="inline-flex items-center gap-1 text-amber-600"><PauseCircle className="h-3 w-3" />waiting on you</span>
                   ) : <span>never ran</span>}
+                  {j.lastRun?.grade?.verdict && (
+                    <span className={'rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' + (j.lastRun.grade.verdict === 'pass' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : j.lastRun.grade.verdict === 'fail' ? 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300')}>
+                      {j.lastRun.grade.verdict}{j.lastRun.grade.score != null ? ` ${j.lastRun.grade.score}` : ''}
+                    </span>
+                  )}
                   {j.scheduleText && <span className="inline-flex items-center gap-1"><CalendarClock className="h-3 w-3" />{j.scheduleText}</span>}
                   {!j.enabled && <span className="rounded-full bg-zinc-100 px-1.5 dark:bg-zinc-800">paused</span>}
                 </span>

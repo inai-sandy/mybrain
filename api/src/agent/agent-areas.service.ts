@@ -270,11 +270,11 @@ export class AgentAreasService {
         where: { agentId: { not: null } },
         orderBy: { startedAt: 'desc' },
         take: 300,
-        select: { agentId: true, status: true, startedAt: true, endedAt: true },
+        select: { agentId: true, status: true, startedAt: true, endedAt: true, grade: true },
       }),
     ]);
     const lastByAgent = new Map<string, any>();
-    for (const r of lastRuns) if (r.agentId && !lastByAgent.has(r.agentId)) lastByAgent.set(r.agentId, { status: r.status, at: r.endedAt || r.startedAt });
+    for (const r of lastRuns as any[]) if (r.agentId && !lastByAgent.has(r.agentId)) lastByAgent.set(r.agentId, { status: r.status, at: r.endedAt || r.startedAt, grade: this.parse<any>(r.grade, null) });
     const byArea = new Map<string, any[]>();
     for (const a of agents as any[]) {
       (a as any)._lastRun = lastByAgent.get(a.id) || null;
@@ -289,7 +289,28 @@ export class AgentAreasService {
     const area = await (this.prisma as any).agentArea.findUnique({ where: { id } });
     if (!area) throw new NotFoundException('Agent not found');
     const jobs = await this.prisma.agent.findMany({ where: { areaId: id } as any, orderBy: { createdAt: 'desc' } });
+    // The agent page used to compute NO last run at all, so every job read "never ran" — even one
+    // that was running right then. (BEA-1176)
+    await this.attachLastRun(jobs as any[]);
     return this.shape(area, jobs as any[]);
+  }
+
+  /** Hang each job's most recent run — status, when, and how it was graded — on the row. */
+  private async attachLastRun(jobs: any[]): Promise<void> {
+    const ids = jobs.map((j) => j.id);
+    if (!ids.length) return;
+    const runs = await this.prisma.agentRun.findMany({
+      where: { agentId: { in: ids } },
+      orderBy: { startedAt: 'desc' },
+      take: 300,
+      select: { agentId: true, status: true, startedAt: true, endedAt: true, grade: true },
+    }).catch(() => [] as any[]);
+    const byAgent = new Map<string, any>();
+    for (const r of runs as any[]) {
+      if (!r.agentId || byAgent.has(r.agentId)) continue;
+      byAgent.set(r.agentId, { status: r.status, at: r.endedAt || r.startedAt, grade: this.parse<any>(r.grade, null) });
+    }
+    for (const j of jobs) j._lastRun = byAgent.get(j.id) || null;
   }
 
   async create(input: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
