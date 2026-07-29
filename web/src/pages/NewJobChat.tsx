@@ -3,7 +3,7 @@ import { Loader2, Send, Sparkles, X, CalendarClock, Check, ListChecks, Wrench } 
 import { useToast } from '../ui/Toast';
 import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
-import { useCatalog } from '../ui/ToolPicker';
+import { ToolPicker, useCatalog } from '../ui/ToolPicker';
 
 /**
  * The new-job conversation (BEA-1170). "New job" used to open a silent form: starter cards, one
@@ -20,12 +20,24 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  // The tool step (BEA-1171). `picked` starts as what the chat proposed and becomes whatever you
+  // tick — null means "not touched yet", so a fresh proposal can still flow in.
+  const [picked, setPickedState] = useState<string[]>([]);
+  const [touched, setTouched] = useState(false);
+  const [pickingTools, setPickingTools] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch(`/api/agent/areas/${areaId}/job-builder`).then((r) => r.json()).then((d) => { setLog(d.log || []); setJob(d.job || null); }).catch(() => undefined);
   }, [areaId]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [log, job]);
+
+  // Adopt what the chat proposes — until you touch the list yourself, then yours wins.
+  useEffect(() => {
+    if (touched) return;
+    const ids = Array.isArray(job?.tools) ? job.tools.map((t: any) => (typeof t === 'string' ? t : t?.id)).filter(Boolean) : [];
+    setPickedState(ids);
+  }, [job, touched]);
 
   async function send() {
     const m = msg.trim();
@@ -47,7 +59,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
     if (!job || creating) return;
     setCreating(true);
     try {
-      const r = await fetch(`/api/agent/areas/${areaId}/job-builder/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const r = await fetch(`/api/agent/areas/${areaId}/job-builder/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: picked }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not create');
       toast('success', 'Job created 🎉');
@@ -62,6 +74,10 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   }
 
   const toolName = (id: string) => (catalog?.tools || []).find((t: any) => t.id === id)?.name || id;
+  const whyFor = (id: string) => (Array.isArray(job?.tools) ? job.tools : []).find((t: any) => t?.id === id)?.why || '';
+  const reasons: { id: string; why: string }[] = (Array.isArray(job?.tools) ? job.tools : [])
+    .filter((t: any) => t?.id && t?.why && picked.includes(t.id))
+    .map((t: any) => ({ id: t.id, why: String(t.why) }));
 
   return (
     <Sheet onClose={onClose} size="lg">
@@ -97,11 +113,35 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
                 <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold">{job.icon || '📄'} {job.name}</div>
                 {job.task && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-600 dark:text-zinc-300">{job.task}</p>}
                 {job.outcome && <p className="mt-1.5 text-xs text-zinc-500"><b>A good result:</b> {job.outcome}</p>}
-                {Array.isArray(job.tools) && job.tools.length > 0 && (
-                  <p className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-zinc-500">
-                    <Wrench className="h-3 w-3" />{job.tools.map((t: any) => toolName(typeof t === 'string' ? t : t?.id)).join(' · ')}
-                  </p>
-                )}
+                {/* The tool step (BEA-1171): it proposes, you tick. Nothing is picked for you silently. */}
+                <div className="mt-2 rounded-lg border border-emerald-200 bg-white/70 p-2 dark:border-emerald-500/20 dark:bg-zinc-900/50">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-200"><Wrench className="h-3.5 w-3.5 text-zinc-400" />Tools it will use</span>
+                    <button onClick={() => setPickingTools(true)} className="text-xs font-medium text-emerald-600 hover:underline">Change</button>
+                  </div>
+                  {picked.length === 0 ? (
+                    <p className="mt-1 text-xs text-zinc-400">None picked. It will use its own judgment — tap Change to choose.</p>
+                  ) : (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {picked.map((id) => {
+                        const t = (catalog?.tools || []).find((x: any) => x.id === id);
+                        const why = whyFor(id);
+                        return (
+                          <span key={id} title={why || undefined} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                            {t?.name || id}
+                            {t && t.connected === false && <span className="rounded-full bg-amber-100 px-1 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs connecting</span>}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {/* Why it suggested each one — the reason matters more than the name. */}
+                  {reasons.length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5">
+                      {reasons.map((r) => <li key={r.id} className="text-[11px] text-zinc-500">· <b>{toolName(r.id)}</b> — {r.why}</li>)}
+                    </ul>
+                  )}
+                </div>
                 {Array.isArray(job.checks) && job.checks.length > 0 && (
                   <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-zinc-500"><ListChecks className="h-3 w-3" />{job.checks.length} check{job.checks.length === 1 ? '' : 's'}</p>
                 )}
@@ -113,6 +153,16 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
             )}
             <div ref={endRef} />
           </div>
+
+          {pickingTools && (
+            <ToolPicker
+              value={picked}
+              onSave={(ids) => { setPickedState(ids); setTouched(true); }}
+              onClose={() => setPickingTools(false)}
+              title="Tools for this job"
+              subtitle="It suggested these. Tick what it may use — it gets nothing else."
+            />
+          )}
 
           <div className="border-t border-zinc-100 p-3 dark:border-zinc-800">
             <div className="flex items-center gap-2">
