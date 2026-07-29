@@ -273,11 +273,10 @@ export class AgentAreasService {
         select: { agentId: true, status: true, startedAt: true, endedAt: true, grade: true },
       }),
     ]);
-    const lastByAgent = new Map<string, any>();
-    for (const r of lastRuns as any[]) if (r.agentId && !lastByAgent.has(r.agentId)) lastByAgent.set(r.agentId, { status: r.status, at: r.endedAt || r.startedAt, grade: this.parse<any>(r.grade, null) });
+    void lastRuns; // superseded by attachLastRun, which also counts flow runs (BEA-1176)
+    await this.attachLastRun(agents as any[]);
     const byArea = new Map<string, any[]>();
     for (const a of agents as any[]) {
-      (a as any)._lastRun = lastByAgent.get(a.id) || null;
       const key = (a as any).areaId || '';
       if (!byArea.has(key)) byArea.set(key, []);
       byArea.get(key)!.push(a);
@@ -295,22 +294,48 @@ export class AgentAreasService {
     return this.shape(area, jobs as any[]);
   }
 
-  /** Hang each job's most recent run — status, when, and how it was graded — on the row. */
+  /**
+   * Hang each job's most recent run on the row — status, when, and how it was graded.
+   *
+   * A job's work can happen EITHER as a direct agent run or as a flow run (anything deep, and every
+   * voice job, runs as a flow). Looking at only one of the two is why a job that was running right
+   * then still read "never ran". (BEA-1176)
+   */
   private async attachLastRun(jobs: any[]): Promise<void> {
     const ids = jobs.map((j) => j.id);
     if (!ids.length) return;
-    const runs = await this.prisma.agentRun.findMany({
-      where: { agentId: { in: ids } },
-      orderBy: { startedAt: 'desc' },
-      take: 300,
-      select: { agentId: true, status: true, startedAt: true, endedAt: true, grade: true },
-    }).catch(() => [] as any[]);
-    const byAgent = new Map<string, any>();
-    for (const r of runs as any[]) {
-      if (!r.agentId || byAgent.has(r.agentId)) continue;
-      byAgent.set(r.agentId, { status: r.status, at: r.endedAt || r.startedAt, grade: this.parse<any>(r.grade, null) });
+
+    const [agentRuns, flows] = await Promise.all([
+      Promise.resolve((this.prisma as any).agentRun?.findMany?.({
+        where: { agentId: { in: ids } },
+        orderBy: { startedAt: 'desc' },
+        take: 300,
+        select: { agentId: true, status: true, startedAt: true, endedAt: true, grade: true },
+      })).catch(() => [] as any[]),
+      // Optional-call: spec harnesses build a partial prisma without these delegates.
+      Promise.resolve((this.prisma as any).flow?.findMany?.({ where: { agentId: { in: ids } }, select: { id: true, agentId: true } })).catch(() => [] as any[]),
+    ]);
+
+    const best = new Map<string, any>();
+    const consider = (agentId: string | null, row: { status: string; at: any; grade?: any }) => {
+      if (!agentId || !row.at) return;
+      const cur = best.get(agentId);
+      if (!cur || new Date(row.at).getTime() > new Date(cur.at).getTime()) best.set(agentId, row);
+    };
+    for (const r of (agentRuns || []) as any[]) consider(r.agentId, { status: r.status, at: r.endedAt || r.startedAt, grade: this.parse<any>(r.grade, null) });
+
+    const agentByFlow = new Map<string, string>(((flows || []) as any[]).map((f) => [f.id, f.agentId]));
+    if (agentByFlow.size) {
+      const flowRuns = await Promise.resolve((this.prisma as any).flowRun?.findMany?.({
+        where: { flowId: { in: [...agentByFlow.keys()] } },
+        orderBy: { startedAt: 'desc' },
+        take: 300,
+        select: { flowId: true, status: true, startedAt: true, endedAt: true },
+      })).catch(() => [] as any[]);
+      for (const r of (flowRuns || []) as any[]) consider(agentByFlow.get(r.flowId) || null, { status: r.status, at: r.endedAt || r.startedAt });
     }
-    for (const j of jobs) j._lastRun = byAgent.get(j.id) || null;
+
+    for (const j of jobs) j._lastRun = best.get(j.id) || null;
   }
 
   async create(input: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {

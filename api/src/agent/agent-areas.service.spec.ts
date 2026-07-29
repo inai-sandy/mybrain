@@ -30,6 +30,9 @@ function fakePrisma(overrides: any = {}) {
         update: jest.fn(async (args: any) => { calls.agentUpdates.push(args); return {}; }),
       },
       agentRun: { findMany: jest.fn(async () => [{ agentId: 'j2', status: 'done', startedAt: new Date(), endedAt: new Date() }]) },
+      // A job's work can also happen as a flow run (BEA-1176).
+      flow: { findMany: jest.fn(async () => overrides.flows ?? []) },
+      flowRun: { findMany: jest.fn(async () => overrides.flowRuns ?? []) },
     },
   };
 }
