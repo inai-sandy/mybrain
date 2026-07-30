@@ -320,14 +320,28 @@ export class DeepResearchService {
     return found
       .map((r, i) => {
         const body = (pages.get(r.url) || r.snippet || '').slice(0, CHARS_PER_SOURCE);
-        const when = r.published ? ` · ${String(r.published).slice(0, 10)}` : '';
+        const when = this.day(r.published) ? ` · ${this.day(r.published)}` : '';
         return `[${i + 1}] ${r.title}${when}\n${r.url}\n${body}`;
       })
       .join('\n\n');
   }
 
   private sourceList(found: WebResult[]): string {
-    return found.map((r, i) => `${i + 1}. [${r.title}](${r.url})${r.published ? ` — ${String(r.published).slice(0, 10)}` : ''}`).join('\n');
+    return found.map((r, i) => `${i + 1}. [${r.title}](${r.url})${this.day(r.published) ? ` — ${this.day(r.published)}` : ''}`).join('\n');
+  }
+
+  /**
+   * A publication date a person can read.
+   *
+   * Tavily returns RFC-822 ("Sat, 02 Aug 2026 00:00:00 GMT"), so the obvious slice(0,10) produced
+   * "Sat, 02 Au" in a live report. Parse it properly and fall back to showing nothing.
+   */
+  private day(v: unknown): string {
+    const raw = String(v ?? '').trim();
+    if (!raw) return '';
+    if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : '';
   }
 
   /** Same page reached two ways is one source. */

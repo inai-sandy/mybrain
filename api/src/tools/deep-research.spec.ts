@@ -166,6 +166,22 @@ describe('deep research (BEA-1196)', () => {
     expect(report).toContain('### Sources');
   });
 
+  // A live report listed sources as "Sat, 02 Au" — Tavily dates are RFC-822 and a 10-char slice cuts
+  // them mid-month.
+  it('shows readable dates, whatever format the search API used', async () => {
+    const rows = [
+      { title: 'RFC date', url: 'https://a.test/1', snippet: 's', published: 'Sat, 02 Aug 2026 00:00:00 GMT' },
+      { title: 'ISO date', url: 'https://a.test/2', snippet: 's', published: '2026-03-14T09:00:00Z' },
+      { title: 'Junk date', url: 'https://a.test/3', snippet: 's', published: 'sometime last year' },
+    ];
+    const { svc } = make({ results: { '*': rows }, plan: 'one question about the thing' });
+    const { report } = await svc.run('a question');
+    expect(report).toContain('2026-08-02');
+    expect(report).toContain('2026-03-14');
+    expect(report).not.toMatch(/Sat, 02 Au\b/);
+    expect(report).not.toContain('sometime la');   // unparseable → show nothing, not a truncation
+  });
+
   it('reports what it spent, in the output as well as the return value', async () => {
     const { svc } = make();
     const { report } = await svc.run('a question about something');
