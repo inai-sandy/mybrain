@@ -8,6 +8,12 @@ import { MemoryModule } from '../memory/memory.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { PushModule } from '../push/push.module';
 import { ToolCatalogModule } from '../tools/tool-catalog.module';
+// Tier-1 tools do their work in-process instead of through a 118k-token engine turn (BEA-1203).
+// None of these import FlowsModule, so there is no cycle: Items/Tasks pull in only MemoryModule,
+// Contacts pulls in Llm + Tasks. (Only EmoModule imports FlowsModule.)
+import { ItemsModule } from '../items/items.module';
+import { TasksModule } from '../tasks/tasks.module';
+import { ContactsModule } from '../contacts/contacts.module';
 import { FlowsService } from './flows.service';
 import { FlowRunnerService } from './flows-runner.service';
 import { FlowScheduler } from './flow-scheduler.service';
@@ -15,7 +21,7 @@ import { FlowsController } from './flows.controller';
 
 /** Flow canvas (Phase 2, BEA-644/646) — saved flows, palette, decompose, the graph executor + scheduler. */
 @Module({
-  imports: [SkillsModule, LlmModule, AgentModule, HermesModule, DocumentsModule, MemoryModule, TelegramModule, PushModule, ToolCatalogModule],
+  imports: [SkillsModule, LlmModule, AgentModule, HermesModule, DocumentsModule, MemoryModule, TelegramModule, PushModule, ToolCatalogModule, ItemsModule, TasksModule, ContactsModule],
   controllers: [FlowsController],
   providers: [FlowsService, FlowRunnerService, FlowScheduler],
   exports: [FlowsService, FlowRunnerService], // EMO research builds, saves AND runs a flow (BEA-870/1175)

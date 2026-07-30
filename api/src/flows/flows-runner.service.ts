@@ -12,6 +12,9 @@ import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
 import { WebResearchService } from '../tools/web-research.service';
 import { DeepResearchService, ResearchSpend } from '../tools/deep-research.service';
+import { ItemsService } from '../items/items.service';
+import { TasksService } from '../tasks/tasks.service';
+import { PostboxService } from '../contacts/postbox.service';
 import { randomBytes } from 'crypto';
 
 type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean };
@@ -51,6 +54,10 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly alerts?: AlertsService,
     private readonly web?: WebResearchService, // real Tavily/Exa research (BEA-1194)
     private readonly deep?: DeepResearchService, // our own research loop (BEA-1196)
+    // Tier-1 tools: work we simply do, no model at all (BEA-1203).
+    private readonly items?: ItemsService,
+    private readonly tasks?: TasksService,
+    private readonly postbox?: PostboxService,
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -824,12 +831,18 @@ export class FlowRunnerService implements OnModuleInit {
   // directly above) falls through to a plain model call — fine for reasoning, wrong for a lookup,
   // so every catalog tool that touches your data or the outside world belongs in this set (BEA-1167).
   private static AGENT_TOOLS = new Set([
-    // web_search / web_read / web_search_meaning are NOT here on purpose (BEA-1194): they are real
-    // Tavily/Exa calls handled directly below, in seconds, instead of a multi-minute engine turn
-    // that decided for itself how (or whether) to search.
-    'gmail', 'calendar', 'drive', 'save_document', 'telegram', 'http',
+    // Only tools that need REAL ACCESS and genuine agency belong here — an engine turn averages
+    // 118,000 tokens, as much as eight branches of real research.
+    //
+    // Deliberately absent, all handled directly instead:
+    //  • web_search / web_read / web_search_meaning / deep_research (BEA-1194, BEA-1196) — the model
+    //    must never decide how to search; it answered a 2025 question from 2021 training data.
+    //  • save_document / save_capture / create_task / remember / telegram / whatsapp / search_rag /
+    //    fetch_document (BEA-1203) — filing a document is not a decision. These were engine turns
+    //    whose only job was to call our own API back.
+    'gmail', 'calendar', 'drive', 'http',
     'docs', 'sheets', 'slides', 'tasks', 'forms', 'meet', 'chat', 'contacts',
-    'whatsapp', 'cli', 'remember', 'save_capture', 'create_task', 'search_rag', 'fetch_document',
+    'cli',
   ]);
 
   /** The tool ids this flow's job may use — null when nobody has chosen, which blocks nothing. */
@@ -911,6 +924,14 @@ export class FlowRunnerService implements OnModuleInit {
             throw e;
           }
         }
+        // Work we can simply DO (BEA-1203). Saving a document, filing a note, creating a task,
+        // remembering something, sending a message, looking in your own notes — none of these need a
+        // model. Each was spawning a 118,000-token engine turn whose only job was to call our own
+        // API back. One engine turn costs as much as eight branches of real research.
+        {
+          const done = await this.directTool(refId, node, input, onLine);
+          if (done !== null) return done;
+        }
         if (FlowRunnerService.AGENT_TOOLS.has(refId)) {
           // Title the branch run by its sub-question, not a generic "Web search". (BEA-772)
           const focus = /THIS BRANCH FOCUSES ON:\s*([^\n]+)/.exec(input || '')?.[1]?.trim();
@@ -953,6 +974,150 @@ export class FlowRunnerService implements OnModuleInit {
     throw new Error(d?.error || 'the thinking step produced nothing');
   }
 
+  /**
+   * The tools we can simply DO, with no model involved at all (BEA-1203).
+   *
+   * Returns the step's output, or `null` when this id is not one of ours — so the caller falls
+   * through to the engine exactly as before.
+   *
+   * Every one of these was an engine turn. The My Brain MCP server makes the absurdity plain: for
+   * `save_document` and `remember`, the engine's whole job was to call our own `/api/agent/tools/…`
+   * endpoint back. 118,000 tokens to reach a service sitting in the same process.
+   *
+   * The line is agency versus transformation. Deciding what to do next earns an engine turn. Filing
+   * a document does not.
+   */
+  private async directTool(refId: string, node: any, input: string, onLine?: (t: string) => void): Promise<string | null> {
+    const text = (input || node?.data?.sub || '').trim();
+    const say = onLine || (() => undefined);
+
+    switch (refId) {
+      case 'save_document': {
+        if (!text) return 'There was nothing to save — the step received no text.';
+        const title = this.titleFor(node, text, 'Flow result');
+        const doc = await this.saveDoc(title, text, String(node?.data?.label || 'Flow'));
+        if (!doc) return 'The document could not be saved.';
+        say(`   💾 saved "${doc.title}"`);
+        return `Saved to your documents as "${doc.title}".\n\n${text}`;
+      }
+
+      case 'save_capture': {
+        if (!text) return 'There was nothing to file — the step received no text.';
+        if (!this.items?.store) return 'Capture is not available on this server.';
+        const title = this.titleFor(node, text, 'From a flow');
+        const r: any = await this.items.store(text, 'flow', title);
+        say(r?.deduped ? '   📥 already in your captures' : `   📥 filed "${title}"`);
+        return r?.deduped ? `That was already in your captures, so nothing was filed again.\n\n${text}` : `Filed into your captures as "${title}".\n\n${text}`;
+      }
+
+      case 'create_task': {
+        // One task per non-empty line, so a step that produced a list does not become one giant to-do.
+        const lines = text.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((l) => l.length > 2).slice(0, 20);
+        if (!lines.length) return 'There was nothing to add — the step received no text.';
+        if (!this.tasks?.create) return 'Tasks are not available on this server.';
+        const made: string[] = [];
+        for (const title of lines) {
+          // `auto: true` would fire a paid model call per task to write a note. Not worth it here.
+          const t: any = await this.tasks.create({ title }).catch(() => null);
+          if (t?.title) made.push(t.title);
+        }
+        if (!made.length) return 'No tasks could be created from that.';
+        say(`   ✅ added ${made.length} task${made.length === 1 ? '' : 's'}`);
+        return `Added ${made.length} task${made.length === 1 ? '' : 's'}:\n${made.map((t) => `• ${t}`).join('\n')}`;
+      }
+
+      case 'remember': {
+        if (!text) return 'There was nothing to remember — the step received no text.';
+        await this.memory.enqueue?.(text, { refType: 'flow-memory', title: this.titleFor(node, text, 'Remembered from a flow'), tags: ['flow'] });
+        say('   🧠 remembered');
+        return `Saved to your long-term memory.\n\n${text}`;
+      }
+
+      case 'telegram': {
+        if (!text) return 'There was nothing to send — the step received no text.';
+        const chat = await this.telegram.ownerChatId?.().catch(() => null);
+        if (!chat) return 'Telegram is not linked, so nothing was sent. Connect it in Settings → Connections.';
+        // `send` defaults to HTML, which rejects any message containing < > or & — and model output
+        // is full of them. Plain text is the only safe choice for arbitrary content.
+        const parts = this.chunk(text, 3900);
+        // `api()` does NOT throw when Telegram refuses (blocked bot, bad chat id) — it resolves with
+        // ok:false. Swallowing that and still saying "sent" is the lie this project keeps fixing.
+        for (const part of parts) {
+          const res: any = await this.telegram.send(chat, part, { parse_mode: undefined }).catch(() => null);
+          if (res && res.ok === false) return `Telegram refused the message${res?.description ? ` (${res.description})` : ''}, so it was not sent.`;
+          if (res === null) return 'Telegram could not be reached, so the message was not sent.';
+        }
+        say('   📨 sent to Telegram');
+        return `Sent to you on Telegram.${this.cutNote(text, parts)}\n\n${text}`;
+      }
+
+      case 'whatsapp': {
+        if (!text) return 'There was nothing to send — the step received no text.';
+        if (!this.postbox?.sendText) return 'WhatsApp is not set up on this server.';
+        const to = (await this.prisma.setting?.findUnique?.({ where: { key: 'alerts.whatsappNumber' } }).catch(() => null))?.value;
+        if (!to) return 'No WhatsApp number is saved, so nothing was sent. Add one in Settings.';
+        const body = text.slice(0, 3900);
+        const r: any = await this.postbox.sendText(to, body).catch(() => ({ status: 'failed' }));
+        if (r?.status === 'failed') return `WhatsApp would not accept the message${r?.error ? ` (${r.error})` : ''}. This usually means the 24-hour window has closed.`;
+        say('   📲 sent on WhatsApp');
+        const cut = body.length < text.length ? ` Only the first ${body.length} characters fitted — the rest is below but was not sent.` : '';
+        return `Sent to you on WhatsApp.${cut}\n\n${text}`;
+      }
+
+      case 'search_rag': {
+        if (!text) return 'There was nothing to look up — the step received no text.';
+        const hits: any[] = await this.memory.searchRag?.(text, 10).catch(() => []) ?? [];
+        say(`   🗒 ${hits.length} note${hits.length === 1 ? '' : 's'} found`);
+        if (!hits.length) return 'Nothing in your raw notes matched that.';
+        return hits.map((h, i) => `[${i + 1}] ${h.title || 'note'}${h.when ? ` (${String(h.when).slice(0, 10)})` : ''}\n${(h.content || '').slice(0, 600)}`).join('\n\n');
+      }
+
+      case 'fetch_document': {
+        if (!text) return 'No document was named.';
+        // A flow step is handed prose, not an id. Take an explicit id if the node has one, else a
+        // cuid/uuid out of the text, else find the closest document by searching for it.
+        let id = String(node?.data?.docId || '').trim() || (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.exec(text) || [])[0] || '';
+        if (!id) {
+          const found: any = await this.documents.search?.(text.slice(0, 120)).catch(() => null);
+          id = found?.documents?.[0]?.id || '';
+        }
+        if (!id) return 'No document matched that.';
+        const doc: any = await this.documents.get?.(id).catch(() => null);
+        if (!doc) return 'No document was found with that id.';
+        say(`   📄 opened "${doc.title || 'Untitled'}"`);
+        return `# ${doc.title || 'Untitled'}\n\n${(doc.contentText || doc.content || '').slice(0, 12000)}`;
+      }
+
+      default:
+        return null; // not ours — the caller decides (engine turn, or a plain model call)
+    }
+  }
+
+  /** A readable title for something a flow is filing. The node's label is usually generic ("Save to Documents"). */
+  private titleFor(node: any, text: string, fallback: string): string {
+    const explicit = String(node?.data?.title || '').trim();
+    if (explicit) return explicit.slice(0, 180);
+    const heading = /^\s*#{1,3}\s+(.+)$/m.exec(text)?.[1]?.trim();
+    if (heading) return heading.slice(0, 180);
+    const firstLine = (text.split('\n').find((l) => l.trim().length > 3) || '').trim().replace(/[#*_`>]/g, '');
+    if (firstLine) return firstLine.slice(0, 120);
+    return fallback;
+  }
+
+  /** Says plainly when a message was cut short. Claiming to have sent text we dropped is a lie. */
+  private cutNote(text: string, parts: string[]): string {
+    const sent = parts.reduce((n, p) => n + p.length, 0);
+    return sent < text.length ? ` Only the first ${sent} characters fitted — the rest is below but was not sent.` : '';
+  }
+
+  /** Split for services with a message-length cap (Telegram is 4096). */
+  private chunk(text: string, size: number): string[] {
+    if (text.length <= size) return [text];
+    const out: string[] = [];
+    for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+    return out.slice(0, 5); // five messages is already too many — never spam
+  }
+
   /** Direct second-brain lookup (RAG + SuperMemory) — fast, replaces the agent-turn that timed out. */
   private async searchBrain(query: string): Promise<string> {
     const q = (query || '').trim();
@@ -973,8 +1138,6 @@ export class FlowRunnerService implements OnModuleInit {
       gmail: `Look at my Gmail and answer:\n${input}`,
       calendar: `Look at my calendar and answer:\n${input}`,
       drive: `Look in my Google Drive and answer:\n${input}`,
-      save_document: `Save the following as a document in my library, then confirm with the title:\n${input}`,
-      telegram: `Send the following to me on Telegram, then confirm:\n${input}`,
       http: `Make the appropriate external API / HTTP request to satisfy this, then return the result:\n${input}`,
       docs: `Look at my Google Docs and answer:\n${input}`,
       sheets: `Look at my Google Sheets and answer:\n${input}`,
@@ -984,13 +1147,7 @@ export class FlowRunnerService implements OnModuleInit {
       meet: `Look at my Google Meet meetings and answer:\n${input}`,
       chat: `Look at my Google Chat messages and answer:\n${input}`,
       contacts: `Look in my Google Contacts and answer:\n${input}`,
-      whatsapp: `Send the following to me on WhatsApp, then confirm:\n${input}`,
       cli: `Run the command line tool needed for this and return what it printed:\n${input}`,
-      remember: `Save the key fact(s) below into my long-term memory, then confirm what you saved:\n${input}`,
-      save_capture: `File the following into my capture inbox, then confirm:\n${input}`,
-      create_task: `Add the following to my task list as a to-do, then confirm:\n${input}`,
-      search_rag: `Search my raw notes (no memory layer) and answer:\n${input}`,
-      fetch_document: `Open the document referred to below and return its content:\n${input}`,
     };
     return map[toolId] || `Use the ${label} tool for the following:\n${input}`;
   }

@@ -306,3 +306,156 @@ describe('a failed run keeps the research that worked (BEA-1200)', () => {
     expect(research.contentText).not.toContain('### The combined research'); // not duplicated
   });
 });
+
+/**
+ * BEA-1203 — eight tools were spawning a 118,000-token engine turn to do work we can simply do.
+ * An engine turn costs as much as EIGHT branches of real research, and for `save_document` and
+ * `remember` its entire job was to call our own API back.
+ *
+ * The rule these pin: agency earns an engine turn, transformation does not.
+ */
+describe('work we can just do never reaches the engine (BEA-1203)', () => {
+  // positional: prisma, bridge, agent, llm, documents, memory, skills, telegram, flows,
+  //             push, alerts, web, deep, items, tasks, postbox
+  const runner = (over: any = {}) => {
+    const s: any = new FlowRunnerService(
+      over.prisma ?? { setting: { findUnique: async () => ({ value: '+919876543210' }) } } as any,
+      {} as any, {} as any, {} as any,
+      over.documents ?? {} as any,
+      over.memory ?? {} as any,
+      {} as any,
+      over.telegram ?? {} as any,
+      {} as any, undefined, undefined, undefined, undefined,
+      over.items, over.tasks, over.postbox,
+    );
+    s.agentRun = async () => { throw new Error('an engine turn must never be spawned for this'); };
+    return s;
+  };
+  const node = (refId: string, data: any = {}) => ({ data: { kind: 'tool', refId, label: refId, ...data } });
+
+  it('saves a document itself, and titles it from the text', async () => {
+    let saved: any = null;
+    const s = runner({ documents: { create: async (d: any) => { saved = d; return { id: 'd1', slug: 's', title: d.title }; } } });
+    const out = await s.runNode(node('save_document'), '# Fresher hiring in 2026\n\nThe sources say...', []);
+    expect(saved.title).toBe('Fresher hiring in 2026');   // the heading, not the generic node label
+    expect(saved.contentText).toContain('The sources say');
+    expect(out).toContain('Saved to your documents');
+  });
+
+  it('creates one task per line, not one giant to-do', async () => {
+    const made: string[] = [];
+    const s = runner({ tasks: { create: async (d: any) => { made.push(d.title); return d; } } });
+    const out = await s.runNode(node('create_task'), '- Call the supplier\n- Send the quote\n\n', []);
+    expect(made).toEqual(['Call the supplier', 'Send the quote']);
+    expect(out).toContain('Added 2 tasks');
+  });
+
+  it('never asks a task to write itself a note — that is a paid call per task', async () => {
+    const seen: any[] = [];
+    const s = runner({ tasks: { create: async (d: any) => { seen.push(d); return d; } } });
+    await s.runNode(node('create_task'), 'One thing to do', []);
+    expect(seen[0].auto).toBeUndefined();
+  });
+
+  it('remembers straight into the memory outbox', async () => {
+    let got: any = null;
+    const s = runner({ memory: { enqueue: async (t: string, o: any) => { got = { t, o }; } } });
+    await s.runNode(node('remember'), 'Rakesh handles the Friday report', []);
+    expect(got.t).toBe('Rakesh handles the Friday report');
+    expect(got.o.tags).toContain('flow');
+  });
+
+  it('sends Telegram as plain text, because model output breaks HTML mode', async () => {
+    const sent: any[] = [];
+    const s = runner({ telegram: { ownerChatId: async () => '123', send: async (c: any, t: string, x: any) => { sent.push({ c, t, x }); } } });
+    await s.runNode(node('telegram'), 'Costs < 5% and margin > 3 & rising', []);
+    expect(sent[0].c).toBe('123');
+    expect(sent[0].x.parse_mode).toBeUndefined();   // HTML mode would reject this message outright
+  });
+
+  it('splits a long Telegram message instead of losing it', async () => {
+    const sent: any[] = [];
+    const s = runner({ telegram: { ownerChatId: async () => '1', send: async (_c: any, t: string) => { sent.push(t); } } });
+    await s.runNode(node('telegram'), 'x'.repeat(9000), []);
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.every((t) => t.length <= 3900)).toBe(true);
+  });
+
+  // Review finding: `api()` resolves with ok:false when Telegram refuses; swallowing that and still
+  // saying "sent" is exactly the lie this whole line of work keeps removing.
+  it('does not claim success when Telegram refuses the message', async () => {
+    const s = runner({ telegram: { ownerChatId: async () => '1', send: async () => ({ ok: false, description: 'bot was blocked by the user' }) } });
+    const out = await s.runNode(node('telegram'), 'hello', []);
+    expect(out).toMatch(/refused/);
+    expect(out).toMatch(/blocked by the user/);
+    expect(out).not.toMatch(/Sent to you/);
+  });
+
+  it('says how much was actually sent when the text had to be cut', async () => {
+    const s = runner({ telegram: { ownerChatId: async () => '1', send: async () => ({ ok: true }) } });
+    const out = await s.runNode(node('telegram'), 'x'.repeat(30000), []);
+    expect(out).toMatch(/Only the first 19500 characters fitted/);
+  });
+
+  it('says so plainly when Telegram is not linked, rather than pretending', async () => {
+    const s = runner({ telegram: { ownerChatId: async () => null, send: async () => undefined } });
+    const out = await s.runNode(node('telegram'), 'anything', []);
+    expect(out).toMatch(/not linked/);
+  });
+
+  it('searches only the raw notes for search_rag', async () => {
+    let usedBrain = false;
+    const s = runner({ memory: {
+      searchBrain: async () => { usedBrain = true; return []; },
+      searchRag: async () => [{ title: 'A note', content: 'the note body' }],
+    } });
+    const out = await s.runNode(node('search_rag'), 'production targets', []);
+    expect(usedBrain).toBe(false);
+    expect(out).toContain('the note body');
+  });
+
+  it('finds the document when handed prose instead of an id', async () => {
+    const s = runner({ documents: {
+      search: async () => ({ documents: [{ id: 'doc-9', title: 'The one' }] }),
+      get: async (id: string) => (id === 'doc-9' ? { title: 'The one', contentText: 'full text here' } : null),
+    } });
+    const out = await s.runNode(node('fetch_document'), 'the placement report', []);
+    expect(out).toContain('full text here');
+  });
+
+  it('files a capture, and says when it was already there', async () => {
+    const s = runner({ items: { store: async () => ({ deduped: true }) } });
+    const out = await s.runNode(node('save_capture'), 'a thought worth keeping', []);
+    expect(out).toMatch(/already in your captures/);
+  });
+
+  it('says when WhatsApp only took part of the message', async () => {
+    const s = runner({ postbox: { sendText: async () => ({ status: 'sent' }) } });
+    const out = await s.runNode(node('whatsapp'), 'y'.repeat(9000), []);
+    expect(out).toMatch(/Only the first 3900 characters fitted/);
+  });
+
+  it('reports honestly when WhatsApp refuses the message', async () => {
+    const s = runner({ postbox: { sendText: async () => ({ status: 'failed', error: 'outside the window' }) } });
+    const out = await s.runNode(node('whatsapp'), 'the update', []);
+    expect(out).toMatch(/outside the window/);
+  });
+
+  it('still sends anything genuinely agentic to the engine', async () => {
+    const s: any = runner();
+    s.agentRun = async () => 'from the engine';
+    expect(await s.runNode(node('gmail'), 'what did Rakesh send?', [])).toBe('from the engine');
+  });
+
+  it('leaves no tool id stranded between the two paths', () => {
+    // An id that is neither in AGENT_TOOLS nor handled directly falls through to a plain model call,
+    // and the model invents the answer. That is the failure this whole line of work exists to stop.
+    const src = require('fs').readFileSync(require('path').join(__dirname, 'flows-runner.service.ts'), 'utf8');
+    const engine: string[] = (/AGENT_TOOLS = new Set\(\[([\s\S]*?)\]\)/.exec(src)?.[1] || '').match(/'([a-z_]+)'/g)?.map((x: string) => x.replace(/'/g, '')) || [];
+    for (const id of ['save_document', 'save_capture', 'create_task', 'remember', 'telegram', 'whatsapp', 'search_rag', 'fetch_document']) {
+      expect(engine).not.toContain(id);                    // no longer an engine turn
+      expect(src).toContain(`case '${id}':`);              // and genuinely handled instead
+    }
+    for (const id of ['gmail', 'drive', 'http', 'cli']) expect(engine).toContain(id); // real access stays
+  });
+});
