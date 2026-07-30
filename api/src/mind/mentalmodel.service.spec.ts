@@ -281,3 +281,34 @@ describe('rewriting findings written before the bar (BEA-1145)', () => {
     expect(updates).toHaveLength(0);
   });
 });
+
+/**
+ * BEA-1178. The Lab's "two paid runs a day" cap lived in one shared `mind.paidDay` holding
+ * `day:count`, and the stamp reset the count to 1 whenever the day differed. `catchUp()` walks a
+ * backlog of closed days in a single tick, so with two or more queued each one reset the previous
+ * one's counter and the cap never held.
+ *
+ * The file's own note says it was "hitting 15", so this has already cost real money once. Found by
+ * the review of the identical fix in the mentor, which was making twelve paid calls in ten minutes.
+ */
+describe('the paid-run cap is per day, not one shared slot (BEA-1178)', () => {
+  it('a backlog of days cannot reset each other\'s allowance', async () => {
+    const { svc, llm } = harness({ llmJson: ONE_FINDING });
+    // Six passes over two days, the way catchUp() walks a backlog in one tick.
+    for (let i = 0; i < 6; i++) {
+      await svc.run('2026-06-20');
+      await svc.run('2026-06-19');
+    }
+    expect(llm.completeWith).toHaveBeenCalledTimes(4); // two each, and no more
+  });
+
+  it('still gives each day its own two runs', async () => {
+    const { svc, llm } = harness({ llmJson: ONE_FINDING });
+    await svc.run('2026-06-21');
+    await svc.run('2026-06-21');
+    await svc.run('2026-06-21'); // third on the same day — blocked
+    expect(llm.completeWith).toHaveBeenCalledTimes(2);
+    await svc.run('2026-06-22');  // a different day still gets its own
+    expect(llm.completeWith).toHaveBeenCalledTimes(3);
+  });
+});

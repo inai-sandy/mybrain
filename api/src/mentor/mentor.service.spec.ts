@@ -290,6 +290,27 @@ describe('a day can only be paid for twice (BEA-1140)', () => {
     expect(llm.completeWith).toHaveBeenCalledTimes(3);
   });
 
+  /**
+   * The one that mattered (BEA-1178). The nightly tick checks TWO days every sixty seconds — today
+   * and yesterday. The cap lived in one shared setting holding `day:count`, and stamping a different
+   * day reset the count to 1. So the two days wiped each other's counter every minute and neither was
+   * ever capped: twelve guidance calls between 18:30 and 18:39 on 26 July, against a cap of two.
+   *
+   * Every existing test above runs its days one after another, which is precisely why this survived.
+   * This one interleaves them, the way the tick really does. Checked against the old code: it fails
+   * with exactly 12 calls — the same number seen in production that night.
+   */
+  it('two days checked in turn cannot reset each other\'s allowance', async () => {
+    const { svc, llm, dayStories } = makeService('{"adherenceScore":70,"guidance":"A read."}');
+    dayStories.push({ day: '2026-06-20', text: 'Today.', moodScore: 60, createdAt: new Date('2026-06-20T18:00:00Z') });
+    dayStories.push({ day: '2026-06-19', text: 'Yesterday.', moodScore: 60, createdAt: new Date('2026-06-19T18:00:00Z') });
+    for (let i = 0; i < 6; i++) {
+      await svc.runMentorDay('2026-06-20', true);
+      await svc.runMentorDay('2026-06-19', true);
+    }
+    expect(llm.completeWith).toHaveBeenCalledTimes(4); // two each, and no more
+  });
+
   it('a manual regenerate is still allowed past the ceiling', async () => {
     const { svc, llm, dayStories } = makeService('{"adherenceScore":70,"guidance":"A read."}');
     dayStories.push({ day: '2026-06-14', text: 'The day.', moodScore: 60, createdAt: new Date('2026-06-14T18:00:00Z') });
