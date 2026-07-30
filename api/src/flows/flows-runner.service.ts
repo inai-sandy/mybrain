@@ -493,7 +493,16 @@ export class FlowRunnerService implements OnModuleInit {
       const failed = Object.values(results).find((r) => r.status === 'failed');
       if (failed) {
         if (!terminal.length || terminal[terminal.length - 1]?.text !== '✗ a step failed') term('✗ a step failed');
-        await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any });
+        // Keep whatever the steps that DID work produced (BEA-1200). BEA-1193 made research survive a
+        // failing final step, but only on the success path — so a run whose last step broke threw the
+        // lot away. One real run lost 21,651 characters gathered from 95 paid-for searches, and said
+        // nothing about it. There is no "result" document to save, but the research is still research.
+        const kept = opts.evalMode ? [] : await this.saveDocuments(flow, graph, incoming, results, '').catch((e: any) => {
+          this.log.warn(`could not keep the research of failed run ${runId}: ${e?.message || e}`);
+          return [] as any[];
+        });
+        if (kept.length) term(`💾 kept the research from the steps that worked (${kept.length} document${kept.length === 1 ? '' : 's'})`);
+        await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), documentIds: JSON.stringify(kept), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any });
         this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
         void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: (failed.output || 'a step failed').slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
         void this.alerts?.runFailed(flow?.name || 'Your flow', (failed.output || 'a step failed').slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
@@ -739,12 +748,21 @@ export class FlowRunnerService implements OnModuleInit {
     let kept = 0;
     for (const n of graph.nodes || []) {
       const r = results[n.id];
-      const out = (r?.output || '').trim();
       const kind = n.data?.kind;
+      // Only what actually WORKED is research. A failed node's `output` holds its error message, and
+      // filing "the model returned nothing" under a research heading would be worse than saving
+      // nothing at all — it reads like a finding. (Surfaced by BEA-1200's own tests.)
+      const out = r?.status === 'failed' || r?.status === 'skipped' ? '' : (r?.output || '').trim();
       if (kind === 'question') { if (out) parts.push(`> ${out.replace(/\n+/g, ' ')}`); continue; }
       if (kind === 'subquestion') { if (out || n.data?.sub) parts.push(`\n## ${String(n.data?.sub || n.data?.label || 'Part').slice(0, 120)}`); continue; }
       if (!out) continue;
-      if (kind === 'merge' || kind === 'output') continue; // the result is added on its own below
+      if (kind === 'merge' || kind === 'output') {
+        // Normally the merged text IS the result, added on its own below. But when there is no
+        // result — the run failed after the merge — it is the most complete thing the run produced,
+        // and skipping it here is how a real run lost 21,651 characters of combined research (BEA-1200).
+        if (!finalOutput?.trim() && kind === 'merge' && out) { parts.push(`\n### The combined research\n\n${out}`); kept++; }
+        continue;
+      }
       parts.push(`\n### ${String(n.data?.label || kind || 'Step').slice(0, 80)}\n\n${out}`);
       kept++;
     }

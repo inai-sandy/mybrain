@@ -225,3 +225,84 @@ describe('fenced HTML is still HTML (BEA-1199)', () => {
     expect(saved.contentText).toBe(md);   // untouched
   });
 });
+
+/**
+ * BEA-1200 — a run that failed at its LAST step threw away everything the earlier steps produced.
+ * A real run lost 21,651 characters gathered from 95 paid-for searches and said nothing about it.
+ * BEA-1193 made research survive a failing final step, but only ever on the success path.
+ */
+describe('a failed run keeps the research that worked (BEA-1200)', () => {
+  const graph = {
+    nodes: [
+      { id: 'q', data: { kind: 'question', label: 'Question' } },
+      { id: 'b0', data: { kind: 'subquestion', label: 'Branch 1', sub: 'graduation numbers' } },
+      { id: 'd0', data: { kind: 'tool', refId: 'deep_research', label: 'Deep research' } },
+      { id: 'm', data: { kind: 'merge', label: 'Merge' } },
+      { id: 'sk', data: { kind: 'skill', refId: 'sk1', label: 'interactive-html' } },
+    ],
+    edges: [],
+  };
+  const runner = () => new FlowRunnerService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+
+  it('still writes the research, and the merged text is not lost with it', async () => {
+    const saved: any[] = [];
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved.push(d); return { id: 'd' + saved.length, slug: 's', title: d.title }; } };
+    const results: any = {
+      q: { status: 'done', output: 'the question', kind: 'question' },
+      b0: { status: 'done', output: 'graduation numbers', kind: 'subquestion' },
+      d0: { status: 'done', output: 'BRANCH FINDINGS with sources', kind: 'tool', label: 'Deep research' },
+      m: { status: 'done', output: 'THE COMBINED RESEARCH, 21k characters worth', kind: 'merge' },
+      sk: { status: 'failed', output: 'the model returned nothing', kind: 'skill' },
+    };
+    const docs = await s.saveDocuments({ name: 'Report' }, graph, new Map([['m', ['d0']]]), results, '');
+    expect(docs.length).toBeGreaterThan(0);
+    const research = saved.find((d) => d.title.includes('research'));
+    expect(research).toBeTruthy();
+    expect(research.contentText).toContain('BRANCH FINDINGS with sources');
+    expect(research.contentText).toContain('THE COMBINED RESEARCH');          // the merge is kept
+    expect(research.contentText).toContain('this document is the research');  // and it says why
+    expect(saved.some((d) => d.title.includes('— result'))).toBe(false);      // there IS no result
+  });
+
+  // Surfaced by this very test: researchMarkdown used a node's `output` whatever its status, and a
+  // failed node's output is its error message. "the model returned nothing" under a research
+  // heading reads like a finding.
+  it('never files an error message as if it were research', async () => {
+    const saved: any[] = [];
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved.push(d); return { id: 'z', slug: 's', title: d.title }; } };
+    const results: any = {
+      d0: { status: 'done', output: 'real findings', kind: 'tool', label: 'Deep research' },
+      sk: { status: 'failed', output: 'the model returned nothing', kind: 'skill', label: 'interactive-html' },
+    };
+    await s.saveDocuments({ name: 'Report' }, graph, new Map(), results, '');
+    const research = saved.find((d) => d.title.includes('research'));
+    expect(research.contentText).toContain('real findings');
+    expect(research.contentText).not.toContain('the model returned nothing');
+  });
+
+  it('claims nothing when nothing succeeded', async () => {
+    const saved: any[] = [];
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved.push(d); return { id: 'x', slug: 's', title: d.title }; } };
+    const results: any = { d0: { status: 'failed', output: 'search failed', kind: 'tool' } };
+    const docs = await s.saveDocuments({ name: 'Report' }, graph, new Map(), results, '');
+    expect(docs).toEqual([]);
+    expect(saved).toEqual([]);
+  });
+
+  it('keeps the merged text out of the research doc when there IS a result', async () => {
+    const saved: any[] = [];
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved.push(d); return { id: 'y', slug: 's', title: d.title }; } };
+    const results: any = {
+      d0: { status: 'done', output: 'branch findings', kind: 'tool', label: 'Deep research' },
+      m: { status: 'done', output: 'THE COMBINED RESEARCH', kind: 'merge' },
+    };
+    await s.saveDocuments({ name: 'Report' }, graph, new Map(), results, 'THE FINISHED REPORT');
+    const research = saved.find((d) => d.title.includes('research'));
+    expect(research.contentText).toContain('THE FINISHED REPORT');
+    expect(research.contentText).not.toContain('### The combined research'); // not duplicated
+  });
+});
