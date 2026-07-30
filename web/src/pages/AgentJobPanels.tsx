@@ -257,6 +257,21 @@ export function RunsPanel({ id, flow }: { id: string; flow: any }) {
             {r.grade?.verdict
               ? <Verdict v={r.grade.verdict} s={r.grade.score} />
               : r.status === 'done' && <span className="shrink-0 text-xs text-zinc-400">not graded</span>}
+            {/* What the run really spent on search (BEA-1196) — shown so a report's cost is a fact
+                on the run, not an estimate anyone has to take on trust. */}
+            {r.spend?.searches > 0 && (
+              <span
+                className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                title={[
+                  `${r.spend.searches} searches + ${r.spend.extracts} page reads across ${r.spend.sources} sources`,
+                  r.spend.meaningSearches > 0 ? `${r.spend.meaningSearches} on Exa (not billed as Tavily credits)` : '',
+                  r.spend.paidCalls > 0 ? `⚠️ ${r.spend.paidCalls} thinking step(s) used the paid model — your engine was unavailable` : 'the writing ran free on your own engine',
+                ].filter(Boolean).join(' · ')}
+              >
+                {Math.max(0, (r.spend.searches || 0) - (r.spend.meaningSearches || 0)) * 2} credits
+                {r.spend.paidCalls > 0 && <span className="ml-1 text-amber-600 dark:text-amber-400">+ paid</span>}
+              </span>
+            )}
             {r.documents?.length > 0 && <span className="ml-auto inline-flex items-center gap-1 text-xs text-zinc-400"><FileText className="h-3.5 w-3.5" />{r.documents.length}</span>}
           </button>
           {r.status !== 'running' && r.status !== 'awaiting_input' && r.status !== 'waiting' && (

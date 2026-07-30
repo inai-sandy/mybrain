@@ -92,3 +92,69 @@ describe('search is a real call, and thinking fails loudly (BEA-1194)', () => {
     expect(await (runner(undefined, llm) as any).runNode({ data: { kind: 'ask_ai' } }, 'material', [])).toBe('the written section');
   });
 });
+
+/**
+ * BEA-1196 — deep research is OUR loop on the flat-rate engine, not a paid product and not an engine
+ * turn that decides for itself how to research. These pin the wiring: the flow calls the service, the
+ * toolbox still gates it, and what it spent comes back so the run can record it.
+ */
+describe('deep research is our own loop (BEA-1196)', () => {
+  const runner = (deep?: any) =>
+    new FlowRunnerService({} as any, {} as any, {} as any, {} as any as any, {} as any, {} as any, {} as any, {} as any, {} as any, undefined, undefined, undefined, deep);
+
+  const node = { data: { kind: 'tool', refId: 'deep_research', label: 'Deep research' } };
+
+  it('calls the research service and never the engine', async () => {
+    let engineUsed = false;
+    const deep = { run: async () => ({ report: 'The report\n\n### Sources\n\n1. [A](https://a)', spend: { searches: 4, extracts: 3, sources: 9 } }) };
+    const s: any = runner(deep);
+    s.agentRun = async () => { engineUsed = true; return 'from the engine'; };
+    const out = await s.runNode(node, 'what is changing in fresher hiring', []);
+    expect(out).toContain('### Sources');
+    expect(engineUsed).toBe(false);
+  });
+
+  it('hands back what it spent, so the run can record the real cost', async () => {
+    const spent: any[] = [];
+    const deep = { run: async () => ({ report: 'r', spend: { searches: 6, extracts: 4, sources: 12 } }) };
+    const s: any = runner(deep);
+    await s.runNode(node, 'q', [], null, null, undefined, (x: any) => spent.push(x));
+    expect(spent).toEqual([{ searches: 6, extracts: 4, sources: 12 }]);
+  });
+
+  it('passes the node\'s own limits through as the budget', async () => {
+    let got: any = null;
+    const deep = { run: async (_q: string, o: any) => { got = o.budget; return { report: 'r', spend: { searches: 1, extracts: 0, sources: 1 } }; } };
+    const s: any = runner(deep);
+    await s.runNode({ data: { ...node.data, maxSearches: 3, maxReads: 2 } }, 'q', []);
+    expect(got).toEqual({ searches: 3, extracts: 2 });
+  });
+
+  it('records the spend of a FAILED attempt too, so a retry cannot hide the cost', async () => {
+    const spent: any[] = [];
+    const boom: any = new Error('the searches found nothing to work from');
+    boom.spend = { searches: 5, extracts: 0, sources: 0 };
+    const deep = { run: async () => { throw boom; } };
+    const s: any = runner(deep);
+    await expect(s.runNode(node, 'q', [], null, null, undefined, (x: any) => spent.push(x))).rejects.toThrow(/found nothing/);
+    expect(spent).toEqual([{ searches: 5, extracts: 0, sources: 0 }]);
+  });
+
+  it('is still gated by the agent toolbox', async () => {
+    const deep = { run: async () => { throw new Error('should never be called'); } };
+    const s: any = runner(deep);
+    const out = await s.runNode(node, 'q', [], new Set(['web_search']));
+    expect(out).toMatch(/not in this agent's toolbox/);
+  });
+
+  it('says so plainly when research is not available on this server', async () => {
+    const s: any = runner(undefined);
+    await expect(s.runNode(node, 'q', [])).rejects.toThrow(/not available on this server/);
+  });
+
+  it('lets a failure through, so the step is marked failed with the reason', async () => {
+    const deep = { run: async () => { throw new Error('the searches found nothing to work from'); } };
+    const s: any = runner(deep);
+    await expect(s.runNode(node, 'q', [])).rejects.toThrow(/found nothing to work from/);
+  });
+});
