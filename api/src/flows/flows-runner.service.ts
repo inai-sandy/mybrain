@@ -11,6 +11,7 @@ import { SkillsService } from '../skills/skills.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
 import { WebResearchService } from '../tools/web-research.service';
+import { DeepResearchService, ResearchSpend } from '../tools/deep-research.service';
 import { randomBytes } from 'crypto';
 
 type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean };
@@ -49,6 +50,7 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly push?: PushService,
     private readonly alerts?: AlertsService,
     private readonly web?: WebResearchService, // real Tavily/Exa research (BEA-1194)
+    private readonly deep?: DeepResearchService, // our own research loop (BEA-1196)
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -238,6 +240,7 @@ export class FlowRunnerService implements OnModuleInit {
       if (ref === 'search_brain') return '🧠 searched your brain';
       if (ref === 'web_search') return '🌐 searched the web';
       if (ref === 'web_read') return '📄 read the page(s)';
+      if (ref === 'deep_research') return '🔬 researched it in depth';
       if (ref === 'gmail') return '📧 checked Gmail';
       if (ref === 'calendar') return '📅 checked the calendar';
       if (ref === 'drive') return '🗂 looked in Drive';
@@ -256,7 +259,9 @@ export class FlowRunnerService implements OnModuleInit {
   /** Recent runs of a flow, with the documents each produced (Agent↔Flow merge ④). */
   async listRuns(flowId: string) {
     const rows = await this.prisma.flowRun.findMany({ where: { flowId }, orderBy: { startedAt: 'desc' }, take: 50 });
-    return rows.map((r) => ({ id: r.id, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt, finalOutput: r.finalOutput?.slice(0, 240) || null, documents: this.parseArr(r.documentIds) }));
+    // spend rides along so the Runs list can show what a report actually cost (BEA-1196) — the owner
+    // asked for this because he would not take a per-report price on trust.
+    return rows.map((r) => ({ id: r.id, status: r.status, startedAt: r.startedAt, endedAt: r.endedAt, finalOutput: r.finalOutput?.slice(0, 240) || null, documents: this.parseArr(r.documentIds), spend: (r as any).spend ? this.parse((r as any).spend) : null }));
   }
 
   /** Turn off the given branch indexes (b{idx}_*) for ONE run only, without touching the saved flow. (BEA-796) */
@@ -347,6 +352,17 @@ export class FlowRunnerService implements OnModuleInit {
     for (const [nid, rr] of Object.entries(results)) { const st = (rr as NodeResult)?.status; if (st === 'done' || st === 'skipped') memo.set(nid, Promise.resolve((rr as NodeResult).output || '')); }
     const persist = () => stale() || this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
+    // What this run spent on search, totalled across every deep research step (BEA-1196). Recorded so
+    // the owner reads the real cost of a report off the run instead of trusting an estimate.
+    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, paidCalls: 0 };
+    const addSpend = (s: ResearchSpend) => {
+      spend.searches += s?.searches || 0;
+      spend.extracts += s?.extracts || 0;
+      spend.sources += s?.sources || 0;
+      spend.meaningSearches += s?.meaningSearches || 0;
+      spend.paidCalls += s?.paidCalls || 0;
+    };
+    const spendJson = () => (spend.searches || spend.extracts ? { spend: JSON.stringify(spend) } : {});
     if (!opts.evalMode && !terminal.length) term('▶ started');
 
     // Adopt the paused driver's still-in-flight sibling work (BEA-792): a node the old walk left
@@ -423,7 +439,7 @@ export class FlowRunnerService implements OnModuleInit {
           let output = '';
           let lastErr: any = null;
           for (let attempt = 0; attempt <= retries; attempt++) {
-            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }); lastErr = null; break; }
+            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }, (s) => addSpend(s)); lastErr = null; break; }
             catch (e: any) {
               if (e instanceof PauseSignal) throw e;
               lastErr = e;
@@ -477,7 +493,7 @@ export class FlowRunnerService implements OnModuleInit {
       const failed = Object.values(results).find((r) => r.status === 'failed');
       if (failed) {
         if (!terminal.length || terminal[terminal.length - 1]?.text !== '✗ a step failed') term('✗ a step failed');
-        await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null } });
+        await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any });
         this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
         void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: (failed.output || 'a step failed').slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
         void this.alerts?.runFailed(flow?.name || 'Your flow', (failed.output || 'a step failed').slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
@@ -499,7 +515,7 @@ export class FlowRunnerService implements OnModuleInit {
       if (g) { gradeJson = JSON.stringify(g); term(`✓ checked against your Outcome — ${g.verdict} ${g.score}/100`); }
     }
 
-    await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'done', finalOutput, results: JSON.stringify(results), documentIds: JSON.stringify(docs), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...(gradeJson ? { grade: gradeJson } : {}) } as any });
+    await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'done', finalOutput, results: JSON.stringify(results), documentIds: JSON.stringify(docs), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...(gradeJson ? { grade: gradeJson } : {}), ...spendJson() } as any });
     this.dropDriver(runId, gen);
 
     // Notify on a background/long run so you know it's ready even if you walked away (workspace ⑥).
@@ -767,7 +783,7 @@ export class FlowRunnerService implements OnModuleInit {
     return r && r.ids.length ? new Set(r.ids) : null;
   }
 
-  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void): Promise<string> {
+  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void, onSpend?: (s: ResearchSpend) => void): Promise<string> {
     const kind = node.data?.kind;
     const label = node.data?.label || '';
     const refId = node.data?.refId;
@@ -820,6 +836,23 @@ export class FlowRunnerService implements OnModuleInit {
           const rows = byMeaning ? await this.web.searchByMeaning(q) : await this.web.search(q);
           onLine?.(`   found ${rows.length} source${rows.length === 1 ? '' : 's'}`);
           return this.web.asMarkdown(q.slice(0, 120), rows, byMeaning ? 'by meaning' : 'web search');
+        }
+        // Our own deep research (BEA-1196): many searches, then the report, all on the flat-rate
+        // engine. Direct like the rest of the Web group — the engine never picks how to search.
+        if (refId === 'deep_research') {
+          if (!this.deep) throw new Error('deep research is not available on this server');
+          const q = (input || node.data?.sub || '').trim();
+          const budget = { searches: Number(node.data?.maxSearches) || undefined, extracts: Number(node.data?.maxReads) || undefined };
+          try {
+            const { report, spend } = await this.deep.run(q, { budget, onLine });
+            onSpend?.(spend);
+            return report;
+          } catch (e: any) {
+            // A failed attempt still spent credits, and this node may be set to retry. Record what it
+            // cost before rethrowing, so the run's total is the truth rather than only the wins.
+            if (e?.spend) onSpend?.(e.spend);
+            throw e;
+          }
         }
         if (FlowRunnerService.AGENT_TOOLS.has(refId)) {
           // Title the branch run by its sub-question, not a generic "Web search". (BEA-772)

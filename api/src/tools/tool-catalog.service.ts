@@ -122,6 +122,14 @@ export class ToolCatalogService {
       { id: 'web_read', name: 'Read a page', group: 'Web', kind: 'tool', connected: tavily, description: 'Open a link and read what it says (Tavily)', connectHint: tHint, connectPath: tavily ? undefined : path },
       // Semantic search (BEA-1194) — for the questions where you don't know the right keywords.
       { id: 'web_search_meaning', name: 'Search by meaning', group: 'Web', kind: 'tool', connected: exa, description: 'Finds pages about an idea, even when you do not know the right words (Exa)', connectHint: eHint, connectPath: exa ? undefined : path },
+      // Our own research loop (BEA-1196) — many searches, then the report, on the flat-rate engine.
+      // Either search back-end is enough to run it.
+      {
+        id: 'deep_research', name: 'Deep research', group: 'Web', kind: 'tool', connected: tavily || exa,
+        description: 'Breaks your question up, searches many sources, reads the best pages and writes a report with citations',
+        connectHint: tavily || exa ? undefined : 'Add a Tavily or Exa key in Settings → Connections',
+        connectPath: tavily || exa ? undefined : path,
+      },
     ];
   }
 

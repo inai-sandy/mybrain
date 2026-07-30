@@ -111,6 +111,10 @@ export class LlmService {
     'ui-spec': null,
     'flow-plan': null,
     'draft-check': null,
+    // Deep research (BEA-1196) defaults to Codex on purpose: the whole point of building our own
+    // research loop was that the engine is already paid for, so a report costs only search credits.
+    // Picking an API model here puts the per-report cost back.
+    'deep-research': { provider: 'codex', model: 'codex' },
   };
 
   async helperModel(key: string): Promise<LlmConfig | null> {

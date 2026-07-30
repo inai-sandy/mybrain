@@ -31,6 +31,21 @@ export class WebResearchService {
 
   constructor(private readonly connectors: ConnectorService) {}
 
+  /**
+   * Which search back-ends have a key, asked ONCE.
+   *
+   * Deep research needs this up front: it must know whether Exa is an option before it starts
+   * choosing a back-end per sub-question, rather than discovering it by catching a failure and
+   * having to guess whether that failure cost a credit.
+   */
+  async available(): Promise<{ tavily: boolean; exa: boolean }> {
+    const [t, e] = await Promise.all([
+      this.connectors.get<{ apiKey?: string }>('tavily').catch(() => null),
+      this.connectors.get<{ apiKey?: string }>('exa').catch(() => null),
+    ]);
+    return { tavily: !!t?.apiKey, exa: !!e?.apiKey };
+  }
+
   /** Does the wording ask for something current? Then weight the last year. */
   static wantsRecent(q: string): boolean {
     const t = String(q || '').toLowerCase();

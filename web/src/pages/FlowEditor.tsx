@@ -636,6 +636,34 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose, onTest, testi
             </div>
           </>
         )}
+        {/* Deep research is the one step that spends money per run, so its limits are visible and
+            editable right here rather than buried in a default (BEA-1196). */}
+        {kind === 'tool' && d.refId === 'deep_research' && (
+          <div className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/70 px-2.5 py-2 dark:border-zinc-700 dark:bg-zinc-800/50">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={labelCls}>Searches (max 8)</label>
+                <input
+                  type="number" min={1} max={8} value={d.maxSearches ?? 6}
+                  onChange={(e) => set({ maxSearches: Math.min(8, Math.max(1, Number(e.target.value) || 1)) })}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Pages to read (max 10)</label>
+                <input
+                  type="number" min={1} max={10} value={d.maxReads ?? 6}
+                  onChange={(e) => set({ maxReads: Math.min(10, Math.max(1, Number(e.target.value) || 1)) })}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+              About <strong>{(d.maxSearches ?? 6) * 2} search credits</strong> per run — a few pence. The writing runs on your own engine, so it costs nothing extra.
+              {Number(d.retries) > 0 && <> Note: <strong>“If it fails”</strong> is set to retry, so a bad run can spend this up to {Number(d.retries) + 1}×.</>}
+            </p>
+          </div>
+        )}
         {(kind === 'skill' || kind === 'tool' || kind === 'ask_ai') && (
           <div>
             <label className={labelCls}>If it fails</label>
