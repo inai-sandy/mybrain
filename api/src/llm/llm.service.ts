@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from './token-budget.service';
 
 export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini'; model: string };
 
@@ -20,6 +21,8 @@ export class LlmService {
   constructor(
     private readonly connectors: ConnectorService,
     private readonly prisma: PrismaService,
+    // Optional + LAST — spec files construct this positionally with fewer args.
+    private readonly budget?: TokenBudgetService, // the daily token ceiling (BEA-1204)
   ) {}
 
   async getConfig(): Promise<LlmConfig | null> {
@@ -166,6 +169,8 @@ export class LlmService {
       if (text && text.trim()) return { text, error: null };
       return { text: null, error: `${cfg.model} returned nothing — it may be rate-limited, over its context, or briefly unavailable` };
     } catch (e: any) {
+      // A budget stop is not a model failure — say what it really is, in the owner's words.
+      if (e instanceof TokenBudgetError) return { text: null, error: String(e.message) };
       return { text: null, error: `${cfg.model} failed: ${String(e?.message || e).slice(0, 160)}` };
     }
   }
@@ -183,7 +188,7 @@ export class LlmService {
   }
 
   /** Run a prompt on a subscription agent (Codex / Gemini) via its host runner. Returns null on any failure. */
-  private async runAgent(cfg: LlmConfig, prompt: string): Promise<string | null> {
+  private async runAgent(cfg: LlmConfig, prompt: string, label = 'agent'): Promise<string | null> {
     try {
       const url = cfg.provider === 'codex' ? CODEX_RUNNER : GEMINI_RUNNER;
       // For Gemini, cfg.model carries the specific Antigravity model name (e.g. "Gemini 3.5 Flash").
@@ -196,7 +201,16 @@ export class LlmService {
       });
       if (!r.ok) return null;
       const d: any = await r.json();
-      return String(d?.text || '').trim() || null;
+      const text = String(d?.text || '').trim() || null;
+      // Record what the turn cost (BEA-1204). Without this the budget can see an engine turn only
+      // while it is running: the reservation lifts on return and nothing is left in the usage log,
+      // so the traffic that actually emptied the subscription stays invisible. When the runner does
+      // not report usage, charge the measured average rather than nothing.
+      if (text) {
+        const t = TokenBudgetService.tokensOf(d?.usage);
+        await this.logUsage(label, cfg.model || cfg.provider, { prompt_tokens: t.prompt, completion_tokens: t.completion }).catch(() => undefined);
+      }
+      return text;
     } catch {
       return null;
     }
@@ -209,7 +223,12 @@ export class LlmService {
   async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; model: string | null }> {
     if (!cfg?.provider || !cfg?.model) return { text: null, model: null };
     if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-      const text = await this.runAgent(cfg, prompt);
+      // Charged up front like any engine turn — it reports nothing until it finishes (BEA-1204).
+      // RESERVED too, not merely checked: two turns starting together would otherwise read the same
+      // figure and both be allowed through.
+      await this.budget?.require(ENGINE_TURN_TOKENS);
+      const release = this.budget?.reserve(ENGINE_TURN_TOKENS) ?? (() => undefined);
+      const text = await this.runAgent(cfg, prompt, label).finally(release);
       if (text) return { text, model: cfg.model };
       const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
       return { text: fb, model: fb ? 'Claude Sonnet 4.6 (fallback)' : cfg.model };
@@ -220,11 +239,19 @@ export class LlmService {
   /** Single-shot completion forcing a specific provider+model (e.g. the Tasks engine's Sonnet). */
   async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
+    // The ceiling is checked BEFORE the call, never after (BEA-1204). A call that would begin past
+    // the budget does not begin — which is exactly "finish the step in flight, then start nothing
+    // new". A subscription engine turn is charged its measured average up front, because it reports
+    // nothing until it finishes.
+    const isAgent = cfg.provider === 'codex' || cfg.provider === 'gemini';
+    const estimate = isAgent ? ENGINE_TURN_TOKENS : Math.ceil(prompt.length / 4) + maxTokens;
+    await this.budget?.require(estimate); // throws TokenBudgetError, which callers surface verbatim
+    const release = this.budget?.reserve(estimate) ?? (() => undefined);
     try {
       // Subscription agents (Codex / Gemini) — route to the host runner (no per-call API $). If the
       // runner is down/slow/empty, fall back to the API on Sonnet so the feature never silently dies.
       if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-        const text = await this.runAgent(cfg, prompt);
+        const text = await this.runAgent(cfg, prompt, label);
         if (text) return text;
         return this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
       }
@@ -259,8 +286,13 @@ export class LlmService {
         await this.logUsage(label, cfg.model, d?.usage, maxTokens);
         return d?.choices?.[0]?.message?.content ?? null;
       }
-    } catch {
+    } catch (e) {
+      if (e instanceof TokenBudgetError) throw e; // a budget stop is a real answer, never a silent null
       return null;
+    } finally {
+      // The real figure is in UsageLog by now (or the call never ran), so the up-front estimate
+      // must come back off — otherwise the day is charged twice for the same call.
+      release();
     }
     return null;
   }
@@ -268,6 +300,19 @@ export class LlmService {
   /** Vision completion — sends an image with the prompt. OpenRouter (image_url) + Anthropic (base64);
    *  subscription agents / unknown providers fall back to a text-only completion. (BEA-555) */
   async completeImage(cfg: LlmConfig | null, prompt: string, image: { dataUrl: string; mediaType: string; base64: string }, maxTokens = 400, label = 'vision'): Promise<string | null> {
+    if (!cfg?.provider || !cfg?.model) return null;
+    // Images bypassed the ceiling too (BEA-1204) — checked and reserved, like every other path.
+    const imageEstimate = Math.ceil(prompt.length / 4) + maxTokens;
+    await this.budget?.require(imageEstimate);
+    const releaseImage = this.budget?.reserve(imageEstimate) ?? (() => undefined);
+    try {
+      return await this.completeImageInner(cfg, prompt, image, maxTokens, label);
+    } finally {
+      releaseImage();
+    }
+  }
+
+  private async completeImageInner(cfg: LlmConfig | null, prompt: string, image: { dataUrl: string; mediaType: string; base64: string }, maxTokens = 400, label = 'vision'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     try {
       if (cfg.provider === 'openrouter') {
@@ -305,6 +350,21 @@ export class LlmService {
 
   /** Streaming completion — calls onToken as text arrives, returns the full text. Falls back to non-streaming for Anthropic. */
   async completeStream(cfg: LlmConfig | null, prompt: string, maxTokens: number, onToken: (t: string) => void, label = 'chat'): Promise<string | null> {
+    if (!cfg?.provider || !cfg?.model) return null;
+    // Chat streams straight to the provider and used to skip the ceiling entirely — the single
+    // busiest surface in the app, unbudgeted (BEA-1204). Reserved as well as checked: two chats
+    // starting together would otherwise read the same figure and both be let through.
+    const streamEstimate = Math.ceil(prompt.length / 4) + maxTokens;
+    await this.budget?.require(streamEstimate);
+    const releaseStream = this.budget?.reserve(streamEstimate) ?? (() => undefined);
+    try {
+      return await this.completeStreamInner(cfg, prompt, maxTokens, onToken, label);
+    } finally {
+      releaseStream();
+    }
+  }
+
+  private async completeStreamInner(cfg: LlmConfig | null, prompt: string, maxTokens: number, onToken: (t: string) => void, label = 'chat'): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
     if (cfg.provider === 'openrouter') {
       try {

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { TaskHealthService } from '../tasks/task-health.service';
+import { TokenBudgetService } from '../llm/token-budget.service';
 import { TelegramService } from './telegram.service';
 import { localDayKey } from '../common/localday';
 
@@ -21,9 +22,18 @@ export class TaskHealthNotifier implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly health: TaskHealthService,
     private readonly telegram: TelegramService,
+    // Optional + LAST — spec files construct this positionally.
+    private readonly budget?: TokenBudgetService,
   ) {}
 
   onModuleInit() {
+    // The budget refuses work deep inside LlmService, where there is no way to reach Telegram
+    // without an import cycle (the one that rolled back BEA-1190). So it raises a callback and the
+    // telegram module — which already depends on everything it needs — does the telling. (BEA-1204)
+    this.budget?.onStop?.(async (message: string) => {
+      const chat = await this.telegram.ownerChatId().catch(() => null);
+      if (chat) await this.telegram.send(chat, message, { parse_mode: undefined }).catch(() => undefined);
+    });
     // Woken every 30 minutes but it only runs once a day, after 22:00 local. A fixed nightly timer
     // drifts with every restart; this survives them.
     this.timer = setInterval(() => void this.maybeRunNightly().catch(() => undefined), 30 * 60_000);

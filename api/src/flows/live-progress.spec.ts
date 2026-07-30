@@ -459,3 +459,68 @@ describe('work we can just do never reaches the engine (BEA-1203)', () => {
     for (const id of ['gmail', 'drive', 'http', 'cli']) expect(engine).toContain(id); // real access stays
   });
 });
+
+/**
+ * BEA-1204 — the budget as the flow sees it. The owner's rules: it blocks rather than warns, the
+ * step in flight finishes, and work already gathered is never thrown away for it.
+ */
+describe('the token ceiling inside a run (BEA-1204)', () => {
+  const runner = (budget?: any) => new FlowRunnerService(
+    {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+    { ownerChatId: async () => null, send: async () => undefined } as any,
+    {} as any, undefined, undefined, undefined, undefined, undefined, undefined, undefined, budget,
+  );
+  const budget = (over: any = {}) => ({
+    runLimit: async () => over.runLimit ?? 150_000,
+    check: async () => over.day ?? { ok: true },
+    today: async () => ({ spent: 1, limit: 2 }),
+    shouldAnnounce: () => true,
+    ...over,
+  });
+
+  it('never blocks work that costs no tokens', async () => {
+    const s: any = runner(budget({ runLimit: async () => 1, day: { ok: false, reason: 'used up' } }));
+    // Saving a document, creating a task, searching our own notes — refusing these because the AI
+    // budget is gone would be absurd. They do not use the AI.
+    for (const id of ['save_document', 'create_task', 'remember', 'telegram', 'search_brain', 'search_rag', 'web_search']) {
+      expect(await s.budgetStop('tool', id, 9_999_999)).toBe('');
+    }
+    expect(await s.budgetStop('text', undefined, 9_999_999)).toBe('');
+  });
+
+  it('stops the things that DO cost tokens', async () => {
+    const s: any = runner(budget({ runLimit: async () => 1000 }));
+    expect(await s.budgetStop('ask_ai', undefined, 5000)).toMatch(/reached its token budget/);
+    expect(await s.budgetStop('tool', 'deep_research', 5000)).toMatch(/reached its token budget/);
+    expect(await s.budgetStop('skill', 'sk1', 5000)).toMatch(/reached its token budget/);
+    expect(await s.budgetStop('tool', 'gmail', 5000)).toMatch(/reached its token budget/);
+  });
+
+  it('passes on the daily reason word for word, so the owner knows which ceiling it was', async () => {
+    const s: any = runner(budget({ day: { ok: false, reason: "today's AI budget is used up (500,000 of 500,000 tokens)." } }));
+    expect(await s.budgetStop('ask_ai', undefined, 0)).toMatch(/today's AI budget is used up \(500,000/);
+  });
+
+  it('says the gathered work is kept, because it is', async () => {
+    const s: any = runner(budget({ runLimit: async () => 10 }));
+    expect(await s.budgetStop('ask_ai', undefined, 99)).toMatch(/Everything gathered so far is kept/);
+  });
+
+  it('charges an engine turn its measured average and a plain call its text', async () => {
+    const s: any = runner(budget());
+    expect(s.stepCost('tool', 'gmail', 'x', 'y')).toBe(118_000);      // real access, real cost
+    expect(s.stepCost('skill', 'sk1', 'x', 'y')).toBe(118_000);       // skills run on the engine
+    expect(s.stepCost('tool', 'save_document', 'x'.repeat(400), 'y')).toBe(0); // we just do it
+    expect(s.stepCost('ask_ai', undefined, 'x'.repeat(400), 'y'.repeat(400))).toBe(200);
+  });
+
+  it('does nothing at all when no budget service is wired', async () => {
+    const s: any = runner(undefined);
+    expect(await s.budgetStop('ask_ai', undefined, 9_999_999)).toBe('');
+  });
+
+  it('carries on while there is room', async () => {
+    const s: any = runner(budget({ runLimit: async () => 150_000 }));
+    expect(await s.budgetStop('ask_ai', undefined, 1000)).toBe('');
+  });
+});

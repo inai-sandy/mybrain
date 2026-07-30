@@ -13,6 +13,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import { MemoryService } from '../memory/memory.service';
 import { LlmService } from '../llm/llm.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
+import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -66,6 +67,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly prompts?: PromptsService,
     private readonly skillsSvc?: SkillsService,
     private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167/1168)
+    private readonly budget?: TokenBudgetService, // the token ceiling (BEA-1204)
   ) {}
 
   onModuleInit() {
@@ -620,7 +622,32 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     return null; // agent_message / reasoning — the answer, not a step
   }
 
+  /**
+   * Every engine turn in the app funnels through here — saved agents, the scheduler, both EMO voice
+   * lanes, bookmark research, flow tool steps. So this is where the ceiling belongs (BEA-1204).
+   * Guarding `execute()` instead would have missed `startRun` and half the callers.
+   */
   private async runViaCodex(prompt: string, handlers: HermesRunHandlers, opts: { title?: string; model?: string; sessionId?: string; skill?: string; bypass?: boolean }): Promise<HermesRunResult> {
+    // An engine turn averages 118,000 tokens — as much as eight branches of real research. Charged
+    // up front because it reports nothing until it finishes, and RESERVED so two turns starting
+    // together cannot both read the same figure and both be let through.
+    await this.budget?.require(ENGINE_TURN_TOKENS);
+    const releaseBudget = this.budget?.reserve(ENGINE_TURN_TOKENS) ?? (() => undefined);
+    try {
+      const result = await this.runViaCodexInner(prompt, handlers, opts);
+      // Log HERE, not at the call sites. Three of them reach the engine through this method — the
+      // main turn, the auto-revise retry and a skill turn — and only one used to record anything.
+      // A turn that leaves no trace is invisible to the day budget the moment its reservation lifts,
+      // which is the very bug this issue exists to fix. One place charges, one place records.
+      const t = TokenBudgetService.tokensOf(result?.usage);
+      await this.llm.recordUsage?.('agent', opts.model || 'codex', { prompt_tokens: t.prompt, completion_tokens: t.completion })?.catch(() => undefined);
+      return result;
+    } finally {
+      releaseBudget();
+    }
+  }
+
+  private async runViaCodexInner(prompt: string, handlers: HermesRunHandlers, opts: { title?: string; model?: string; sessionId?: string; skill?: string; bypass?: boolean }): Promise<HermesRunResult> {
     // Live play-by-play (BEA-1084): when someone is watching steps, ask the runner to STREAM its
     // events (ndjson) and append each step the moment it happens — the run screen's poll turns
     // that into a live feed. Headless calls (skills) keep the old single-JSON reply.
@@ -826,7 +853,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     let text = (result.finalText || '').trim();
     await this.agent.appendStep(runId, { label: `Answer received · ${text.length.toLocaleString()} chars · ${fmtElapsed(Math.round((Date.now() - startedAt) / 1000))}`, status: 'done', kind: 'log' }).catch(() => undefined);
     // Log Codex token usage as the flat-rate 'agent' feature so Usage can show its "included" value. (BEA-716)
-    if (result.usage) await this.llm.recordUsage('agent', cfg.model || 'codex', result.usage).catch(() => undefined);
+    // (usage is recorded once, inside runViaCodex — every engine turn goes through it)
     // Self-check against the Outcome + ONE auto-retry on a fail (BEA-696). Grade the answer; if it
     // fails the user's definition of done, revise once with the grader's notes and keep the better one.
     // Grade EVERY finished run (BEA-1173), not just the ones that happen to carry a rubric: the job's

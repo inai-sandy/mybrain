@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Param, Put } from '@nestjs/common';
+import { TokenBudgetService } from './token-budget.service';
 import { LlmService } from './llm.service';
 import { ConnectorService } from '../connectors/connector.service';
 
@@ -7,6 +8,7 @@ export class LlmController {
   constructor(
     private readonly llm: LlmService,
     private readonly connectors: ConnectorService,
+    private readonly budget: TokenBudgetService,
   ) {}
 
   @Get()
@@ -49,5 +51,18 @@ export class LlmController {
     if (!model) throw new BadRequestException('Model required');
     await this.llm.setConfig(provider, model);
     return { ok: true, provider, model };
+  }
+
+  /** Today's AI spend against the ceiling — so the budget is never a surprise (BEA-1204). */
+  @Get('budget')
+  async budgetToday() {
+    return this.budget.today();
+  }
+
+  /** Change the ceilings. 0 switches one off. */
+  @Put('budget')
+  async setBudget(@Body() b: { day?: number; run?: number }) {
+    await this.budget.setLimits(b?.day, b?.run);
+    return this.budget.today();
   }
 }
