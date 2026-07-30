@@ -165,11 +165,15 @@ describe("the team's own page only asks for what's due (BEA-1156)", () => {
     expect(b.open.map((t: any) => t.id)).toEqual(['t1']);
   });
 
+  // Uses `other` — a weekday that is definitely not today — rather than a hardcoded 'Fri'. The old
+  // version failed every Friday: the board works in IST, so from 18:30 UTC the app's "today" is
+  // already tomorrow, and a Friday report really was due. A test that only passes six days a week
+  // is worse than no test, because it trains you to ignore a red suite.
   it('still shows it, under what is coming, with when it is due', async () => {
-    const b: any = await board([report('t2', 'Send Friday night production status update', ['Fri'])]);
+    const b: any = await board([report('t2', 'Send the production status update', [other])]);
     const notDue = b.reports.filter((r: any) => !r.dueToday);
     expect(notDue).toHaveLength(1);
-    expect(notDue[0].schedule).toBe('Fri');
+    expect(notDue[0].schedule).toBe(other);
   });
 
   it('an ordinary job is never hidden by the schedule rule', async () => {
