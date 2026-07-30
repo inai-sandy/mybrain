@@ -1,4 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { TokenBudgetError } from '../llm/token-budget.service';
 import { promises as fs } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { MemoryService, MemHit, deepLinkFor } from '../memory/memory.service';
@@ -47,6 +48,16 @@ type Source = { title: string; url?: string; itemId?: string; link?: string; sou
 
 @Injectable()
 export class ChatService implements OnModuleInit, OnModuleDestroy {
+  /**
+   * Chat is the busiest surface in the app, and it was reaching the model with no ceiling at all
+   * (BEA-1204). Now that a budget stop throws, it must read as a plain sentence here — a raw 500 in
+   * the chat window would break the project's own "friendly errors, never a raw crash" rule.
+   */
+  private budgetText = (e: unknown): string => {
+    if (e instanceof TokenBudgetError) return `I have stopped for now — ${e.message}`;
+    return '';
+  };
+
   private tick: NodeJS.Timeout | null = null;
 
   constructor(
@@ -179,7 +190,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     const convo = recent.map((m) => `${m.role}: ${m.content}`).join('\n').slice(-2000);
     const tmpl = await this.prompts.get('chat.router');
     const prompt = `${tmpl}\n\n` + (session.summary ? `Earlier summary: ${session.summary}\n` : '') + `Conversation:\n${convo}\n\nNew message: ${text}`;
-    const out = await this.llm.completeWith(await this.getModel(), prompt, 150, 'chat-router');
+    const out = await this.llm.completeWith(await this.getModel(), prompt, 150, 'chat-router').catch(() => null);
     try {
       const j = JSON.parse(out!.slice(out!.indexOf('{'), out!.lastIndexOf('}') + 1));
       return { search: !!j.search, query: String(j.query || text) };
@@ -229,7 +240,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     }
     const sources = await this.toSources(hits);
     const prompt = await this.buildAnswerPrompt({ scope, summary: null }, [], clean, hits, true);
-    const raw = (await this.llm.completeWith(await this.getModel(), prompt, 800, 'chat')) || '';
+    const raw = (await this.llm.completeWith(await this.getModel(), prompt, 800, 'chat').catch(this.budgetText)) || '';
     return { answer: this.splitAnswer(raw).answer, sources };
   }
 
@@ -277,7 +288,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async answer(session: any, recent: any[], text: string, hits: MemHit[], didSearch: boolean): Promise<{ answer: string; followups: string[] }> {
-    const raw = (await this.llm.completeWith(await this.getModel(), await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800, 'chat')) || '';
+    const raw = (await this.llm.completeWith(await this.getModel(), await this.buildAnswerPrompt(session, recent, text, hits, didSearch), 800, 'chat').catch(this.budgetText)) || '';
     return this.splitAnswer(raw);
   }
 
@@ -310,7 +321,7 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
 
     const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, didSearch);
     const cfg = await this.getModel();
-    const full = (await this.llm.completeStream(cfg, prompt, 800, onToken, 'chat')) || '';
+    const full = (await this.llm.completeStream(cfg, prompt, 800, onToken, 'chat').catch(this.budgetText)) || '';
     const { answer, followups } = this.splitAnswer(full);
 
     const aMsg = await this.prisma.chatMessage.create({

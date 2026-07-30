@@ -15,6 +15,7 @@ import { DeepResearchService, ResearchSpend } from '../tools/deep-research.servi
 import { ItemsService } from '../items/items.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PostboxService } from '../contacts/postbox.service';
+import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { randomBytes } from 'crypto';
 
 type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean };
@@ -58,6 +59,7 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly items?: ItemsService,
     private readonly tasks?: TasksService,
     private readonly postbox?: PostboxService,
+    private readonly budget?: TokenBudgetService, // the token ceiling (BEA-1204)
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -369,7 +371,14 @@ export class FlowRunnerService implements OnModuleInit {
       spend.meaningSearches += s?.meaningSearches || 0;
       spend.paidCalls += s?.paidCalls || 0;
     };
-    const spendJson = () => (spend.searches || spend.extracts ? { spend: JSON.stringify(spend) } : {});
+    const spendJson = () => (spend.searches || spend.extracts || runTokens ? { spend: JSON.stringify({ ...spend, tokens: runTokens }) } : {});
+    // Tokens this run has used. An engine turn reports nothing until it ends, so it is charged the
+    // measured average; everything else is charged what the step's own text implies.
+    // Carried across a pause (BEA-1204). A run that spent 140k before an "Ask me" would otherwise
+    // resume at zero and get a whole fresh allowance — and durable HITL is the normal case here.
+    let runTokens = Number(this.parse(runRow?.spend as any)?.tokens) || 0;
+    let stoppedOnBudget = '';
+    const chargeRun = (n: number) => { runTokens += Math.max(0, n); };
     if (!opts.evalMode && !terminal.length) term('▶ started');
 
     // Adopt the paused driver's still-in-flight sibling work (BEA-792): a node the old walk left
@@ -436,9 +445,24 @@ export class FlowRunnerService implements OnModuleInit {
         if (kind === 'ask_user') {
           // In eval mode there's no one to answer — skip it so the regression test doesn't hang.
           if (opts.evalMode) { results[nodeId] = { status: 'skipped', output: '', kind, label }; await persist(); return ''; }
-          await this.pauseForInput(runId, flow, node, input, results);
+          await this.pauseForInput(runId, flow, node, input, results, spendJson().spend);
           throw new PauseSignal(nodeId);
         }
+        // Before starting anything new, is there budget left? (BEA-1204) Checked here rather than
+        // inside the call so the answer is "finish the step in flight, then start nothing new" —
+        // the owner gets a whole thought, not half of one.
+        const guard = await this.budgetStop(kind, node?.data?.refId, runTokens);
+        if (guard) {
+          results[nodeId] = { status: 'skipped', output: guard, kind, label };
+          if (!stoppedOnBudget) { stoppedOnBudget = guard; term(`⏹ ${guard}`); }
+          await persist();
+          return '';
+        }
+        // Branches run in parallel, so two could pass the guard on the same figure and then both
+        // charge afterwards — overshooting by a whole turn. Charge the run NOW for what this step is
+        // expected to cost, and correct it with the real figure once it finishes.
+        const expected = this.stepCost(kind, node?.data?.refId, input, '');
+        chargeRun(expected);
         results[nodeId] = { status: 'running', output: '', kind, label }; await persist();
         try {
           // Optional per-node retry (BEA-1071): "if it fails, try again N times" before giving up.
@@ -454,6 +478,8 @@ export class FlowRunnerService implements OnModuleInit {
             }
           }
           if (lastErr) throw lastErr;
+          // Replace the up-front estimate with what the step really moved.
+          chargeRun(this.stepCost(kind, node?.data?.refId, input, output) - expected);
           // If-condition verdict (BEA-1073) — stored on the result so its edges can steer.
           const condFalse = kind === 'if' ? !this.evalCond(node.data?.cond, input) : undefined;
           if (kind === 'if') term(`🔱 ${label || 'If'}: ${condFalse ? 'no — taking the other path' : 'yes'}`);
@@ -520,7 +546,10 @@ export class FlowRunnerService implements OnModuleInit {
 
     // Save the outputs as Documents you can browse later (Agent↔Flow merge ④) — but not for eval runs.
     const docs = opts.evalMode ? [] : await this.saveDocuments(flow, graph, incoming, results, finalOutput);
-    if (!opts.evalMode) term('✓ done');
+    // A run cut short by the budget did not fail — nothing broke — but it must not read as a clean
+    // success either, or the owner acts on a partial answer thinking it is the whole one (BEA-1204).
+    if (!opts.evalMode) term(stoppedOnBudget ? '⏹ stopped on budget — what was finished is saved' : '✓ done');
+    if (stoppedOnBudget && !opts.evalMode) void this.announceBudget(stoppedOnBudget, flow?.name).catch(() => undefined);
 
     // Grade the finished result against the job's Outcome — or the agent's standing one (BEA-1191).
     // Deep runs and EVERY voice job come through here, and they were finishing with no verdict at
@@ -668,7 +697,7 @@ export class FlowRunnerService implements OnModuleInit {
   }
 
   /** Persist the pause (status 'waiting') + notify the user (Move B). */
-  private async pauseForInput(runId: string, flow: any, node: any, input: string, results: Record<string, NodeResult>) {
+  private async pauseForInput(runId: string, flow: any, node: any, input: string, results: Record<string, NodeResult>, spendSoFar?: string) {
     const label = node.data?.label || 'Ask me';
     const base = node.data?.question || node.data?.sub || node.data?.text || 'Your input is needed to continue.';
     const question = input ? `${base}\n\n${input.slice(0, 1500)}` : base;
@@ -677,7 +706,9 @@ export class FlowRunnerService implements OnModuleInit {
     results[node.id] = { status: 'waiting', output: '', kind: 'ask_user', label };
     await this.prisma.flowRun.update({
       where: { id: runId },
-      data: { status: 'waiting', results: JSON.stringify(results), waitNodeId: node.id, waitQuestion: question, waitKind: kind, waitOptions: JSON.stringify(options), waitToken: randomBytes(16).toString('hex') },
+      // Carry the spend across the pause (BEA-1204) — otherwise the resumed run starts its token
+      // count at zero and quietly gets a second full allowance.
+      data: { status: 'waiting', results: JSON.stringify(results), waitNodeId: node.id, waitQuestion: question, waitKind: kind, waitOptions: JSON.stringify(options), waitToken: randomBytes(16).toString('hex'), ...(spendSoFar ? { spend: spendSoFar } : {}) } as any,
     });
     this.telegram.notifyFlowWaiting({ flowName: flow?.name, question }).catch(() => undefined);
     // Phone push (BEA-1088): a flow's direct ask always delivers; tapping lands on the waiting card.
@@ -972,6 +1003,58 @@ export class FlowRunnerService implements OnModuleInit {
       if (text?.trim()) return text;
     }
     throw new Error(d?.error || 'the thinking step produced nothing');
+  }
+
+  /**
+   * Tell the owner the budget stopped something — ONCE a day, not once a call (BEA-1204).
+   *
+   * A message per refused step would be noise, and noise gets muted, and a muted warning is the
+   * same as no warning. The whole point is that the day Codex ran dry, nobody was told at all.
+   */
+  private async announceBudget(reason: string, flowName?: string): Promise<void> {
+    if (!this.budget?.shouldAnnounce?.()) return;
+    const t: any = await this.budget.today?.().catch(() => null);
+    const detail = t ? `\n\nToday: ${t.spent.toLocaleString()} of ${t.limit.toLocaleString()} tokens. You can raise it in Settings.` : '';
+    const body = `⏹ ${flowName || 'A job'} ${reason}${detail}`;
+    const chat = await this.telegram.ownerChatId?.().catch(() => null);
+    if (chat) await this.telegram.send(chat, body, { parse_mode: undefined }).catch(() => undefined);
+    this.log.warn(`budget stop: ${reason}`);
+  }
+
+  /**
+   * Should this step be refused for budget reasons? Returns the message, or '' to carry on (BEA-1204).
+   *
+   * Steps that cost nothing — the tier-1 tools, a text block, a search we run ourselves — are never
+   * blocked. Refusing to save a document because the AI budget is gone would be absurd.
+   */
+  private async budgetStop(kind: string, refId: string | undefined, runTokens: number): Promise<string> {
+    if (!this.budget) return '';
+    if (!this.costs(kind, refId)) return '';
+    const runLimit = await this.budget.runLimit?.().catch(() => 0) ?? 0;
+    if (runLimit > 0 && runTokens >= runLimit) {
+      return `stopped: this run reached its token budget (${runTokens.toLocaleString()} of ${runLimit.toLocaleString()}). Everything gathered so far is kept.`;
+    }
+    const day: any = await this.budget.check?.(0).catch(() => ({ ok: true })) ?? { ok: true };
+    if (!day.ok) return `stopped: ${day.reason}`;
+    return '';
+  }
+
+  /** Does this step spend tokens at all? Tier-1 tools and plain text do not. */
+  private costs(kind: string, refId?: string): boolean {
+    if (kind === 'skill' || kind === 'ask_ai' || kind === 'merge') return true;
+    if (kind !== 'tool' || !refId) return false;
+    // Everything we do ourselves is free of tokens (BEA-1194, BEA-1203). Deep research and every
+    // engine tool are not.
+    const free = new Set(['search_brain', 'search_rag', 'fetch_document', 'save_document', 'save_capture', 'create_task', 'remember', 'telegram', 'whatsapp', 'web_search', 'web_read', 'web_search_meaning']);
+    return !free.has(refId);
+  }
+
+  /** What a finished step cost, well enough to budget with. */
+  private stepCost(kind: string, refId: string | undefined, input: string, output: string): number {
+    if (!this.costs(kind, refId)) return 0;
+    if (kind === 'skill') return ENGINE_TURN_TOKENS; // skills run on the engine
+    if (kind === 'tool' && refId && FlowRunnerService.AGENT_TOOLS.has(refId)) return ENGINE_TURN_TOKENS;
+    return Math.ceil(((input || '').length + (output || '').length) / 4);
   }
 
   /**
