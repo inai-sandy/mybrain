@@ -64,8 +64,16 @@ const CREDITS_PER_SEARCH = 2;
 
 /** How much of each page the write-up is shown. Ten full extracts would swamp the prompt. */
 const CHARS_PER_SOURCE = 3000;
-/** A snippet this long already says enough — don't spend an extract re-reading the page. */
-const SNIPPET_IS_ENOUGH = 500;
+
+/**
+ * Only skip reading a page when its snippet already fills the space we would give the full text.
+ *
+ * This was 500 chars, which quietly disabled the whole reading step: Tavily's advanced search returns
+ * snippets of up to 900, so every source looked "already covered" and a live run did 3 searches and 0
+ * page reads. A snippet is a summary, not the page — reading the best few properly is the point of
+ * DEEP research.
+ */
+const SNIPPET_IS_ENOUGH = CHARS_PER_SOURCE;
 
 @Injectable()
 export class DeepResearchService {

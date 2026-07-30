@@ -143,9 +143,18 @@ describe('deep research (BEA-1196)', () => {
     expect(spend.searches).toBe(3);
   });
 
-  it('does not spend an extract on a page whose snippet already says enough', async () => {
-    const long = 'x'.repeat(600);
-    const { svc, calls } = make({ results: { '*': [{ title: 'Full', url: 'https://long.test/a', snippet: long }] } });
+  // Caught by running it live: the threshold was 500, but Tavily snippets run to 900, so a real run
+  // did 3 searches and ZERO page reads — the whole "read the best pages" step was dead.
+  it('still reads the page when the snippet is only a search-result summary', async () => {
+    const snippet = 'x'.repeat(900); // the longest Tavily gives us
+    const { svc, calls } = make({ results: { '*': [{ title: 'Summary only', url: 'https://long.test/a', snippet }] } });
+    await svc.run('a question about something');
+    expect(calls.extracts).toBe(1);
+  });
+
+  it('does not spend an extract when the snippet already fills the space the full text would get', async () => {
+    const whole = 'x'.repeat(3200); // >= CHARS_PER_SOURCE, so reading adds nothing
+    const { svc, calls } = make({ results: { '*': [{ title: 'Full', url: 'https://long.test/a', snippet: whole }] } });
     await svc.run('a question about something');
     expect(calls.extracts).toBe(0);
   });
