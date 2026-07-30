@@ -100,11 +100,37 @@ export class DeepResearchService {
     return !words.slice(1).some((w) => /^[A-Z]/.test(w)); // no proper nouns → search by meaning
   }
 
+  /**
+   * Separate what THIS step is researching from the goal it sits inside (BEA-1199).
+   *
+   * A branch node prefixes the whole research goal above its own focus. The owner's report has a
+   * ten-part, 1,254-character goal, so the planner was reading all ten demands in every branch and
+   * writing sub-questions that wandered across the lot — the "messy research" he reported. (The same
+   * prompt made Perplexity's own deep research return a 502.)
+   *
+   * The goal still matters, but only for reading ambiguous words the right way. It is context, not
+   * the thing being researched.
+   */
+  static splitFocus(input: string): { focus: string; context: string } {
+    const t = String(input || '');
+    const MARK = 'THIS BRANCH FOCUSES ON:';
+    // The LAST marker, not the first. A branch feeding another branch stacks the markers, and taking
+    // the first would hand this step its parent's focus as well as its own — the very thing this
+    // method exists to stop, just one level down.
+    const at = t.lastIndexOf(MARK);
+    if (at < 0) return { focus: t.trim(), context: '' };
+    const focus = t.slice(at + MARK.length).trim();
+    const before = t.slice(0, at);
+    const goal = /OVERALL RESEARCH GOAL[^:]*:\s*([\s\S]*)$/.exec(before)?.[1] || '';
+    return { focus, context: goal.trim().slice(0, 600) };
+  }
+
   async run(
     question: string,
     opts: { budget?: Partial<ResearchBudget>; onLine?: (t: string) => void } = {},
   ): Promise<DeepResearchResult> {
-    const goal = (question || '').trim();
+    const { focus, context } = DeepResearchService.splitFocus(question);
+    const goal = focus;
     if (!goal) throw new WebSearchError('there is nothing to research — the step got no question.');
 
     const budget: ResearchBudget = {
@@ -114,13 +140,21 @@ export class DeepResearchService {
     const say = opts.onLine || (() => undefined);
     const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, paidCalls: 0 };
 
+    // Work the date window and country out ONCE from the real question — a sub-question like
+    // "AICTE approved intake" often loses the "2025 and 2026" the owner actually asked about.
+    const window = WebResearchService.dateWindow(goal);
+    const country = WebResearchService.countryOf(goal);
+    if (window.start_date) say(`   limiting to ${window.start_date} → ${window.end_date}`);
+    else if (window.time_range) say(`   limiting to the last ${window.time_range}`);
+    if (country) say(`   focused on ${country}`);
+
     const have = await this.web.available().catch(() => ({ tavily: false, exa: false }));
     if (!have.tavily && !have.exa) {
       throw new WebSearchError('no search is connected — add a Tavily or Exa key in Settings → Integrations.');
     }
 
     // 1. Plan. The model chooses the questions; it never chooses how they get answered.
-    const asks = await this.plan(goal, budget.searches, say, spend);
+    const { asks, sites } = await this.plan(goal, context, budget.searches, say, spend);
     say(`   researching ${asks.length} question${asks.length === 1 ? '' : 's'}, up to ${budget.searches} searches`);
 
     // 2. Gather. One search per sub-question, deduplicated by URL across all of them.
@@ -131,10 +165,14 @@ export class DeepResearchService {
       if (spend.searches >= budget.searches) break;
       const meaning = DeepResearchService.prefersMeaning(ask) && have.exa;
       say(`   🔎 ${ask.slice(0, 80)}`);
-      spend.searches++;
-      if (meaning) spend.meaningSearches++;
+      // One question can cost more than one call: a domain guess or a date window that finds nothing
+      // is widened and tried again. Count the CALLS, because that is what Tavily charges for — the
+      // budget is a spend cap, not a question cap (BEA-1199).
+      if (meaning) { spend.searches++; spend.meaningSearches++; }
       try {
-        const rows = meaning ? await this.web.searchByMeaning(ask) : await this.web.search(ask);
+        const rows = meaning
+          ? await this.web.searchByMeaning(ask)
+          : await this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; } });
         let fresh = 0;
         for (const r of rows) {
           const key = this.urlKey(r.url);
@@ -178,7 +216,7 @@ export class DeepResearchService {
 
     // 4. Write it up, from the sources only.
     const sources = this.numbered(found, pages);
-    const report = await this.write(goal, sources, say, spend);
+    const report = await this.write(goal, sources, say, spend, found.length);
     const list = this.sourceList(found);
     const cost = this.costLine(spend);
     say(`   💸 used ${cost}`);
@@ -191,16 +229,19 @@ export class DeepResearchService {
   // ---- the steps ------------------------------------------------------------------------------
 
   /** Break the goal into searchable sub-questions. The model plans; it does not answer. */
-  private async plan(goal: string, max: number, say: (t: string) => void, spend: ResearchSpend): Promise<string[]> {
+  private async plan(goal: string, context: string, max: number, say: (t: string) => void, spend: ResearchSpend): Promise<{ asks: string[]; sites: string[] }> {
     const prompt = [
       'You are PLANNING research. Do not answer anything.',
       '',
-      'GOAL (interpret every ambiguous term the way this goal intends, and stay strictly inside it):',
-      goal.slice(0, 4000),
+      'RESEARCH THIS — and only this:',
+      goal.slice(0, 1500),
       '',
+      ...(context ? ['It sits inside a wider piece of work, given ONLY so you read ambiguous words correctly.', 'Do NOT research the wider work:', context, ''] : []),
       `Write between 3 and ${max} short search questions that together cover this goal.`,
       'Rules:',
       '- One per line. No numbering, no bullets, no commentary, no headings.',
+      '- If, and ONLY if, you are certain which websites publish this, add a final line of the form',
+      '  "sites: example.gov, example.org" (domains only, at most 5). If you are not sure, leave it out.',
       '- Each line must be something you could type into a search box.',
       '- Cover different parts of the goal; do not rephrase the same question twice.',
       '- Do not answer any of them.',
@@ -209,12 +250,32 @@ export class DeepResearchService {
     const { text, paid } = await this.engine(prompt, 700, 'deep-research-plan');
     if (paid) spend.paidCalls++;
     const asks = this.parsePlan(text, max);
-    if (asks.length) return asks;
+    const sites = this.parseSites(text);
+    if (sites.length) say(`   looking first at ${sites.join(', ')}`);
+    if (asks.length) return { asks, sites };
     // Planning failing is not fatal: searching the goal verbatim is still a real search of the real
     // web. What must never happen is answering from memory, and that is a different step.
-    say('   could not plan sub-questions — searching the goal directly');
-    this.log.warn('deep research: planning produced nothing, falling back to the raw goal');
-    return [goal.slice(0, 300)];
+    say('   could not plan sub-questions — searching the question directly');
+    this.log.warn('deep research: planning produced nothing, falling back to the raw question');
+    return { asks: [goal.slice(0, 300)], sites: [] };
+  }
+
+  /**
+   * Websites the planner is confident about, if it named any (BEA-1199).
+   *
+   * Only ever a hint. `WebResearchService.search` retries without the filter when it finds nothing,
+   * because a wrong guess returns zero results and zero results reads as "this does not exist" —
+   * the most expensive wrong answer this tool can give.
+   */
+  parseSites(text: string | null | undefined): string[] {
+    const line = /^\s*sites?\s*:\s*(.+)$/im.exec(String(text || ''))?.[1] || '';
+    const out: string[] = [];
+    for (const raw of line.split(/[,;\s]+/)) {
+      const d = raw.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+      if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) && !out.includes(d)) out.push(d);
+      if (out.length >= 5) break;
+    }
+    return out;
   }
 
   /** Turn the planner's reply into clean, bounded, de-duplicated questions. */
@@ -228,6 +289,7 @@ export class DeepResearchService {
       // opener. Deliberately narrow: an earlier version dropped anything starting with "question",
       // which threw away real sub-questions like "question of who actually pays for it".
       if (line.endsWith(':')) continue;
+      if (/^sites?\s*:/i.test(line)) continue; // the domain hint, not a question
       if (/^(here (are|is)|these are|sure|okay|below|i(?:'| a)m going to)\b/i.test(line)) continue;
       const key = line.toLowerCase();
       if (seen.has(key)) continue;
@@ -239,13 +301,18 @@ export class DeepResearchService {
   }
 
   /** The write-up. Sources only — and it must admit a gap rather than fill it. */
-  private async write(goal: string, sources: string, say: (t: string) => void, spend: ResearchSpend): Promise<string> {
+  private async write(goal: string, sources: string, say: (t: string) => void, spend: ResearchSpend, sourceCount: number): Promise<string> {
     say('   ✍️ writing the report');
     const prompt = [
-      'Write a clear, well-structured report answering the goal below, using ONLY the sources given.',
+      'Write a clear, well-structured report answering the question below, using ONLY the sources given.',
       '',
-      'GOAL:',
-      goal.slice(0, 4000),
+      'QUESTION:',
+      goal.slice(0, 1500),
+      '',
+      'START WITH A SHORT SECTION headed "## What I could and could not answer".',
+      'Two plain lists under it: what the sources DO answer, and what they do NOT.',
+      `You were given ${sourceCount} source(s). Be specific — name the part of the question each gap belongs to.`,
+      'Then write the report itself.',
       '',
       'RULES',
       '- Use only what the sources say. For this task you have no other knowledge.',
