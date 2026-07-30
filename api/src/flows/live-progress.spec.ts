@@ -158,3 +158,70 @@ describe('deep research is our own loop (BEA-1196)', () => {
     await expect(s.runNode(node, 'q', [])).rejects.toThrow(/found nothing to work from/);
   });
 });
+
+/**
+ * BEA-1199 — a flow ending in an HTML skill produced a whole page as its answer, and every one was
+ * filed as `kind: 'md'`. The owner opened his 36KB report and got raw source. The description was
+ * built the same way, so it read "<!doctype html> <html lang=…".
+ */
+describe('an HTML answer is saved as HTML (BEA-1199)', () => {
+  const runner = () => new FlowRunnerService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+
+  const page = '<!doctype html>\n<html lang="en">\n<head><style>.a{color:red}</style><script>var x=1</script></head>\n<body><h1>City Placement Review</h1><p>The sources do not cover 2026.</p></body>\n</html>';
+
+  it('files a page as kind html, described by its words not its markup', async () => {
+    let saved: any = null;
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved = d; return { id: 'd1', slug: 's1', title: d.title }; } };
+    await s.saveDoc('Report — result', page, 'Report');
+    expect(saved.kind).toBe('html');
+    expect(saved.description).toContain('City Placement Review');
+    expect(saved.description).not.toContain('<!doctype');
+    expect(saved.description).not.toContain('color:red');   // style and script are stripped
+    expect(saved.description).not.toContain('var x');
+    expect(saved.contentText).toBe(page);                    // the page itself is stored untouched
+  });
+
+  it('still files ordinary research as markdown', async () => {
+    let saved: any = null;
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved = d; return { id: 'd2', slug: 's2', title: d.title }; } };
+    await s.saveDoc('Report — research', '# Findings\n\nThe sources say...', 'Report');
+    expect(saved.kind).toBe('md');
+    expect(saved.description).toContain('Findings');
+  });
+
+  it('is not fooled by markdown that merely mentions html', async () => {
+    let saved: any = null;
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved = d; return { id: 'd3', slug: 's3', title: d.title }; } };
+    await s.saveDoc('x', 'Here is some `<html>` in a sentence about HTML pages.', 'Report');
+    expect(saved.kind).toBe('md');
+  });
+});
+
+/** Review finding on BEA-1199: a model asked for "an HTML page" usually replies inside a fence. */
+describe('fenced HTML is still HTML (BEA-1199)', () => {
+  const runner = () => new FlowRunnerService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+  const save = async (content: string) => {
+    let saved: any = null;
+    const s: any = runner();
+    (s as any).documents = { create: async (d: any) => { saved = d; return { id: 'd', slug: 's', title: d.title }; } };
+    await s.saveDoc('t', content, 'Report');
+    return saved;
+  };
+
+  it('files a fenced page as html, with the fence removed', async () => {
+    const saved = await save('```html\n<!doctype html>\n<html><body><h1>Report</h1></body></html>\n```');
+    expect(saved.kind).toBe('html');
+    expect(saved.contentText.startsWith('<!doctype html')).toBe(true);
+    expect(saved.contentText).not.toContain('```');
+  });
+
+  it('leaves an ordinary fenced code block in a markdown document alone', async () => {
+    const md = '# Findings\n\n```js\nconst x = 1\n```\n';
+    const saved = await save(md);
+    expect(saved.kind).toBe('md');
+    expect(saved.contentText).toBe(md);   // untouched
+  });
+});

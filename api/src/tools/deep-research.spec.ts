@@ -17,13 +17,17 @@ function make(opts: {
   onSearch?: (q: string, kind: 'keyword' | 'meaning') => void;
   readFails?: boolean;
   engineDown?: boolean;
+  attemptsPerSearch?: number;
   helperCfg?: any;
 } = {}) {
   const calls = { searches: 0, extracts: 0, meaning: 0 };
   const web: any = {
     available: async () => opts.available ?? { tavily: true, exa: true },
-    search: async (q: string) => {
+    search: async (q: string, _max?: number, o?: any) => {
       calls.searches++; opts.onSearch?.(q, 'keyword');
+      // The real service reports every Tavily request it makes, so the double must too — otherwise
+      // these tests would pass while spend silently read zero.
+      for (let i = 0; i < (opts.attemptsPerSearch ?? 1); i++) o?.onAttempt?.();
       return opts.results?.[q] ?? opts.results?.['*'] ?? [{ title: 'A page', url: `https://x.test/${calls.searches}`, snippet: 'short' }];
     },
     searchByMeaning: async (q: string) => {
@@ -292,6 +296,127 @@ describe('deep research (BEA-1196)', () => {
       const svc = make().svc;
       const many = Array.from({ length: 20 }, (_, i) => `question number ${i} here`).join('\n');
       expect(svc.parsePlan(many, 3)).toHaveLength(3);
+    });
+  });
+
+  /**
+   * BEA-1199 — the owner's report has a ten-part, 1,254-character goal, and every branch was handed
+   * all ten demands. The planner then wrote sub-questions that wandered across the lot. (The same
+   * prompt made Perplexity's own deep research return a 502.)
+   */
+  describe('a branch researches its own focus, not the whole goal', () => {
+    const branchInput = [
+      'OVERALL RESEARCH GOAL (interpret every term and stay strictly within this):',
+      '1. Study Engineering and MBA students. 2. Find pass-out numbers. 3. Find placement data.',
+      '4. Cover campus and off-campus. 5. Break into job categories. 6. Estimate percentages.',
+      '',
+      'THIS BRANCH FOCUSES ON:',
+      'Find data on Engineering and MBA student graduation numbers for 2025 and 2026.',
+    ].join('\n');
+
+    it('splits the focus from the surrounding goal', () => {
+      const { focus, context } = DeepResearchService.splitFocus(branchInput);
+      expect(focus).toBe('Find data on Engineering and MBA student graduation numbers for 2025 and 2026.');
+      expect(context).toContain('Study Engineering and MBA students');
+      expect(focus).not.toContain('Break into job categories');
+    });
+
+    it('treats a plain question with no branch marker as the focus itself', () => {
+      expect(DeepResearchService.splitFocus('just this question').focus).toBe('just this question');
+      expect(DeepResearchService.splitFocus('just this question').context).toBe('');
+    });
+
+    it('plans against the focus and only mentions the goal as context', async () => {
+      const { svc, llm } = make();
+      await svc.run(branchInput);
+      const planPrompt = llm.completeWithModel.mock.calls.find((c: any[]) => c[3] === 'deep-research-plan')[1];
+      expect(planPrompt).toContain('RESEARCH THIS — and only this:');
+      expect(planPrompt).toContain('graduation numbers for 2025 and 2026');
+      expect(planPrompt).toContain('Do NOT research the wider work');
+    });
+  });
+
+  describe('the report says what it could not answer (BEA-1199)', () => {
+    it('asks for that section up front, with the real source count', async () => {
+      const { svc, llm } = make();
+      await svc.run('a question about something');
+      const writePrompt = llm.completeWithModel.mock.calls.find((c: any[]) => c[3] === 'deep-research-write')[1];
+      expect(writePrompt).toContain('What I could and could not answer');
+      expect(writePrompt).toContain('You were given 3 source(s)');
+    });
+  });
+
+  describe('site hints from the planner (BEA-1199)', () => {
+    it('reads a sites: line and passes it to the search', async () => {
+      const seen: any[] = [];
+      const web: any = {
+        available: async () => ({ tavily: true, exa: false }),
+        search: async (_q: string, _m: number, o: any) => { seen.push(o); return [{ title: 'T', url: 'https://a', snippet: 's' }]; },
+        searchByMeaning: async () => [],
+        readPage: async () => 'text',
+      };
+      const llm: any = {
+        helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+        completeWithModel: async (_c: any, _p: string, _t: number, label: string) => ({
+          text: label === 'deep-research-plan' ? 'how many students graduated\nsites: aicte-india.org, https://www.aishe.gov.in/reports' : 'report', model: 'codex',
+        }),
+      };
+      const svc = new DeepResearchService(web, llm);
+      await svc.run('engineering graduates in India 2026');
+      expect(seen[0].includeDomains).toEqual(['aicte-india.org', 'aishe.gov.in']);
+      expect(seen[0].country).toBe('india');
+      expect(seen[0].window.start_date).toBe('2026-01-01');
+    });
+
+    it('never mistakes the sites line for a question to research', () => {
+      const svc = make().svc;
+      expect(svc.parsePlan('how many students graduated\nsites: a.org, b.org', 8)).toEqual(['how many students graduated']);
+    });
+
+    it('ignores rubbish in the sites line and caps it at five', () => {
+      const svc = make().svc;
+      expect(svc.parseSites('sites: not a domain, good.org, x.gov.in, a.com, b.com, c.com, d.com, e.com')).toEqual(['good.org', 'x.gov.in', 'a.com', 'b.com', 'c.com']);
+      expect(svc.parseSites('no sites line here')).toEqual([]);
+    });
+  });
+
+  /**
+   * Review findings on BEA-1199, each fixed before shipping. These are the regression net.
+   */
+  describe('review fixes (BEA-1199)', () => {
+    // HIGH: one question can cost up to three Tavily calls once the widening fallbacks fire. Counting
+    // questions instead of calls under-reported the bill by up to 3x, exactly when it mattered.
+    it('counts every Tavily call, not one per question', async () => {
+      const { svc } = make({ attemptsPerSearch: 3, plan: 'one question about the thing' });
+      const { spend } = await svc.run('a question');
+      expect(spend.searches).toBe(3);
+    });
+
+    it('stops on the credit budget, not the question count', async () => {
+      const plan = Array.from({ length: 8 }, (_, i) => `question number ${i} about the topic`).join('\n');
+      const { svc, calls } = make({ attemptsPerSearch: 2, plan });
+      const { spend } = await svc.run('a big question', { budget: { searches: 4, extracts: 1 } });
+      expect(spend.searches).toBeLessThanOrEqual(4 + 1); // never runs away; one in-flight question may finish
+      expect(calls.searches).toBeLessThan(8);            // and it stopped well short of every question
+    });
+
+    // MEDIUM: a nested branch stacked the marker, and taking the first one dragged the parent's
+    // focus along — reintroducing the bug this fix exists to remove, one level down.
+    it('takes the innermost branch focus when branches are nested', () => {
+      const nested = [
+        'OVERALL RESEARCH GOAL (interpret every term and stay strictly within this):',
+        'the whole ten part goal',
+        '',
+        'THIS BRANCH FOCUSES ON:',
+        'branch A: market sizing',
+        '',
+        'THIS BRANCH FOCUSES ON:',
+        'sub-branch A1: TAM in India',
+      ].join('\n');
+      const { focus } = DeepResearchService.splitFocus(nested);
+      expect(focus).toBe('sub-branch A1: TAM in India');
+      expect(focus).not.toContain('market sizing');
+      expect(focus).not.toContain('THIS BRANCH FOCUSES ON');
     });
   });
 });

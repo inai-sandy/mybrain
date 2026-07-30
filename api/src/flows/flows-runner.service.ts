@@ -754,10 +754,49 @@ export class FlowRunnerService implements OnModuleInit {
     return `${head}${parts.join('\n')}${tail}`.slice(0, 200000);
   }
 
+  /**
+   * Is this an HTML page rather than markdown? (BEA-1199)
+   *
+   * A flow that ends in an HTML skill produces a whole page as its answer, and every one of them was
+   * being filed as `kind: 'md'` — so the library showed 36KB of raw source instead of the report.
+   */
+  private looksHtml(content: string): boolean {
+    const head = this.unfence(content).trimStart().slice(0, 200).toLowerCase();
+    return head.startsWith('<!doctype html') || head.startsWith('<html');
+  }
+
+  /**
+   * Take off a markdown code fence, if the whole thing is wrapped in one.
+   *
+   * A model asked for "an HTML page" very often replies with ```html … ```. Stored as-is that is
+   * neither valid markdown nor a page that renders — so strip the fence and keep the page.
+   */
+  private unfence(content: string): string {
+    const t = (content || '').trim();
+    const m = /^```[a-z]*\s*\n([\s\S]*?)\n?```$/i.exec(t);
+    return m ? m[1] : content;
+  }
+
+  /** The words on the page, with the markup taken out — a description a person can read. */
+  private visibleText(content: string): string {
+    return (content || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   private async saveDoc(title: string, content: string, flowName: string, isPart = false): Promise<{ id: string; slug: string; title: string } | null> {
     try {
+      const html = this.looksHtml(content);
+      // Store the page itself, not the fence a model wrapped it in.
+      if (html) content = this.unfence(content);
+      // A description built by collapsing whitespace on HTML reads "<!doctype html> <html lang=…".
+      const description = (html ? this.visibleText(content) : content.replace(/\s+/g, ' ')).slice(0, 180);
       // pass description + tags so DocumentsService skips its (paid) AI summarise pass
-      const doc: any = await this.documents.create({ title: title.slice(0, 180), contentText: content, kind: 'md', description: content.replace(/\s+/g, ' ').slice(0, 180), tags: ['flow', flowName.slice(0, 40), ...(isPart ? ['flow-part'] : [])], noIndex: true });
+      const doc: any = await this.documents.create({ title: title.slice(0, 180), contentText: content, kind: html ? 'html' : 'md', description, tags: ['flow', flowName.slice(0, 40), ...(isPart ? ['flow-part'] : [])], noIndex: true });
       return { id: doc.id, slug: doc.slug, title: doc.title };
     } catch (e: any) { this.log.warn(`flow doc save failed: ${e?.message || e}`); return null; }
   }
