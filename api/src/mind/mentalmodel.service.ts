@@ -11,6 +11,8 @@ import { surfacedWhere } from './surfacing';
 
 // The reasoning model defaults to Sonnet — this is the "no basic stuff" core, it needs real reasoning.
 const MODEL_KEY = 'mind.llm';
+/** Paid model runs allowed per day. Keyed per day, not one shared slot — see paidToday. */
+const MIND_RUNS_PER_DAY = 2;
 const LEARNED_KEY = 'mind.learnedDays'; // closed days the Lab has already reflected on (BEA-458)
 const ABOUT_KEY = 'mind.aboutMe'; // the user's own words about who they are (BEA-463)
 // Haiku, not Sonnet. This job reads one day of structured signals and fills a fixed JSON shape —
@@ -220,14 +222,21 @@ export class MentalModelService implements OnModuleInit {
       .join('\n\n');
   }
 
-  /** At most two paid model runs a day — it was hitting 15. (BEA-1140) */
+  /**
+   * At most two paid model runs a day — it was hitting 15. (BEA-1140)
+   *
+   * Keyed PER DAY (BEA-1178). It used to be one shared `mind.paidDay` holding `day:count`, and the
+   * stamp reset the count to 1 whenever the day differed. `catchUp()` walks a backlog of closed days
+   * in a single tick, so with two or more days queued each one reset the previous one's counter and
+   * the cap never held — the same mechanism that had the mentor making twelve paid calls in ten
+   * minutes. Given the note above ("it was hitting 15"), this file has already paid for it once.
+   */
   private async paidToday(day: string): Promise<boolean> {
     // Defensive: if the lookup can't run, treat the day as UNPAID so guidance still gets written.
     // Failing closed here would silently stop the Lab working. (BEA-1140)
     try {
-      const row = await this.prisma.setting?.findUnique({ where: { key: 'mind.paidDay' } });
-      const [d, n] = String(row?.value || '').split(':');
-      return d === day && Number(n || 0) >= 2;
+      const row = await this.prisma.setting?.findUnique({ where: { key: `mind.paid.${day}` } });
+      return Number(row?.value || 0) >= MIND_RUNS_PER_DAY;
     } catch {
       return false;
     }
@@ -265,10 +274,10 @@ export class MentalModelService implements OnModuleInit {
 
     // Must never throw — it sits in front of the paid call. (BEA-1140)
     try {
-      const cur = await this.prisma.setting?.findUnique({ where: { key: 'mind.paidDay' } });
-      const [pd, pn] = String(cur?.value || '').split(':');
-      const next = `${day}:${pd === day ? Number(pn || 0) + 1 : 1}`;
-      await this.prisma.setting?.upsert({ where: { key: 'mind.paidDay' }, create: { key: 'mind.paidDay', value: next }, update: { value: next } });
+      const key = `mind.paid.${day}`;
+      const cur = await this.prisma.setting?.findUnique({ where: { key } });
+      const next = String(Number(cur?.value || 0) + 1);
+      await this.prisma.setting?.upsert({ where: { key }, create: { key, value: next }, update: { value: next } });
     } catch {
       /* cost guard only */
     }

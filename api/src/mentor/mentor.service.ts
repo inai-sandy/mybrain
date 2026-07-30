@@ -13,6 +13,8 @@ const DEFAULT_TZ = 'Asia/Kolkata';
 const MENTOR_AT = '23:59'; // runs just after the Story of the Day (23:58)
 /** After an unusable reply, leave that day alone for a while instead of retrying every minute. (BEA-1178) */
 const MENTOR_RETRY_AFTER_MS = 30 * 60_000;
+/** Paid guidance runs allowed per day. The cap is per DAY, not one shared slot — see paidToday. */
+const MENTOR_RUNS_PER_DAY = 2;
 const DEFAULT_MENTOR_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 const DERIVE_EVERY_MS = 3 * 24 * 60 * 60 * 1000;
 
@@ -511,14 +513,24 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Has this day already used up its two paid guidance runs? */
+  /**
+   * Has this day already used up its two paid guidance runs?
+   *
+   * Keyed PER DAY (BEA-1178). It used to be one shared `mentor.paidDay` holding `day:count`, and
+   * `stampPaid` reset the count to 1 whenever the day differed. But the nightly tick checks TWO days
+   * every sixty seconds — today and yesterday — so each one reset the other's counter and neither was
+   * ever capped. The result was two paid calls a minute: twelve guidance calls between 18:30 and
+   * 18:39 on 26 July alone, against a cap of two.
+   *
+   * This is the identical mistake already fixed a few lines above for the failure backoff, which was
+   * moved to `mentor.lastFail.<day>` for exactly the same reason. The cap never got the same fix.
+   */
   private async paidToday(day: string): Promise<boolean> {
     // Defensive: if the lookup can't run, treat the day as UNPAID so guidance still gets written.
     // Failing closed here would silently stop the Lab working. (BEA-1140)
     try {
-      const row = await this.prisma.setting?.findUnique({ where: { key: 'mentor.paidDay' } });
-      const [d, n] = String(row?.value || '').split(':');
-      return d === day && Number(n || 0) >= 2;
+      const row = await this.prisma.setting?.findUnique({ where: { key: `mentor.paid.${day}` } });
+      return Number(row?.value || 0) >= MENTOR_RUNS_PER_DAY;
     } catch {
       return false;
     }
@@ -528,10 +540,10 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     // Must never throw — this sits directly in front of the paid call, so a failure here would
     // stop guidance being written at all. (BEA-1140)
     try {
-      const cur = await this.prisma.setting?.findUnique({ where: { key: 'mentor.paidDay' } });
-      const [pd, pn] = String(cur?.value || '').split(':');
-      const next = `${day}:${pd === day ? Number(pn || 0) + 1 : 1}`;
-      await this.prisma.setting?.upsert({ where: { key: 'mentor.paidDay' }, create: { key: 'mentor.paidDay', value: next }, update: { value: next } });
+      const key = `mentor.paid.${day}`;
+      const cur = await this.prisma.setting?.findUnique({ where: { key } });
+      const next = String(Number(cur?.value || 0) + 1);
+      await this.prisma.setting?.upsert({ where: { key }, create: { key, value: next }, update: { value: next } });
     } catch {
       /* the ceiling is a cost guard, not a correctness one */
     }
