@@ -63,7 +63,9 @@ export class TeamUpdatesService {
   /** Everything waiting on him, oldest first — the ones that have been ignored longest matter most. */
   async inbox() {
     const rows = await this.prisma.teamUpdate.findMany({
-      where: { needsYou: true, closedAt: null },
+      // A message about a task that is already DONE has nothing left to review — the base filter
+      // never looked at the task at all, so completed work sat in the inbox forever. (BEA-1211)
+      where: { needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: { not: 'done' } } }] },
       orderBy: { at: 'asc' },
       take: 100,
       include: {
@@ -156,7 +158,9 @@ export class TeamUpdatesService {
     const covered = new Set(items.map((i) => i.claimId).filter(Boolean));
     const orphans = await this.prisma.taskClaim
       .findMany({
-        where: { status: 'pending' },
+        // Same rule as the base list: a claim on work that is already done needs no yes/no — the
+        // unfiltered sweep was resurrecting items for tasks the owner had long closed. (BEA-1211)
+        where: { status: 'pending', task: { status: { not: 'done' } } },
         orderBy: { createdAt: 'asc' },
         include: { contact: { select: { id: true, name: true, whatsappNumber: true } }, task: { select: { id: true, title: true, status: true } } },
       })

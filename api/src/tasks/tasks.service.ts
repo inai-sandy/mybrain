@@ -1026,8 +1026,33 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     this.indexTask(upd);
     this.touchPerson((upd as any).ownerContactId);
     await this.syncChases(id, done);
-    if (done) await this.spawnFollowUp(t, followUpDate);
+    if (done) {
+      await this.settleReview(id);
+      await this.spawnFollowUp(t, followUpDate);
+    }
     return this.shape(upd);
+  }
+
+  /**
+   * Marking a task done answers everything the review tab was asking about it (BEA-1211).
+   * Nothing else ever cleared these: the message rows stayed `needsYou`, the pending claim kept
+   * being swept back in, and "I closed it and it came back" was the result. The tick IS the
+   * owner's decision, so the claim is confirmed and the messages close with it.
+   * Optional-chained: spec harnesses build this service with partial Prisma stubs.
+   */
+  private async settleReview(taskId: string) {
+    try {
+      await (this.prisma as any).taskClaim?.updateMany?.({
+        where: { taskId, status: 'pending' },
+        data: { status: 'confirmed', decidedAt: new Date() },
+      });
+      await (this.prisma as any).teamUpdate?.updateMany?.({
+        where: { taskId, closedAt: null },
+        data: { closedAt: new Date() },
+      });
+    } catch (e: any) {
+      this.log.warn(`review settle for ${taskId}: ${e?.message ?? e}`);
+    }
   }
 
   /**

@@ -52,6 +52,52 @@ const TROUBLE = [
 /** They are telling him a thing is finished. */
 const CLAIMS_DONE = /\b(?:done|completed|finished|closed|delivered|dispatched|submitted|uploaded|sent\s+it|handed\s+over)\b/i;
 
+/** Words that plainly mean the whole thing is finished — these beat any progress signal. */
+const CLEARLY_COMPLETE =
+  /\b(all done|fully (done|completed|uploaded|sent)|100\s*%|completed all|finished all|everything (is )?(done|completed|uploaded|sent)|it is (completed|complete|done)|its? (completed|complete|done))\b/i;
+
+/** "so far" / "up to now" / "remaining" / "working on it" — a report of progress, not of completion. */
+const PROGRESS_WORDS =
+  /\b(so far|till now|till date|up\s?to\s?(now|know|date)|as of now|in progress|work(ing)? on it|almost|partially|partial|remaining|balance|pending|yet to|not yet|will (finish|complete|do)|started|ongoing)\b/i;
+
+/** "45 of 120", "45 out of 120", "45/120" — short of the total. */
+function shortOfTotal(text: string): boolean {
+  const re = /(\d[\d,]*)\s*(?:\/|of|out of)\s*(\d[\d,]*)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const a = Number(m[1].replace(/,/g, ''));
+    const b = Number(m[2].replace(/,/g, ''));
+    if (Number.isFinite(a) && Number.isFinite(b) && b > 0 && a < b) return true;
+  }
+  return false;
+}
+
+/**
+ * Does this message read as PROGRESS rather than completion? (BEA-1122)
+ *
+ * The prompt already tells the model that a partial update is not finished, and it still read
+ * "Total we have 120 BOMs to upload, upto know we uploaded 45 BOMs" as done — which filed a claim,
+ * silenced the chase, and left the person un-chased for two days. Wording alone was not enough, so
+ * this is a deterministic second opinion: when a message plainly reports progress, a "done" from
+ * the model is refused. Erring this way only costs an extra nudge; erring the other way loses the
+ * chase entirely.
+ *
+ * Moved here from the agent (BEA-1211): the review queue reads with readUpdate below, which was
+ * built WITHOUT this guard — so "started, working on it" landed in review as a done-claim, the
+ * exact bug BEA-1122 had already fixed on the claims path. One home, one opinion.
+ */
+export function looksLikePartialProgress(text: string): boolean {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (CLEARLY_COMPLETE.test(t)) return false; // they said it outright — believe them
+  if (shortOfTotal(t)) return true;
+  if (PROGRESS_WORDS.test(t)) return true;
+  // Present continuous with no completion word: "we are using it and updating the data" is an
+  // ongoing state, not a finished job.
+  if (/\b(is|are|am)\s+\w+ing\b/i.test(t)) return true;
+  return false;
+}
+
 /** Real content — figures, quantities, names of things. A status report rather than an ack. */
 const HAS_SUBSTANCE = /\d/;
 
@@ -90,7 +136,9 @@ export function readUpdate(text: string, opts: { isReport?: boolean } = {}): Rea
   // promise. (BEA-1152)
   if (isPromise) {
     reads.add('promise');
-  } else if (CLAIMS_DONE.test(t) && !isQuantityNotClaim(t, reported)) {
+  } else if (CLAIMS_DONE.test(t) && !isQuantityNotClaim(t, reported) && !looksLikePartialProgress(t)) {
+    // The progress guard runs here too (BEA-1211): "started the upload" contains a done-word but
+    // reads as progress, and a progress report must never demand a yes/no in review.
     reads.add('done');
     if (!why) why = 'they say it is finished';
   }

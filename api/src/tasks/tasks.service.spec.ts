@@ -314,6 +314,20 @@ describe('create() note guarantee (BEA-955)', () => {
     expect(tasks[tasks.length - 1].day).toBe('2026-08-01');
   });
 
+  it('marking done settles its review items — the claim is confirmed and the messages close (BEA-1211)', async () => {
+    const { svc } = makeService(null);
+    const t = await (svc as any).create({ title: 'Upload BOMs' });
+    const claimCalls: any[] = [];
+    const updateCalls: any[] = [];
+    (svc as any).prisma.taskClaim = { updateMany: async (a: any) => { claimCalls.push(a); return { count: 1 }; } };
+    (svc as any).prisma.teamUpdate = { updateMany: async (a: any) => { updateCalls.push(a); return { count: 1 }; } };
+    await svc.setDone(t.id, true);
+    expect(claimCalls[0].where).toMatchObject({ taskId: t.id, status: 'pending' });
+    expect(claimCalls[0].data.status).toBe('confirmed'); // the tick IS the decision
+    expect(updateCalls[0].where).toMatchObject({ taskId: t.id, closedAt: null });
+    expect(updateCalls[0].data.closedAt).toBeTruthy();
+  });
+
   it('keeps the form\'s "recurring" choice — it was silently dropped, so every standing report saved as a one-off (BEA-1210)', async () => {
     const { svc, tasks } = makeService(null);
     await (svc as any).create({ title: 'Send the daily production update', kind: 'recurring' });
