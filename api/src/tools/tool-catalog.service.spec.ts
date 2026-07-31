@@ -71,22 +71,50 @@ describe('ToolCatalogService', () => {
     expect(tools.find((t) => t.id === 'telegram')!.connected).toBe(true);
   });
 
-  it('includes installed skills, and shows an uninstalled one as needing connection', async () => {
+  /**
+   * A skill counts as available only when it is in the folder THE ENGINES READ (BEA-1224).
+   *
+   * This used to accept any target. But `beakn` is a separate machine account that neither runner
+   * reads, so a skill sitting only there was offered on the canvas and then failed at run time.
+   */
+  it('offers a skill installed where the engines actually look', async () => {
     const svc = new ToolCatalogService(
       connectors([]),
       skills([
-        { id: 'sk1', title: 'Deep research', description: 'digs properly', installedOn: ['agent'] },
+        { id: 'sk1', title: 'Deep research', description: 'digs properly', installedOn: ['sandy'] },
         { id: 'sk2', title: 'Not installed', description: '', installedOn: [] },
       ]),
       google(false),
     );
     const { tools } = await svc.catalog();
-    const a = tools.find((t) => t.id === 'sk1')!;
+    expect(tools.find((t) => t.id === 'sk1')!.connected).toBe(true);
     const b = tools.find((t) => t.id === 'sk2')!;
-    expect(a.kind).toBe('skill');
-    expect(a.connected).toBe(true);
     expect(b.connected).toBe(false);
     expect(b.connectPath).toBe('/skills');
+  });
+
+  it('does NOT offer a skill installed only on a machine no engine reads', async () => {
+    const svc = new ToolCatalogService(
+      connectors([]),
+      skills([{ id: 'sk9', title: 'Only on beakn', description: '', installedOn: ['beakn'] }]),
+      google(false),
+    );
+    const t = (await svc.catalog()).tools.find((x) => x.id === 'sk9')!;
+    expect(t.connected).toBe(false);
+    expect(t.connectHint).toMatch(/Install this skill/);
+  });
+
+  it('marks every skill unavailable when the chosen engine cannot run skills at all', async () => {
+    const svc = new ToolCatalogService(
+      connectors([]),
+      skills([{ id: 'sk1', title: 'Installed everywhere', description: '', installedOn: ['sandy'] }]),
+      google(false),
+      { engineChoice: async () => ({ provider: 'gemini', model: 'g' }) } as any,
+    );
+    const t = (await svc.catalog()).tools.find((x) => x.id === 'sk1')!;
+    expect(t.connected).toBe(false);
+    expect(t.connectHint).toMatch(/gemini.*cannot run skills/);
+    expect(t.connectPath).toBe('/settings#models');   // the fix is to change engine, not to install
   });
 
   it('lists the My Brain MCP server', async () => {

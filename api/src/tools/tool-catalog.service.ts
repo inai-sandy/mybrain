@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { SkillsService } from '../skills/skills.service';
 import { GoogleService } from '../google/google.service';
+import { LlmService } from '../llm/llm.service';
 
 /**
  * The ONE tool catalog (BEA-1167).
@@ -64,15 +65,17 @@ export class ToolCatalogService {
     private readonly connectors: ConnectorService,
     private readonly skills: SkillsService,
     private readonly google?: GoogleService, // optional + LAST — spec files construct positionally
+    private readonly llm?: LlmService, // to know which engine is chosen (BEA-1224)
   ) {}
 
   /** The whole catalog, grouped, with a truthful connected flag on every entry. */
   async catalog(): Promise<{ groups: { group: ToolGroup; tools: CatalogTool[] }[]; tools: CatalogTool[] }> {
-    const [connectors, skills, googleOn, engineOn] = await Promise.all([
+    const [connectors, skills, googleOn, engineOn, engine] = await Promise.all([
       this.connectors.listStatus().catch(() => [] as { name: string; configured: boolean }[]),
       this.skills.list().catch(() => [] as any[]),
       this.googleConnected(),
       this.engineReachable(),
+      this.llm?.engineChoice?.().then((c: any) => c?.provider || 'codex').catch(() => 'codex') ?? Promise.resolve('codex'),
     ]);
     const has = (n: string) => connectors.some((c) => c.name === n && c.configured);
 
@@ -81,7 +84,7 @@ export class ToolCatalogService {
       ...this.webTools(has('tavily'), has('exa'), has('brave')),
       ...this.googleTools(googleOn),
       ...this.messagingTools(has('telegram')),
-      ...this.skillTools(skills),
+      ...this.skillTools(skills, engine),
       ...this.mcpTools(engineOn),
     ];
 
@@ -174,9 +177,21 @@ export class ToolCatalogService {
   }
 
   /** Your installed skills. "Connected" means the skill's folder really exists on a target. */
-  private skillTools(skills: any[]): CatalogTool[] {
+  /**
+   * Your skills, and whether the engine you picked can actually run each one (BEA-1224).
+   *
+   * This used to call a skill available if it was installed on ANY target. But `beakn` is a separate
+   * machine account that neither engine reads, so a skill sitting only there was offered on the
+   * canvas and then failed at run time. Only the engine's own folder counts.
+   */
+  private skillTools(skills: any[], engine: string): CatalogTool[] {
+    const engineRunsSkills = SkillsService.SKILL_ENGINES.includes(engine);
     return (skills || []).slice(0, 200).map((s: any) => {
-      const on = Array.isArray(s.installedOn) && s.installedOn.length > 0;
+      const onEngine = Array.isArray(s.installedOn) && s.installedOn.includes(SkillsService.ENGINE_TARGET);
+      const on = engineRunsSkills && onEngine;
+      const why = !engineRunsSkills
+        ? `Your engine (${engine}) cannot run skills — switch to Codex or Claude in Settings → Models`
+        : 'Install this skill so your engine can read it — Skills → Install';
       return {
         id: s.id,
         name: s.title || 'Untitled skill',
@@ -184,8 +199,8 @@ export class ToolCatalogService {
         kind: 'skill' as const,
         connected: on,
         description: clip(s.description, 140) || 'One of your saved skills',
-        connectHint: on ? undefined : 'Install this skill on the engine before using it',
-        connectPath: on ? undefined : '/skills',
+        connectHint: on ? undefined : why,
+        connectPath: on ? undefined : engineRunsSkills ? '/skills' : '/settings#models',
       };
     });
   }
