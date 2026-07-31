@@ -71,6 +71,9 @@ function skillsDir() {
 type SourceMeta = { sourceRepo?: string; sourceRef?: string; skillPath?: string; sourceUrl?: string; folderHash?: string; packId?: string; packName?: string; bundlePaths?: string[] };
 type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string; aiDescribe?: boolean; source?: SourceMeta; allowDuplicateTitle?: boolean };
 
+/** Engine ids as the owner sees them on screen ("codex" is written Codex, not codex). */
+const engineName = (id: string) => (id === 'codex' ? 'Codex' : id === 'claude' ? 'Claude' : id.charAt(0).toUpperCase() + id.slice(1));
+
 @Injectable()
 export class SkillsService {
   private scanning = false; // re-entrancy guard: a slow scan clicked twice must not run concurrently (BEA-961)
@@ -283,12 +286,20 @@ export class SkillsService {
   static readonly SKILL_ENGINES = ['codex', 'claude'];
 
   /** Who each deploy target actually serves, in engine names rather than Linux usernames. */
-  targetLabels(): Record<string, { label: string; engines: string[] }> {
-    const out: Record<string, { label: string; engines: string[] }> = {};
+  targetLabels(): Record<string, { short: string; label: string; engines: string[] }> {
+    const out: Record<string, { short: string; label: string; engines: string[] }> = {};
     for (const name of Object.keys(this.deployTargets())) {
       out[name] = name === SkillsService.ENGINE_TARGET
-        ? { label: 'Codex · Claude', engines: SkillsService.SKILL_ENGINES }
-        : { label: `${name} (a separate machine — no engine reads it)`, engines: [] };
+        ? {
+            short: SkillsService.SKILL_ENGINES.map(engineName).join(' · '),
+            label: 'Your engines read this folder — one install serves both',
+            engines: SkillsService.SKILL_ENGINES,
+          }
+        : {
+            short: `${name}'s machine`,
+            label: 'A separate machine — no engine reads it, so a flow cannot use a skill that is only here',
+            engines: [],
+          };
     }
     return out;
   }

@@ -294,6 +294,15 @@ export function Skills() {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [confirm, setConfirm] = useState<{ kind: 'skill' | 'pack'; id: string; title: string } | null>(null);
   const [cleaning, setCleaning] = useState(false);
+  /**
+   * What each install target means, straight from the server (BEA-1224).
+   *
+   * The server owns this: the engine target is an env var (`ENGINE_SKILLS_TARGET`), so a label
+   * hardcoded here would keep saying "Codex · Claude" about a folder no engine reads any more —
+   * a wrong answer delivered confidently, which is the exact failure this issue exists to remove.
+   * If the call fails the badges simply fall back to the raw target name, which is honest.
+   */
+  const [targets, setTargets] = useState<Record<string, { short: string; label: string; engines: string[] }>>({});
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -310,6 +319,12 @@ export function Skills() {
     [3000, 8000, 16000, 28000].forEach((ms) => setTimeout(load, ms));
   }
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    fetch('/api/skills/targets')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setTargets(d))
+      .catch(() => { /* badges fall back to the raw target name */ });
+  }, []);
 
   const setB = (k: string, v: boolean) => setBusy((p) => ({ ...p, [k]: v }));
 
@@ -390,8 +405,13 @@ export function Skills() {
     { key: 'origin', label: 'Kind', options: [{ value: 'created', label: 'Created' }, { value: 'downloaded', label: 'Downloaded' }], match: (e: Entry, val: string) => e.skills.some((s) => s.origin === val) },
     { key: 'platform', label: 'Platform', options: [{ value: 'code', label: 'Claude Code' }, { value: 'chat', label: 'Claude Chat' }], match: (e: Entry, val: string) => e.skills.some((s) => s.platform === val) },
     {
-      key: '_server', label: 'Server',
-      options: [{ value: 'sandy', label: 'Ready for Codex · Claude' }, { value: 'beakn', label: "Only on beakn's machine" }, { value: 'none', label: 'Not installed anywhere' }],
+      key: '_server', label: 'Runs on',
+      // Built from the server's target list for the same reason the badges are (BEA-1224) — a
+      // hardcoded 'sandy' here would offer a filter for a folder that may no longer be the engine's.
+      options: [
+        ...Object.entries(targets).map(([name, t]) => ({ value: name, label: t.short || name })),
+        { value: 'none', label: 'Not installed anywhere' },
+      ],
       match: (e: Entry, val: string) => (val === 'none' ? !e.installedOn.length : e.installedOn.includes(val)),
     },
   ];
@@ -403,21 +423,31 @@ export function Skills() {
   /**
    * Which ENGINES can run this skill (BEA-1224).
    *
-   * These badges used to read "sandy" and "beakn" — Linux usernames, which tell you nothing about
-   * whether a flow can use the skill. Both engines read the `sandy` folder, so one install already
-   * serves Codex and Claude; and `beakn` is a separate machine that no engine reads at all.
+   * These badges used to read "sandy" and "beakn" — Linux usernames, which say nothing about
+   * whether a flow can actually use the skill. The server now names each target by the engines
+   * that read it, so one install showing "Codex · Claude" is the truth rather than a guess.
    */
   const installBadges = (on: string[]) => (
     !!on.length && (
       <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
-        {on.includes('sandy') && (
-          <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
-            title="Your engines read this folder — one install serves both Codex and Claude">Codex · Claude</span>
-        )}
-        {on.includes('beakn') && (
-          <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-            title="A separate machine account — no engine reads it, so a flow cannot use a skill that is only here">beakn's machine</span>
-        )}
+        {on.map((name) => {
+          const t = targets[name];
+          const usable = !!t?.engines?.length;
+          return (
+            <span
+              key={name}
+              title={t?.label || `Installed on ${name}`}
+              className={
+                'rounded-full px-1.5 py-0.5 text-[10px] font-medium ' +
+                (usable
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                  : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')
+              }
+            >
+              {t?.short || name}
+            </span>
+          );
+        })}
       </span>
     )
   );

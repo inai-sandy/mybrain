@@ -277,3 +277,45 @@ describe('SkillsService.scan — dedup + re-entrancy (BEA-961)', () => {
     expect(r).toMatchObject({ created: 0, updated: 0, total: 0 });
   });
 });
+
+describe('SkillsService.targetLabels — which ENGINE reads each folder (BEA-1224)', () => {
+  const svc = () => new SkillsService({} as any, {} as any, {} as any, {} as any);
+  const withDirs = (dirs: string, fn: () => void) => {
+    const prev = process.env.DEPLOY_SKILLS_DIRS;
+    process.env.DEPLOY_SKILLS_DIRS = dirs;
+    try { fn(); } finally { process.env.DEPLOY_SKILLS_DIRS = prev; }
+  };
+
+  it('names the engine target by its engines, not by the Linux username', () => {
+    withDirs('sandy:/scan/sandy/skills', () => {
+      const t = svc().targetLabels();
+      expect(t.sandy.short).toBe('Codex · Claude');
+      expect(t.sandy.engines).toEqual(['codex', 'claude']);
+      // The point of the issue: the folder name must not be what the owner is shown.
+      expect(t.sandy.short).not.toContain('sandy');
+    });
+  });
+
+  it('marks any other folder as unusable, because no engine reads it', () => {
+    withDirs('sandy:/scan/sandy/skills,beakn:/scan/beakn/skills', () => {
+      const t = svc().targetLabels();
+      expect(t.beakn.engines).toEqual([]);
+      expect(t.beakn.short).toBe("beakn's machine");
+      expect(t.beakn.label).toMatch(/no engine reads it/i);
+    });
+  });
+
+  it('follows ENGINE_SKILLS_TARGET rather than assuming "sandy" forever', () => {
+    const prevTarget = (SkillsService as any).ENGINE_TARGET;
+    Object.defineProperty(SkillsService, 'ENGINE_TARGET', { value: 'runner', configurable: true });
+    try {
+      withDirs('sandy:/a,runner:/b', () => {
+        const t = svc().targetLabels();
+        expect(t.runner.engines).toEqual(['codex', 'claude']);
+        expect(t.sandy.engines).toEqual([]); // the old folder is now just a machine
+      });
+    } finally {
+      Object.defineProperty(SkillsService, 'ENGINE_TARGET', { value: prevTarget, configurable: true });
+    }
+  });
+});

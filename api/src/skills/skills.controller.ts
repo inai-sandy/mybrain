@@ -74,6 +74,17 @@ export class SkillsController {
     return this.skills.removePack(packId, true);
   }
 
+  /**
+   * Who each install target actually serves, in engine names (BEA-1224).
+   *
+   * MUST stay above `@Get(':id')` — Nest matches routes in declaration order, so a fixed path
+   * declared after the wildcard is swallowed by it and answers "Skill not found".
+   */
+  @Get('targets')
+  targets() {
+    return this.skills.targetLabels();
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const s = await this.skills.get(id);
@@ -156,9 +167,4 @@ export class SkillsController {
     return { ok: true };
   }
 
-  /** Who each install target actually serves, in engine names (BEA-1224). */
-  @Get('targets')
-  targets() {
-    return this.skills.targetLabels();
-  }
 }
