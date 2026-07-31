@@ -24,6 +24,12 @@ export class ContactsController {
     return this.contacts.state(id);
   }
 
+  /** The team board: contacts with their work signals for the list page. (BEA-1219) */
+  @Get('board')
+  board(@Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.contacts.board(q || undefined, Number(page) || 1, Number(pageSize) || 20);
+  }
+
   /** The weekly character profile. Empty until the weekly writer ships (BEA-1216) — the page
    *  already has its accordion, so the slot answers cleanly rather than 404ing. (BEA-1215) */
   @Get(':id/profile')

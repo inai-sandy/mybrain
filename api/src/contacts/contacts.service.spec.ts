@@ -188,3 +188,61 @@ describe("the team's own page only asks for what's due (BEA-1156)", () => {
     expect(b.reports[0].schedule).toBe('every working day');
   });
 });
+
+/**
+ * BEA-1219: the contacts list is a TEAM BOARD — each card carries the work signals (open count,
+ * needs-your-eyes, today's report state, chasing, last heard) folded from batched queries.
+ */
+describe('the team board (BEA-1219)', () => {
+  const ALL_DAYS = '["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]'; // always due — the test must not care what day it runs
+
+  async function setup(opts: { statusDay?: string | null; recurringFor?: number[] } = {}) {
+    const prisma = fakePrisma();
+    const svc = new ContactsService(prisma as any);
+    const a = await svc.create({ name: 'Jayanth' });
+    const b = await svc.create({ name: 'Radha' });
+    const recurringFor = opts.recurringFor ?? [0, 1];
+    const ids = [a.id, b.id];
+    prisma.task = {
+      groupBy: async () => [{ ownerContactId: a.id, _count: { _all: 2 } }, { ownerContactId: b.id, _count: { _all: 1 } }],
+      findMany: async () => recurringFor.map((i) => ({ id: `t${i}`, ownerContactId: ids[i], scheduleDays: ALL_DAYS })),
+    };
+    prisma.teamUpdate = { findMany: async () => [{ contactId: b.id }] };
+    prisma.taskClaim = { findMany: async () => [] };
+    prisma.reminder = { groupBy: async () => [{ contactId: a.id, _count: { _all: 1 } }] };
+    prisma.reminderMessage = { groupBy: async () => [{ contactId: a.id, _max: { createdAt: '2026-07-30T10:00:00Z' } }] };
+    prisma.taskStatusDay = { findMany: async () => (opts.statusDay === null ? [] : [{ taskId: 't0', status: opts.statusDay ?? 'received' }]) };
+    prisma.setting = { findUnique: async () => null };
+    return { svc, a, b };
+  }
+
+  it('folds every signal onto the right card', async () => {
+    const { svc, a, b } = await setup();
+    const out: any = await svc.board();
+    const ja = out.contacts.find((c: any) => c.id === a.id).board;
+    const ra = out.contacts.find((c: any) => c.id === b.id).board;
+    expect(ja).toMatchObject({ open: 2, needsYou: 0, chasing: 1, report: 'in' });
+    expect(ja.lastHeardAt).toBeTruthy();
+    expect(ra).toMatchObject({ open: 1, needsYou: 1, chasing: 0, report: 'waiting', lastHeardAt: null });
+  });
+
+  it('one missed report colours the whole day missed', async () => {
+    const { svc, a } = await setup({ statusDay: 'missed' });
+    const out: any = await svc.board();
+    expect(out.contacts.find((c: any) => c.id === a.id).board.report).toBe('missed');
+  });
+
+  it('no standing reports → no report signal at all', async () => {
+    const { svc, a } = await setup({ recurringFor: [], statusDay: null });
+    const out: any = await svc.board();
+    expect(out.contacts.find((c: any) => c.id === a.id).board.report).toBeNull();
+  });
+
+  it('an empty page returns cleanly with no signal queries exploding', async () => {
+    const prisma = fakePrisma();
+    const svc = new ContactsService(prisma as any);
+    const out: any = await svc.board('nobody-matches-this');
+    expect(out.contacts).toEqual([]);
+    expect(out.total).toBe(0);
+  });
+});
