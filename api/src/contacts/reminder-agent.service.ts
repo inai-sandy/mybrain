@@ -6,6 +6,8 @@ import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { RecurringService } from '../tasks/recurring.service';
+import { isOwedOn } from '../tasks/schedule';
+import { weekdayOf } from '../common/localday';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService, topicFromMessage } from './reminders.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -491,7 +493,15 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       const linkAlreadySent = messages.slice(-12).some((m) => m.direction === 'out' && m.body?.includes('/t/'));
       if (owesToday && !linkAlreadySent) {
         const today = this.recurring.today();
-        const stillWaiting = (await Promise.all(items.filter((it) => it.taskId && it.recurring).map((it) => this.recurring.isReceived(it.taskId, today)))).some((r) => !r);
+        // Only reports OWED today count — on a rest day or an off-schedule day nothing is due, and
+        // "fill today's update" would be the BEA-1147 bug all over again. (review finding)
+        const rIds = items.filter((it) => it.taskId && it.recurring).map((it) => it.taskId as string);
+        const rTasks = ((await Promise.resolve(this.prisma.task?.findMany?.({ where: { id: { in: rIds } }, select: { id: true, scheduleDays: true } })).catch(() => [])) ?? []) as { id: string; scheduleDays: string | null }[];
+        const rest = ((await Promise.resolve(this.recurring.restDays?.()).catch(() => ['Sun'])) ?? ['Sun']) as string[];
+        const weekday = weekdayOf(today);
+        const owedIds = rTasks.filter((t) => isOwedOn(t.scheduleDays, weekday, rest)).map((t) => t.id);
+        const stillWaiting = owedIds.length > 0
+          && (await Promise.all(owedIds.map((id) => this.recurring.isReceived(id, today)))).some((r) => !r);
         if (stillWaiting) {
           // Never hand out a link to a page the owner turned OFF — a dead door is worse than none.
           const c = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { shareSlug: true, shareEnabled: true } }).catch(() => null);

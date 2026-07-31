@@ -247,8 +247,12 @@ function dailySetup(voice: string, lastIn?: string) {
     setting: { findUnique: async () => ({ value: '919885698665' }) },
     task: {
       findUnique: async () => ({ title: 'Send the daily production update', kind: 'recurring', status: 'open' }),
-      // the kind lookup for the numbered items — t9 IS recurring
-      findMany: async ({ where }: any) => (where?.kind === 'recurring' ? [{ id: 't9' }] : []),
+      // the kind lookup for the numbered items — t9 IS recurring; the schedule lookup for the
+      // Updates-tab link (BEA-1217) returns the same task with its days
+      findMany: async ({ where }: any) =>
+        where?.kind === 'recurring' ? [{ id: 't9' }]
+        : where?.id?.in ? [{ id: 't9', scheduleDays: (state.scheduleDays !== undefined ? state.scheduleDays : null) }]
+        : [],
     },
     briefing: { findMany: async () => [] },
   };
@@ -335,6 +339,13 @@ describe('the reply points at the Updates tab when the report is still owed (BEA
 
   it('never adds the link when the message WAS the report — the day is settled', async () => {
     const { svc, state } = dailySetup('{"send":true,"reply":"Thanks Jayanth — noted.","statusToday":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.texts[0]).not.toContain('/t/');
+  });
+
+  it('never asks for an update on a day the report is not owed (the BEA-1147 rule)', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"No problem, whenever you can."}', 'I will send the update after 6');
+    state.scheduleDays = '["Tue"]'; // harness "today" is Monday 2026-07-27 — nothing is owed
     await svc.onContactReply('c1');
     expect(state.texts[0]).not.toContain('/t/');
   });
