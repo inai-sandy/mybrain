@@ -29,7 +29,7 @@ Map generated from code on 2026-07-21 (`web/src/App.tsx` routes + `api/src/*` + 
 | 18 | Dashboard & navigation | `/` · `home/`, `connections/` · "needs you" feed, AppShell, back nav, responsive, dark mode | built | BEA-1136✅ facts API · 1137✅ control-tower redesign (zero paragraphs; also fixed lever stored cut mid-word) · Today page BEA-1138✅ (facts strip, compact actions, two-line rows) | 2026-07-26 |
 | 19 | Memory & the brain index | `memory/` · RAG + Supermemory queue, drain, reconcile, what's indexed vs dropped | — | | |
 | 20 | Telegram | `telegram/` · bot commands, nudges, voice pref, backup reports | — | | |
-| 21 | Settings, models & costs | `/settings` · `llm/`, `prompts/`, `connectors/`, `usage/`, `codex/`, `gemini/` | filed | REVAMP (module-first, approved 2026-07-31): BEA-1227 shell · 1228 Tasks+People · 1229 Voice+EMO · 1230 Story/Docs/Chat · 1231 Google/Meetings/Telegram · 1232 Agents+rest | 2026-07-31 |
+| 21 | Settings, models & costs | `/settings` · `llm/`, `prompts/`, `connectors/`, `usage/`, `codex/`, `gemini/` | built | REVAMP (module-first, approved 2026-07-31, ALL SHIPPED same day): BEA-1227✅ shell+generated search · 1228✅ Tasks+People (+timezone) · 1229✅ Voice+EMO (+router model) · 1230✅ Story/Docs/Chat · 1231✅ Google/Meetings (+recordings retention, blocked senders) · 1232✅ Agents (+quiet hours, MCP write, 3 new model cards) | 2026-07-31 |
 | 22 | Security, sharing & MCP | `auth/`, `oauth/`, `public-mcp/` · login, device tokens, share links, MCP server | — | | |
 | 23 | The night shift | All 20 background timers — what runs while you sleep, what it costs, what fails silently | — | | |
 
