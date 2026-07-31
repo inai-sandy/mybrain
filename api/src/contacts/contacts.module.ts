@@ -11,11 +11,13 @@ import { ReminderAgentService } from './reminder-agent.service';
 import { PostboxCallbackController } from './postbox-callback.controller';
 import { LlmModule } from '../llm/llm.module';
 import { TasksModule } from '../tasks/tasks.module';
+import { MemoryModule } from '../memory/memory.module';
+import { ProfileWriterService } from './profile-writer.service';
 
 @Module({
-  imports: [LlmModule, TasksModule],
+  imports: [LlmModule, TasksModule, MemoryModule],
   controllers: [ContactsController, ShareController, RemindersController, PostboxCallbackController],
-  providers: [ContactsService, TeamUpdatesService, RemindersService, PostboxService, ReminderSenderService, ReminderAgentService],
+  providers: [ContactsService, TeamUpdatesService, RemindersService, PostboxService, ReminderSenderService, ReminderAgentService, ProfileWriterService],
   exports: [ContactsService, RemindersService, PostboxService, TeamUpdatesService],
 })
 export class ContactsModule {}

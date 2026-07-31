@@ -1067,8 +1067,22 @@ model Contact {
   briefings      Briefing[] // the situations you've told me about them (BEA-1020)
   claims         TaskClaim[] // work they say they've finished, waiting on you (BEA-1024)
   teamUpdates    TeamUpdate[] // everything they've said, both channels (BEA-1159)
+  profile        ContactProfile? // the weekly character profile (BEA-1216)
 
   @@index([name])
+}
+
+/// The weekly character profile: who this person is and how they work, written by the app from
+/// their reports and the owner's briefings. ONE living row per contact, rewritten in place every
+/// week — and one living brain doc behind it (the ids below), so RAG never grows duplicates. (BEA-1216)
+model ContactProfile {
+  contactId     String   @id
+  contact       Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  text          String
+  weekStart     String // Monday key of the week this was last written for — the "already ran" guard
+  supermemoryId String?
+  ragId         String?
+  updatedAt     DateTime @updatedAt
 }
 
 /// A WhatsApp reminder to chase a contact about a task (BEA-720).

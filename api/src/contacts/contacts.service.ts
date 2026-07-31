@@ -191,9 +191,7 @@ export class ContactsService {
     await this.prisma.contact.delete({ where: { id } }).catch(() => {
       throw new NotFoundException('Contact not found');
     });
-    // Their profile lives in a Setting keyed by id (BEA-1215/1216) — no FK to cascade it.
-    // Optional-chained: spec harnesses stub a partial Prisma.
-    await this.prisma.setting?.delete({ where: { key: `contact.profile.${id}` } }).catch(() => undefined);
+    // Their profile row cascades with the contact (FK); nothing else to clean. (BEA-1216)
     return { ok: true };
   }
 
@@ -278,21 +276,12 @@ export class ContactsService {
     return { enabled: !!enabled };
   }
 
-  /**
-   * The weekly character profile (BEA-1216). Stored in a Setting per contact until the weekly
-   * writer lands — the endpoint exists first (BEA-1215) so the page's accordion answers cleanly.
-   */
+  /** The weekly character profile — the living row the Sunday writer maintains. (BEA-1216) */
   async profile(id: string) {
     const c = await this.prisma.contact.findUnique({ where: { id }, select: { id: true } });
     if (!c) throw new NotFoundException('Contact not found');
-    const row = await this.prisma.setting.findUnique({ where: { key: `contact.profile.${id}` } }).catch(() => null);
-    if (!row?.value) return { text: null, updatedAt: null };
-    try {
-      const v = JSON.parse(row.value);
-      return { text: typeof v?.text === 'string' ? v.text : null, updatedAt: v?.updatedAt || null };
-    } catch {
-      return { text: null, updatedAt: null };
-    }
+    const row = await this.prisma.contactProfile?.findUnique({ where: { contactId: id } }).catch(() => null);
+    return { text: row?.text || null, updatedAt: row?.updatedAt || null };
   }
 
   /**

@@ -1,9 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ContactsService } from './contacts.service';
+import { ProfileWriterService } from './profile-writer.service';
+import { localDayKey } from '../common/localday';
 
 @Controller('contacts')
 export class ContactsController {
-  constructor(private readonly contacts: ContactsService) {}
+  constructor(
+    private readonly contacts: ContactsService,
+    private readonly profiles: ProfileWriterService,
+  ) {}
 
   @Get()
   list(@Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
@@ -22,6 +27,14 @@ export class ContactsController {
   @Get(':id/state')
   state(@Param('id') id: string) {
     return this.contacts.state(id);
+  }
+
+  /** Write every due character profile NOW — for a first fill and for testing. (BEA-1216) */
+  @Post('profiles/run')
+  async runProfiles() {
+    const week = this.profiles.weekStartOf(localDayKey());
+    const written = await this.profiles.writeAll(week);
+    return { ok: true, written, week };
   }
 
   /** The team board: contacts with their work signals for the list page. (BEA-1219) */

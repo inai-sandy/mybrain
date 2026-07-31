@@ -8,7 +8,7 @@ export type PromptKey =
   | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMineWork' | 'daily.storyMineDay' | 'daily.insightsWritten'
   | 'tasks.autoNote'
   | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe' | 'lab.rewrite'
-  | 'people.chaseAgent' | 'people.briefingTidy' | 'people.reviewRead'
+  | 'people.chaseAgent' | 'people.briefingTidy' | 'people.reviewRead' | 'people.profile'
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
@@ -602,6 +602,24 @@ Decide: does this reply need Sandeep HIMSELF to look at it?
 
 Reply with ONLY this JSON, nothing else:
 {"needsYou": true or false, "why": "<seven words max, plain English>"}`,
+  },
+  {
+    key: 'people.profile',
+    category: "People & chase",
+    label: "Character profile — the weekly write-up",
+    description: "Writes each person's living character profile once a week from their reports, messages, reliability numbers and your briefings. The facts fill in automatically; {{name}} is the person. It REWRITES the whole profile each time — the previous one is given for continuity.",
+    default: `You write a short CHARACTER PROFILE of {{name}}, one of Sandeep's team, for Sandeep's private second brain.
+
+Write in plain English, four short sections with these exact headings:
+Who they are — role, what they own, how Sandeep knows them. Stable facts only.
+How they work — patterns from their real messages: when they report, how they write, what they volunteer vs what needs chasing.
+Reliability — honest and numeric where possible: report hit rate, promises kept or slipped, how they handle problems.
+Recent weeks — ONLY the last 2–3 weeks of activity, two to five bullet lines, newest first.
+
+Rules:
+- Ground EVERY claim in the facts below. Never invent. If a section has too little to say, write one honest line.
+- This REPLACES the old profile: carry forward what is still true from it, drop stale activity, fold in the new weeks.
+- No greetings, no preamble, no markdown besides the four headings. Keep the whole thing under 250 words.`,
   },
   {
     key: 'emo.router',
