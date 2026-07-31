@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, X, Send, Loader2, MessageSquare, Link2, Radio, Search } from 'lucide-react';
+import { Check, X, Send, Loader2, MessageSquare, Link2, Radio, Search, ChevronDown } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Item = {
@@ -40,6 +40,13 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  // Accordion state (BEA-1214): collapsed by default — a 1–2 line glance per item, detail on tap.
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => {
+    setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+    // Collapsing while composing acts like Cancel — re-opening must not resurrect a half-typed draft.
+    if (replyTo === id && open.has(id)) { setReplyTo(null); setDraft(''); }
+  };
 
   const load = useCallback(() => {
     fetch('/api/reminders/review')
@@ -145,30 +152,53 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
       )}
 
       <ul className="space-y-2.5">
-        {shown.map((it) => (
-          <li key={it.id} className="rounded-xl border border-zinc-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400">
-              {it.contact && (
-                <Link to={`/contacts?contact=${it.contact.id}`} className="font-medium text-emerald-600 hover:underline dark:text-emerald-400">{it.contact.name}</Link>
-              )}
-              <span className="inline-flex items-center gap-1">
-                {it.channel === 'link' ? <><Link2 size={11} /> on their link</> : <><MessageSquare size={11} /> on WhatsApp</>}
-              </span>
-              <span className="tabular-nums">{it.openDays === 0 ? 'today' : `${it.openDays}d ago`}</span>
-              <span className={it.label.includes('problem') ? 'text-amber-600 dark:text-amber-500' : 'text-violet-600 dark:text-violet-400'}>{it.label}</span>
-              {/* He replies and then nothing follows up — worth knowing before he answers. (BEA-1160) */}
-              {it.chasePaused && <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><Radio size={11} /> their chase is off</span>}
+        {shown.map((it) => {
+          const isOpen = open.has(it.id);
+          return (
+          <li key={it.id} className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            {/* The whole header is the accordion toggle (BEA-1214). The contact link stays a link —
+                it stops the tap from also toggling. */}
+            <div
+              role="button" tabIndex={0} aria-expanded={isOpen}
+              onClick={() => toggle(it.id)}
+              // Only keys pressed ON the header itself toggle — Enter on the nested contact link
+              // must open the contact, not fold the card. (review finding, BEA-1214)
+              onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(it.id); } }}
+              className="cursor-pointer p-3.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400">
+                    {it.contact && (
+                      <Link to={`/contacts?contact=${it.contact.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-emerald-600 hover:underline dark:text-emerald-400">{it.contact.name}</Link>
+                    )}
+                    <span className="inline-flex items-center gap-1">
+                      {it.channel === 'link' ? <><Link2 size={11} /> on their link</> : <><MessageSquare size={11} /> on WhatsApp</>}
+                    </span>
+                    <span className="tabular-nums">{it.openDays === 0 ? 'today' : `${it.openDays}d ago`}</span>
+                    <span className={it.label.includes('problem') ? 'text-amber-600 dark:text-amber-500' : 'text-violet-600 dark:text-violet-400'}>{it.label}</span>
+                    {/* He replies and then nothing follows up — worth knowing before he answers. (BEA-1160) */}
+                    {it.chasePaused && <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><Radio size={11} /> their chase is off</span>}
+                  </div>
+
+                  {/* On a split row the TASK is the question, so it leads — their words are the evidence. */}
+                  {it.task && (
+                    <p className={it.perTask ? 'mt-1 text-sm font-medium' : 'mt-1.5 text-[11px] text-zinc-500'}>
+                      {it.perTask ? it.task.title : `on “${it.task.title}”`}
+                    </p>
+                  )}
+
+                  {/* Collapsed: the first 1–2 lines of their words, enough to know what it is. */}
+                  {!isOpen && <p className="mt-1 line-clamp-2 border-l-2 border-zinc-200 pl-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{it.text}</p>}
+                </div>
+                <ChevronDown size={16} className={'mt-0.5 shrink-0 text-zinc-400 transition-transform ' + (isOpen ? 'rotate-180' : '')} />
+              </div>
             </div>
 
-            {/* On a split row the TASK is the question, so it leads — their words are the evidence. */}
-            {it.task && (
-              <p className={it.perTask ? 'mt-1 text-sm font-medium' : 'mt-1.5 text-[11px] text-zinc-500'}>
-                {it.perTask ? it.task.title : `on “${it.task.title}”`}
-              </p>
-            )}
-
+            {isOpen && (
+            <div className="px-3.5 pb-3.5">
             {/* Their exact words. Never rewritten, never summarised. */}
-            <p className="mt-1 whitespace-pre-wrap border-l-2 border-zinc-200 pl-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{it.text}</p>
+            <p className="whitespace-pre-wrap border-l-2 border-zinc-200 pl-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{it.text}</p>
 
             {replyTo === it.id ? (
               <div className="mt-2.5 space-y-2">
@@ -214,8 +244,11 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                 </button>
               </div>
             )}
+            </div>
+            )}
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );
