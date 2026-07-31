@@ -204,12 +204,45 @@ function renderSection(id: Tab, email?: string): ReactNode {
         desc="Rewrites your rough words into a proper WhatsApp reminder (the ✨ Clean up button in a reminder). A quick live action, so it uses a dependable API model." />
       <PromptsSection category="People & chase" />
     </>;
-    case 'documents': return <div className="space-y-4"><DocumentIngestCard /><RaindropSyncCard /></div>;
-    case 'chat': return <div className="space-y-4"><ChatRetentionCard /></div>;
+    case 'documents': return <div className="space-y-4">
+      <DocumentIngestCard />
+      <RaindropSyncCard />
+      <ModuleAiHeader />
+      <EngineModelCard title="Documents summary model" icon={FileText} base="/api/documents/model" agents
+        desc="Writes the title, description and tags for documents you upload or create. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      <BookmarksModelCard />
+      <PromptsSection category="Library" />
+    </div>;
+    case 'chat': return <div className="space-y-4">
+      <ChatRetentionCard />
+      <ModuleAiHeader />
+      <ChatModelCard />
+      <PromptsSection category="Meetings & Chat" />
+    </div>;
     case 'meetings': return <div className="space-y-4"><MeetingsEngineCard /></div>;
     case 'voice': return <div className="space-y-4"><VoiceModelCard /><DeepgramModelCard /></div>;
     case 'emo': return <><EmoSettingsSection /><ModuleAiHeader /><PromptsSection category="EMO voice" /></>;
-    case 'story': return <div className="space-y-4"><NudgesCard /><LabActivitySection /></div>;
+    case 'story': return <div className="space-y-4">
+      <NudgesCard />
+      <ModuleAiHeader />
+      <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model" agents
+        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. Pick a Claude/GPT API model, or run it FREE on your Codex/Gemini subscription (slower, but it's a nightly job)." />
+      <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model" agents
+        desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. Pick a strong Claude API model, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Weekly review model" icon={Compass} base="/api/mentor/weekly-model" agents
+        desc="Writes the Sunday-night weekly review (wins, drift, the pattern, the experiment). Until you pick one it follows the Mentor model. Can run FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Book model (chapters & year)" icon={Moon} base="/api/daily/book-model" agents
+        desc="Writes the monthly chapters and the Story of the Year — the best writing in the app. Until you pick one it follows the Story of the Day model. Can run FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="4 PM nudge model" icon={Compass} base="/api/telegram/nudge-model" agents
+        desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Day summary model" icon={FileText} base="/api/daily/summary-model" agents
+        desc="Writes the short end-of-day summary (tasks done, what's pending, the gist). Until you pick one it follows the Tasks engine. Can run FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="The Lab — how it reasons about you" icon={FlaskConical} base="/api/mind/model" agents
+        desc="The mini mental model that learns your patterns from your tasks + stories each night. Sonnet (default) does the deep reasoning, or run it FREE on your Codex/Gemini subscription with Sonnet auto-fallback." />
+      <PromptsSection category="Daily & Story" />
+      <PromptsSection category="The Lab" />
+      <LabActivitySection />
+    </div>;
     case 'agents': return <><AgentEngineSection /><div className="mt-6 space-y-1"><h2 className="text-sm font-semibold text-zinc-500">All AI models</h2><p className="text-xs text-zinc-400">Every model in one list. These are moving into their own modules, one by one.</p></div><ModelsSection /></>;
     case 'memory': return <div className="space-y-4"><IndexSection /><SuperMemorySyncCard /></div>;
     case 'prompts': return <PromptsSection />;
@@ -1494,29 +1527,11 @@ function ModelsSection() {
     <div className="space-y-4">
       <EnginePicker />
       <AiModelCard />
-      <ChatModelCard />
-      <BookmarksModelCard />
       <MeetingsEngineCard />
       <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
         desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
-      <EngineModelCard title="Story of the Day model" icon={Moon} base="/api/daily/story-model" agents
-        desc="Writes your nightly Story of the Day (11:58 PM) from your story + tasks + activity. Pick a Claude/GPT API model, or run it FREE on your Codex/Gemini subscription (slower, but it's a nightly job)." />
-      <EngineModelCard title="Mentor model" icon={Compass} base="/api/mentor/model" agents
-        desc="Powers Mentor Mode — reads your stories, sets your focus areas, and writes your daily guidance. Pick a strong Claude API model, or run it FREE on your Codex/Gemini subscription." />
-      <EngineModelCard title="Weekly review model" icon={Compass} base="/api/mentor/weekly-model" agents
-        desc="Writes the Sunday-night weekly review (wins, drift, the pattern, the experiment). Until you pick one it follows the Mentor model. Can run FREE on your Codex/Gemini subscription." />
-      <EngineModelCard title="Book model (chapters & year)" icon={Moon} base="/api/daily/book-model" agents
-        desc="Writes the monthly chapters and the Story of the Year — the best writing in the app. Until you pick one it follows the Story of the Day model. Can run FREE on your Codex/Gemini subscription." />
-      <EngineModelCard title="4 PM nudge model" icon={Compass} base="/api/telegram/nudge-model" agents
-        desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
-      <EngineModelCard title="Day summary model" icon={FileText} base="/api/daily/summary-model" agents
-        desc="Writes the short end-of-day summary (tasks done, what's pending, the gist). Until you pick one it follows the Tasks engine. Can run FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="Email Daily Brief model" icon={Send} base="/api/google/gmail-brief-model" agents
         desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
-      <EngineModelCard title="The Lab — how it reasons about you" icon={FlaskConical} base="/api/mind/model" agents
-        desc="The mini mental model that learns your patterns from your tasks + stories each night. Sonnet (default) does the deep reasoning, or run it FREE on your Codex/Gemini subscription with Sonnet auto-fallback." />
-      <EngineModelCard title="Documents summary model" icon={FileText} base="/api/documents/model" agents
-        desc="Writes the title, description and tags for documents you upload or create. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       {/* Agent-helper jobs (BEA-1106) — each little AI job around agents has its own model. */}
       <EngineModelCard title="Agent chat-edit model" icon={Bot} base="/api/llm-config/helper/chat-edit"
         desc="Powers 'Change it by chatting' on every job — turns your sentence into a safe proposed change. Sonnet (default) follows the JSON rules most reliably." />
