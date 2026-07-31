@@ -238,17 +238,20 @@ export class RecurringService implements OnModuleInit {
    */
   async taskSettings() {
     const get = async (k: string) => (await this.prisma.setting.findUnique({ where: { key: k } }).catch(() => null))?.value ?? null;
-    const [restRaw, hourRaw, timesRaw, graceRaw] = await Promise.all([
+    const [restRaw, hourRaw, timesRaw, graceRaw, tzRaw] = await Promise.all([
       get(TASK_SETTING_KEYS.restDays),
       get(TASK_SETTING_KEYS.digestHour),
       get(TASK_SETTING_KEYS.chaseTimes),
       get(TASK_SETTING_KEYS.claimGraceDays),
+      get(TASK_SETTING_KEYS.tz),
     ]);
     const rest = await this.restDays();
     const hour = await this.digestHour();
     const times = parseChaseTimes(timesRaw);
     const grace = parseClaimGraceDays(graceRaw);
+    const tz = tzRaw || 'Asia/Kolkata';
     return {
+      tz: { value: tz, says: `Days, chase times and the digest all run on ${tz} time.` },
       chaseTimes: { value: times, says: `A new chase nudges at ${times.join(' and ')}.` },
       claimGraceDays: {
         value: grace,
@@ -266,7 +269,7 @@ export class RecurringService implements OnModuleInit {
   }
 
   /** Save one or more of those rules. Anything absent is left alone. */
-  async setTaskSettings(input: { chaseTimes?: unknown; claimGraceDays?: unknown; restDays?: unknown; digestHour?: unknown }) {
+  async setTaskSettings(input: { chaseTimes?: unknown; claimGraceDays?: unknown; restDays?: unknown; digestHour?: unknown; tz?: unknown }) {
     const put = async (key: string, value: string) => {
       await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } }).catch((e) => this.log.warn(`setTaskSettings ${key}: ${e?.message}`));
     };
@@ -278,6 +281,16 @@ export class RecurringService implements OnModuleInit {
     if (input.claimGraceDays !== undefined) {
       const n = Number(input.claimGraceDays);
       await put(TASK_SETTING_KEYS.claimGraceDays, String(Number.isFinite(n) && n >= 0 && n <= 365 ? Math.floor(n) : 0));
+    }
+    if (input.tz !== undefined) {
+      // Only a real IANA zone may be stored — a typo here would silently shift every day-key.
+      const z = String(input.tz || '').trim();
+      try {
+        new Intl.DateTimeFormat('en', { timeZone: z });
+        await put(TASK_SETTING_KEYS.tz, z);
+      } catch {
+        this.log.warn(`setTaskSettings tz: "${z}" is not a real timezone — ignored`);
+      }
     }
     if (input.restDays !== undefined) await this.setRestDays(input.restDays);
     if (input.digestHour !== undefined) {

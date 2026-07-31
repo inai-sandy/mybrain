@@ -166,6 +166,16 @@ function useSettingsStatus() {
   return s;
 }
 
+/** The divider every module page uses before its AI models + prompts. (BEA-1228) */
+function ModuleAiHeader() {
+  return (
+    <div className="mt-6 space-y-0.5">
+      <h2 className="text-sm font-semibold text-zinc-500">AI in this module</h2>
+      <p className="text-xs text-zinc-400">Which models do this module's thinking, and the exact prompts they follow.</p>
+    </div>
+  );
+}
+
 /**
  * One module page = everything about that module, composed from the cards that used to be
  * scattered. The per-module deep re-work lands issue by issue (BEA-1228→1232); this shell
@@ -173,8 +183,27 @@ function useSettingsStatus() {
  */
 function renderSection(id: Tab, email?: string): ReactNode {
   switch (id) {
-    case 'tasks': return <TasksSettings />;
-    case 'people': return <WhatsAppSection />;
+    case 'tasks': return <>
+      <TasksSettings />
+      <ModuleAiHeader />
+      <TasksModelCard />
+      <PromptsSection category="Tasks" />
+    </>;
+    case 'people': return <>
+      <WhatsAppSection />
+      <ModuleAiHeader />
+      <EngineModelCard title="Review filter model" icon={MessageSquare} base="/api/llm-config/helper/review-read"
+        desc="Reads each team WhatsApp reply and decides if it truly needs your eyes in Review — a bare 'okay' stays out, a real problem lands. Runs on every reply, so Haiku (the default) is ideal. A 'they say it's done' claim ALWAYS reaches you regardless." />
+      <EngineModelCard title="Character profile model" icon={User} base="/api/llm-config/helper/character-profile"
+        desc="Writes each person's living character profile every Sunday evening (and on the profile's Update-now button). A weekly reasoning job over a month of real messages — Sonnet (the default) fits it." />
+      <EngineModelCard title="Report summary model" icon={FileText} base="/api/llm-config/helper/report-summary"
+        desc="Condenses each daily report into the 1–2 line summary on the contact page, the moment it arrives. Runs per report — Haiku (the default) is ideal." />
+      <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model" agents
+        desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
+      <EngineModelCard title="Reminder Clean up model" icon={Sparkles} base="/api/reminders/format-model"
+        desc="Rewrites your rough words into a proper WhatsApp reminder (the ✨ Clean up button in a reminder). A quick live action, so it uses a dependable API model." />
+      <PromptsSection category="People & chase" />
+    </>;
     case 'documents': return <div className="space-y-4"><DocumentIngestCard /><RaindropSyncCard /></div>;
     case 'chat': return <div className="space-y-4"><ChatRetentionCard /></div>;
     case 'meetings': return <div className="space-y-4"><MeetingsEngineCard /></div>;
@@ -1468,10 +1497,7 @@ function ModelsSection() {
       <ChatModelCard />
       <EngineModelCard title="Explore answer model" icon={Sparkles} base="/api/explore/model"
         desc="Writes your Explore answers from your indexed brain. Sonnet (default) is the most capable; switch to Haiku to cut the cost per question by ~3–4× (each ask is mostly the model reading your retrieved notes)." />
-      <EngineModelCard title="Reminder Clean up model" icon={Sparkles} base="/api/reminders/format-model"
-        desc="Rewrites your rough words into a proper WhatsApp reminder (the ✨ Clean up button in a reminder). This is a quick, live action, so it uses a dependable API model — Sonnet (default) is reliable; Haiku is cheaper and still good. (Free Codex/Gemini engines aren't offered here because they're too slow/flaky for a live tap.)" />
       <BookmarksModelCard />
-      <TasksModelCard />
       <MeetingsEngineCard />
       <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
         desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
@@ -1485,8 +1511,6 @@ function ModelsSection() {
         desc="Writes the monthly chapters and the Story of the Year — the best writing in the app. Until you pick one it follows the Story of the Day model. Can run FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="4 PM nudge model" icon={Compass} base="/api/telegram/nudge-model" agents
         desc="Phrases the short afternoon Telegram nudge when a pinned must-do hasn't moved. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
-      <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model" agents
-        desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="Day summary model" icon={FileText} base="/api/daily/summary-model" agents
         desc="Writes the short end-of-day summary (tasks done, what's pending, the gist). Until you pick one it follows the Tasks engine. Can run FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="Email Daily Brief model" icon={Send} base="/api/google/gmail-brief-model" agents
@@ -1508,8 +1532,6 @@ function ModelsSection() {
         desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
       <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
         desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
-      <EngineModelCard title="Review filter model" icon={MessageSquare} base="/api/llm-config/helper/review-read"
-        desc="Reads each team WhatsApp reply and decides if it truly needs your eyes in Review — a bare 'okay' stays out, a real problem lands. Runs on every reply, so Haiku (the default) is ideal. A 'they say it's done' claim ALWAYS reaches you regardless." />
       <VoiceModelCard />
     </div>
   );
@@ -1942,7 +1964,9 @@ type PromptItem = { key: string; label: string; description: string; default: st
 // Category display order — anything unknown falls to the end under "Other". (BEA-1059)
 const PROMPT_CAT_ORDER = ['Daily & Story', 'Tasks', 'People & chase', 'Agents', 'EMO voice', 'The Lab', 'Meetings & Chat', 'Library', 'Google', 'Other'];
 
-function PromptsSection() {
+/** With `category` set, renders ONLY that module's prompts — the same editor, embedded in the
+ *  module's own settings page. One source, two doors (approved 2026-07-31). (BEA-1228) */
+function PromptsSection({ category }: { category?: string } = {}) {
   const [items, setItems] = useState<PromptItem[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
@@ -1979,10 +2003,11 @@ function PromptsSection() {
     }
   }
 
+  const scoped = category ? items.filter((p) => p.category === category) : items;
   const query = q.trim().toLowerCase();
   const filtered = query
-    ? items.filter((p) => `${p.label} ${p.description} ${p.key} ${p.value}`.toLowerCase().includes(query))
-    : items;
+    ? scoped.filter((p) => `${p.label} ${p.description} ${p.key} ${p.value}`.toLowerCase().includes(query))
+    : scoped;
 
   // Group by category, ordered; unknown categories fall under "Other". (BEA-1059)
   const groups = new Map<string, PromptItem[]>();

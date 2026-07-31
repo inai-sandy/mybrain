@@ -4,12 +4,16 @@ import { useToast } from '../../ui/Toast';
 
 type Field<T> = { value: T; says: string };
 type Settings = {
+  tz?: Field<string>;
   chaseTimes: Field<string[]>;
   claimGraceDays: Field<number>;
   restDays: Field<string[]>;
   digestHour: Field<number>;
   weekdays: string[];
 };
+
+/** The zones that make sense for this owner — plus a free type-in for anywhere else. */
+const COMMON_TZ = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Europe/London', 'America/New_York', 'America/Los_Angeles', 'UTC'];
 
 /**
  * The rules that decide how the owner's team gets chased. (BEA-1161)
@@ -128,6 +132,32 @@ export function TasksSettings() {
           A report with its own days ignores this — if you set someone a Sunday report, you meant it.
         </p>
       </Card>
+
+      {/* The app's clock — used to have NO control anywhere. (BEA-1228) */}
+      {s.tz && (
+        <Card title="The app's timezone" says={s.tz.says}>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={COMMON_TZ.includes(s.tz.value) ? s.tz.value : 'other'}
+              disabled={busy}
+              onChange={(e) => { if (e.target.value !== 'other') save({ tz: e.target.value }); }}
+              className="rounded-lg border border-zinc-300 bg-zinc-100 px-2 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            >
+              {COMMON_TZ.map((z) => <option key={z} value={z}>{z}</option>)}
+              <option value="other">{COMMON_TZ.includes(s.tz.value) ? 'Other…' : s.tz.value}</option>
+            </select>
+            <input
+              placeholder="e.g. Asia/Kolkata"
+              disabled={busy}
+              onKeyDown={(e) => { if (e.key === 'Enter') save({ tz: (e.target as HTMLInputElement).value.trim() }); }}
+              className="w-44 rounded-lg border border-zinc-300 bg-zinc-100 px-2 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+            />
+          </div>
+          <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-500">
+            Changing this shifts what “today” means for every report, chase and nightly job. A wrong zone is only ignored — but a different valid one moves your whole day.
+          </p>
+        </Card>
+      )}
 
       <Card title="When the day closes" says={s.digestHour.says}>
         <select
