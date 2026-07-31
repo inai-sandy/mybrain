@@ -459,6 +459,14 @@ describe('deep research (BEA-1196)', () => {
       expect(calls.brave).toBe(0);
     });
 
+    it('never pays to re-read a page Brave already returned', async () => {
+      // Brave hands back the page content with the search. A live run still spent two Tavily
+      // extracts on Brave sources before this — money for text we already had.
+      const { svc, calls } = withBrave({ plan: 'how many students graduated' });
+      await svc.run('a plain question');
+      expect(calls.extracts).toBe(0);
+    });
+
     it('prices Brave separately — it is not billed at Tavily rates', async () => {
       const { svc } = withBrave({ plan: 'how many students graduated' });
       const { report, spend } = await svc.run('a plain question');

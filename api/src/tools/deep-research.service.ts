@@ -162,6 +162,7 @@ export class DeepResearchService {
     // 2. Gather. One search per sub-question, deduplicated by URL across all of them.
     const seen = new Set<string>();
     let useBraveFirst = false;
+    const alreadyRead = new Set<string>(); // Brave hands back the page content with the search
     const found: WebResult[] = [];
     const failures: string[] = [];
     for (const ask of asks) {
@@ -186,6 +187,8 @@ export class DeepResearchService {
           : useBrave
             ? await this.web.braveContext(ask, { country })
             : await this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; } });
+        // Brave already returned the page's content. Paying Tavily to open it again buys nothing.
+        if (useBrave) for (const r of rows) alreadyRead.add(r.url);
         let fresh = 0;
         for (const r of rows) {
           const key = this.urlKey(r.url);
@@ -234,8 +237,7 @@ export class DeepResearchService {
 
     // 3. Read the best pages properly. A long snippet already says enough.
     // Brave already returned the page content, so re-reading those costs a credit for nothing.
-    const braveHosts = new Set<string>();
-    const toRead = found.filter((r) => (r.snippet || '').length < SNIPPET_IS_ENOUGH && !braveHosts.has(r.url)).slice(0, budget.extracts);
+    const toRead = found.filter((r) => (r.snippet || '').length < SNIPPET_IS_ENOUGH && !alreadyRead.has(r.url)).slice(0, budget.extracts);
     const pages = new Map<string, string>();
     for (const r of toRead) {
       if (spend.extracts >= budget.extracts) break;
