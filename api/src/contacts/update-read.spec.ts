@@ -106,6 +106,33 @@ describe('a quantity is not a claim', () => {
 });
 
 /**
+ * BEA-1211: the review queue was rebuilt on this reader WITHOUT the BEA-1122 progress guard, so
+ * "started, working on it" — a done-word inside a progress report — demanded a yes/no in review
+ * all over again. The guard now lives here and runs on every read.
+ */
+describe('progress is never a done-claim (BEA-1211)', () => {
+  it('a done-word inside a progress message does not land in review as done', () => {
+    // Short messages on purpose: long ones are already saved by the quantity rule, so each of
+    // these reaches review as a done-claim unless the progress guard stops it.
+    for (const s of ['uploaded 45 so far', 'completed 45 of 120', 'dispatched 5, ongoing']) {
+      const r = readUpdate(s, { isReport: true });
+      expect(r.reads).not.toContain('done');
+      expect(r.needsYou).toBe(false);
+    }
+  });
+
+  it('"45 of 120 uploaded" is progress, not completion — the original BEA-1122 message', () => {
+    const r = readUpdate('Total we have 120 BOMs to upload, upto know we uploaded 45 BOMs');
+    expect(r.reads).not.toContain('done');
+    expect(r.needsYou).toBe(false);
+  });
+
+  it('a clear completion still gets through the guard', () => {
+    expect(readUpdate('All done, everything is uploaded').reads).toContain('done');
+  });
+});
+
+/**
  * Found by running the backfill over the owner's real messages, not by guessing. Jayanth's nightly
  * OT report lists "Trinetra Problem Devices For Rework" — a device category, not trouble. Flagging
  * it would have put a routine report in his review every night, and an inbox with noise in it

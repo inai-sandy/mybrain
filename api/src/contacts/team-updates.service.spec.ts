@@ -311,6 +311,58 @@ describe('a pending claim can never be orphaned (BEA-1159)', () => {
 });
 
 /**
+ * BEA-1211, found live for the second time: the inbox filter never looked at the task at all, so
+ * messages and claims about work the owner had already marked done sat in review forever — and the
+ * orphan sweep kept resurrecting them after every close. Finished work asks for nothing.
+ */
+describe('finished work leaves the review tab (BEA-1211)', () => {
+  /** Doubles that honour the new done-task filters the way real prisma would. */
+  function svcWithTasks(taskStatus: Record<string, string>, claims: any[] = []) {
+    const { svc } = make();
+    const p = (svc as any).prisma;
+    const base = p.teamUpdate.findMany;
+    p.teamUpdate.findMany = async (args: any = {}) => {
+      const out = await base(args);
+      if (!args?.where?.OR) return out;
+      return out
+        .filter((r: any) => r.taskId == null || taskStatus[r.taskId] !== 'done')
+        .map((r: any) => ({ ...r, task: r.taskId ? { id: r.taskId, title: 'T', status: taskStatus[r.taskId] } : null }));
+    };
+    p.taskClaim = {
+      findFirst: async () => null,
+      findMany: async (args: any = {}) =>
+        args?.where?.task?.status?.not === 'done' ? claims.filter((c) => taskStatus[c.taskId] !== 'done') : claims,
+    };
+    p.task = { findMany: async () => [], count: async () => 0, findUnique: async () => null };
+    return { svc };
+  }
+
+  it('a needs-you message about a task the owner already marked done stays out', async () => {
+    const { svc } = svcWithTasks({ t1: 'done' });
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp', taskId: 't1' });
+    expect((await svc.inbox()).count).toBe(0);
+  });
+
+  it('the same message about live work still shows', async () => {
+    const { svc } = svcWithTasks({ t1: 'open' });
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp', taskId: 't1' });
+    expect((await svc.inbox()).count).toBe(1);
+  });
+
+  it('the orphan sweep no longer resurrects a claim on finished work', async () => {
+    const claim = { id: 'cl1', taskId: 't1', quote: 'It is completed', createdAt: new Date(), contact: { id: 'c1', name: 'Deepthi', whatsappNumber: '9190' }, task: { id: 't1', title: 'T', status: 'done' } };
+    const { svc } = svcWithTasks({ t1: 'done' }, [claim]);
+    expect((await svc.inbox()).count).toBe(0);
+  });
+
+  it('a claim on live work is still swept in — that protection stays (BEA-1159)', async () => {
+    const claim = { id: 'cl1', taskId: 't1', quote: 'It is completed', createdAt: new Date(), contact: { id: 'c1', name: 'Deepthi', whatsappNumber: '9190' }, task: { id: 't1', title: 'T', status: 'open' } };
+    const { svc } = svcWithTasks({ t1: 'open' }, [claim]);
+    expect((await svc.inbox()).count).toBe(1);
+  });
+});
+
+/**
  * BEA-1159. The owner: *"Split by task. They might be only doing one task. You have to split a task."*
  *
  * Deepthi has two open jobs — the geyser components and the PCB order — and one message covering

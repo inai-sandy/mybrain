@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { promisesLater } from './promise-later';
-import { readUpdate } from './update-read';
+import { readUpdate, looksLikePartialProgress } from './update-read';
 import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
@@ -76,47 +76,11 @@ export function ackLine(name: string, lastIn: string): string {
   return `Great, thanks ${who}!`;
 }
 
-/** Words that plainly mean the whole thing is finished — these beat any progress signal. */
-const CLEARLY_COMPLETE =
-  /\b(all done|fully (done|completed|uploaded|sent)|100\s*%|completed all|finished all|everything (is )?(done|completed|uploaded|sent)|it is (completed|complete|done)|its? (completed|complete|done))\b/i;
-
-/** "so far" / "up to now" / "remaining" / "working on it" — a report of progress, not of completion. */
-const PROGRESS_WORDS =
-  /\b(so far|till now|till date|up\s?to\s?(now|know|date)|as of now|in progress|work(ing)? on it|almost|partially|partial|remaining|balance|pending|yet to|not yet|will (finish|complete|do)|started|ongoing)\b/i;
-
-/** "45 of 120", "45 out of 120", "45/120" — short of the total. */
-function shortOfTotal(text: string): boolean {
-  const re = /(\d[\d,]*)\s*(?:\/|of|out of)\s*(\d[\d,]*)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const a = Number(m[1].replace(/,/g, ''));
-    const b = Number(m[2].replace(/,/g, ''));
-    if (Number.isFinite(a) && Number.isFinite(b) && b > 0 && a < b) return true;
-  }
-  return false;
-}
-
-/**
- * Does this message read as PROGRESS rather than completion? (BEA-1122)
- *
- * The prompt already tells the model that a partial update is not finished, and it still read
- * "Total we have 120 BOMs to upload, upto know we uploaded 45 BOMs" as done — which filed a claim,
- * silenced the chase, and left the person un-chased for two days. Wording alone was not enough, so
- * this is a deterministic second opinion: when a message plainly reports progress, a "done" from
- * the model is refused. Erring this way only costs an extra nudge; erring the other way loses the
- * chase entirely.
- */
-export function looksLikePartialProgress(text: string): boolean {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  if (CLEARLY_COMPLETE.test(t)) return false; // they said it outright — believe them
-  if (shortOfTotal(t)) return true;
-  if (PROGRESS_WORDS.test(t)) return true;
-  // Present continuous with no completion word: "we are using it and updating the data" is an
-  // ongoing state, not a finished job.
-  if (/\b(is|are|am)\s+\w+ing\b/i.test(t)) return true;
-  return false;
-}
+// The BEA-1122 progress guard now lives in update-read.ts, next to the reader that needed it most:
+// the review queue was rebuilt on readUpdate (BEA-1159) WITHOUT this guard, and the exact bug the
+// guard exists for — "started, working on it" read as a done-claim — came back on the new surface.
+// One home means one opinion, everywhere. (BEA-1211)
+export { looksLikePartialProgress };
 
 /**
  * How much the agent reads before it answers (BEA-1115). It used to read EVERY message ever
