@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link2, MessageSquare, Check, Hand, ChevronDown, Loader2 } from 'lucide-react';
 import { useToast } from './Toast';
+import { Accordion } from './Accordion';
 
 type Update = {
   id: string;
@@ -55,20 +56,23 @@ export function PersonTimeline({ contactId, reload }: { contactId: string; reloa
   const openCount = items.filter((u) => u.needsYou && !u.closedAt).length;
   // Newest last reads like a conversation; the tail is what matters, so show it by default.
   const shown = open ? items : items.slice(-6);
+  const last = items[items.length - 1];
 
+  // An accordion like every other section on the page (BEA-1215): collapsed it shows the LAST
+  // thing they said — usually the exact answer being looked for — instead of eating the screen.
   return (
-    <section className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold text-zinc-500">
-          Everything they've said <span className="font-normal text-zinc-400">· {items.length}</span>
-        </h3>
-        {openCount > 0 && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-600 dark:text-violet-400">
-            <Hand size={11} /> {openCount} still needs you
-          </span>
-        )}
-      </div>
-
+    <Accordion
+      dense
+      icon={MessageSquare}
+      tile="bg-emerald-500/10 text-emerald-500"
+      title={<>Everything they've said <span className="font-normal text-zinc-400">· {items.length}</span></>}
+      badge={openCount > 0 ? (
+        <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-violet-600 dark:text-violet-400">
+          <Hand size={11} /> {openCount} needs you
+        </span>
+      ) : null}
+      summary={<span className="line-clamp-2 text-xs font-normal text-zinc-400">“{last.text}” · {new Date(last.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>}
+    >
       <ul className="space-y-1.5">
         {shown.map((u) => (
           <li key={u.id} className={'rounded-lg border px-3 py-2 ' + (u.needsYou && !u.closedAt ? 'border-violet-400/50 bg-violet-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
@@ -101,6 +105,6 @@ export function PersonTimeline({ contactId, reload }: { contactId: string; reloa
           {open ? 'Show less' : `Show all ${items.length}`}
         </button>
       )}
-    </section>
+    </Accordion>
   );
 }

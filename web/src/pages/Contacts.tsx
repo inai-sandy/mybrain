@@ -5,6 +5,7 @@ import { useToast } from '../ui/Toast';
 import { BriefModal, BriefingsTab } from './Briefings';
 import { ContactShareLink } from '../ui/ContactShareLink';
 import { ContactState, ContactTasks } from '../ui/ContactWork';
+import { Accordion } from '../ui/Accordion';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
 type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
@@ -58,7 +59,6 @@ function ContactDetail({ contactId }: { contactId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [editContact, setEditContact] = useState(false);
-  const [tab, setTab] = useState<'reminders' | 'briefings' | 'tasks' | 'mentions'>('reminders');
   // The conversation, opened from THIS page. Having to leave for Chats and find the person again
   // was half of the four-screen hunt. (BEA-1149)
   const [chatOpen, setChatOpen] = useState(false);
@@ -113,18 +113,26 @@ function ContactDetail({ contactId }: { contactId: string }) {
     <div className="space-y-4">
       <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"><ArrowLeft className="h-4 w-4" />Contacts</button>
 
-      <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-lg font-semibold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{(contact?.name || '·').slice(0, 1).toUpperCase()}</span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-lg font-semibold">{contact?.name || 'Contact'}</div>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
-            {contact?.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{contact.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
-            {contact?.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
+      {/* Hero — who they are and the three things you actually do from here. (BEA-1215) */}
+      <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="flex items-center gap-3.5">
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-xl font-bold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{(contact?.name || '·').slice(0, 1).toUpperCase()}</span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xl font-extrabold">{contact?.name || 'Contact'}</div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
+              {contact?.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{contact.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
+              {contact?.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
+            </div>
+            {contact?.aliases && contact.aliases.length > 0 && <p className="mt-0.5 text-xs text-zinc-400">also known as {contact.aliases.join(', ')}</p>}
+            {contact?.notes && <p className="mt-0.5 truncate text-xs text-zinc-400">{contact.notes}</p>}
           </div>
-          {contact?.aliases && contact.aliases.length > 0 && <p className="mt-0.5 text-xs text-zinc-400">also known as {contact.aliases.join(', ')}</p>}
-          {contact?.notes && <p className="mt-0.5 truncate text-xs text-zinc-400">{contact.notes}</p>}
+          {contact && <button onClick={() => setEditContact(true)} title="Edit contact" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
         </div>
-        {contact && <button onClick={() => setEditContact(true)} title="Edit contact" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
+        <div className="mt-3.5 flex flex-wrap gap-2">
+          <button onClick={() => setChatOpen(true)} disabled={!contact} className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"><MessageSquare className="h-4 w-4" /> Message</button>
+          <button onClick={() => setBriefing(true)} disabled={!contact} className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"><MessageSquareQuote className="h-4 w-4" /> Brief me</button>
+          <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="inline-flex items-center gap-1.5 rounded-full border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"><Plus className="h-4 w-4" /> Reminder</button>
+        </div>
       </div>
 
       {/* Fuzzy "same person?" suggestions — one-tap to link an alias (BEA-763) */}
@@ -142,50 +150,27 @@ function ContactDetail({ contactId }: { contactId: string }) {
       {/* How they stand right now — one glance. (BEA-1037) */}
       {contact && <ContactState contactId={contact.id} reload={briefReload} />}
 
-      {/* Their own page — copy it, send it, rotate it, turn it off. (BEA-1027) */}
-      {contact && <ContactShareLink contactId={contact.id} contactName={contact.name} chaseId={(reminders || []).find((r) => r.status === 'active' || r.status === 'paused')?.id || null} />}
-
-      {/* Tabs: everything about this person in one place (BEA-762) */}
-      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
-        <button
-          onClick={() => setChatOpen(true)}
-          disabled={!contact}
-          className="-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"
-        >
-          <MessageSquare className="h-3.5 w-3.5" /> Chat
-        </button>
-        {([['reminders', 'Reminders', reminders?.length], ['briefings', 'Briefings', undefined], ['tasks', 'Tasks', tasks?.length], ['mentions', 'Mentions', mentions?.mentions]] as const).map(([id, label, n]) => (
-          <button key={id} onClick={() => setTab(id)} className={'-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}>{label}{n ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{n}</span> : null}</button>
-        ))}
-      </div>
-
-      {tab === 'briefings' && contact && (
-        <BriefingsTab contactId={contact.id} contactName={contact.name} reload={briefReload} />
+      {/* The accordion stack — everything about this person, folded to one line each. (BEA-1215) */}
+      {contact && (
+        <Accordion dense icon={CheckCircle2} tile="bg-emerald-500/10 text-emerald-500"
+          title="Their work"
+          badge={tasks?.length ? <span className="text-xs font-normal text-zinc-400">· {tasks.length}</span> : null}
+          summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">{tasks?.length ? tasks.filter((t) => t.status !== 'done').slice(0, 3).map((t) => t.title).join(' · ') || 'All finished.' : `Nothing is with ${contact.name} yet.`}</span>}>
+          <ContactTasks contactId={contact.id} contactName={contact.name} reload={briefReload} legacy={tasks} />
+        </Accordion>
       )}
 
-      {tab === 'tasks' && contact && <ContactTasks contactId={contact.id} contactName={contact.name} reload={briefReload} legacy={tasks} />}
-
-      {tab === 'mentions' && (
-        mentions === null ? <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">{contact?.name || 'This contact'} hasn't come up in your stories yet.</div>
-        : <div className="space-y-4">
-            <p className="text-xs text-zinc-500">{mentions.mentions} day{mentions.mentions === 1 ? '' : 's'} · first {fmtDay(mentions.firstSeen)} · last {fmtDay(mentions.lastSeen)}</p>
-            {mentions.days.filter((d) => d.items.length).map((d) => (
-              <div key={d.day}>
-                <div className="mb-1.5 flex items-center gap-2"><span className="text-xs font-semibold text-zinc-500">{fmtDay(d.day)}</span><span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" /></div>
-                <ul className="space-y-1.5">
-                  {d.items.map((it, i) => { const ic = MENTION_ICON[it.type] || MENTION_ICON.note; const Icon = ic.icon; return (
-                    <li key={i} className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-300"><Icon className={'mt-0.5 h-3.5 w-3.5 shrink-0 ' + ic.cls} /><span>{it.text}</span></li>
-                  ); })}
-                </ul>
-              </div>
-            ))}
-          </div>
-      )}
-
-      {tab === 'reminders' && (reminders === null ? (
+      {contact && (
+        <Accordion dense icon={Clock} tile="bg-amber-500/10 text-amber-500"
+          title="Reminders"
+          badge={reminders?.length ? <span className="text-xs font-normal text-zinc-400">· {groups[0].items.length} active</span> : null}
+          summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">
+            {reminders === null ? 'Loading…' : reminders.length === 0 ? 'No reminders yet — add one from the button above.' : groups[0].items.slice(0, 2).map((r) => r.subject?.trim() || r.task?.title || 'Reminder').join(' · ') || 'None active.'}
+          </span>}>
+      {reminders === null ? (
         <div className="space-y-2">{[0, 1].map((i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
       ) : reminders.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No reminders for {contact?.name || 'this contact'} yet. Add the first one below.</div>
+        <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No reminders for {contact?.name || 'this contact'} yet. Add the first one from the button above.</div>
       ) : (
         <div className="space-y-4">
           {groups.map((g) => g.items.length === 0 ? null : (
@@ -223,11 +208,51 @@ function ContactDetail({ contactId }: { contactId: string }) {
             </section>
           ))}
         </div>
-      ))}
+      )}
+        </Accordion>
+      )}
 
-      {tab === 'briefings' && contact && <button onClick={() => setBriefing(true)} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"><MessageSquareQuote className="h-4 w-4" />Brief me</button>}
+      {/* Briefings — what you've told the app about them, in your own words. */}
+      {contact && (
+        <Accordion dense icon={MessageSquareQuote} tile="bg-violet-500/10 text-violet-500"
+          title="Briefings"
+          summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">What you've told the app about {contact.name} — tap Brief me above to add more.</span>}>
+          <BriefingsTab contactId={contact.id} contactName={contact.name} reload={briefReload} />
+        </Accordion>
+      )}
+
+      {/* Mentions — where they came up in your days and stories. */}
+      {contact && (
+        <Accordion dense icon={Moon} tile="bg-indigo-500/10 text-indigo-400"
+          title="Mentions"
+          badge={mentions?.mentions ? <span className="text-xs font-normal text-zinc-400">· {mentions.mentions} day{mentions.mentions === 1 ? '' : 's'}</span> : null}
+          summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">
+            {mentions === null ? `${contact.name} hasn't come up in your stories yet.` : `First ${fmtDay(mentions.firstSeen)} · last ${fmtDay(mentions.lastSeen)}.`}
+          </span>}>
+          {mentions === null ? (
+            <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">{contact.name} hasn't come up in your stories yet.</div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-xs text-zinc-500">{mentions.mentions} day{mentions.mentions === 1 ? '' : 's'} · first {fmtDay(mentions.firstSeen)} · last {fmtDay(mentions.lastSeen)}</p>
+              {mentions.days.filter((d) => d.items.length).map((d) => (
+                <div key={d.day}>
+                  <div className="mb-1.5 flex items-center gap-2"><span className="text-xs font-semibold text-zinc-500">{fmtDay(d.day)}</span><span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" /></div>
+                  <ul className="space-y-1.5">
+                    {d.items.map((it, i) => { const ic = MENTION_ICON[it.type] || MENTION_ICON.note; const Icon = ic.icon; return (
+                      <li key={i} className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-300"><Icon className={'mt-0.5 h-3.5 w-3.5 shrink-0 ' + ic.cls} /><span>{it.text}</span></li>
+                    ); })}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </Accordion>
+      )}
+
+      {/* Their own page — copy it, send it, rotate it, turn it off. (BEA-1027) */}
+      {contact && <ContactShareLink contactId={contact.id} contactName={contact.name} chaseId={(reminders || []).find((r) => r.status === 'active' || r.status === 'paused')?.id || null} />}
+
       {briefing && contact && <BriefModal contactId={contact.id} contactName={contact.name} onClose={() => setBriefing(false)} onSaved={() => { setBriefReload((n) => n + 1); loadPerson(); }} />}
-      {tab === 'reminders' && <button onClick={() => { setEditingReminder(null); setShowForm(true); }} disabled={!contact} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500 disabled:opacity-50"><Plus className="h-4 w-4" />Add reminder</button>}
 
       {openThread && (() => { const r = reminders?.find((x) => x.id === openThread); return r ? <ReminderChat reminder={r} onClose={() => setOpenThread(null)} /> : null; })()}
       {/* Their whole WhatsApp thread, opened from their own page. (BEA-1149) */}

@@ -24,6 +24,13 @@ export class ContactsController {
     return this.contacts.state(id);
   }
 
+  /** The weekly character profile. Empty until the weekly writer ships (BEA-1216) — the page
+   *  already has its accordion, so the slot answers cleanly rather than 404ing. (BEA-1215) */
+  @Get(':id/profile')
+  profile(@Param('id') id: string) {
+    return this.contacts.profile(id);
+  }
+
   /** The contact's own link — created on first ask. (BEA-1027) */
   @Get(':id/share')
   share(@Param('id') id: string) {
