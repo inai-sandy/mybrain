@@ -114,9 +114,18 @@ export class LlmService {
     'ui-spec': null,
     'flow-plan': null,
     'draft-check': null,
-    // Deep research (BEA-1196) defaults to Codex on purpose: the whole point of building our own
-    // research loop was that the engine is already paid for, so a report costs only search credits.
-    // Picking an API model here puts the per-report cost back.
+    // Deep research makes two very different calls, so it gets two settings (BEA-1206).
+    //
+    // PLANNING is "write me six search questions" — measured at ~320 tokens in, ~150 out. A small
+    // model does that perfectly. Sending it to the subscription engine is worse than wasteful: a CLI
+    // call drags roughly 25,000 tokens of its own system prompt along, so a 470-token job would burn
+    // fifty times that from the very allowance the writing needs. Free is not free when it spends the
+    // thing you are short of.
+    'deep-research-plan': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // WRITING reads ~12,900 tokens of sources and produces the report the owner actually reads. It
+    // stays on Codex: the engine is already paid for, and on the API the same call costs ~6 cents.
+    'deep-research-write': { provider: 'codex', model: 'codex' },
+    // Kept so an existing saved setting still resolves.
     'deep-research': { provider: 'codex', model: 'codex' },
   };
 

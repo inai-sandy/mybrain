@@ -419,11 +419,15 @@ export class DeepResearchService {
    * we report is a lie. So compare the model that actually answered against the one we asked for.
    */
   private async engine(prompt: string, maxTokens: number, label: string): Promise<{ text: string | null; paid: boolean }> {
-    const cfg: any = (await this.llm.helperModel?.('deep-research').catch(() => null)) ?? null;
+    // Planning and writing are different jobs on different models (BEA-1206). The label already says
+    // which one this is, so it picks its own setting; `deep-research` remains the fallback so an
+    // older saved choice still resolves.
+    const helper = label === 'deep-research-plan' ? 'deep-research-plan' : label === 'deep-research-write' ? 'deep-research-write' : 'deep-research';
+    const cfg: any = (await this.llm.helperModel?.(helper).catch(() => null)) ?? (await this.llm.helperModel?.('deep-research').catch(() => null)) ?? null;
     // Older/partial harnesses may not expose completeWithModel — fall back to the plain helper call,
     // which cannot report the model, so we do not claim to know whether it was paid.
     if (!this.llm.completeWithModel) {
-      const text = await this.llm.completeHelper?.('deep-research', prompt, maxTokens, label).catch(() => null);
+      const text = await this.llm.completeHelper?.(helper, prompt, maxTokens, label).catch(() => null);
       return { text: text ?? null, paid: false };
     }
     const r = await this.llm.completeWithModel(cfg, prompt, maxTokens, label).catch(() => null);
