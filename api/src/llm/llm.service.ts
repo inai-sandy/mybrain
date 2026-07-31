@@ -138,6 +138,9 @@ export class LlmService {
     // fifty times that from the very allowance the writing needs. Free is not free when it spends the
     // thing you are short of.
     'deep-research-plan': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Reads one team reply and says whether it needs the owner's eyes — tiny in, tiny out, runs on
+    // every inbound WhatsApp message, so a small fast model is the right default. (BEA-1213)
+    'review-read': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     // WRITING follows THE engine choice (see engineChoice) — null means "whatever engine is picked".
     'deep-research-write': null,
     // Kept so an existing saved setting still resolves.

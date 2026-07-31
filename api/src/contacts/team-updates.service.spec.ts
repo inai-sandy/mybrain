@@ -311,6 +311,78 @@ describe('a pending claim can never be orphaned (BEA-1159)', () => {
 });
 
 /**
+ * BEA-1213: the AI second opinion on each reply. The word-rules stay the floor — the model may
+ * only raise what they read as chat, or stand down the short politeness class they trip on.
+ */
+describe('the AI second opinion on each reply (BEA-1213)', () => {
+  function svcWithAi(answer: string | null) {
+    const { svc, rows } = make();
+    const asked: string[] = [];
+    (svc as any).llm = { completeHelper: async (_k: string, p: string) => { asked.push(p); if (answer === null) throw new Error('model down'); return answer; } };
+    (svc as any).prompts = { get: async () => 'Does this need Sandeep?\n{{report}}{{message}}' };
+    return { svc, rows, asked };
+  }
+
+  it('raises a message the word-rules read as chat', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": true, "why": "asks about the new die"}');
+    await svc.record({ contactId: 'c1', text: 'Boss wanted to know about the new die before we cut', channel: 'whatsapp' });
+    expect(rows[0].needsYou).toBe(true);
+    expect(rows[0].why).toBe('asks about the new die');
+  });
+
+  it('stands down "No problem sir" — the problem-word rule trips on it every time', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": false, "why": "politeness"}');
+    await svc.record({ contactId: 'c1', text: 'No problem sir', channel: 'whatsapp' });
+    expect(rows[0].needsYou).toBe(false);
+  });
+
+  it('cannot stand down a figure-carrying problem — the deterministic floor holds', async () => {
+    const { svc, rows } = svcWithAi('{"needsYou": false, "why": "routine"}');
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    expect(rows[0].needsYou).toBe(true);
+  });
+
+  it('a completion claim never even asks the model', async () => {
+    const { svc, rows, asked } = svcWithAi('{"needsYou": false, "why": "routine"}');
+    await svc.record({ contactId: 'c1', text: 'It is completed', channel: 'whatsapp', taskId: 't1' });
+    expect(rows[0].needsYou).toBe(true);
+    expect(asked).toHaveLength(0);
+  });
+
+  it('a bare ack never asks the model either — no cost on "Kk sir"', async () => {
+    const { svc, asked } = svcWithAi('{"needsYou": true, "why": "?"}');
+    await svc.record({ contactId: 'c1', text: 'Kk sir', channel: 'whatsapp' });
+    expect(asked).toHaveLength(0);
+  });
+
+  it('when the model is down, the word-rules stand and intake never breaks', async () => {
+    const { svc, rows } = svcWithAi(null);
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    expect(rows[0].needsYou).toBe(true);
+  });
+
+  it('when the model returns rubbish instead of JSON, the word-rules stand too', async () => {
+    for (const rubbish of ['sure, that needs him!', '{"needsYou": "yes"}', '{broken']) {
+      const { svc, rows } = svcWithAi(rubbish);
+      await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+      expect(rows[0].needsYou).toBe(true);
+    }
+  });
+
+  it('backfill skips the model — hundreds of historical messages cost nothing', async () => {
+    const { svc, asked } = svcWithAi('{"needsYou": true, "why": "?"}');
+    await svc.record({ contactId: 'c1', text: 'Boss wanted to know about the new die before we cut', channel: 'whatsapp', skipAi: true });
+    expect(asked).toHaveLength(0);
+  });
+
+  it('without a model wired at all, everything works exactly as before', async () => {
+    const { svc, rows } = make();
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    expect(rows[0].needsYou).toBe(true);
+  });
+});
+
+/**
  * BEA-1211, found live for the second time: the inbox filter never looked at the task at all, so
  * messages and claims about work the owner had already marked done sat in review forever — and the
  * orphan sweep kept resurrecting them after every close. Finished work asks for nothing.

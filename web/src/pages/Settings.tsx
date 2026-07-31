@@ -1440,6 +1440,8 @@ function ModelsSection() {
         desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
       <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
         desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
+      <EngineModelCard title="Review filter model" icon={MessageSquare} base="/api/llm-config/helper/review-read"
+        desc="Reads each team WhatsApp reply and decides if it truly needs your eyes in Review — a bare 'okay' stays out, a real problem lands. Runs on every reply, so Haiku (the default) is ideal. A 'they say it's done' claim ALWAYS reaches you regardless." />
       <VoiceModelCard />
     </div>
   );

@@ -1,7 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from './postbox.service';
-import { readUpdate, readLabel, type Read } from './update-read';
+import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
+import { readUpdate, readLabel, type Read, type ReadResult } from './update-read';
 
 
 /**
@@ -24,13 +26,56 @@ export class TeamUpdatesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly postbox: PostboxService,
+    // Optional and LAST: spec harnesses build this service positionally with fewer args.
+    @Optional() private readonly llm?: LlmService,
+    @Optional() private readonly prompts?: PromptsService,
   ) {}
+
+  /**
+   * The AI second opinion on one reply (BEA-1213). The word-rules in update-read stay the floor;
+   * the model may only move what they were unsure about:
+   *
+   * - A completion claim ("done") ALWAYS reaches the owner — the never-guess rule. Not negotiable.
+   * - The model may RAISE a message the rules read as chat/status — it caught a need the words hid.
+   *   Wrong costs one glance.
+   * - The model may STAND DOWN a flagged message only in the short, figure-free politeness class
+   *   ("No problem sir" trips the problem-word rule every time). A real problem is long or carries
+   *   figures, and those keep their deterministic floor — wrong there costs a stopped line.
+   * - No model, no answer, bad answer → the deterministic read stands. This must never break intake.
+   */
+  private async secondOpinion(text: string, r: ReadResult, isReport: boolean): Promise<{ needsYou: boolean; why: string | null }> {
+    const out = { needsYou: r.needsYou, why: r.why };
+    if (!this.llm || !this.prompts) return out;
+    if (r.reads.includes('done')) return out; // the floor: a claim always reaches him
+    const t = text.trim();
+    if (r.reads.length === 1 && r.reads[0] === 'chat' && t.length < 12) return out; // "Kk sir" needs no model
+    try {
+      const tmpl = await this.prompts.get('people.reviewRead');
+      const prompt = tmpl
+        .replace(/\{\{message\}\}/g, t.slice(0, 1500))
+        .replace(/\{\{report\}\}/g, isReport ? 'This person owes Sandeep a standing daily report.\n' : '');
+      const raw = await this.llm.completeHelper('review-read', prompt, 80, 'review-read');
+      const m = String(raw || '').match(/\{[\s\S]*\}/);
+      const parsed = m ? JSON.parse(m[0]) : null;
+      if (typeof parsed?.needsYou !== 'boolean') return out;
+      if (parsed.needsYou && !out.needsYou) {
+        return { needsYou: true, why: String(parsed.why || 'this needs your eyes').trim().slice(0, 120) || 'this needs your eyes' };
+      }
+      if (!parsed.needsYou && out.needsYou && t.length <= 25 && !/\d/.test(t)) {
+        this.log.log(`AI stood down "${t.slice(0, 40)}" — politeness, not a problem`);
+        return { needsYou: false, why: null };
+      }
+      return out;
+    } catch {
+      return out;
+    }
+  }
 
   /**
    * Record what someone said, whatever channel it came through. Returns the row, or null when
    * there is nothing worth keeping.
    */
-  async record(input: { contactId: string; text: string; channel: 'whatsapp' | 'link'; taskId?: string | null; at?: Date; isReport?: boolean }) {
+  async record(input: { contactId: string; text: string; channel: 'whatsapp' | 'link'; taskId?: string | null; at?: Date; isReport?: boolean; skipAi?: boolean }) {
     const text = String(input.text || '').trim();
     if (!text || !input.contactId) return null;
     const at = input.at ?? new Date();
@@ -42,6 +87,9 @@ export class TeamUpdatesService {
     if (dupe) return null;
 
     const r = readUpdate(text, { isReport: !!input.isReport });
+    // The word-rules propose, the AI seconds, and the merge rules in secondOpinion decide. (BEA-1213)
+    // Backfill passes skipAi: hundreds of historical messages need no model round-trip each.
+    const read = input.skipAi ? { needsYou: r.needsYou, why: r.why } : await this.secondOpinion(text, r, !!input.isReport);
     const row = await this.prisma.teamUpdate
       .create({
         data: {
@@ -50,13 +98,13 @@ export class TeamUpdatesService {
           channel: input.channel,
           text: text.slice(0, 4000),
           reads: JSON.stringify(r.reads),
-          needsYou: r.needsYou,
-          why: r.why,
+          needsYou: read.needsYou,
+          why: read.why,
           at,
         },
       })
       .catch((e) => { this.log.warn(`record: ${e?.message}`); return null; });
-    if (row && r.needsYou) this.log.log(`needs you — ${r.why}: "${text.replace(/\s+/g, ' ').slice(0, 70)}"`);
+    if (row && read.needsYou) this.log.log(`needs you — ${read.why}: "${text.replace(/\s+/g, ' ').slice(0, 70)}"`);
     return row;
   }
 
@@ -352,7 +400,7 @@ export class TeamUpdatesService {
       // The share page's own defaults are not messages — they are what it writes when they type nothing.
       if (!words || /^(Ticked it off on their page|Sent today's update)$/.test(words)) continue;
       if (!c.contactId) continue;
-      if (count(await this.record({ contactId: c.contactId, text: words, channel: 'link', taskId: c.taskId, at: c.createdAt, isReport: c.task?.kind === 'recurring' }))) fromLink++;
+      if (count(await this.record({ contactId: c.contactId, text: words, channel: 'link', taskId: c.taskId, at: c.createdAt, isReport: c.task?.kind === 'recurring', skipAi: true }))) fromLink++;
     }
 
     // What satisfied a day's report — Radha's blockers live here, recorded as a green tick.
@@ -364,7 +412,7 @@ export class TeamUpdatesService {
       const words = String(d.quote || '').trim();
       if (!words || /^(Ticked it off on their page|Sent today's update)$/.test(words)) continue;
       if (!d.contactId) continue;
-      if (count(await this.record({ contactId: d.contactId, text: words, channel: d.source === 'page' ? 'link' : 'whatsapp', taskId: d.taskId, at: d.signalAt || d.createdAt, isReport: true }))) fromReports++;
+      if (count(await this.record({ contactId: d.contactId, text: words, channel: d.source === 'page' ? 'link' : 'whatsapp', taskId: d.taskId, at: d.signalAt || d.createdAt, isReport: true, skipAi: true }))) fromReports++;
     }
 
     // Their recent WhatsApp replies, so a person's page reads as one story from day one.
@@ -376,7 +424,7 @@ export class TeamUpdatesService {
     }).catch(() => [] as any[]);
     for (const m of msgs as any[]) {
       if (!m.contactId || !String(m.body || '').trim()) continue;
-      if (count(await this.record({ contactId: m.contactId, text: m.body, channel: 'whatsapp', at: m.createdAt, isReport: true }))) fromWhatsApp++;
+      if (count(await this.record({ contactId: m.contactId, text: m.body, channel: 'whatsapp', at: m.createdAt, isReport: true, skipAi: true }))) fromWhatsApp++;
     }
 
     this.log.log(`backfill: ${fromLink} from links, ${fromReports} from reports, ${fromWhatsApp} from WhatsApp — ${needsYou} need you`);
