@@ -363,12 +363,13 @@ export class FlowRunnerService implements OnModuleInit {
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
     // What this run spent on search, totalled across every deep research step (BEA-1196). Recorded so
     // the owner reads the real cost of a report off the run instead of trusting an estimate.
-    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, paidCalls: 0 };
+    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, braveSearches: 0, paidCalls: 0 };
     const addSpend = (s: ResearchSpend) => {
       spend.searches += s?.searches || 0;
       spend.extracts += s?.extracts || 0;
       spend.sources += s?.sources || 0;
       spend.meaningSearches += s?.meaningSearches || 0;
+      spend.braveSearches += s?.braveSearches || 0;
       spend.paidCalls += s?.paidCalls || 0;
     };
     const spendJson = () => (spend.searches || spend.extracts || runTokens ? { spend: JSON.stringify({ ...spend, tokens: runTokens }) } : {});

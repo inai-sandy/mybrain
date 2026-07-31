@@ -2,9 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
-export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify';
+export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'brave' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify';
 
-export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify'];
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'brave', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify'];
 
 export function isKnownConnector(n: string): n is ConnectorName {
   return (KNOWN_CONNECTORS as string[]).includes(n);
@@ -95,6 +95,17 @@ export class ConnectorService implements OnModuleInit {
         if (r.ok) return { ok: true, message: 'Tavily key works — pages can be read.' };
         if (r.status === 401) return { ok: false, message: 'Tavily rejected that key. Double-check it.' };
         return { ok: false, message: `Tavily returned an error (HTTP ${r.status}).` };
+      }
+      if (name === 'brave') {
+        const r = await fetch('https://api.search.brave.com/res/v1/llm/context', {
+          method: 'POST',
+          headers: { 'x-subscription-token': secrets.apiKey, 'Content-Type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({ q: 'ping' }),
+        });
+        if (r.ok) return { ok: true, message: 'Brave key works — searching and reading in one call.' };
+        if (r.status === 401 || r.status === 403) return { ok: false, message: 'Brave rejected that key, or your plan does not include the LLM Context endpoint.' };
+        if (r.status === 429) return { ok: true, message: 'Brave key works, but it is rate-limited right now.' };
+        return { ok: false, message: `Brave returned an error (HTTP ${r.status}).` };
       }
       if (name === 'exa') {
         const r = await fetch('https://api.exa.ai/search', {

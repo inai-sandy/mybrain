@@ -78,7 +78,7 @@ export class ToolCatalogService {
 
     const tools: CatalogTool[] = [
       ...BUILT_IN,
-      ...this.webTools(has('tavily'), has('exa')),
+      ...this.webTools(has('tavily'), has('exa'), has('brave')),
       ...this.googleTools(googleOn),
       ...this.messagingTools(has('telegram')),
       ...this.skillTools(skills),
@@ -113,7 +113,7 @@ export class ToolCatalogService {
 
   // ---- groups that depend on something being connected ----------------------------------------
 
-  private webTools(tavily: boolean, exa: boolean): CatalogTool[] {
+  private webTools(tavily: boolean, exa: boolean, brave = false): CatalogTool[] {
     const tHint = tavily ? undefined : 'Add your Tavily key in Settings → Connections';
     const eHint = exa ? undefined : 'Add your Exa key in Settings → Connections';
     const path = '/settings#connections';
@@ -125,10 +125,10 @@ export class ToolCatalogService {
       // Our own research loop (BEA-1196) — many searches, then the report, on the flat-rate engine.
       // Either search back-end is enough to run it.
       {
-        id: 'deep_research', name: 'Deep research', group: 'Web', kind: 'tool', connected: tavily || exa,
+        id: 'deep_research', name: 'Deep research', group: 'Web', kind: 'tool', connected: tavily || exa || brave,
         description: 'Breaks your question up, searches many sources, reads the best pages and writes a report with citations',
-        connectHint: tavily || exa ? undefined : 'Add a Tavily or Exa key in Settings → Connections',
-        connectPath: tavily || exa ? undefined : path,
+        connectHint: tavily || exa || brave ? undefined : 'Add a Brave, Tavily or Exa key in Settings → Connections',
+        connectPath: tavily || exa || brave ? undefined : path,
       },
     ];
   }

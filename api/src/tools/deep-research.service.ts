@@ -30,6 +30,8 @@ export type ResearchSpend = {
   sources: number;
   /** Of those searches, how many went to Exa. Only the Tavily ones are priced in Tavily credits. */
   meaningSearches: number;
+  /** Of those searches, how many went to Brave — one call there does search AND page reading. */
+  braveSearches: number;
   /**
    * Thinking steps that had to use a PAID model.
    *
@@ -138,7 +140,7 @@ export class DeepResearchService {
       extracts: this.cap(opts.budget?.extracts, DEFAULT_BUDGET.extracts, HARD_CAP.extracts),
     };
     const say = opts.onLine || (() => undefined);
-    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, paidCalls: 0 };
+    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, braveSearches: 0, paidCalls: 0 };
 
     // Work the date window and country out ONCE from the real question — a sub-question like
     // "AICTE approved intake" often loses the "2025 and 2026" the owner actually asked about.
@@ -148,9 +150,9 @@ export class DeepResearchService {
     else if (window.time_range) say(`   limiting to the last ${window.time_range}`);
     if (country) say(`   focused on ${country}`);
 
-    const have = await this.web.available().catch(() => ({ tavily: false, exa: false }));
-    if (!have.tavily && !have.exa) {
-      throw new WebSearchError('no search is connected — add a Tavily or Exa key in Settings → Integrations.');
+    const have = await this.web.available().catch(() => ({ tavily: false, exa: false, brave: false }) as any);
+    if (!have.tavily && !have.exa && !have.brave) {
+      throw new WebSearchError('no search is connected — add a Brave, Tavily or Exa key in Settings → Integrations.');
     }
 
     // 1. Plan. The model chooses the questions; it never chooses how they get answered.
@@ -159,20 +161,31 @@ export class DeepResearchService {
 
     // 2. Gather. One search per sub-question, deduplicated by URL across all of them.
     const seen = new Set<string>();
+    let useBraveFirst = false;
     const found: WebResult[] = [];
     const failures: string[] = [];
     for (const ask of asks) {
       if (spend.searches >= budget.searches) break;
       const meaning = DeepResearchService.prefersMeaning(ask) && have.exa;
+      // Which gatherer? (BEA-1205)
+      //  • Exa when the question has no keywords to match.
+      //  • Tavily when we need PRECISION — a real date window or a list of sites to stay inside.
+      //    Brave only has `site:` and a coarse freshness setting.
+      //  • Brave otherwise: one call does search AND extraction, and returns ranked chunks. Measured
+      //    at 3 calls / 11,111 words / 3.7s against Tavily's 15 / 69,702 / 23.7s for the same three
+      //    questions — and it found more sources.
+      const needsPrecision = !!(window.start_date || window.time_range || sites.length);
+      const useBrave = !meaning && have.brave && !needsPrecision;
       say(`   🔎 ${ask.slice(0, 80)}`);
-      // One question can cost more than one call: a domain guess or a date window that finds nothing
-      // is widened and tried again. Count the CALLS, because that is what Tavily charges for — the
-      // budget is a spend cap, not a question cap (BEA-1199).
-      if (meaning) { spend.searches++; spend.meaningSearches++; }
+      if (meaning || useBrave) spend.searches++;
+      if (meaning) spend.meaningSearches++;
+      if (useBrave) { spend.braveSearches++; useBraveFirst = true; }
       try {
         const rows = meaning
           ? await this.web.searchByMeaning(ask)
-          : await this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; } });
+          : useBrave
+            ? await this.web.braveContext(ask, { country })
+            : await this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; } });
         let fresh = 0;
         for (const r of rows) {
           const key = this.urlKey(r.url);
@@ -192,6 +205,27 @@ export class DeepResearchService {
     }
     spend.sources = found.length;
 
+    // Before concluding that nothing exists, ASK THE OTHER INDEX (BEA-1205).
+    //
+    // Measured: Brave and Tavily shared only 3/6, 2/6 and 0/6 hosts on three real questions — on one
+    // they returned completely different sources. So one index drawing a blank is weak evidence.
+    // "This data does not exist publicly" is the most consequential sentence this tool writes, and
+    // the owner's placement report turned on exactly that claim. It costs one extra call, only in
+    // the case where being wrong matters most.
+    if (!found.length && have.brave && have.tavily) {
+      say('   🔁 nothing found — asking the other index before saying so');
+      const second = await (useBraveFirst ? this.web.search(goal, 6, { country }) : this.web.braveContext(goal, { country }))
+        .catch(() => [] as WebResult[]);
+      spend.searches++;
+      if (!useBraveFirst) spend.braveSearches++;
+      for (const r of second) {
+        const key = this.urlKey(r.url);
+        if (key && !seen.has(key)) { seen.add(key); found.push(r); }
+      }
+      spend.sources = found.length;
+      if (found.length) say(`      the second index found ${found.length}`);
+    }
+
     if (!found.length) {
       const why = failures.length ? ` Reasons: ${failures.join('; ')}` : '';
       // Those searches were paid for even though they returned nothing — report them.
@@ -199,7 +233,9 @@ export class DeepResearchService {
     }
 
     // 3. Read the best pages properly. A long snippet already says enough.
-    const toRead = found.filter((r) => (r.snippet || '').length < SNIPPET_IS_ENOUGH).slice(0, budget.extracts);
+    // Brave already returned the page content, so re-reading those costs a credit for nothing.
+    const braveHosts = new Set<string>();
+    const toRead = found.filter((r) => (r.snippet || '').length < SNIPPET_IS_ENOUGH && !braveHosts.has(r.url)).slice(0, budget.extracts);
     const pages = new Map<string, string>();
     for (const r of toRead) {
       if (spend.extracts >= budget.extracts) break;
@@ -367,13 +403,14 @@ export class DeepResearchService {
 
   /** The cost, in the only units that are actually verified. */
   private costLine(spend: ResearchSpend): string {
-    const tavily = Math.max(0, spend.searches - spend.meaningSearches);
+    const tavily = Math.max(0, spend.searches - spend.meaningSearches - spend.braveSearches);
     const bits = [`${spend.searches} search${spend.searches === 1 ? '' : 'es'}`, `${spend.extracts} page read${spend.extracts === 1 ? '' : 's'}`];
     // Only Tavily's rate is a figure I checked, so only Tavily searches are priced.
     const priced = tavily > 0 ? `${tavily * CREDITS_PER_SEARCH} Tavily credits` : '';
     const exa = spend.meaningSearches > 0 ? `${spend.meaningSearches} of them on Exa` : '';
+    const brave = spend.braveSearches > 0 ? `${spend.braveSearches} on Brave (search + read in one)` : '';
     const paid = spend.paidCalls > 0 ? `⚠️ ${spend.paidCalls} thinking step${spend.paidCalls === 1 ? '' : 's'} used the paid model because your own engine was unavailable` : '';
-    const notes = [priced, exa, paid].filter(Boolean).join(' · ');
+    const notes = [priced, exa, brave, paid].filter(Boolean).join(' · ');
     return `${bits.join(' + ')}${notes ? ` (${notes})` : ''}`;
   }
 
