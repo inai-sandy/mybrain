@@ -25,7 +25,8 @@ const ago = (iso: string | null) => {
   if (!iso) return 'never';
   const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
   if (d <= 0) return 'today';
-  return d === 1 ? 'yesterday' : `${d}d ago`;
+  // Short on purpose — four stat cells share a phone width, and "yesterday" clips. (BEA-1215)
+  return d === 1 ? 'yday' : `${d}d ago`;
 };
 
 /**
