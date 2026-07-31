@@ -394,11 +394,9 @@ export class DeepResearchService {
       sources,
     ].join('\n');
 
-    const { text, paid } = await this.engine(prompt, 6000, 'deep-research-write');
-    if (paid) {
-      spend.paidCalls++;
-      say('   ⚠️ your own engine was unavailable — the write-up used the paid model instead');
-    }
+    const { text, paid, fellBack } = await this.engine(prompt, 6000, 'deep-research-write');
+    if (paid) spend.paidCalls++;
+    if (fellBack) say('   ⚠️ every free engine was unavailable — the write-up used the paid model instead');
     if (text && text.trim()) return text.trim();
 
     // The write-up failing must not destroy the research — 12,400 characters were lost that way once
@@ -418,12 +416,13 @@ export class DeepResearchService {
    * (losing research we already paid to gather is worse), but it must never be invisible, or the cost
    * we report is a lie. So compare the model that actually answered against the one we asked for.
    */
-  private async engine(prompt: string, maxTokens: number, label: string): Promise<{ text: string | null; paid: boolean }> {
+  private async engine(prompt: string, maxTokens: number, label: string): Promise<{ text: string | null; paid: boolean; fellBack?: boolean }> {
     // Planning and writing are different jobs on different models (BEA-1206). The label already says
     // which one this is, so it picks its own setting; `deep-research` remains the fallback so an
     // older saved choice still resolves.
     const helper = label === 'deep-research-plan' ? 'deep-research-plan' : label === 'deep-research-write' ? 'deep-research-write' : 'deep-research';
     const cfg: any = (await this.llm.helperModel?.(helper).catch(() => null)) ?? (await this.llm.helperModel?.('deep-research').catch(() => null)) ?? null;
+    const wantedFlatRate = cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'claude';
     // Older/partial harnesses may not expose completeWithModel — fall back to the plain helper call,
     // which cannot report the model, so we do not claim to know whether it was paid.
     if (!this.llm.completeWithModel) {
@@ -436,9 +435,11 @@ export class DeepResearchService {
     // Judge on WHO ANSWERED, not on whether the model differed (BEA-1201). Falling through from
     // Codex to Claude changes the model but costs nothing — counting that as paid raised a false
     // alarm on a run that was in fact still free.
-    if (typeof r?.flatRate === 'boolean') return { text, paid: !r.flatRate };
-    const flatRate = cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'claude';
-    return { text, paid: !flatRate };
+    // `fellBack` is the honest distinction: the planner runs on a small PAID model on purpose
+    // (BEA-1206), which is not the same as every free engine being gone. Warning about an engine
+    // outage when nothing went wrong is the same false alarm this project keeps removing.
+    if (typeof r?.flatRate === 'boolean') return { text, paid: !r.flatRate, fellBack: !r.flatRate && wantedFlatRate };
+    return { text, paid: !wantedFlatRate, fellBack: false };
   }
 
   /** The cost, in the only units that are actually verified. */
@@ -449,7 +450,7 @@ export class DeepResearchService {
     const priced = tavily > 0 ? `${tavily * CREDITS_PER_SEARCH} Tavily credits` : '';
     const exa = spend.meaningSearches > 0 ? `${spend.meaningSearches} of them on Exa` : '';
     const brave = spend.braveSearches > 0 ? `${spend.braveSearches} on Brave (search + read in one)` : '';
-    const paid = spend.paidCalls > 0 ? `⚠️ ${spend.paidCalls} thinking step${spend.paidCalls === 1 ? '' : 's'} used the paid model because your own engine was unavailable` : '';
+    const paid = spend.paidCalls > 0 ? `${spend.paidCalls} thinking step${spend.paidCalls === 1 ? '' : 's'} on a paid model` : '';
     const notes = [priced, exa, brave, paid].filter(Boolean).join(' · ');
     return `${bits.join(' + ')}${notes ? ` (${notes})` : ''}`;
   }

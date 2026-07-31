@@ -213,8 +213,8 @@ describe('deep research (BEA-1196)', () => {
       const lines: string[] = [];
       const { svc } = make({ engineDown: true });
       const { report } = await svc.run('a question about something', { onLine: (t) => lines.push(t) });
-      expect(lines.join('\n')).toMatch(/your own engine was unavailable/);
-      expect(report).toMatch(/used the paid model/);
+      expect(lines.join('\n')).toMatch(/every free engine was unavailable/);
+      expect(report).toMatch(/on a paid model/);
     });
 
     it('reports nothing paid on the normal path', async () => {
@@ -222,6 +222,19 @@ describe('deep research (BEA-1196)', () => {
       const { report, spend } = await svc.run('a question about something');
       expect(spend.paidCalls).toBe(0);
       expect(report).not.toMatch(/paid model/);
+    });
+
+    // The planner runs on a small paid model BY CHOICE (BEA-1206). Warning that the engine is down
+    // when nothing went wrong is the same false alarm this project keeps removing.
+    it('does not cry "engine down" when a paid model was the deliberate choice', async () => {
+      const lines: string[] = [];
+      const web: any = { available: async () => ({ tavily: true, exa: false, brave: false }), search: async () => [{ title: 'T', url: 'https://a', snippet: 's' }], readPage: async () => 't' };
+      const llm: any = {
+        helperModel: async () => ({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }), // chosen, not a fallback
+        completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'report', model: 'haiku', provider: 'openrouter', flatRate: false }),
+      };
+      await new DeepResearchService(web, llm).run('a question', { onLine: (t) => lines.push(t) });
+      expect(lines.join('\n')).not.toMatch(/unavailable/);
     });
 
     it('treats "no flat-rate engine configured" as paid, because it is', async () => {
