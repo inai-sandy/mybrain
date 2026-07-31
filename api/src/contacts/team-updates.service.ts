@@ -215,6 +215,20 @@ export class TeamUpdatesService {
       .catch(() => [] as any[]);
     for (const c of orphans as any[]) {
       if (covered.has(c.id)) continue;
+      // ONE item per situation (BEA-1221). If this contact already has an open item with no
+      // decision on it, the claim attaches THERE — Yes/No replaces "Sorted, close it", and
+      // deciding resolves both. Two rows for one person is how Ashish's count stuck at 1.
+      // Only a host about the SAME task (or about no task at all) may take the claim — gluing a
+      // claim for task B onto a problem about task A would make Yes/No decide the wrong thing
+      // while showing the wrong title. (review finding)
+      const host = items.find((i) => i.contact?.id === c.contactId && !i.claimId && !i.perTask && (!i.task || i.task.id === c.taskId));
+      if (host) {
+        host.claimId = c.id;
+        host.task = host.task || c.task || null;
+        host.label = `${host.label} — and says something is done`;
+        covered.add(c.id);
+        continue;
+      }
       items.push({
         id: `claim:${c.id}`,
         claimId: c.id,
@@ -297,6 +311,9 @@ export class TeamUpdatesService {
     confirm: boolean,
     decider: (claimId: string, confirm: boolean) => Promise<any>,
     setTaskDone?: (taskId: string, done: boolean) => Promise<any>,
+    /** The exact claim shown on screen (BEA-1221) — beats re-deriving it, which fails when the
+     *  contact holds more than one pending claim. */
+    knownClaimId?: string,
   ) {
     /**
      * A per-task row is `<updateId>::<taskId>`. (BEA-1159)
@@ -328,14 +345,20 @@ export class TeamUpdatesService {
       await decider(claimId, confirm);
       return { ok: true, confirmed: confirm };
     }
-    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, taskId: true, contactId: true } });
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, taskId: true, contactId: true, reads: true } });
     if (!u) return { ok: false, message: 'That is not there any more' };
-    const claim = await this.pendingClaimFor(u.contactId, u.taskId);
+    const claim = (knownClaimId
+      // Scoped to THIS contact — a stale tab must not decide someone else's claim. (review finding)
+      ? await this.prisma.taskClaim.findFirst({ where: { id: knownClaimId, status: 'pending', contactId: u.contactId }, select: { id: true, taskId: true } }).catch(() => null)
+      : null) || (await this.pendingClaimFor(u.contactId, u.taskId));
     if (!claim) return { ok: false, message: 'That has already been decided' };
     await decider(claim.id, confirm);
-    // Either way the question is answered, so it leaves his inbox.
-    await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: new Date() } }).catch(() => undefined);
-    return { ok: true, confirmed: confirm };
+    // The claim is answered — but a message that RAISED A PROBLEM is not cleared by ruling on a
+    // claim (never-guess): it stays until he closes it himself. Only a pure claim message leaves
+    // the inbox here. (BEA-1221 review)
+    const stillOpen = safeReads(u.reads).includes('needs_you');
+    if (!stillOpen) await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: new Date() } }).catch(() => undefined);
+    return { ok: true, confirmed: confirm, stillOpen };
   }
 
   /**
@@ -361,11 +384,16 @@ export class TeamUpdatesService {
 
   /** He closes it — the only way an item leaves the inbox. */
   async close(id: string) {
-    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, closedAt: true } });
+    const u = await this.prisma.teamUpdate.findUnique({ where: { id }, select: { id: true, closedAt: true, contactId: true } });
     if (!u) return { ok: false };
     if (u.closedAt) return { ok: true, alreadyClosed: true };
     await this.prisma.teamUpdate.update({ where: { id }, data: { closedAt: new Date() } });
-    return { ok: true };
+    // Closing a message never decides a claim (never-guess) — but he must HEAR that one is still
+    // waiting, or the count looks stuck for no reason. (BEA-1221)
+    const pending = ((await Promise.resolve(
+      this.prisma.taskClaim?.count?.({ where: { contactId: u.contactId, status: 'pending', task: { status: { not: 'done' } } } }),
+    ).catch(() => 0)) ?? 0) as number;
+    return { ok: true, pendingClaim: pending > 0 };
   }
 
   /** Re-open, for the times he closes one by mistake. */

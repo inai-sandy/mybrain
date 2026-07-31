@@ -135,7 +135,7 @@ export class RemindersController {
    * confirming marks it done and stops the chase, rejecting reopens it and the chase resumes.
    */
   @Post('review/:id/decide')
-  async reviewDecide(@Param('id') id: string, @Body() body: { confirm?: boolean }) {
+  async reviewDecide(@Param('id') id: string, @Body() body: { confirm?: boolean; claimId?: string }) {
     const confirm = body?.confirm !== false;
     return this.updates.decide(
       id,
@@ -148,6 +148,9 @@ export class RemindersController {
       // They said "all done" but only one claim was ever raised — a yes on the others marks them
       // done directly, which is the same end state and stops their chase the same way. (BEA-1159)
       async (taskId, done) => this.tasks.setDone(taskId, done),
+      // The exact claim the screen showed — a host item carries an attached claim id, and
+      // re-guessing it server-side breaks when the contact holds two. (BEA-1221)
+      body?.claimId || undefined,
     );
   }
 

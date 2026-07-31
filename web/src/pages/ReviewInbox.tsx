@@ -88,11 +88,15 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
     setBusy(it.id);
     try {
       const r = await fetch(`/api/reminders/review/${it.id}/decide`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm }),
+        // The exact claim this card showed — never let the server re-guess it. (BEA-1221)
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm, claimId: it.claimId || undefined }),
       });
       const d = await r.json().catch(() => ({ ok: false }));
       if (!d.ok) { toast('error', d.message || 'Could not save that'); return; }
-      toast('success', confirm ? 'Marked done — no more chasing for it' : `Sent back — ${it.contact?.name || 'they'} will be chased again`);
+      // A message that also raised a problem stays until HE closes it — say so. (BEA-1221)
+      toast('success', (confirm ? 'Marked done — no more chasing for it' : `Sent back — ${it.contact?.name || 'they'} will be chased again`)
+        + (d.stillOpen ? '. Their message stays until you close it.' : ''));
+      if (d.stillOpen) { load(); return; }
       setItems((xs) => { const next = (xs || []).filter((x) => x.id !== it.id); onCountChange?.(next.length); return next; });
     } catch {
       toast('error', 'Could not reach the server');
@@ -104,8 +108,15 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
   async function close(it: Item) {
     setBusy(it.id);
     try {
-      await fetch(`/api/reminders/review/${it.id}/close`, { method: 'POST' });
-      toast('success', 'Closed');
+      const r = await fetch(`/api/reminders/review/${it.id}/close`, { method: 'POST' });
+      const d = await r.json().catch(() => ({ ok: r.ok }));
+      if (!d.ok) { toast('error', 'Could not close that'); load(); return; }
+      // If a "says it's done" is still waiting, SAY so — a count that stays up with no
+      // explanation is how Ashish's 1 looked broken. (BEA-1221)
+      toast('success', d.pendingClaim
+        ? `Closed — ${it.contact?.name || 'they'} still has a "says it's done" waiting for your Yes/No`
+        : 'Closed');
+      if (d.pendingClaim) { load(); return; } // the claim may resurface as the one remaining item
       setItems((xs) => { const next = (xs || []).filter((x) => x.id !== it.id); onCountChange?.(next.length); return next; });
     } catch {
       toast('error', 'Could not close that');
@@ -181,7 +192,8 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
                       {it.channel === 'link' ? <><Link2 size={11} /> on their link</> : <><MessageSquare size={11} /> on WhatsApp</>}
                     </span>
                     <span className="tabular-nums">{it.openDays === 0 ? 'today' : `${it.openDays}d ago`}</span>
-                    <span className={it.label.includes('problem') ? 'text-amber-600 dark:text-amber-500' : 'text-violet-600 dark:text-violet-400'}>{it.label}</span>
+                    {/* Colour follows the ACTION on the card: violet = a Yes/No decision, amber = a problem to read. (BEA-1221) */}
+                    <span className={claim ? 'text-violet-600 dark:text-violet-400' : it.label.includes('problem') ? 'text-amber-600 dark:text-amber-500' : 'text-violet-600 dark:text-violet-400'}>{it.label}</span>
                     {/* He replies and then nothing follows up — worth knowing before he answers. (BEA-1160) */}
                     {it.chasePaused && <span className="inline-flex items-center gap-1 text-rose-600 dark:text-rose-400"><Radio size={11} /> their chase is off</span>}
                   </div>
