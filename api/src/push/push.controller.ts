@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, Put } from '@nestjs/common';
 import { PushService } from './push.service';
 
 /** Web Push surface (BEA-1088). Behind the global auth guard. */
@@ -24,6 +24,17 @@ export class PushController {
   @Post('unsubscribe')
   unsubscribe(@Body() body: { endpoint?: string }) {
     return this.push.unsubscribe(body?.endpoint);
+  }
+
+  /** Quiet hours — enforced since day one, controllable since BEA-1232. */
+  @Get('quiet-hours')
+  quietHours() {
+    return this.push.quietHours();
+  }
+
+  @Put('quiet-hours')
+  setQuietHours(@Body() body: { start?: number | null; end?: number | null }) {
+    return this.push.setQuietHours(body?.start ?? null, body?.end ?? null);
   }
 
   /** Fire a test notification to every subscribed device. */
