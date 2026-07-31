@@ -551,3 +551,45 @@ describe('dates the owner sets (BEA-1209)', () => {
     expect(err.message).toMatch(/not a sign the information does not exist/);
   });
 });
+
+/**
+ * BEA-1206 — planning and writing are different jobs and now use different models.
+ *
+ * Planning is "write me six search questions": ~320 tokens in, ~150 out. Sending that to the
+ * subscription engine is worse than wasteful — a CLI call carries ~25,000 tokens of its own system
+ * prompt, so a 470-token job would burn fifty times that from the allowance the writing needs.
+ */
+describe('planning and writing use their own models (BEA-1206)', () => {
+  const spy = () => {
+    const asked: string[] = [];
+    const llm: any = {
+      helperModel: async (k: string) => { asked.push(k); return { provider: 'openrouter', model: 'm-' + k }; },
+      completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'the report', model: 'm-' + (l === 'deep-research-plan' ? 'deep-research-plan' : 'deep-research-write') }),
+    };
+    const web: any = {
+      available: async () => ({ tavily: true, exa: false, brave: false }),
+      search: async () => [{ title: 'T', url: 'https://a', snippet: 's' }],
+      readPage: async () => 'text',
+    };
+    return { svc: new DeepResearchService(web, llm), asked };
+  };
+
+  it('asks for a planning model to plan and a writing model to write', async () => {
+    const { svc, asked } = spy();
+    await svc.run('a question');
+    expect(asked).toContain('deep-research-plan');
+    expect(asked).toContain('deep-research-write');
+  });
+
+  it('falls back to the old single setting rather than to nothing', async () => {
+    const asked: string[] = [];
+    const llm: any = {
+      helperModel: async (k: string) => { asked.push(k); return k === 'deep-research' ? { provider: 'codex', model: 'codex' } : null; },
+      completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'report', model: 'codex' }),
+    };
+    const web: any = { available: async () => ({ tavily: true, exa: false, brave: false }), search: async () => [{ title: 'T', url: 'https://a', snippet: 's' }], readPage: async () => 't' };
+    const { report } = await new DeepResearchService(web, llm).run('a question');
+    expect(asked).toContain('deep-research');   // the old key still resolves
+    expect(report).toContain('report');
+  });
+});
