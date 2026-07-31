@@ -2044,8 +2044,8 @@ function PromptsSection({ category }: { category?: string } = {}) {
   return (
     <div className="space-y-4">
       <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">
-        <h2 className="flex items-center gap-2 font-semibold mb-1"><MessageSquare size={18} className="text-emerald-600" /> AI prompts <span className="text-xs font-normal text-zinc-400">· {items.length}</span></h2>
-        <p className="text-sm text-zinc-500">Tune the exact instructions the AI follows across the app. Your edits apply immediately; the dynamic data (your dump, your day's tasks, etc.) is added automatically. Use <b>Reset</b> any time to restore the original.</p>
+        <h2 className="flex items-center gap-2 font-semibold mb-1"><MessageSquare size={18} className="text-emerald-600" /> {category ? `${category} prompts` : 'AI prompts'} <span className="text-xs font-normal text-zinc-400">· {scoped.length}</span></h2>
+        <p className="text-sm text-zinc-500">{category ? "This module's exact AI instructions — the same prompts also appear in the central Prompts page." : 'Tune the exact instructions the AI follows across the app.'} Your edits apply immediately; the dynamic data is added automatically. Use <b>Reset</b> any time to restore the original.</p>
         <div className="relative mt-3">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search prompts…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 pl-9 pr-3 py-2 text-sm outline-none focus:border-emerald-500" />
