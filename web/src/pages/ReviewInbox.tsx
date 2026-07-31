@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Check, X, Send, Loader2, MessageSquare, Link2, Radio, Search, ChevronDown } from 'lucide-react';
+import { Check, X, Send, Loader2, MessageSquare, Link2, Radio, Search, ChevronDown, Hand, TriangleAlert } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
 type Item = {
@@ -154,8 +154,9 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
       <ul className="space-y-2.5">
         {shown.map((it) => {
           const isOpen = open.has(it.id);
+          const claim = !!it.claimId; // a yes/no decision (violet) vs a problem to read (amber)
           return (
-          <li key={it.id} className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+          <li key={it.id} className={'overflow-hidden rounded-xl border bg-white dark:bg-zinc-900 ' + (claim ? 'border-violet-400/40 dark:border-violet-500/30' : 'border-amber-400/40 dark:border-amber-500/25')}>
             {/* The whole header is the accordion toggle (BEA-1214). The contact link stays a link —
                 it stops the tap from also toggling. */}
             <div
@@ -167,6 +168,10 @@ export function ReviewInbox({ onCountChange }: { onCountChange?: (n: number) => 
               className="cursor-pointer p-3.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
             >
               <div className="flex items-start justify-between gap-2">
+                {/* The icon tile every card in the family leads with. (BEA-1220) */}
+                <span className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ' + (claim ? 'bg-violet-500/10 text-violet-500' : 'bg-amber-500/10 text-amber-500')}>
+                  {claim ? <Hand size={16} /> : <TriangleAlert size={16} />}
+                </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-zinc-400">
                     {it.contact && (
