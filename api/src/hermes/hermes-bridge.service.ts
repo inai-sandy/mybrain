@@ -699,12 +699,42 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
    * Move A (BEA-664): run a skill block in Codex with the skill's REAL folder in the working dir.
    * Lightweight (no AgentRun row) — used by the flow runner's skill nodes.
    */
+  /**
+   * Run a real skill on THE chosen engine.
+   *
+   * This used to go to Codex and nowhere else. With Codex out of quota every skill step fell back to
+   * a plain model asked to work "in the style of" the skill — without its files — so the owner's
+   * interactive-html page was an imitation of his own skill, and nothing said so.
+   */
   async runSkillTurn(skillSlug: string, prompt: string, opts: { model?: string } = {}): Promise<string> {
+    const engine = await this.llm.engineChoice?.().catch(() => null);
+    if (engine && engine.provider !== 'codex') return this.runSkillElsewhere(engine, skillSlug, prompt);
     // skills run sandboxed (workspace-write in the per-run skill folder) — no bypass needed now that
     // the host's bubblewrap sandbox works (BEA-665).
     const r = await this.runViaCodex(prompt, {}, { model: opts.model, skill: skillSlug });
     if (r.status === 'error') throw new Error(r.error || 'skill run failed');
     return r.finalText || '';
+  }
+
+  /** A skill on Claude or Gemini — same shape, their own runner. */
+  private async runSkillElsewhere(engine: { provider: string; model: string }, skill: string, prompt: string): Promise<string> {
+    const url = engine.provider === 'claude'
+      ? (process.env.CLAUDE_RUNNER_URL || 'http://172.18.0.1:8768')
+      : (process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767');
+    const r = await fetch(`${url}/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt, skill }),
+      signal: AbortSignal.timeout(300_000),
+    }).catch((e) => { throw new Error(`the ${engine.provider} engine could not be reached (${e?.message || e})`); });
+    const d: any = await r.json().catch(() => ({}));
+    if (!r.ok || d?.error) throw new Error(String(d?.error || `the ${engine.provider} engine refused the skill`));
+    const t = String(d?.text || '').trim();
+    if (!t) throw new Error(`the ${engine.provider} engine returned nothing for that skill`);
+    // Record it, or a skill turn is invisible to the day's budget (BEA-1204).
+    const u = TokenBudgetService.tokensOf(d?.usage);
+    await this.llm.recordUsage?.('skill', engine.model, { prompt_tokens: u.prompt, completion_tokens: u.completion })?.catch(() => undefined);
+    return t;
   }
 
   async execute(runId: string, input: StartRunInput) {

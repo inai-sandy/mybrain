@@ -1360,9 +1360,56 @@ function AccordionCard({ title, icon: Icon, badge, defaultOpen, children }: { ti
   );
 }
 
+/**
+ * ONE engine choice (owner's call): "When I choose the engine Claude, Step 4 and Skills has to run
+ * in Claude. When I choose Codex, has to run in Codex." A setting per job was complexity for its own
+ * sake. The fallback order underneath is insurance, not a thing to configure.
+ */
+function EnginePicker() {
+  const [cur, setCur] = useState('');
+  const [engines, setEngines] = useState<any[]>([]);
+  const [msg, setMsg] = useState('');
+  useEffect(() => {
+    fetch('/api/llm-config/engine').then((r) => r.json()).then((d) => setCur(d?.provider || '')).catch(() => undefined);
+    fetch('/api/llm-config/engines').then((r) => r.json()).then((d) => setEngines(d?.chain || [])).catch(() => undefined);
+  }, []);
+  const pick = async (provider: string) => {
+    setCur(provider);
+    const ok = await fetch('/api/llm-config/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider }) }).then((r) => r.ok).catch(() => false);
+    setMsg(ok ? 'Saved.' : 'That did not save — try again.');
+    setTimeout(() => setMsg(''), 4000);
+  };
+  if (!engines.length) return null;
+  return (
+    <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/5">
+      <h2 className="text-sm font-semibold">Your engine</h2>
+      <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+        The one choice. Research write-ups, skills and agent runs all use it. If it is unavailable the others below cover for it automatically.
+      </p>
+      <div className="mt-2.5 space-y-1.5">
+        {engines.map((e: any) => (
+          <label key={e.name} className={'flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 transition-colors ' + (cur === e.name ? 'border-emerald-500 bg-white dark:bg-zinc-900' : 'border-zinc-200 hover:border-emerald-300 dark:border-zinc-700')}>
+            <input type="radio" name="engine" checked={cur === e.name} onChange={() => pick(e.name)} className="mt-1 accent-emerald-600" />
+            <span className="min-w-0 text-sm">
+              <b>{e.label}</b>
+              <span className={'ml-1.5 text-xs ' + (e.ready ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>{e.ready ? 'working' : 'unavailable'}</span>
+              {!e.ready && e.reason && <span className="block text-[11px] text-rose-600 dark:text-rose-400">{e.reason}</span>}
+            </span>
+          </label>
+        ))}
+      </div>
+      {msg && <p className="mt-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">{msg}</p>}
+      <p className="mt-2 text-[11px] text-zinc-400">
+        Planning a research question stays on a small fast model whatever you pick — it is a 470-token job, and an engine call carries ~25,000 tokens before your prompt even starts.
+      </p>
+    </div>
+  );
+}
+
 function ModelsSection() {
   return (
     <div className="space-y-4">
+      <EnginePicker />
       <AiModelCard />
       <ChatModelCard />
       <EngineModelCard title="Explore answer model" icon={Sparkles} base="/api/explore/model"
@@ -1407,11 +1454,6 @@ function ModelsSection() {
         desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
       <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
         desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
-      {/* Deep research makes two very different calls, so it gets two settings (BEA-1206). */}
-      <EngineModelCard title="Research — planning model" icon={FlaskConical} base="/api/llm-config/helper/deep-research-plan" agents
-        desc="Turns your question into a handful of search questions. A tiny job (about 470 tokens) — Haiku, the default, is ideal. Avoid a subscription engine here: each of those calls carries ~25,000 tokens of its own before your prompt, so a small job would eat the allowance the writing needs." />
-      <EngineModelCard title="Research — writing model" icon={FlaskConical} base="/api/llm-config/helper/deep-research-write" agents
-        desc="Reads the gathered sources and writes your report with citations. The part you actually read. Runs FREE on your Codex or Claude plan; on the API the same call costs about 6 cents." />
       <VoiceModelCard />
     </div>
   );

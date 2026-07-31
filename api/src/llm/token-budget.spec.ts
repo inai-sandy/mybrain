@@ -273,3 +273,48 @@ describe('an engine that is out of quota is remembered (BEA-1201)', () => {
     expect(called).toBe(0);
   });
 });
+
+/**
+ * ONE engine choice, the owner's design: "When I choose the engine Claude, Step 4 and Skills has to
+ * run in Claude. When I choose Codex, has to run in Codex." A setting per job was complexity for its
+ * own sake.
+ */
+describe('one engine choice governs everything (owner\'s design)', () => {
+  const { LlmService } = require('./llm.service');
+  const store: Record<string, string> = {};
+  const prisma: any = {
+    setting: {
+      findUnique: async ({ where }: any) => (where.key in store ? { key: where.key, value: store[where.key] } : null),
+      upsert: async ({ where, create }: any) => { store[where.key] = create.value; return {}; },
+    },
+  };
+  const svc = () => new LlmService({ get: async () => ({ apiKey: 'k' }) } as any, prisma);
+  beforeEach(() => { for (const k of Object.keys(store)) delete store[k]; });
+
+  it('defaults to the first engine in the chain', async () => {
+    expect((await svc().engineChoice()).provider).toBe('codex');
+  });
+
+  it('remembers what you picked', async () => {
+    const s = svc();
+    await s.setEngineChoice('claude');
+    expect((await s.engineChoice()).provider).toBe('claude');
+  });
+
+  it('refuses an engine that does not exist, rather than storing nonsense', async () => {
+    await expect(svc().setEngineChoice('banana')).rejects.toThrow(/Unknown engine/);
+  });
+
+  it('falls back to the default if the stored value stops being valid', async () => {
+    store['engine.choice'] = 'some-engine-we-removed';
+    expect((await svc().engineChoice()).provider).toBe('codex');
+  });
+
+  it('leaves the research write-up following the choice, not a fixed model', () => {
+    // `null` in HELPERS means "whatever engine is picked" — the write-up must not pin its own.
+    expect(LlmService.HELPERS['deep-research-write']).toBeNull();
+    // Planning is deliberately NOT engine-bound: a 470-token job on an engine would carry ~25,000
+    // tokens of overhead, eating the allowance the writing needs.
+    expect(LlmService.HELPERS['deep-research-plan']?.provider).toBe('openrouter');
+  });
+});

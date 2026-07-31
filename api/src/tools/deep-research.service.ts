@@ -421,7 +421,11 @@ export class DeepResearchService {
     // which one this is, so it picks its own setting; `deep-research` remains the fallback so an
     // older saved choice still resolves.
     const helper = label === 'deep-research-plan' ? 'deep-research-plan' : label === 'deep-research-write' ? 'deep-research-write' : 'deep-research';
-    const cfg: any = (await this.llm.helperModel?.(helper).catch(() => null)) ?? (await this.llm.helperModel?.('deep-research').catch(() => null)) ?? null;
+    // A helper set explicitly wins; otherwise the write-up follows THE engine choice, so picking
+    // Claude in Settings really does make the report run on Claude.
+    const cfg: any = (await this.llm.helperModel?.(helper).catch(() => null))
+      ?? (helper === 'deep-research-write' ? await this.llm.engineChoice?.().catch(() => null) : null)
+      ?? (await this.llm.helperModel?.('deep-research').catch(() => null)) ?? null;
     const wantedFlatRate = cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'claude';
     // Older/partial harnesses may not expose completeWithModel — fall back to the plain helper call,
     // which cannot report the model, so we do not claim to know whether it was paid.
