@@ -10,6 +10,8 @@
  */
 
 export const TASK_SETTING_KEYS = {
+  /** The app's timezone — every day-key, chase slot and digest reads it. (BEA-1228) */
+  tz: 'tasks.tz',
   /** Local HH:MM slots a new chase uses when he named no time. */
   chaseTimes: 'tasks.chaseTimes',
   /**
