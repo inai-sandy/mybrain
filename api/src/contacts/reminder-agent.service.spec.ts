@@ -279,16 +279,44 @@ describe("a daily report satisfies today, never the task (BEA-1118)", () => {
     expect(state.received).toHaveLength(1); // treated as today's status instead
   });
 
-  it('ignores a status number that is not a daily item', async () => {
+  it('a garbled status number no longer loses the report — the backstop settles the day (BEA-1210)', async () => {
+    // The model pointed at item 7, which does not exist. The message is still a real report,
+    // so the deterministic reader settles today anyway instead of recording nothing.
     const { svc, state } = dailySetup('{"send":true,"reply":"Thanks!","needsSandeep":false,"statusToday":[7]}');
     await svc.onContactReply('c1');
-    expect(state.received).toHaveLength(0);
+    expect(state.received).toEqual([{ taskId: 't9', day: '2026-07-27', quote: expect.stringContaining('8 members') }]);
   });
 
   it('still replies to them either way', async () => {
     const { svc, state } = dailySetup('{"send":true,"reply":"Thanks Jayanth — noted.","needsSandeep":false,"statusToday":[1]}');
     await svc.onContactReply('c1');
     expect(state.sent).toBe(1);
+  });
+});
+
+/**
+ * BEA-1210: on 29 Jul Jayanth sent four real reports and the day's ledger recorded none of them —
+ * the model's reply simply had no statusToday, and marking the day depended entirely on it. The
+ * deterministic reader that already files every update now also settles the day.
+ */
+describe("a report settles the day even when the model says nothing (BEA-1210)", () => {
+  it('marks today received when statusToday is missing but the message reads as a report', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Thanks Jayanth — noted."}');
+    await svc.onContactReply('c1');
+    expect(state.received).toEqual([{ taskId: 't9', day: '2026-07-27', quote: expect.stringContaining('8 members') }]);
+    expect(state.claims).toHaveLength(0); // never a claim — nothing lands in review for this
+  });
+
+  it('does not mark twice when the model DID record the status', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Noted.","statusToday":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.received).toHaveLength(1);
+  });
+
+  it('does not mark twice when the model wrongly said done on the daily item', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Noted.","done":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.received).toHaveLength(1);
   });
 });
 

@@ -3,6 +3,7 @@ import { TasksSettings } from './settings/TasksSettings';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
+import { Accordion } from '../ui/Accordion';
 import { useToast } from '../ui/Toast';
 import { mindApi, fmtWhen, fmtRelative, RUN_KIND, type Activity, type DayRun, type RunStat } from '../mind/client';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -1342,23 +1343,8 @@ function RequestLog() {
   );
 }
 
-/** Collapsible card — header (icon + title + optional badge + chevron) with the body hidden until tapped. (BEA-531) */
-function AccordionCard({ title, icon: Icon, badge, defaultOpen, children }: { title: string; icon?: LucideIcon; badge?: ReactNode; defaultOpen?: boolean; children: ReactNode }) {
-  const [open, setOpen] = useState(!!defaultOpen);
-  return (
-    <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center justify-between gap-3 p-5 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
-        <span className="flex items-center gap-2 font-semibold min-w-0">
-          {Icon && <Icon size={18} className="text-emerald-600 shrink-0" />}
-          <span className="truncate">{title}</span>
-          {badge}
-        </span>
-        <ChevronDown size={18} className={'shrink-0 text-zinc-400 transition-transform ' + (open ? 'rotate-180' : '')} />
-      </button>
-      {open && <div className="px-5 pb-5">{children}</div>}
-    </section>
-  );
-}
+/** Collapsible card — now the shared Accordion, so every page folds the same way. (BEA-1210) */
+const AccordionCard = Accordion;
 
 /**
  * ONE engine choice (owner's call): "When I choose the engine Claude, Step 4 and Skills has to run

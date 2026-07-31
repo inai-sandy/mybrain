@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { promisesLater } from './promise-later';
+import { readUpdate } from './update-read';
 import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
@@ -447,7 +448,10 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         // The model was told never to mark a daily report finished. If it does anyway, treat it as
         // today's status instead of a completion — a wrong call must not be able to end the chase.
         if (item.recurring) {
-          if (!promisesLater(lastIn)) await this.recurring.markReceived(item.taskId, this.recurring.today(), lastIn, contactId, { source: 'whatsapp' });
+          if (!promisesLater(lastIn)) {
+            await this.recurring.markReceived(item.taskId, this.recurring.today(), lastIn, contactId, { source: 'whatsapp' });
+            reported.push(item.subject); // the day is settled — the backstop below must not mark it twice (BEA-1210)
+          }
           continue;
         }
         // A second, deterministic opinion before a claim silences the chase. (BEA-1122)
@@ -459,6 +463,24 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         if (row) claimed.push(item.subject);
       }
       if (claimed.length) this.log.log(`agent: ${name} says done — ${claimed.join('; ')} (waiting on Sandeep)`);
+    }
+
+    // Deterministic backstop (BEA-1210): a substantive status message satisfies today even when
+    // the model's parse says nothing. On 29 Jul four real reports arrived, every one was read as
+    // "status" by readUpdate, and the day's ledger recorded none of them — the model simply didn't
+    // fill statusToday, and marking the day depended entirely on it. The same deterministic reader
+    // that files the update now also settles the day, so a report can never again arrive and
+    // leave "Today's reports" saying waiting/missed.
+    if (lastIn && !reported.length && !promisesLater(lastIn)) {
+      const recurringItems = items.filter((it) => it.taskId && it.recurring);
+      if (recurringItems.length && readUpdate(lastIn, { isReport: true }).reads.includes('status')) {
+        const today = this.recurring.today();
+        for (const it of recurringItems) {
+          await this.recurring.markReceived(it.taskId, today, lastIn, contactId, { source: 'whatsapp' });
+          reported.push(it.subject);
+        }
+        this.log.log(`agent: ${name}'s message reads as a report — settled today's ${reported.join('; ')} (backstop)`);
+      }
     }
 
     // A promised date eases the chase to once a day until then. (BEA-1022)

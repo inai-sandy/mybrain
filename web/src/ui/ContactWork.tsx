@@ -4,6 +4,7 @@ import { CheckCircle2, Circle, Hand, Radio, Clock, MessageSquare, Plus, Pencil, 
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PersonTimeline } from './PersonTimeline';
+import { Accordion } from './Accordion';
 import { TaskFormModal, type Task } from '../pages/taskShared';
 
 type Report = {
@@ -40,10 +41,14 @@ export function ContactState({ contactId, reload }: { contactId: string; reload:
   }, [contactId, reload]);
 
   if (!s) return <div className="h-16 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />;
-  if (!s.open && !s.done && !s.awaitingYou) return null;
+  // The zero-task early return used to swallow Today's reports AND the whole conversation
+  // timeline with it — a contact with 60 messages and no linked task showed nothing. Only the
+  // stat cells depend on tasks; the rest always renders. (BEA-1210)
+  const hasTasks = !!(s.open || s.done || s.awaitingYou);
 
   return (
     <div className="space-y-2">
+    {hasTasks && (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <Cell icon={<Circle size={13} />} n={s.open} label="still open" hint={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? `oldest ${s.oldestOpenDays}d` : undefined} tone={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? 'rose' : undefined} />
       {/* No longer a link out to Review — everything about this person is answered on this page.
@@ -55,6 +60,7 @@ export function ContactState({ contactId, reload }: { contactId: string; reload:
         <p className="mt-0.5 text-sm font-semibold">{ago(s.lastHeardAt)}</p>
       </div>
     </div>
+    )}
     <TodayReports today={s.today} onChanged={() => fetch(`/api/contacts/${contactId}/state`).then((r) => (r.ok ? r.json() : null)).then(setS).catch(() => undefined)} />
     {/* Both channels in one thread, so half the conversation is no longer invisible. (BEA-1159) */}
     <PersonTimeline contactId={contactId} reload={reload} />
@@ -118,11 +124,16 @@ export function TodayReports({ today, onChanged }: { today: State['today']; onCh
     </li>
   );
 
+  // Collapsed by default with the answer still on the surface: what came in, what's waiting,
+  // in one line. The detail — quotes, sources, the day picker — is one tap away. (BEA-1210)
+  const glance = today.due.length
+    ? today.due.map((r) => `${r.status === 'received' ? '✓' : r.status === 'missed' ? '✕' : '•'} ${r.title}`).join(' · ')
+    : 'Nothing due from them today.';
+
   return (
-    <section className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
-      <h3 className="mb-2 text-xs font-semibold text-zinc-500">
-        Today’s reports {today.counts.due > 0 && <span className="font-normal text-zinc-400">· {today.counts.received} of {today.counts.due} in</span>}
-      </h3>
+    <Accordion dense title="Today’s reports"
+      badge={today.counts.due > 0 ? <span className="font-normal text-zinc-400">· {today.counts.received} of {today.counts.due} in</span> : null}
+      summary={<p className="line-clamp-2 text-xs text-zinc-400">{glance}</p>}>
       {today.due.length ? <ul className="space-y-1.5">{today.due.map(row)}</ul> : <p className="text-sm text-zinc-400">Nothing due from them today.</p>}
       {today.notDue.length > 0 && (
         <>
@@ -130,7 +141,7 @@ export function TodayReports({ today, onChanged }: { today: State['today']; onCh
           <ul className="space-y-1.5">{today.notDue.map(row)}</ul>
         </>
       )}
-    </section>
+    </Accordion>
   );
 }
 
