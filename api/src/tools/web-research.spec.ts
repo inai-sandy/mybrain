@@ -278,3 +278,37 @@ describe('Brave as the gatherer (BEA-1205)', () => {
     expect(await new WebResearchService(conn({ tavily: 't', brave: 'b' })).available()).toEqual({ tavily: true, exa: false, brave: true });
   });
 });
+
+/** BEA-1209 — a window the owner typed is never widened; a guessed one still is. */
+describe('a stated window is respected (BEA-1209)', () => {
+  const origFetch = global.fetch;
+  afterEach(() => { global.fetch = origFetch; });
+  const svcK = () => new WebResearchService({ get: async () => ({ apiKey: 'k' }) } as any);
+
+  it('does NOT search again without the dates the owner set', async () => {
+    const s = svcK();
+    const bodies: any[] = [];
+    (global as any).fetch = async (_u: string, init: any) => { bodies.push(JSON.parse(init.body)); return ok({ results: [] }); };
+    const rows = await s.search('placements', 6, { window: { start_date: '2026-01-01', end_date: '2026-06-30', stated: true } });
+    expect(rows).toEqual([]);
+    expect(bodies).toHaveLength(1);                      // one attempt only
+    expect(bodies[0].start_date).toBe('2026-01-01');
+  });
+
+  it('still widens a window we only guessed', async () => {
+    const s = svcK();
+    const bodies: any[] = [];
+    (global as any).fetch = async (_u: string, init: any) => { bodies.push(JSON.parse(init.body)); return ok({ results: [] }); };
+    await s.search('placements', 6, { window: { start_date: '2026-01-01', end_date: '2026-06-30' } }); // no `stated`
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].start_date).toBeUndefined();
+  });
+
+  it('gives Brave the same window as a freshness range', async () => {
+    let body: any = null;
+    const s = svcK();
+    (global as any).fetch = async (_u: string, init: any) => { body = JSON.parse(init.body); return ok({ grounding: { generic: [] } }); };
+    await s.braveContext('x', { window: { start_date: '2025-01-01', end_date: '2026-06-30', stated: true } });
+    expect(body.freshness).toBe('2025-01-01to2026-06-30');
+  });
+});

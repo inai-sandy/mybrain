@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { WebResearchService, WebResult, WebSearchError } from './web-research.service';
+import { WebResearchService, WebResult, WebSearchError, SearchWindow } from './web-research.service';
 import { LlmService } from '../llm/llm.service';
 
 /**
@@ -87,6 +87,24 @@ export class DeepResearchService {
   ) {}
 
   /**
+   * Turn the owner's two date fields into a window (BEA-1209).
+   *
+   * Returns undefined when neither is filled in — which is the normal case, so the guess still runs.
+   * `stated: true` is what stops it being widened later.
+   */
+  static statedWindow(from?: string, to?: string): SearchWindow | undefined {
+    const ok = (d?: string) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d || '').trim()) ? String(d).trim() : '');
+    const a = ok(from);
+    const b = ok(to);
+    if (!a && !b) return undefined;
+    // One end alone is meaningful: "since January" or "up to March".
+    const start = a || undefined;
+    const end = b || undefined;
+    if (start && end && start > end) return { start_date: end, end_date: start, stated: true }; // typed backwards
+    return { start_date: start, end_date: end, stated: true };
+  }
+
+  /**
    * Pick the search back-end for one sub-question.
    *
    * Long, wordy questions with no proper noun, number or quoted phrase are exactly the ones keyword
@@ -129,7 +147,13 @@ export class DeepResearchService {
 
   async run(
     question: string,
-    opts: { budget?: Partial<ResearchBudget>; onLine?: (t: string) => void } = {},
+    opts: {
+      budget?: Partial<ResearchBudget>;
+      onLine?: (t: string) => void;
+      /** Dates the OWNER typed (BEA-1209). Optional — without them the window is guessed as before. */
+      from?: string;
+      to?: string;
+    } = {},
   ): Promise<DeepResearchResult> {
     const { focus, context } = DeepResearchService.splitFocus(question);
     const goal = focus;
@@ -144,9 +168,11 @@ export class DeepResearchService {
 
     // Work the date window and country out ONCE from the real question — a sub-question like
     // "AICTE approved intake" often loses the "2025 and 2026" the owner actually asked about.
-    const window = WebResearchService.dateWindow(goal);
+    // A window the owner typed beats anything we could infer, and is never widened (BEA-1209).
+    const stated = DeepResearchService.statedWindow(opts.from, opts.to);
+    const window = stated ?? WebResearchService.dateWindow(goal);
     const country = WebResearchService.countryOf(goal);
-    if (window.start_date) say(`   limiting to ${window.start_date} → ${window.end_date}`);
+    if (window.start_date) say(`   limiting to ${window.start_date} → ${window.end_date}${stated ? ' (your dates)' : ''}`);
     else if (window.time_range) say(`   limiting to the last ${window.time_range}`);
     if (country) say(`   focused on ${country}`);
 
@@ -185,7 +211,7 @@ export class DeepResearchService {
         const rows = meaning
           ? await this.web.searchByMeaning(ask)
           : useBrave
-            ? await this.web.braveContext(ask, { country })
+            ? await this.web.braveContext(ask, { country, window })
             : await this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; } });
         // Brave already returned the page's content. Paying Tavily to open it again buys nothing.
         if (useBrave) for (const r of rows) alreadyRead.add(r.url);
@@ -231,8 +257,13 @@ export class DeepResearchService {
 
     if (!found.length) {
       const why = failures.length ? ` Reasons: ${failures.join('; ')}` : '';
-      // Those searches were paid for even though they returned nothing — report them.
-      throw new DeepResearchError(`the searches found nothing to work from, so there is no report to write.${why}`, spend);
+      // With dates the owner set, "nothing found" means nothing IN THAT PERIOD — a completely
+      // different statement from "this does not exist". Saying the wrong one is how a report comes
+      // to conclude the data is unavailable when we simply looked in the wrong years (BEA-1209).
+      const scope = stated
+        ? ` Nothing was published between ${stated.start_date || 'the start'} and ${stated.end_date || 'today'} — that is the dates you set, not a sign the information does not exist.`
+        : '';
+      throw new DeepResearchError(`the searches found nothing to work from, so there is no report to write.${scope}${why}`, spend);
     }
 
     // 3. Read the best pages properly. A long snippet already says enough.
@@ -254,7 +285,7 @@ export class DeepResearchService {
 
     // 4. Write it up, from the sources only.
     const sources = this.numbered(found, pages);
-    const report = await this.write(goal, sources, say, spend, found.length);
+    const report = await this.write(goal, sources, say, spend, found.length, stated);
     const list = this.sourceList(found);
     const cost = this.costLine(spend);
     say(`   💸 used ${cost}`);
@@ -339,7 +370,7 @@ export class DeepResearchService {
   }
 
   /** The write-up. Sources only — and it must admit a gap rather than fill it. */
-  private async write(goal: string, sources: string, say: (t: string) => void, spend: ResearchSpend, sourceCount: number): Promise<string> {
+  private async write(goal: string, sources: string, say: (t: string) => void, spend: ResearchSpend, sourceCount: number, stated?: SearchWindow): Promise<string> {
     say('   ✍️ writing the report');
     const prompt = [
       'Write a clear, well-structured report answering the question below, using ONLY the sources given.',
@@ -347,6 +378,7 @@ export class DeepResearchService {
       'QUESTION:',
       goal.slice(0, 1500),
       '',
+      ...(stated ? [`The owner limited this to ${stated.start_date || 'any time'} → ${stated.end_date || 'today'}. Say so in the report, and if something is missing, say it was not found IN THAT PERIOD rather than that it does not exist.`, ''] : []),
       'START WITH A SHORT SECTION headed "## What I could and could not answer".',
       'Two plain lists under it: what the sources DO answer, and what they do NOT.',
       `You were given ${sourceCount} source(s). Be specific — name the part of the question each gap belongs to.`,

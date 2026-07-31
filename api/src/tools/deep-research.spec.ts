@@ -500,3 +500,54 @@ describe('deep research (BEA-1196)', () => {
     });
   });
 });
+
+/**
+ * BEA-1209 — the owner can set a start and end date. The point is not the filter; it is what a
+ * negative result MEANS. Without a window, "the sources do not cover this" cannot be told apart from
+ * "we looked in the wrong years" — and his placement report turned on exactly that claim.
+ */
+describe('dates the owner sets (BEA-1209)', () => {
+  it('reads two dates, and marks them as stated', () => {
+    expect(DeepResearchService.statedWindow('2025-01-01', '2026-06-30')).toEqual({ start_date: '2025-01-01', end_date: '2026-06-30', stated: true });
+  });
+
+  it('accepts one end on its own — "since January" is a real request', () => {
+    expect(DeepResearchService.statedWindow('2025-01-01', undefined)).toEqual({ start_date: '2025-01-01', end_date: undefined, stated: true });
+    expect(DeepResearchService.statedWindow(undefined, '2026-06-30')).toEqual({ start_date: undefined, end_date: '2026-06-30', stated: true });
+  });
+
+  it('quietly fixes dates typed the wrong way round', () => {
+    expect(DeepResearchService.statedWindow('2026-06-30', '2025-01-01')).toEqual({ start_date: '2025-01-01', end_date: '2026-06-30', stated: true });
+  });
+
+  it('ignores rubbish and empty fields, so the guess still runs', () => {
+    expect(DeepResearchService.statedWindow(undefined, undefined)).toBeUndefined();
+    expect(DeepResearchService.statedWindow('', '')).toBeUndefined();
+    expect(DeepResearchService.statedWindow('last tuesday', 'soon')).toBeUndefined();
+  });
+
+  it('uses the owner\'s dates instead of guessing from the question', async () => {
+    const seen: any[] = [];
+    const web: any = {
+      available: async () => ({ tavily: true, exa: false, brave: false }),
+      search: async (_q: string, _m: number, o: any) => { seen.push(o.window); return [{ title: 'T', url: 'https://a', snippet: 's' }]; },
+      readPage: async () => 'text',
+    };
+    const llm: any = { helperModel: async () => null, completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'report', model: 'x' }) };
+    // The question says 2026; the owner says 2020-2021. The owner wins.
+    await new DeepResearchService(web, llm).run('what happened in 2026', { from: '2020-01-01', to: '2021-12-31' });
+    expect(seen[0]).toMatchObject({ start_date: '2020-01-01', end_date: '2021-12-31', stated: true });
+  });
+
+  it('blames the window, not the world, when the owner\'s period is empty', async () => {
+    const web: any = {
+      available: async () => ({ tavily: true, exa: false, brave: false }),
+      search: async () => [],
+      readPage: async () => '',
+    };
+    const llm: any = { helperModel: async () => null, completeWithModel: async () => ({ text: 'one question here', model: 'x' }) };
+    const err: any = await new DeepResearchService(web, llm).run('anything', { from: '2020-01-01', to: '2020-12-31' }).catch((e: any) => e);
+    expect(err.message).toMatch(/Nothing was published between 2020-01-01 and 2020-12-31/);
+    expect(err.message).toMatch(/not a sign the information does not exist/);
+  });
+});
