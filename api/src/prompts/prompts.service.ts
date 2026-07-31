@@ -8,7 +8,7 @@ export type PromptKey =
   | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMineWork' | 'daily.storyMineDay' | 'daily.insightsWritten'
   | 'tasks.autoNote'
   | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe' | 'lab.rewrite'
-  | 'people.chaseAgent' | 'people.briefingTidy'
+  | 'people.chaseAgent' | 'people.briefingTidy' | 'people.reviewRead'
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
@@ -586,6 +586,22 @@ Reply with ONLY this JSON, nothing else:
     description: "Tidies a spoken briefing about a person into clean sentences without losing any fact. Your words are added automatically. The person’s name fills in where it says {{name}}. Keep it faithful — it must NOT change your meaning.",
     default: `Tidy this spoken briefing about {{name}} into clean, plain sentences.
 Rules: keep EVERY fact, name, number and date exactly as said. Remove only filler, repetition and dictation stumbles. Do NOT add anything, do NOT summarise away details, keep it in the first person. Reply with ONLY the tidied text, no preamble.`,
+  },
+  {
+    key: 'people.reviewRead',
+    category: "People & chase",
+    label: "Review — does this reply need you?",
+    description: "The AI second opinion on each team reply: does it really need your eyes in Review? The message fills in where it says {{message}}. A completion claim always reaches you no matter what this says. ⚠️ Keep the JSON shape intact — use Reset if unsure.",
+    default: `You read ONE WhatsApp reply from a member of Sandeep's team.
+{{report}}Their reply:
+"""{{message}}"""
+
+Decide: does this reply need Sandeep HIMSELF to look at it?
+- YES when they raise a problem, are blocked, ask him a question, need a decision, approval, money, or say something unusual he must know about.
+- NO when it is a routine status update, a promise to do something later, or plain politeness/acknowledgement ("ok", "no problem sir", "thank you").
+
+Reply with ONLY this JSON, nothing else:
+{"needsYou": true or false, "why": "<seven words max, plain English>"}`,
   },
   {
     key: 'emo.router',
