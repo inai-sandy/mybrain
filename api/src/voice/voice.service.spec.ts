@@ -50,6 +50,25 @@ describe('VoiceService', () => {
     expect(text).toBe('um hello world'); // OpenAI fallback result
   });
 
+  it('logs the model that ACTUALLY ran when the newest one is unavailable (BEA-1218)', async () => {
+    const { svc } = make({ settings: { 'voice.cleanup': '0' } });
+    const logged: any[] = [];
+    (svc as any).prisma.usageLog = { create: async ({ data }: any) => { logged.push(data); return {}; } };
+    let audioCalls = 0;
+    (global as any).fetch = jest.fn(async (url: string) => {
+      if (url.includes('api.openai.com/v1/audio')) {
+        audioCalls++;
+        if (audioCalls === 1) return { ok: false, json: async () => ({}) }; // account can't use gpt-transcribe
+        return { ok: true, json: async () => ({ text: 'hello' }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    const text = await svc.transcribe(Buffer.from('x'), 'a.webm', 'audio/webm');
+    expect(text).toBe('hello');
+    expect(audioCalls).toBe(2); // gpt-transcribe → gpt-4o-transcribe, chain stops at first success
+    expect(logged[0].model).toBe('gpt-4o-transcribe'); // the log names what ran, not what we hoped
+  });
+
   it('ignores a chatty "reply" from cleanup and keeps the raw transcript', async () => {
     const { svc } = make({ clean: "I don't see any transcript text to clean up. Please provide the speech you'd like cleaned." });
     const text = await svc.transcribe(Buffer.from('audio'), 'a.webm');

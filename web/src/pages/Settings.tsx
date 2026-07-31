@@ -24,7 +24,7 @@ const INTEGRATIONS: Integration[] = [
   { name: 'exa', label: 'Exa', desc: 'Search by meaning — finds pages about an idea when you do not know the right words', icon: Globe, testable: true, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'anthropic', label: 'Anthropic (Claude)', desc: 'Claude models direct', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openrouter', label: 'OpenRouter', desc: 'One gateway to many models (Claude, GPT, Gemini…)', icon: Boxes, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
-  { name: 'openai', label: 'OpenAI', desc: 'Powers voice-to-text (GPT-4o Transcribe) + Whisper', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'openai', label: 'OpenAI', desc: 'Powers voice-to-text (GPT Transcribe) + Whisper', icon: Sparkles, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'openai_admin', label: 'OpenAI Admin (usage)', desc: 'Optional — unlocks your OpenAI spend in the API-usage card. Create an Admin key with the usage-read scope at platform.openai.com → Settings → API keys.', icon: Sparkles, fields: [{ key: 'apiKey', label: 'Admin key', type: 'password' }] },
   { name: 'elevenlabs', label: 'ElevenLabs', desc: 'Optional voice engine — Scribe (most accurate on English)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'deepgram', label: 'Deepgram', desc: 'Optional voice engine — Nova-3 (fast)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
