@@ -65,4 +65,31 @@ export class LlmController {
     await this.budget.setLimits(b?.day, b?.run);
     return this.budget.today();
   }
+
+  /**
+   * Which engines are actually alive right now (BEA-1201).
+   *
+   * Codex ran dry on 30 July and nothing on screen said so — every job quietly moved to a paid
+   * model for weeks. A picker that implies an engine is working when it is not is worse than no
+   * picker at all.
+   */
+  @Get('engines')
+  async engines() {
+    const probes: Array<{ name: string; label: string; url: string }> = [
+      { name: 'codex', label: 'Codex (ChatGPT plan)', url: process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765' },
+      { name: 'claude', label: 'Claude Code (Max plan)', url: process.env.CLAUDE_RUNNER_URL || 'http://172.18.0.1:8768' },
+      { name: 'gemini', label: 'Gemini', url: process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767' },
+    ];
+    const rows = await Promise.all(probes.map(async (p) => {
+      try {
+        const r = await fetch(`${p.url}/status`, { signal: AbortSignal.timeout(20_000) });
+        const d: any = await r.json().catch(() => ({}));
+        return { ...p, url: undefined, ready: !!d?.ready, reason: d?.error ? String(d.error).slice(0, 200) : null };
+      } catch (e: any) {
+        return { ...p, url: undefined, ready: false, reason: `not answering (${String(e?.message || e).slice(0, 60)})` };
+      }
+    }));
+    // The order jobs actually try them in, so the screen matches the behaviour.
+    return { chain: rows, fallback: 'A paid model, only when every one of these is unavailable.' };
+  }
 }

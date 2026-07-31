@@ -146,3 +146,76 @@ describe('an engine turn can never be invisible (BEA-1204)', () => {
     await expect(s.require(1)).rejects.toBeInstanceOf(TokenBudgetError);
   });
 });
+
+/**
+ * BEA-1201 — the engine chain. Codex ran dry on 30 July and every call moved silently to a paid
+ * model. One fallback was never the answer; an ORDER is, with everything already paid for by flat
+ * fee ahead of anything billed per token.
+ *
+ * These drive the real `completeWith`, not the source text. An earlier version of this block only
+ * grepped for substrings, which would have missed the very bug the review found: the FIRST engine's
+ * failure going unlogged.
+ */
+describe('the engine chain (BEA-1201)', () => {
+  const { LlmService } = require('./llm.service');
+
+  function svc(runners: Record<string, string | null>) {
+    const tried: string[] = [];
+    const warned: string[] = [];
+    const s: any = new LlmService({ get: async () => ({ apiKey: 'k' }) } as any, { setting: { findUnique: async () => null } } as any);
+    // Stand in for the host runners: each engine either answers or does not.
+    s.runAgent = async (cfg: any) => { tried.push(cfg.provider); return runners[cfg.provider] ?? null; };
+    s.logUsage = async () => undefined;
+    (s as any).log = { warn: (m: string) => warned.push(m), log: () => undefined, error: () => undefined };
+    return { s, tried, warned };
+  }
+
+  it('stops at the first engine that answers', async () => {
+    const { s, tried } = svc({ codex: 'from codex' });
+    expect(await s.completeWith({ provider: 'codex', model: 'codex' }, 'hi', 100, 'x')).toBe('from codex');
+    expect(tried).toEqual(['codex']);
+  });
+
+  it('walks on to the next FREE engine before anything paid', async () => {
+    const { s, tried } = svc({ codex: null, claude: 'from claude' });
+    expect(await s.completeWith({ provider: 'codex', model: 'codex' }, 'hi', 100, 'x')).toBe('from claude');
+    expect(tried).toEqual(['codex', 'claude']);
+  });
+
+  it('tries every free engine, in order, before reaching for a paid one', async () => {
+    const { s, tried } = svc({ codex: null, claude: null, gemini: null });
+    s.completeWith = s.completeWith.bind(s);
+    const paid: string[] = [];
+    const orig = s.completeWith;
+    // The paid fallback re-enters completeWith with the openrouter config; record and stop there.
+    s.completeWith = async function (cfg: any, p: string, m: number, l: string) {
+      if (cfg?.provider === 'openrouter') { paid.push(l); return 'from the paid model'; }
+      return orig.call(this, cfg, p, m, l);
+    };
+    expect(await s.completeWith({ provider: 'codex', model: 'codex' }, 'hi', 100, 'x')).toBe('from the paid model');
+    expect(tried).toEqual(['codex', 'claude', 'gemini']);
+    expect(paid[0]).toBe('x-fallback'); // labelled, so the usage log shows what it cost
+  });
+
+  // The review's HIGH finding. The original guard skipped the FIRST hop, which is the common case:
+  // Codex going dry would move silently to Claude and say nothing.
+  it('logs the first engine\'s failure, not just later ones', async () => {
+    const { s, warned } = svc({ codex: null, claude: 'ok' });
+    await s.completeWith({ provider: 'codex', model: 'codex' }, 'hi', 100, 'x');
+    expect(warned.some((w) => w.includes('codex could not answer'))).toBe(true);
+  });
+
+  it('starts from the engine the caller asked for, not the top of the list', async () => {
+    const { s, tried } = svc({ gemini: 'from gemini' });
+    await s.completeWith({ provider: 'gemini', model: 'Gemini 3.5 Flash' }, 'hi', 100, 'x');
+    expect(tried).toEqual(['gemini']); // never re-tries codex/claude above it
+  });
+
+  it('keeps the caller\'s own model on its own hop', async () => {
+    const models: string[] = [];
+    const { s } = svc({});
+    s.runAgent = async (cfg: any) => { models.push(cfg.model); return cfg.provider === 'gemini' ? 'ok' : null; };
+    await s.completeWith({ provider: 'gemini', model: 'Gemini 9 Special' }, 'hi', 100, 'x');
+    expect(models[0]).toBe('Gemini 9 Special');
+  });
+});

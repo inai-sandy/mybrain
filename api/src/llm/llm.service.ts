@@ -3,7 +3,7 @@ import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from './token-budget.service';
 
-export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini'; model: string };
+export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini' | 'claude'; model: string };
 
 // Host-side agent runners (subscription-based engines). The container reaches them on the Docker gateway.
 /** Ceiling for a single chat completion. Generous enough for a long answer, short enough that a
@@ -11,6 +11,22 @@ export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemi
 const LLM_TIMEOUT_MS = 60_000;
 const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
 const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
+const CLAUDE_RUNNER = process.env.CLAUDE_RUNNER_URL || 'http://172.18.0.1:8768';
+
+/**
+ * The engine chain (BEA-1201). Try each flat-rate engine in turn; a PAID model is the last resort.
+ *
+ * Codex ran dry on 30 July and every call quietly moved to Sonnet over OpenRouter without a word.
+ * The fix is not one fallback, it is an order — and the order puts everything we already pay a flat
+ * fee for ahead of anything billed per token.
+ */
+const ENGINE_CHAIN: LlmConfig[] = [
+  { provider: 'codex', model: 'codex' },
+  { provider: 'claude', model: 'claude' },
+  { provider: 'gemini', model: 'Gemini 3.5 Flash' },
+];
+/** Derived from the chain on purpose — two hand-kept lists would drift and silently misroute. */
+const isFlatRate = (p?: string) => ENGINE_CHAIN.some((e) => e.provider === p);
 
 // When a free subscription agent is down/slow/empty, work never silently fails — it falls back to the API on Sonnet.
 const AGENT_FALLBACK: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -191,6 +207,7 @@ export class LlmService {
    */
   agentConfig(provider: string | undefined, model: string): LlmConfig {
     if (model === 'codex') return { provider: 'codex', model: 'codex' };
+    if (model === 'claude') return { provider: 'claude', model: 'claude' };
     if (model === 'gemini') return { provider: 'gemini', model: 'Gemini 3.5 Flash' };
     if (model.startsWith('gemini::')) return { provider: 'gemini', model: model.slice('gemini::'.length) };
     return { provider: provider === 'anthropic' ? 'anthropic' : 'openrouter', model };
@@ -199,7 +216,7 @@ export class LlmService {
   /** Run a prompt on a subscription agent (Codex / Gemini) via its host runner. Returns null on any failure. */
   private async runAgent(cfg: LlmConfig, prompt: string, label = 'agent'): Promise<string | null> {
     try {
-      const url = cfg.provider === 'codex' ? CODEX_RUNNER : GEMINI_RUNNER;
+      const url = cfg.provider === 'codex' ? CODEX_RUNNER : cfg.provider === 'claude' ? CLAUDE_RUNNER : GEMINI_RUNNER;
       // For Gemini, cfg.model carries the specific Antigravity model name (e.g. "Gemini 3.5 Flash").
       const model = cfg.provider === 'gemini' && cfg.model && cfg.model !== 'gemini' ? cfg.model : undefined;
       const r = await fetch(`${url}/run`, {
@@ -231,14 +248,27 @@ export class LlmService {
    */
   async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; model: string | null }> {
     if (!cfg?.provider || !cfg?.model) return { text: null, model: null };
-    if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
+    if (isFlatRate(cfg.provider)) {
       // Charged up front like any engine turn — it reports nothing until it finishes (BEA-1204).
       // RESERVED too, not merely checked: two turns starting together would otherwise read the same
       // figure and both be allowed through.
       await this.budget?.require(ENGINE_TURN_TOKENS);
       const release = this.budget?.reserve(ENGINE_TURN_TOKENS) ?? (() => undefined);
-      const text = await this.runAgent(cfg, prompt, label).finally(release);
-      if (text) return { text, model: cfg.model };
+      try {
+        // Walk the same chain as completeWith (BEA-1201). This used to try one engine and drop
+        // straight to the paid model, so the Story of the Day, the Gmail brief and the research
+        // write-up never saw the other free engines at all.
+        const start = ENGINE_CHAIN.findIndex((e) => e.provider === cfg.provider);
+        for (let i = Math.max(0, start); i < ENGINE_CHAIN.length; i++) {
+          const e = ENGINE_CHAIN[i];
+          const use = i === start ? cfg : e;
+          const text = await this.runAgent(use, prompt, i === start ? label : `${label}-${e.provider}`);
+          if (text) return { text, model: use.model };
+          this.log.warn(`${label}: ${use.provider} could not answer — trying the next engine`);
+        }
+      } finally {
+        release();
+      }
       const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
       return { text: fb, model: fb ? 'Claude Sonnet 4.6 (fallback)' : cfg.model };
     }
@@ -252,16 +282,29 @@ export class LlmService {
     // the budget does not begin — which is exactly "finish the step in flight, then start nothing
     // new". A subscription engine turn is charged its measured average up front, because it reports
     // nothing until it finishes.
-    const isAgent = cfg.provider === 'codex' || cfg.provider === 'gemini';
+    const isAgent = isFlatRate(cfg.provider);
     const estimate = isAgent ? ENGINE_TURN_TOKENS : Math.ceil(prompt.length / 4) + maxTokens;
     await this.budget?.require(estimate); // throws TokenBudgetError, which callers surface verbatim
     const release = this.budget?.reserve(estimate) ?? (() => undefined);
     try {
       // Subscription agents (Codex / Gemini) — route to the host runner (no per-call API $). If the
       // runner is down/slow/empty, fall back to the API on Sonnet so the feature never silently dies.
-      if (cfg.provider === 'codex' || cfg.provider === 'gemini') {
-        const text = await this.runAgent(cfg, prompt, label);
-        if (text) return text;
+      if (isFlatRate(cfg.provider)) {
+        // Walk the chain from wherever this call started (BEA-1201). One engine running dry is an
+        // inconvenience; it is only a bill when there is nowhere else to go.
+        const start = ENGINE_CHAIN.findIndex((e) => e.provider === cfg.provider);
+        for (let i = Math.max(0, start); i < ENGINE_CHAIN.length; i++) {
+          const e = ENGINE_CHAIN[i];
+          const use = i === start ? cfg : e;
+          const text = await this.runAgent(use, prompt, i === start ? label : `${label}-${e.provider}`);
+          if (text) return text;
+          // EVERY failed hop is logged, including the first. The original guard skipped `i === start`,
+          // which is the common case — Codex going dry would have moved silently to Claude and said
+          // nothing. That is precisely the invisibility this issue exists to end.
+          this.log.warn(`${label}: ${use.provider} could not answer — trying the next engine`);
+        }
+        // Nothing free was available. This one costs money, so it is labelled as a fallback and the
+        // paid call shows up in the usage log under its own name.
         return this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
       }
       if (cfg.provider === 'anthropic') {
@@ -350,7 +393,7 @@ export class LlmService {
         await this.logUsage(label, cfg.model, d?.usage, maxTokens);
         return d?.content?.[0]?.text ?? null;
       }
-      // codex/gemini agents or unknown → text-only (no vision); the caller's prompt should still be useful.
+      // subscription agents or unknown → text-only (no vision); the caller's prompt should still be useful.
       return this.completeWith(cfg, prompt, maxTokens, label);
     } catch {
       return null;
