@@ -1407,6 +1407,11 @@ function ModelsSection() {
         desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
       <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
         desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
+      {/* Deep research makes two very different calls, so it gets two settings (BEA-1206). */}
+      <EngineModelCard title="Research — planning model" icon={FlaskConical} base="/api/llm-config/helper/deep-research-plan" agents
+        desc="Turns your question into a handful of search questions. A tiny job (about 470 tokens) — Haiku, the default, is ideal. Avoid a subscription engine here: each of those calls carries ~25,000 tokens of its own before your prompt, so a small job would eat the allowance the writing needs." />
+      <EngineModelCard title="Research — writing model" icon={FlaskConical} base="/api/llm-config/helper/deep-research-write" agents
+        desc="Reads the gathered sources and writes your report with citations. The part you actually read. Runs FREE on your Codex or Claude plan; on the API the same call costs about 6 cents." />
       <VoiceModelCard />
     </div>
   );
@@ -1426,6 +1431,7 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
     { id: 'gemini::Gemini 3.5 Flash', name: '✦ Gemini 3.5 Flash — your Google plan (free · ~13s)' },
     { id: 'gemini::Gemini 3.1 Pro', name: '✦ Gemini 3.1 Pro — your Google plan (free · deeper)' },
     { id: 'codex', name: '⚡ Codex — your ChatGPT plan (free · ~25s)' },
+    { id: 'claude', name: '◆ Claude Code — your Max plan (free · ~4s)' },
   ];
   const [opts, setOpts] = useState<{ id: string; name: string }[]>([]);
   const [model, setModel] = useState('');
@@ -1442,7 +1448,7 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
         const finalOpts = [...(agents ? AGENT_OPTS : []), ...(models.length ? models : FALLBACK)];
         setOpts(finalOpts);
         // Derive the picker id from the saved engine: agents store provider gemini/codex with a plain model name.
-        const m = cfg.provider === 'gemini' ? `gemini::${cfg.model}` : cfg.provider === 'codex' ? 'codex' : (cfg.model || '');
+        const m = cfg.provider === 'gemini' ? `gemini::${cfg.model}` : cfg.provider === 'codex' ? 'codex' : cfg.provider === 'claude' ? 'claude' : (cfg.model || '');
         setModel(m);
         setCustom(!!m && !finalOpts.some((o) => o.id === m));
       })
