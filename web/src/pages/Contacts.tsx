@@ -8,6 +8,9 @@ import { ContactState, ContactTasks } from '../ui/ContactWork';
 import { Accordion } from '../ui/Accordion';
 
 type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
+/** The work signals behind one card on the team board. (BEA-1219) */
+type Board = { open: number; needsYou: number; chasing: number; lastHeardAt: string | null; report: 'in' | 'waiting' | 'missed' | null };
+type BoardContact = Contact & { board?: Board };
 type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
 
 /** One row in the WhatsApp-style conversation inbox (BEA-921). */
@@ -266,7 +269,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
 function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const [contacts, setContacts] = useState<Contact[] | null>(null);
+  const [contacts, setContacts] = useState<BoardContact[] | null>(null);
   const [total, setTotal] = useState(0);
   // Seed search + page from the URL so opening a contact and pressing Back restores the same view (BEA-1001).
   const [q, setQ] = useState(() => params.get('q') || '');
@@ -288,7 +291,7 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const reqId = useRef(0);
   function load() {
     const my = ++reqId.current; // latest-wins: ignore a slow response once a newer request started (BEA-814)
-    fetch(`/api/contacts?q=${encodeURIComponent(q)}&page=${page}&pageSize=${PAGE_SIZE}`)
+    fetch(`/api/contacts/board?q=${encodeURIComponent(q)}&page=${page}&pageSize=${PAGE_SIZE}`)
       .then((r) => r.json())
       .then((d) => { if (my !== reqId.current) return; setContacts(d.contacts || []); setTotal(d.total || 0); })
       .catch(() => { if (my === reqId.current) setContacts([]); });
@@ -327,27 +330,61 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
         <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
           {q ? `No contacts match “${q}”.` : 'No contacts yet. Add the people you want to chase.'}
         </div>
-      ) : (
-        <ul className="space-y-2">
-          {contacts.map((c) => (
-            <li key={c.id} className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 transition-colors hover:border-emerald-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-500/40">
-              <button onClick={() => onOpen(c.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left" title="Open contact">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{c.name.slice(0, 1).toUpperCase()}</span>
+      ) : (() => {
+        // The board reads in two breaths (BEA-1219): who needs your eyes, then everyone else.
+        const alert = (c: BoardContact) => (c.board?.needsYou || 0) > 0 || c.board?.report === 'missed';
+        const eyes = contacts.filter(alert);
+        const rest = contacts.filter((c) => !alert(c));
+        const card = (c: BoardContact) => {
+          const b = c.board;
+          return (
+            <li key={c.id} className={'group flex items-start gap-3 rounded-xl border bg-white p-3.5 transition-colors dark:bg-zinc-900 ' + (alert(c) ? 'border-rose-400/40 hover:border-rose-400/70 dark:border-rose-500/30' : 'border-zinc-200 hover:border-emerald-300 dark:border-zinc-800 dark:hover:border-emerald-500/40')}>
+              <button onClick={() => onOpen(c.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left" title="Open contact">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 font-bold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{c.name.slice(0, 1).toUpperCase()}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{c.name}</div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500">
-                    {c.whatsappNumber ? <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" />+{c.whatsappNumber}</span> : <span className="text-amber-600">No number yet</span>}
-                    {c.notes && <span className="truncate">{c.notes}</span>}
-                    {c.tags?.map((t) => <span key={t} className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] dark:bg-zinc-800">{t}</span>)}
+                  <div className="truncate font-semibold">{c.name}</div>
+                  <div className="mt-0.5 truncate text-xs text-zinc-500">
+                    {[c.tags?.[0], b?.lastHeardAt ? `heard ${fmtRel(b.lastHeardAt)}` : null].filter(Boolean).join(' · ') || (c.whatsappNumber ? `+${c.whatsappNumber}` : 'no number yet')}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px] font-medium">
+                    {(b?.needsYou || 0) > 0 && <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-rose-600 dark:text-rose-400">⚠ needs your eyes{(b!.needsYou > 1) ? ` · ${b!.needsYou}` : ''}</span>}
+                    {b?.report === 'in' && <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-400">✓ today's report in</span>}
+                    {b?.report === 'waiting' && <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-400">◷ report waiting</span>}
+                    {b?.report === 'missed' && <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-rose-600 dark:text-rose-400">✕ report missed</span>}
+                    {(b?.chasing || 0) > 0 && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-500 dark:bg-zinc-800">chasing {b!.chasing}</span>}
+                    {b && !b.open && !b.needsYou && !b.report && !b.chasing && <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-zinc-400 dark:bg-zinc-800">no work items</span>}
                   </div>
                 </div>
               </button>
-              <button onClick={() => { setEditing(c); setShowForm(true); }} title="Edit" className="shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>
-              <button onClick={() => del(c)} title="Delete" className="shrink-0 rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+              <div className="flex shrink-0 flex-col items-end gap-1.5">
+                {b && b.open > 0 ? (
+                  <div className="text-right"><div className="text-lg font-extrabold leading-none">{b.open}</div><div className="mt-0.5 text-[10px] text-zinc-500">open</div></div>
+                ) : (
+                  <div className="text-lg font-extrabold leading-none text-zinc-300 dark:text-zinc-700">–</div>
+                )}
+                <div className="flex gap-0.5 opacity-60 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                  <button onClick={() => { setEditing(c); setShowForm(true); }} title="Edit" className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => del(c)} title="Delete" className="rounded-lg p-1 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              </div>
             </li>
-          ))}
-        </ul>
-      )}
+          );
+        };
+        return (
+          <div className="space-y-4">
+            {eyes.length > 0 && (
+              <section>
+                <h3 className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">Needs your eyes · {eyes.length}</h3>
+                <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{eyes.map(card)}</ul>
+              </section>
+            )}
+            <section>
+              {eyes.length > 0 && <h3 className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">Everyone</h3>}
+              <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{rest.map(card)}</ul>
+            </section>
+          </div>
+        );
+      })()}
 
       {pages > 1 && (
         <div className="flex items-center justify-center gap-3 text-sm">

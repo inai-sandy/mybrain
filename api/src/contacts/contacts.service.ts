@@ -50,6 +50,53 @@ export class ContactsService {
     return { contacts: rows.map((r) => this.shape(r)), total, page: p, pageSize: ps };
   }
 
+  /**
+   * The contacts list as a TEAM BOARD (BEA-1219): every card answers "where do we stand with this
+   * person" — open work, whether today's report is in, whether anything needs the owner's eyes,
+   * and when they were last heard. Signals are batched over the visible page, so 20 cards cost a
+   * handful of queries rather than a handful each.
+   */
+  async board(q?: string, page = 1, pageSize = 20) {
+    const base = await this.list(q, page, pageSize);
+    const ids = base.contacts.map((c: any) => c.id);
+    if (!ids.length) return base;
+    const [openTasks, needs, claims, chasing, lastIns, reports, restDays] = await Promise.all([
+      this.prisma.task.groupBy({ by: ['ownerContactId'], where: { ownerContactId: { in: ids }, status: { not: 'done' } }, _count: { _all: true } }).catch(() => [] as any[]),
+      // The same reading the review inbox uses: needs him, not closed, work not already done. (BEA-1211)
+      this.prisma.teamUpdate.findMany({ where: { contactId: { in: ids }, needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: { not: 'done' } } }] }, select: { contactId: true } }).catch(() => [] as any[]),
+      this.prisma.taskClaim.findMany({ where: { contactId: { in: ids }, status: 'pending', task: { status: { not: 'done' } } }, select: { contactId: true } }).catch(() => [] as any[]),
+      this.prisma.reminder.groupBy({ by: ['contactId'], where: { contactId: { in: ids }, status: 'active' }, _count: { _all: true } }).catch(() => [] as any[]),
+      // Exact per-contact latest — a flat row cap could let one chatty contact push a quiet one's
+      // last message out of the window and make them look never-heard. (review finding)
+      this.prisma.reminderMessage.groupBy({ by: ['contactId'], where: { contactId: { in: ids }, direction: 'in' }, _max: { createdAt: true } }).catch(() => [] as any[]),
+      this.prisma.task.findMany({ where: { ownerContactId: { in: ids }, kind: 'recurring', status: { not: 'done' } }, select: { id: true, ownerContactId: true, scheduleDays: true } }).catch(() => [] as any[]),
+      this.restDaysSafe(),
+    ]);
+    const statusRows = (reports as any[]).length
+      ? await this.prisma.taskStatusDay.findMany({ where: { day: todayKey(), taskId: { in: (reports as any[]).map((r) => r.id) } }, select: { taskId: true, status: true } }).catch(() => [] as any[])
+      : ([] as any[]);
+
+    const count = (rows: any[], key: string) => rows.reduce<Record<string, number>>((m, r) => { m[r[key]] = (m[r[key]] || 0) + 1; return m; }, {});
+    const openBy = Object.fromEntries((openTasks as any[]).map((r) => [r.ownerContactId, r._count?._all ?? 0]));
+    const chaseBy = Object.fromEntries((chasing as any[]).map((r) => [r.contactId, r._count?._all ?? 0]));
+    const needsBy = count([...(needs as any[]), ...(claims as any[])], 'contactId');
+    const heardBy: Record<string, string> = Object.fromEntries((lastIns as any[]).map((r) => [r.contactId, r._max?.createdAt]).filter(([, v]) => v));
+    const statusByTask = Object.fromEntries((statusRows as any[]).map((r) => [r.taskId, r.status]));
+    const weekday = weekdayOf(todayKey());
+
+    const shaped = base.contacts.map((c: any) => {
+      // Their standing reports DUE today, folded to one signal: in / waiting / missed / none owed.
+      const due = (reports as any[]).filter((r) => r.ownerContactId === c.id && isOwedOn(r.scheduleDays, weekday, restDays));
+      let report: 'in' | 'waiting' | 'missed' | null = null;
+      if (due.length) {
+        const states = due.map((r) => statusByTask[r.id] || 'waiting');
+        report = states.every((s) => s === 'received') ? 'in' : states.includes('missed') ? 'missed' : 'waiting';
+      }
+      return { ...c, board: { open: openBy[c.id] || 0, needsYou: needsBy[c.id] || 0, chasing: chaseBy[c.id] || 0, lastHeardAt: heardBy[c.id] || null, report } };
+    });
+    return { ...base, contacts: shaped };
+  }
+
   /** Every contact as {id, name, aliases} — the small payload pickers and @mentions need. (BEA-1019) */
   async allForPicker() {
     const rows = await this.prisma.contact.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, aliases: true } });
