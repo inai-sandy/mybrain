@@ -213,3 +213,68 @@ describe('date window edge cases the review caught (BEA-1199)', () => {
     expect(attempts).toBe(http);     // and every one was reported
   });
 });
+
+/**
+ * BEA-1205 — Brave's LLM Context endpoint does search AND page extraction in one call. Measured
+ * against Tavily on three real questions: 3 calls vs 15, 11,111 words vs 69,702, 3.7s vs 23.7s, and
+ * it found more sources. It returns ranked chunks, so the trimming happens before the text ever
+ * reaches our token count — which is why it replaced "build a context trimmer".
+ */
+describe('Brave as the gatherer (BEA-1205)', () => {
+  const origFetch = global.fetch;
+  afterEach(() => { global.fetch = origFetch; });
+  const conn = (keys: Record<string, string>) => ({ get: async (n: string) => (keys[n] ? { apiKey: keys[n] } : null) }) as any;
+
+  it('calls the right endpoint with the right field name', async () => {
+    let seen: any = null;
+    const s = new WebResearchService(conn({ brave: 'b-key' }));
+    (global as any).fetch = async (url: string, init: any) => { seen = { url, headers: init.headers, body: JSON.parse(init.body) }; return ok({ grounding: { generic: [] } }); };
+    await s.braveContext('AICTE intake in India 2026');
+    // The marketing docs say /res/v1/summarizer/llm_context, which returns 403. This is the real one.
+    expect(seen.url).toBe('https://api.search.brave.com/res/v1/llm/context');
+    expect(seen.headers['x-subscription-token']).toBe('b-key');
+    expect(seen.body.q).toBe('AICTE intake in India 2026'); // `q`, not `query`
+    expect(seen.body.country).toBe('IN');                    // two-letter code, not the full name
+  });
+
+  it('keeps a table readable instead of dumping raw JSON at the writer', async () => {
+    const s = new WebResearchService(conn({ brave: 'k' }));
+    (global as any).fetch = async () => ok({ grounding: { generic: [{ url: 'https://a.test/x', title: 'Fees',
+      snippets: [JSON.stringify({ title: 'Fee table', table: [{ Course: 'B.Tech', Fee: '1.2L' }] })] }] } });
+    const rows = await s.braveContext('fees');
+    expect(rows[0].snippet).toContain('Course: B.Tech | Fee: 1.2L');
+    expect(rows[0].snippet).not.toContain('{"title"');
+  });
+
+  it('passes plain text chunks straight through', async () => {
+    const s = new WebResearchService(conn({ brave: 'k' }));
+    (global as any).fetch = async () => ok({ grounding: { generic: [{ url: 'https://a.test/y', title: 'T', snippets: ['just some prose'] }] } });
+    expect((await s.braveContext('x'))[0].snippet).toBe('just some prose');
+  });
+
+  it('respects Brave\'s 50-word limit rather than being rejected', async () => {
+    let body: any = null;
+    const s = new WebResearchService(conn({ brave: 'k' }));
+    (global as any).fetch = async (_u: string, init: any) => { body = JSON.parse(init.body); return ok({ grounding: { generic: [] } }); };
+    await s.braveContext(Array.from({ length: 90 }, (_, i) => `word${i}`).join(' '));
+    expect(body.q.split(/\s+/).length).toBeLessThanOrEqual(50);
+    expect(body.q.length).toBeLessThanOrEqual(400);
+  });
+
+  it('says which problem it hit, rather than looking empty', async () => {
+    const s = new WebResearchService(conn({ brave: 'k' }));
+    (global as any).fetch = async () => ({ ok: false, status: 403, json: async () => ({}) });
+    await expect(s.braveContext('x')).rejects.toThrow(/rejected the key|does not include/);
+    (global as any).fetch = async () => ({ ok: false, status: 429, json: async () => ({}) });
+    await expect(s.braveContext('x')).rejects.toThrow(/rate-limited/);
+  });
+
+  it('says so when Brave is not connected', async () => {
+    const s = new WebResearchService(conn({}));
+    await expect(s.braveContext('x')).rejects.toThrow(/not connected/);
+  });
+
+  it('reports all three back-ends', async () => {
+    expect(await new WebResearchService(conn({ tavily: 't', brave: 'b' })).available()).toEqual({ tavily: true, exa: false, brave: true });
+  });
+});

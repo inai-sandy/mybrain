@@ -13,16 +13,16 @@ function make(opts: {
   results?: Record<string, any[]>;
   plan?: string | null;
   report?: string | null;
-  available?: { tavily: boolean; exa: boolean };
+  available?: { tavily: boolean; exa: boolean; brave?: boolean };
   onSearch?: (q: string, kind: 'keyword' | 'meaning') => void;
   readFails?: boolean;
   engineDown?: boolean;
   attemptsPerSearch?: number;
   helperCfg?: any;
 } = {}) {
-  const calls = { searches: 0, extracts: 0, meaning: 0 };
+  const calls = { searches: 0, extracts: 0, meaning: 0, brave: 0 };
   const web: any = {
-    available: async () => opts.available ?? { tavily: true, exa: true },
+    available: async () => opts.available ?? { tavily: true, exa: true, brave: false },
     search: async (q: string, _max?: number, o?: any) => {
       calls.searches++; opts.onSearch?.(q, 'keyword');
       // The real service reports every Tavily request it makes, so the double must too — otherwise
@@ -33,6 +33,10 @@ function make(opts: {
     searchByMeaning: async (q: string) => {
       calls.searches++; calls.meaning++; opts.onSearch?.(q, 'meaning');
       return opts.results?.[q] ?? opts.results?.['*'] ?? [{ title: 'A page', url: `https://m.test/${calls.searches}`, snippet: 'short' }];
+    },
+    braveContext: async (q: string) => {
+      calls.brave++; opts.onSearch?.(q, 'keyword');
+      return opts.results?.[q] ?? opts.results?.['*'] ?? [{ title: 'Brave page', url: `https://b.test/${calls.brave}`, snippet: 'short' }];
     },
     readPage: async (u: string) => {
       calls.extracts++;
@@ -417,6 +421,74 @@ describe('deep research (BEA-1196)', () => {
       expect(focus).toBe('sub-branch A1: TAM in India');
       expect(focus).not.toContain('market sizing');
       expect(focus).not.toContain('THIS BRANCH FOCUSES ON');
+    });
+  });
+
+  /**
+   * BEA-1205. Brave leads because one call does search AND extraction; Tavily is kept for the two
+   * things only it does well — a real date window and a list of sites to stay inside.
+   */
+  describe('choosing the gatherer', () => {
+    const withBrave = (over: any = {}) => make({ available: { tavily: true, exa: true, brave: true }, ...over });
+
+    it('leads with Brave when nothing needs precision', async () => {
+      const { svc, calls } = withBrave({ plan: 'how many students graduated' });
+      await svc.run('a plain question');
+      expect(calls.brave).toBe(1);
+      expect(calls.searches).toBe(0);
+    });
+
+    it('uses Tavily when a date window is in play — Brave cannot pin one', async () => {
+      const { svc, calls } = withBrave({ plan: 'how many students graduated' });
+      await svc.run('placements in 2025 and 2026');
+      expect(calls.searches).toBe(1);
+      expect(calls.brave).toBe(0);
+    });
+
+    it('uses Tavily when the planner named sites to stay inside', async () => {
+      const { svc, calls } = withBrave({ plan: 'how many students graduated\nsites: aicte-india.org' });
+      await svc.run('a plain question');
+      expect(calls.searches).toBe(1);
+      expect(calls.brave).toBe(0);
+    });
+
+    it('still sends a keyword-less question to Exa', async () => {
+      const { svc, calls } = withBrave({ plan: 'what makes some people quietly give up on their own ideas' });
+      await svc.run('a plain question');
+      expect(calls.meaning).toBe(1);
+      expect(calls.brave).toBe(0);
+    });
+
+    it('prices Brave separately — it is not billed at Tavily rates', async () => {
+      const { svc } = withBrave({ plan: 'how many students graduated' });
+      const { report, spend } = await svc.run('a plain question');
+      expect(spend.braveSearches).toBe(1);
+      expect(report).toMatch(/1 on Brave \(search \+ read in one\)/);
+      expect(report).not.toMatch(/2 Tavily credits/); // the Brave call is not a Tavily credit
+    });
+
+    /**
+     * The 0/6 overlap finding. Brave and Tavily returned completely different sources on one real
+     * question, so one index drawing a blank is weak evidence. "This does not exist publicly" is the
+     * most consequential sentence this tool writes.
+     */
+    it('asks the other index before concluding nothing exists', async () => {
+      let asked = 0;
+      const web: any = {
+        available: async () => ({ tavily: true, exa: false, brave: true }),
+        braveContext: async () => { asked++; return []; },
+        search: async () => { asked++; return [{ title: 'Found by the other index', url: 'https://t.test/1', snippet: 's' }]; },
+        readPage: async () => 'text',
+      };
+      const llm: any = { helperModel: async () => null, completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'the report', model: 'x' }) };
+      const { report } = await new DeepResearchService(web, llm).run('something obscure');
+      expect(asked).toBe(2);                                   // Brave, then Tavily
+      expect(report).toContain('Found by the other index');
+    });
+
+    it('does not ask twice when only one index is connected', async () => {
+      const { svc } = make({ available: { tavily: true, exa: false, brave: false }, results: { '*': [] }, plan: 'one question here' });
+      await expect(svc.run('nothing findable')).rejects.toThrow(/found nothing to work from/);
     });
   });
 });

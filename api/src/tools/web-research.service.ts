@@ -44,6 +44,12 @@ const RESEARCH_FROM = 2015;
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
+/** Brave wants the two-letter code where Tavily wants the full name. */
+const COUNTRY_CODE: Record<string, string> = {
+  india: 'IN', 'united states': 'US', 'united kingdom': 'GB', germany: 'DE', france: 'FR',
+  japan: 'JP', china: 'CN', singapore: 'SG', australia: 'AU', canada: 'CA', 'united arab emirates': 'AE',
+};
+
 /** Countries worth spotting in a question. Tavily takes the full country name. */
 const COUNTRIES: [string, string][] = [
   ['\\bindian?\\b', 'india'], ['united states|\\busa?\\b', 'united states'],
@@ -71,12 +77,70 @@ export class WebResearchService {
    * choosing a back-end per sub-question, rather than discovering it by catching a failure and
    * having to guess whether that failure cost a credit.
    */
-  async available(): Promise<{ tavily: boolean; exa: boolean }> {
-    const [t, e] = await Promise.all([
+  async available(): Promise<{ tavily: boolean; exa: boolean; brave: boolean }> {
+    const [t, e, b] = await Promise.all([
       this.connectors.get<{ apiKey?: string }>('tavily').catch(() => null),
       this.connectors.get<{ apiKey?: string }>('exa').catch(() => null),
+      this.connectors.get<{ apiKey?: string }>('brave').catch(() => null),
     ]);
-    return { tavily: !!t?.apiKey, exa: !!e?.apiKey };
+    return { tavily: !!t?.apiKey, exa: !!e?.apiKey, brave: !!b?.apiKey };
+  }
+
+  /**
+   * Brave's LLM Context endpoint — search AND page extraction in ONE call (BEA-1205).
+   *
+   * Measured against Tavily on three real questions: 3 calls versus 15, 11,111 words versus 69,702,
+   * 3.7 seconds versus 23.7 — and it found MORE sources (11/11/6 against 6/6/6). It returns ranked,
+   * already-extracted chunks instead of raw page dumps, so the trimming happens at Brave's end
+   * before the text ever reaches our token count. That is why this replaced the whole "build a
+   * context trimmer" issue.
+   *
+   * It keeps structure: tables arrive as JSON rather than being flattened into prose.
+   *
+   * NOTE the endpoint. `/res/v1/llm/context` with `q` — the paths in Brave's marketing pages
+   * (`/res/v1/summarizer/llm_context`) return 403.
+   */
+  async braveContext(query: string, opts: { country?: string; maxTokens?: number } = {}): Promise<WebResult[]> {
+    const q = (query || '').trim().split(/\s+/).slice(0, 50).join(' ').slice(0, 400); // Brave caps at 50 words / 400 chars
+    if (!q) return [];
+    const key = (await this.connectors.get<{ apiKey?: string }>('brave').catch(() => null))?.apiKey;
+    if (!key) throw new WebSearchError('Brave is not connected — add your key in Settings → Integrations.');
+    const body: any = { q, maximum_number_of_tokens: Math.min(Math.max(opts.maxTokens || 8192, 1024), 32768) };
+    const country = opts.country ?? WebResearchService.countryOf(query);
+    if (country) body.country = COUNTRY_CODE[country] || undefined;
+    const r = await fetch('https://api.search.brave.com/res/v1/llm/context', {
+      method: 'POST',
+      headers: { 'x-subscription-token': key, 'Content-Type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    }).catch((e) => { this.log.warn(`Brave failed to connect: ${e?.message || e}`); throw new WebSearchError(`the search could not run (${e?.message || e})`); });
+    if (r.status === 429) throw new WebSearchError('Brave is rate-limited right now.');
+    if (r.status === 401 || r.status === 403) throw new WebSearchError('Brave rejected the key, or your plan does not include this endpoint.');
+    if (!r.ok) throw new WebSearchError(`the search failed (Brave said ${r.status}).`);
+    const d: any = await r.json().catch(() => ({}));
+    const rows: any[] = d?.grounding?.generic || [];
+    return rows.map((x: any) => ({
+      title: String(x.title || 'Untitled'),
+      url: String(x.url || ''),
+      // Chunks come back ranked. Join them, and keep any JSON table readable rather than dumping it raw.
+      snippet: (Array.isArray(x.snippets) ? x.snippets : []).map((s: any) => this.readableChunk(s)).join('\n').slice(0, 4000),
+      published: x.age || x.page_age || undefined,
+    })).filter((x) => x.url);
+  }
+
+  /** A Brave chunk may be plain text or a JSON-encoded table. Make either readable. */
+  private readableChunk(s: unknown): string {
+    const t = String(s ?? '').trim();
+    if (!t.startsWith('{')) return t;
+    try {
+      const o = JSON.parse(t);
+      const rows: any[] = Array.isArray(o?.table) ? o.table : [];
+      if (!rows.length) return String(o?.title || t);
+      const lines = rows.map((row) => Object.entries(row).map(([k, v]) => `${k}: ${v}`).join(' | '));
+      return [o?.title, ...lines].filter(Boolean).join('\n');
+    } catch {
+      return t;
+    }
   }
 
   /** Does the wording ask for something current? Then weight the last year. */
