@@ -7,7 +7,7 @@ import { PromptsService } from '../prompts/prompts.service';
 export type Engine = 'openai' | 'elevenlabs' | 'deepgram' | 'gemini';
 
 const ENGINES: { id: Engine; name: string; connector: ConnectorName }[] = [
-  { id: 'openai', name: 'OpenAI GPT-4o Transcribe (recommended)', connector: 'openai' },
+  { id: 'openai', name: 'OpenAI GPT Transcribe (recommended)', connector: 'openai' },
   { id: 'elevenlabs', name: 'ElevenLabs Scribe (most accurate on English)', connector: 'elevenlabs' },
   { id: 'deepgram', name: 'Deepgram Nova-3 (fast)', connector: 'deepgram' },
   { id: 'gemini', name: 'Gemini (via OpenRouter)', connector: 'openrouter' },
@@ -157,7 +157,7 @@ export class VoiceService {
     }
     if (!text) return '';
     // Log the request (STT providers don't return a $ figure — cost stays in the provider totals).
-    const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
+    const sttModel: Record<Engine, string> = { openai: this.lastOpenAiModel, elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
     const loggedModel = used === 'deepgram' ? await this.getDeepgramModel() : sttModel[used];
     await this.prisma.usageLog.create({ data: { feature: 'voice-transcribe', model: loggedModel, cost: null } }).catch(() => undefined);
     if (await this.cleanupOn()) text = await this.clean(text).catch(() => text);
@@ -175,7 +175,7 @@ export class VoiceService {
       text = await this.run('openai', buf, filename, mime).catch(() => null);
     }
     if (text) {
-      const sttModel: Record<Engine, string> = { openai: 'gpt-4o-transcribe', elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
+      const sttModel: Record<Engine, string> = { openai: this.lastOpenAiModel, elevenlabs: 'scribe_v1', deepgram: 'nova-3', gemini: 'gemini-3-flash' };
       const model = used === 'deepgram' ? await this.getDeepgramModel() : sttModel[used];
       await this.prisma.usageLog.create({ data: { feature: 'meeting-transcribe', model, cost: null } }).catch(() => undefined);
     }
@@ -235,6 +235,10 @@ export class VoiceService {
     }
   }
 
+  /** The OpenAI model that produced the LAST successful transcription — so the usage log names
+   *  what actually ran, not what we hoped ran (a fallback spans a real price difference). (BEA-1218) */
+  private lastOpenAiModel = 'gpt-transcribe';
+
   private async openai(buf: Buffer, filename: string): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('openai');
     if (!c?.apiKey) return null;
@@ -249,10 +253,13 @@ export class VoiceService {
       const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any });
       if (!r.ok) return null;
       const d: any = await r.json();
-      return d?.text?.trim() || null;
+      const text = d?.text?.trim() || null;
+      if (text) this.lastOpenAiModel = model;
+      return text;
     };
-    // Best model first; fall back to whisper-1 if the account can't use gpt-4o-transcribe yet.
-    return (await call('gpt-4o-transcribe')) || (await call('whisper-1'));
+    // Best model first (BEA-1218: gpt-transcribe — newer and 25% cheaper than gpt-4o-transcribe),
+    // then the older names, so an account without access to the new one still transcribes.
+    return (await call('gpt-transcribe')) || (await call('gpt-4o-transcribe')) || (await call('whisper-1'));
   }
 
   private async elevenlabs(buf: Buffer, filename: string, mime: string): Promise<string | null> {
