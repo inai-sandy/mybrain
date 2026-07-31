@@ -19,11 +19,13 @@ export function Tasks() {
   const [reviewCount, setReviewCount] = useState<number | null>(null); // what the team needs you for (BEA-1159)
   const [eaterCount, setEaterCount] = useState<number | null>(null); // BEA-1056
   const [dailyCount, setDailyCount] = useState<number | null>(null); // standing daily reports (BEA-1123)
+  const [reportsWaiting, setReportsWaiting] = useState<number | null>(null); // today's still-owed reports, for the stat strip (BEA-1220)
   useEffect(() => {
     fetch('/api/tasks/delegated').then((r) => (r.ok ? r.json() : null)).then((d) => setDelegatedOpen(d?.summary?.open ?? 0)).catch(() => setDelegatedOpen(0));
     fetch('/api/reminders/review').then((r) => (r.ok ? r.json() : null)).then((d) => setReviewCount(d?.count ?? 0)).catch(() => setReviewCount(0));
     fetch('/api/tasks/brain-eaters').then((r) => (r.ok ? r.json() : null)).then((d) => setEaterCount(d?.openCount ?? 0)).catch(() => setEaterCount(0));
-    fetch('/api/tasks/recurring/day-log').then((r) => (r.ok ? r.json() : null)).then((d) => setDailyCount((d?.items || []).length)).catch(() => setDailyCount(0));
+    // One parse fills both the tab badge and the stat strip — no second fetch. (BEA-1220)
+    fetch('/api/tasks/recurring/day-log').then((r) => (r.ok ? r.json() : null)).then((d) => { setDailyCount((d?.items || []).length); setReportsWaiting(d?.counts?.waiting ?? null); }).catch(() => setDailyCount(0));
   }, [tab]);
   const [dumping, setDumping] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -47,6 +49,7 @@ export function Tasks() {
   const [people, setPeople] = useState<string[]>([]);
   const [personTasks, setPersonTasks] = useState<Task[] | null>(null); // all tasks involving the picked person
   const [sort, setSortRaw] = useState<string>(() => localStorage.getItem('tasks-sort') || 'newest');
+
   function setSort(v: string) {
     setSortRaw(v);
     localStorage.setItem('tasks-sort', v);
@@ -165,21 +168,40 @@ export function Tasks() {
         </div>)}
       </div>
 
-      {/* The three tabs. Same page, same look — different lists. (BEA-1044) */}
-      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden dark:border-zinc-800">
-        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['review', 'Needs you', reviewCount], ['daily', '🔁 Daily', dailyCount], ['eaters', '🧠 Brain Eaters', eaterCount]] as const).map(([id, label, n]) => (
+      {/* The tabs as pills in a card — the approved family look. (BEA-1220) */}
+      <div className="flex gap-1 overflow-x-auto rounded-xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {([['mine', 'My tasks', null], ['delegated', 'Delegated', delegatedOpen], ['review', 'Needs you', reviewCount], ['daily', '🔁 Daily', dailyCount], ['eaters', '🧠 Eaters', eaterCount]] as const).map(([id, label, n]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={'-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ' + (tab === id ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
+            className={'flex flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ' + (tab === id ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')}
           >
             {label}
             {n !== null && n !== undefined && n > 0 && (
-              <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{n}</span>
+              <span className={'rounded-full px-1.5 text-[10px] ' + (tab === id ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800')}>{n}</span>
             )}
           </button>
         ))}
       </div>
+
+      {/* The day's shape before the list — the same stat language as Home. Tapping a cell jumps
+          to the tab that answers it. (BEA-1220) */}
+      {tab === 'mine' && !history && !fPerson && (
+        <div className="grid grid-cols-3 gap-2">
+          <button onClick={() => setTab('review')} className="rounded-xl border border-zinc-200 bg-white p-2.5 text-center transition-colors hover:border-rose-400/60 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className={'text-lg font-extrabold leading-6 ' + (reviewCount ? 'text-rose-500' : '')}>{reviewCount ?? '–'}</p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">need you</p>
+          </button>
+          <div className="rounded-xl border border-zinc-200 bg-white p-2.5 text-center dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="text-lg font-extrabold leading-6"><span className={data?.counts.done ? 'text-emerald-500' : ''}>{data?.counts.done ?? 0}</span><span className="text-sm text-zinc-400">/{(data?.counts.done ?? 0) + openCount}</span></p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">done today</p>
+          </div>
+          <button onClick={() => setTab('daily')} className="rounded-xl border border-zinc-200 bg-white p-2.5 text-center transition-colors hover:border-amber-400/60 dark:border-zinc-800 dark:bg-zinc-900">
+            <p className={'text-lg font-extrabold leading-6 ' + (reportsWaiting ? 'text-amber-500' : '')}>{reportsWaiting ?? '–'}</p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">reports waiting</p>
+          </button>
+        </div>
+      )}
 
       {tab === 'eaters' && <BrainEatersTab onCountChange={setEaterCount} />}
       {tab === 'delegated' && <DelegatedTab onCountChange={setDelegatedOpen} />}
