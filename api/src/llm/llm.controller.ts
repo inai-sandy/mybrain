@@ -100,4 +100,18 @@ export class LlmController {
     // The order jobs actually try them in, so the screen matches the behaviour.
     return { chain: rows, fallback: 'A paid model, only when every one of these is unavailable.' };
   }
+
+  /** THE engine — one choice; the research write-up, skills and agent runs all follow it. */
+  @Get('engine')
+  async engine() {
+    const cfg = await this.llm.engineChoice();
+    return { provider: cfg.provider, model: cfg.model };
+  }
+
+  @Put('engine')
+  async setEngine(@Body() b: { provider?: string }) {
+    if (!b?.provider) throw new BadRequestException('Pick an engine');
+    const cfg = await this.llm.setEngineChoice(b.provider);
+    return { ok: true, provider: cfg.provider, model: cfg.model };
+  }
 }

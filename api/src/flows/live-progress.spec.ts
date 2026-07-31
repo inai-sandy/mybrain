@@ -524,3 +524,32 @@ describe('the token ceiling inside a run (BEA-1204)', () => {
     expect(await s.budgetStop('ask_ai', undefined, 1000)).toBe('');
   });
 });
+
+/** A skill that cannot run must FAIL, not quietly become an imitation of itself. */
+describe('a skill never pretends (owner\'s design)', () => {
+  const runner = (bridge: any, skills?: any) => new FlowRunnerService(
+    {} as any, bridge, {} as any, { completeDetailed: async () => ({ text: 'IMITATION', error: null }) } as any,
+    {} as any, {} as any, skills ?? { get: async () => ({ id: 'sk1', slug: 'interactive-html', deployments: '{"sandy":"interactive-html"}' }) } as any,
+    {} as any, {} as any,
+  );
+  const node = { data: { kind: 'skill', refId: 'sk1', label: 'interactive-html' } };
+
+  it('fails with the reason when the engine cannot run it', async () => {
+    const s: any = runner({ runSkillTurn: async () => { throw new Error('every engine was unavailable'); } });
+    await expect(s.runNode(node, 'the research', [])).rejects.toThrow(/interactive-html.*could not run/);
+    // It must NOT have fallen through to a model imitating the skill.
+    await expect(s.runNode(node, 'the research', [])).rejects.not.toThrow(/IMITATION/);
+  });
+
+  it('says so plainly when the skill is not installed at all', async () => {
+    const s: any = runner({ runSkillTurn: async () => 'never called' }, { get: async () => null });
+    const out = await s.runNode(node, 'x', []);
+    expect(out).toMatch(/not installed on the engine/);
+    expect(out).not.toBe('IMITATION');
+  });
+
+  it('returns the real skill output when it works', async () => {
+    const s: any = runner({ runSkillTurn: async () => '<!doctype html><html>real skill output</html>' });
+    expect(await s.runNode(node, 'x', [])).toContain('real skill output');
+  });
+});

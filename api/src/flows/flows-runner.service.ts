@@ -981,9 +981,15 @@ export class FlowRunnerService implements OnModuleInit {
         const slug = await this.skillSlug(refId);
         if (slug) {
           const p = `Use the "${label}" skill — its files are in your working directory; read SKILL.md and follow it. Do the following and reply with ONLY the finished result.${this.guidance(node)}\n\n${input}`;
-          return this.bridge.runSkillTurn(slug, p).catch(() => this.askModel(`Carry out the following in the style/approach of the "${label}" skill. Reply with only the finished result.${this.guidance(node)}\n\n${input}`));
+          // A skill that cannot run FAILS. It used to fall back to a plain model asked to work "in
+          // the style of" the skill — with none of its files — so you got an imitation of your own
+          // skill and nothing said so. A named imitation is worse than an honest failure.
+          return this.bridge.runSkillTurn(slug, p).catch((e: any) => {
+            throw new Error(`the "${label}" skill could not run: ${String(e?.message || e).slice(0, 200)}`);
+          });
         }
-        return this.askModel(`Carry out the following in the style/approach of the "${label}" skill. Reply with only the finished result.${this.guidance(node)}\n\n${input}`);
+        // No skill folder installed anywhere — say so rather than pretending to be it.
+        return `The "${label}" skill is not installed on the engine, so this step did nothing. Install it on the Skills page, or take this step out of the flow.`;
       }
       // Ask AI is pure reasoning over the upstream input — a direct model call, not a Codex turn.
       case 'ask_ai': {

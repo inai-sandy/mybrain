@@ -138,12 +138,34 @@ export class LlmService {
     // fifty times that from the very allowance the writing needs. Free is not free when it spends the
     // thing you are short of.
     'deep-research-plan': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
-    // WRITING reads ~12,900 tokens of sources and produces the report the owner actually reads. It
-    // stays on Codex: the engine is already paid for, and on the API the same call costs ~6 cents.
-    'deep-research-write': { provider: 'codex', model: 'codex' },
+    // WRITING follows THE engine choice (see engineChoice) — null means "whatever engine is picked".
+    'deep-research-write': null,
     // Kept so an existing saved setting still resolves.
     'deep-research': { provider: 'codex', model: 'codex' },
   };
+
+  /**
+   * THE engine — one choice, and everything engine-shaped follows it.
+   *
+   * The owner's words: "When I choose the engine Claude, Step 4 and Skills has to run in Claude.
+   * When I choose Codex, has to run in Codex." He was right — a separate setting per job was
+   * complexity for its own sake. One picker, and the research write-up, skills and agent runs all
+   * obey it. The chain below is only ever an automatic fallback when the chosen one is down, which
+   * is insurance rather than something to configure.
+   */
+  async engineChoice(): Promise<LlmConfig> {
+    const row = await this.prisma.setting?.findUnique({ where: { key: 'engine.choice' } }).catch(() => null);
+    const picked = String(row?.value || '').trim();
+    const found = picked ? ENGINE_CHAIN.find((e) => e.provider === picked) : null;
+    return found || ENGINE_CHAIN[0];
+  }
+
+  async setEngineChoice(provider: string): Promise<LlmConfig> {
+    const found = ENGINE_CHAIN.find((e) => e.provider === provider);
+    if (!found) throw new Error('Unknown engine');
+    await this.prisma.setting?.upsert({ where: { key: 'engine.choice' }, create: { key: 'engine.choice', value: provider }, update: { value: provider } }).catch(() => undefined);
+    return found;
+  }
 
   async helperModel(key: string): Promise<LlmConfig | null> {
     if (!(key in LlmService.HELPERS)) return null;
