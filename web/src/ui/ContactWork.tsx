@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Circle, Hand, Radio, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { CheckCircle2, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2, BarChart3, UserRound } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PersonTimeline } from './PersonTimeline';
@@ -28,6 +28,34 @@ const ago = (iso: string | null) => {
   return d === 1 ? 'yesterday' : `${d}d ago`;
 };
 
+/**
+ * The weekly character profile — who this person is and how they work, written by the app from
+ * their reports and the owner's briefings. (BEA-1216; the accordion ships with the redesign so
+ * the page has its slot from day one.)
+ */
+export function CharacterProfile({ contactId, reload }: { contactId: string; reload?: number }) {
+  const [p, setP] = useState<{ text: string; updatedAt: string | null } | 'none' | null>(null);
+  useEffect(() => {
+    setP(null);
+    fetch(`/api/contacts/${contactId}/profile`)
+      .then((r) => (r.ok ? r.json() : 'none'))
+      .then((d: any) => setP(d && d !== 'none' && d.text ? d : 'none'))
+      .catch(() => setP('none'));
+  }, [contactId, reload]);
+  const ready = p !== null && p !== 'none';
+  return (
+    <Accordion dense icon={UserRound} tile="bg-violet-500/10 text-violet-500" title="Character profile"
+      badge={ready && p.updatedAt ? <span className="text-xs font-normal text-zinc-400">· {new Date(p.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span> : null}
+      summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">
+        {ready ? p.text.split('\n').find(Boolean) : 'Being written — builds itself each week from their reports and your briefings.'}
+      </span>}>
+      {ready
+        ? <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{p.text}</div>
+        : <p className="text-sm text-zinc-400">Nothing written yet. Once there's enough activity, the profile writes itself every week — same page, always fresh.</p>}
+    </Accordion>
+  );
+}
+
 /** Where this person stands, in one glance at the top of their page. (BEA-1037) */
 export function ContactState({ contactId, reload }: { contactId: string; reload: number }) {
   const [s, setS] = useState<State | null>(null);
@@ -47,20 +75,22 @@ export function ContactState({ contactId, reload }: { contactId: string; reload:
   const hasTasks = !!(s.open || s.done || s.awaitingYou);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
     {hasTasks && (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <Cell icon={<Circle size={13} />} n={s.open} label="still open" hint={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? `oldest ${s.oldestOpenDays}d` : undefined} tone={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? 'rose' : undefined} />
+    <div className="grid grid-cols-4 gap-2">
+      {/* The approved board language (BEA-1215): big coloured number, tiny grey label. */}
+      <Cell n={s.open} label={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? `open · oldest ${s.oldestOpenDays}d` : 'still open'} tone={s.oldestOpenDays !== null && s.oldestOpenDays >= 7 ? 'rose' : undefined} />
       {/* No longer a link out to Review — everything about this person is answered on this page.
           Bouncing between four screens to know where one person stands was the complaint. (BEA-1149) */}
-      <Cell icon={<Hand size={13} />} n={s.awaitingYou} label="waiting on you" tone={s.awaitingYou ? 'violet' : undefined} />
-      <Cell icon={<Radio size={13} />} n={s.chasing} label="being chased" />
-      <div className="rounded-xl border border-zinc-200 p-2.5 dark:border-zinc-800">
-        <div className="flex items-center gap-1.5 text-zinc-500"><MessageSquare size={13} /><span className="text-[11px]">last heard</span></div>
-        <p className="mt-0.5 text-sm font-semibold">{ago(s.lastHeardAt)}</p>
+      <Cell n={s.awaitingYou} label="waiting on you" tone={s.awaitingYou ? 'violet' : undefined} />
+      <Cell n={s.chasing} label="being chased" tone={s.chasing ? 'emerald' : undefined} />
+      <div className="rounded-xl border border-zinc-200 bg-white p-2.5 text-center dark:border-zinc-800 dark:bg-zinc-900">
+        <p className="text-sm font-bold leading-6">{ago(s.lastHeardAt)}</p>
+        <p className="mt-0.5 text-[10px] text-zinc-500">last heard</p>
       </div>
     </div>
     )}
+    <CharacterProfile contactId={contactId} reload={reload} />
     <TodayReports today={s.today} onChanged={() => fetch(`/api/contacts/${contactId}/state`).then((r) => (r.ok ? r.json() : null)).then(setS).catch(() => undefined)} />
     {/* Both channels in one thread, so half the conversation is no longer invisible. (BEA-1159) */}
     <PersonTimeline contactId={contactId} reload={reload} />
@@ -131,9 +161,9 @@ export function TodayReports({ today, onChanged }: { today: State['today']; onCh
     : 'Nothing due from them today.';
 
   return (
-    <Accordion dense title="Today’s reports"
-      badge={today.counts.due > 0 ? <span className="font-normal text-zinc-400">· {today.counts.received} of {today.counts.due} in</span> : null}
-      summary={<p className="line-clamp-2 text-xs text-zinc-400">{glance}</p>}>
+    <Accordion dense icon={BarChart3} tile="bg-amber-500/10 text-amber-500" title="Today’s reports"
+      badge={today.counts.due > 0 ? <span className="text-xs font-normal text-zinc-400">· {today.counts.received} of {today.counts.due} in</span> : null}
+      summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">{glance}</span>}>
       {today.due.length ? <ul className="space-y-1.5">{today.due.map(row)}</ul> : <p className="text-sm text-zinc-400">Nothing due from them today.</p>}
       {today.notDue.length > 0 && (
         <>
@@ -145,13 +175,12 @@ export function TodayReports({ today, onChanged }: { today: State['today']; onCh
   );
 }
 
-function Cell({ icon, n, label, hint, tone }: { icon: React.ReactNode; n: number; label: string; hint?: string; tone?: 'violet' | 'rose' }) {
-  const border = tone === 'violet' && n > 0 ? 'border-violet-400/50 bg-violet-500/5' : tone === 'rose' && n > 0 ? 'border-rose-400/40 bg-rose-500/5' : 'border-zinc-200 dark:border-zinc-800';
+function Cell({ n, label, tone }: { n: number; label: string; tone?: 'violet' | 'rose' | 'emerald' }) {
+  const num = tone === 'violet' && n > 0 ? 'text-violet-500' : tone === 'rose' && n > 0 ? 'text-rose-500' : tone === 'emerald' && n > 0 ? 'text-emerald-500' : '';
   return (
-    <div className={`rounded-xl border p-2.5 ${border}`}>
-      <div className="flex items-center gap-1.5 text-zinc-500">{icon}<span className="text-[11px]">{label}</span></div>
-      <p className="mt-0.5 text-lg font-bold leading-none">{n}</p>
-      {hint && <p className="mt-0.5 text-[10px] text-rose-600 dark:text-rose-400">{hint}</p>}
+    <div className="rounded-xl border border-zinc-200 bg-white p-2.5 text-center dark:border-zinc-800 dark:bg-zinc-900">
+      <p className={`text-lg font-extrabold leading-6 ${num}`}>{n}</p>
+      <p className="mt-0.5 text-[10px] text-zinc-500">{label}</p>
     </div>
   );
 }
