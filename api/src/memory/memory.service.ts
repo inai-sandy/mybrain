@@ -28,6 +28,12 @@ const SOURCE_META: Record<string, SourceMeta> = {
     label: 'Where each person stands', model: 'contact', pk: 'id', cadence: 'on-update',
     include: { ownedTasks: { select: { title: true, status: true, createdAt: true, promisedFor: true }, take: 60, orderBy: { createdAt: 'desc' } } },
   },
+  // The weekly character profile — who each person IS, next to the contact doc's "where they
+  // stand". One living doc per person, rewritten weekly. (BEA-1216)
+  contactprofile: {
+    label: 'Character profiles (people)', model: 'contactProfile', pk: 'contactId', cadence: 'on-update',
+    include: { contact: { select: { name: true } } },
+  },
   note: { label: 'Notes', model: 'note', pk: 'id', defaultDisabled: true, cadence: 'live' },
   // Vault — LABELS ONLY (BEA-368). Index the searchable metadata so items are findable from the brain;
   // the encrypted secret is NEVER indexed (see buildVaultIndexText). User-toggleable; default on.
@@ -897,6 +903,16 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
           tags: ['people', 'delegation', String(name).toLowerCase().split(/\s+/)[0]],
         };
       }
+      // The weekly character profile — the stored text IS the doc; nothing to rebuild. (BEA-1216)
+      case 'contactprofile': {
+        const name = row.contact?.name || 'Someone';
+        if (!row.text) return null;
+        return {
+          content: `Character profile — ${name}\n\n${row.text}`,
+          title: `Who ${name} is — character profile`.slice(0, 120),
+          tags: ['people', 'profile', String(name).toLowerCase().split(/\s+/)[0]],
+        };
+      }
       case 'story':
         return { content: `His own story — ${row.day}${row.mood ? ` (mood: ${row.mood})` : ''}\n\n${row.rawText}`, title: `Your story ${row.day}`, tags: ['activity', 'story'] };
       case 'idea':
@@ -973,9 +989,12 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
         // build, so the generic safety-net must NOT pull in today's partial brief. (BEA-343)
         if (table === 'gmailbrief') continue;
         if (!this.modelOf(table)) continue; // unknown/missing delegate — never let one source halt the sweep
+        // Carry the type's include: buildContent for briefing/contactprofile needs the contact's
+        // name — without it the backstop reindexes as "Someone". (review finding, BEA-1216)
         const rows = await this.modelOf(table).findMany({
           where: { OR: [{ ragId: null }, { supermemoryId: null }] },
           take: 200,
+          ...(SOURCE_META[table]?.include ? { include: SOURCE_META[table].include } : {}),
         });
         for (const row of rows) {
           const missingSm = !row.supermemoryId;

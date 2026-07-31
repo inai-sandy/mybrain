@@ -141,6 +141,9 @@ export class LlmService {
     // Reads one team reply and says whether it needs the owner's eyes — tiny in, tiny out, runs on
     // every inbound WhatsApp message, so a small fast model is the right default. (BEA-1213)
     'review-read': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Writes each contact's weekly character profile — a once-a-week reasoning job over a month of
+    // real messages, so Sonnet by default. (BEA-1216)
+    'character-profile': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
     // WRITING follows THE engine choice (see engineChoice) — null means "whatever engine is picked".
     'deep-research-write': null,
     // Kept so an existing saved setting still resolves.
