@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorService, ConnectorName } from '../connectors/connector.service';
 import { LlmService } from '../llm/llm.service';
@@ -18,6 +18,8 @@ const ttsCache = new Map<string, Buffer>(); // spoken fillers/ack repeat → ins
 /** One transcription engine for the whole app (in-app mic + Telegram voice): record → STT → optional AI cleanup. */
 @Injectable()
 export class VoiceService {
+  private readonly log = new Logger('Voice');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly connectors: ConnectorService,
@@ -239,6 +241,11 @@ export class VoiceService {
    *  what actually ran, not what we hoped ran (a fallback spans a real price difference). (BEA-1218) */
   private lastOpenAiModel = 'gpt-transcribe';
 
+  /** The account rejected gpt-transcribe outright (smoke-tested live on 31 Jul — OpenAI hasn't
+   *  enabled it here yet). Remember that until the next restart so every dictation doesn't pay a
+   *  wasted round trip; each deploy retries once, so the day OpenAI turns it on we upgrade alone. */
+  private newestOpenAiDown = false;
+
   private async openai(buf: Buffer, filename: string): Promise<string | null> {
     const c = await this.connectors.get<{ apiKey: string }>('openai');
     if (!c?.apiKey) return null;
@@ -251,7 +258,14 @@ export class VoiceService {
       if (lang) form.append('language', lang);
       if (hint) form.append('prompt', hint); // bias toward the user's real names/terms (BEA-888)
       const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${c.apiKey}` }, body: form as any });
-      if (!r.ok) return null;
+      if (!r.ok) {
+        // A hard rejection (bad model / no access) will repeat on every try — stop paying for it.
+        if (model === 'gpt-transcribe' && [400, 403, 404].includes(r.status)) {
+          this.newestOpenAiDown = true;
+          this.log.warn('gpt-transcribe rejected by the account — using gpt-4o-transcribe until the next restart');
+        }
+        return null;
+      }
       const d: any = await r.json();
       const text = d?.text?.trim() || null;
       if (text) this.lastOpenAiModel = model;
@@ -259,7 +273,7 @@ export class VoiceService {
     };
     // Best model first (BEA-1218: gpt-transcribe — newer and 25% cheaper than gpt-4o-transcribe),
     // then the older names, so an account without access to the new one still transcribes.
-    return (await call('gpt-transcribe')) || (await call('gpt-4o-transcribe')) || (await call('whisper-1'));
+    return (this.newestOpenAiDown ? null : await call('gpt-transcribe')) || (await call('gpt-4o-transcribe')) || (await call('whisper-1'));
   }
 
   private async elevenlabs(buf: Buffer, filename: string, mime: string): Promise<string | null> {

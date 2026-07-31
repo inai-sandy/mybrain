@@ -69,6 +69,23 @@ describe('VoiceService', () => {
     expect(logged[0].model).toBe('gpt-4o-transcribe'); // the log names what ran, not what we hoped
   });
 
+  it('remembers a hard rejection of gpt-transcribe — later dictations skip the wasted call (BEA-1218)', async () => {
+    const { svc } = make({ settings: { 'voice.cleanup': '0' } });
+    (svc as any).prisma.usageLog = { create: async () => ({}) };
+    let audioCalls = 0;
+    (global as any).fetch = jest.fn(async (url: string) => {
+      if (url.includes('api.openai.com/v1/audio')) {
+        audioCalls++;
+        if (audioCalls === 1) return { ok: false, status: 404, json: async () => ({}) }; // model not enabled here
+        return { ok: true, json: async () => ({ text: 'hello' }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    await svc.transcribe(Buffer.from('x'), 'a.webm', 'audio/webm'); // pays the failed call once
+    await svc.transcribe(Buffer.from('y'), 'b.webm', 'audio/webm'); // goes straight to the fallback
+    expect(audioCalls).toBe(3); // 2 for the first (fail+success), only 1 for the second
+  });
+
   it('ignores a chatty "reply" from cleanup and keeps the raw transcript', async () => {
     const { svc } = make({ clean: "I don't see any transcript text to clean up. Please provide the speech you'd like cleaned." });
     const text = await svc.transcribe(Buffer.from('audio'), 'a.webm');
