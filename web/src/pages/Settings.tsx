@@ -250,7 +250,13 @@ function renderSection(id: Tab, email?: string): ReactNode {
       <PromptsSection category="The Lab" />
       <LabActivitySection />
     </div>;
-    case 'agents': return <><AgentEngineSection /><div className="mt-6 space-y-1"><h2 className="text-sm font-semibold text-zinc-500">All AI models</h2><p className="text-xs text-zinc-400">Every model in one list. These are moving into their own modules, one by one.</p></div><ModelsSection /></>;
+    case 'agents': return <>
+      <AgentEngineSection />
+      <QuietHoursCard />
+      <ModuleAiHeader />
+      <ModelsSection />
+      <PromptsSection category="Agents" />
+    </>;
     case 'memory': return <div className="space-y-4"><IndexSection /><SuperMemorySyncCard /></div>;
     case 'prompts': return <PromptsSection />;
     case 'google': return <div className="space-y-4">
@@ -699,7 +705,7 @@ function AgentEngineSection() {
 
 /** Public RAG MCP server (BEA-633) — let third-party agents search your brain over HTTPS. */
 function PublicRagMcpCard() {
-  const [cfg, setCfg] = useState<{ enabled: boolean; token: string; url: string; tools: { name: string; description: string }[] } | null>(null);
+  const [cfg, setCfg] = useState<{ enabled: boolean; write?: boolean; token: string; url: string; tools: { name: string; description: string }[] } | null>(null);
   const [show, setShow] = useState(false);
   const [regen, setRegen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -708,6 +714,10 @@ function PublicRagMcpCard() {
   async function setEnabled(enabled: boolean) {
     setBusy(true);
     try { const r = await fetch('/api/mcp/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }); if (r.ok) { setCfg(await r.json()); toast('success', enabled ? 'RAG MCP server is on' : 'RAG MCP server turned off'); } else toast('error', 'Could not update'); } finally { setBusy(false); }
+  }
+  async function setWrite(enabled: boolean) {
+    setBusy(true);
+    try { const r = await fetch('/api/mcp/write', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) }); if (r.ok) { setCfg(await r.json()); toast('success', enabled ? 'Write access ON — the token can now file captures' : 'Write access off — read-only again'); } else toast('error', 'Could not update'); } finally { setBusy(false); }
   }
   async function regenerate() {
     setRegen(false);
@@ -768,6 +778,14 @@ function PublicRagMcpCard() {
 
       <label className="mb-1 block text-xs text-zinc-500">Or use a token — Claude Code, Desktop &amp; API (paste into the agent's MCP config)</label>
       <pre className="overflow-x-auto whitespace-pre rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-xs font-mono dark:border-zinc-700 dark:bg-zinc-950">{snippet}</pre>
+      {/* Write access was a code-only key until BEA-1232 — the owner opts in with open eyes. */}
+      <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-sm">
+        <input type="checkbox" checked={!!cfg.write} disabled={busy} onChange={(e) => setWrite(e.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" />
+        <span>
+          <span className="font-medium">Allow this token to WRITE (file captures)</span><br />
+          <span className="text-xs text-amber-600 dark:text-amber-500">Off = read-only, the safe default. On means anyone holding the token can add notes into your brain — leave it off unless a connected agent genuinely needs it.</span>
+        </span>
+      </label>
       <div className="mt-4 flex justify-between">
         <button onClick={() => copy(snippet, 'Config')} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700">Copy config</button>
         <button onClick={() => setRegen(true)} className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-rose-500 hover:border-rose-400 dark:border-zinc-700">Regenerate token</button>
@@ -1554,7 +1572,12 @@ function ModelsSection() {
         desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
       <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
         desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
-      <VoiceModelCard />
+      <EngineModelCard title="Deep research — planning model" icon={Compass} base="/api/llm-config/helper/deep-research-plan"
+        desc="Writes the sub-questions a deep research run will chase. Tiny in, tiny out — Haiku (the default) is right; a big engine here wastes the allowance the writing needs." />
+      <EngineModelCard title="Deep research — writing model" icon={FileText} base="/api/llm-config/helper/deep-research-write"
+        desc="Reads the gathered pages and writes the cited report. Follows THE engine choice until you pick one — that is what keeps a report at search-credit cost." />
+      <EngineModelCard title="Commitments model" icon={CheckSquare} base="/api/accountability/model" agents
+        desc="Extracts the commitments you make in your stories and checks how they went. Had an API and no card until now. Can run FREE on your Codex/Gemini subscription." />
     </div>
   );
 }
@@ -1620,6 +1643,39 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
       <div className="mt-4 text-right">
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
       </div>
+    </AccordionCard>
+  );
+}
+
+/** Quiet hours for phone pushes — enforced since day one, visible since now. (BEA-1232) */
+function QuietHoursCard() {
+  const [qh, setQh] = useState<{ start: number | null; end: number | null } | null>(null);
+  const toast = useToast();
+  useEffect(() => { fetch('/api/push/quiet-hours').then((r) => r.json()).then(setQh).catch(() => setQh(null)); }, []);
+  async function save(start: number | null, end: number | null) {
+    const r = await fetch('/api/push/quiet-hours', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ start, end }) }).catch(() => null);
+    if (r?.ok) { setQh(await r.json()); toast('success', start === null ? 'Quiet hours off — pushes any time' : `Quiet from ${start}:00 to ${end}:00`); }
+    else toast('error', 'Could not save');
+  }
+  if (!qh) return null;
+  const on = qh.start !== null && qh.end !== null;
+  const hourSel = (v: number | null, set: (n: number) => void) => (
+    <select value={v ?? 22} onChange={(e) => set(Number(e.target.value))} className="rounded-lg border border-zinc-300 bg-zinc-100 px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950">
+      {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+    </select>
+  );
+  return (
+    <AccordionCard title="Phone push quiet hours" icon={BellRing}>
+      <p className="mb-3 text-sm text-zinc-500">Between these hours routine pushes are held. A question an agent is waiting on ALWAYS comes through — a paused agent costs more than a buzz.</p>
+      <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+        <input type="checkbox" checked={on} onChange={(e) => (e.target.checked ? save(22, 7) : save(null, null))} className="h-4 w-4 accent-emerald-600" />
+        <span className="font-medium">{on ? 'Quiet hours are on' : 'Quiet hours are off'}</span>
+      </label>
+      {on && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
+          from {hourSel(qh.start, (n) => save(n, qh.end))} to {hourSel(qh.end, (n) => save(qh.start, n))}
+        </div>
+      )}
     </AccordionCard>
   );
 }

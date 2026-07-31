@@ -74,6 +74,28 @@ export class PushService implements OnModuleInit {
     return { devices: await this.prisma.pushSubscription.count() };
   }
 
+  /** The current quiet-hours window, for the settings card. null/null = off. (BEA-1232) */
+  async quietHours(): Promise<{ start: number | null; end: number | null }> {
+    const [s, e] = await Promise.all([
+      this.prisma.setting.findUnique({ where: { key: 'push.quietStart' } }).catch(() => null),
+      this.prisma.setting.findUnique({ where: { key: 'push.quietEnd' } }).catch(() => null),
+    ]);
+    const start = s?.value === '' ? null : Number(s?.value ?? 22);
+    const end = e?.value === '' ? null : Number(e?.value ?? 7);
+    return { start: Number.isNaN(start as number) ? null : start, end: Number.isNaN(end as number) ? null : end };
+  }
+
+  /** Set (or clear with nulls) the quiet-hours window. Hours 0–23; asks always pass regardless. */
+  async setQuietHours(start: number | null, end: number | null): Promise<{ start: number | null; end: number | null }> {
+    const clean = (v: number | null) => (v === null || !Number.isFinite(v) || v < 0 || v > 23 ? '' : String(Math.floor(v)));
+    const put = async (key: string, value: string) => {
+      await this.prisma.setting.upsert({ where: { key }, create: { key, value }, update: { value } }).catch(() => undefined);
+    };
+    await put('push.quietStart', clean(start));
+    await put('push.quietEnd', clean(end));
+    return this.quietHours();
+  }
+
   /** Quiet hours (IST): non-ask pushes are held between quietStart and quietEnd. Asks always pass. */
   async inQuietHours(now: Date = new Date()): Promise<boolean> {
     const [s, e] = await Promise.all([
