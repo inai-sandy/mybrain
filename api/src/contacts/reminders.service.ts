@@ -228,6 +228,27 @@ export class RemindersService {
   }
 
   /**
+   * The chat can be opened for a CONTACT with no particular reminder — the Message button on their
+   * page (BEA-1149) passes the synthetic id 'thread'. Sending then failed "Reminder not found",
+   * because both send paths insisted on a real reminder row. The contact is the real anchor: use
+   * their latest reminder when one exists, none otherwise. (BEA-1226)
+   */
+  private async anchorFor(id: string, contactId?: string | null): Promise<{ contact: any; reminder: any | null }> {
+    if (id && id !== 'thread') {
+      const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
+      // The reminder's own contactId is authoritative — the joined row rides along for name/number.
+      if (r) return { contact: { id: r.contactId, ...(r.contact || {}) }, reminder: r };
+    }
+    if (!contactId) throw new NotFoundException('Reminder not found');
+    const contact = await this.prisma.contact.findUnique({ where: { id: contactId } });
+    if (!contact) throw new NotFoundException('Contact not found');
+    const reminder = await this.prisma.reminder
+      .findFirst({ where: { contactId }, orderBy: { updatedAt: 'desc' } })
+      .catch(() => null);
+    return { contact, reminder };
+  }
+
+  /**
    * Send a manual message to the contact from the chat window (user takes over). Free-text, 24h-window. (BEA-736)
    *
    * Outside that window WhatsApp will not carry free text, so we send the approved template instead
@@ -235,26 +256,25 @@ export class RemindersService {
    * accepted and only fails later on the delivery webhook, so the app would report success while the
    * person heard nothing — which is how a rejected claim went silent for two days. (BEA-1112)
    */
-  async sendManual(id: string, body: string) {
-    const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
-    if (!r) throw new NotFoundException('Reminder not found');
+  async sendManual(id: string, body: string, threadContactId?: string) {
+    const { contact, reminder } = await this.anchorFor(id, threadContactId);
     const text = (body || '').trim();
     if (!text) throw new BadRequestException('Type a message');
-    const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
+    const number = (contact?.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number) throw new BadRequestException('This contact has no WhatsApp number');
     if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
 
     // ---- the checkpoint ----
-    if (!chatWindowOpen(await this.lastInboundAt(r.contactId))) {
-      const firstName = (r.contact?.name || 'there').trim().split(/\s+/)[0];
-      const subject = await this.subjectForReminder(r);
+    if (!chatWindowOpen(await this.lastInboundAt(contact.id))) {
+      const firstName = (contact?.name || 'there').trim().split(/\s+/)[0];
+      const subject = reminder ? await this.subjectForReminder(reminder) : 'your pending updates';
       const t = await this.postbox.sendReminderTemplate(number, firstName, subject);
       if (t.error) throw new BadRequestException(t.error);
       const rendered = this.postbox.renderReminderTemplate(firstName, subject);
       const sent = await this.prisma.reminderMessage.create({
-        data: { contactId: r.contactId, reminderId: id, direction: 'out', body: rendered, wamid: t.wamid || null, status: 'sent' },
+        data: { contactId: contact.id, reminderId: reminder?.id || null, direction: 'out', body: rendered, wamid: t.wamid || null, status: 'sent' },
       });
-      await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
+      await this.prisma.reminder.updateMany({ where: { contactId: contact.id, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
       return {
         id: sent.id,
         direction: 'out',
@@ -276,10 +296,10 @@ export class RemindersService {
       );
     }
     const msg = await this.prisma.reminderMessage.create({
-      data: { contactId: r.contactId, reminderId: id, direction: 'out', body: text, wamid: res.wamid || null, status: 'sent' },
+      data: { contactId: contact.id, reminderId: reminder?.id || null, direction: 'out', body: text, wamid: res.wamid || null, status: 'sent' },
     });
     // Sandeep just replied → clear the "needs you" flag for this contact. (BEA-766)
-    await this.prisma.reminder.updateMany({ where: { contactId: r.contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
+    await this.prisma.reminder.updateMany({ where: { contactId: contact.id, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
     return { id: msg.id, direction: 'out', body: msg.body, at: msg.createdAt, status: 'sent', viaTemplate: false, note: null as string | null };
   }
 
@@ -290,21 +310,20 @@ export class RemindersService {
    * "Open my list" button — resending must never say less than the scheduled chase would.
    * Subjects are the tasks' CURRENT titles, never the snapshot stored at creation time.
    */
-  async resendTemplate(id: string) {
-    const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true } });
-    if (!r) throw new NotFoundException('Reminder not found');
-    const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
+  async resendTemplate(id: string, threadContactId?: string) {
+    const { contact, reminder } = await this.anchorFor(id, threadContactId);
+    const number = (contact?.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number) throw new BadRequestException('This contact has no WhatsApp number');
     if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
-    const firstName = (r.contact?.name || 'there').trim().split(/\s+/)[0] || 'there';
+    const firstName = (contact?.name || 'there').trim().split(/\s+/)[0] || 'there';
 
     // Everything currently open with this person, in the SAME order the scheduler and the agent
     // number them — so a reply of "2 is done" always means the same task.
     const open = await this.prisma.reminder.findMany({
-      where: { contactId: r.contactId, status: { in: ['active', 'paused'] } },
+      where: { contactId: contact.id, status: { in: ['active', 'paused'] } },
       orderBy: { createdAt: 'asc' },
     });
-    const items = open.length ? open : [r];
+    const items = open.length ? open : reminder ? [reminder] : [];
     const subjects: string[] = [];
     for (const it of items) {
       let sub = '';
@@ -320,7 +339,7 @@ export class RemindersService {
     if (subjects.length >= 2) {
       const shownList = subjects.slice(0, 3).map((t, i) => `${i + 1}) ${t}`).join(' ')
         + (subjects.length > 3 ? ` and ${subjects.length - 3} more on your list` : '');
-      const slug = await this.contacts.share(r.contactId).then((x) => x.slug).catch(() => 'unavailable');
+      const slug = await this.contacts.share(contact.id).then((x) => x.slug).catch(() => 'unavailable');
       res = await this.postbox.sendTaskListTemplate(number, firstName, subjects.length, shownList, slug);
       body = this.postbox.renderTaskListTemplate(firstName, subjects.length, shownList, slug);
       if (res.error) {
@@ -336,7 +355,7 @@ export class RemindersService {
     }
     if (res.error) throw new BadRequestException(res.error);
     const msg = await this.prisma.reminderMessage.create({
-      data: { contactId: r.contactId, reminderId: id, direction: 'out', body, wamid: res.wamid || null, status: 'sent' },
+      data: { contactId: contact.id, reminderId: reminder?.id || null, direction: 'out', body, wamid: res.wamid || null, status: 'sent' },
     });
     return { id: msg.id, direction: 'out', body, at: msg.createdAt, status: 'sent' };
   }

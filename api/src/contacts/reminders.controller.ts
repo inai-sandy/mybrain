@@ -98,16 +98,17 @@ export class RemindersController {
     return this.reminders.thread(id);
   }
 
-  /** Send a manual message to the contact from the chat window (BEA-736). */
+  /** Send a manual message to the contact from the chat window (BEA-736). The contact thread
+   *  (Message button, id 'thread') carries the contactId as its anchor. (BEA-1226) */
   @Post(':id/message')
-  sendMessage(@Param('id') id: string, @Body() body: { body?: string }) {
-    return this.reminders.sendManual(id, body?.body || '');
+  sendMessage(@Param('id') id: string, @Body() body: { body?: string; contactId?: string }) {
+    return this.reminders.sendManual(id, body?.body || '', body?.contactId || undefined);
   }
 
-  /** Re-send the approved template to re-open the 24h chat window. (BEA-917) */
+  /** Re-send the approved template to re-open the 24h chat window. (BEA-917/1226) */
   @Post(':id/resend-template')
-  resendTemplate(@Param('id') id: string) {
-    return this.reminders.resendTemplate(id);
+  resendTemplate(@Param('id') id: string, @Body() body?: { contactId?: string }) {
+    return this.reminders.resendTemplate(id, body?.contactId || undefined);
   }
 
   /** One-time: bring in everything already said, so the inbox is not empty on day one. (BEA-1159) */
