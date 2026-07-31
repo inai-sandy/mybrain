@@ -302,7 +302,9 @@ export class ContactsService {
       this.prisma.task
         .findMany({
           where: { ownerContactId: id, kind: 'recurring', status: { not: 'done' } },
-          select: { id: true, title: true, scheduleDays: true, statusDays: { where: { day: todayKey() }, take: 1 } },
+          // The last days, not just today (BEA-1223): while today's is still out, the section
+          // shows the most recent report's SUMMARY instead of a bare "waiting".
+          select: { id: true, title: true, scheduleDays: true, statusDays: { orderBy: { day: 'desc' }, take: 8 } },
           orderBy: { createdAt: 'asc' },
         })
         .catch(() => [] as any[]),
@@ -315,7 +317,10 @@ export class ContactsService {
     }, null);
     const weekday = weekdayOf(todayKey());
     const today = (reports as any[]).map((t) => {
-      const row = t.statusDays?.[0] || null;
+      const days: any[] = t.statusDays || [];
+      const row = days.find((d) => d.day === todayKey()) || null;
+      // The freshest report that actually CAME IN — what to show while today's is still out. (BEA-1223)
+      const last = days.find((d) => d.status === 'received' && d.quote) || null;
       const due = isOwedOn(t.scheduleDays, weekday, restDays);
       return {
         taskId: t.id,
@@ -325,8 +330,10 @@ export class ContactsService {
         due,
         status: !due ? 'off' : row?.status || 'waiting',
         quote: row?.quote || null,
+        summary: row?.summary || null, // the 1–2 line read; quote is the tap-deeper evidence (BEA-1223)
         source: row?.source || null, // 'page' = they ticked it; 'whatsapp' = they said it (BEA-1152)
         at: row?.signalAt || row?.createdAt || null,
+        last: last && last.day !== todayKey() ? { day: last.day, summary: last.summary || null, quote: last.quote, source: last.source || null } : null,
       };
     });
     const dueToday = today.filter((r) => r.due);

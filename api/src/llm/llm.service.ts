@@ -144,6 +144,8 @@ export class LlmService {
     // Writes each contact's weekly character profile — a once-a-week reasoning job over a month of
     // real messages, so Sonnet by default. (BEA-1216)
     'character-profile': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
+    // Condenses one daily report into 1–2 lines the moment it arrives — tiny job, Haiku. (BEA-1223)
+    'report-summary': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     // WRITING follows THE engine choice (see engineChoice) — null means "whatever engine is picked".
     'deep-research-write': null,
     // Kept so an existing saved setting still resolves.

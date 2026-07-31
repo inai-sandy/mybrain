@@ -101,7 +101,7 @@ describe("a person's page answers today (BEA-1149)", () => {
 
   it("shows a report due today, and what settled it", async () => {
     const svc = withReports([
-      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [{ status: 'received', quote: 'OT 8 members', source: 'whatsapp', signalAt: new Date() }] },
+      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [{ day, status: 'received', quote: 'OT 8 members', source: 'whatsapp', signalAt: new Date() }] },
     ]);
     const s: any = await svc.state('c1');
     expect(s.today.due).toHaveLength(1);
@@ -122,7 +122,7 @@ describe("a person's page answers today (BEA-1149)", () => {
 
   it('says a tick on their page is a tick, not a message', async () => {
     const svc = withReports([
-      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [{ status: 'received', quote: "Sent today's update", source: 'page', signalAt: new Date() }] },
+      { id: 't1', title: 'Send the daily production update', scheduleDays: null, statusDays: [{ day, status: 'received', quote: "Sent today's update", source: 'page', signalAt: new Date() }] },
     ]);
     const s: any = await svc.state('c1');
     expect(s.today.due[0].source).toBe('page');

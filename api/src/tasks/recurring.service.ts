@@ -1,5 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LlmService } from '../llm/llm.service';
+import { PromptsService } from '../prompts/prompts.service';
 import { localDayKey, localHour, weekdayOf } from '../common/localday';
 import { isOwedOn, parseSchedule, serialiseSchedule, daysFromTitle, scheduleLabel } from './schedule';
 import { laterWins } from '../contacts/promise-later';
@@ -20,10 +22,64 @@ export const DEFAULT_REST_DAYS = ['Sun'];
  * report is owed again tomorrow. This service owns that per-day ledger and the rest-day rule.
  */
 @Injectable()
-export class RecurringService {
+export class RecurringService implements OnModuleInit {
   private readonly log = new Logger('Recurring');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Optional and LAST: spec harnesses build this service positionally with fewer args.
+    @Optional() private readonly llm?: LlmService,
+    @Optional() private readonly prompts?: PromptsService,
+  ) {}
+
+  onModuleInit() {
+    // One-time catch-up: summarize the last week's reports that arrived before summaries existed,
+    // so the section reads well from day one. Bounded and delayed off the boot path. (BEA-1223)
+    setTimeout(() => this.summarizeBacklog().catch(() => undefined), 30_000);
+  }
+
+  /**
+   * The 1–2 line summary of one day's report (BEA-1223) — written ONCE when the report arrives,
+   * so the owner reads what was said, not plumbing. Fire-and-forget: a model failure just leaves
+   * the quote, which the UI already falls back to. A short quote IS its own summary.
+   */
+  private async summarizeRow(rowId: string, taskId: string, quote: string): Promise<void> {
+    if (!this.llm || !this.prompts) return;
+    const q = (quote || '').trim();
+    if (q.length < 60) return; // already one line — burning a model call would add nothing
+    try {
+      // The title lookup lives HERE so the webhook hot path never waits on it. (review finding)
+      const title = ((await Promise.resolve(this.prisma.task?.findUnique?.({ where: { id: taskId }, select: { title: true } })).catch(() => null)) as any)?.title || 'Daily report';
+      const tmpl = await this.prompts.get('people.reportSummary');
+      const raw = await this.llm.completeHelper('report-summary', tmpl.replace(/\{\{title\}\}/g, title.slice(0, 120)).replace(/\{\{report\}\}/g, q.slice(0, 1500)), 120, 'report-summary');
+      const summary = (raw || '').trim().replace(/^["'\s]+|["'\s]+$/g, '').slice(0, 300);
+      if (summary.length < 8) return; // junk writes nothing — the quote fallback stands
+      await this.prisma.taskStatusDay.update({ where: { id: rowId }, data: { summary } }).catch(() => undefined);
+    } catch {
+      /* the quote fallback stands */
+    }
+  }
+
+  /** Summarize recent received rows that predate summaries. Runs once per boot, capped. */
+  async summarizeBacklog(): Promise<number> {
+    if (!this.llm || !this.prompts) return 0;
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const rows = await this.prisma.taskStatusDay
+      .findMany({
+        where: { status: 'received', summary: null, day: { gte: since }, quote: { not: null } },
+        select: { id: true, quote: true, taskId: true },
+        take: 30,
+      })
+      .catch(() => [] as any[]);
+    let n = 0;
+    for (const r of rows as any[]) {
+      if ((r.quote || '').trim().length < 60) continue;
+      await this.summarizeRow(r.id, r.taskId, r.quote);
+      n++;
+    }
+    if (n) this.log.log(`summarized ${n} recent report(s)`);
+    return n;
+  }
 
   /** Today, in the owner's timezone. */
   today(now: Date = new Date()): string {
@@ -76,15 +132,20 @@ export class RecurringService {
     const source = opts?.source ?? null;
     // The LATER signal wins. A share-page tick followed by "sending at 12" must not stay received,
     // and a stale retry must never flip a settled day back. (BEA-1152)
-    const existing = await this.prisma.taskStatusDay.findUnique({ where: { taskId_day: { taskId, day } }, select: { signalAt: true } }).catch(() => null);
+    const existing = await this.prisma.taskStatusDay.findUnique({ where: { taskId_day: { taskId, day } }, select: { signalAt: true, quote: true } }).catch(() => null);
     if (existing && !laterWins(existing.signalAt, at)) return;
-    await this.prisma.taskStatusDay
+    // A resend of the SAME words must not wipe a good summary and pay for a new one. (review finding)
+    const newWords = !!words && words !== existing?.quote;
+    const row = await this.prisma.taskStatusDay
       .upsert({
         where: { taskId_day: { taskId, day } },
         create: { taskId, day, status: 'received', quote: words, contactId: contactId || null, source, signalAt: at },
-        update: { status: 'received', quote: words ?? undefined, contactId: contactId || undefined, source: source ?? undefined, signalAt: at },
+        // NEW words replace the old summary with them — a resend of the same words keeps both. (BEA-1223)
+        update: { status: 'received', quote: words ?? undefined, contactId: contactId || undefined, source: source ?? undefined, signalAt: at, ...(newWords ? { summary: null } : {}) },
       })
-      .catch((e) => this.log.warn(`markReceived: ${e?.message}`));
+      .catch((e) => { this.log.warn(`markReceived: ${e?.message}`); return null; });
+    // Fully fire-and-forget: the day is settled either way; the summary lands seconds later. (BEA-1223)
+    if (row && newWords) void this.summarizeRow((row as any).id, taskId, words!);
   }
 
   /**
