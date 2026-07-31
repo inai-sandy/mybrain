@@ -56,8 +56,24 @@ export class RecordingsService implements OnModuleInit {
     setInterval(() => this.retentionTick().catch(() => undefined), 3600_000);
   }
 
+  /** How long local audio is kept before archiving — a REAL setting now, not a constant. (BEA-1231) */
+  async retentionDays(): Promise<number> {
+    const row = await this.prisma.setting?.findUnique({ where: { key: 'recordings.retentionDays' } }).catch(() => null);
+    const n = Number(row?.value);
+    return Number.isFinite(n) && n >= 7 && n <= 3650 ? Math.floor(n) : 90;
+  }
+
+  async setRetentionDays(days: unknown): Promise<{ days: number }> {
+    const n = Number(days);
+    if (!Number.isFinite(n) || n < 7 || n > 3650) return { days: await this.retentionDays() };
+    await this.prisma.setting
+      ?.upsert({ where: { key: 'recordings.retentionDays' }, create: { key: 'recordings.retentionDays', value: String(Math.floor(n)) }, update: { value: String(Math.floor(n)) } })
+      .catch(() => undefined);
+    return { days: Math.floor(n) };
+  }
+
   async retentionTick(): Promise<void> {
-    const cutoff = new Date(Date.now() - 90 * 86_400_000);
+    const cutoff = new Date(Date.now() - (await this.retentionDays()) * 86_400_000);
     const old = await this.prisma.recording.findMany({
       where: { status: 'done', startedAt: { lt: cutoff } },
       select: { id: true },

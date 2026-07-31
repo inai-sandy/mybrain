@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { RecordingsService } from './recordings.service';
 
@@ -46,6 +46,17 @@ export class RecordingsController {
   }
 
   // ---- web ----
+  /** How long local audio is kept before archiving. (BEA-1231) */
+  @Get('retention')
+  async retention() {
+    return { days: await this.svc.retentionDays() };
+  }
+
+  @Put('retention')
+  async setRetention(@Body() body: { days?: number }) {
+    return this.svc.setRetentionDays(body?.days);
+  }
+
   @Get()
   list(@Query('q') q?: string, @Query('take') take?: string, @Query('skip') skip?: string) {
     return this.svc.list({ q, take: Number(take) || undefined, skip: Number(skip) || undefined });

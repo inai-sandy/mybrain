@@ -219,7 +219,14 @@ function renderSection(id: Tab, email?: string): ReactNode {
       <ChatModelCard />
       <PromptsSection category="Meetings & Chat" />
     </div>;
-    case 'meetings': return <div className="space-y-4"><MeetingsEngineCard /></div>;
+    case 'meetings': return <div className="space-y-4">
+      <MeetingsEngineCard />
+      <RecordingsRetentionCard />
+      <ModuleAiHeader />
+      <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
+        desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
+      <PromptsSection category="Meetings & Chat" />
+    </div>;
     case 'voice': return <div className="space-y-4"><VoiceModelCard /><DeepgramModelCard /></div>;
     case 'emo': return <><EmoSettingsSection /><ModuleAiHeader /><PromptsSection category="EMO voice" /></>;
     case 'story': return <div className="space-y-4">
@@ -246,7 +253,14 @@ function renderSection(id: Tab, email?: string): ReactNode {
     case 'agents': return <><AgentEngineSection /><div className="mt-6 space-y-1"><h2 className="text-sm font-semibold text-zinc-500">All AI models</h2><p className="text-xs text-zinc-400">Every model in one list. These are moving into their own modules, one by one.</p></div><ModelsSection /></>;
     case 'memory': return <div className="space-y-4"><IndexSection /><SuperMemorySyncCard /></div>;
     case 'prompts': return <PromptsSection />;
-    case 'google': return <GoogleServicesSection />;
+    case 'google': return <div className="space-y-4">
+      <GoogleServicesSection />
+      <BlockedSendersCard />
+      <ModuleAiHeader />
+      <EngineModelCard title="Email Daily Brief model" icon={Send} base="/api/google/gmail-brief-model" agents
+        desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
+      <PromptsSection category="Google" />
+    </div>;
     case 'connections': return <div className="space-y-4"><IntegrationsSection /><TelegramCard /><CliSection /><SkillsSyncCard /></div>;
     case 'usage': return <><BudgetAndEngines /><UsageCard /></>;
     case 'account': return <div className="space-y-4"><AppearanceSection /><AccountSection email={email} /></div>;
@@ -1527,11 +1541,6 @@ function ModelsSection() {
     <div className="space-y-4">
       <EnginePicker />
       <AiModelCard />
-      <MeetingsEngineCard />
-      <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
-        desc="The AI that writes each meeting's title, summary, key takeaways, decisions and action items." />
-      <EngineModelCard title="Email Daily Brief model" icon={Send} base="/api/google/gmail-brief-model" agents
-        desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
       {/* Agent-helper jobs (BEA-1106) — each little AI job around agents has its own model. */}
       <EngineModelCard title="Agent chat-edit model" icon={Bot} base="/api/llm-config/helper/chat-edit"
         desc="Powers 'Change it by chatting' on every job — turns your sentence into a safe proposed change. Sonnet (default) follows the JSON rules most reliably." />
@@ -1611,6 +1620,78 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
       <div className="mt-4 text-right">
         <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
       </div>
+    </AccordionCard>
+  );
+}
+
+/** Local audio retention — was a hard-coded 90 days with no way to change it. (BEA-1231) */
+function RecordingsRetentionCard() {
+  const [days, setDays] = useState(90);
+  const toast = useToast();
+  useEffect(() => { fetch('/api/recordings/retention').then((r) => r.json()).then((d) => setDays(d.days || 90)).catch(() => undefined); }, []);
+  async function pick(n: number) {
+    setDays(n);
+    const r = await fetch('/api/recordings/retention', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days: n }) }).catch(() => null);
+    if (r?.ok) toast('success', `Recordings keep their audio for ${n} days`);
+    else toast('error', 'Could not save');
+  }
+  return (
+    <AccordionCard title="Recordings — keep audio for" icon={Mic}>
+      <p className="mb-3 text-sm text-zinc-500">Older sessions lose their LOCAL audio and flip to archived — transcripts and marks stay, and the home server keeps the audio forever. This only decides how long the phone-playable copy lives here.</p>
+      <div className="flex flex-wrap gap-2">
+        {[30, 90, 180, 365].map((n) => (
+          <button key={n} onClick={() => pick(n)} className={'rounded-lg border px-3 py-1.5 text-sm ' + (days === n ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300')}>{n} days</button>
+        ))}
+      </div>
+    </AccordionCard>
+  );
+}
+
+/** Senders whose mail never enters email memory — the API existed, the control did not. (BEA-1231) */
+function BlockedSendersCard() {
+  const [senders, setSenders] = useState<{ from: string; count: number; blocked: boolean }[]>([]);
+  const [blocked, setBlocked] = useState<string[]>([]);
+  const [addr, setAddr] = useState('');
+  const toast = useToast();
+  const load = () => fetch('/api/google/email-memory/senders').then((r) => r.json()).then((d) => { setSenders(d.senders || []); setBlocked(d.blocked || []); }).catch(() => undefined);
+  useEffect(() => { load(); }, []);
+  async function setBlock(from: string, on: boolean) {
+    const r = await fetch('/api/google/email-memory/senders/block', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from, blocked: on }) }).catch(() => null);
+    const d = r ? await r.json().catch(() => null) : null;
+    if (d) { toast('success', on ? `Blocked${d.removed ? ` — ${d.removed} stored email(s) removed` : ''}` : 'Unblocked'); setAddr(''); load(); }
+    else toast('error', 'Could not save');
+  }
+  const top = senders.filter((x) => !x.blocked).slice(0, 6);
+  return (
+    <AccordionCard title="Blocked email senders" icon={Send} badge={blocked.length ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">{blocked.length}</span> : undefined}>
+      <p className="mb-3 text-sm text-zinc-500">Mail from these addresses never enters your email memory — blocking also sweeps out what is already stored.</p>
+      <div className="flex gap-2">
+        <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="sender@example.com" className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950" />
+        <button onClick={() => addr.trim() && setBlock(addr.trim(), true)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500">Block</button>
+      </div>
+      {blocked.length > 0 && (
+        <ul className="mt-3 space-y-1.5">
+          {blocked.map((b) => (
+            <li key={b} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm dark:border-zinc-800">
+              <span className="truncate">{b}</span>
+              <button onClick={() => setBlock(b, false)} className="shrink-0 text-xs text-zinc-400 hover:text-rose-500">Unblock</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {top.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Most stored — one tap to block</p>
+          <ul className="space-y-1">
+            {top.map((x) => (
+              <li key={x.from} className="flex items-center justify-between gap-2 text-xs text-zinc-500">
+                <span className="truncate">{x.from} · {x.count}</span>
+                <button onClick={() => setBlock(x.from, true)} className="shrink-0 text-zinc-400 hover:text-rose-500">Block</button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </AccordionCard>
   );
 }
