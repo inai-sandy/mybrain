@@ -155,4 +155,10 @@ export class SkillsController {
     await this.skills.remove(id, uninstall === 'true' || uninstall === '1');
     return { ok: true };
   }
+
+  /** Who each install target actually serves, in engine names (BEA-1224). */
+  @Get('targets')
+  targets() {
+    return this.skills.targetLabels();
+  }
 }

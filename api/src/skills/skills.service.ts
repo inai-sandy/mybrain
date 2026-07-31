@@ -269,6 +269,30 @@ export class SkillsService {
     return { filePath, name: `${base}.${ext}` };
   }
 
+  /**
+   * The target the ENGINES actually read (BEA-1224).
+   *
+   * Both runners point at `/home/sandy/.claude/skills`, which the app mounts as `/scan/sandy/skills`
+   * — so installing to this one target serves Codex AND Claude at the same moment. There is no
+   * second install. Any other target is a different machine account that neither engine reads, and
+   * a skill sitting only there is not installed as far as a flow is concerned.
+   */
+  static readonly ENGINE_TARGET = process.env.ENGINE_SKILLS_TARGET || 'sandy';
+
+  /** Which engines can run a skill at all. Gemini has no skills folder and no skill mode. */
+  static readonly SKILL_ENGINES = ['codex', 'claude'];
+
+  /** Who each deploy target actually serves, in engine names rather than Linux usernames. */
+  targetLabels(): Record<string, { label: string; engines: string[] }> {
+    const out: Record<string, { label: string; engines: string[] }> = {};
+    for (const name of Object.keys(this.deployTargets())) {
+      out[name] = name === SkillsService.ENGINE_TARGET
+        ? { label: 'Codex · Claude', engines: SkillsService.SKILL_ENGINES }
+        : { label: `${name} (a separate machine — no engine reads it)`, engines: [] };
+    }
+    return out;
+  }
+
   /** Configured deploy targets, e.g. { sandy: '/scan/sandy/skills', beakn: '/scan/beakn/skills' }. */
   deployTargets(): Record<string, string> {
     const out: Record<string, string> = {};

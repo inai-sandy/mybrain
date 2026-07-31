@@ -181,7 +181,7 @@ function AddSkillModal({ onClose, onCreated }: { onClose: () => void; onCreated:
                 </ul>
                 <label className="mt-3 flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
                   <input type="checkbox" checked={deployAfter} onChange={(e) => setDeployAfter(e.target.checked)} className="accent-emerald-600" />
-                  <Rocket size={13} className="text-emerald-600" /> Install everywhere after import (all your Claude Code folders)
+                  <Rocket size={13} className="text-emerald-600" /> Install everywhere after import (every skills folder on this server)
                 </label>
               </div>
             )}
@@ -391,7 +391,7 @@ export function Skills() {
     { key: 'platform', label: 'Platform', options: [{ value: 'code', label: 'Claude Code' }, { value: 'chat', label: 'Claude Chat' }], match: (e: Entry, val: string) => e.skills.some((s) => s.platform === val) },
     {
       key: '_server', label: 'Server',
-      options: [{ value: 'sandy', label: 'On Claude · sandy' }, { value: 'beakn', label: 'On Claude · beakn' }, { value: 'none', label: 'Not installed anywhere' }],
+      options: [{ value: 'sandy', label: 'Ready for Codex · Claude' }, { value: 'beakn', label: "Only on beakn's machine" }, { value: 'none', label: 'Not installed anywhere' }],
       match: (e: Entry, val: string) => (val === 'none' ? !e.installedOn.length : e.installedOn.includes(val)),
     },
   ];
@@ -400,11 +400,24 @@ export function Skills() {
     { label: 'Title A–Z', key: 'title', dir: 1 },
   ];
 
+  /**
+   * Which ENGINES can run this skill (BEA-1224).
+   *
+   * These badges used to read "sandy" and "beakn" — Linux usernames, which tell you nothing about
+   * whether a flow can use the skill. Both engines read the `sandy` folder, so one install already
+   * serves Codex and Claude; and `beakn` is a separate machine that no engine reads at all.
+   */
   const installBadges = (on: string[]) => (
     !!on.length && (
       <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
-        {on.includes('sandy') && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" title="Installed in Claude · sandy">sandy</span>}
-        {on.includes('beakn') && <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" title="Installed in Claude · beakn">beakn</span>}
+        {on.includes('sandy') && (
+          <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+            title="Your engines read this folder — one install serves both Codex and Claude">Codex · Claude</span>
+        )}
+        {on.includes('beakn') && (
+          <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+            title="A separate machine account — no engine reads it, so a flow cannot use a skill that is only here">beakn's machine</span>
+        )}
       </span>
     )
   );
