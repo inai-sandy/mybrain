@@ -219,3 +219,57 @@ describe('the engine chain (BEA-1201)', () => {
     expect(models[0]).toBe('Gemini 9 Special');
   });
 });
+
+/**
+ * BEA-1201 — a runner's own /status cannot see quota. Codex reported `ready: true` for a month while
+ * refusing every call, so Settings showed a green light on a dead engine. What a real refusal tells
+ * us has to outrank a health check that cannot know.
+ */
+describe('an engine that is out of quota is remembered (BEA-1201)', () => {
+  const { LlmService } = require('./llm.service');
+  const store: Record<string, string> = {};
+  const prisma: any = {
+    setting: {
+      findUnique: async ({ where }: any) => (where.key in store ? { key: where.key, value: store[where.key] } : null),
+      upsert: async ({ where, create }: any) => { store[where.key] = create.value; return {}; },
+    },
+  };
+  const svc = () => {
+    const s: any = new LlmService({ get: async () => ({ apiKey: 'k' }) } as any, prisma);
+    (s as any).log = { warn: () => undefined, log: () => undefined, error: () => undefined };
+    return s;
+  };
+
+  beforeEach(() => { for (const k of Object.keys(store)) delete store[k]; });
+
+  it('reads the reset time out of the refusal, rather than guessing', async () => {
+    const s = svc();
+    await (s as any).markEngineLimited('codex', "You've hit your usage limit. Upgrade to Plus, or try again at Aug 28th, 2026 2:55 AM.");
+    const lim = await s.engineLimit('codex');
+    expect(lim.until.getUTCMonth()).toBe(7);   // August
+    expect(lim.until.getUTCFullYear()).toBe(2026);
+  });
+
+  it('falls back to an hour when no time is given, so a blip is not a month', async () => {
+    const s = svc();
+    await (s as any).markEngineLimited('gemini', 'rate limit exceeded');
+    const lim = await s.engineLimit('gemini');
+    const hours = (lim.until.getTime() - Date.now()) / 3600_000;
+    expect(hours).toBeGreaterThan(0.9);
+    expect(hours).toBeLessThan(1.1);
+  });
+
+  it('forgets the limit once it has passed', async () => {
+    store['engine.limit.codex'] = JSON.stringify({ until: new Date(Date.now() - 1000).toISOString(), reason: 'old' });
+    expect(await svc().engineLimit('codex')).toBeNull();
+  });
+
+  it('skips a known-dead engine instead of spending nine seconds proving it', async () => {
+    const s = svc();
+    let called = 0;
+    (global as any).fetch = async () => { called++; return { ok: true, json: async () => ({ text: 'hi' }) }; };
+    store['engine.limit.codex'] = JSON.stringify({ until: new Date(Date.now() + 3600_000).toISOString(), reason: 'out' });
+    expect(await (s as any).runAgent({ provider: 'codex', model: 'codex' }, 'x')).toBeNull();
+    expect(called).toBe(0);
+  });
+});

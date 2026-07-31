@@ -84,6 +84,14 @@ export class LlmController {
       try {
         const r = await fetch(`${p.url}/status`, { signal: AbortSignal.timeout(20_000) });
         const d: any = await r.json().catch(() => ({}));
+        // A runner's own /status only checks that the binary is there and signed in — it cannot see
+        // quota, so it reported Codex as WORKING while every call was refused (BEA-1201). What we
+        // learned from a real refusal outranks it.
+        const limit = await this.llm.engineLimit(p.name).catch(() => null);
+        if (limit) {
+          const when = limit.until ? limit.until.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'later';
+          return { ...p, url: undefined, ready: false, reason: `out of quota until ${when}` };
+        }
         return { ...p, url: undefined, ready: !!d?.ready, reason: d?.error ? String(d.error).slice(0, 200) : null };
       } catch (e: any) {
         return { ...p, url: undefined, ready: false, reason: `not answering (${String(e?.message || e).slice(0, 60)})` };

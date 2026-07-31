@@ -214,7 +214,39 @@ export class LlmService {
   }
 
   /** Run a prompt on a subscription agent (Codex / Gemini) via its host runner. Returns null on any failure. */
+  /**
+   * Engines known to be out of quota, and when they come back (BEA-1201).
+   *
+   * Codex refused every call from 30 July to 28 August. Without this, each attempt spends nine
+   * seconds rediscovering that — on every hop, of every job, for a month.
+   */
+  async engineLimit(provider: string): Promise<{ until: Date | null; reason: string } | null> {
+    const row = await this.prisma.setting?.findUnique({ where: { key: `engine.limit.${provider}` } }).catch(() => null);
+    if (!row?.value) return null;
+    try {
+      const v = JSON.parse(row.value);
+      const until = v.until ? new Date(v.until) : null;
+      if (until && until.getTime() < Date.now()) return null; // it has reset
+      return { until, reason: String(v.reason || '').slice(0, 200) };
+    } catch { return null; }
+  }
+
+  private async markEngineLimited(provider: string, reason: string): Promise<void> {
+    // The message carries the reset time ("try again at Aug 28th, 2026 2:55 AM"). Read it when we
+    // can; otherwise assume an hour, so a transient rate-limit is not treated as a month-long outage.
+    // "Aug 28th, 2026 2:55 AM" — the ordinal suffix alone makes Date.parse return NaN, which would
+    // quietly downgrade a month-long outage to a one-hour guess.
+    const m = /try again at ([^.)]+)/i.exec(reason)?.[1]?.trim().replace(/(\d+)(st|nd|rd|th)\b/i, '$1');
+    const parsed = m ? Date.parse(m) : NaN;
+    const until = Number.isFinite(parsed) ? new Date(parsed) : new Date(Date.now() + 3600_000);
+    const value = JSON.stringify({ until: until.toISOString(), reason: reason.slice(0, 300) });
+    await this.prisma.setting?.upsert({ where: { key: `engine.limit.${provider}` }, create: { key: `engine.limit.${provider}`, value }, update: { value } }).catch(() => undefined);
+    this.log.warn(`${provider} is out of quota until ${until.toISOString()} — skipping it until then`);
+  }
+
   private async runAgent(cfg: LlmConfig, prompt: string, label = 'agent'): Promise<string | null> {
+    // Don't spend nine seconds rediscovering a limit we already know about.
+    if (await this.engineLimit(cfg.provider)) return null;
     try {
       const url = cfg.provider === 'codex' ? CODEX_RUNNER : cfg.provider === 'claude' ? CLAUDE_RUNNER : GEMINI_RUNNER;
       // For Gemini, cfg.model carries the specific Antigravity model name (e.g. "Gemini 3.5 Flash").
@@ -225,8 +257,16 @@ export class LlmService {
         body: JSON.stringify({ prompt, model }),
         signal: AbortSignal.timeout(190_000),
       });
-      if (!r.ok) return null;
-      const d: any = await r.json();
+      const d: any = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // The runner now reports the REAL reason (BEA-1201). A usage limit is not a blip — it lasts
+        // days — so remember it, skip this engine until it resets, and let Settings say so. Its own
+        // /status only checks that the binary exists and is signed in, so it happily reports a green
+        // light on an engine that refuses every call. That false green is what this issue is about.
+        const why = String(d?.error || '');
+        if (/usage limit|rate limit|quota/i.test(why)) await this.markEngineLimited(cfg.provider, why);
+        return null;
+      }
       const text = String(d?.text || '').trim() || null;
       // Record what the turn cost (BEA-1204). Without this the budget can see an engine turn only
       // while it is running: the reservation lifts on return and nothing is left in the usage log,
