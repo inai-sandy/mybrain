@@ -435,6 +435,80 @@ describe('finished work leaves the review tab (BEA-1211)', () => {
 });
 
 /**
+ * BEA-1221 (the Ashish case): he closed the message, and a pending claim resurfaced as a second
+ * row — the count stuck at 1 with no explanation. One person's situation is ONE item.
+ */
+describe('one item, one action (BEA-1221)', () => {
+  const CONTACT = { id: 'c1', name: 'Ashish', whatsappNumber: '9190' };
+  const twoClaims = [
+    { id: 'cl1', contactId: 'c1', taskId: 't1', quote: 'done one', createdAt: new Date(), contact: CONTACT, task: { id: 't1', title: 'T1', status: 'open' } },
+    { id: 'cl2', contactId: 'c1', taskId: 't2', quote: 'done two', createdAt: new Date(), contact: CONTACT, task: { id: 't2', title: 'T2', status: 'open' } },
+  ];
+  function svcWith(claims: any[], hostTask: any = null) {
+    const { svc, rows } = make();
+    const base = (svc as any).prisma.teamUpdate.findMany;
+    (svc as any).prisma.teamUpdate.findMany = async (args: any = {}) => (await base(args)).map((r: any) => ({ ...r, task: hostTask }));
+    (svc as any).prisma.taskClaim = { findFirst: async ({ where }: any) => (where?.id ? claims.find((c) => c.id === where.id) || null : null), findMany: async () => claims, count: async () => claims.length };
+    (svc as any).prisma.task = { findMany: async () => [], count: async () => 0, findUnique: async () => null };
+    return { svc, rows };
+  }
+
+  it("a pending claim attaches to the contact's open item — never a second row", async () => {
+    const { svc } = svcWith(twoClaims); // two pending → the single-claim merge can't fire, the sweep must
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    const inbox: any = await svc.inbox();
+    const host = inbox.items.find((i: any) => !String(i.id).startsWith('claim:'));
+    expect(host.claimId).toBe('cl1'); // the problem item became the Yes/No item
+    expect(inbox.count).toBe(2); // host(+cl1) and cl2 — not three rows
+  });
+
+  it("a claim about a DIFFERENT task never glues onto the problem — wrong Yes/No is worse than two rows", async () => {
+    const { svc } = svcWith(twoClaims, { id: 't-other', title: 'Something else entirely', status: 'open' });
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp', taskId: 't-other' });
+    const inbox: any = await svc.inbox();
+    const host = inbox.items.find((i: any) => !String(i.id).startsWith('claim:'));
+    expect(host.claimId).toBeNull(); // stays a problem to read
+    expect(inbox.count).toBe(3); // both claims keep their own rows
+  });
+
+  it('deciding uses the EXACT claim the card showed, even with two pending', async () => {
+    const { svc } = svcWith(twoClaims);
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    const host: any = (await svc.inbox()).items.find((i: any) => !String(i.id).startsWith('claim:'));
+    const calls: any[] = [];
+    const r: any = await svc.decide(host.id, true, async (claimId, ok) => { calls.push({ claimId, ok }); return { ok: true }; }, undefined, host.claimId);
+    expect(r.ok).toBe(true);
+    expect(calls).toEqual([{ claimId: 'cl1', ok: true }]);
+  });
+
+  it('deciding an attached claim never clears the PROBLEM — the message stays until he closes it', async () => {
+    const { svc, rows } = svcWith(twoClaims);
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    const host: any = (await svc.inbox()).items.find((i: any) => !String(i.id).startsWith('claim:'));
+    const r: any = await svc.decide(host.id, true, async () => ({ ok: true }), undefined, host.claimId);
+    expect(r.stillOpen).toBe(true);
+    expect(rows[0].closedAt).toBeFalsy(); // the problem report survives the claim decision
+  });
+
+  it('closing says when a says-done is still waiting — the count is never a mystery', async () => {
+    const { svc } = svcWith(twoClaims);
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    const items: any[] = (await svc.inbox()).items;
+    const host = items.find((i: any) => !String(i.id).startsWith('claim:'))!;
+    const r: any = await svc.close(host.id);
+    expect(r).toMatchObject({ ok: true, pendingClaim: true });
+  });
+
+  it('closing with nothing pending stays a plain close', async () => {
+    const { svc } = svcWith([]);
+    await svc.record({ contactId: 'c1', text: 'We are short of 200 units', channel: 'whatsapp' });
+    const id = (await svc.inbox()).items[0].id;
+    const r: any = await svc.close(id);
+    expect(r).toMatchObject({ ok: true, pendingClaim: false });
+  });
+});
+
+/**
  * BEA-1159. The owner: *"Split by task. They might be only doing one task. You have to split a task."*
  *
  * Deepthi has two open jobs — the geyser components and the PCB order — and one message covering
