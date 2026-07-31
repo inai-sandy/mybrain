@@ -92,7 +92,7 @@ function renderSection(id: Tab, email?: string): ReactNode {
     case 'google': return <GoogleServicesSection />;
     case 'models': return <ModelsSection />;
     case 'whatsapp': return <WhatsAppSection />;
-    case 'usage': return <UsageCard />;
+    case 'usage': return <><BudgetAndEngines /><UsageCard /></>;
     case 'index': return <IndexSection />;
     case 'prompts': return <PromptsSection />;
     case 'sync': return <SyncSection />;
@@ -108,6 +108,7 @@ const SEARCH_INDEX: { label: string; keywords: string; cat: Tab; anchor?: string
   { label: 'Privacy', keywords: 'privacy data export', cat: 'account' },
   { label: 'Reset / clear app', keywords: 'reset clear wipe app', cat: 'account' },
   { label: 'Usage, tokens & cost', keywords: 'usage tokens cost spend wallet billing money', cat: 'usage' },
+  { label: "Today's AI budget & engines", keywords: 'budget token limit ceiling engine codex claude gemini fallback', cat: 'usage' },
   { label: 'SuperMemory', keywords: 'supermemory memory store connector', cat: 'integrations' },
   { label: 'RAG store', keywords: 'rag vector memory store', cat: 'integrations' },
   { label: 'Notion', keywords: 'notion pages import', cat: 'integrations' },
@@ -1053,6 +1054,83 @@ const USAGE_BUCKETS: { key: string; label: string; icon: LucideIcon; match: RegE
   { key: 'chat', label: 'Chat', icon: MessageSquare, match: /^chat/ },
 ];
 const usageBucket = (feature: string) => USAGE_BUCKETS.find((b) => b.match.test(feature));
+
+/**
+ * Today's AI budget and which engines are actually alive (BEA-1204 / BEA-1201).
+ *
+ * Codex ran dry on 30 July and nothing on screen said so — every job quietly moved to a paid model
+ * for weeks, and the only reason it surfaced was a counter added to deep research. A budget nobody
+ * can see is a budget nobody trusts, and an engine picker that implies something is working when it
+ * is not is worse than no picker.
+ */
+function BudgetAndEngines() {
+  const [b, setB] = useState<any>(null);
+  const [eng, setEng] = useState<any>(null);
+  const [day, setDay] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Guard the shape, not just the network: a 500 returns JSON too, and `{statusCode, message}`
+  // would crash the render on `.toLocaleString()`.
+  const load = () => fetch('/api/llm-config/budget')
+    .then((r) => r.json())
+    .then((x) => { if (typeof x?.limit === 'number') { setB(x); setDay(String(x.limit)); } })
+    .catch(() => undefined);
+  useEffect(() => { load(); fetch('/api/llm-config/engines').then((r) => r.json()).then(setEng).catch(() => undefined); }, []);
+  if (!b) return null;
+  const pct = b.pct ?? 0;
+  const bar = pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
+  const save = async () => {
+    setSaving(true);
+    setMsg(null);
+    const ok = await fetch('/api/llm-config/budget', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ day: Number(day) }) })
+      .then((r) => r.ok).catch(() => false);
+    await load();
+    setSaving(false);
+    setMsg(ok ? { ok: true, text: 'Saved.' } : { ok: false, text: 'That did not save — try again.' });
+    setTimeout(() => setMsg(null), 4000);
+  };
+  return (
+    <div className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <h2 className="text-sm font-semibold">Today's AI budget</h2>
+      <p className="mt-0.5 text-[11px] text-zinc-500">Jobs that need the AI stop when this runs out. The step already running finishes first.</p>
+      <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+        <div className={'h-full rounded-full transition-all ' + bar} style={{ width: `${Math.max(2, pct)}%` }} />
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+        <span><b className="text-zinc-800 dark:text-zinc-100">{(b.spent ?? 0).toLocaleString()}</b> of {(b.limit ?? 0).toLocaleString()} tokens</span>
+        <span>·</span><span>{(b.left ?? 0).toLocaleString()} left</span>
+      </div>
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <label className="text-[11px] text-zinc-500">Daily limit</label>
+        <input value={day} onChange={(e) => setDay(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric"
+          className="w-32 rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-800" />
+        <button onClick={save} disabled={saving || !day} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+        <span className="text-[11px] text-zinc-400">0 switches it off</span>
+        {msg && <span className={'text-[11px] ' + (msg.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>{msg.text}</span>}
+      </div>
+
+      {eng?.chain?.length > 0 && (
+        <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <h3 className="text-sm font-semibold">Engines, in the order jobs try them</h3>
+          <ul className="mt-1.5 space-y-1.5">
+            {eng.chain.map((e: any, i: number) => (
+              <li key={e.name} className="flex items-start gap-2 text-xs">
+                <span className="mt-0.5 text-zinc-400">{i + 1}.</span>
+                <span className={'mt-0.5 h-2 w-2 shrink-0 rounded-full ' + (e.ready ? 'bg-emerald-500' : 'bg-rose-500')} />
+                <span className="min-w-0">
+                  <b className="text-zinc-800 dark:text-zinc-100">{e.label}</b>
+                  <span className="text-zinc-500"> — {e.ready ? 'working' : 'unavailable'}</span>
+                  {!e.ready && e.reason && <span className="block text-[11px] text-rose-600 dark:text-rose-400">{e.reason}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-zinc-400">{eng.fallback}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function UsageCard() {
   const [u, setU] = useState<UsageData | null>(null);
