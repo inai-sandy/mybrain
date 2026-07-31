@@ -859,7 +859,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Manually add a single task (no dump). */
-  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string; ownerContactId?: string | null; mentions?: string[]; briefingId?: string | null }) {
+  async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string; ownerContactId?: string | null; mentions?: string[]; briefingId?: string | null; kind?: string }) {
     const title = String(data.title || '').trim().slice(0, 160);
     if (!title) return null;
     const tz = await this.tz();
@@ -896,6 +896,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
         party: owner.party,
         dueDate: data.dueDate ? new Date(data.dueDate) : null,
         day: /^\d{4}-\d{2}-\d{2}$/.test(data.day || '') ? (data.day as string) : this.dayKey(tz),
+        // The form's "recurring" choice was silently dropped here, so every standing report was
+        // stored as a one-off and "Today's reports" found nothing. Update honoured it; create
+        // must too. (BEA-1210)
+        ...(data.kind === 'assignment' || data.kind === 'recurring' ? { kind: data.kind } : {}),
       },
     });
     this.indexTask(t);

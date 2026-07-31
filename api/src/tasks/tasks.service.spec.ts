@@ -313,6 +313,18 @@ describe('create() note guarantee (BEA-955)', () => {
     await (svc as any).create({ title: 'Prep deck', auto: true, note: 'for the review', day: '2026-08-01' });
     expect(tasks[tasks.length - 1].day).toBe('2026-08-01');
   });
+
+  it('keeps the form\'s "recurring" choice — it was silently dropped, so every standing report saved as a one-off (BEA-1210)', async () => {
+    const { svc, tasks } = makeService(null);
+    await (svc as any).create({ title: 'Send the daily production update', kind: 'recurring' });
+    expect(tasks[tasks.length - 1].kind).toBe('recurring');
+
+    await (svc as any).create({ title: 'One-off job', kind: 'assignment' });
+    expect(tasks[tasks.length - 1].kind).toBe('assignment');
+
+    await (svc as any).create({ title: 'No kind sent', kind: 'nonsense' });
+    expect(tasks[tasks.length - 1].kind).toBeUndefined(); // garbage never reaches the database
+  });
 });
 
 describe('indexTask — the dates EMO reads (BEA-1013)', () => {
