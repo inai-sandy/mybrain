@@ -45,27 +45,111 @@ const MODELS: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-type Tab = 'tasks' | 'account' | 'integrations' | 'agent' | 'cli' | 'google' | 'models' | 'usage' | 'index' | 'prompts' | 'sync' | 'appearance' | 'activity' | 'emo' | 'whatsapp';
+/**
+ * MODULE-FIRST settings (BEA-1227, approved 2026-07-31). One tile per module of the app; inside a
+ * module lives EVERYTHING about it — its toggles, its AI models, its prompts. "Show me everything
+ * about X" always has one answer. Each module declares its own `search` entries right here, so the
+ * search index is generated from this registry and can never rot separately from the sections.
+ */
+type Tab = 'tasks' | 'people' | 'voice' | 'emo' | 'story' | 'documents' | 'chat' | 'meetings' | 'google' | 'agents' | 'memory' | 'prompts' | 'connections' | 'usage' | 'account';
 
-type Cat = { id: Tab; label: string; icon: LucideIcon; desc: string; group: string };
+type SearchEntry = { label: string; keywords: string; anchor?: string };
+type Cat = { id: Tab; label: string; icon: LucideIcon; desc: string; group: string; search: SearchEntry[] };
 const CATS: Cat[] = [
-  { id: 'account', label: 'Account', icon: User, desc: 'Sign-in, privacy, reset', group: 'You & the app' },
-  { id: 'appearance', label: 'Appearance', icon: Palette, desc: 'Theme & display', group: 'You & the app' },
-  { id: 'usage', label: 'Usage', icon: Wallet, desc: 'Tokens & costs', group: 'You & the app' },
-  { id: 'integrations', label: 'Integrations', icon: Plug, desc: 'Connected services & keys', group: 'Connections' },
-  { id: 'google', label: 'Google', icon: Globe, desc: 'Workspace services', group: 'Connections' },
-  { id: 'cli', label: 'CLI', icon: Terminal, desc: 'Command-line access', group: 'Connections' },
-  { id: 'sync', label: 'Sync', icon: RefreshCw, desc: 'Import & reconcile memory', group: 'Connections' },
-  { id: 'whatsapp', label: 'WhatsApp', icon: MessageSquare, desc: 'My Brain templates & messages', group: 'Connections' },
-  { id: 'tasks', label: 'Tasks', icon: ListChecks, desc: 'Chasing, reviews & reports', group: 'Your work' },
-  { id: 'emo', label: 'EMO', icon: Mic, desc: 'Voice device & EMO voice', group: 'AI brain' },
-  { id: 'agent', label: 'Agent Engine', icon: Bot, desc: 'How agents run', group: 'AI brain' },
-  { id: 'models', label: 'Models', icon: Cpu, desc: 'Which models do what', group: 'AI brain' },
-  { id: 'prompts', label: 'Prompts', icon: MessageSquare, desc: 'Tune the AI prompts', group: 'AI brain' },
-  { id: 'index', label: 'Index', icon: Database, desc: "What's in your brain", group: 'AI brain' },
-  { id: 'activity', label: 'Activity', icon: FlaskConical, desc: 'The Lab & learning', group: 'AI brain' },
+  { id: 'tasks', label: 'Tasks', icon: ListChecks, desc: 'Chasing, reports & the day', group: 'Your work', search: [
+    { label: 'Chase times', keywords: 'chase times nudge when whatsapp schedule' },
+    { label: 'Rest days', keywords: 'rest days sunday weekday no report owed' },
+    { label: 'Claim grace days', keywords: 'claim grace unreviewed done chase stops' },
+    { label: 'Day close hour (digest)', keywords: 'digest hour day closes missed summary evening' },
+    { label: 'Tasks AI model', keywords: 'tasks model dump parse ai' },
+  ] },
+  { id: 'people', label: 'People & Chase', icon: MessageSquare, desc: 'WhatsApp, review & profiles', group: 'Your work', search: [
+    { label: 'Your WhatsApp alerts', keywords: 'whatsapp alert number failure output message me' },
+    { label: 'WhatsApp templates & message log', keywords: 'whatsapp template message log sent delivered number postbox' },
+    { label: 'Review filter model', keywords: 'review filter needs you okay replies model haiku' },
+    { label: 'Character profile model', keywords: 'character profile weekly person model' },
+    { label: 'Report summary model', keywords: 'report summary condense daily model' },
+    { label: 'People extraction model', keywords: 'people extraction names mentions model' },
+    { label: 'Reminder clean-up model', keywords: 'reminder clean up format model' },
+  ] },
+  { id: 'documents', label: 'Documents & Library', icon: FileText, desc: 'Library, bookmarks & imports', group: 'Your work', search: [
+    { label: 'Documents ingest token', keywords: 'documents ingest token upload server api' },
+    { label: 'Raindrop auto-sync', keywords: 'raindrop bookmark autosync pull schedule' },
+    { label: 'Documents summary model', keywords: 'documents title description tags model' },
+    { label: 'Bookmarks model', keywords: 'bookmarks summary model' },
+  ] },
+  { id: 'chat', label: 'Chat', icon: Send, desc: 'Chat AI & retention', group: 'Your work', search: [
+    { label: 'Chat retention', keywords: 'chat retention keep months delete history' },
+    { label: 'Chat AI model', keywords: 'chat model answer ai' },
+  ] },
+  { id: 'meetings', label: 'Meetings & Recordings', icon: Volume2, desc: 'Transcription & audio', group: 'Your work', search: [
+    { label: 'Meetings transcription engine', keywords: 'meetings transcription engine deepgram whisper elevenlabs' },
+    { label: 'Deepgram model', keywords: 'deepgram nova model live' },
+    { label: 'Auto-delete meeting audio', keywords: 'meeting audio delete after transcription retention' },
+    { label: 'Meeting summary model', keywords: 'meeting summary model' },
+  ] },
+  { id: 'voice', label: 'Voice', icon: Mic, desc: 'Dictation & speech', group: 'AI & voice', search: [
+    { label: 'Voice input engine', keywords: 'voice input stt engine dictation openai deepgram transcribe' },
+    { label: 'Dictation clean-up', keywords: 'voice cleanup tidy dictation ai' },
+    { label: 'Spoken language', keywords: 'voice language hint spoken' },
+    { label: 'Voice vocabulary', keywords: 'vocabulary custom words names get right' },
+  ] },
+  { id: 'emo', label: 'EMO', icon: Sparkles, desc: 'The voice device & assistant', group: 'AI & voice', search: [
+    { label: 'EMO device token', keywords: 'emo device token pairing' },
+    { label: 'EMO talk & brain models', keywords: 'emo talk brain model conversational explore' },
+    { label: 'EMO internet search', keywords: 'emo internet search on off auto' },
+    { label: 'EMO device volume & OTA', keywords: 'emo volume speaker ota update card sync' },
+  ] },
+  { id: 'story', label: 'Story & Lab', icon: Moon, desc: 'Your story, mentor & learning', group: 'AI & voice', search: [
+    { label: 'Story of the Day model', keywords: 'story day model nightly' },
+    { label: 'Mentor & weekly review models', keywords: 'mentor weekly review nudge model' },
+    { label: 'Story & mentor nudges', keywords: 'nudge push story reminder mentor insights' },
+    { label: 'The Lab & activity', keywords: 'lab activity learning mood heatmap findings' },
+  ] },
+  { id: 'agents', label: 'Agents & Engines', icon: Bot, desc: 'The engine & how agents run', group: 'AI & voice', search: [
+    { label: 'THE engine (Codex / Claude / Gemini)', keywords: 'engine choice codex claude gemini picker flat rate' },
+    { label: 'Agent autonomy', keywords: 'autonomy cautious balanced autopilot agent permission approve', anchor: 'set-autonomy' },
+    { label: 'Agent model', keywords: 'agent model codex gpt engine default', anchor: 'set-model' },
+    { label: 'Recall brain before a run', keywords: 'recall brain context before search agent', anchor: 'set-recall' },
+    { label: 'Learn after runs', keywords: 'learn learnings remember after run agent', anchor: 'set-learn' },
+    { label: 'Phone notifications', keywords: 'push notifications phone quiet hours' },
+    { label: 'Public MCP access', keywords: 'mcp public rag token external access' },
+    { label: 'All AI models (which model does what)', keywords: 'models story lab meeting voice haiku sonnet gemini per feature wall' },
+  ] },
+  { id: 'memory', label: 'Memory & Index', icon: Database, desc: "What's in your brain", group: 'AI & voice', search: [
+    { label: 'What gets indexed', keywords: 'index sources vault tasks notes documents memory enable disable' },
+    { label: 'Reconcile & re-chunk memory', keywords: 'sync import reconcile supermemory backfill rechunk' },
+  ] },
+  { id: 'prompts', label: 'Prompts', icon: Wand2, desc: 'Tune every AI prompt', group: 'AI & voice', search: [
+    { label: 'AI prompts', keywords: 'prompt prompts tune instructions wording edit reset' },
+  ] },
+  { id: 'google', label: 'Google', icon: Globe, desc: 'Workspace services', group: 'Connections', search: [
+    { label: 'Google Workspace', keywords: 'google gmail drive docs sheets calendar workspace connect' },
+    { label: 'Gmail Daily Brief model', keywords: 'gmail brief email model nightly' },
+  ] },
+  { id: 'connections', label: 'Connections', icon: Plug, desc: 'Keys, Telegram & CLI', group: 'Connections', search: [
+    { label: 'API keys & connectors', keywords: 'integrations keys supermemory rag notion raindrop tavily brave exa deepgram apify openai openrouter anthropic elevenlabs connector' },
+    { label: 'Telegram', keywords: 'telegram bot notify link unlink' },
+    { label: 'CLI engines (Codex / Gemini)', keywords: 'cli terminal command line codex gemini subscription' },
+    { label: 'Skills scan', keywords: 'skills scan github import' },
+  ] },
+  { id: 'usage', label: 'Usage & Costs', icon: Wallet, desc: 'Tokens, budgets & spend', group: 'You & the app', search: [
+    { label: 'Usage, tokens & cost', keywords: 'usage tokens cost spend wallet billing money log' },
+    { label: "Today's AI budget & engine limits", keywords: 'budget token limit ceiling engine fallback daily' },
+  ] },
+  { id: 'account', label: 'Account', icon: User, desc: 'Sign-in, theme & privacy', group: 'You & the app', search: [
+    { label: 'Dark / light theme', keywords: 'dark light theme appearance colour color mode display', anchor: 'set-theme' },
+    { label: 'Account & sign-in', keywords: 'account email sign in login logout password' },
+    { label: 'Privacy & reset', keywords: 'privacy data export reset clear wipe app' },
+  ] },
 ];
-const GROUPS = ['Your work', 'You & the app', 'Connections', 'AI brain'];
+const GROUPS = ['Your work', 'AI & voice', 'Connections', 'You & the app'];
+
+/** Old tab ids → their new module home, so every saved link and habit keeps working. (BEA-1227) */
+const LEGACY: Record<string, Tab> = {
+  appearance: 'account', integrations: 'connections', cli: 'connections', sync: 'connections',
+  whatsapp: 'people', agent: 'agents', models: 'agents', index: 'memory', activity: 'story',
+};
 
 /** Best-effort live status shown on the tiles. */
 function useSettingsStatus() {
@@ -74,65 +158,43 @@ function useSettingsStatus() {
   useEffect(() => {
     setS((p) => ({ ...p, appearance: theme === 'dark' ? 'Dark' : 'Light' }));
     /* eslint-disable-next-line */
-    fetch('/api/agent/engine').then((r) => r.json()).then((e) => setS((p) => ({ ...p, agent: e?.ok ? 'Online' : 'Offline' }))).catch(() => undefined);
-    fetch('/api/connectors').then((r) => r.json()).then((d) => { const list = Array.isArray(d) ? d : d?.connectors || []; const n = list.filter((c: any) => c.connected || c.configured).length; if (list.length) setS((p) => ({ ...p, integrations: `${n} connected` })); }).catch(() => undefined);
-    fetch('/api/explore/sources').then((r) => r.json()).then((d) => { const list = Array.isArray(d) ? d : d?.sources || []; const on = list.filter((x: any) => x.enabled).length; if (list.length) setS((p) => ({ ...p, index: `${on} sources on` })); }).catch(() => undefined);
+    fetch('/api/agent/engine').then((r) => r.json()).then((e) => setS((p) => ({ ...p, agents: e?.ok ? 'Online' : 'Offline' }))).catch(() => undefined);
+    fetch('/api/connectors').then((r) => r.json()).then((d) => { const list = Array.isArray(d) ? d : d?.connectors || []; const n = list.filter((c: any) => c.connected || c.configured).length; if (list.length) setS((p) => ({ ...p, connections: `${n} connected` })); }).catch(() => undefined);
+    fetch('/api/explore/sources').then((r) => r.json()).then((d) => { const list = Array.isArray(d) ? d : d?.sources || []; const on = list.filter((x: any) => x.enabled).length; if (list.length) setS((p) => ({ ...p, memory: `${on} sources on` })); }).catch(() => undefined);
     fetch('/api/google/status').then((r) => r.json()).then((d) => { if (d?.email) setS((p) => ({ ...p, google: d.email })); else if (d?.connected) setS((p) => ({ ...p, google: 'Connected' })); }).catch(() => undefined);
   }, [theme]);
   return s;
 }
 
+/**
+ * One module page = everything about that module, composed from the cards that used to be
+ * scattered. The per-module deep re-work lands issue by issue (BEA-1228→1232); this shell
+ * guarantees every existing control already lives under its right module. (BEA-1227)
+ */
 function renderSection(id: Tab, email?: string): ReactNode {
   switch (id) {
-    case 'account': return <AccountSection email={email} />;
     case 'tasks': return <TasksSettings />;
+    case 'people': return <WhatsAppSection />;
+    case 'documents': return <div className="space-y-4"><DocumentIngestCard /><RaindropSyncCard /></div>;
+    case 'chat': return <div className="space-y-4"><ChatRetentionCard /></div>;
+    case 'meetings': return <div className="space-y-4"><MeetingsEngineCard /></div>;
+    case 'voice': return <div className="space-y-4"><VoiceModelCard /></div>;
     case 'emo': return <EmoSettingsSection />;
-    case 'integrations': return <IntegrationsSection />;
-    case 'agent': return <AgentEngineSection />;
-    case 'cli': return <CliSection />;
-    case 'google': return <GoogleServicesSection />;
-    case 'models': return <ModelsSection />;
-    case 'whatsapp': return <WhatsAppSection />;
-    case 'usage': return <><BudgetAndEngines /><UsageCard /></>;
-    case 'index': return <IndexSection />;
+    case 'story': return <div className="space-y-4"><NudgesCard /><LabActivitySection /></div>;
+    case 'agents': return <><AgentEngineSection /><div className="mt-6 space-y-1"><h2 className="text-sm font-semibold text-zinc-500">All AI models</h2><p className="text-xs text-zinc-400">Every model in one list. These are moving into their own modules, one by one.</p></div><ModelsSection /></>;
+    case 'memory': return <div className="space-y-4"><IndexSection /><SuperMemorySyncCard /></div>;
     case 'prompts': return <PromptsSection />;
-    case 'sync': return <SyncSection />;
-    case 'activity': return <LabActivitySection />;
-    case 'appearance': return <AppearanceSection />;
+    case 'google': return <GoogleServicesSection />;
+    case 'connections': return <div className="space-y-4"><IntegrationsSection /><TelegramCard /><CliSection /><SkillsSyncCard /></div>;
+    case 'usage': return <><BudgetAndEngines /><UsageCard /></>;
+    case 'account': return <div className="space-y-4"><AppearanceSection /><AccountSection email={email} /></div>;
   }
 }
 
-// Deep search index — every notable setting, findable by keyword (BEA-714). anchor = id on the detail page.
-const SEARCH_INDEX: { label: string; keywords: string; cat: Tab; anchor?: string }[] = [
-  { label: 'Dark / light theme', keywords: 'dark light theme appearance colour color mode display', cat: 'appearance', anchor: 'set-theme' },
-  { label: 'Account & sign-in', keywords: 'account email sign in login logout password', cat: 'account' },
-  { label: 'Privacy', keywords: 'privacy data export', cat: 'account' },
-  { label: 'Reset / clear app', keywords: 'reset clear wipe app', cat: 'account' },
-  { label: 'Usage, tokens & cost', keywords: 'usage tokens cost spend wallet billing money', cat: 'usage' },
-  { label: "Today's AI budget & engines", keywords: 'budget token limit ceiling engine codex claude gemini fallback', cat: 'usage' },
-  { label: 'SuperMemory', keywords: 'supermemory memory store connector', cat: 'integrations' },
-  { label: 'RAG store', keywords: 'rag vector memory store', cat: 'integrations' },
-  { label: 'Notion', keywords: 'notion pages import', cat: 'integrations' },
-  { label: 'Telegram', keywords: 'telegram bot notify notification push', cat: 'integrations' },
-  { label: 'Raindrop bookmarks', keywords: 'raindrop bookmark', cat: 'integrations' },
-  { label: 'Tavily web reader', keywords: 'tavily web read page', cat: 'integrations' },
-  { label: 'Brave Search', keywords: 'brave search api research gather sources llm context', cat: 'integrations' },
-  { label: 'Exa meaning search', keywords: 'exa semantic search meaning research', cat: 'integrations' },
-  { label: 'Deepgram (voice key)', keywords: 'deepgram voice dictation transcribe speech key', cat: 'integrations' },
-  { label: 'Apify (Instagram)', keywords: 'apify instagram bookmark enrich', cat: 'integrations' },
-  { label: 'Google Workspace', keywords: 'google gmail drive docs sheets calendar workspace', cat: 'google' },
-  { label: 'CLI access', keywords: 'cli terminal command line codex', cat: 'cli' },
-  { label: 'Import / reconcile memory', keywords: 'sync import reconcile supermemory backfill', cat: 'sync' },
-  { label: 'Agent autonomy', keywords: 'autonomy cautious balanced autopilot agent permission approve', cat: 'agent', anchor: 'set-autonomy' },
-  { label: 'Agent model', keywords: 'agent model codex gpt engine default', cat: 'agent', anchor: 'set-model' },
-  { label: 'WhatsApp templates & messages', keywords: 'whatsapp template message log sent delivered number postbox', cat: 'whatsapp' },
-  { label: 'Recall brain before a run', keywords: 'recall brain context before search agent', cat: 'agent', anchor: 'set-recall' },
-  { label: 'Learn after runs', keywords: 'learn learnings remember after run agent', cat: 'agent', anchor: 'set-learn' },
-  { label: 'Which model does what', keywords: 'models story lab meeting voice haiku sonnet gemini per feature', cat: 'models' },
-  { label: 'AI prompts', keywords: 'prompt prompts tune instructions wording', cat: 'prompts' },
-  { label: 'What gets indexed', keywords: 'index sources vault tasks notes documents memory enable disable', cat: 'index' },
-  { label: 'The Lab & activity', keywords: 'lab activity learning mood heatmap findings', cat: 'activity' },
-];
+/** The search index is GENERATED from the module registry above — a module's entries live next to
+ *  the module, so the index can never rot separately from the sections again. (BEA-1227) */
+const SEARCH_INDEX: { label: string; keywords: string; cat: Tab; anchor?: string }[] =
+  CATS.flatMap((c) => c.search.map((s) => ({ ...s, cat: c.id })));
 
 function SettingsSearch() {
   const nav = useNavigate();
@@ -186,7 +248,13 @@ export function Settings({ email }: { email?: string }) {
   const { category } = useParams();
   const nav = useNavigate();
   const status = useSettingsStatus();
-  const active = CATS.find((c) => c.id === category);
+  // An old bookmark like /settings/models lands on its new module home. (BEA-1227)
+  const resolved = category && LEGACY[category] ? LEGACY[category] : category;
+  useEffect(() => {
+    if (category && LEGACY[category]) nav(`/settings/${LEGACY[category]}${window.location.hash || ''}`, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
+  const active = CATS.find((c) => c.id === resolved);
   useHashHighlight(!!active);
 
   // ---- detail page for one category ----
@@ -2161,20 +2229,6 @@ function DocumentIngestCard() {
       </div>
       <ConfirmDialog open={regen} title="Regenerate the token?" message="The old token stops working immediately — any server still using it will be rejected until you update it." confirmLabel="Regenerate" onCancel={() => setRegen(false)} onConfirm={regenerate} />
     </section>
-  );
-}
-
-function SyncSection() {
-  return (
-    <div className="space-y-4">
-      <TelegramCard />
-      <NudgesCard />
-      <DocumentIngestCard />
-      <ChatRetentionCard />
-      <RaindropSyncCard />
-      <SkillsSyncCard />
-      <SuperMemorySyncCard />
-    </div>
   );
 }
 
