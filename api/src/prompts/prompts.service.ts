@@ -8,7 +8,7 @@ export type PromptKey =
   | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMineWork' | 'daily.storyMineDay' | 'daily.insightsWritten'
   | 'tasks.autoNote'
   | 'lab.chainParse' | 'lab.chainInfer' | 'lab.chainReview' | 'lab.model' | 'lab.dedupe' | 'lab.rewrite'
-  | 'people.chaseAgent' | 'people.briefingTidy' | 'people.reviewRead' | 'people.profile'
+  | 'people.chaseAgent' | 'people.briefingTidy' | 'people.reviewRead' | 'people.profile' | 'people.reportSummary'
   | 'emo.router' | 'emo.searchClarify' | 'emo.searchAnswer' | 'emo.researchClarify' | 'emo.research' | 'emo.researchBrief' | 'emo.meeting' | 'emo.meetingChunk' | 'emo.meetingMerge' | 'emo.taskTitle' | 'emo.reminderExtract' | 'emo.briefWho' | 'emo.askOffer' | 'emo.askSummary' | 'emo.talk'
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
@@ -620,6 +620,17 @@ Rules:
 - Ground EVERY claim in the facts below. Never invent. If a section has too little to say, write one honest line.
 - This REPLACES the old profile: carry forward what is still true from it, drop stale activity, fold in the new weeks.
 - No greetings, no preamble, no markdown besides the four headings. Keep the whole thing under 250 words.`,
+  },
+  {
+    key: 'people.reportSummary',
+    category: "People & chase",
+    label: "Report — the 1–2 line summary",
+    description: "Condenses one daily report into 1–2 plain lines for the contact page — every figure kept exactly. The report fills in where it says {{report}}; the task title where it says {{title}}.",
+    default: `Condense this daily report into ONE or TWO short plain-English lines for a busy owner.
+Keep EVERY number, quantity, time and name exactly as written. Drop greetings, dates and filler.
+Report ("{{title}}"):
+"""{{report}}"""
+Reply with ONLY the summary line(s), nothing else.`,
   },
   {
     key: 'emo.router',

@@ -387,3 +387,75 @@ describe('the chase rules are his to set (BEA-1161)', () => {
     expect(after.digestHour.value).toBe(before.digestHour.value);
   });
 });
+
+/**
+ * BEA-1223: the 1–2 line summary of a day's report — written once when the report arrives, so the
+ * owner reads WHAT was said. The quote stays the untouched evidence underneath.
+ */
+describe('the report summary (BEA-1223)', () => {
+  const LONG = 'OT from 7:00 to 10:30 PM. Total 11 members. 5 for magnetic rework, 1 for cases Fybros, 2 for daily dispatch, 3 for socket wire fixing.';
+
+  function makeWithLlm(reply: string | null) {
+    const rows: any[] = [];
+    const prisma: any = {
+      setting: { findUnique: async () => null, upsert: async () => ({}) },
+      taskStatusDay: {
+        findUnique: async ({ where }: any) => rows.find((r) => r.taskId === where.taskId_day.taskId && r.day === where.taskId_day.day) || null,
+        upsert: async ({ where, create, update }: any) => {
+          const i = rows.findIndex((r) => r.taskId === where.taskId_day.taskId && r.day === where.taskId_day.day);
+          if (i >= 0) { rows[i] = { ...rows[i], ...update }; return rows[i]; }
+          rows.push({ id: `sd${rows.length + 1}`, ...create });
+          return rows[rows.length - 1];
+        },
+        update: async ({ where, data }: any) => { const r = rows.find((x) => x.id === where.id); if (r) Object.assign(r, data); return r; },
+        findMany: async () => [],
+      },
+      task: { findUnique: async () => ({ title: 'Send the OT update' }) },
+    };
+    const llm: any = { completeHelper: jest.fn(async () => reply) };
+    const prompts: any = { get: async () => 'Summarize {{title}}: {{report}}' };
+    return { svc: new RecurringService(prisma, llm, prompts), rows, llm };
+  }
+  const settle = () => new Promise((r) => setTimeout(r, 0)); // the summary is fire-and-forget
+
+  it('writes the summary onto the day the moment a real report lands', async () => {
+    const { svc, rows } = makeWithLlm('OT 7–10:30pm, 11 members: 5 rework, 1 Fybros, 2 dispatch, 3 sockets.');
+    await svc.markReceived('t1', '2026-07-31', LONG, 'c1', { source: 'whatsapp' });
+    await settle();
+    expect(rows[0].summary).toContain('11 members');
+    expect(rows[0].quote).toBe(LONG); // the evidence is never rewritten
+  });
+
+  it('a short line IS its own summary — no model call, no cost', async () => {
+    const { svc, llm } = makeWithLlm('anything');
+    await svc.markReceived('t1', '2026-07-31', 'Nothing new today', 'c1', {});
+    await settle();
+    expect(llm.completeHelper).not.toHaveBeenCalled();
+  });
+
+  it('a junk reply writes nothing — the quote fallback stands', async () => {
+    const { svc, rows } = makeWithLlm('  " ');
+    await svc.markReceived('t1', '2026-07-31', LONG, 'c1', {});
+    await settle();
+    expect(rows[0].summary ?? null).toBeNull();
+  });
+
+  it('a newer signal replaces the words and the stale summary with them', async () => {
+    const { svc, rows } = makeWithLlm('fresh: 11 members, figures updated');
+    await svc.markReceived('t1', '2026-07-31', LONG, 'c1', { at: new Date('2026-07-31T10:00:00Z') });
+    await settle();
+    rows[0].summary = 'stale summary from the earlier words';
+    await svc.markReceived('t1', '2026-07-31', LONG + ' Corrected: 12 members.', 'c1', { at: new Date('2026-07-31T11:00:00Z') });
+    await settle();
+    expect(rows[0].summary).toBe('fresh: 11 members, figures updated');
+  });
+
+  it('without a model wired, the day still settles exactly as before', async () => {
+    const { svc, rows } = makeWithLlm(null);
+    (svc as any).llm = undefined;
+    await svc.markReceived('t1', '2026-07-31', LONG, 'c1', {});
+    await settle();
+    expect(rows[0].status).toBe('received');
+    expect(rows[0].summary ?? null).toBeNull();
+  });
+});

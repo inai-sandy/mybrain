@@ -10,8 +10,15 @@ import { TaskFormModal, type Task } from '../pages/taskShared';
 type Report = {
   taskId: string; title: string; schedule: string[] | null; scheduleLabel: string;
   due: boolean; status: 'received' | 'waiting' | 'missed' | 'off'; quote: string | null;
+  /** The 1–2 line AI read of what they sent; the quote stays the tap-deeper evidence. (BEA-1223) */
+  summary: string | null;
   source: string | null; at: string | null;
+  /** The freshest report that DID come in, for while today's is still out. (BEA-1223) */
+  last: { day: string; summary: string | null; quote: string; source: string | null } | null;
 };
+
+/** "Thu, 31 Jul" from a YYYY-MM-DD key. */
+const fmtDayKey = (d?: string | null) => { try { return d ? new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) : ''; } catch { return d || ''; } };
 
 type State = {
   open: number; done: number; awaitingYou: number; chasing: number;
@@ -159,13 +166,30 @@ export function TodayReports({ today, onChanged }: { today: State['today']; onCh
           {r.status === 'received' ? '✓' : r.status === 'missed' ? '✕' : r.due ? '•' : '—'}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm leading-snug">{r.title}</p>
+          <p className="text-sm font-medium leading-snug">{r.title}</p>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-400">
             <button onClick={() => setEditing(editing === r.taskId ? null : r.taskId)} className="underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">{r.scheduleLabel}</button>
-            {r.due ? <span>{r.status === 'received' ? 'came in' : r.status === 'missed' ? 'missed' : 'still waiting'}</span> : <span>not due today</span>}
-            {r.source && <span className={r.source === 'page' ? 'text-amber-600 dark:text-amber-500' : 'text-emerald-600 dark:text-emerald-400'}>{r.source === 'page' ? 'ticked on their page' : 'said on WhatsApp'}</span>}
+            {r.due ? <span>{r.status === 'received' ? 'in' : r.status === 'missed' ? 'missed' : 'not in yet'}</span> : <span>not due today</span>}
+            {r.source && <span className={r.source === 'page' ? 'text-amber-600 dark:text-amber-500' : 'text-emerald-600 dark:text-emerald-400'}>{r.source === 'page' ? 'filled on their page' : 'from chat'}</span>}
           </div>
-          {r.quote && <p className="mt-1 border-l-2 border-zinc-200 pl-2 text-xs italic text-zinc-500 dark:border-zinc-700">“{r.quote.slice(0, 180)}”</p>}
+          {/* WHAT they reported — the summary reads first; their exact words one tap deeper. (BEA-1223) */}
+          {r.status === 'received' && (r.summary || r.quote) && (
+            <>
+              <p className="mt-1 text-sm leading-snug text-zinc-700 dark:text-zinc-300">{r.summary || (r.quote || '').slice(0, 180)}</p>
+              {r.quote && r.summary && (
+                <details className="mt-0.5">
+                  <summary className="cursor-pointer text-[11px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">their exact words</summary>
+                  <p className="mt-1 whitespace-pre-wrap border-l-2 border-zinc-200 pl-2 text-xs italic text-zinc-500 dark:border-zinc-700">“{r.quote}”</p>
+                </details>
+              )}
+            </>
+          )}
+          {/* Today's still out — show the freshest one that DID come in, with its date. (BEA-1223) */}
+          {r.due && r.status !== 'received' && r.last && (
+            <p className="mt-1 text-xs leading-snug text-zinc-500">
+              <span className="font-medium text-zinc-400">last · {fmtDayKey(r.last.day)}</span> — {r.last.summary || r.last.quote.slice(0, 160)}
+            </p>
+          )}
           {editing === r.taskId && (
             <div className="mt-2 flex flex-wrap items-center gap-1">
               {DAYS.map((d) => {
@@ -184,14 +208,17 @@ export function TodayReports({ today, onChanged }: { today: State['today']; onCh
     </li>
   );
 
-  // Collapsed by default with the answer still on the surface: what came in, what's waiting,
-  // in one line. The detail — quotes, sources, the day picker — is one tap away. (BEA-1210)
+  // Collapsed by default with the answer still on the surface: WHAT came in, not just whether.
+  // The detail — full summaries, exact words, the day picker — is one tap away. (BEA-1210/1223)
   const glance = today.due.length
-    ? today.due.map((r) => `${r.status === 'received' ? '✓' : r.status === 'missed' ? '✕' : '•'} ${r.title}`).join(' · ')
+    ? today.due.map((r) => (r.status === 'received' && (r.summary || r.quote))
+        ? `✓ ${(r.summary || r.quote || '').slice(0, 90)}`
+        : `${r.status === 'missed' ? '✕' : '•'} ${r.title} — ${r.status === 'missed' ? 'missed' : 'not in yet'}`).join('  ·  ')
     : 'Nothing due from them today.';
 
   return (
-    <Accordion dense icon={BarChart3} tile="bg-amber-500/10 text-amber-500" title="Today’s reports"
+    <Accordion dense icon={BarChart3} tile="bg-amber-500/10 text-amber-500"
+      title={<>Reports <span className="font-normal text-zinc-400">— {fmtDayKey(today.day)}</span></>}
       badge={today.counts.due > 0 ? <span className="text-xs font-normal text-zinc-400">· {today.counts.received} of {today.counts.due} in</span> : null}
       summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">{glance}</span>}>
       {today.due.length ? <ul className="space-y-1.5">{today.due.map(row)}</ul> : <p className="text-sm text-zinc-400">Nothing due from them today.</p>}
