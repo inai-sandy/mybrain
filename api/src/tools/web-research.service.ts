@@ -21,8 +21,18 @@ import { ConnectorService } from '../connectors/connector.service';
 export type WebResult = { title: string; url: string; snippet: string; published?: string };
 
 /** What a caller may narrow a search with. Anything omitted is worked out from the question. */
+/** A date window, and whether the owner stated it or we guessed it (BEA-1209). */
+export type SearchWindow = { start_date?: string; end_date?: string; time_range?: string; stated?: boolean };
+
 export type SearchOptions = {
-  window?: { start_date?: string; end_date?: string; time_range?: string };
+  /**
+   * `stated: true` means the OWNER typed these dates (BEA-1209). A stated window is never widened:
+   * he asked for that period, and quietly answering with 2019 material because 2026 was empty is the
+   * same dishonesty being removed everywhere else. A guessed window is only ever a hint, so it IS
+   * widened when it finds nothing — a bad guess returning zero looks identical to "this does not
+   * exist anywhere", the most expensive wrong answer this tool can give.
+   */
+  window?: SearchWindow;
   country?: string;
   includeDomains?: string[];
   /**
@@ -100,7 +110,7 @@ export class WebResearchService {
    * NOTE the endpoint. `/res/v1/llm/context` with `q` — the paths in Brave's marketing pages
    * (`/res/v1/summarizer/llm_context`) return 403.
    */
-  async braveContext(query: string, opts: { country?: string; maxTokens?: number } = {}): Promise<WebResult[]> {
+  async braveContext(query: string, opts: { country?: string; maxTokens?: number; window?: SearchWindow } = {}): Promise<WebResult[]> {
     const q = (query || '').trim().split(/\s+/).slice(0, 50).join(' ').slice(0, 400); // Brave caps at 50 words / 400 chars
     if (!q) return [];
     const key = (await this.connectors.get<{ apiKey?: string }>('brave').catch(() => null))?.apiKey;
@@ -108,6 +118,10 @@ export class WebResearchService {
     const body: any = { q, maximum_number_of_tokens: Math.min(Math.max(opts.maxTokens || 8192, 1024), 32768) };
     const country = opts.country ?? WebResearchService.countryOf(query);
     if (country) body.country = COUNTRY_CODE[country] || undefined;
+    // Brave takes a freshness range as YYYY-MM-DDtoYYYY-MM-DD, or one of pd/pw/pm/py (BEA-1209).
+    const w = opts.window;
+    if (w?.start_date || w?.end_date) body.freshness = `${w.start_date || '2000-01-01'}to${w.end_date || iso(Date.now())}`;
+    else if (w?.time_range) body.freshness = ({ day: 'pd', week: 'pw', month: 'pm', year: 'py' } as any)[w.time_range] || undefined;
     const r = await fetch('https://api.search.brave.com/res/v1/llm/context', {
       method: 'POST',
       headers: { 'x-subscription-token': key, 'Content-Type': 'application/json', accept: 'application/json' },
@@ -160,7 +174,7 @@ export class WebResearchService {
    *
    * `today` is injected so this is testable without freezing the clock.
    */
-  static dateWindow(q: string, today = new Date()): { start_date?: string; end_date?: string; time_range?: string } {
+  static dateWindow(q: string, today = new Date()): SearchWindow {
     const t = String(q || '');
     const thisYear = today.getUTCFullYear();
     const named = [...new Set((t.match(/\b(1\d{3}|20\d{2})\b/g) || []).map(Number))].sort((a, b) => a - b);
@@ -227,7 +241,8 @@ export class WebResearchService {
       this.log.warn(`Tavily: nothing within the ${domains.length} chosen site(s) — searching the whole web instead`);
       rows = await attempt({ ...window, country });
     }
-    if (!rows.length && (window.start_date || window.time_range)) {
+    // A GUESSED window may be dropped when it finds nothing. A STATED one may not (BEA-1209).
+    if (!rows.length && !window.stated && (window.start_date || window.time_range)) {
       rows = await attempt({ country });
     }
     return rows.map((x) => ({ title: String(x.title || 'Untitled'), url: String(x.url || ''), snippet: String(x.content || '').slice(0, 900), published: x.published_date || undefined }));

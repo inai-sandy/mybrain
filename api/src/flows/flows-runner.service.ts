@@ -471,7 +471,7 @@ export class FlowRunnerService implements OnModuleInit {
           let output = '';
           let lastErr: any = null;
           for (let attempt = 0; attempt <= retries; attempt++) {
-            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }, (s) => addSpend(s)); lastErr = null; break; }
+            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }, (s) => addSpend(s), graph?.researchFrom, graph?.researchTo); lastErr = null; break; }
             catch (e: any) {
               if (e instanceof PauseSignal) throw e;
               lastErr = e;
@@ -885,7 +885,7 @@ export class FlowRunnerService implements OnModuleInit {
     return r && r.ids.length ? new Set(r.ids) : null;
   }
 
-  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void, onSpend?: (s: ResearchSpend) => void): Promise<string> {
+  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void, onSpend?: (s: ResearchSpend) => void, researchFrom?: string, researchTo?: string): Promise<string> {
     const kind = node.data?.kind;
     const label = node.data?.label || '';
     const refId = node.data?.refId;
@@ -945,8 +945,12 @@ export class FlowRunnerService implements OnModuleInit {
           if (!this.deep) throw new Error('deep research is not available on this server');
           const q = (input || node.data?.sub || '').trim();
           const budget = { searches: Number(node.data?.maxSearches) || undefined, extracts: Number(node.data?.maxReads) || undefined };
+          // Dates the owner set, if any (BEA-1209). On the node first, else the flow's own. Empty is
+          // the normal case and the window is guessed from the question as before.
+          const from = String(node.data?.researchFrom || researchFrom || '').trim() || undefined;
+          const to = String(node.data?.researchTo || researchTo || '').trim() || undefined;
           try {
-            const { report, spend } = await this.deep.run(q, { budget, onLine });
+            const { report, spend } = await this.deep.run(q, { budget, onLine, from, to });
             onSpend?.(spend);
             return report;
           } catch (e: any) {
