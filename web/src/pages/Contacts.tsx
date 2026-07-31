@@ -733,7 +733,8 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
     if (resending) return;
     setResending(true);
     try {
-      const r = await fetch(`/api/reminders/${reminder.id}/resend-template`, { method: 'POST' });
+      // The contact rides along — the thread opened from the Message button has no real reminder. (BEA-1226)
+      const r = await fetch(`/api/reminders/${reminder.id}/resend-template`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contactId: reminder.contactId }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.message || 'Could not re-send');
       setData((prev) => (prev ? { ...prev, messages: [...prev.messages, d] } : prev));
@@ -746,7 +747,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
     if (!body || sending) return;
     setSending(true);
     try {
-      const r = await fetch(`/api/reminders/${reminder.id}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+      const r = await fetch(`/api/reminders/${reminder.id}/message`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body, contactId: reminder.contactId }) });
       const d = await r.json();
       if (!r.ok) throw new Error(d?.message || 'Could not send');
       setData((prev) => (prev ? { ...prev, messages: [...prev.messages, d] } : prev));

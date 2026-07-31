@@ -671,3 +671,70 @@ describe('dailySubject — asking for today\'s copy', () => {
     expect(dailySubject('   ')).toBe("today's update");
   });
 });
+
+/**
+ * BEA-1226 (the Naveen case): the Message button opens the thread with the synthetic id 'thread',
+ * and sending failed "Reminder not found" — both send paths insisted on a real reminder row.
+ * The CONTACT is the anchor now; the latest reminder rides along when one exists.
+ */
+describe("the contact thread can send (BEA-1226)", () => {
+  function makeThread(opts: { reminder?: any; lastIn?: Date | null } = {}) {
+    const state: any = { texts: [], rows: [] };
+    const prisma: any = {
+      contact: { findUnique: async () => ({ id: 'c1', name: 'Naveen Kumar', whatsappNumber: '919999888877' }) },
+      reminder: {
+        findUnique: async () => null, // 'thread' is not a real reminder
+        findFirst: async () => opts.reminder ?? null,
+        findMany: async () => (opts.reminder ? [opts.reminder] : []),
+        updateMany: async () => ({ count: 0 }),
+      },
+      reminderMessage: {
+        findFirst: async () => (opts.lastIn === undefined ? { createdAt: new Date() } : opts.lastIn ? { createdAt: opts.lastIn } : null),
+        create: async ({ data }: any) => { state.rows.push(data); return { id: 'm1', createdAt: new Date(), ...data }; },
+      },
+      task: { findUnique: async () => null },
+    };
+    const postbox: any = {
+      isConfigured: () => true,
+      sendText: async (_to: string, bodyText: string) => { state.texts.push(bodyText); return { wamid: 'w1', status: 'sent', error: null }; },
+      sendReminderTemplate: async () => ({ wamid: 'w2', status: 'sent', error: null }),
+      renderReminderTemplate: (f: string, s: string) => `Hi ${f}, about ${s}`,
+    };
+    const svc = new RemindersService(prisma, {} as any, {} as any, postbox);
+    return { svc, state };
+  }
+
+  it('sends free text from the Message-button thread, anchored to the contact', async () => {
+    const { svc, state } = makeThread({ reminder: { id: 'r9', contactId: 'c1', subject: 'the OT update', message: 'x' } });
+    const out: any = await svc.sendManual('thread', 'How did today go?', 'c1');
+    expect(out.status).toBe('sent');
+    expect(state.texts).toEqual(['How did today go?']);
+    expect(state.rows[0]).toMatchObject({ contactId: 'c1', reminderId: 'r9' }); // latest reminder rides along
+  });
+
+  it('works even when the contact has NO reminders at all', async () => {
+    const { svc, state } = makeThread({ reminder: null });
+    const out: any = await svc.sendManual('thread', 'Quick question for you', 'c1');
+    expect(out.status).toBe('sent');
+    expect(state.rows[0]).toMatchObject({ contactId: 'c1', reminderId: null });
+  });
+
+  it('outside the 24h window the template goes instead — same as a real reminder thread', async () => {
+    const { svc, state } = makeThread({ reminder: null, lastIn: null });
+    const out: any = await svc.sendManual('thread', 'Hello?', 'c1');
+    expect(out.viaTemplate).toBe(true);
+    expect(state.rows[0].reminderId).toBeNull();
+  });
+
+  it("a genuinely unknown reminder id with no contact still says so", async () => {
+    const { svc } = makeThread();
+    await expect(svc.sendManual('does-not-exist', 'x')).rejects.toThrow('Reminder not found');
+  });
+
+  it('resend-template works from the thread too', async () => {
+    const { svc, state } = makeThread({ reminder: { id: 'r9', contactId: 'c1', subject: 'the OT update', message: 'x' } });
+    const out: any = await svc.resendTemplate('thread', 'c1');
+    expect(out.status).toBe('sent');
+    expect(state.rows[0]).toMatchObject({ contactId: 'c1' });
+  });
+});
