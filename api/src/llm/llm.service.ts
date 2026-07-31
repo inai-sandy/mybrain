@@ -286,7 +286,7 @@ export class LlmService {
    * Like completeWith, but also reports which model ACTUALLY produced the text — so a feature that
    * records its engine (e.g. the Story of the Day) shows the truth after an agent→Sonnet fallback.
    */
-  async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; model: string | null }> {
+  async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; model: string | null; provider?: string; flatRate?: boolean }> {
     if (!cfg?.provider || !cfg?.model) return { text: null, model: null };
     if (isFlatRate(cfg.provider)) {
       // Charged up front like any engine turn — it reports nothing until it finishes (BEA-1204).
@@ -303,16 +303,16 @@ export class LlmService {
           const e = ENGINE_CHAIN[i];
           const use = i === start ? cfg : e;
           const text = await this.runAgent(use, prompt, i === start ? label : `${label}-${e.provider}`);
-          if (text) return { text, model: use.model };
+          if (text) return { text, model: use.model, provider: use.provider, flatRate: true };
           this.log.warn(`${label}: ${use.provider} could not answer — trying the next engine`);
         }
       } finally {
         release();
       }
       const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
-      return { text: fb, model: fb ? 'Claude Sonnet 4.6 (fallback)' : cfg.model };
+      return { text: fb, model: fb ? 'Claude Sonnet 4.6 (fallback)' : cfg.model, provider: 'openrouter', flatRate: false };
     }
-    return { text: await this.completeWith(cfg, prompt, maxTokens, label), model: cfg.model };
+    return { text: await this.completeWith(cfg, prompt, maxTokens, label), model: cfg.model, provider: cfg.provider, flatRate: isFlatRate(cfg.provider) };
   }
 
   /** Single-shot completion forcing a specific provider+model (e.g. the Tasks engine's Sonnet). */

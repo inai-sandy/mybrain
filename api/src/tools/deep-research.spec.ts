@@ -54,6 +54,7 @@ function make(opts: {
       text: answer(label),
       // A fallback is what the shared layer really does when the host runner is unavailable.
       model: opts.engineDown ? 'Claude Sonnet 4.6 (fallback)' : cfg?.model,
+      flatRate: opts.engineDown ? false : !!cfg,
     })),
     completeHelper: jest.fn(async (_k: string, _p: string, _t: number, label: string) => answer(label)),
   };
@@ -591,5 +592,29 @@ describe('planning and writing use their own models (BEA-1206)', () => {
     const { report } = await new DeepResearchService(web, llm).run('a question');
     expect(asked).toContain('deep-research');   // the old key still resolves
     expect(report).toContain('report');
+  });
+});
+
+/** BEA-1201 — moving from one FREE engine to another is not a paid call, and must not be reported as one. */
+describe('a free fall-through is not a paid call (BEA-1201)', () => {
+  const build = (flatRate: boolean) => {
+    const web: any = { available: async () => ({ tavily: true, exa: false, brave: false }), search: async () => [{ title: 'T', url: 'https://a', snippet: 's' }], readPage: async () => 't' };
+    const llm: any = {
+      helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+      // Codex was dry, so Claude answered — a different model, still free.
+      completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'report', model: 'claude', provider: 'claude', flatRate }),
+    };
+    return new DeepResearchService(web, llm);
+  };
+
+  it('counts nothing as paid when another free engine answered', async () => {
+    const { spend, report } = await build(true).run('a question');
+    expect(spend.paidCalls).toBe(0);
+    expect(report).not.toMatch(/paid model/);
+  });
+
+  it('still counts it when the answer really did cost money', async () => {
+    const { spend } = await build(false).run('a question');
+    expect(spend.paidCalls).toBe(2);
   });
 });

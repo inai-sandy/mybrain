@@ -433,10 +433,12 @@ export class DeepResearchService {
     const r = await this.llm.completeWithModel(cfg, prompt, maxTokens, label).catch(() => null);
     const text = r?.text ?? null;
     if (!text) return { text: null, paid: false };
-    const flatRate = cfg?.provider === 'codex' || cfg?.provider === 'gemini';
-    // No flat-rate engine configured → every call is a paid one. Configured but a different model
-    // answered → the fallback kicked in.
-    return { text, paid: !flatRate || r?.model !== cfg?.model };
+    // Judge on WHO ANSWERED, not on whether the model differed (BEA-1201). Falling through from
+    // Codex to Claude changes the model but costs nothing — counting that as paid raised a false
+    // alarm on a run that was in fact still free.
+    if (typeof r?.flatRate === 'boolean') return { text, paid: !r.flatRate };
+    const flatRate = cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'claude';
+    return { text, paid: !flatRate };
   }
 
   /** The cost, in the only units that are actually verified. */
