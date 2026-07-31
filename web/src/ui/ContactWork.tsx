@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2, BarChart3, UserRound } from 'lucide-react';
+import { CheckCircle2, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2, BarChart3, UserRound, RefreshCw } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PersonTimeline } from './PersonTimeline';
@@ -36,6 +36,8 @@ const ago = (iso: string | null) => {
  */
 export function CharacterProfile({ contactId, reload }: { contactId: string; reload?: number }) {
   const [p, setP] = useState<{ text: string; updatedAt: string | null } | 'none' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
   useEffect(() => {
     setP(null);
     fetch(`/api/contacts/${contactId}/profile`)
@@ -43,7 +45,28 @@ export function CharacterProfile({ contactId, reload }: { contactId: string; rel
       .then((d: any) => setP(d && d !== 'none' && d.text ? d : 'none'))
       .catch(() => setP('none'));
   }, [contactId, reload]);
+
+  /** Rewrite the profile NOW from the latest data — the Sunday writer, on demand. (BEA-1222) */
+  async function refresh() {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/contacts/${contactId}/profile/refresh`, { method: 'POST' });
+      const d = await r.json().catch(() => null);
+      if (d?.ok && d.text) { setP({ text: d.text, updatedAt: d.updatedAt }); toast('success', 'Profile rewritten from the latest activity'); }
+      else if (d?.text) { setP({ text: d.text, updatedAt: d.updatedAt }); toast('error', "Couldn't write a fresh one — kept the last good profile"); }
+      else toast('error', 'Not enough activity to write a profile yet');
+    } catch {
+      toast('error', 'Could not reach the server');
+    } finally { setBusy(false); }
+  }
+
   const ready = p !== null && p !== 'none';
+  const refreshBtn = (
+    <button onClick={refresh} disabled={busy}
+      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs text-zinc-500 hover:border-violet-500 hover:text-violet-600 disabled:opacity-50 dark:border-zinc-700 dark:hover:text-violet-400">
+      {busy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} {busy ? 'Rewriting…' : 'Update now'}
+    </button>
+  );
   return (
     <Accordion dense icon={UserRound} tile="bg-violet-500/10 text-violet-500" title="Character profile"
       badge={ready && p.updatedAt ? <span className="text-xs font-normal text-zinc-400">· {new Date(p.updatedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span> : null}
@@ -51,8 +74,14 @@ export function CharacterProfile({ contactId, reload }: { contactId: string; rel
         {ready ? p.text.split('\n').find(Boolean) : 'Being written — builds itself each week from their reports and your briefings.'}
       </span>}>
       {ready
-        ? <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{p.text}</div>
-        : <p className="text-sm text-zinc-400">Nothing written yet. Once there's enough activity, the profile writes itself every week — same page, always fresh.</p>}
+        ? <>
+            <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{p.text}</div>
+            {refreshBtn}
+          </>
+        : <>
+            <p className="text-sm text-zinc-400">Nothing written yet. It writes itself every Sunday — or write it right now:</p>
+            {refreshBtn}
+          </>}
     </Accordion>
   );
 }
