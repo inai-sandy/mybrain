@@ -50,6 +50,14 @@ export class ContactsController {
     return this.contacts.profile(id);
   }
 
+  /** Rewrite ONE contact's profile right now — the accordion's refresh button. (BEA-1222) */
+  @Post(':id/profile/refresh')
+  async refreshProfile(@Param('id') id: string) {
+    const ok = await this.profiles.writeOne(id, this.profiles.weekStartOf(localDayKey())).catch(() => false);
+    const p = await this.contacts.profile(id);
+    return { ok, ...p };
+  }
+
   /** The contact's own link — created on first ask. (BEA-1027) */
   @Get(':id/share')
   share(@Param('id') id: string) {
