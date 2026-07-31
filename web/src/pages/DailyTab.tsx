@@ -23,19 +23,15 @@ type Log = { day: string; weekday: string; restDay: boolean; items: Item[] };
 const time = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
 
-/** A colour down the left edge makes the day scannable without reading every chip. (BEA-1132) */
-const EDGE: Record<Item['status'], string> = {
-  received: '!border-l-emerald-500',
-  missed: '!border-l-rose-500',
-  waiting: '!border-l-amber-500',
-  off: '!border-l-zinc-300 dark:!border-l-zinc-700',
-};
-
-const LOOK: Record<Item['status'], { chip: string; label: string; icon: typeof Clock }> = {
-  received: { chip: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', label: "today's is in", icon: CalendarCheck },
-  missed: { chip: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', label: 'missed today', icon: TriangleAlert },
-  waiting: { chip: 'bg-amber-500/10 text-amber-700 dark:text-amber-400', label: 'waiting', icon: Clock },
-  off: { chip: 'bg-zinc-500/10 text-zinc-500', label: 'day off', icon: Coffee },
+/**
+ * Status still colours the card so the day stays scannable (BEA-1132) — but through the same
+ * chip + leading-icon language every TaskCard uses, not a different card style. (BEA-1212)
+ */
+const LOOK: Record<Item['status'], { chip: string; label: string; icon: typeof Clock; mark: string }> = {
+  received: { chip: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', label: "today's is in", icon: CalendarCheck, mark: 'text-emerald-600' },
+  missed: { chip: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', label: 'missed today', icon: TriangleAlert, mark: 'text-rose-500' },
+  waiting: { chip: 'bg-amber-500/10 text-amber-700 dark:text-amber-400', label: 'waiting', icon: Clock, mark: 'text-amber-500' },
+  off: { chip: 'bg-zinc-500/10 text-zinc-500', label: 'day off', icon: Coffee, mark: 'text-zinc-400 dark:text-zinc-600' },
 };
 
 /**
@@ -147,43 +143,49 @@ export function DailyTab({ onCountChange }: { onCountChange?: (n: number) => voi
     } finally { setBusy(null); setConfirmDel(null); }
   }
 
+  // The same card language as every TaskCard (BEA-1212): status mark in the leading slot where
+  // the tick lives on a task, actions as hover-revealed icons top-right, chips along the bottom.
   const card = (it: Item) => {
     const look = LOOK[it.status];
     const Icon = look.icon;
     return (
-      <div className={'rounded-xl border border-l-4 bg-white p-3 dark:bg-zinc-900 ' + EDGE[it.status] + ' border-zinc-200 dark:border-zinc-800'}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            {editing === it.taskId ? (
-              <div className="space-y-2">
-                <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full rounded-lg border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950" />
-                <div className="flex gap-2">
-                  <button onClick={() => rename(it)} disabled={busy === it.taskId} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-500 disabled:opacity-50">Save</button>
-                  <button onClick={() => setEditing(null)} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs dark:border-zinc-700">Cancel</button>
-                </div>
+      <div className="group flex items-start gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 transition-all hover:border-emerald-500/40 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <span className={'mt-0.5 shrink-0 ' + look.mark} title={look.label} role="img" aria-label={look.label}><Icon size={20} /></span>
+        <div className="min-w-0 flex-1">
+          {editing === it.taskId ? (
+            <div className="space-y-2">
+              <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} className="w-full rounded-lg border border-zinc-300 bg-zinc-100 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950" />
+              <div className="flex gap-2">
+                <button onClick={() => rename(it)} disabled={busy === it.taskId} className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs text-white hover:bg-emerald-500 disabled:opacity-50">Save</button>
+                <button onClick={() => setEditing(null)} className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs dark:border-zinc-700">Cancel</button>
               </div>
-            ) : (
-              <>
-                <p className="text-sm font-medium leading-snug">{it.title}</p>
-                <p className="mt-0.5 text-xs text-zinc-500">
-                  {it.contact?.name || 'Nobody assigned'}
-                  {it.at ? ` · ${time(it.at)}` : ''}
-                </p>
-              </>
-            )}
+            </div>
+          ) : (
+            <div className="flex items-start gap-2">
+              <h3 className="flex-1 font-medium leading-snug">{it.title}</h3>
+              <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                <button onClick={() => { setEditing(it.taskId); setDraft(it.title); }} title="Edit" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><Pencil size={14} /></button>
+                <button onClick={() => makeOneOff(it)} disabled={busy === it.taskId} title="Not a daily report — back to Delegated" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><CircleSlash size={14} /></button>
+                <button onClick={() => setConfirmDel(it)} title="Delete" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-rose-600 dark:hover:bg-zinc-800"><Trash2 size={14} /></button>
+              </div>
+            </div>
+          )}
+          <p className="mt-0.5 text-xs text-zinc-500">
+            {it.contact?.name || 'Nobody assigned'}
+            {it.at ? ` · ${time(it.at)}` : ''}
+          </p>
+          {it.quote && <p className="mt-1.5 break-words text-xs italic text-zinc-600 line-clamp-2 dark:text-zinc-400">“{it.quote}”</p>}
+
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ' + look.chip}><Icon size={11} /> {look.label}</span>
+            {/* Which days it is owed on — editable here rather than only on the person's page. (BEA-1157) */}
+            <button onClick={() => setSchedFor(schedFor === it.taskId ? null : it.taskId)}
+              className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-zinc-500 hover:text-emerald-600 dark:bg-zinc-800">
+              <Repeat size={11} /> {it.scheduleLabel || 'every working day'}
+            </button>
           </div>
-          <span className={'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ' + look.chip}>
-            <Icon size={11} /> {look.label}
-          </span>
-        </div>
-
-        {it.quote && <p className="mt-2 break-words text-xs italic text-zinc-600 dark:text-zinc-400">“{it.quote}”</p>}
-
-        {/* Which days it is owed on — editable here rather than only on the person's page. (BEA-1157) */}
-        <div className="mt-2 flex flex-wrap items-center gap-1">
-          <span className="mr-1 text-[11px] text-zinc-400">{it.scheduleLabel || 'every working day'}</span>
-          {schedFor === it.taskId ? (
-            <>
+          {schedFor === it.taskId && (
+            <div className="mt-2 flex flex-wrap items-center gap-1">
               {DAYS.map((d) => {
                 const on = (it.schedule || []).includes(d);
                 return (
@@ -193,16 +195,8 @@ export function DailyTab({ onCountChange }: { onCountChange?: (n: number) => voi
                 );
               })}
               <button onClick={() => setDays(it, [])} className="text-[11px] text-zinc-500 underline">every working day</button>
-            </>
-          ) : (
-            <button onClick={() => setSchedFor(it.taskId)} className="text-[11px] text-zinc-500 underline underline-offset-2 hover:text-emerald-600">change days</button>
+            </div>
           )}
-        </div>
-
-        <div className="mt-2 flex flex-wrap items-center gap-2.5">
-          <button onClick={() => { setEditing(it.taskId); setDraft(it.title); }} className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-emerald-600"><Pencil size={11} /> Edit</button>
-          <button onClick={() => makeOneOff(it)} disabled={busy === it.taskId} className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-800 disabled:opacity-50 dark:hover:text-zinc-200"><CircleSlash size={11} /> Not a daily report</button>
-          <button onClick={() => setConfirmDel(it)} className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-rose-600"><Trash2 size={11} /> Delete</button>
         </div>
       </div>
     );
