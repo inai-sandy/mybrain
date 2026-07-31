@@ -11,6 +11,8 @@ export type EmoSettings = {
   sttEngine: string;
   brainModel: string;
   talkModel: string;
+  /** The fast model that ROUTES each utterance to its lane — had no UI until BEA-1229. */
+  routerModel: string;
   searchDefault: 'on' | 'off' | 'auto';
   vocabulary: string;
   deviceVolume: number;
@@ -44,6 +46,7 @@ export class EmoSettingsService {
       sttEngine: (await this.g('voice.engine')) || 'openai',
       brainModel: this.modelOf(await this.g('explore.llm'), 'anthropic/claude-sonnet-4.6'),
       talkModel: this.modelOf(await this.g('emo.talk.model'), 'anthropic/claude-haiku-4.5'),
+      routerModel: this.modelOf(await this.g('emo.router.model'), 'anthropic/claude-haiku-4.5'),
       searchDefault: ['on', 'off', 'auto'].includes(searchDefault) ? searchDefault : 'auto',
       vocabulary: (await this.g('voice.vocabulary')) || '',
       deviceVolume: Math.min(100, Math.max(0, Number(await this.g('emo.device.volume')) || 60)),
@@ -60,6 +63,7 @@ export class EmoSettingsService {
     if (patch.sttEngine && STT_ENGINES.includes(patch.sttEngine)) await this.s('voice.engine', patch.sttEngine);
     if (patch.brainModel) await this.s('explore.llm', JSON.stringify({ provider: 'openrouter', model: patch.brainModel }));
     if (patch.talkModel) await this.s('emo.talk.model', JSON.stringify({ provider: 'openrouter', model: patch.talkModel }));
+    if (patch.routerModel && EMO_MODELS.includes(patch.routerModel)) await this.s('emo.router.model', JSON.stringify({ provider: 'openrouter', model: patch.routerModel }));
     if (patch.searchDefault && ['on', 'off', 'auto'].includes(patch.searchDefault)) await this.s('emo.search.default', patch.searchDefault);
     if (patch.vocabulary !== undefined) await this.s('voice.vocabulary', String(patch.vocabulary).slice(0, 2000));
     if (patch.deviceVolume !== undefined) await this.s('emo.device.volume', String(Math.min(100, Math.max(0, Number(patch.deviceVolume) || 0))));

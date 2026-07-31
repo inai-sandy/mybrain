@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { TasksSettings } from './settings/TasksSettings';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { Accordion } from '../ui/Accordion';
@@ -207,8 +207,8 @@ function renderSection(id: Tab, email?: string): ReactNode {
     case 'documents': return <div className="space-y-4"><DocumentIngestCard /><RaindropSyncCard /></div>;
     case 'chat': return <div className="space-y-4"><ChatRetentionCard /></div>;
     case 'meetings': return <div className="space-y-4"><MeetingsEngineCard /></div>;
-    case 'voice': return <div className="space-y-4"><VoiceModelCard /></div>;
-    case 'emo': return <EmoSettingsSection />;
+    case 'voice': return <div className="space-y-4"><VoiceModelCard /><DeepgramModelCard /></div>;
+    case 'emo': return <><EmoSettingsSection /><ModuleAiHeader /><PromptsSection category="EMO voice" /></>;
     case 'story': return <div className="space-y-4"><NudgesCard /><LabActivitySection /></div>;
     case 'agents': return <><AgentEngineSection /><div className="mt-6 space-y-1"><h2 className="text-sm font-semibold text-zinc-500">All AI models</h2><p className="text-xs text-zinc-400">Every model in one list. These are moving into their own modules, one by one.</p></div><ModelsSection /></>;
     case 'memory': return <div className="space-y-4"><IndexSection /><SuperMemorySyncCard /></div>;
@@ -1495,8 +1495,6 @@ function ModelsSection() {
       <EnginePicker />
       <AiModelCard />
       <ChatModelCard />
-      <EngineModelCard title="Explore answer model" icon={Sparkles} base="/api/explore/model"
-        desc="Writes your Explore answers from your indexed brain. Sonnet (default) is the most capable; switch to Haiku to cut the cost per question by ~3–4× (each ask is mostly the model reading your retrieved notes)." />
       <BookmarksModelCard />
       <MeetingsEngineCard />
       <EngineModelCard title="Meeting summary model" icon={Mic} base="/api/meetings/model"
@@ -1602,22 +1600,47 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
   );
 }
 
+/** The ONE Deepgram model control — meetings, the live mic and EMO all read this key. (BEA-1229) */
+function DeepgramModelCard() {
+  const [models, setModels] = useState<{ id: string; name: string }[]>([]);
+  const [model, setModel] = useState('nova-3');
+  const toast = useToast();
+  useEffect(() => {
+    fetch('/api/voice/deepgram-models').then((r) => r.json()).then((d) => setModels(d.models || [])).catch(() => undefined);
+    fetch('/api/voice/deepgram-model').then((r) => r.json()).then((d) => setModel(d.model || 'nova-3')).catch(() => undefined);
+  }, []);
+  async function pick(m: string) {
+    setModel(m);
+    await fetch('/api/voice/deepgram-model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) }).catch(() => undefined);
+    toast('success', 'Deepgram model saved');
+  }
+  return (
+    <AccordionCard title="Deepgram model" icon={Mic}>
+      <p className="mb-3 text-sm text-zinc-500">The Deepgram model behind the live mic, meetings and EMO device turns. Nova-3 is the current best for speed and accuracy.</p>
+      {models.length ? (
+        <select value={model} onChange={(e) => pick(e.target.value)} className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm">
+          {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
+          {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      ) : (
+        <p className="text-xs text-zinc-400">Connect your Deepgram key in Connections to choose from all models (currently <b>{model}</b>).</p>
+      )}
+    </AccordionCard>
+  );
+}
+
 function MeetingsEngineCard() {
   const [engines, setEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [engine, setEngine] = useState('deepgram');
   const [autoDelete, setAutoDelete] = useState(false);
-  const [dgModels, setDgModels] = useState<{ id: string; name: string }[]>([]);
-  const [dgModel, setDgModel] = useState('nova-3');
   const [loaded, setLoaded] = useState(false);
   const toast = useToast();
   useEffect(() => {
     Promise.all([
       fetch('/api/meetings/engines').then((r) => r.json()).catch(() => ({})),
       fetch('/api/meetings/auto-delete-audio').then((r) => r.json()).catch(() => ({})),
-      fetch('/api/voice/deepgram-models').then((r) => r.json()).catch(() => ({})),
-      fetch('/api/voice/deepgram-model').then((r) => r.json()).catch(() => ({})),
     ])
-      .then(([eng, ad, dgm, dgc]) => { setEngines(eng.engines || []); setEngine(eng.default || 'deepgram'); setAutoDelete(!!ad.enabled); setDgModels(dgm.models || []); setDgModel(dgc.model || 'nova-3'); })
+      .then(([eng, ad]) => { setEngines(eng.engines || []); setEngine(eng.default || 'deepgram'); setAutoDelete(!!ad.enabled); })
       .finally(() => setLoaded(true));
   }, []);
   if (!loaded) return null;
@@ -1630,11 +1653,6 @@ function MeetingsEngineCard() {
     setAutoDelete(on);
     await fetch('/api/meetings/auto-delete-audio', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).catch(() => undefined);
   }
-  async function pickDgModel(m: string) {
-    setDgModel(m);
-    await fetch('/api/voice/deepgram-model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: m }) }).catch(() => undefined);
-    toast('success', 'Deepgram model saved');
-  }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
   return (
     <AccordionCard title="Meeting transcription engine" icon={Mic}>
@@ -1645,17 +1663,7 @@ function MeetingsEngineCard() {
           {engines.map((e) => <option key={e.id} value={e.id} disabled={!e.configured}>{e.name}{e.configured ? '' : ' — needs API key'}</option>)}
         </select>
       </label>
-      <label className="mt-3 text-sm text-zinc-600 dark:text-zinc-400 block">
-        Deepgram model
-        {dgModels.length ? (
-          <select value={dgModel} onChange={(e) => pickDgModel(e.target.value)} className={sel}>
-            {!dgModels.some((m) => m.id === dgModel) && <option value={dgModel}>{dgModel}</option>}
-            {dgModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        ) : (
-          <p className="text-xs text-zinc-400 mt-1">Connect your Deepgram key in Integrations to choose from all models (currently <b>{dgModel}</b>).</p>
-        )}
-      </label>
+      <p className="mt-3 text-xs text-zinc-400">The Deepgram model itself is set once, in <Link to="/settings/voice" className="text-emerald-600 underline underline-offset-2 dark:text-emerald-400">Settings → Voice</Link> — meetings, the live mic and EMO all follow it.</p>
       <label className="mt-4 flex items-start gap-2.5 text-sm cursor-pointer">
         <input type="checkbox" checked={autoDelete} onChange={(e) => toggleAutoDelete(e.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" />
         <span><span className="font-medium">Delete the recording after transcribing</span><br /><span className="text-xs text-zinc-500">Frees disk on long meetings — the transcript and summary are kept. You can also delete a recording manually on its page.</span></span>
@@ -1738,6 +1746,7 @@ function EmoSettingsSection() {
   const [earsEngines, setEarsEngines] = useState<{ id: string; name: string; configured: boolean }[]>([]);
   const [brain, setBrain] = useState('');
   const [talk, setTalk] = useState('');
+  const [router, setRouter] = useState('');
   const [search, setSearch] = useState('auto');
   const [devVol, setDevVol] = useState(60);
   useEffect(() => {
@@ -1745,7 +1754,7 @@ function EmoSettingsSection() {
     fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setTtsVoice(d.voice || 'nova'); setTtsVoices(d.voices || []); }).catch(() => undefined);
     fetch('/api/voice/config').then((r) => r.json()).then((d) => { setEars(d.engine || ''); setEarsEngines(d.engines || []); }).catch(() => undefined);
     fetch('/api/explore/model').then((r) => r.json()).then((d) => setBrain(d.model || '')).catch(() => undefined);
-    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setSearch(d.searchDefault || 'auto'); setDevVol(typeof d.deviceVolume === 'number' ? d.deviceVolume : 60); }).catch(() => undefined);
+    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setRouter(d.routerModel || ''); setSearch(d.searchDefault || 'auto'); setDevVol(typeof d.deviceVolume === 'number' ? d.deviceVolume : 60); }).catch(() => undefined);
   }, []);
   async function regen() {
     if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
@@ -1758,6 +1767,11 @@ function EmoSettingsSection() {
     setEars(e);
     await fetch('/api/voice/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: e }) }).catch(() => undefined);
     toast('success', 'EMO ears updated');
+  }
+  async function pickRouter(m: string) {
+    setRouter(m);
+    await fetch('/api/emo/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ routerModel: m }) }).catch(() => undefined);
+    toast('success', 'EMO router updated');
   }
   async function pickVoice(v: string) {
     setTtsVoice(v);
@@ -1801,16 +1815,7 @@ function EmoSettingsSection() {
       </AccordionCard>
 
       <AccordionCard title="Ears — how EMO hears you" icon={Mic}>
-        <p className="mb-3 text-sm text-zinc-500">The transcription engine (speech → text). OpenAI GPT‑4o is recommended for your accent; it also gets your contact names right.</p>
-        <div className="space-y-2">
-          {earsEngines.map((e) => (
-            <label key={e.id} className={'flex items-start gap-3 rounded-lg border p-3 ' + (e.configured ? 'cursor-pointer ' : 'opacity-60 ') + (ears === e.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
-              <input type="radio" name="emoEars" disabled={!e.configured} checked={ears === e.id} onChange={() => pickEars(e.id)} className="mt-1 accent-emerald-600" />
-              <div className="min-w-0"><div className="text-sm font-medium">{e.name}</div><div className="text-xs text-zinc-500">{e.configured ? 'Ready' : 'Add this provider’s API key in Integrations'}</div></div>
-            </label>
-          ))}
-        </div>
-        <p className="mt-3 text-xs text-zinc-500">Your contacts are fed in automatically. Add other tricky words in <b>Voice input → Words to get right</b>.</p>
+        <p className="text-sm text-zinc-500">EMO hears with the app-wide voice engine{ears ? <> — currently <b>{earsEngines.find((e) => e.id === ears)?.name || ears}</b></> : null}. One control for it lives in <Link to="/settings/voice" className="text-emerald-600 underline underline-offset-2 dark:text-emerald-400">Settings → Voice</Link>, so EMO, dictation and Telegram can never disagree.</p>
       </AccordionCard>
 
       <AccordionCard title="Voice — how EMO talks back" icon={Volume2}>
@@ -1820,8 +1825,8 @@ function EmoSettingsSection() {
         </select>
       </AccordionCard>
 
-      <AccordionCard title="Brain — how EMO answers" icon={Brain}>
-        <p className="mb-3 text-sm text-zinc-500">The model that answers from your memory. Sonnet 5 is the most capable; Haiku is faster and cheaper. (The quick clarify + summary always use Haiku.)</p>
+      <AccordionCard title="Brain — how EMO & Explore answer" icon={Brain}>
+        <p className="mb-3 text-sm text-zinc-500">The ONE model that answers from your memory — EMO on the device and the Explore page share it. Sonnet 5 is the most capable; Haiku is faster and cheaper. (The quick clarify + summary always use Haiku.)</p>
         <select value={brain} onChange={(e) => pickBrain(e.target.value)} className={sel}>
           {brainOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
@@ -1830,6 +1835,13 @@ function EmoSettingsSection() {
       <AccordionCard title="Talk — how EMO converses" icon={MessageSquare}>
         <p className="mb-3 text-sm text-zinc-500">The model behind Talk (the hands‑free back‑and‑forth). Haiku is fast and cheap — great for conversation; Sonnet is more capable.</p>
         <select value={talk} onChange={(e) => pickTalk(e.target.value)} className={sel}>
+          {talkOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </AccordionCard>
+
+      <AccordionCard title="Router — how EMO understands what you meant" icon={Compass}>
+        <p className="mb-3 text-sm text-zinc-500">The fast model that reads each thing you say and routes it to the right lane (task, note, reminder…). It runs on every utterance — keep it small and quick. Had no control at all until now.</p>
+        <select value={router} onChange={(e) => pickRouter(e.target.value)} className={sel}>
           {talkOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </AccordionCard>
