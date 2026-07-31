@@ -235,10 +235,10 @@ describe('the owner is told BEFORE anything is promised for him (BEA-1026)', () 
  * DAY and is owed again tomorrow. And if the model wrongly calls a daily item finished, that must
  * not be able to end the chase: the owner was rejecting those ticks by hand every day.
  */
-function dailySetup(voice: string) {
-  const contact = { id: 'c1', name: 'Jayanth', whatsappNumber: '919812345678' };
+function dailySetup(voice: string, lastIn?: string) {
+  const contact = { id: 'c1', name: 'Jayanth', whatsappNumber: '919812345678', shareSlug: 'jayanth-w5ng' };
   const reminders = [{ id: 'r1', status: 'active', subject: 'the daily production update', taskId: 't9' }];
-  const messages = [{ direction: 'in', body: '24/07 OT from 7:00 to 10:30 PM, 8 members: 2 fitting, 2 mounting' }];
+  const messages = [{ direction: 'in', body: lastIn ?? '24/07 OT from 7:00 to 10:30 PM, 8 members: 2 fitting, 2 mounting' }];
   const state: any = { out: [], updated: {}, sent: 0, texts: [], claims: [], received: [] };
   const prisma: any = {
     contact: { findUnique: async () => contact },
@@ -252,12 +252,13 @@ function dailySetup(voice: string) {
     },
     briefing: { findMany: async () => [] },
   };
-  const postbox: any = { isConfigured: () => true, sendText: async () => { state.sent++; return { wamid: 'w1' }; } };
+  const postbox: any = { isConfigured: () => true, sendText: async (_to: string, body: string) => { state.texts.push(body); state.sent++; return { wamid: 'w1' }; } };
   const remindersSvc: any = { voiceComplete: async () => voice };
   const claims: any = { claim: async (i: any) => { state.claims.push(i); return { id: 'k1' }; }, isPending: async () => false };
   const recurring: any = {
     today: () => '2026-07-27',
     markReceived: async (taskId: string, day: string, quote?: string) => { state.received.push({ taskId, day, quote }); },
+    markNotReceived: async () => false,
     isReceived: async () => false,
   };
   const svc = new ReminderAgentService(prisma, postbox, remindersSvc, claims, recurring, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async () => null } as any);
@@ -317,6 +318,25 @@ describe("a report settles the day even when the model says nothing (BEA-1210)",
     const { svc, state } = dailySetup('{"send":true,"reply":"Noted.","done":[1]}');
     await svc.onContactReply('c1');
     expect(state.received).toHaveLength(1);
+  });
+});
+
+/**
+ * BEA-1217: a recurring update still owed and a reply that didn't carry it → the agent hands them
+ * the door to the structured section on their page, exactly once per conversation stretch.
+ */
+describe('the reply points at the Updates tab when the report is still owed (BEA-1217)', () => {
+  it('appends the link on a promise that is not a report', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"No problem, whenever you can."}', 'I will send the update after 6');
+    await svc.onContactReply('c1');
+    expect(state.received).toHaveLength(0); // a promise never settles the day (BEA-1152)
+    expect(state.texts[0]).toContain('/t/jayanth-w5ng?tab=updates');
+  });
+
+  it('never adds the link when the message WAS the report — the day is settled', async () => {
+    const { svc, state } = dailySetup('{"send":true,"reply":"Thanks Jayanth — noted.","statusToday":[1]}');
+    await svc.onContactReply('c1');
+    expect(state.texts[0]).not.toContain('/t/');
   });
 });
 

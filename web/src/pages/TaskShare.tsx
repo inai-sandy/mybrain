@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Check, Clock, Loader2, CircleAlert, CheckCircle2, Undo2, Send } from 'lucide-react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { Check, Clock, Loader2, CircleAlert, CheckCircle2, Undo2, Send, X, MessageSquare } from 'lucide-react';
 
 type Item = {
   id: string;
@@ -19,6 +19,8 @@ type Item = {
   schedule?: string | null;
   /** Daily items only: is it actually owed today? */
   dueToday?: boolean | null;
+  /** Daily items only: their own last week on this report — the Updates tab. (BEA-1217) */
+  history?: { day: string; status: string; quote: string | null; source: string | null }[] | null;
 };
 type Board = { off: boolean; name: string; open?: Item[]; done?: Item[]; reports?: Item[] };
 
@@ -37,6 +39,10 @@ export function TaskShare() {
   const { slug = '' } = useParams();
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The tab lives in the URL so a WhatsApp nudge can land straight on Updates. (BEA-1217)
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'updates' ? 'updates' : 'list';
+  const setTab = (t: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (t === 'updates') n.set('tab', 'updates'); else n.delete('tab'); return n; }, { replace: true });
 
   const load = useCallback(() => {
     setError(null);
@@ -66,6 +72,8 @@ export function TaskShare() {
   const dueNow = reports.filter((r) => r.dueToday);
   const later = reports.filter((r) => !r.dueToday);
   const jobs = open.filter((t) => t.kind !== 'recurring');
+  const owedNow = dueNow.filter((r) => !r.sentToday).length;
+  const showTabs = reports.length > 0; // no standing reports → no Updates tab to show
 
   return (
     <Shell>
@@ -81,70 +89,81 @@ export function TaskShare() {
         </p>
       </header>
 
-      {/* Daily reports are their own thing and people need telling — most of the team open this on a
-          phone between jobs and will not work out the rhythm on their own. (BEA-1156) */}
-      {dueNow.length > 0 && (
-        <section className="mb-6">
-          <h2 className="text-sm font-semibold">Today's update{dueNow.length > 1 ? 's' : ''}</h2>
-          <p className="mb-2.5 mt-0.5 text-xs text-zinc-500">
-            Please send these every working day — even a short line, or “nothing new today”, is enough.
-          </p>
-          <ul className="space-y-3">
-            {dueNow.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
-          </ul>
-        </section>
-      )}
-
-      {jobs.length > 0 && (
-        <>
-          {dueNow.length > 0 && <h2 className="mb-2 text-sm font-semibold">Other things</h2>}
-          <ul className="space-y-3">
-            {jobs.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
-          </ul>
-        </>
-      )}
-
-      {/* Not owed today — shown so they know it exists, never asking for an update. */}
-      {later.length > 0 && (
-        <section className="mt-6">
-          <h2 className="mb-2 text-sm font-semibold text-zinc-500">Coming up</h2>
-          <ul className="space-y-2">
-            {later.map((t) => (
-              <li key={t.id} className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-zinc-600 dark:text-zinc-300">{t.title}</span>
-                  <span className="text-[11px] text-zinc-400">{t.schedule ? `Due ${t.schedule}` : 'Not due today'} — nothing needed right now</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {open.length === 0 && later.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center dark:border-zinc-700">
-          <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
-          <p className="font-medium">All clear</p>
-          <p className="mt-1 text-sm text-zinc-500">Nothing is waiting on you right now.</p>
+      {/* Their daily updates live on their own tab (BEA-1217) — the WhatsApp nudge links straight
+          to it, so the structured section is one tap away, with their own last days under it. */}
+      {showTabs && (
+        <div className="mb-5 flex gap-1 rounded-xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900">
+          <button onClick={() => setTab('list')} className={'flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ' + (tab !== 'updates' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'text-zinc-500')}>
+            Your list
+          </button>
+          <button onClick={() => setTab('updates')} className={'flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition-colors ' + (tab === 'updates' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'text-zinc-500')}>
+            Updates
+            {owedNow > 0 && <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">{owedNow}</span>}
+          </button>
         </div>
       )}
 
-      {done.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-2 text-sm font-semibold text-zinc-500">Already finished ({done.length})</h2>
-          <ul className="space-y-2">
-            {done.map((t) => (
-              <li key={t.id} className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
-                <span className="min-w-0">
-                  <span className="block text-sm text-zinc-500 line-through">{t.title}</span>
-                  {t.completedAt && <span className="text-[11px] text-zinc-400">{day(t.completedAt)}</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {(!showTabs || tab !== 'updates') && (
+        <>
+          {jobs.length > 0 && (
+            <ul className="space-y-3">
+              {jobs.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
+            </ul>
+          )}
+
+          {jobs.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-zinc-300 p-10 text-center dark:border-zinc-700">
+              <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-emerald-500" />
+              <p className="font-medium">All clear here</p>
+              <p className="mt-1 text-sm text-zinc-500">{showTabs ? 'No one-off jobs are open — check the Updates tab for today.' : 'Nothing is waiting on you right now.'}</p>
+            </div>
+          )}
+
+          {done.length > 0 && (
+            <section className="mt-8">
+              <h2 className="mb-2 text-sm font-semibold text-zinc-500">Already finished ({done.length})</h2>
+              <ul className="space-y-2">
+                {done.map((t) => (
+                  <li key={t.id} className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+                    <span className="min-w-0">
+                      <span className="block text-sm text-zinc-500 line-through">{t.title}</span>
+                      {t.completedAt && <span className="text-[11px] text-zinc-400">{day(t.completedAt)}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
+      )}
+
+      {showTabs && tab === 'updates' && (
+        <>
+          {/* Daily reports are their own thing and people need telling — most of the team open this
+              on a phone between jobs and will not work out the rhythm on their own. (BEA-1156) */}
+          {dueNow.length > 0 && (
+            <section className="mb-6">
+              <h2 className="text-sm font-semibold">Today's update{dueNow.length > 1 ? 's' : ''}</h2>
+              <p className="mb-2.5 mt-0.5 text-xs text-zinc-500">
+                Please fill these every working day — even a short line, or “nothing new today”, is enough.
+              </p>
+              <ul className="space-y-3">
+                {dueNow.map((t) => <OpenRow key={t.id} item={t} slug={slug} onChanged={load} />)}
+              </ul>
+            </section>
+          )}
+          {dueNow.length === 0 && (
+            <div className="mb-6 rounded-2xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
+              <CheckCircle2 className="mx-auto mb-2 h-7 w-7 text-emerald-500" />
+              <p className="text-sm font-medium">Nothing owed today</p>
+              {later.length > 0 && <p className="mt-1 text-xs text-zinc-500">Next: {later.map((t) => `${t.title} (${t.schedule})`).join(' · ')}</p>}
+            </div>
+          )}
+
+          {/* Their own last days on each report — what came in, in their words. */}
+          {reports.map((t) => <ReportHistory key={t.id} item={t} />)}
+        </>
       )}
 
       {/* Say something without having to claim a task is finished. (BEA-1159) */}
@@ -154,6 +173,38 @@ export function TaskShare() {
         Sent by My Brain on behalf of Sandeep.
       </footer>
     </Shell>
+  );
+}
+
+/** One report's recent days: sent ✓, missed ✕, in their own words — their side of the ledger. (BEA-1217) */
+function ReportHistory({ item }: { item: Item }) {
+  const rows = (item.history || []).filter((h) => h.status === 'received' || h.status === 'missed');
+  if (!rows.length) return null;
+  const dayLabel = (d: string) => { try { return new Date(d + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }); } catch { return d; } };
+  return (
+    <section className="mt-5">
+      <h3 className="text-sm font-semibold">{item.title}</h3>
+      {!item.dueToday && <p className="mt-0.5 text-[11px] text-zinc-400">Due {item.schedule} — nothing needed today.</p>}
+      <ul className="mt-2 space-y-1.5">
+        {rows.map((h) => (
+          <li key={h.day} className={'rounded-xl border p-2.5 ' + (h.status === 'received' ? 'border-zinc-200 bg-white/60 dark:border-zinc-800 dark:bg-zinc-900/60' : 'border-rose-300/50 bg-rose-500/5 dark:border-rose-500/25')}>
+            <div className="flex items-center gap-2 text-[11px]">
+              {h.status === 'received'
+                ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                : <X className="h-3.5 w-3.5 shrink-0 text-rose-500" />}
+              <span className="font-medium text-zinc-600 dark:text-zinc-300">{dayLabel(h.day)}</span>
+              <span className="text-zinc-400">{h.status === 'received' ? 'sent' : 'missed'}</span>
+              {h.status === 'received' && h.source && (
+                <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-zinc-500/10 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                  <MessageSquare className="h-2.5 w-2.5" /> {h.source === 'page' ? 'filled here' : 'from chat'}
+                </span>
+              )}
+            </div>
+            {h.quote && <p className="mt-1 pl-5 text-xs italic text-zinc-500 line-clamp-2">“{h.quote}”</p>}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

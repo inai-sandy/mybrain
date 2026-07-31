@@ -101,11 +101,16 @@ export class PostboxService {
    * to us reads robotic. Inside an open session free text is allowed, so ask like a human would.
    * Sent via {@link sendText}; this is the one place the wording lives.
    */
-  renderProgressNudge(firstName: string, count: number, listOrSubject: string, slug?: string | null): string {
+  renderProgressNudge(firstName: string, count: number, listOrSubject: string, slug?: string | null, updatesTab?: boolean): string {
     if (count <= 1) {
-      return `Hi ${firstName}, checking in again about ${listOrSubject} — how is it going? Even a quick line on where it stands helps.`;
+      // A recurring chase carries the Updates tab (BEA-1217): the structured section on their page
+      // is where the day's update belongs, so the nudge hands them the door, not just the question.
+      const link = updatesTab && slug && slug !== 'unavailable' ? `\n📝 Fill today's update here: https://mybrain.1site.ai/t/${slug}?tab=updates` : '';
+      return `Hi ${firstName}, checking in again about ${listOrSubject} — how is it going? Even a quick line on where it stands helps.${link}`;
     }
-    const link = slug && slug !== 'unavailable' ? `\n🔗 Your list: https://mybrain.1site.ai/t/${slug}` : '';
+    const link = slug && slug !== 'unavailable'
+      ? `\n🔗 Your list: https://mybrain.1site.ai/t/${slug}${updatesTab ? '?tab=updates' : ''}`
+      : '';
     return `Hi ${firstName}, checking in again — ${count} things are still pending with Sandeep: ${listOrSubject}. How are they coming along? A quick line on each is enough.${link}`;
   }
 

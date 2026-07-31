@@ -483,6 +483,23 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // A recurring update is still owed and this reply didn't carry it → hand them the door to the
+    // structured section on their page, once per conversation stretch. The suppression: if any of
+    // the last outbound messages already carried their link, don't paste it again. (BEA-1217)
+    if (replyText && reported.length === 0) {
+      const owesToday = items.some((it) => it.taskId && it.recurring);
+      const linkAlreadySent = messages.slice(-12).some((m) => m.direction === 'out' && m.body?.includes('/t/'));
+      if (owesToday && !linkAlreadySent) {
+        const today = this.recurring.today();
+        const stillWaiting = (await Promise.all(items.filter((it) => it.taskId && it.recurring).map((it) => this.recurring.isReceived(it.taskId, today)))).some((r) => !r);
+        if (stillWaiting) {
+          // Never hand out a link to a page the owner turned OFF — a dead door is worse than none.
+          const c = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { shareSlug: true, shareEnabled: true } }).catch(() => null);
+          if (c?.shareSlug && c.shareEnabled !== false) replyText += `\n📝 You can fill today's update here: https://mybrain.1site.ai/t/${c.shareSlug}?tab=updates`;
+        }
+      }
+    }
+
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
     const alreadySent = messages.some((m) => m.direction === 'out' && norm(m.body) === norm(replyText));

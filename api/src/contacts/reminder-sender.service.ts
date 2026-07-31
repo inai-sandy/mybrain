@@ -283,9 +283,16 @@ export class ReminderSenderService implements OnModuleInit {
 
       let res: { wamid: string | null; status: string; error: string | null } | null = null;
       let rendered = '';
+      // A recurring chase points at the Updates tab on their page — the structured section is
+      // where the day's report belongs. (BEA-1217)
+      const taskIds = rems.map((r) => r.taskId).filter(Boolean) as string[];
+      // Optional-chained: spec harnesses stub a partial Prisma.
+      const hasRecurring = taskIds.length
+        ? (((await Promise.resolve(this.prisma.task?.count?.({ where: { id: { in: taskIds }, kind: 'recurring' } })).catch(() => 0)) ?? 0) as number) > 0
+        : false;
       if (chatOpen) {
-        const slug = subjects.length >= 2 ? await this.slugFor(contactId, g.name) : null;
-        rendered = this.postbox.renderProgressNudge(firstName, subjects.length, subjects.length >= 2 ? shownList : subjects[0] || 'this', slug);
+        const slug = subjects.length >= 2 || hasRecurring ? await this.slugFor(contactId, g.name) : null;
+        rendered = this.postbox.renderProgressNudge(firstName, subjects.length, subjects.length >= 2 ? shownList : subjects[0] || 'this', slug, hasRecurring);
         res = await this.postbox.sendText(g.number, rendered);
         if (res.error) {
           // Our 24h clock and Meta's can disagree by minutes — if the session just closed, plain

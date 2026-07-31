@@ -396,11 +396,12 @@ export class ContactsService {
       select: {
         id: true, title: true, note: true, status: true, dueDate: true, createdAt: true, completedAt: true, promisedFor: true, kind: true, scheduleDays: true,
         claims: { where: { status: 'pending' }, take: 1, select: { id: true, quote: true, createdAt: true } },
-        // For a daily report the only question is whether TODAY's is in — "tick it off" makes no
-        // sense for something owed again tomorrow. (BEA-1118)
-        statusDays: { where: { day: localDayKey(), status: 'received' }, take: 1, select: { createdAt: true } },
+        // The last week of the ledger (BEA-1217): today answers "is it in?", the rest fills the
+        // Updates tab — their own recent days, in their own words. Their data, safe to show them.
+        statusDays: { orderBy: { day: 'desc' }, take: 7, select: { day: true, status: true, quote: true, source: true, createdAt: true } },
       },
     });
+    const today = localDayKey();
     const shape = (t: any) => ({
       id: t.id,
       title: t.title,
@@ -412,10 +413,14 @@ export class ContactsService {
       completedAt: t.completedAt,
       claimed: t.claims?.[0] ? { at: t.claims[0].createdAt, note: t.claims[0].quote } : null,
       // Daily items: has today's update already been sent?
-      sentToday: t.kind === 'recurring' ? !!t.statusDays?.[0] : null,
+      sentToday: t.kind === 'recurring' ? !!(t.statusDays || []).find((d: any) => d.day === today && d.status === 'received') : null,
       // When it is owed, in their words — so nobody has to guess. (BEA-1156)
       schedule: t.kind === 'recurring' ? scheduleLabel(t.scheduleDays) : null,
       dueToday: t.kind === 'recurring' ? isOwedOn(t.scheduleDays, weekday, rest) : null,
+      // Their own last week on this report, for the Updates tab. (BEA-1217)
+      history: t.kind === 'recurring'
+        ? (t.statusDays || []).map((d: any) => ({ day: d.day, status: d.status, quote: d.quote || null, source: d.source || null }))
+        : null,
     });
 
     const open = rows.filter((t) => t.status !== 'done').map(shape);
