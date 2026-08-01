@@ -6,6 +6,7 @@ import { NewsWriteService } from './news-write.service';
 import { NewsResearchService } from './news-research.service';
 import { NewsPipelineService } from './news-pipeline.service';
 import { NewsAgentService } from './news-agent.service';
+import { NewsReadService } from './news-read.service';
 
 @Controller('news')
 export class NewsController {
@@ -17,6 +18,7 @@ export class NewsController {
     private readonly research: NewsResearchService,
     private readonly pipeline: NewsPipelineService,
     private readonly agent: NewsAgentService,
+    private readonly read: NewsReadService,
   ) {}
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
@@ -62,6 +64,25 @@ export class NewsController {
   @Post('issues/:id/write')
   writeEdition(@Param('id') id: string) {
     return this.write.publishEdition(id);
+  }
+
+  /** Every edition, newest first — the archive. (BEA-1260) */
+  @Get('editions')
+  editions(@Query('limit') limit?: string) {
+    const n = Number(limit);
+    return this.read.list(Number.isFinite(n) && n > 0 ? Math.floor(n) : 60);
+  }
+
+  /** The newest edition's day, so the page knows where to land. (BEA-1260) */
+  @Get('editions/latest')
+  latest() {
+    return this.read.latestDay().then((day) => ({ day }));
+  }
+
+  /** One whole edition — every story, under its category. (BEA-1260) */
+  @Get('editions/:day')
+  edition(@Param('day') day: string) {
+    return this.read.byDay(day);
   }
 
   /** Create (or repair) the AI News Daily agent, its job and its locked, scheduled flow. (BEA-1259) */
