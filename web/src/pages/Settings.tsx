@@ -1613,7 +1613,7 @@ function ModelsSection() {
       <EngineModelCard title="Mini-screen designer model" icon={Bot} base="/api/llm-config/helper/ui-spec"
         desc="Designs each job's own small run screen from the approved blocks. A small job — the app default is fine." />
       <EngineModelCard title="Flow auto-plan model" icon={Bot} base="/api/llm-config/helper/flow-plan"
-        desc="Plans a flow's branches and steps from your question. Follows the app default until you pick one." />
+        desc="The splitter — divides your request into branches and picks each branch's tool, including how deep to go. The most important call in a run, so it sits on Sonnet 5 (default) via the API: fast, reliable, and it never eats your engine quota." />
       <EngineModelCard title="Draft double-check model" icon={Bot} base="/api/llm-config/helper/draft-check"
         desc="Quietly sanity-checks a draft an agent wants approved (wrong name, date, amount…). A tiny job — a cheap model is fine." />
       <EngineModelCard title="Deep research — planning model" icon={Compass} base="/api/llm-config/helper/deep-research-plan"

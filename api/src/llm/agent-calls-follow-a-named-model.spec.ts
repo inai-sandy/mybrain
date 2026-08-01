@@ -82,8 +82,9 @@ describe('no agent or flow call reaches the general model (BEA-1248)', () => {
     // ~25,000 tokens of system prompt for a ~400-token job. Same reasoning as deep-research-plan.
     expect(LlmService.HELPERS['flow-decompose']).toEqual(LlmService.HELPERS['deep-research-plan']);
     expect(LlmService.HELPERS['flow-decompose']).not.toEqual(LlmService.FOLLOW_ENGINE);
-    // Planning the flow is the opposite case — it reasons over the whole tool catalog.
-    expect(LlmService.HELPERS['flow-plan']).toEqual(LlmService.FOLLOW_ENGINE);
+    // The full split reasons over the whole tool catalog, so it gets a strong API model — pinned
+    // Sonnet 5 since BEA-1244, never the engine (the split must not wait behind engine quota).
+    expect(LlmService.HELPERS['flow-plan']).toEqual({ provider: 'openrouter', model: 'anthropic/claude-sonnet-5' });
   });
 
   it('every new helper key has a control in Settings, or the owner still cannot change it', () => {

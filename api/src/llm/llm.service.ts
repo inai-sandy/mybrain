@@ -160,7 +160,12 @@ export class LlmService {
     'sync-words': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
     'draft': LlmService.FOLLOW_ENGINE,
     'ui-spec': LlmService.FOLLOW_ENGINE,
-    'flow-plan': LlmService.FOLLOW_ENGINE,
+    // The SPLITTER — the owner's "most important step" (BEA-1244): it divides a request into
+    // branches and picks each branch's tool, including how deep to go (BEA-1246). Pinned to Sonnet 5
+    // on the API on purpose: it is a short thinking job that must never wait behind engine quota or
+    // pay the ~25,000-token system-prompt tax of a CLI turn, and its judgement decides everything
+    // downstream. The engine's job starts AFTER the split: collect, merge, summarise, deliver.
+    'flow-plan': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
     'draft-check': LlmService.FOLLOW_ENGINE,
     // Deep research makes two very different calls, so it gets two settings (BEA-1206).
     //
