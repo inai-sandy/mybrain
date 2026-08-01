@@ -1,9 +1,13 @@
-import { Controller, Get, Post, Query } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { NewsFeedService } from './news-feed.service';
+import { NewsSplitService } from './news-split.service';
 
 @Controller('news')
 export class NewsController {
-  constructor(private readonly feed: NewsFeedService) {}
+  constructor(
+    private readonly feed: NewsFeedService,
+    private readonly split: NewsSplitService,
+  ) {}
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
   @Post('poll')
@@ -18,5 +22,23 @@ export class NewsController {
     const n = Number(take);
     const safe = Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 200) : 30;
     return this.feed.usableIssues(safe);
+  }
+
+  /** Split every stored issue that has content and has not been split yet. (BEA-1255) */
+  @Post('split')
+  splitPending() {
+    return this.split.splitPending();
+  }
+
+  /** Re-split one issue — safe to repeat, it replaces that issue's rows. (BEA-1255) */
+  @Post('issues/:id/split')
+  splitOne(@Param('id') id: string) {
+    return this.split.splitOne(id);
+  }
+
+  /** The pieces of one issue, in the order they appeared. `?kind=story` for just the news. */
+  @Get('issues/:id/stories')
+  stories(@Param('id') id: string, @Query('kind') kind?: string) {
+    return this.split.storiesFor(id, kind || undefined);
   }
 }
