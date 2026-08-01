@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
 import { TokenBudgetService } from './token-budget.service';
 import { LlmService } from './llm.service';
 import { ConnectorService } from '../connectors/connector.service';
@@ -99,6 +99,17 @@ export class LlmController {
     }));
     // The order jobs actually try them in, so the screen matches the behaviour.
     return { chain: rows, fallback: 'A paid model, only when every one of these is unavailable.' };
+  }
+
+  /**
+   * "I have upgraded my plan — try it again." (BEA-1237)
+   *
+   * Declared BEFORE the `:key` routes below it, because Nest matches in declaration order and a
+   * fixed path under a wildcard is never reached.
+   */
+  @Post('engines/:name/recheck')
+  async recheckEngine(@Param('name') name: string) {
+    return this.llm.recheckEngine(name);
   }
 
   /** THE engine — one choice; the research write-up, skills and agent runs all follow it. */

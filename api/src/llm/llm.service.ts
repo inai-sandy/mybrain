@@ -293,6 +293,27 @@ export class LlmService {
     } catch { return null; }
   }
 
+  /**
+   * Forget a stored limit and find out for real (BEA-1237).
+   *
+   * `runAgent` short-circuits on a stored limit without calling the engine, and the limit only
+   * expires when its own `until` passes. Codex was marked out until 28 August — so upgrading the
+   * plan would have changed nothing for four weeks, with the app quietly using something else and
+   * no way to say why. Clearing alone would be a lie in the other direction, so this makes a real
+   * call: if the engine is still limited, the limit comes straight back with the reason.
+   */
+  async recheckEngine(provider: string): Promise<{ ok: boolean; reason: string | null }> {
+    if (!ENGINE_CHAIN.some((e) => e.provider === provider)) throw new Error('Unknown engine');
+    await this.prisma.setting?.deleteMany?.({ where: { key: `engine.limit.${provider}` } }).catch(() => undefined);
+    const cfg = ENGINE_CHAIN.find((e) => e.provider === provider)!;
+    const text = await this.runAgent(cfg, 'Reply with exactly: OK', 'engine-recheck').catch(() => null);
+    if (text && text.trim()) return { ok: true, reason: null };
+    // runAgent records a genuine refusal itself; read back whatever it learned so the answer here
+    // matches what Settings will show a second later.
+    const again = await this.engineLimit(provider).catch(() => null);
+    return { ok: false, reason: again?.reason || 'it did not answer' };
+  }
+
   private async markEngineLimited(provider: string, reason: string): Promise<void> {
     // The message carries the reset time ("try again at Aug 28th, 2026 2:55 AM"). Read it when we
     // can; otherwise assume an hour, so a transient rate-limit is not treated as a month-long outage.
