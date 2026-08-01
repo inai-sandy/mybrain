@@ -84,6 +84,26 @@ export function buildOgRoutes({ docs, prisma }: Deps): OgRoute[] {
     // Documents — unchanged behaviour (BEA-900).
     { path: '/d/:slug', resolve: (p, origin) => docs.ogMeta(p.slug, origin) },
 
+    // AI News Daily (BEA-1261). This page is MEANT to be shared, so it gets a real card: the day's
+    // headline and the top of the 60-second read. Server-rendered, because crawlers do not run
+    // JavaScript — a card built in React is a card nobody ever sees.
+    {
+      path: '/paper/:day',
+      resolve: async (p, origin) => {
+        const e = await prisma.newsEdition.findFirst({ where: { day: p.day, published: true } }).catch(() => null);
+        if (!e) return null;
+        let sixty: string[] = [];
+        try { sixty = JSON.parse(e.sixty || '[]'); } catch { sixty = []; }
+        const when = new Date(`${e.day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        return {
+          title: `${e.headline} — AI News Daily`,
+          description: cleanDescription(sixty.slice(0, 3).join(' '), `${when}: ${e.storyCount} stories in AI, in one read.`),
+          url: `${origin}/paper/${e.day}`,
+          image: `${origin}/og-default.png`,
+        };
+      },
+    },
+
     // The SHORT document link — the one people actually paste. Same card, its own URL.
     {
       path: '/s/:code',

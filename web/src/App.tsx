@@ -54,6 +54,7 @@ const FlowEditor = lazy(() => import('./pages/FlowEditor').then((m) => ({ defaul
 const Recordings = lazy(() => import('./pages/Recordings'));
 const RecordingView = lazy(() => import('./pages/RecordingView'));
 const News = lazy(() => import('./pages/News'));
+const PaperPublic = lazy(() => import('./pages/PaperPublic'));
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -82,6 +83,9 @@ export default function App() {
           <Route path="/t/:slug" element={<TaskShare />} />
           <Route path="/d/:slug" element={<DocumentPublic />} />
           <Route path="/s/:code" element={<ShortLink />} />
+          {/* AI News Daily — meant to be shared, so no login and no personal controls (BEA-1261). */}
+          <Route path="/paper" element={<Suspense fallback={<RouteSkeleton />}><PaperPublic /></Suspense>} />
+          <Route path="/paper/:day" element={<Suspense fallback={<RouteSkeleton />}><PaperPublic /></Suspense>} />
           {/* Everything else is behind auth. */}
           <Route path="/*" element={<AuthedApp />} />
         </Routes>

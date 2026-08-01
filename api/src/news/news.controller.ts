@@ -7,6 +7,8 @@ import { NewsResearchService } from './news-research.service';
 import { NewsPipelineService } from './news-pipeline.service';
 import { NewsAgentService } from './news-agent.service';
 import { NewsReadService } from './news-read.service';
+import { NewsPublicService } from './news-public.service';
+import { Public } from '../auth/public.decorator';
 
 @Controller('news')
 export class NewsController {
@@ -19,6 +21,7 @@ export class NewsController {
     private readonly pipeline: NewsPipelineService,
     private readonly agent: NewsAgentService,
     private readonly read: NewsReadService,
+    private readonly pub: NewsPublicService,
   ) {}
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
@@ -64,6 +67,23 @@ export class NewsController {
   @Post('issues/:id/write')
   writeEdition(@Param('id') id: string) {
     return this.write.publishEdition(id);
+  }
+
+  // ---- Public. No login. Deliberately a separate, narrower shape. (BEA-1261) -------------------
+
+  /** Editions anyone may read, newest first. */
+  @Public()
+  @Get('public/editions')
+  publicIndex(@Query('limit') limit?: string) {
+    const n = Number(limit);
+    return this.pub.index(Number.isFinite(n) && n > 0 ? Math.floor(n) : 60);
+  }
+
+  /** One public edition — no story ids, no shortlist, nothing personal. */
+  @Public()
+  @Get('public/editions/:day')
+  publicEdition(@Param('day') day: string) {
+    return this.pub.byDay(day);
   }
 
   /** Every edition, newest first — the archive. (BEA-1260) */
