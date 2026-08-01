@@ -17,6 +17,12 @@ export class UsageController {
     return this.usage.features(days ? Number(days) : 7, from, to);
   }
 
+  /** Tokens per agent and per job, rolled up from flow runs (BEA-1245). */
+  @Get('agents')
+  async agents(@Query('days') days?: string) {
+    return this.usage.agents(days ? Number(days) : 30);
+  }
+
   /** Individual AI/transcription requests (newest first), paginated + filterable by feature and date. */
   @Get('requests')
   async requests(@Query('limit') limit?: string, @Query('offset') offset?: string, @Query('feature') feature?: string, @Query('from') from?: string, @Query('to') to?: string) {

@@ -251,6 +251,7 @@ function renderSection(id: Tab, email?: string): ReactNode {
       <LabActivitySection />
     </div>;
     case 'agents': return <>
+      <AgentTokensCard />
       <AgentEngineSection />
       <QuietHoursCard />
       <ModuleAiHeader />
@@ -1594,6 +1595,65 @@ function EnginePicker() {
       <p className="mt-2 text-[11px] text-zinc-400">
         Planning a research question stays on a small fast model whatever you pick — it is a 470-token job, and an engine call carries ~25,000 tokens before your prompt even starts.
       </p>
+    </div>
+  );
+}
+
+/**
+ * What the agents actually consumed (BEA-1245) — tokens per agent, engine vs paid, at the top of
+ * the section. The rollup counts flow runs (every deep run and every voice job), which is where
+ * virtually all tokens go; quick chats log usage but carry no agent link, and the card says so.
+ */
+function AgentTokensCard() {
+  const [days, setDays] = useState(30);
+  const [rollup, setRollup] = useState<any>(null);
+  const [feat, setFeat] = useState<any>(null);
+  useEffect(() => {
+    fetch(`/api/usage/agents?days=${days}`).then((r) => r.json()).then(setRollup).catch(() => setRollup(null));
+    fetch(`/api/usage/features?days=${days}`).then((r) => r.json()).then(setFeat).catch(() => setFeat(null));
+  }, [days]);
+  const k = (n?: number) => (!n ? '0' : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  // null = still loading OR the fetch failed — either way, "0" would read as "you spent nothing",
+  // which is worse than admitting we don't know (CLAUDE.md loading/error standard).
+  if (rollup === null && feat === null) {
+    return <div className="h-28 animate-pulse rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900" />;
+  }
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">Tokens used</h2>
+        <div className="flex gap-1 text-xs">
+          {[7, 30].map((d) => (
+            <button key={d} onClick={() => setDays(d)} className={'rounded-full px-2.5 py-1 ' + (days === d ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300')}>{d} days</button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="rounded-xl bg-zinc-50 p-2.5 dark:bg-zinc-800/60"><p className="text-[11px] text-zinc-500">On your engine (free)</p><p className="text-lg font-semibold">{k(feat?.includedTokens)}</p><p className="text-[11px] text-zinc-400">{feat?.includedRequests || 0} requests</p></div>
+        <div className="rounded-xl bg-zinc-50 p-2.5 dark:bg-zinc-800/60"><p className="text-[11px] text-zinc-500">Paid API</p><p className="text-lg font-semibold">{k(feat?.paidTokens)}</p><p className="text-[11px] text-zinc-400">${(feat?.totalCost || 0).toFixed(2)}</p></div>
+        <div className="rounded-xl bg-zinc-50 p-2.5 dark:bg-zinc-800/60"><p className="text-[11px] text-zinc-500">Agent runs</p><p className="text-lg font-semibold">{rollup?.total?.runs || 0}</p><p className="text-[11px] text-zinc-400">≈{k(rollup?.total?.tokens)} tokens budgeted</p></div>
+        <div className="rounded-xl bg-zinc-50 p-2.5 dark:bg-zinc-800/60"><p className="text-[11px] text-zinc-500">Searches</p><p className="text-lg font-semibold">{rollup?.total?.searches || 0}</p><p className="text-[11px] text-zinc-400">{rollup?.total?.reads || 0} page reads</p></div>
+      </div>
+      {(rollup?.jobs || []).length > 0 && (
+        <div className="mt-3 max-h-64 overflow-x-auto overflow-y-auto">
+          <p className="mb-1 text-[11px] text-zinc-400">{rollup.jobs.length} job{rollup.jobs.length === 1 ? '' : 's'} with runs in this period · biggest first</p>
+          <table className="w-full text-left text-xs">
+            <thead><tr className="text-zinc-400"><th className="py-1 pr-2 font-medium">Job</th><th className="py-1 pr-2 font-medium">Agent</th><th className="py-1 pr-2 text-right font-medium">Runs</th><th className="py-1 pr-2 text-right font-medium">Tokens</th><th className="py-1 text-right font-medium">Searches</th></tr></thead>
+            <tbody>
+              {rollup.jobs.map((j: any) => (
+                <tr key={j.jobId} className="border-t border-zinc-100 dark:border-zinc-800">
+                  <td className="max-w-[180px] truncate py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">{j.job}</td>
+                  <td className="max-w-[120px] truncate py-1.5 pr-2 text-zinc-500">{j.agent}</td>
+                  <td className="py-1.5 pr-2 text-right">{j.runs}</td>
+                  <td className="py-1.5 pr-2 text-right font-medium">{k(j.tokens)}</td>
+                  <td className="py-1.5 text-right">{j.searches}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-zinc-400">Engine and Paid are REAL counts from the request log. "Agent runs" and the table are each run's own budget accounting (≈) — a flat charge per engine step plus size-based charges — which is deliberately generous, so the two views will not match. Quick chats appear in the real totals but aren't tied to one agent.</p>
     </div>
   );
 }
