@@ -85,8 +85,14 @@ describe('ContactsService (BEA-719)', () => {
  */
 describe("a person's page answers today (BEA-1149)", () => {
   const day = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
-  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(day + 'T12:00:00Z').getUTCDay()];
-  const other = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].filter((d) => d !== weekday)[0];
+  const WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const weekday = WEEK[new Date(day + 'T12:00:00Z').getUTCDay()];
+  // The weekend these tests mock must never BE today, or a report owed "every working day" is not
+  // owed at all and every expectation here collapses. The old hardcoded ['Sun'] failed every
+  // Saturday from 18:30 UTC, when the app's IST "today" has already rolled over into Sunday —
+  // the same six-days-a-week trap the BEA-1156 block below documents for Fridays.
+  const offDay = WEEK.filter((d) => d !== weekday)[0];
+  const other = WEEK.filter((d) => d !== weekday && d !== offDay)[0];
 
   function withReports(reports: any[]) {
     const p: any = fakePrisma();
@@ -94,10 +100,24 @@ describe("a person's page answers today (BEA-1149)", () => {
     p.taskClaim = { count: async () => 0 };
     p.reminder = { count: async () => 1 };
     p.reminderMessage = { findFirst: async () => null };
-    p.setting = { findUnique: async () => ({ value: JSON.stringify(['Sun']) }) };
+    p.setting = { findUnique: async () => ({ value: JSON.stringify([offDay]) }) };
     p.task = { findMany: async ({ where }: any) => (where?.kind === 'recurring' ? reports : []) };
     return new ContactsService(p);
   }
+
+  it('the mocked weekend can never land on today, whatever day it is run', () => {
+    // Locks the fix rather than trusting that today happens to be convenient. Run for all seven
+    // days: the off day and the "other" day must both differ from today, and from each other, or
+    // these tests go red once a week and train you to ignore a red suite.
+    const WEEK7 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (const t of WEEK7) {
+      const off = WEEK7.filter((d) => d !== t)[0];
+      const oth = WEEK7.filter((d) => d !== t && d !== off)[0];
+      expect(off).not.toBe(t);
+      expect(oth).not.toBe(t);
+      expect(oth).not.toBe(off);
+    }
+  });
 
   it("shows a report due today, and what settled it", async () => {
     const svc = withReports([
@@ -145,12 +165,15 @@ describe("the team's own page only asks for what's due (BEA-1156)", () => {
   const day = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const today = WD[new Date(day + 'T12:00:00Z').getUTCDay()];
-  const other = WD.filter((d) => d !== today && d !== 'Sun')[0];
+  // Same rule as above: the mocked weekend must never land on today, or "owed every working day"
+  // silently means "owed on no day" and these tests go red once a week for no real reason.
+  const offDay = WD.filter((d) => d !== today)[0];
+  const other = WD.filter((d) => d !== today && d !== offDay)[0];
 
   function board(tasks: any[]) {
     const p: any = fakePrisma();
     p.contact.findUnique = async () => ({ id: 'c1', name: 'Rakesh', shareSlug: 'rakesh-6npa', shareEnabled: true });
-    p.setting = { findUnique: async () => ({ value: JSON.stringify(['Sun']) }) };
+    p.setting = { findUnique: async () => ({ value: JSON.stringify([offDay]) }) };
     p.task = { findMany: async () => tasks };
     return new ContactsService(p).publicBoard('rakesh-6npa');
   }

@@ -13,7 +13,8 @@ export type PromptKey =
   | 'library.noteFormat' | 'library.documentSummary' | 'library.captureEnrich' | 'library.bookmarkOrganize'
   | 'other.commitmentsExtract'
   | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan' | 'agent.builder' | 'agent.jobBuilder'
-  | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief';
+  | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief'
+  | 'news.categorise';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
 
@@ -878,6 +879,33 @@ Rules:
 - Group the emails into a few clear topics. Each section: a short heading, 1–4 concise points, and "emails" = the NUMBERS (from the list) the section is based on.
 - In points you may use **bold** for names, companies, amounts, dates. Prefix anything needing a reply with "Action:".
 - Keep it brief and skimmable. Write in simple, plain, everyday English — short words and short sentences, no fancy words.`,
+  },
+  {
+    key: 'news.categorise',
+    category: 'AI News Daily',
+    label: 'Sort news stories into categories',
+    description:
+      'Files every story from the day\'s AI news into one of your fixed categories. The numbered stories are added automatically. ⚠️ Keep the JSON shape and the category names exactly as they are — anything else lands in Uncategorised.',
+    default: `You are filing AI news stories into fixed categories. Someone will read the result as a daily paper.
+
+Return ONLY JSON (no prose, no code fences), shaped exactly:
+{"items":[{"n":1,"category":"Models & releases"},{"n":2,"category":"Policy & law"}]}
+
+The categories, and NOTHING else:
+- "Models & releases" — new models, versions, benchmarks, evals of a released model
+- "Research" — papers, findings, techniques, methods, architecture work
+- "Tools & building" — dev tools, frameworks, APIs, agents, libraries, infrastructure people build on
+- "Money & business" — funding, deals, revenue, pricing, hiring, layoffs, company moves
+- "Policy & law" — regulation, courts, safety rules, copyright, government
+- "Chips & hardware" — GPUs, datacentres, devices, robots, energy
+- "Talk & opinion" — takes, threads, debates, predictions, community argument
+- "Uncategorised" — use this ONLY when the story genuinely fits none of the above
+
+Rules:
+- Give EVERY numbered story a line. Do not skip any, do not merge any, do not reorder.
+- Use "n" exactly as the number shown against the story.
+- Pick the single best fit. If a story is about a model launch AND its price, prefer the launch.
+- Never invent a category name. Anything not on the list above is thrown away and the story lands in Uncategorised.`,
   },
 ];
 

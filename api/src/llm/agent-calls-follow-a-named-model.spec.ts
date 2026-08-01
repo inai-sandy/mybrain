@@ -91,7 +91,7 @@ describe('no agent or flow call reaches the general model (BEA-1248)', () => {
     // The point of registering a key is that the owner can point it somewhere. A key with no card
     // is only half a fix — this issue exists because grading had no card at all.
     const settings = readFileSync(join(SRC, '../../web/src/pages/Settings.tsx'), 'utf8');
-    const missing = ['agent-grade', 'flow-eval-grade', 'flow-decompose', 'suggest-evals', 'agent-learn']
+    const missing = ['agent-grade', 'flow-eval-grade', 'flow-decompose', 'suggest-evals', 'agent-learn', 'news-categorise']
       .filter((k) => !settings.includes(`/api/llm-config/helper/${k}`));
     expect(missing).toEqual([]);
   });
