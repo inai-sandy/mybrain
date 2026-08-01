@@ -16,14 +16,19 @@ const VERDICT: Record<string, string> = {
   pass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400',
   partial: 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400',
   fail: 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-400',
+  // The check ran, but we could not judge it (BEA-1247). Grey, because it is neither good news nor
+  // bad news — it is missing news, and it must not look like a real verdict.
+  ungraded: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
 };
 export function Verdict({ v, s }: { v?: string; s?: number | null }) {
   if (!v) return <span className="shrink-0 text-xs text-zinc-400">not run</span>;
+  if (v === 'ungraded') return <span className={'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ' + VERDICT.ungraded}>couldn’t grade</span>;
   return <span className={'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ' + (VERDICT[v] || VERDICT.partial)}>{v}{s != null ? ` · ${s}` : ''}</span>;
 }
 export function passPillFor(evals: any[]) {
   const passed = evals.filter((e: any) => e.lastVerdict === 'pass').length;
-  const scored = evals.filter((e: any) => e.lastVerdict).length;
+  // A check we could not grade is NOT scored — counting it would quietly change the pass rate.
+  const scored = evals.filter((e: any) => e.lastVerdict && e.lastVerdict !== 'ungraded').length;
   const cls = scored > 0 ? (passed === evals.length ? VERDICT.pass : passed === 0 ? VERDICT.fail : VERDICT.partial) : '';
   return { passed, scored, cls };
 }
