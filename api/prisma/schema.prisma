@@ -1021,6 +1021,11 @@ model Flow {
   graph        String   @default("{\"nodes\":[],\"edges\":[]}")
   schedule     String? // JSON Sched {every, at, dow} — when set, runs on a timer (Stage 3)
   lastFiredKey String? // dedup key so a schedule fires once per slot
+  /// A hand-drawn flow that Auto-plan must not rewrite (BEA-1259). The planner is good at turning a
+  /// question into branches, and terrible at leaving a working pipeline alone: one press would
+  /// replace AI News Daily's fetch/split/categorise steps with generic web searches and silently
+  /// throw the RSS work away. Same class of failure as BEA-1246.
+  locked       Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }

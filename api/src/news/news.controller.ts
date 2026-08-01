@@ -4,6 +4,8 @@ import { NewsSplitService } from './news-split.service';
 import { NewsCategoriseService } from './news-categorise.service';
 import { NewsWriteService } from './news-write.service';
 import { NewsResearchService } from './news-research.service';
+import { NewsPipelineService } from './news-pipeline.service';
+import { NewsAgentService } from './news-agent.service';
 
 @Controller('news')
 export class NewsController {
@@ -13,6 +15,8 @@ export class NewsController {
     private readonly categorise: NewsCategoriseService,
     private readonly write: NewsWriteService,
     private readonly research: NewsResearchService,
+    private readonly pipeline: NewsPipelineService,
+    private readonly agent: NewsAgentService,
   ) {}
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
@@ -58,6 +62,18 @@ export class NewsController {
   @Post('issues/:id/write')
   writeEdition(@Param('id') id: string) {
     return this.write.publishEdition(id);
+  }
+
+  /** Create (or repair) the AI News Daily agent, its job and its locked, scheduled flow. (BEA-1259) */
+  @Post('setup')
+  setup() {
+    return this.agent.ensure();
+  }
+
+  /** Run the whole daily pipeline now, exactly as the noon schedule does. (BEA-1259) */
+  @Post('run')
+  runDaily() {
+    return this.pipeline.runDaily().then((report) => ({ ok: true, report }));
   }
 
   /** Pick the stories worth digging into. (BEA-1258) */

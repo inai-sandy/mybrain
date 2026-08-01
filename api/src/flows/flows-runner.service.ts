@@ -16,6 +16,7 @@ import { ItemsService } from '../items/items.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PostboxService } from '../contacts/postbox.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
+import { NewsPipelineService } from '../news/news-pipeline.service';
 import { randomBytes } from 'crypto';
 import { Grade, GRADE_MAX_TOKENS, GradeResult, parseGrade } from '../hermes/grade';
 
@@ -61,6 +62,8 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly tasks?: TasksService,
     private readonly postbox?: PostboxService,
     private readonly budget?: TokenBudgetService, // the token ceiling (BEA-1204)
+    // LAST, and optional: many spec harnesses build this service positionally with fewer args.
+    private readonly news?: NewsPipelineService, // AI News Daily's own steps (BEA-1259)
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -1073,6 +1076,15 @@ export class FlowRunnerService implements OnModuleInit {
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
       case 'tool': {
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
+        // AI News Daily (BEA-1259) — direct, like the Web group. These must NEVER fall through to
+        // a plain model call: an unregistered tool id reaches askModel, which would cheerfully
+        // describe collecting the news instead of collecting it.
+        if (refId === 'news_collect' || refId === 'news_write' || refId === 'news_flag') {
+          if (!this.news) throw new Error('AI News Daily is not available on this server');
+          if (refId === 'news_collect') return this.news.collect();
+          if (refId === 'news_write') return this.news.writeToday();
+          return this.news.flagToday();
+        }
         // Real research, direct — no engine turn (BEA-1194). A failure THROWS so the step is marked
         // failed with the reason, rather than quietly handing back model knowledge.
         if (refId === 'web_search' || refId === 'web_search_meaning' || refId === 'web_read') {
@@ -1224,7 +1236,7 @@ export class FlowRunnerService implements OnModuleInit {
     if (kind !== 'tool' || !refId) return false;
     // Everything we do ourselves is free of tokens (BEA-1194, BEA-1203). Deep research and every
     // engine tool are not.
-    const free = new Set(['search_brain', 'search_rag', 'fetch_document', 'save_document', 'save_capture', 'create_task', 'remember', 'telegram', 'whatsapp', 'web_search', 'web_read', 'web_search_meaning']);
+    const free = new Set(['search_brain', 'search_rag', 'fetch_document', 'save_document', 'save_capture', 'create_task', 'remember', 'telegram', 'whatsapp', 'web_search', 'web_read', 'web_search_meaning', 'news_collect', 'news_write', 'news_flag']);
     return !free.has(refId);
   }
 
