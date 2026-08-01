@@ -172,6 +172,28 @@ export class LlmService {
     'flow-merge': LlmService.FOLLOW_ENGINE,
     // Kept so an existing saved setting still resolves.
     'deep-research': { provider: 'codex', model: 'codex' },
+    // ---- Agent & flow helpers that had NO entry at all (BEA-1248) ----------------------------
+    // These five reached `llm.complete()` directly, so they ran on the app's general model — the
+    // one setting the owner can change by accident — and could not be pointed anywhere from
+    // Settings. Grading was the worst of them: the thing that tells you whether a run was any good
+    // was itself running on whatever happened to be selected.
+    //
+    // Grading judges a long report against up to 12 of the owner's own checks and gates the
+    // auto-revise, so it gets a real model rather than the cheapest one. It is a small job by
+    // input size, which is why it does NOT follow the engine — a CLI turn drags ~25,000 tokens of
+    // its own system prompt along for a ~1,000-token question, on EVERY run.
+    'agent-grade': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
+    'flow-eval-grade': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
+    // Splitting a request into sub-questions is NOT the same job as planning the flow. It is fed
+    // only the raw question — no tool catalog, no skills — and returns 2-5 short strings. That is
+    // the same shape as 'deep-research-plan', which sits on Haiku for exactly the reason that
+    // applies here: an engine turn drags ~25,000 tokens of its own system prompt along for a
+    // ~400-token job. 'flow-plan' follows the engine because it really does reason over the whole
+    // tool catalog; this one does not.
+    'flow-decompose': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Small extraction jobs: a few example inputs, a few durable facts. Haiku is plenty.
+    'suggest-evals': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    'agent-learn': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
   };
 
   /**
@@ -221,12 +243,26 @@ export class LlmService {
     return cfg;
   }
 
-  /** Complete on a helper's own model (or its default), falling back to the app default model. */
+  /**
+   * Complete on a helper's own model.
+   *
+   * A helper that HAS a chosen model never silently runs on a different one (BEA-1248). This used to
+   * end `return this.complete(...)` unconditionally — the app's general `llm` setting — so any
+   * helper whose model came back empty quietly finished on whatever that setting happened to be.
+   * It was `qwen/qwen3.7-max` one morning and `moonshotai/kimi-k3` by the afternoon. Freezing the
+   * engine to Codex did nothing for these, because the swap happened below the engine entirely.
+   *
+   * An engine-following helper still has the engine's OWN backup chain inside `completeWithModel`,
+   * so this removes a third, invisible layer — not a real safety net.
+   *
+   * Only a helper with no model at all falls through to the app default, which is what "no opinion"
+   * genuinely means.
+   */
   async completeHelper(key: string, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
     const cfg = await this.helperModel(key);
     if (cfg) {
       const { text } = await this.completeWithModel(cfg, prompt, maxTokens, label);
-      if (text) return text;
+      return text || null;
     }
     return this.complete(prompt, maxTokens, label);
   }

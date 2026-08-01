@@ -188,10 +188,10 @@ export class FlowRunnerService implements OnModuleInit {
   private async gradeOutput(rubric: string, result: string): Promise<GradeResult> {
     let out: string | null = null;
     try {
-      out = await this.llm.complete(
-        `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
-        GRADE_MAX_TOKENS, 'flow-eval-grade',
-      );
+      const gradePrompt = `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`;
+      out = (this.llm as any).completeHelper
+        ? await (this.llm as any).completeHelper('flow-eval-grade', gradePrompt, GRADE_MAX_TOKENS, 'flow-eval-grade')
+        : await this.llm.complete(gradePrompt, GRADE_MAX_TOKENS, 'flow-eval-grade');
     } catch (e: any) {
       return { ok: false, reason: `the grader could not be reached — ${String(e?.message || e).slice(0, 120)}` };
     }

@@ -1622,12 +1622,22 @@ function ModelsSection() {
         desc="Reads the gathered pages and writes the cited report. Follows THE engine choice until you pick one — that is what keeps a report at search-credit cost." />
       <EngineModelCard title="Commitments model" icon={CheckSquare} base="/api/accountability/model" agents
         desc="Extracts the commitments you make in your stories and checks how they went. Had an API and no card until now. Can run FREE on your Codex/Gemini subscription." />
+      {/* These five ran on the general model and had no card at all until BEA-1248 — the grader
+          most of all, which is the thing that tells you whether a run was any good. */}
+      <EngineModelCard title="Grading model" icon={CheckSquare} base="/api/llm-config/helper/agent-grade" alsoBase="/api/llm-config/helper/flow-eval-grade"
+        desc="Judges every finished run against your Outcome and your checks, and decides whether a job retries itself. Sets both graders at once, so the agent page and the Checks panel can never disagree. Sonnet 5 (default) reads a long report against a dozen checks most reliably." />
+      <EngineModelCard title="Question-splitting model" icon={Bot} base="/api/llm-config/helper/flow-decompose"
+        desc="Breaks a request into the independent sub-questions each branch will chase. Short in, short out — Haiku (the default) is right; picking the tools is a separate, bigger job under Flow auto-plan." />
+      <EngineModelCard title="Suggested checks model" icon={CheckSquare} base="/api/llm-config/helper/suggest-evals"
+        desc="Writes example inputs to test a job on when you tap ✨ on the Checks tab. A small job — Haiku (the default) is fine." />
+      <EngineModelCard title="Learn-after model" icon={Bot} base="/api/llm-config/helper/agent-learn"
+        desc="Reads a finished run and proposes a few durable facts worth keeping, which you confirm. Tiny job — Haiku (the default) is fine." />
     </div>
   );
 }
 
 /** Reusable model picker for an engine that exposes GET/PUT `${base}` + GET `${base}s`. */
-function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: string; desc: string; icon: LucideIcon; base: string; agents?: boolean }) {
+function EngineModelCard({ title, desc, icon: Icon, base, agents, alsoBase }: { title: string; desc: string; icon: LucideIcon; base: string; agents?: boolean; alsoBase?: string }) {
   const FALLBACK = [
     { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 (best, recommended)' },
     { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
@@ -1669,8 +1679,12 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
   // (owner feedback, BEA-1233)
   async function save(next: string) {
     if (!next) return;
-    const r = await fetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: next }) });
-    if (r.ok) toast('success', 'Model saved');
+    const body = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: next }) };
+    const r = await fetch(base, body);
+    // One control, both graders (BEA-1248). A run judged one way on the agent page and another on
+    // the Checks panel is worse than no verdict, so these two can never be set apart.
+    const r2 = alsoBase ? await fetch(alsoBase, body) : { ok: true };
+    if (r.ok && r2.ok) toast('success', 'Model saved');
     else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
   }
   const sel = 'w-full mt-1 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm';
