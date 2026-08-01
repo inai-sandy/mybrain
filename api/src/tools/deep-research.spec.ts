@@ -31,8 +31,11 @@ function make(opts: {
       return opts.results?.[q] ?? opts.results?.['*'] ?? [{ title: 'A page', url: `https://x.test/${calls.searches}`, snippet: 'short' }];
     },
     searchByMeaning: async (q: string) => {
-      calls.searches++; calls.meaning++; opts.onSearch?.(q, 'meaning');
-      return opts.results?.[q] ?? opts.results?.['*'] ?? [{ title: 'A page', url: `https://m.test/${calls.searches}`, snippet: 'short' }];
+      // `calls.searches` means TAVILY calls only. It used to count Exa too, which was harmless when
+      // a question went to exactly one index — and became confusing the moment every question swept
+      // all three (BEA-1239).
+      calls.meaning++; opts.onSearch?.(q, 'meaning');
+      return opts.results?.[q] ?? opts.results?.['*'] ?? [{ title: 'A page', url: `https://m.test/${calls.meaning}`, snippet: 'short' }];
     },
     braveContext: async (q: string) => {
       calls.brave++; opts.onSearch?.(q, 'keyword');
@@ -65,12 +68,14 @@ describe('deep research (BEA-1196)', () => {
   it('plans, searches, reads and writes — with the sources appended', async () => {
     const { svc, calls } = make();
     const { report, spend } = await svc.run('what is changing in fresher hiring');
-    expect(calls.searches).toBe(3);
+    // 3 questions × 2 configured indexes (Tavily + Exa) = 6 calls, 6 distinct pages (BEA-1239).
+    expect(calls.searches).toBe(3);   // Tavily, once per question
+    expect(calls.meaning).toBe(3);    // Exa, once per question
     expect(report).toContain('The report body [1].');
     expect(report).toContain('### Sources');
     expect(report).toContain('https://x.test/1');       // the links must reach the saved document
-    expect(spend).toMatchObject({ searches: 3, extracts: 3 });
-    expect(spend.sources).toBe(3);
+    expect(spend).toMatchObject({ searches: 6, tavilySearches: 3, meaningSearches: 3 });
+    expect(spend.sources).toBe(6);
   });
 
   // The whole reason the owner rejected Perplexity was cost. A step that can quietly do 40 searches
@@ -79,16 +84,20 @@ describe('deep research (BEA-1196)', () => {
     const plan = Array.from({ length: 30 }, (_, i) => `question number ${i} about the topic`).join('\n');
     const { svc, calls } = make({ plan });
     const { spend } = await svc.run('a big question', { budget: { searches: 2, extracts: 1 } });
-    expect(calls.searches).toBe(2);
+    // The budget counts CALLS, not questions — one question now costs one call per index, so a
+    // budget of 2 buys a single question's sweep and then stops. That is the safety net working.
+    expect(spend.searches).toBeLessThanOrEqual(2);
     expect(calls.extracts).toBe(1);
-    expect(spend).toMatchObject({ searches: 2, extracts: 1 });
+    expect(spend).toMatchObject({ extracts: 1 });
   });
 
   it('clamps a silly budget to the hard cap instead of trusting it', async () => {
     const plan = Array.from({ length: 40 }, (_, i) => `question number ${i} about the topic`).join('\n');
     const { svc, calls } = make({ plan });
     await svc.run('a big question', { budget: { searches: 999, extracts: 999 } });
-    expect(calls.searches).toBeLessThanOrEqual(8);
+    // The ceiling rose 8 → 24 with BEA-1239 because every question now sweeps three indexes on
+    // purpose. It is still a hard ceiling: 40 proposed questions cannot spend more than this.
+    expect(calls.searches + calls.meaning + calls.brave).toBeLessThanOrEqual(24);
     expect(calls.extracts).toBeLessThanOrEqual(10);
   });
 
@@ -96,7 +105,8 @@ describe('deep research (BEA-1196)', () => {
   it('still reports what it spent when it fails', async () => {
     const { svc } = make({ results: { '*': [] } });
     const err: any = await svc.run('nothing findable').catch((e: any) => e);
-    expect(err.spend).toMatchObject({ searches: 3, sources: 0 });
+    // 3 questions × 2 indexes, then the last-resort sweep asks the goal itself on both (BEA-1239).
+    expect(err.spend).toMatchObject({ searches: 8, sources: 0 });
   });
 
   it('fails loudly when the searches found nothing — it must NOT write from memory', async () => {
@@ -148,8 +158,8 @@ describe('deep research (BEA-1196)', () => {
     const dup = [{ title: 'Same', url: 'https://dup.test/a/', snippet: 'short' }];
     const { svc } = make({ results: { '*': dup } });
     const { spend } = await svc.run('a question about something');
-    expect(spend.sources).toBe(1);       // three searches, one unique page
-    expect(spend.searches).toBe(3);
+    expect(spend.sources).toBe(1);       // every index found the same page — counted once
+    expect(spend.searches).toBe(6);      // 3 questions × 2 configured indexes
   });
 
   // Caught by running it live: the threshold was 500, but Tavily snippets run to 900, so a real run
@@ -171,7 +181,7 @@ describe('deep research (BEA-1196)', () => {
   it('carries on when a page will not open — the snippet is still a source', async () => {
     const { svc } = make({ readFails: true });
     const { report, spend } = await svc.run('a question about something');
-    expect(spend.sources).toBe(3);
+    expect(spend.sources).toBe(6);
     expect(report).toContain('### Sources');
   });
 
@@ -194,7 +204,7 @@ describe('deep research (BEA-1196)', () => {
   it('reports what it spent, in the output as well as the return value', async () => {
     const { svc } = make();
     const { report } = await svc.run('a question about something');
-    expect(report).toMatch(/3 searches \+ 3 page reads \(6 Tavily credits/);
+    expect(report).toMatch(/6 searches \+ 6 page reads \(6 Tavily credits/);
   });
 
   /**
@@ -249,9 +259,11 @@ describe('deep research (BEA-1196)', () => {
     const plan = 'what makes some people quietly give up on their own ideas\nCOEP placements 2026\nIndia hiring report';
     const { svc } = make({ plan });
     const { report, spend } = await svc.run('a question');
-    expect(spend).toMatchObject({ searches: 3, meaningSearches: 1 });
-    expect(report).toMatch(/4 Tavily credits/);   // 2 keyword searches × 2, NOT 6
-    expect(report).toMatch(/1 of them on Exa/);
+    // Every question goes to both now, so Exa is asked 3 times and Tavily 3 times — but only the
+    // Tavily calls carry a credit price.
+    expect(spend).toMatchObject({ tavilySearches: 3, meaningSearches: 3 });
+    expect(report).toMatch(/6 Tavily credits/);
+    expect(report).toMatch(/3 of them on Exa/);
   });
 
   it('tells the run what it is doing at every stage', async () => {
@@ -360,7 +372,7 @@ describe('deep research (BEA-1196)', () => {
       await svc.run('a question about something');
       const writePrompt = llm.completeWithModel.mock.calls.find((c: any[]) => c[3] === 'deep-research-write')[1];
       expect(writePrompt).toContain('What I could and could not answer');
-      expect(writePrompt).toContain('You were given 3 source(s)');
+      expect(writePrompt).toContain('You were given 6 source(s)');
     });
   });
 
@@ -407,14 +419,16 @@ describe('deep research (BEA-1196)', () => {
     it('counts every Tavily call, not one per question', async () => {
       const { svc } = make({ attemptsPerSearch: 3, plan: 'one question about the thing' });
       const { spend } = await svc.run('a question');
-      expect(spend.searches).toBe(3);
+      expect(spend.tavilySearches).toBe(3); // three attempts on ONE question, each a real credit
     });
 
     it('stops on the credit budget, not the question count', async () => {
       const plan = Array.from({ length: 8 }, (_, i) => `question number ${i} about the topic`).join('\n');
       const { svc, calls } = make({ attemptsPerSearch: 2, plan });
       const { spend } = await svc.run('a big question', { budget: { searches: 4, extracts: 1 } });
-      expect(spend.searches).toBeLessThanOrEqual(4 + 1); // never runs away; one in-flight question may finish
+      // One question's whole sweep may finish after the ceiling is reached — bounded by the number
+      // of indexes, not unbounded. It must never run away.
+      expect(spend.searches).toBeLessThanOrEqual(4 + 3);
       expect(calls.searches).toBeLessThan(8);            // and it stopped well short of every question
     });
 
@@ -442,70 +456,148 @@ describe('deep research (BEA-1196)', () => {
    * BEA-1205. Brave leads because one call does search AND extraction; Tavily is kept for the two
    * things only it does well — a real date window and a list of sites to stay inside.
    */
-  describe('choosing the gatherer', () => {
+  describe('every question sweeps EVERY index (BEA-1239)', () => {
     const withBrave = (over: any = {}) => make({ available: { tavily: true, exa: true, brave: true }, ...over });
 
-    it('leads with Brave when nothing needs precision', async () => {
+    /**
+     * This block used to assert the opposite — that one gatherer was CHOSEN per question by
+     * heuristic. Measured head to head, Tavily/Exa/Brave shared only 3/6, 2/6 and on one question
+     * 0/6 sources, so a question was answered from about a third of what we could see, and
+     * "cannot be determined" was sometimes just the one index we happened to ask.
+     */
+    it('asks Tavily AND Exa AND Brave for the same question', async () => {
       const { svc, calls } = withBrave({ plan: 'how many students graduated' });
       await svc.run('a plain question');
-      expect(calls.brave).toBe(1);
-      expect(calls.searches).toBe(0);
+      expect(calls.searches).toBe(1); // Tavily
+      expect(calls.meaning).toBe(1);  // Exa
+      expect(calls.brave).toBe(1);    // Brave
     });
 
-    it('uses Tavily when a date window is in play — Brave cannot pin one', async () => {
+    it('does not send a question to only one index, whatever it looks like', async () => {
+      for (const plan of ['how many students graduated', 'what makes some people quietly give up on their own ideas']) {
+        const { svc, calls } = withBrave({ plan });
+        await svc.run('a plain question');
+        const used = [calls.searches, calls.meaning, calls.brave].filter((n) => n > 0).length;
+        expect(used).toBeGreaterThan(1);
+      }
+    });
+
+    it('leaves Brave out when the owner STATED a date range — it cannot hold one', async () => {
+      // BEA-1209 promises an explicit window is never widened. Brave has only a coarse freshness
+      // setting, so including it would quietly widen the very thing the owner pinned.
       const { svc, calls } = withBrave({ plan: 'how many students graduated' });
-      await svc.run('placements in 2025 and 2026');
-      expect(calls.searches).toBe(1);
+      await svc.run('a plain question', { from: '2025-08-01' });
       expect(calls.brave).toBe(0);
+      expect(calls.searches).toBe(1);
     });
 
-    it('uses Tavily when the planner named sites to stay inside', async () => {
-      const { svc, calls } = withBrave({ plan: 'how many students graduated\nsites: aicte-india.org' });
-      await svc.run('a plain question');
-      expect(calls.searches).toBe(1);
-      expect(calls.brave).toBe(0);
-    });
-
-    it('still sends a keyword-less question to Exa', async () => {
-      const { svc, calls } = withBrave({ plan: 'what makes some people quietly give up on their own ideas' });
-      await svc.run('a plain question');
-      expect(calls.meaning).toBe(1);
-      expect(calls.brave).toBe(0);
+    it('counts three sources found by three indexes ONCE when they are the same page', async () => {
+      const same = [{ title: 'Same page', url: 'https://same.test/a', snippet: 'short' }];
+      const { svc } = withBrave({ plan: 'one question here', results: { '*': same } });
+      const { spend } = await svc.run('a plain question');
+      expect(spend.sources).toBe(1); // three indexes, not three times the reading
     });
 
     it('never pays to re-read a page Brave already returned', async () => {
-      // Brave hands back the page content with the search. A live run still spent two Tavily
-      // extracts on Brave sources before this — money for text we already had.
-      const { svc, calls } = withBrave({ plan: 'how many students graduated' });
+      const { svc, calls } = withBrave({ plan: 'how many students graduated', results: { '*': [{ title: 'p', url: 'https://b.test/1', snippet: 'short' }] } });
       await svc.run('a plain question');
       expect(calls.extracts).toBe(0);
     });
 
-    it('prices Brave separately — it is not billed at Tavily rates', async () => {
+    it('prices each index honestly — Brave is not billed at Tavily rates', async () => {
       const { svc } = withBrave({ plan: 'how many students graduated' });
       const { report, spend } = await svc.run('a plain question');
       expect(spend.braveSearches).toBe(1);
+      expect(spend.tavilySearches).toBe(1);
+      expect(spend.meaningSearches).toBe(1);
       expect(report).toMatch(/1 on Brave \(search \+ read in one\)/);
-      expect(report).not.toMatch(/2 Tavily credits/); // the Brave call is not a Tavily credit
     });
 
-    /**
-     * The 0/6 overlap finding. Brave and Tavily returned completely different sources on one real
-     * question, so one index drawing a blank is weak evidence. "This does not exist publicly" is the
-     * most consequential sentence this tool writes.
-     */
-    it('asks the other index before concluding nothing exists', async () => {
-      let asked = 0;
+    it('names the index that failed instead of looking like a full sweep that found nothing', async () => {
       const web: any = {
         available: async () => ({ tavily: true, exa: false, brave: true }),
-        braveContext: async () => { asked++; return []; },
-        search: async () => { asked++; return [{ title: 'Found by the other index', url: 'https://t.test/1', snippet: 's' }]; },
+        search: async () => { throw new WebSearchError('tavily is over its quota'); },
+        braveContext: async () => [{ title: 'p', url: 'https://b.test/1', snippet: 'short' }],
         readPage: async () => 'text',
       };
-      const llm: any = { helperModel: async () => null, completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'the report', model: 'x' }) };
-      const { report } = await new DeepResearchService(web, llm).run('something obscure');
-      expect(asked).toBe(2);                                   // Brave, then Tavily
-      expect(report).toContain('Found by the other index');
+      const llm: any = { helperModel: async () => null, completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'the report [1].', model: 'x' }) };
+      const lines: string[] = [];
+      const { report } = await new DeepResearchService(web, llm).run('a plain question', { onLine: (t) => lines.push(t) });
+      expect(report).toBeTruthy();
+      expect(lines.join('\n')).toMatch(/Tavily: failed/);
+    });
+  });
+
+  describe('the last resort', () => {
+    /**
+     * This test used to return a real result from the FIRST sweep, so the last resort never ran and
+     * it was quietly re-testing "the normal sweep asks both indexes". The mocks now answer the
+     * sub-question with nothing and only answer the owner's own wording, which is the whole point:
+     * the sub-questions are a plan, and a plan can be wrong.
+     */
+    it('asks the question in the owner\'s OWN words before concluding nothing exists', async () => {
+      const asked: string[] = [];
+      const web: any = {
+        available: async () => ({ tavily: true, exa: false, brave: true }),
+        braveContext: async (q: string) => { asked.push(`brave:${q}`); return []; },
+        search: async (q: string) => {
+          asked.push(`tavily:${q}`);
+          return q === 'something obscure the planner mangled'
+            ? [{ title: 'Found by asking it your way', url: 'https://t.test/1', snippet: 's' }]
+            : [];
+        },
+        readPage: async () => 'text',
+      };
+      const llm: any = { helperModel: async () => null, completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'a badly worded sub question' : 'the report', model: 'x' }) };
+      const lines: string[] = [];
+      const { report } = await new DeepResearchService(web, llm).run('something obscure the planner mangled', { onLine: (t) => lines.push(t) });
+      expect(lines.join('\n')).toMatch(/asking your question as you wrote it/);
+      expect(asked).toContain('tavily:something obscure the planner mangled');
+      expect(report).toContain('Found by asking it your way');
+    });
+
+    it('the last resort still obeys the budget — it cannot blow the ceiling', async () => {
+      // Measured at 30 against a cap of 24 before this: the block fired unconditionally and added up
+      // to five more charged calls, on exactly the "nothing found anywhere" path it exists for.
+      const plan = Array.from({ length: 40 }, (_, i) => `question number ${i} about the topic`).join('\n');
+      const { svc, calls } = make({ plan, results: { '*': [] }, available: { tavily: true, exa: true, brave: true }, attemptsPerSearch: 3 });
+      const lines: string[] = [];
+      const err: any = await svc.run('a big question', { budget: { searches: 999, extracts: 999 }, onLine: (t) => lines.push(t) }).catch((e: any) => e);
+      // The honest guarantee: the ceiling stops NEW work starting, so a run can overshoot by at most
+      // the sweep already in flight — one question across every index, worst case 5 calls. What it
+      // must never do is add the last resort on top of an exhausted budget, which is what took a
+      // measured run to 30.
+      expect(err.spend.searches).toBeLessThanOrEqual(24 + 5);
+      expect(lines.join('\n')).not.toMatch(/asking your question as you wrote it/);
+      expect(calls.searches + calls.meaning + calls.brave).toBeLessThanOrEqual(24 + 5);
+    });
+
+    it('does NOT drop Brave just because the question mentions a year', async () => {
+      // A window GUESSED from the wording is not a window the owner typed. Testing for any dates at
+      // all silently dropped one of three indexes for most real questions.
+      const { svc, calls } = make({ available: { tavily: true, exa: true, brave: true }, plan: 'engineering placements in 2025' });
+      await svc.run('engineering placements in 2025');
+      expect(calls.brave).toBe(1);
+    });
+
+    it('does drop Brave when the owner typed the dates', async () => {
+      const { svc, calls } = make({ available: { tavily: true, exa: true, brave: true }, plan: 'engineering placements' });
+      await svc.run('engineering placements', { from: '2025-08-01' });
+      expect(calls.brave).toBe(0);
+    });
+
+    it('never pays to re-read a Brave page that another index returned under a different URL', async () => {
+      // Same page, different raw string — the everyday case (www, trailing slash). Keyed by the raw
+      // URL this quietly paid Tavily to open a page Brave had already handed over in full.
+      const web: any = {
+        available: async () => ({ tavily: true, exa: false, brave: true }),
+        search: async () => [{ title: 'p', url: 'https://same.test/page', snippet: 'short' }],
+        braveContext: async () => [{ title: 'p', url: 'https://www.same.test/page/', snippet: 'short' }],
+        readPage: async () => { throw new Error('must not re-read what Brave already returned'); },
+      };
+      const llm: any = { helperModel: async () => null, completeWithModel: async (_c: any, _p: string, _t: number, l: string) => ({ text: l === 'deep-research-plan' ? 'one question here' : 'the report [1].', model: 'x' }) };
+      const { report } = await new DeepResearchService(web, llm).run('a question about something');
+      expect(report).toContain('the report [1].');
     });
 
     it('does not ask twice when only one index is connected', async () => {
