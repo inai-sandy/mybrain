@@ -53,6 +53,7 @@ import { FlowRunsList } from './pages/FlowRunsList';
 const FlowEditor = lazy(() => import('./pages/FlowEditor').then((m) => ({ default: m.FlowEditor })));
 const Recordings = lazy(() => import('./pages/Recordings'));
 const RecordingView = lazy(() => import('./pages/RecordingView'));
+const News = lazy(() => import('./pages/News'));
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -176,6 +177,8 @@ function AuthedApp() {
         <Route path="mentor" element={<Navigate to="/lab?tab=plan" replace />} />
         <Route path="notes" element={<Notes />} />
         <Route path="notes/:id" element={<NoteView />} />
+        <Route path="news" element={<News />} />
+        <Route path="news/:day" element={<News />} />
         <Route path="documents" element={<Documents />} />
         <Route path="documents/:id" element={<DocumentView />} />
         <Route path="vault" element={<Vault />} />
