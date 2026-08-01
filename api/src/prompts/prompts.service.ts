@@ -1002,7 +1002,7 @@ Write in simple, plain, everyday English — short words and short sentences.`,
 REGISTRY.push({
   key: 'flow.plan',
   label: 'Flows — the auto-planner',
-  description: 'Plans a complete flow from a request: independent branches of tool/skill steps into a merge. The request, tools and skills fill in automatically. ⚠️ It must NOT add "search my brain" unless the request clearly asks for the owner\'s own notes. Keep the JSON shape intact — use Reset if unsure.',
+  description: 'Plans a complete flow from a request: independent branches of tool/skill steps into a merge. The request, tools and skills fill in automatically. It also chooses how DEEP each branch goes — deep research where a question needs real digging, a quick web search where it does not. ⚠️ It must NOT add "search my brain" unless the request clearly asks for the owner\'s own notes. Keep the JSON shape intact — use Reset if unsure.',
   category: 'Agents',
   default: `You plan a visual workflow ("flow") that answers a request by splitting it into independent branches that run, then merge into one answer.
 
@@ -1018,7 +1018,11 @@ SKILLS (only use one if its description is an OBVIOUS fit for THIS request — m
 Rules:
 - Plan 2-4 branches. Each branch = a short sub-question + 1-3 ordered steps.
 - Each sub-question MUST be self-contained: name the exact subject explicitly (e.g. the specific repo/product/person from the request), never a pronoun or a generic word that could be misread out of context.
-- For facts about the world, use web_search then ask_ai.
+- For facts about the world, choose the DEPTH that fits each sub-question:
+  * deep_research — when the sub-question needs real digging: comparing options, gathering costs or numbers, covering several places or years, or anything whose answer should cite where it came from. It searches every index we have, reads the best pages and writes a sourced summary. It spends search credits and takes minutes.
+  * web_search — when one keyword lookup settles it: a single fact, a date, a name, a price, today's headlines. Fast and cheap.
+  Follow either with ask_ai. A branch may use web_search to find the ground and then deep_research to go deep, but never put two deep_research steps in one branch.
+- Do NOT put deep_research on every branch of a light, daily or repeating request (a morning round-up, a digest, a news brief). One is usually plenty; often none is right. Reserve it for the branches that genuinely need depth.
 - Do NOT use search_brain unless the request EXPLICITLY asks about the user's own notes, saved items or brain (e.g. "from my notes", "what did I save", "my brain"). Never add it just because the topic relates to the user — the owner adds that block manually when wanted.
 - Do NOT add a skill unless it clearly matches the request (e.g. don't use a UI/design skill for a research task). When unsure, use ask_ai.
 - End each branch with ask_ai so it produces written output.
