@@ -17,6 +17,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { PostboxService } from '../contacts/postbox.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { randomBytes } from 'crypto';
+import { Grade, GRADE_MAX_TOKENS, GradeResult, parseGrade } from '../hermes/grade';
 
 type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean; cascaded?: boolean };
 
@@ -148,14 +149,22 @@ export class FlowRunnerService implements OnModuleInit {
       await this.agent.setEvals(agentId, evals).catch(() => undefined);
       let res = await this.runForEval(flowId, c.input).catch(() => ({ runId: '', finalOutput: '', status: 'failed' }));
       if (res.status !== 'done') res = await this.runForEval(flowId, c.input).catch(() => ({ runId: '', finalOutput: '', status: 'failed' })); // retry once
-      const grade = agent.rubric && res.finalOutput ? await this.gradeOutput(agent.rubric, res.finalOutput) : null;
+      const gr = agent.rubric && res.finalOutput ? await this.gradeOutput(agent.rubric, res.finalOutput) : null;
+      let grade: Grade | null = null;
+      let gradeErr: string | null = null;
+      if (gr) { if (gr.ok) grade = gr.grade; else gradeErr = gr.reason; }
       c.running = false;
       c.lastRunId = res.runId || c.lastRunId;
       c.lastRunKind = 'flow';
-      c.lastVerdict = grade?.verdict || (res.status !== 'done' ? 'fail' : 'partial');
+      // "Couldn't grade it" is its own state, never a real 'partial' — a failure must not be counted
+      // in the passed pill as though it had been judged (BEA-1247).
+      c.lastVerdict = grade?.verdict || (res.status !== 'done' ? 'fail' : gradeErr ? 'ungraded' : 'partial');
       c.lastScore = grade?.score ?? null;
       c.lastCriteria = Array.isArray(grade?.criteria) ? grade.criteria : null;
-      c.lastNotes = grade?.notes || null;
+      // Why a check has no verdict, kept on the case itself (BEA-1247) — a blank row used to be the
+      // only sign that grading had failed, and it looked identical to "not run yet".
+      c.lastNotes = grade?.notes || (gradeErr ? `Couldn't check this — ${gradeErr}` : null);
+      c.lastGradeError = gradeErr;
       c.lastRunAt = new Date().toISOString();
       await this.agent.setEvals(agentId, evals).catch(() => undefined);
     }
@@ -175,16 +184,18 @@ export class FlowRunnerService implements OnModuleInit {
     return { runId: run.id, finalOutput: after?.finalOutput || '', status: after?.status || 'failed' };
   }
 
-  /** Grade a result against the Outcome (same rubric as agent runs). */
-  private async gradeOutput(rubric: string, result: string): Promise<any | null> {
+  /** Grade a result against the Outcome (same rubric, same reader and same cap as agent runs). */
+  private async gradeOutput(rubric: string, result: string): Promise<GradeResult> {
+    let out: string | null = null;
     try {
-      const out = await this.llm.complete(
+      out = await this.llm.complete(
         `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
-        700, 'flow-eval-grade',
+        GRADE_MAX_TOKENS, 'flow-eval-grade',
       );
-      const m = (out || '').match(/\{[\s\S]*\}/);
-      return m ? JSON.parse(m[0]) : null;
-    } catch { return null; }
+    } catch (e: any) {
+      return { ok: false, reason: `the grader could not be reached — ${String(e?.message || e).slice(0, 120)}` };
+    }
+    return parseGrade(out);
   }
 
   /** Resolve a skill's on-disk folder name from its id (for running the real skill in Codex). */
@@ -678,8 +689,14 @@ export class FlowRunnerService implements OnModuleInit {
     // all, which made the standing Outcome added for exactly those jobs pointless.
     let gradeJson: string | undefined;
     if (!opts.evalMode && (flow as any)?.agentId && finalOutput) {
-      const g = await this.bridge.gradeFor?.((flow as any).agentId, finalOutput).catch(() => null);
-      if (g) { gradeJson = JSON.stringify(g); term(`✓ checked against your Outcome — ${g.verdict} ${g.score}/100`); }
+      // BEA-1247: a grader that cannot answer says so. It used to return null on a cut-off reply and
+      // the run finished with a clean ✓ and no verdict — silence exactly when the answer got good.
+      const gr: GradeResult | null = await this.bridge.gradeFor?.((flow as any).agentId, finalOutput)
+        .catch((e: any) => ({ ok: false, reason: `the grader could not be reached — ${String(e?.message || e).slice(0, 120)}` }));
+      if (gr) {
+        if (gr.ok) { gradeJson = JSON.stringify(gr.grade); term(`✓ checked against your Outcome — ${gr.grade.verdict} ${gr.grade.score}/100`); }
+        else term(`⚠ couldn't check this against your Outcome — ${gr.reason}`);
+      }
     }
 
     await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'done', finalOutput, results: JSON.stringify(results), documentIds: JSON.stringify(docs), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...(gradeJson ? { grade: gradeJson } : {}), ...spendJson() } as any });

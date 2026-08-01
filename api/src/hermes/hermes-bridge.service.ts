@@ -18,6 +18,7 @@ import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { SkillsService } from '../skills/skills.service';
+import { GRADE_MAX_CHECKS, GRADE_MAX_TOKENS, Grade, GradeResult, parseGrade } from './grade';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -54,6 +55,13 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('HermesBridge');
   private resumeTimer: ReturnType<typeof setInterval> | null = null;
   private readonly resuming = new Set<string>();
+  /**
+   * Why a run could not be graded, keyed by run id (BEA-1247). Written by execute(), read and
+   * cleared by runOneEval immediately afterwards, so it never grows. Deliberately in memory: the
+   * reason is only needed for the few seconds between grading and the eval case being written, and
+   * it must not change the stored run shape the UI already reads.
+   */
+  private readonly gradeFailure = new Map<string, string>();
 
   constructor(
     private readonly agent: AgentService,
@@ -263,37 +271,44 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
    * runs with the same judge (BEA-1191) — deep runs and every voice job go through flows, and they
    * were coming back with no verdict at all.
    */
-  async gradeFor(agentId: string | null | undefined, result: string): Promise<any | null> {
+  async gradeFor(agentId: string | null | undefined, result: string): Promise<GradeResult | null> {
     if (!result?.trim()) return null;
     const g = (await this.agent.outcomeFor?.(agentId).catch(() => null)) || { rubric: '', checks: [] as string[] };
     if (!g.rubric) return null; // nothing to grade against — the run still stands
     return this.gradeRun(g.rubric, result, g.checks);
   }
 
-  /** Grade-and-iterate (BEA-641): score the result against the agent's Outcome (definition of done). */
-  private async gradeRun(rubric: string, result: string, checks?: string[]): Promise<any | null> {
+  /**
+   * Grade-and-iterate (BEA-641): score the result against the agent's Outcome (definition of done).
+   *
+   * Never returns null for a FAILURE (BEA-1247). It used to: the reply was capped at 400 tokens, and
+   * a long report judged against a real check list cannot answer inside that. The JSON came back cut
+   * off mid-array, JSON.parse threw, `catch { return null }` ate it, and the caller had another
+   * `.catch(() => null)` on top — so the run finished with a clean ✓ and no verdict, saying nothing.
+   *
+   * Measured: the 1,739-character bad run was graded fail 0/100; the 12,174 and 12,458-character good
+   * ones got no grade at all. The better the answer, the more certain the grader was to go quiet.
+   *
+   * So the cap now fits the job, and when grading still fails the caller is told WHY and shows it.
+   */
+  private async gradeRun(rubric: string, result: string, checks?: string[]): Promise<GradeResult> {
+    // The owner's own checks (BEA-1173) are the criteria — grading against them beats letting the
+    // grader invent its own, because these are the words they actually used.
+    const checkList = (checks || []).filter(Boolean).slice(0, GRADE_MAX_CHECKS);
+    let out: string | null = null;
     try {
-      // The owner's own checks (BEA-1173) are the criteria — grading against them beats letting the
-      // grader invent its own, because these are the words they actually used.
-      const checkList = (checks || []).filter(Boolean).slice(0, 12);
       const checksBlock = checkList.length
         ? `\n\nJudge it against EXACTLY these checks, one "criteria" entry per check, in this order:\n${checkList.map((c, i) => `${i + 1}. ${c}`).join('\n')}`
         : '';
-      const out = await this.llm.complete(
+      out = await this.llm.complete(
         `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}${checksBlock}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
-        400,
+        GRADE_MAX_TOKENS,
         'agent-grade',
       );
-      const m = (out || '').match(/\{[\s\S]*\}/);
-      if (!m) return null;
-      const g = JSON.parse(m[0]);
-      const verdict = ['pass', 'partial', 'fail'].includes(g.verdict) ? g.verdict : 'partial';
-      const score = Math.max(0, Math.min(100, Math.round(Number(g.score) || 0)));
-      const criteria = Array.isArray(g.criteria) ? g.criteria.slice(0, 8).map((c: any) => ({ text: String(c.text || '').slice(0, 160), met: !!c.met })) : [];
-      return { verdict, score, criteria, notes: String(g.notes || '').slice(0, 240) };
-    } catch {
-      return null;
+    } catch (e: any) {
+      return { ok: false, reason: `the grader could not be reached — ${String(e?.message || e).slice(0, 120)}` };
     }
+    return parseGrade(out, checkList.length);
   }
 
   /** Pause the run on a durable question, notify over Telegram, and wait for the answer (or the timeout default). */
@@ -577,23 +592,31 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
 
       c.running = false;
       c.lastRunId = r?.runId ?? c.lastRunId;
-      c.lastVerdict = r?.grade?.verdict || (r?.status === 'failed' ? 'fail' : 'partial');
+      // "We could not grade this" is its OWN state (BEA-1247). It used to land on 'partial', which
+      // reads as a real judgement and is counted in the passed pill — the same silence this issue
+      // exists to kill, just on the Checks panel instead of the run.
+      c.lastVerdict = r?.grade?.verdict || (r?.status === 'failed' ? 'fail' : r?.gradeError ? 'ungraded' : 'partial');
       c.lastScore = r?.grade?.score ?? null;
       c.lastCriteria = Array.isArray(r?.grade?.criteria) ? r.grade.criteria : null; // per-criterion detail (Evals ②)
-      c.lastNotes = r?.grade?.notes || null;
+      c.lastNotes = r?.grade?.notes || (r?.gradeError ? `Couldn't check this — ${r.gradeError}` : null);
+      c.lastGradeError = r?.gradeError || null;
       c.lastRunAt = new Date().toISOString();
       await this.agent.setEvals(agentId, evals).catch(() => undefined); // persist as we go
     }
   }
 
-  /** Run one eval case once; returns {runId, status, grade} (never throws). */
-  private async runOneEval(agentId: string, agent: any, c: any): Promise<{ runId?: string; status?: string; grade?: any }> {
+  /** Run one eval case once; returns {runId, status, grade, gradeError} (never throws). */
+  private async runOneEval(agentId: string, agent: any, c: any): Promise<{ runId?: string; status?: string; grade?: any; gradeError?: string | null }> {
     try {
       const run = await this.agent.createRun({ agentId, title: `Eval — ${agent.name}`, input: c.input });
       const prompt = agent.prompt ? `${agent.prompt}\n\n[Test input] ${c.input}` : c.input;
       await this.execute(run.id, { prompt, title: `Eval — ${agent.name}`, agentId, rubric: agent.rubric, save: false, allowAsk: false });
       const r: any = await this.agent.getRun(run.id).catch(() => null);
-      return { runId: run.id, status: r?.status, grade: r?.grade };
+      // Why this case has no verdict, carried out of execute() (BEA-1247). Without it a run that
+      // finished fine but could NOT be graded came back indistinguishable from a real "partial".
+      const gradeError = this.gradeFailure.get(run.id) || null;
+      this.gradeFailure.delete(run.id);
+      return { runId: run.id, status: r?.status, grade: r?.grade, gradeError };
     } catch {
       return { status: 'failed' };
     }
@@ -894,17 +917,36 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     const rubric = (input.rubric || graded.rubric || '').trim();
     if (rubric && text) {
       await this.agent.appendStep(runId, { label: 'Checking against your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
-      let g = await this.gradeRun(rubric, text, graded.checks);
-      if (g) await this.agent.appendStep(runId, { label: `Outcome: ${g.verdict} · ${g.score}/100`, status: g.verdict === 'fail' ? 'failed' : g.verdict === 'partial' ? 'info' : 'done' }).catch(() => undefined);
+      const gr = await this.gradeRun(rubric, text, graded.checks);
+      // A failed check is SAID, not swallowed (BEA-1247). It used to leave the step above stuck on
+      // "running" for ever and the run looking cleanly finished.
+      let g: Grade | null = null;
+      if (gr.ok) {
+        g = gr.grade;
+        this.gradeFailure.delete(runId);
+        await this.agent.appendStep(runId, { label: `Outcome: ${g.verdict} · ${g.score}/100`, status: g.verdict === 'fail' ? 'failed' : g.verdict === 'partial' ? 'info' : 'done' }).catch(() => undefined);
+      } else {
+        // Kept so an eval case can say WHY it has no verdict — the step below is only visible if you
+        // open that one run. runOneEval reads and clears it.
+        this.gradeFailure.set(runId, gr.reason);
+        await this.agent.appendStep(runId, { label: `Couldn't check against your Outcome — ${gr.reason}`, status: 'info' }).catch(() => undefined);
+      }
       if (!quick && g && g.verdict === 'fail') {
         await this.agent.appendStep(runId, { label: 'Revising once to meet your Outcome', status: 'running', kind: 'log' }).catch(() => undefined);
         const revisePrompt = `Your previous answer did NOT meet the user's definition of done. Fix it.\n\nThe Outcome (definition of done):\n${rubric}\n\nWhat was wrong: ${g.notes || 'it fell short of the Outcome'}\n\nYour previous answer:\n${text}\n\nProduce a better answer that fully meets every part of the Outcome. Keep the inline citations/sources.`;
         const r2 = await this.runViaCodex(revisePrompt, handlers, { title: input.title, model: jobModel || cfg.model || undefined }).catch(() => null);
         const text2 = (r2?.finalText || '').trim();
         if (text2) {
-          const g2 = await this.gradeRun(rubric, text2, graded.checks);
-          if (g2 && (g2.score || 0) >= (g.score || 0)) { text = text2; g = g2; }
-          await this.agent.appendStep(runId, { label: `Revised · ${g?.verdict} · ${g?.score}/100`, status: g?.verdict === 'fail' ? 'failed' : 'done' }).catch(() => undefined);
+          const gr2 = await this.gradeRun(rubric, text2, graded.checks);
+          if (gr2.ok) {
+            const g2 = gr2.grade;
+            if ((g2.score || 0) >= (g.score || 0)) { text = text2; g = g2; }
+            await this.agent.appendStep(runId, { label: `Revised · ${g?.verdict} · ${g?.score}/100`, status: g?.verdict === 'fail' ? 'failed' : 'done' }).catch(() => undefined);
+          } else {
+            // The revision could not be graded, so we keep the ORIGINAL text and say why — never swap
+            // in an answer we were unable to check.
+            await this.agent.appendStep(runId, { label: `Revised, but couldn't check it — ${gr2.reason}. Keeping the first answer.`, status: 'info' }).catch(() => undefined);
+          }
         }
       }
       if (g) gradeJson = JSON.stringify(g);
