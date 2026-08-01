@@ -193,6 +193,10 @@ export class LlmService {
     // the owner's split of labour is that Sonnet decides and Codex delivers. It writes WORDS only,
     // never HTML — the page template is ours (BEA-1261).
     'news-write': LlmService.FOLLOW_ENGINE,
+    // Picks the few stories worth a proper dig (BEA-1258). Forty short snippets in, a handful of
+    // numbers out — a small-model job, and one that must not queue behind the engine when the
+    // edition is already written and waiting on it.
+    'news-flag': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     // WRITING follows THE engine choice (see engineChoice).
     'deep-research-write': LlmService.FOLLOW_ENGINE,
     // The thinking blocks INSIDE a flow. The owner's rule — "when I choose Codex, it has to run in

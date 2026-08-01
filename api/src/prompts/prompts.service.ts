@@ -14,7 +14,7 @@ export type PromptKey =
   | 'other.commitmentsExtract'
   | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan' | 'agent.builder' | 'agent.jobBuilder'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief'
-  | 'news.categorise' | 'news.section' | 'news.topline';
+  | 'news.categorise' | 'news.section' | 'news.topline' | 'news.flagResearch';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
 
@@ -951,6 +951,30 @@ Rules:
 - Each dashed line is one short sentence a person could repeat to someone else. Concrete: who, what.
 - Three lines is fine on a quiet day. Never more than five.
 - Plain everyday English. No hype, no colons-and-subtitles, no HTML or markdown.`,
+  },
+  {
+    key: 'news.flagResearch',
+    category: 'AI News Daily',
+    label: 'Pick the stories worth digging into',
+    description:
+      'Picks the few stories from the day that deserve proper research. The numbered stories are added automatically. ⚠️ Keep the JSON shape — anything else means nothing gets flagged that day.',
+    default: `You are picking the few stories from today's AI news that deserve proper research — the ones where the news says something matters but does not say enough.
+
+Return ONLY JSON (no prose, no code fences), shaped exactly:
+{"research":[3,11,24]}
+
+The numbers are the story numbers shown below. Pick a story when it is BOTH:
+- significant — it changes something, costs something, or affects a decision someone would make; AND
+- thin — a big claim with no numbers, no named source, no detail, or an outcome nobody has checked yet.
+
+Do NOT pick:
+- a story that is already complete (it says what happened, with the numbers and the source)
+- routine releases, opinions, jokes, or someone's take on someone else's take
+- something interesting but settled — "worth researching" means there is a real question left open
+
+Rules:
+- Pick at most SIX. Three is usually right. An empty list is a perfectly good answer on a quiet day — return {"research":[]}.
+- Never invent a number that is not in the list.`,
   },
 ];
 

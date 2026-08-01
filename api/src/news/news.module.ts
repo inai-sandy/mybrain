@@ -7,12 +7,14 @@ import { NewsFeedService } from './news-feed.service';
 import { NewsSplitService } from './news-split.service';
 import { NewsCategoriseService } from './news-categorise.service';
 import { NewsWriteService } from './news-write.service';
+import { NewsResearchService } from './news-research.service';
+import { AgentModule } from '../agent/agent.module';
 
 /** AI News Daily (BEA-1254 →). Fetch, split, categorise; the engine's write-up follows. */
 @Module({
-  imports: [PrismaModule, LlmModule, PromptsModule],
+  imports: [PrismaModule, LlmModule, PromptsModule, AgentModule],
   controllers: [NewsController],
-  providers: [NewsFeedService, NewsSplitService, NewsCategoriseService, NewsWriteService],
-  exports: [NewsFeedService, NewsSplitService, NewsCategoriseService, NewsWriteService],
+  providers: [NewsFeedService, NewsSplitService, NewsCategoriseService, NewsWriteService, NewsResearchService],
+  exports: [NewsFeedService, NewsSplitService, NewsCategoriseService, NewsWriteService, NewsResearchService],
 })
 export class NewsModule {}
