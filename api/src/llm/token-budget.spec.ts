@@ -176,25 +176,24 @@ describe('the engine chain (BEA-1201)', () => {
     expect(tried).toEqual(['codex']);
   });
 
-  it('walks on to the next FREE engine before anything paid', async () => {
-    const { s, tried } = svc({ codex: null, claude: 'from claude' });
-    expect(await s.completeWith({ provider: 'codex', model: 'codex' }, 'hi', 100, 'x')).toBe('from claude');
-    expect(tried).toEqual(['codex', 'claude']);
-  });
-
-  it('tries every free engine, in order, before reaching for a paid one', async () => {
-    const { s, tried } = svc({ codex: null, claude: null, gemini: null });
+  // BEA-1243: the relay is GONE. It used to walk codex → claude → gemini before paying — three
+  // hops, each able to fail slowly, through subscriptions the owner isn't maintaining. The chain
+  // is now the chosen engine, then one NAMED paid model, said out loud.
+  it('goes straight to the named API when the engine cannot answer — no relay through other engines', async () => {
+    const { s, tried } = svc({ codex: null, claude: 'from claude', gemini: 'from gemini' });
     s.completeWith = s.completeWith.bind(s);
-    const paid: string[] = [];
+    const paid: { label: string; model: string }[] = [];
     const orig = s.completeWith;
-    // The paid fallback re-enters completeWith with the openrouter config; record and stop there.
     s.completeWith = async function (cfg: any, p: string, m: number, l: string) {
-      if (cfg?.provider === 'openrouter') { paid.push(l); return 'from the paid model'; }
+      if (cfg?.provider === 'openrouter') { paid.push({ label: l, model: cfg.model }); return 'from the paid model'; }
       return orig.call(this, cfg, p, m, l);
     };
     expect(await s.completeWith({ provider: 'codex', model: 'codex' }, 'hi', 100, 'x')).toBe('from the paid model');
-    expect(tried).toEqual(['codex', 'claude', 'gemini']);
-    expect(paid[0]).toBe('x-fallback'); // labelled, so the usage log shows what it cost
+    // Claude and Gemini were ALIVE and still not tried — they are manual choices now, not backups.
+    expect(tried).toEqual(['codex']);
+    expect(paid[0].label).toBe('x-fallback'); // labelled, so the usage log shows what it cost
+    // The fallback is pinned by NAME — never the app's loose general setting (the qwen/kimi trap).
+    expect(paid[0].model).toBe('anthropic/claude-sonnet-5');
   });
 
   // The review's HIGH finding. The original guard skipped the FIRST hop, which is the common case:

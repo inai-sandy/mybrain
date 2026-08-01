@@ -18,22 +18,37 @@ const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
 const CLAUDE_RUNNER = process.env.CLAUDE_RUNNER_URL || 'http://172.18.0.1:8768';
 
 /**
- * The engine chain (BEA-1201). Try each flat-rate engine in turn; a PAID model is the last resort.
- *
- * Codex ran dry on 30 July and every call quietly moved to Sonnet over OpenRouter without a word.
- * The fix is not one fallback, it is an order — and the order puts everything we already pay a flat
- * fee for ahead of anything billed per token.
+ * Every engine the app knows how to talk to. The owner can still PICK any of these by hand in
+ * Settings, and "Upgraded my plan — try again" still works for each — they just no longer form an
+ * automatic relay.
  */
-const ENGINE_CHAIN: LlmConfig[] = [
+const KNOWN_ENGINES: LlmConfig[] = [
   { provider: 'codex', model: 'codex' },
   { provider: 'claude', model: 'claude' },
   { provider: 'gemini', model: 'Gemini 3.5 Flash' },
 ];
-/** Derived from the chain on purpose — two hand-kept lists would drift and silently misroute. */
-const isFlatRate = (p?: string) => ENGINE_CHAIN.some((e) => e.provider === p);
 
-// When a free subscription agent is down/slow/empty, work never silently fails — it falls back to the API on Sonnet.
-const AGENT_FALLBACK: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
+/**
+ * The automatic chain is Codex, then the API — nothing in between (BEA-1243).
+ *
+ * It used to be codex → claude → gemini → paid. Three hops, each able to fail slowly, before a
+ * model that answers. The owner froze the engine to Codex and upgraded that plan; the honest backup
+ * is one named API model that always works, not a tour of subscriptions he isn't maintaining.
+ */
+const ENGINE_CHAIN: LlmConfig[] = [
+  { provider: 'codex', model: 'codex' },
+];
+/** Flat-rate = any KNOWN engine (a hand-picked Gemini is still free) — not just the automatic chain. */
+const isFlatRate = (p?: string) => KNOWN_ENGINES.some((e) => e.provider === p);
+
+/**
+ * The fallback is NAMED AND PINNED (BEA-1243). It must never read the app's general model setting —
+ * that is a moving target (qwen one morning, kimi the same afternoon), and qwen is the model that
+ * returned nothing twice and killed two branches of a real run (BEA-1236).
+ */
+const AGENT_FALLBACK: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' };
+/** The name the OWNER sees in run logs and story credits — friendlier than the raw model id. */
+const AGENT_FALLBACK_LABEL = 'Claude Sonnet 5 (fallback)';
 
 @Injectable()
 export class LlmService {
@@ -208,12 +223,12 @@ export class LlmService {
   async engineChoice(): Promise<LlmConfig> {
     const row = await this.prisma.setting?.findUnique({ where: { key: 'engine.choice' } }).catch(() => null);
     const picked = String(row?.value || '').trim();
-    const found = picked ? ENGINE_CHAIN.find((e) => e.provider === picked) : null;
+    const found = picked ? KNOWN_ENGINES.find((e) => e.provider === picked) : null;
     return found || ENGINE_CHAIN[0];
   }
 
   async setEngineChoice(provider: string): Promise<LlmConfig> {
-    const found = ENGINE_CHAIN.find((e) => e.provider === provider);
+    const found = KNOWN_ENGINES.find((e) => e.provider === provider);
     if (!found) throw new Error('Unknown engine');
     await this.prisma.setting?.upsert({ where: { key: 'engine.choice' }, create: { key: 'engine.choice', value: provider }, update: { value: provider } }).catch(() => undefined);
     return found;
@@ -339,9 +354,9 @@ export class LlmService {
    * call: if the engine is still limited, the limit comes straight back with the reason.
    */
   async recheckEngine(provider: string): Promise<{ ok: boolean; reason: string | null }> {
-    if (!ENGINE_CHAIN.some((e) => e.provider === provider)) throw new Error('Unknown engine');
+    if (!KNOWN_ENGINES.some((e) => e.provider === provider)) throw new Error('Unknown engine');
     await this.prisma.setting?.deleteMany?.({ where: { key: `engine.limit.${provider}` } }).catch(() => undefined);
-    const cfg = ENGINE_CHAIN.find((e) => e.provider === provider)!;
+    const cfg = KNOWN_ENGINES.find((e) => e.provider === provider)!;
     const text = await this.runAgent(cfg, 'Reply with exactly: OK', 'engine-recheck').catch(() => null);
     if (text && text.trim()) return { ok: true, reason: null };
     // runAgent records a genuine refusal itself; read back whatever it learned so the answer here
@@ -417,22 +432,17 @@ export class LlmService {
       await this.budget?.require(estimate);
       const release = this.budget?.reserve(estimate) ?? (() => undefined);
       try {
-        // Walk the same chain as completeWith (BEA-1201). This used to try one engine and drop
-        // straight to the paid model, so the Story of the Day, the Gmail brief and the research
-        // write-up never saw the other free engines at all.
-        const start = ENGINE_CHAIN.findIndex((e) => e.provider === cfg.provider);
-        for (let i = Math.max(0, start); i < ENGINE_CHAIN.length; i++) {
-          const e = ENGINE_CHAIN[i];
-          const use = i === start ? cfg : e;
-          const text = await this.runAgent(use, prompt, i === start ? label : `${label}-${e.provider}`);
-          if (text) return { text, model: use.model, provider: use.provider, flatRate: true };
-          this.log.warn(`${label}: ${use.provider} could not answer — trying the next engine`);
-        }
+        // The chosen engine, then the named API — no relay through other subscriptions (BEA-1243).
+        // A hand-picked Claude or Gemini is tried AS ITSELF here; only when it cannot answer does
+        // the job move to the paid model, loudly.
+        const text = await this.runAgent(cfg, prompt, label);
+        if (text) return { text, model: cfg.model, provider: cfg.provider, flatRate: true };
+        this.log.warn(`${label}: ${cfg.provider} could not answer — falling back to the paid API`);
       } finally {
         release();
       }
       const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
-      return { text: fb, model: fb ? 'Claude Sonnet 4.6 (fallback)' : cfg.model, provider: 'openrouter', flatRate: false };
+      return { text: fb, model: fb ? AGENT_FALLBACK_LABEL : cfg.model, provider: 'openrouter', flatRate: false };
     }
     return { text: await this.completeWith(cfg, prompt, maxTokens, label), model: cfg.model, provider: cfg.provider, flatRate: isFlatRate(cfg.provider) };
   }
@@ -452,21 +462,13 @@ export class LlmService {
       // Subscription agents (Codex / Gemini) — route to the host runner (no per-call API $). If the
       // runner is down/slow/empty, fall back to the API on Sonnet so the feature never silently dies.
       if (isFlatRate(cfg.provider)) {
-        // Walk the chain from wherever this call started (BEA-1201). One engine running dry is an
-        // inconvenience; it is only a bill when there is nowhere else to go.
-        const start = ENGINE_CHAIN.findIndex((e) => e.provider === cfg.provider);
-        for (let i = Math.max(0, start); i < ENGINE_CHAIN.length; i++) {
-          const e = ENGINE_CHAIN[i];
-          const use = i === start ? cfg : e;
-          const text = await this.runAgent(use, prompt, i === start ? label : `${label}-${e.provider}`);
-          if (text) return text;
-          // EVERY failed hop is logged, including the first. The original guard skipped `i === start`,
-          // which is the common case — Codex going dry would have moved silently to Claude and said
-          // nothing. That is precisely the invisibility this issue exists to end.
-          this.log.warn(`${label}: ${use.provider} could not answer — trying the next engine`);
-        }
-        // Nothing free was available. This one costs money, so it is labelled as a fallback and the
-        // paid call shows up in the usage log under its own name.
+        // The chosen engine, then the named API (BEA-1243). It used to relay codex → claude →
+        // gemini before paying — three hops, each able to fail slowly, through subscriptions the
+        // owner isn't maintaining. The failure is logged (the silence rule from BEA-1201 stands),
+        // and the paid call shows up in the usage log under its own `-fallback` name.
+        const text = await this.runAgent(cfg, prompt, label);
+        if (text) return text;
+        this.log.warn(`${label}: ${cfg.provider} could not answer — falling back to the paid API`);
         return this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
       }
       if (cfg.provider === 'anthropic') {
