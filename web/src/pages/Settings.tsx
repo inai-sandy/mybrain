@@ -107,14 +107,13 @@ const CATS: Cat[] = [
     { label: 'The Lab & activity', keywords: 'lab activity learning mood heatmap findings' },
   ] },
   { id: 'agents', label: 'Agents & Engines', icon: Bot, desc: 'The engine & how agents run', group: 'AI & voice', search: [
-    { label: 'THE engine (Codex / Claude / Gemini)', keywords: 'engine choice codex claude gemini picker flat rate' },
+    { label: 'THE engine (Codex / Claude / Gemini)', keywords: 'engine choice codex claude gemini picker flat rate', anchor: 'sa-advanced' },
     { label: 'Agent autonomy', keywords: 'autonomy cautious balanced autopilot agent permission approve', anchor: 'set-autonomy' },
     { label: 'Agent model', keywords: 'agent model codex gpt engine default', anchor: 'set-model' },
     { label: 'Recall brain before a run', keywords: 'recall brain context before search agent', anchor: 'set-recall' },
     { label: 'Learn after runs', keywords: 'learn learnings remember after run agent', anchor: 'set-learn' },
     { label: 'Phone notifications', keywords: 'push notifications phone quiet hours' },
-    { label: 'Public MCP access', keywords: 'mcp public rag token external access' },
-    { label: 'All AI models (which model does what)', keywords: 'models story lab meeting voice haiku sonnet gemini per feature wall' },
+    { label: 'All AI models (which model does what)', keywords: 'models story lab meeting voice haiku sonnet gemini per feature wall', anchor: 'sa-advanced' },
   ] },
   { id: 'memory', label: 'Memory & Index', icon: Database, desc: "What's in your brain", group: 'AI & voice', search: [
     { label: 'What gets indexed', keywords: 'index sources vault tasks notes documents memory enable disable' },
@@ -130,6 +129,7 @@ const CATS: Cat[] = [
   { id: 'connections', label: 'Connections', icon: Plug, desc: 'Keys, Telegram & CLI', group: 'Connections', search: [
     { label: 'API keys & connectors', keywords: 'integrations keys supermemory rag notion raindrop tavily brave exa deepgram apify openai openrouter anthropic elevenlabs connector' },
     { label: 'Telegram', keywords: 'telegram bot notify link unlink' },
+    { label: 'Public MCP access (RAG server)', keywords: 'mcp public rag token external access server' },
     { label: 'CLI engines (Codex / Gemini)', keywords: 'cli terminal command line codex gemini subscription' },
     { label: 'Skills scan', keywords: 'skills scan github import' },
   ] },
@@ -250,14 +250,7 @@ function renderSection(id: Tab, email?: string): ReactNode {
       <PromptsSection category="The Lab" />
       <LabActivitySection />
     </div>;
-    case 'agents': return <>
-      <AgentTokensCard />
-      <AgentEngineSection />
-      <QuietHoursCard />
-      <ModuleAiHeader />
-      <ModelsSection />
-      <PromptsSection category="Agents" />
-    </>;
+    case 'agents': return <AgentsSettingsPage />;
     case 'memory': return <div className="space-y-4"><IndexSection /><SuperMemorySyncCard /></div>;
     case 'prompts': return <PromptsSection />;
     case 'google': return <div className="space-y-4">
@@ -268,7 +261,7 @@ function renderSection(id: Tab, email?: string): ReactNode {
         desc="Writes your nightly Gmail Daily Brief — groups the day's important emails into topics. Sonnet (default) is strong, or run it FREE on your Codex/Gemini subscription (it's a nightly job)." />
       <PromptsSection category="Google" />
     </div>;
-    case 'connections': return <div className="space-y-4"><IntegrationsSection /><TelegramCard /><CliSection /><SkillsSyncCard /></div>;
+    case 'connections': return <div className="space-y-4"><IntegrationsSection /><TelegramCard /><PublicRagMcpCard /><CliSection /><SkillsSyncCard /></div>;
     case 'usage': return <><BudgetAndEngines /><UsageCard /></>;
     case 'account': return <div className="space-y-4"><AppearanceSection /><AccountSection email={email} /></div>;
   }
@@ -569,16 +562,16 @@ function AgentEngineSection() {
           <button onClick={loadEngine} className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">Refresh</button>
         </div>
         <dl className="space-y-2.5 text-sm">
-          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Engine</dt><dd className="text-right">{engine?.ok ? <span className="text-emerald-600 dark:text-emerald-400">● Online · Hermes {engine.version}</span> : <span className="text-amber-600">● Offline{engine?.reason ? ` (${engine.reason})` : ''}</span>}</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Engine</dt><dd className="text-right">{engine?.ok ? <span className="text-emerald-600 dark:text-emerald-400">● Online · {engine.version}</span> : <span className="text-amber-600">● Offline{engine?.reason ? ` (${engine.reason})` : ''}</span>}</dd></div>
           <div className="flex items-start justify-between gap-4"><dt className="shrink-0 text-zinc-500">Inference</dt><dd className="text-right">{engine?.connectedToCodex ? <><span>Connected to <b>Codex</b>{engine.model ? ` · ${engine.model}` : ''}</span><div className="text-xs text-zinc-400">ChatGPT subscription · no API key</div></> : <span className="text-zinc-500">{engine?.model || '—'}</span>}</dd></div>
           <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Messaging gateway</dt><dd>{engine?.gatewayRunning ? 'On' : <span className="text-zinc-500">Off · no second bot</span>}</dd></div>
           <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Access</dt><dd className="text-right text-zinc-600 dark:text-zinc-300">Password-protected · internal only</dd></div>
-          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Agents</dt><dd className="text-right">{engine?.counts ? `${engine.counts.agents} saved · ${engine.counts.scheduled} scheduled · ${engine.counts.running} running` : '—'}</dd></div>
+          <div className="flex items-start justify-between gap-4"><dt className="text-zinc-500">Jobs</dt><dd className="text-right">{engine?.counts ? `${engine.counts.agents} jobs · ${engine.counts.scheduled} scheduled · ${engine.counts.running} running` : '—'}</dd></div>
           <div className="flex items-start justify-between gap-4"><dt className="shrink-0 text-zinc-500">Watchdog</dt><dd className="text-right">
             {engine?.health?.lastAutoRestartAt
               ? <span className="text-amber-600 dark:text-amber-400">Auto-recovered {new Date(engine.health.lastAutoRestartAt).toLocaleString()}</span>
               : engine?.health?.lastHealthyAt
-                ? <><span className="text-emerald-600 dark:text-emerald-400">● Monitoring</span><div className="text-xs text-zinc-400">last healthy {new Date(engine.health.lastHealthyAt).toLocaleTimeString()}</div></>
+                ? <><span className="text-emerald-600 dark:text-emerald-400">● Monitoring</span><div className="text-xs text-zinc-400">last healthy {new Date(engine.health.lastHealthyAt).toLocaleTimeString('en-GB')}</div></>
                 : <span className="text-zinc-500">Monitoring</span>}
           </dd></div>
         </dl>
@@ -663,9 +656,6 @@ function AgentEngineSection() {
               <span className="text-sm text-zinc-500">hours</span>
             </div>
           </EngineField>
-          <EngineField label="WhatsApp" hint="Moved to its own section — number, delivery switches, templates and the message log.">
-            <p className="text-sm text-zinc-500">See <b>Settings → WhatsApp</b>.</p>
-          </EngineField>
           <EngineField label="Keep flow working documents for" hint="Branch part-results auto-clean after this; final answers are kept forever. 0 = keep everything">
             <div className="flex items-center gap-2">
               <input type="number" min={0} max={365} value={cfg.flowPartDays ?? 30} onChange={(e) => save({ flowPartDays: Math.max(0, Number(e.target.value) || 0) })} className="w-24 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
@@ -699,7 +689,6 @@ function AgentEngineSection() {
         </div>
       </section>
 
-      <PublicRagMcpCard />
     </div>
   );
 }
@@ -1604,6 +1593,57 @@ function EnginePicker() {
  * the section. The rollup counts flow runs (every deep run and every voice job), which is where
  * virtually all tokens go; quick chats log usage but carry no agent link, and the card says so.
  */
+/**
+ * The Agents & Engines page, rebuilt (BEA-1249). It was one 14-phone-screen scroll: status, tools,
+ * behaviour, a developer RAG panel and TEN near-identical model pickers, all stacked. Now it is
+ * four short groups with jump pills, and the pickers + prompts sit behind one Advanced fold — the
+ * page's own message is "everything follows your engine; Sonnet 5 splits the work", and the
+ * fine-tuning is there when wanted rather than in the way.
+ */
+function AgentsSettingsPage() {
+  const [advanced, setAdvanced] = useState(false);
+  const location = useLocation();
+  // Search results for the model pickers land on #sa-advanced — a hash into a CLOSED fold would
+  // scroll to nothing visible, so the hash opens it (BEA-1249 review).
+  useEffect(() => {
+    if (location.hash === '#sa-advanced') {
+      setAdvanced(true);
+      setTimeout(() => document.getElementById('sa-advanced')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    }
+  }, [location.hash]);
+  const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const pill = 'shrink-0 rounded-full px-3 py-1.5 text-xs font-medium bg-zinc-100 text-zinc-600 hover:bg-emerald-100 hover:text-emerald-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-emerald-500/15 dark:hover:text-emerald-300';
+  return (
+    <div className="space-y-4">
+      <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
+        <button className={pill} onClick={() => jump('sa-usage')}>Tokens</button>
+        <button className={pill} onClick={() => jump('sa-engine')}>Engine & behaviour</button>
+        <button className={pill} onClick={() => jump('sa-quiet')}>Quiet hours</button>
+        <button className={pill} onClick={() => { setAdvanced(true); setTimeout(() => jump('sa-advanced'), 50); }}>Advanced</button>
+      </div>
+      <section id="sa-usage" className="scroll-mt-20"><AgentTokensCard /></section>
+      <section id="sa-engine" className="scroll-mt-20"><AgentEngineSection /></section>
+      <section id="sa-quiet" className="scroll-mt-20"><QuietHoursCard /></section>
+      <section id="sa-advanced" className="scroll-mt-20 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+        <button onClick={() => setAdvanced(!advanced)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold">Advanced — models & prompts</span>
+            <span className="mt-0.5 block text-xs text-zinc-500">Everything follows your engine (Codex); Sonnet 5 splits the work and grades results. Open this to change any single job's model or prompt.</span>
+          </span>
+          <ChevronDown size={16} className={'shrink-0 text-zinc-400 transition-transform ' + (advanced ? 'rotate-180' : '')} />
+        </button>
+        {advanced && (
+          <div className="space-y-4 border-t border-zinc-100 p-4 dark:border-zinc-800">
+            <ModuleAiHeader />
+            <ModelsSection />
+            <PromptsSection category="Agents" />
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function AgentTokensCard() {
   const [days, setDays] = useState(30);
   const [rollup, setRollup] = useState<any>(null);
