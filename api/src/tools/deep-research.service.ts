@@ -421,10 +421,11 @@ export class DeepResearchService {
     // which one this is, so it picks its own setting; `deep-research` remains the fallback so an
     // older saved choice still resolves.
     const helper = label === 'deep-research-plan' ? 'deep-research-plan' : label === 'deep-research-write' ? 'deep-research-write' : 'deep-research';
-    // A helper set explicitly wins; otherwise the write-up follows THE engine choice, so picking
-    // Claude in Settings really does make the report run on Claude.
+    // A helper set explicitly wins; otherwise the write-up follows THE engine choice. That used to
+    // be a special case hardcoded HERE for this one helper name, which is why four other helpers
+    // marked "follows the engine" quietly ran on the default model instead. `helperModel` now
+    // resolves it for everyone (BEA-1236), so there is nothing to special-case.
     const cfg: any = (await this.llm.helperModel?.(helper).catch(() => null))
-      ?? (helper === 'deep-research-write' ? await this.llm.engineChoice?.().catch(() => null) : null)
       ?? (await this.llm.helperModel?.('deep-research').catch(() => null)) ?? null;
     const wantedFlatRate = cfg?.provider === 'codex' || cfg?.provider === 'gemini' || cfg?.provider === 'claude';
     // Older/partial harnesses may not expose completeWithModel — fall back to the plain helper call,

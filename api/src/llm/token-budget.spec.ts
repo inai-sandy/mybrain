@@ -311,10 +311,33 @@ describe('one engine choice governs everything (owner\'s design)', () => {
   });
 
   it('leaves the research write-up following the choice, not a fixed model', () => {
-    // `null` in HELPERS means "whatever engine is picked" — the write-up must not pin its own.
-    expect(LlmService.HELPERS['deep-research-write']).toBeNull();
+    // Was `null`, which meant BOTH "not registered" and "follow the engine" — and the ambiguity is
+    // exactly why four helpers described as following the engine quietly ran on the default model
+    // (BEA-1236). It is now an explicit marker.
+    expect(LlmService.HELPERS['deep-research-write']).toBe(LlmService.FOLLOW_ENGINE);
     // Planning is deliberately NOT engine-bound: a 470-token job on an engine would carry ~25,000
     // tokens of overhead, eating the allowance the writing needs.
     expect(LlmService.HELPERS['deep-research-plan']?.provider).toBe('openrouter');
+  });
+
+  it('every helper marked "follow the engine" really resolves to the chosen engine', async () => {
+    const followers = Object.entries(LlmService.HELPERS)
+      .filter(([, v]) => v === LlmService.FOLLOW_ENGINE)
+      .map(([k]) => k);
+    // The four that were silently on the app default, plus the two flow thinking steps.
+    expect(followers).toEqual(expect.arrayContaining(['draft', 'ui-spec', 'flow-plan', 'draft-check', 'deep-research-write', 'flow-node', 'flow-merge']));
+
+    store['engine.choice'] = 'claude';
+    for (const key of followers) {
+      const cfg = await svc().helperModel(key);
+      expect(cfg).toEqual({ provider: 'claude', model: 'claude' }); // NOT the general `llm` setting
+    }
+  });
+
+  it('the marker is never handed to a provider as if it were one', async () => {
+    // 'engine' is a marker, not something any provider can be asked to answer.
+    store['engine.choice'] = 'codex';
+    const cfg = await svc().helperModel('flow-node');
+    expect(cfg?.provider).not.toBe('engine');
   });
 });

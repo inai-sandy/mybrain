@@ -3,7 +3,11 @@ import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from './token-budget.service';
 
-export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini' | 'claude'; model: string };
+/**
+ * 'engine' is not a provider you can call — it is the marker meaning "use whatever engine is
+ * chosen", resolved by `resolveEngine()` before any call is made (BEA-1236).
+ */
+export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemini' | 'claude' | 'engine'; model: string };
 
 // Host-side agent runners (subscription-based engines). The container reaches them on the Docker gateway.
 /** Ceiling for a single chat completion. Generous enough for a long answer, short enough that a
@@ -123,13 +127,26 @@ export class LlmService {
 
   /** The agent-helper jobs whose model is owner-pickable in Settings → Models (BEA-1106).
    *  null default = follow the app's default text model. */
+  /**
+   * "Follow whatever engine is chosen" — a REAL value, not `null` (BEA-1236).
+   *
+   * `null` used to mean both "this helper is not registered" and "this helper follows the engine",
+   * and `helperModel()` returned `null` for both. `completeHelper()` then fell through to
+   * `this.complete()` — the app's DEFAULT model. So four helpers the Settings screen describes as
+   * following the engine were quietly running on whatever the general `llm` setting happened to be,
+   * which was `qwen/qwen3.7-max`. Only deep-research escaped, by hardcoding a special case for its
+   * own helper name. One ambiguous value, four features silently doing the opposite of what the
+   * screen said.
+   */
+  static readonly FOLLOW_ENGINE: LlmConfig = { provider: 'engine', model: 'engine' };
+
   static readonly HELPERS: Record<string, LlmConfig | null> = {
     'chat-edit': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' }, // BEA-1094
     'sync-words': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
-    'draft': null,
-    'ui-spec': null,
-    'flow-plan': null,
-    'draft-check': null,
+    'draft': LlmService.FOLLOW_ENGINE,
+    'ui-spec': LlmService.FOLLOW_ENGINE,
+    'flow-plan': LlmService.FOLLOW_ENGINE,
+    'draft-check': LlmService.FOLLOW_ENGINE,
     // Deep research makes two very different calls, so it gets two settings (BEA-1206).
     //
     // PLANNING is "write me six search questions" — measured at ~320 tokens in, ~150 out. A small
@@ -146,8 +163,13 @@ export class LlmService {
     'character-profile': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
     // Condenses one daily report into 1–2 lines the moment it arrives — tiny job, Haiku. (BEA-1223)
     'report-summary': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
-    // WRITING follows THE engine choice (see engineChoice) — null means "whatever engine is picked".
-    'deep-research-write': null,
+    // WRITING follows THE engine choice (see engineChoice).
+    'deep-research-write': LlmService.FOLLOW_ENGINE,
+    // The thinking blocks INSIDE a flow. The owner's rule — "when I choose Codex, it has to run in
+    // Codex" — covers these too; they were the steps that reached for qwen and killed two branches
+    // of a real run (BEA-1236).
+    'flow-node': LlmService.FOLLOW_ENGINE,
+    'flow-merge': LlmService.FOLLOW_ENGINE,
     // Kept so an existing saved setting still resolves.
     'deep-research': { provider: 'codex', model: 'codex' },
   };
@@ -178,8 +200,14 @@ export class LlmService {
   async helperModel(key: string): Promise<LlmConfig | null> {
     if (!(key in LlmService.HELPERS)) return null;
     const row = await this.prisma.setting.findUnique({ where: { key: `helper.${key}.llm` } }).catch(() => null);
-    if (row) { try { const v = JSON.parse((row as any).value); if (v?.provider && v?.model) return v; } catch { /* fall through */ } }
-    return LlmService.HELPERS[key];
+    if (row) { try { const v = JSON.parse((row as any).value); if (v?.provider && v?.model) return this.resolveEngine(v); } catch { /* fall through */ } }
+    return this.resolveEngine(LlmService.HELPERS[key]);
+  }
+
+  /** Turn the FOLLOW_ENGINE marker into the engine actually chosen. Every helper goes through here. */
+  private async resolveEngine(cfg: LlmConfig | null): Promise<LlmConfig | null> {
+    if (cfg?.provider !== 'engine') return cfg;
+    return this.engineChoice().catch(() => null);
   }
 
   async setHelperModel(key: string, model: string): Promise<LlmConfig | null> {
@@ -236,6 +264,10 @@ export class LlmService {
    * Anything else is a normal API model id (default provider openrouter).
    */
   agentConfig(provider: string | undefined, model: string): LlmConfig {
+    // 'engine' is the FOLLOW_ENGINE marker, not a model anyone can call. Typed into the "Custom…"
+    // box it would be saved as an OpenRouter model id, fail every call, and fall back to the app
+    // default without a word — the silence this issue exists to remove (BEA-1236).
+    if (model === 'engine') return { ...LlmService.FOLLOW_ENGINE };
     if (model === 'codex') return { provider: 'codex', model: 'codex' };
     if (model === 'claude') return { provider: 'claude', model: 'claude' };
     if (model === 'gemini') return { provider: 'gemini', model: 'Gemini 3.5 Flash' };

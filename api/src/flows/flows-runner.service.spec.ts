@@ -752,12 +752,17 @@ describe('FlowRunnerService — a failed branch must not vanish into the merge (
       agentRun: { update: async () => ({}) },
     };
     const mergePrompts: string[] = [];
+    // Stubs the route the code ACTUALLY takes now (BEA-1236). It used to stub `llm.complete`, which
+    // is how a merge still running on the app default model went unnoticed — the test was watching a
+    // door the code no longer used. `complete` is left as a tripwire.
     const llm: any = {
-      completeDetailed: async (p: string) => {
+      helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+      completeWithModel: async (_cfg: any, p: string, _max: number, purpose: string) => {
+        if (purpose === 'flow-merge') { mergePrompts.push(p); return { text: 'MERGED', model: 'codex', provider: 'codex', flatRate: true }; }
         const t = onComplete(p);
-        return t === null ? { text: null, error: 'qwen/qwen3.7-max returned nothing' } : { text: t };
+        return t === null ? { text: null, error: 'qwen/qwen3.7-max returned nothing' } : { text: t, model: 'codex', provider: 'codex', flatRate: true };
       },
-      complete: async (p: string) => { mergePrompts.push(p); return 'MERGED'; },
+      complete: async () => { throw new Error('the general model must not be used for a flow step'); },
     };
     const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: async () => undefined };
     const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
@@ -820,8 +825,13 @@ describe('FlowRunnerService — the dead-upstream rule must not break the steps 
     };
     const mergePrompts: string[] = [];
     const llm: any = {
-      completeDetailed: async (p: string) => { const t = onAsk(p); return t === null ? { text: null, error: 'model returned nothing' } : { text: t }; },
-      complete: async (p: string) => { mergePrompts.push(p); return 'MERGED'; },
+      helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+      completeWithModel: async (_cfg: any, p: string, _max: number, purpose: string) => {
+        if (purpose === 'flow-merge') { mergePrompts.push(p); return { text: 'MERGED', model: 'codex', provider: 'codex', flatRate: true }; }
+        const t = onAsk(p);
+        return t === null ? { text: null, error: 'model returned nothing' } : { text: t, model: 'codex', provider: 'codex', flatRate: true };
+      },
+      complete: async () => { throw new Error('the general model must not be used for a flow step'); },
     };
     const telegram: any = { notifyFlowWaiting: jest.fn(async () => undefined), notifyFlowDone: async () => undefined };
     const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
@@ -899,3 +909,108 @@ describe('FlowRunnerService — the dead-upstream rule must not break the steps 
     expect(res.a.output).toContain('never arrived');
   });
 });
+
+describe('FlowRunnerService — thinking steps follow THE engine (BEA-1236)', () => {
+  const graph = JSON.stringify({
+    nodes: [
+      { id: 'a', data: { kind: 'ask_ai', label: 'Think', sub: 'work it out' } },
+      { id: 'O', data: { kind: 'output', label: 'Answer' } },
+    ],
+    edges: [{ source: 'a', target: 'O' }],
+  });
+
+  function harness(llm: any) {
+    const flowObj = { id: 'f1', name: 'F', graph };
+    const row: any = { id: 're', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; }, updateMany: async () => ({ count: 0 }) },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+    const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+    return { svc, row, flowObj };
+  }
+
+  it('asks the ENGINE, never the general model setting', async () => {
+    const used: any[] = [];
+    const { svc, flowObj } = harness({
+      helperModel: async (k: string) => (k === 'flow-node' ? { provider: 'codex', model: 'codex' } : null),
+      completeWithModel: async (cfg: any) => { used.push(cfg); return { text: 'thought', model: 'codex', provider: 'codex', flatRate: true }; },
+      completeDetailed: async () => { used.push('GENERAL-MODEL'); return { text: 'wrong path', error: null }; },
+    });
+    await (svc as any).execute('re', flowObj);
+    expect(used).toEqual([{ provider: 'codex', model: 'codex' }]);
+    expect(used).not.toContain('GENERAL-MODEL'); // the qwen path that killed two branches
+  });
+
+  it('SAYS SO when every engine was down and a paid model answered instead', async () => {
+    const { svc, row, flowObj } = harness({
+      helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+      completeWithModel: async () => ({ text: 'thought', model: 'anthropic/claude-sonnet-4.6', provider: 'openrouter', flatRate: false }),
+    });
+    await (svc as any).execute('re', flowObj);
+    expect(JSON.stringify(row.terminal)).toContain('your engine was unavailable');
+    expect(JSON.stringify(row.terminal)).toContain('paid');
+  });
+
+  it('says nothing extra on the normal path', async () => {
+    const { svc, row, flowObj } = harness({
+      helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+      completeWithModel: async () => ({ text: 'thought', model: 'codex', provider: 'codex', flatRate: true }),
+    });
+    await (svc as any).execute('re', flowObj);
+    expect(JSON.stringify(row.terminal)).not.toContain('unavailable');
+  });
+
+  it('fails loudly when the engine cannot answer — no quiet hop to another model', async () => {
+    const { svc, row, flowObj } = harness({
+      helperModel: async () => ({ provider: 'codex', model: 'codex' }),
+      completeWithModel: async () => ({ text: null, error: 'out of quota' }),
+    });
+    await (svc as any).execute('re', flowObj);
+    expect(row.status).toBe('failed');
+    expect(String(row.error)).toContain('out of quota');
+  });
+
+  it('the MERGE step runs on the engine too — not the general model setting', async () => {
+    // The review caught this: registering 'flow-merge' as engine-following and extending askModel's
+    // type was not enough. `merge()` still called `llm.complete(prompt, 1600, 'flow-merge')`, where
+    // the purpose is a usage LABEL only — so the step that builds the final report from every branch
+    // was still on qwen. And a merge failure is quiet: complete() returns null and merge() falls
+    // back to joining the parts. Nothing here may reach `complete`.
+    const graph2 = JSON.stringify({
+      nodes: [
+        { id: 'a0', data: { kind: 'ask_ai', label: 'B1', sub: 'one' } },
+        { id: 'a1', data: { kind: 'ask_ai', label: 'B2', sub: 'two' } },
+        { id: 'M', data: { kind: 'merge', mode: 'ai', label: 'Merge', goal: 'g' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'a0', target: 'M' }, { source: 'a1', target: 'M' }, { source: 'M', target: 'O' }],
+    });
+    const purposes: string[] = [];
+    const flowObj = { id: 'f1', name: 'F', graph: graph2 };
+    const row: any = { id: 'rm', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; }, updateMany: async () => ({ count: 0 }) },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+    const llm: any = {
+      helperModel: async (k: string) => { purposes.push(`helper:${k}`); return { provider: 'codex', model: 'codex' }; },
+      completeWithModel: async (_c: any, _p: string, max: number, purpose: string) => { purposes.push(`call:${purpose}:${max}`); return { text: 'ok', model: 'codex', provider: 'codex', flatRate: true }; },
+      complete: async () => { throw new Error('merge reached the GENERAL model — the bug is back'); },
+      completeDetailed: async () => { throw new Error('merge reached the GENERAL model — the bug is back'); },
+    };
+    const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+    await (svc as any).execute('rm', flowObj);
+
+    expect(row.status).toBe('done');
+    expect(purposes).toContain('helper:flow-merge');       // it asked which engine to use
+    expect(purposes).toContain('call:flow-merge:1600');    // and called it, keeping the larger budget
+  });
+});
+
