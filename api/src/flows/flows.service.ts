@@ -307,11 +307,10 @@ export class FlowsService {
   /** Break a question into independent sub-questions for the branches (BEA-644). */
   async decompose(question: string): Promise<string[]> {
     try {
-      const out = await this.llm.complete(
-        `Break the user's request into 2-5 INDEPENDENT sub-questions that can each be worked on separately, then combined into one answer. Request:\n"${question.slice(0, FlowsService.QUESTION_MAX)}"\n\nReply with ONLY a JSON array of short sub-question strings, e.g. ["...","..."]. No prose.`,
-        400,
-        'flow-decompose',
-      );
+      const decomposePrompt = `Break the user's request into 2-5 INDEPENDENT sub-questions that can each be worked on separately, then combined into one answer. Request:\n"${question.slice(0, FlowsService.QUESTION_MAX)}"\n\nReply with ONLY a JSON array of short sub-question strings, e.g. ["...","..."]. No prose.`;
+      const out = (this.llm as any).completeHelper
+        ? await (this.llm as any).completeHelper('flow-decompose', decomposePrompt, 400, 'flow-decompose')
+        : await this.llm.complete(decomposePrompt, 400, 'flow-decompose');
       const m = (out || '').match(/\[[\s\S]*\]/);
       if (!m) return [];
       const arr = JSON.parse(m[0]);

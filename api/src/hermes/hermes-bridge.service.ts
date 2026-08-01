@@ -253,11 +253,10 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
   /** Learn-after: propose a few durable facts from the result (the user keeps/forgets later). */
   private async proposeLearnings(runId: string, result: string): Promise<void> {
     try {
-      const out = await this.llm.complete(
-        `Read this agent result and list up to 3 SHORT durable facts worth remembering long-term — about the user, their projects, or useful knowledge they gathered. One per line, plain text, no bullets or numbering. If nothing is worth keeping, output nothing.\n\nResult:\n${result.slice(0, 2500)}`,
-        200,
-        'agent-learn',
-      );
+      const learnPrompt = `Read this agent result and list up to 3 SHORT durable facts worth remembering long-term — about the user, their projects, or useful knowledge they gathered. One per line, plain text, no bullets or numbering. If nothing is worth keeping, output nothing.\n\nResult:\n${result.slice(0, 2500)}`;
+      const out = (this.llm as any).completeHelper
+        ? await (this.llm as any).completeHelper('agent-learn', learnPrompt, 200, 'agent-learn')
+        : await this.llm.complete(learnPrompt, 200, 'agent-learn');
       const facts = (out || '').split('\n').map((s) => s.replace(/^[-*\d.\s]+/, '').trim()).filter((s) => s.length > 3).slice(0, 3);
       if (facts.length) {
         await this.agent.setLearnings(runId, facts.map((text) => ({ text, status: 'proposed' })));
@@ -300,11 +299,10 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
       const checksBlock = checkList.length
         ? `\n\nJudge it against EXACTLY these checks, one "criteria" entry per check, in this order:\n${checkList.map((c, i) => `${i + 1}. ${c}`).join('\n')}`
         : '';
-      out = await this.llm.complete(
-        `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}${checksBlock}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`,
-        GRADE_MAX_TOKENS,
-        'agent-grade',
-      );
+      const gradePrompt = `You grade an AI agent's result against the user's definition of done ("the Outcome"). Be strict but fair.\n\nThe Outcome:\n${rubric.slice(0, 1500)}${checksBlock}\n\nThe agent's result:\n${result.slice(0, 3000)}\n\nReply with ONLY JSON, no prose:\n{"verdict":"pass|partial|fail","score":<0-100 integer>,"criteria":[{"text":"<short criterion>","met":true|false}],"notes":"<one short sentence>"}`;
+      out = (this.llm as any).completeHelper
+        ? await (this.llm as any).completeHelper('agent-grade', gradePrompt, GRADE_MAX_TOKENS, 'agent-grade')
+        : await this.llm.complete(gradePrompt, GRADE_MAX_TOKENS, 'agent-grade');
     } catch (e: any) {
       return { ok: false, reason: `the grader could not be reached — ${String(e?.message || e).slice(0, 120)}` };
     }
@@ -427,7 +425,9 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         schedule: a.schedule || null, scheduleText: a.scheduleText || null,
       });
       // Chat-to-edit runs on its own pickable model — default Claude Sonnet (BEA-1094/1106);
-      // completeHelper falls back to the app's default model, so it never dies.
+      // Since BEA-1248 it does NOT quietly fall back to the app's general model — if the chosen
+      // model cannot answer it returns null, and the caller below says "can't do that" rather than
+      // silently doing the work on a model nobody picked.
       const filled = tpl.replaceAll('{{agent}}', current).replaceAll('{{message}}', (message || '').slice(0, 600));
       const out = (this.llm as any).completeHelper
         ? await (this.llm as any).completeHelper('chat-edit', filled, 900, 'agent-chat-edit')
@@ -557,10 +557,10 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     if (!agent) return { added: 0 };
     let arr: any[] = [];
     try {
-      const out = await this.llm.complete(
-        `An AI agent runs this Task:\n"${(agent.prompt || '').slice(0, 600)}"\nIts Outcome (what a good result looks like):\n"${(agent.rubric || '').slice(0, 400)}"\n\nSuggest 4 realistic, varied example INPUTS to test this agent on. Reply with ONLY a JSON array of short input strings, no prose.`,
-        500, 'suggest-evals',
-      );
+      const suggestPrompt = `An AI agent runs this Task:\n"${(agent.prompt || '').slice(0, 600)}"\nIts Outcome (what a good result looks like):\n"${(agent.rubric || '').slice(0, 400)}"\n\nSuggest 4 realistic, varied example INPUTS to test this agent on. Reply with ONLY a JSON array of short input strings, no prose.`;
+      const out = (this.llm as any).completeHelper
+        ? await (this.llm as any).completeHelper('suggest-evals', suggestPrompt, 500, 'suggest-evals')
+        : await this.llm.complete(suggestPrompt, 500, 'suggest-evals');
       const m = (out || '').match(/\[[\s\S]*\]/);
       if (m) arr = JSON.parse(m[0]);
     } catch { arr = []; }
