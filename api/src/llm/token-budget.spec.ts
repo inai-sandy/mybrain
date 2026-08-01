@@ -341,3 +341,59 @@ describe('one engine choice governs everything (owner\'s design)', () => {
     expect(cfg?.provider).not.toBe('engine');
   });
 });
+
+/**
+ * BEA-1237 — a stored limit stops the engine being called at all, and only expires on its own date.
+ * Codex was marked out until 28 August, so paying for more quota would have changed nothing for
+ * four weeks while the app quietly used something else.
+ */
+describe('rechecking an engine after upgrading the plan (BEA-1237)', () => {
+  const { LlmService } = require('./llm.service');
+  function harness(answer: string | null) {
+    const store: Record<string, string> = {
+      'engine.limit.codex': JSON.stringify({ until: '2099-01-01T00:00:00.000Z', reason: "You've hit your usage limit." }),
+    };
+    const deleted: string[] = [];
+    const prisma: any = {
+      setting: {
+        findUnique: async ({ where }: any) => (where.key in store ? { key: where.key, value: store[where.key] } : null),
+        upsert: async ({ where, create }: any) => { store[where.key] = create.value; return {}; },
+        deleteMany: async ({ where }: any) => { deleted.push(where.key); delete store[where.key]; return { count: 1 }; },
+      },
+      usageLog: { findMany: async () => [], create: async () => ({}) },
+    };
+    const svc = new LlmService({} as any, prisma);
+    (svc as any).runAgent = async () => answer;
+    return { svc, store, deleted };
+  }
+
+  it('clears the stored limit and reports it working when the engine answers', async () => {
+    const { svc, store, deleted } = harness('OK');
+    const r = await svc.recheckEngine('codex');
+    expect(r.ok).toBe(true);
+    expect(deleted).toContain('engine.limit.codex');
+    expect(store['engine.limit.codex']).toBeUndefined();
+    expect(await svc.engineLimit('codex')).toBeNull(); // the app will call Codex again
+  });
+
+  it('cannot produce a false green light — a still-limited engine keeps its limit', async () => {
+    const { svc } = harness(null);
+    // A real refusal is recorded by runAgent itself; here it simply does not answer.
+    const r = await svc.recheckEngine('codex');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBeTruthy();
+  });
+
+  it('refuses an engine name that is not in the chain', async () => {
+    const { svc } = harness('OK');
+    await expect(svc.recheckEngine('not-an-engine')).rejects.toThrow(/Unknown engine/);
+  });
+
+  it('makes a REAL call rather than just deleting the row', async () => {
+    const { svc } = harness('OK');
+    let called = 0;
+    (svc as any).runAgent = async () => { called++; return 'OK'; };
+    await svc.recheckEngine('codex');
+    expect(called).toBe(1); // deleting alone would be a lie in the other direction
+  });
+});

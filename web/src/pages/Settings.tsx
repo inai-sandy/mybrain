@@ -1226,6 +1226,46 @@ const usageBucket = (feature: string) => USAGE_BUCKETS.find((b) => b.match.test(
  * can see is a budget nobody trusts, and an engine picker that implies something is working when it
  * is not is worse than no picker.
  */
+/**
+ * "I have upgraded my plan — try it again" (BEA-1237).
+ *
+ * A stored engine limit stops the app calling that engine until its own expiry — Codex was marked
+ * out until 28 August. Paying for more quota changed nothing and nothing said why. This makes a
+ * REAL call: if it is still limited, the limit comes straight back with the reason, so this can
+ * never produce a false green light.
+ */
+function RecheckEngine({ name, onDone }: { name: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  return (
+    <span className="mt-1 block">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          setBusy(true); setSaid(null);
+          try {
+            const r = await fetch(`/api/llm-config/engines/${name}/recheck`, { method: 'POST' });
+            const d = await r.json().catch(() => ({}));
+            setSaid(d?.ok ? 'Working again.' : `Still unavailable — ${d?.reason || 'it did not answer'}`);
+            onDone();
+          } catch {
+            setSaid('Could not check just now.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="rounded-md border border-zinc-300 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300"
+      >
+        {busy ? 'Checking…' : 'Upgraded my plan — try again'}
+      </button>
+      {said && <span className="ml-1.5 text-[11px] text-zinc-500">{said}</span>}
+    </span>
+  );
+}
+
 function BudgetAndEngines() {
   const [b, setB] = useState<any>(null);
   const [eng, setEng] = useState<any>(null);
@@ -1238,7 +1278,8 @@ function BudgetAndEngines() {
     .then((r) => r.json())
     .then((x) => { if (typeof x?.limit === 'number') { setB(x); setDay(String(x.limit)); } })
     .catch(() => undefined);
-  useEffect(() => { load(); fetch('/api/llm-config/engines').then((r) => r.json()).then(setEng).catch(() => undefined); }, []);
+  const loadEng = () => fetch('/api/llm-config/engines').then((r) => r.json()).then(setEng).catch(() => undefined);
+  useEffect(() => { load(); loadEng(); }, []);
   if (!b) return null;
   const pct = b.pct ?? 0;
   const bar = pct >= 90 ? 'bg-rose-500' : pct >= 70 ? 'bg-amber-500' : 'bg-emerald-500';
@@ -1284,6 +1325,7 @@ function BudgetAndEngines() {
                   <b className="text-zinc-800 dark:text-zinc-100">{e.label}</b>
                   <span className="text-zinc-500"> — {e.ready ? 'working' : 'unavailable'}</span>
                   {!e.ready && e.reason && <span className="block text-[11px] text-rose-600 dark:text-rose-400">{e.reason}</span>}
+                  {!e.ready && <RecheckEngine name={e.name} onDone={loadEng} />}
                 </span>
               </li>
             ))}
@@ -1517,9 +1559,10 @@ function EnginePicker() {
   const [cur, setCur] = useState('');
   const [engines, setEngines] = useState<any[]>([]);
   const [msg, setMsg] = useState('');
+  const loadEngines = () => fetch('/api/llm-config/engines').then((r) => r.json()).then((d) => setEngines(d?.chain || [])).catch(() => undefined);
   useEffect(() => {
     fetch('/api/llm-config/engine').then((r) => r.json()).then((d) => setCur(d?.provider || '')).catch(() => undefined);
-    fetch('/api/llm-config/engines').then((r) => r.json()).then((d) => setEngines(d?.chain || [])).catch(() => undefined);
+    loadEngines();
   }, []);
   const pick = async (provider: string) => {
     setCur(provider);
@@ -1542,6 +1585,7 @@ function EnginePicker() {
               <b>{e.label}</b>
               <span className={'ml-1.5 text-xs ' + (e.ready ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>{e.ready ? 'working' : 'unavailable'}</span>
               {!e.ready && e.reason && <span className="block text-[11px] text-rose-600 dark:text-rose-400">{e.reason}</span>}
+              {!e.ready && <RecheckEngine name={e.name} onDone={loadEngines} />}
             </span>
           </label>
         ))}
