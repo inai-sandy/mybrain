@@ -161,6 +161,16 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
   const [watchStatus, setWatchStatus] = useState<string>('');
   const [runStatuses, setRunStatuses] = useState<Record<string, string>>({});
   const [schedule, setSchedule] = useState<any>(null);
+  /**
+   * Dates for the WHOLE flow (BEA-1238).
+   *
+   * The only date control used to live in one research step's own panel, so setting it applied to
+   * whichever step happened to be selected. A real run had branch 1 limited to after Aug 2025 while
+   * branches 2 and 3 searched with no limit at all — and branch 1, starved by the filter, was the
+   * one that reached the report and said "cannot be determined".
+   */
+  const [researchFrom, setResearchFrom] = useState('');
+  const [researchTo, setResearchTo] = useState('');
   const [schedOpen, setSchedOpen] = useState(false);
   const [proc, setProc] = useState<{ process: any; prompt: string } | null>(null);
   const [showProc, setShowProc] = useState(false);
@@ -180,6 +190,8 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
       setAgentId(f.agentId || null);
       setSchedule(f.schedule || null);
       const g = f.graph || { nodes: [], edges: [] };
+      setResearchFrom(g.researchFrom || '');
+      setResearchTo(g.researchTo || '');
       if (!g.nodes?.length) {
         setNodes([
           { id: 'question', type: 'box', position: { x: 250, y: 20 }, data: { kind: 'question', label: 'Question', sub: f.question || 'your one big ask' } },
@@ -257,7 +269,14 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
   }
   function graphJson() {
     // edge data (e.g. onError, BEA-1071) must survive the round-trip — it drives the executor.
-    return { nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })), edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated, data: e.data })) };
+    return {
+      nodes: nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data })),
+      edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, animated: e.animated, data: e.data })),
+      // Top-level, so it reaches EVERY research step. This used to return nodes and edges only, so a
+      // flow-wide setting would have been dropped on save even if something had set it.
+      ...(researchFrom ? { researchFrom } : {}),
+      ...(researchTo ? { researchTo } : {}),
+    };
   }
   // "Run to here" (BEA-1072): save silently, then test one block with its upstream feeders.
   const [testing, setTesting] = useState<string | null>(null);
@@ -439,6 +458,20 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
         <span className="shrink-0 text-xs font-medium text-zinc-500">Question</span>
         <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="The one big ask… e.g. “Full competitor analysis of Tesla.”" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
         <button onClick={autoPlan} disabled={splitting} title="Let the agent plan the whole flow from your question" className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{splitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Auto-plan</button>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
+        <span className="shrink-0 text-xs font-medium text-zinc-500">Only look at things published</span>
+        <input type="date" aria-label="Published from" value={researchFrom} onChange={(e) => setResearchFrom(e.target.value)} className="rounded-lg border border-zinc-200 bg-transparent px-2 py-1 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700" />
+        <span className="text-xs text-zinc-400">to</span>
+        <input type="date" aria-label="Published to" value={researchTo} onChange={(e) => setResearchTo(e.target.value)} className="rounded-lg border border-zinc-200 bg-transparent px-2 py-1 text-xs outline-none focus:border-emerald-400 dark:border-zinc-700" />
+        {(researchFrom || researchTo) && (
+          <button type="button" onClick={() => { setResearchFrom(''); setResearchTo(''); }} className="rounded-md px-1.5 py-0.5 text-[11px] text-zinc-500 underline-offset-2 hover:underline">clear</button>
+        )}
+        <span className="min-w-0 text-[11px] text-zinc-400">
+          {researchFrom || researchTo
+            ? 'Applies to every research step in this flow. Leave a side empty to leave it open.'
+            : 'Optional. Leave both empty and each question works its own dates out.'}
+        </span>
       </div>
       {/* "picture of your words" banner (BEA-1092) — only on the standalone editor; the agent's Flow tab has its own */}
       {agentId && !embedded && (
@@ -640,15 +673,14 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose, onTest, testi
             editable right here rather than buried in a default (BEA-1196). */}
         {kind === 'tool' && d.refId === 'deep_research' && (
           <div className="space-y-1.5 rounded-lg border border-zinc-200 bg-zinc-50/70 px-2.5 py-2 dark:border-zinc-700 dark:bg-zinc-800/50">
-            <label className={labelCls}>Only look at things published between (optional)</label>
+            <label className={labelCls}>Override the dates, just for this step (optional)</label>
             <div className="grid grid-cols-2 gap-2">
               <input type="date" value={d.researchFrom || ''} onChange={(e) => set({ researchFrom: e.target.value })} className={inputCls} />
               <input type="date" value={d.researchTo || ''} onChange={(e) => set({ researchTo: e.target.value })} className={inputCls} />
             </div>
             <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-              Leave both empty and it works the dates out from your question. Set them and it will
-              <strong> only</strong> use that period — if it finds nothing it says so, rather than quietly
-              answering with older material.
+              Leave these empty to use the flow's dates at the top. Set them and <strong>only this step</strong>
+              uses that period — if it finds nothing it says so, rather than quietly answering with older material.
             </p>
           </div>
         )}
