@@ -29,6 +29,21 @@ export class TokenBudgetError extends Error {}
  */
 export const ENGINE_TURN_TOKENS = 118_000;
 
+/**
+ * What to charge up front for a turn on THIS engine (BEA-1240).
+ *
+ * One flat figure for every engine was measured back when everything ran on Claude. Codex turns
+ * really cost about 23,400 — a fifth of it. A 7-step research run therefore booked ~826,000 against
+ * a 500,000 ceiling and was refused after spending closer to 165,000. A safety net that stops free
+ * work on a wrong number is a net that cries wolf, and the owner's only lever was to raise a ceiling
+ * he was never actually approaching.
+ *
+ * Measured from real usage, not guessed. The flat figure survives as the fallback for an engine we
+ * have never seen — an unmeasured engine must never be free to start unlimited work.
+ */
+const ESTIMATE_SAMPLE = 20;      // recent turns to average
+const MIN_ESTIMATE = 20_000;     // never charge so little that a runaway looks cheap
+
 const DEFAULT_DAY = 500_000;
 const DEFAULT_RUN = 150_000;
 
@@ -138,6 +153,32 @@ export class TokenBudgetService {
     const c = Number(usage?.output_tokens ?? usage?.completion_tokens ?? usage?.completionTokens ?? 0) || 0;
     if (p + c > 0) return { prompt: p, completion: c };
     return { prompt: ENGINE_TURN_TOKENS, completion: 0 };
+  }
+
+  /**
+   * The up-front charge for a turn on this engine, from its own recent history.
+   *
+   * Cached for a minute: this runs before every engine call, and a fresh query each time would put a
+   * database read in front of work the budget is meant to protect, not slow down.
+   */
+  private estimates = new Map<string, { at: number; n: number }>();
+  async estimateFor(provider?: string): Promise<number> {
+    if (!provider) return ENGINE_TURN_TOKENS;
+    const hit = this.estimates.get(provider);
+    if (hit && Date.now() - hit.at < 60_000) return hit.n;
+    const rows = await this.prisma.usageLog?.findMany?.({
+      where: { model: provider },
+      orderBy: { at: 'desc' },
+      take: ESTIMATE_SAMPLE,
+      select: { promptTokens: true, completionTokens: true },
+    }).catch(() => []) ?? [];
+    const used = rows.map((r: any) => (r.promptTokens || 0) + (r.completionTokens || 0)).filter((n: number) => n > 0);
+    // No history yet — charge the old flat figure rather than letting an unknown engine start free.
+    const n = used.length
+      ? Math.max(MIN_ESTIMATE, Math.round(used.reduce((a: number, b: number) => a + b, 0) / used.length))
+      : ENGINE_TURN_TOKENS;
+    this.estimates.set(provider, { at: Date.now(), n });
+    return n;
   }
 
   /** For Settings: what today looks like against the ceiling. */

@@ -397,3 +397,54 @@ describe('rechecking an engine after upgrading the plan (BEA-1237)', () => {
     expect(called).toBe(1); // deleting alone would be a lie in the other direction
   });
 });
+
+/**
+ * BEA-1240 — one flat 118,000 charged for every engine turn. Measured from real traffic, a Codex
+ * turn costs 23,403 and a Claude turn 56,146. A 7-step run therefore booked ~826,000 against a
+ * 500,000 ceiling and was refused having spent closer to 165,000.
+ */
+describe('the up-front charge matches the engine actually being called (BEA-1240)', () => {
+  const withHistory = (byModel: Record<string, number[]>) => {
+    const prisma: any = {
+      usageLog: {
+        findMany: async ({ where }: any) => {
+          const rows = byModel[where?.model] || [];
+          return rows.map((n) => ({ promptTokens: n, completionTokens: 0 }));
+        },
+      },
+      setting: { findUnique: async () => null, upsert: async () => undefined },
+    };
+    return new TokenBudgetService(prisma);
+  };
+
+  it('charges Codex what Codex costs, and Claude what Claude costs', async () => {
+    const s = withHistory({ codex: [23_000, 24_000, 23_200], claude: [56_000, 56_300] });
+    expect(await s.estimateFor('codex')).toBeCloseTo(23_400, -3);
+    expect(await s.estimateFor('claude')).toBeCloseTo(56_150, -3);
+    // The point: they must NOT be the same number any more.
+    expect(await s.estimateFor('codex')).not.toBe(await s.estimateFor('claude'));
+  });
+
+  it('falls back to the flat figure for an engine it has never seen', async () => {
+    const s = withHistory({});
+    expect(await s.estimateFor('a-brand-new-engine')).toBe(ENGINE_TURN_TOKENS);
+  });
+
+  it('never charges so little that a runaway looks cheap', async () => {
+    const s = withHistory({ codex: [5, 7, 6] }); // a few trivial calls must not set the estimate
+    expect(await s.estimateFor('codex')).toBeGreaterThanOrEqual(20_000);
+  });
+
+  it('survives a prisma stub with no usage log at all', async () => {
+    const s = new TokenBudgetService({} as any);
+    expect(await s.estimateFor('codex')).toBe(ENGINE_TURN_TOKENS);
+    expect(await s.estimateFor(undefined)).toBe(ENGINE_TURN_TOKENS);
+  });
+
+  it('a 7-step Codex run fits in a budget that the flat figure would have blown', async () => {
+    const s = withHistory({ codex: [23_000, 24_000, 23_200] });
+    const per = await s.estimateFor('codex');
+    expect(per * 7).toBeLessThan(500_000);              // ~164k — fits
+    expect(ENGINE_TURN_TOKENS * 7).toBeGreaterThan(500_000); // ~826k — the bug
+  });
+});
