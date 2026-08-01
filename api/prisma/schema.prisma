@@ -1339,7 +1339,33 @@ model NewsStory {
   // Cascade added while the table was still new: deleting an issue must not leave its stories
   // behind as orphans nobody can reach. Retro-fitting a foreign key later means a table rewrite.
   issue       NewsIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  flagged     Boolean   @default(false) // BEA-1258 — "worth digging into"
 
   @@index([issueId])
   @@index([issueId, kind])
+}
+
+/// One published edition of AI News Daily (BEA-1257). Codex writes the WORDS — a headline, the
+/// 60-second read, and a line plus paragraphs per category — and they are stored here as plain
+/// text. The page template is ours (BEA-1261), so the design cannot drift and nothing the engine
+/// returns is ever treated as markup.
+model NewsEdition {
+  id          String   @id @default(uuid())
+  issueId     String   @unique
+  /// Sequential, for the masthead: "Issue No. 1".
+  number      Int      @unique
+  /// The day this edition covers, as YYYY-MM-DD in the owner's timezone — also the public URL.
+  day         String   @unique
+  headline    String
+  sixty       String   @default("[]") // JSON string[] — the 60-second read
+  sections    String   @default("[]") // JSON WrittenSection[] — category, line, prose, storyCount, written
+  storyCount  Int      @default(0)
+  /// False when the engine could not write part of it. The edition still publishes, and SAYS so.
+  engineOk    Boolean  @default(true)
+  notes       String   @default("[]") // JSON string[] — what went wrong, in plain words
+  published   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdAt])
 }

@@ -14,7 +14,7 @@ export type PromptKey =
   | 'other.commitmentsExtract'
   | 'agent.metaDraft' | 'agent.draftCheck' | 'agent.uiSpec' | 'agent.chatEdit' | 'flow.syncWords' | 'flow.plan' | 'agent.builder' | 'agent.jobBuilder'
   | 'google.gmailQuery' | 'google.gmailRequest' | 'google.gmailRequestTasks' | 'google.gmailBrief'
-  | 'news.categorise';
+  | 'news.categorise' | 'news.section' | 'news.topline';
 
 type PromptDef = { key: PromptKey; label: string; description: string; category: string; default: string };
 
@@ -906,6 +906,51 @@ Rules:
 - Use "n" exactly as the number shown against the story.
 - Pick the single best fit. If a story is about a model launch AND its price, prefer the launch.
 - Never invent a category name. Anything not on the list above is thrown away and the story lands in Uncategorised.`,
+  },
+  {
+    key: 'news.section',
+    category: 'AI News Daily',
+    label: 'Write one category of the daily paper',
+    description:
+      'Writes the paragraphs for one category of the day\'s AI news. The category name and its stories are added automatically. Keep the LINE / WRITE-UP labels — the page reads them.',
+    default: `You are writing one section of a daily AI newspaper. Real people read this over coffee, and many will read nothing else about AI today.
+
+Reply in exactly this shape, plain text only:
+
+LINE: <one short line, under 90 characters, saying what this section is about today>
+WRITE-UP:
+<two to five short paragraphs>
+
+Rules:
+- Write about what ACTUALLY happened in the stories given. Never add facts that are not there, and never guess a number, a date or a name.
+- Lead with the biggest thing. Group the small ones together at the end in a sentence or two.
+- Names matter: say who did what — the company, the model, the person.
+- Plain everyday English. Short words, short sentences. No hype, no "in the rapidly evolving world of AI", no closing summary paragraph.
+- Do NOT write headings, bullet lists, links, HTML or markdown tables. Just the LINE and plain paragraphs.
+- Do not mention story numbers, "the stories above", or the fact that you were given a list.`,
+  },
+  {
+    key: 'news.topline',
+    category: 'AI News Daily',
+    label: 'Write the headline and the 60-second read',
+    description:
+      'Writes the front-page headline and the five lines most people will read instead of the rest. The day\'s sections are added automatically. Keep the HEADLINE label and the dashed lines.',
+    default: `You are writing the front of a daily AI newspaper.
+
+Reply in exactly this shape, plain text only:
+
+HEADLINE: <one line, under 80 characters, saying what today was actually about>
+- <the first thing that mattered>
+- <the second>
+- <the third>
+- <the fourth, if there is one>
+- <the fifth, if there is one>
+
+Rules:
+- The headline must come from what actually happened today. Never write "not much happened today" — say what DID happen, even on a quiet day.
+- Each dashed line is one short sentence a person could repeat to someone else. Concrete: who, what.
+- Three lines is fine on a quiet day. Never more than five.
+- Plain everyday English. No hype, no colons-and-subtitles, no HTML or markdown.`,
   },
 ];
 

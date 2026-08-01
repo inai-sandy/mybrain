@@ -188,6 +188,11 @@ export class LlmService {
     // ONLY paid step in the whole news pipeline. Never FOLLOW_ENGINE: a CLI turn would drag ~25,000
     // tokens of system prompt per batch to answer what is essentially a filing question.
     'news-categorise': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Writes the daily edition — the headline, the 60-second read and a paragraph per category
+    // (BEA-1257). This is the heavy writing job, so it FOLLOWS THE ENGINE and runs on the flat rate:
+    // the owner's split of labour is that Sonnet decides and Codex delivers. It writes WORDS only,
+    // never HTML — the page template is ours (BEA-1261).
+    'news-write': LlmService.FOLLOW_ENGINE,
     // WRITING follows THE engine choice (see engineChoice).
     'deep-research-write': LlmService.FOLLOW_ENGINE,
     // The thinking blocks INSIDE a flow. The owner's rule — "when I choose Codex, it has to run in
