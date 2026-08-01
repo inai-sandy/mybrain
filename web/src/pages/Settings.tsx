@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { TasksSettings } from './settings/TasksSettings';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, type LucideIcon } from 'lucide-react';
+import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, Newspaper, type LucideIcon } from 'lucide-react';
 import { useTheme } from '../ui/theme';
 import { Accordion } from '../ui/Accordion';
 import { useToast } from '../ui/Toast';
@@ -198,6 +198,8 @@ function renderSection(id: Tab, email?: string): ReactNode {
         desc="Writes each person's living character profile every Sunday evening (and on the profile's Update-now button). A weekly reasoning job over a month of real messages — Sonnet (the default) fits it." />
       <EngineModelCard title="Report summary model" icon={FileText} base="/api/llm-config/helper/report-summary"
         desc="Condenses each daily report into the 1–2 line summary on the contact page, the moment it arrives. Runs per report — Haiku (the default) is ideal." />
+      <EngineModelCard title="AI News category model" icon={Newspaper} base="/api/llm-config/helper/news-categorise"
+        desc="Files every story in the daily AI news into one of your eight categories. It runs in batches of 25 and only ever answers with a category name, so Haiku (the default) is ideal — this is the one paid step in the whole news pipeline. A story it cannot place shows as Uncategorised rather than disappearing." />
       <EngineModelCard title="People extraction model" icon={Compass} base="/api/daily/people-model" agents
         desc="Pulls people's names from your nightly story and tasks for People memory. A tiny job — Haiku (the default) is ideal, or run it FREE on your Codex/Gemini subscription." />
       <EngineModelCard title="Reminder Clean up model" icon={Sparkles} base="/api/reminders/format-model"

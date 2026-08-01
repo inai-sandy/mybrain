@@ -1,12 +1,14 @@
 import { Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { NewsFeedService } from './news-feed.service';
 import { NewsSplitService } from './news-split.service';
+import { NewsCategoriseService } from './news-categorise.service';
 
 @Controller('news')
 export class NewsController {
   constructor(
     private readonly feed: NewsFeedService,
     private readonly split: NewsSplitService,
+    private readonly categorise: NewsCategoriseService,
   ) {}
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
@@ -34,6 +36,18 @@ export class NewsController {
   @Post('issues/:id/split')
   splitOne(@Param('id') id: string) {
     return this.split.splitOne(id);
+  }
+
+  /** Sort one issue's stories into the eight fixed categories. (BEA-1256) */
+  @Post('issues/:id/categorise')
+  categoriseOne(@Param('id') id: string) {
+    return this.categorise.categoriseIssue(id);
+  }
+
+  /** How one issue's stories are spread across the categories. (BEA-1256) */
+  @Get('issues/:id/breakdown')
+  breakdown(@Param('id') id: string) {
+    return this.categorise.breakdown(id);
   }
 
   /** The pieces of one issue, in the order they appeared. `?kind=story` for just the news. */

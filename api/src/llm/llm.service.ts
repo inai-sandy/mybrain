@@ -183,6 +183,11 @@ export class LlmService {
     'character-profile': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },
     // Condenses one daily report into 1–2 lines the moment it arrives — tiny job, Haiku. (BEA-1223)
     'report-summary': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Files each AI News Daily story into one of eight fixed categories (BEA-1256). Batched ~30 at
+    // a time, a sentence in and a category name out — the definition of a small-model job, and the
+    // ONLY paid step in the whole news pipeline. Never FOLLOW_ENGINE: a CLI turn would drag ~25,000
+    // tokens of system prompt per batch to answer what is essentially a filing question.
+    'news-categorise': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     // WRITING follows THE engine choice (see engineChoice).
     'deep-research-write': LlmService.FOLLOW_ENGINE,
     // The thinking blocks INSIDE a flow. The owner's rule — "when I choose Codex, it has to run in
