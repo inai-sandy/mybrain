@@ -808,3 +808,94 @@ describe('FlowRunnerService — a failed branch must not vanish into the merge (
     expect(parts.match(/--- Research part \d+ ---/g)?.length).toBe(2);
   });
 });
+
+describe('FlowRunnerService — the dead-upstream rule must not break the steps that survive it (BEA-1235 follow-up)', () => {
+  function harness(graph: string, onAsk: (p: string) => string | null) {
+    const flowObj = { id: 'f1', name: 'F', graph };
+    const row: any = { id: 'rz', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; }, updateMany: async () => ({ count: 0 }) },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+    const mergePrompts: string[] = [];
+    const llm: any = {
+      completeDetailed: async (p: string) => { const t = onAsk(p); return t === null ? { text: null, error: 'model returned nothing' } : { text: t }; },
+      complete: async (p: string) => { mergePrompts.push(p); return 'MERGED'; },
+    };
+    const telegram: any = { notifyFlowWaiting: jest.fn(async () => undefined), notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+    (svc as any).searchBrain = async (q: string) => { if (q.startsWith('dead')) throw new Error('research died'); return `FINDINGS ${q}`; };
+    return { svc, row, flowObj, mergePrompts };
+  }
+
+  it('STILL ASKS the user when the step before them failed — that is the whole point of asking', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'r', data: { kind: 'tool', refId: 'search_brain', label: 'Research', sub: 'dead-q' } },
+        { id: 'q', data: { kind: 'ask_user', question: 'Research failed — carry on?', label: 'Ask me' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'r', target: 'q' }, { source: 'q', target: 'O' }],
+    });
+    const { svc, row, flowObj } = harness(graph, () => 'x');
+    const paused = jest.fn(async () => undefined);
+    (svc as any).pauseForInput = paused;
+    await (svc as any).execute('rz', flowObj).catch(() => undefined);
+    expect(paused).toHaveBeenCalled(); // it used to be marked failed and the run just ended
+  });
+
+  it('a merge whose branches ALL died still produces a report saying so — without paying for a model call', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'r0', data: { kind: 'tool', refId: 'search_brain', label: 'Research 1', sub: 'dead-1' } },
+        { id: 'r1', data: { kind: 'tool', refId: 'search_brain', label: 'Research 2', sub: 'dead-2' } },
+        { id: 'M', data: { kind: 'merge', mode: 'ai', label: 'Merge', goal: 'the question' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'r0', target: 'M' }, { source: 'r1', target: 'M' }, { source: 'M', target: 'O' }],
+    });
+    const { svc, row, flowObj, mergePrompts } = harness(graph, () => 'x');
+    await (svc as any).execute('rz', flowObj);
+    const res = JSON.parse(row.results);
+    expect(res.M.status).toBe('done');
+    expect(res.M.output).toContain('No part of this research produced anything');
+    expect(res.M.output).toContain('research died');
+    expect(mergePrompts.length).toBe(0); // nothing to synthesise — do not spend an engine turn
+  });
+
+  it('blames only the step that really broke, not every step downstream of it', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'r0', data: { kind: 'tool', refId: 'search_brain', label: 'Research 1', sub: 'dead-1' } },
+        { id: 'a0', data: { kind: 'ask_ai', label: 'Branch 1' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'r0', target: 'a0' }, { source: 'a0', target: 'O' }],
+    });
+    const { svc, row, flowObj } = harness(graph, () => 'x');
+    await (svc as any).execute('rz', flowObj);
+    expect(row.status).toBe('failed');
+    expect(String(row.error)).toContain('Research 1');   // the real cause
+    expect(String(row.error)).not.toContain('Branch 1'); // knock-on, not to blame
+    expect(String(row.error)).not.toContain('Answer');
+  });
+
+  it('a CRASHED If is not mistaken for one that steered — the step after it must not run on nothing', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'i', data: { kind: 'if', label: 'Check', cond: 'x' } },
+        { id: 'a', data: { kind: 'ask_ai', label: 'After', sub: 'go on' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'i', target: 'a' }, { source: 'a', target: 'O' }],
+    });
+    const { svc, row, flowObj } = harness(graph, () => 'x');
+    (svc as any).evalCond = () => { throw new Error('condition blew up'); };
+    await (svc as any).execute('rz', flowObj);
+    const res = JSON.parse(row.results);
+    expect(res.a.status).toBe('failed');           // it used to run on '' and report done
+    expect(res.a.output).toContain('never arrived');
+  });
+});
