@@ -40,6 +40,25 @@ export default function PaperPublic() {
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'error'>('loading');
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
+  // A visitor here has never chosen a theme — they are a stranger following a link. The app
+  // defaults to dark for its owner, which means someone on a light phone gets a black page as
+  // their first impression of it. Follow THEIR setting instead, unless they have used the app
+  // before and picked one.
+  useEffect(() => {
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem('mybrain-theme');
+    } catch {
+      saved = null;
+    }
+    if (saved) return;
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const apply = () => document.documentElement.classList.toggle('dark', !!media?.matches);
+    apply();
+    media?.addEventListener?.('change', apply);
+    return () => media?.removeEventListener?.('change', apply);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     (async () => {
