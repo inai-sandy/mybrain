@@ -578,3 +578,144 @@ describe('"Run to here" obeys the toolbox (BEA-1168)', () => {
     for (const c of calls) expect(c).toContain('allowed');
   });
 });
+
+describe('FlowRunnerService — a partly-failed run must never report done (BEA-1234)', () => {
+  /**
+   * Reproduces the real run 14931ba1: three branches researched, two "Ask AI" steps died, one
+   * survived — and the flow reported ✓ done with an answer built from a third of the work.
+   */
+  const threeBranches = () => JSON.stringify({
+    nodes: [
+      { id: 'b0', data: { kind: 'ask_ai', label: 'Branch 1', sub: 'Branch 1 research' } },
+      { id: 'b1', data: { kind: 'ask_ai', label: 'Branch 2', sub: 'Branch 2 research' } },
+      { id: 'b2', data: { kind: 'ask_ai', label: 'Branch 3', sub: 'Branch 3 research' } },
+      { id: 'O', data: { kind: 'output', label: 'Answer' } },
+    ],
+    edges: [{ source: 'b0', target: 'O' }, { source: 'b1', target: 'O' }, { source: 'b2', target: 'O' }],
+  });
+
+  function harness(graph: string, completeDetailed: any) {
+    const flowObj = { id: 'f1', name: 'Placement report', graph };
+    const row: any = { id: 'r1', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; }, updateMany: async () => ({ count: 0 }) },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+    const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: jest.fn(async () => undefined) };
+    const llm: any = { completeDetailed };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = jest.fn(async () => [{ id: 'd1' }]);
+    return { svc, row, flowObj, telegram };
+  }
+
+  it('marks the run FAILED when two of three branches died, even though an answer was produced', async () => {
+    const { svc, row, flowObj, telegram } = harness(threeBranches(), async (p: string) =>
+      p.includes('Branch 1') ? { text: 'the surviving answer' } : { text: null, error: 'qwen/qwen3.7-max returned nothing' });
+    await (svc as any).execute('r1', flowObj);
+
+    expect(row.status).toBe('failed'); // the whole point — it used to be 'done'
+    expect(telegram.notifyFlowDone).toHaveBeenCalledWith(expect.objectContaining({ status: 'failed' }));
+  });
+
+  it('names every failed step in the error, so the owner knows what is missing', async () => {
+    const { svc, row, flowObj } = harness(threeBranches(), async (p: string) =>
+      p.includes('Branch 1') ? { text: 'ok' } : { text: null, error: 'qwen returned nothing' });
+    await (svc as any).execute('r1', flowObj);
+
+    expect(String(row.error)).toContain('Branch 2');
+    expect(String(row.error)).toContain('Branch 3');
+    expect(String(row.error)).not.toContain('Branch 1'); // the one that worked is not blamed
+  });
+
+  it('KEEPS the answer and the documents — a partial run must not throw away what worked', async () => {
+    const { svc, row, flowObj } = harness(threeBranches(), async (p: string) =>
+      p.includes('Branch 1') ? { text: 'the surviving answer' } : { text: null, error: 'nope' });
+    await (svc as any).execute('r1', flowObj);
+
+    expect(String(row.finalOutput)).toContain('the surviving answer');
+    expect(JSON.parse(row.documentIds || '[]').length).toBe(1);
+    expect((svc as any).saveDocuments).toHaveBeenCalled();
+    // and it must SAY the answer is incomplete, not present it as the whole thing
+    expect(JSON.stringify(row.terminal)).toContain('incomplete');
+  });
+
+  it('still reports done when every step worked', async () => {
+    const { svc, row, flowObj } = harness(threeBranches(), async () => ({ text: 'fine' }));
+    await (svc as any).execute('r1', flowObj);
+    expect(row.status).toBe('done');
+  });
+
+  it('does NOT fail the run for a failure the flow deliberately catches with a ⚠ edge', async () => {
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'A', data: { kind: 'ask_ai', label: 'Try this', sub: 'Try this first' } },
+        { id: 'B', data: { kind: 'ask_ai', label: 'Fallback', sub: 'Fallback plan' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [{ source: 'A', target: 'B', data: { onError: true } }, { source: 'B', target: 'O' }],
+    });
+    const { svc, row, flowObj } = harness(graph, async (p: string) =>
+      p.includes('Try this') ? { text: null, error: 'boom' } : { text: 'recovered' });
+    await (svc as any).execute('r1', flowObj);
+    expect(row.status).toBe('done'); // the author planned for it; recovery is not a failed run
+  });
+
+  it('a ⚠ fallback that NEVER RAN does not excuse the failure (dead-end alert node)', async () => {
+    // The review's repro: the edge exists on the canvas, but the alert it points at is a dead end,
+    // so it is never reached and never lands in results. Excusing the failure on the strength of
+    // that edge let two dead branches pass as a healthy run.
+    const graph = JSON.stringify({
+      nodes: [
+        { id: 'b0', data: { kind: 'ask_ai', label: 'Branch 1', sub: 'Branch 1 research' } },
+        { id: 'b1', data: { kind: 'ask_ai', label: 'Branch 2', sub: 'Branch 2 research' } },
+        { id: 'alert', data: { kind: 'ask_ai', label: 'Alert someone', sub: 'tell them' } },
+        { id: 'O', data: { kind: 'output', label: 'Answer' } },
+      ],
+      edges: [
+        { source: 'b0', target: 'O' },
+        { source: 'b1', target: 'O' },
+        { source: 'b1', target: 'alert', data: { onError: true } }, // dead end — nothing after it
+      ],
+    });
+    const { svc, row, flowObj } = harness(graph, async (p: string) =>
+      p.includes('Branch 1') ? { text: 'the surviving answer' } : { text: null, error: 'nope' });
+    await (svc as any).execute('r1', flowObj);
+    expect(row.status).toBe('failed');
+    expect(String(row.error)).toContain('Branch 2');
+  });
+
+  it('an EVAL run with a failed branch is failed too — and fires none of the side effects', async () => {
+    const { svc, row, flowObj, telegram } = harness(threeBranches(), async (p: string) =>
+      p.includes('Branch 1') ? { text: 'partial' } : { text: null, error: 'nope' });
+    await (svc as any).execute('r1', flowObj, { evalMode: true });
+    expect(row.status).toBe('failed'); // so runForEval retries instead of grading a partial answer
+    expect(String(row.error)).toContain('Branch 2');
+    // An eval is a test run: it must not save documents into the library or message the owner.
+    expect((svc as any).saveDocuments).not.toHaveBeenCalled();
+    expect(telegram.notifyFlowDone).not.toHaveBeenCalled();
+  });
+
+  it('does not count skipped steps when saying how many of them failed', async () => {
+    const { svc, row, flowObj } = harness(threeBranches(), async (p: string) =>
+      p.includes('Branch 1') ? { text: 'ok' } : { text: null, error: 'nope' });
+    (svc as any).applySkip = (f: any) => f;
+    await (svc as any).execute('r1', flowObj);
+    // 4 nodes exist (3 branches + output); 2 failed, and the denominator must be steps that RAN.
+    expect(String(row.error)).toMatch(/^2 of \d+ steps failed/);
+    expect(String(row.error)).not.toContain('of 0 steps');
+  });
+
+  it('marks the saved document incomplete, so the caveat travels with the file', async () => {
+    const saved: any[] = [];
+    const { svc, flowObj } = harness(threeBranches(), async (p: string) =>
+      p.includes('Branch 1') ? { text: 'the surviving answer' } : { text: null, error: 'nope' });
+    (svc as any).saveDocuments = jest.fn(async (_f: any, _g: any, _i: any, _r: any, out: string, incomplete?: boolean) => {
+      saved.push({ out, incomplete });
+      return [{ id: 'd1' }];
+    });
+    await (svc as any).execute('r1', flowObj);
+    expect(saved[0].incomplete).toBe(true);
+  });
+});
+

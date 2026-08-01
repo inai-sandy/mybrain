@@ -522,27 +522,74 @@ export class FlowRunnerService implements OnModuleInit {
     // If the run was cancelled while this driver was mid-flight, don't resurrect it as 'done'. (BEA-776)
     if (this.cancelled.has(runId)) { this.cancelled.delete(runId); this.dropDriver(runId, gen); return; }
 
-    // If nothing succeeded and a step failed, the run FAILED — don't report 'done' with a blank answer. (BEA-800)
-    if (!opts.evalMode && !finalOutput.trim()) {
-      const failed = Object.values(results).find((r) => r.status === 'failed');
-      if (failed) {
-        if (!terminal.length || terminal[terminal.length - 1]?.text !== '✗ a step failed') term('✗ a step failed');
-        // Keep whatever the steps that DID work produced (BEA-1200). BEA-1193 made research survive a
-        // failing final step, but only on the success path — so a run whose last step broke threw the
-        // lot away. One real run lost 21,651 characters gathered from 95 paid-for searches, and said
-        // nothing about it. There is no "result" document to save, but the research is still research.
-        const kept = opts.evalMode ? [] : await this.saveDocuments(flow, graph, incoming, results, '').catch((e: any) => {
-          this.log.warn(`could not keep the research of failed run ${runId}: ${e?.message || e}`);
-          return [] as any[];
-        });
-        if (kept.length) term(`💾 kept the research from the steps that worked (${kept.length} document${kept.length === 1 ? '' : 's'})`);
-        await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: (failed.output || 'a step failed').slice(0, 300), results: JSON.stringify(results), documentIds: JSON.stringify(kept), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any });
-        this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
-        void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: (failed.output || 'a step failed').slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
-        void this.alerts?.runFailed(flow?.name || 'Your flow', (failed.output || 'a step failed').slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
-        this.dropDriver(runId, gen);
-        return;
-      }
+    /**
+     * ANY failed step means the run did not succeed (BEA-1234).
+     *
+     * This check used to run only when the final answer was empty (BEA-800 wrote it for "everything
+     * broke"). It had no answer for "some of it broke", which is the common case. One real run lost
+     * two of three branches — 31,204 characters of paid-for research — and still reported ✓ done with
+     * a 1,739-character answer built from the one branch that survived. The grader scored it 0/100
+     * while the screen said it had worked.
+     *
+     * A partial run is now FAILED, not done. It keeps everything the working steps produced — the
+     * answer, the research, the documents — but it never claims to have succeeded. 'failed' rather
+     * than a new 'partial' status on purpose: every screen already renders 'failed' correctly, and a
+     * sixth status would have to be handled in ~65 places to say the same thing.
+     */
+    // A ⚠ edge means the author planned for this failure — but ONLY if the fallback actually RAN.
+    // An edge drawn to a dead-end node (an alert with nothing after it) is never reached when the
+    // graph has its own output node, so it never lands in `results`. Excusing a failure on the
+    // strength of an edge that exists on the canvas would let two dead branches pass as a healthy
+    // run — reproducing the exact bug this issue exists to fix.
+    const handled = new Set<string>();
+    for (const e of graph.edges || []) if (e?.data?.onError && results[e.target]) handled.add(e.source);
+    const failedSteps = Object.entries(results)
+      .filter(([, r]) => (r as NodeResult).status === 'failed')
+      .filter(([id]) => !handled.has(id));
+
+    /**
+     * An EVAL run must fail too (BEA-1234).
+     *
+     * The old guard was `!opts.evalMode`, so a graded eval whose branches died was scored on a
+     * partial answer as though it had fully succeeded — and `runForEval` only retries when the
+     * status is not 'done', so it did not even retry. The status is the honest part and applies to
+     * both; only the side effects (documents, Telegram, push, WhatsApp) are skipped for evals.
+     */
+    if (opts.evalMode && failedSteps.length) {
+      const names = failedSteps.map(([id, r]) => (r as NodeResult).label || id);
+      await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error: `${failedSteps.length} step(s) failed: ${names.join(', ')}`.slice(0, 300), ...(finalOutput.trim() ? { finalOutput } : {}), results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any }).catch(() => undefined);
+      this.dropDriver(runId, gen);
+      return;
+    }
+
+    if (failedSteps.length) {
+      const names = failedSteps.map(([id, r]) => (r as NodeResult).label || id);
+      const first = (failedSteps[0][1] as NodeResult).output || 'a step failed';
+      const headline = failedSteps.length === 1
+        ? `✗ the "${names[0]}" step failed`
+        : `✗ ${failedSteps.length} steps failed: ${names.join(', ')}`;
+      if (!terminal.length || terminal[terminal.length - 1]?.text !== headline) term(headline);
+
+      // Keep what DID work (BEA-1200/BEA-1193) — including the answer, if a later step still produced
+      // one. Passing finalOutput here is what stops a partial run from throwing away a usable report
+      // just because a sibling branch died.
+      const kept = await this.saveDocuments(flow, graph, incoming, results, finalOutput, true).catch((e: any) => {
+        this.log.warn(`could not keep the work of partly-failed run ${runId}: ${e?.message || e}`);
+        return [] as any[];
+      });
+      if (kept.length) term(`💾 kept what the steps that worked produced (${kept.length} document${kept.length === 1 ? '' : 's'})`);
+      if (finalOutput.trim()) term('⚠ the answer below is incomplete — it is missing the failed steps');
+
+      const ran = Object.values(results).filter((r) => (r as NodeResult).status !== 'skipped').length;
+      const error = `${failedSteps.length} of ${ran} steps failed (${names.join(', ')}) — ${first}`.slice(0, 300);
+      // Only write an answer when one genuinely survived. Writing '' would still satisfy "not done",
+      // but BEA-800's guarantee is that a failed run never promotes anything to finalOutput at all.
+      await this.prisma.flowRun.update({ where: { id: runId }, data: { status: 'failed', error, ...(finalOutput.trim() ? { finalOutput } : {}), results: JSON.stringify(results), documentIds: JSON.stringify(kept), terminal: JSON.stringify(terminal.slice(-300)), endedAt: new Date(), waitNodeId: null, waitQuestion: null, waitToken: null, ...spendJson() } as any });
+      this.telegram.notifyFlowDone({ flowName: flow?.name, status: 'failed' }).catch(() => undefined);
+      void this.push?.send({ title: `${flow?.name || 'Your flow'} failed`, body: error.slice(0, 140), url: `/flows/runs/${runId}`, tag: `flow-${runId}` }).catch(() => undefined);
+      void this.alerts?.runFailed(flow?.name || 'Your flow', error.slice(0, 200), `/flows/runs/${runId}`).catch(() => undefined); // WhatsApp (BEA-1071)
+      this.dropDriver(runId, gen);
+      return;
     }
 
     // Save the outputs as Documents you can browse later (Agent↔Flow merge ④) — but not for eval runs.
@@ -741,7 +788,7 @@ export class FlowRunnerService implements OnModuleInit {
   }
 
   /** Persist branch parts (when >1) + the final output as Documents; returns [{id, slug, title}]. */
-  private async saveDocuments(flow: any, graph: any, incoming: Map<string, string[]>, results: Record<string, NodeResult>, finalOutput: string) {
+  private async saveDocuments(flow: any, graph: any, incoming: Map<string, string[]>, results: Record<string, NodeResult>, finalOutput: string, incomplete = false) {
     const name = (flow.name || 'Flow').toString().slice(0, 80);
     const nodes = new Map<string, any>((graph.nodes || []).map((n: any) => [n.id, n]));
     const partIds = new Set<string>();
@@ -766,7 +813,14 @@ export class FlowRunnerService implements OnModuleInit {
         if (d) docs.push(d);
       }
     }
-    if (finalOutput?.trim()) { const d = await this.saveDoc(`${name} — result`, finalOutput, name); if (d) docs.push(d); }
+    if (finalOutput?.trim()) {
+      // Say it in the TITLE and the body when steps failed. The run row carries the caveat, but the
+      // document is read on its own in /documents, where an incomplete answer is indistinguishable
+      // from a complete one — the caveat has to travel with the file.
+      const body = incomplete ? `> ⚠ Incomplete — some steps of this run failed, so parts of the answer are missing.\n\n${finalOutput}` : finalOutput;
+      const d = await this.saveDoc(`${name} — result${incomplete ? ' (incomplete)' : ''}`, body, name);
+      if (d) docs.push(d);
+    }
 
     // ALWAYS keep the research as a markdown document, whatever the last step happened to be
     // (BEA-1193). The owner's rule, and this run is why: two searches gathered 12,400 characters,
