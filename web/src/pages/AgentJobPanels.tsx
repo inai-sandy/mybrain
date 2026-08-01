@@ -264,6 +264,15 @@ export function RunsPanel({ id, flow }: { id: string; flow: any }) {
               : r.status === 'done' && <span className="shrink-0 text-xs text-zinc-400">not graded</span>}
             {/* What the run really spent on search (BEA-1196) — shown so a report's cost is a fact
                 on the run, not an estimate anyone has to take on trust. */}
+            {/* Tokens this run was BUDGETED (BEA-1245). This is the run's own budget accounting —
+                a flat charge per engine step plus size-based charges for thinking steps — NOT a
+                provider-measured count. Saying "measured" here would be lying with a confident
+                number; the real per-call counts live in Settings → Usage. */}
+            {r.spend?.tokens > 0 && (
+              <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400" title="Budget estimate for this run (flat charge per engine step + size-based charges). Real per-call counts: Settings → Usage.">
+                ≈{r.spend.tokens >= 1000 ? `${Math.round(r.spend.tokens / 1000)}k` : r.spend.tokens} tokens
+              </span>
+            )}
             {r.spend?.searches > 0 && (
               <span
                 className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
