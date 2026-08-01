@@ -18,7 +18,7 @@ import { PostboxService } from '../contacts/postbox.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { randomBytes } from 'crypto';
 
-type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean };
+type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean; cascaded?: boolean };
 
 /** Thrown to abort the graph walk when a flow pauses on an "Ask me" block (Move B). */
 class PauseSignal { constructor(public nodeId: string) {} }
@@ -473,13 +473,32 @@ export class FlowRunnerService implements OnModuleInit {
          * reported success both times, and the merge dropped the empty string without a word. Same
          * silence as the bug this issue is about, reached by a different route.
          */
-        const steered = (sid: string) => errEdge.has(`${sid}->${nodeId}`) || (results[sid] as NodeResult)?.kind === 'if';
-        const deadUps = ups.filter((sid) => !steered(sid) && (results[sid] as NodeResult)?.status === 'failed');
-        if (ups.length && deadUps.length === ups.filter((sid) => !steered(sid)).length && deadUps.length) {
+        const steered = (sid: string) => {
+          if (errEdge.has(`${sid}->${nodeId}`)) return true;
+          // Only a RESOLVED If steers its edges. A crashed If still carries kind:'if' on its failed
+          // result with condFalse undefined — treating that as steering let a node run on empty
+          // input and report done, which is the very silence this check exists to end.
+          const r = results[sid] as NodeResult;
+          return r?.kind === 'if' && r.condFalse !== undefined;
+        };
+        const realUps = ups.filter((sid) => !steered(sid));
+        const deadUps = realUps.filter((sid) => (results[sid] as NodeResult)?.status === 'failed');
+        /**
+         * Some steps do NOT need their input to have arrived, and must still run:
+         *  • ask_user — the whole point of "the research failed, ask me what to do". Short-circuiting
+         *    it meant a durable checkpoint was never asked and the run just ended.
+         *  • merge — it now handles missing branches itself (BEA-1235). Killing it here threw away
+         *    the rescue/MISSING machinery for the case where every branch died.
+         */
+        const runsWithoutInput = kind === 'ask_user' || kind === 'merge';
+        if (!runsWithoutInput && ups.length && realUps.length && deadUps.length === realUps.length) {
           const why = deadUps
             .map((sid) => `${(results[sid] as NodeResult)?.label || sid}: ${((results[sid] as NodeResult)?.output || 'failed').slice(0, 120)}`)
             .join('; ');
-          results[nodeId] = { status: 'failed', output: `its input never arrived — ${why}`, kind, label };
+          // Marked as a knock-on so the run's message names the steps that REALLY broke. Without
+          // this a single dead research step reported "6 of 6 steps failed", listing a merge and an
+          // output node that never ran — true that the run failed, misleading about where.
+          results[nodeId] = { status: 'failed', output: `its input never arrived — ${why}`, kind, label, cascaded: true };
           await persist();
           return '';
         }
@@ -594,9 +613,13 @@ export class FlowRunnerService implements OnModuleInit {
     // run — reproducing the exact bug this issue exists to fix.
     const handled = new Set<string>();
     for (const e of graph.edges || []) if (e?.data?.onError && results[e.target]) handled.add(e.source);
-    const failedSteps = Object.entries(results)
+    const allFailed = Object.entries(results)
       .filter(([, r]) => (r as NodeResult).status === 'failed')
       .filter(([id]) => !handled.has(id));
+    // Blame only what really broke. A knock-on ("its input never arrived") still fails the run, but
+    // naming it alongside the root cause overstates the damage and hides the step to actually fix.
+    const rootFailed = allFailed.filter(([, r]) => !(r as NodeResult).cascaded);
+    const failedSteps = rootFailed.length ? rootFailed : allFailed;
 
     /**
      * An EVAL run must fail too (BEA-1234).
@@ -1388,6 +1411,11 @@ export class FlowRunnerService implements OnModuleInit {
   private async merge(mode: string, outputs: string[], goal?: string): Promise<string> {
     const parts = outputs.filter(Boolean);
     if (!parts.length) return '';
+    // Every part is a "MISSING" note — there is nothing to synthesise, so say so plainly rather than
+    // paying for an engine turn to write "everything is missing" (BEA-1235).
+    if (parts.every((p) => /^--- .*: MISSING\./m.test(p))) {
+      return `No part of this research produced anything.\n\n${parts.join('\n')}`;
+    }
     if (parts.length === 1) return parts[0];
     if (mode === 'raw') return parts.map((o, i) => `## Part ${i + 1}\n\n${o}`).join('\n\n');
     const goalBlock = (goal || '').trim() ? `The original question this must answer:\n"${goal!.trim()}"\n\n` : '';
