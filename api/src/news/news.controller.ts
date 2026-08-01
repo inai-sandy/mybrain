@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { NewsFeedService } from './news-feed.service';
 import { NewsSplitService } from './news-split.service';
 import { NewsCategoriseService } from './news-categorise.service';
@@ -9,6 +9,7 @@ import { NewsAgentService } from './news-agent.service';
 import { NewsReadService } from './news-read.service';
 import { NewsPublicService } from './news-public.service';
 import { Public } from '../auth/public.decorator';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
 @Controller('news')
 export class NewsController {
@@ -71,8 +72,16 @@ export class NewsController {
 
   // ---- Public. No login. Deliberately a separate, narrower shape. (BEA-1261) -------------------
 
-  /** Editions anyone may read, newest first. */
+  /**
+   * Editions anyone may read, newest first.
+   *
+   * Rate-limited because this is the first ANONYMOUS surface in the app and it is meant to be
+   * shared widely — every other public route here opts in the same way. Generous enough that a
+   * real reader never notices, tight enough that a scraper does.
+   */
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Get('public/editions')
   publicIndex(@Query('limit') limit?: string) {
     const n = Number(limit);
@@ -81,6 +90,8 @@ export class NewsController {
 
   /** One public edition — no story ids, no shortlist, nothing personal. */
   @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @Get('public/editions/:day')
   publicEdition(@Param('day') day: string) {
     return this.pub.byDay(day);

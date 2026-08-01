@@ -75,11 +75,13 @@ type Deps = {
   docs: { ogMeta(slug: string, origin: string): Promise<OgMeta | null>; resolveShortCode(code: string): Promise<{ slug: string } | null> };
   /** Prisma — the other surfaces only need "is it shared" + a title, so no service wiring needed. */
   prisma: any;
+  /** NewsPublicService — AI News Daily builds its own card, so the logic lives in one place. */
+  news?: { ogMeta(day: string, origin: string): Promise<OgMeta | null> };
 };
 
 const card = (origin: string, type: string, id: string) => `${origin}/api/og/${type}/${encodeURIComponent(id)}/card.png`;
 
-export function buildOgRoutes({ docs, prisma }: Deps): OgRoute[] {
+export function buildOgRoutes({ docs, prisma, news }: Deps): OgRoute[] {
   return [
     // Documents — unchanged behaviour (BEA-900).
     { path: '/d/:slug', resolve: (p, origin) => docs.ogMeta(p.slug, origin) },
@@ -87,22 +89,10 @@ export function buildOgRoutes({ docs, prisma }: Deps): OgRoute[] {
     // AI News Daily (BEA-1261). This page is MEANT to be shared, so it gets a real card: the day's
     // headline and the top of the 60-second read. Server-rendered, because crawlers do not run
     // JavaScript — a card built in React is a card nobody ever sees.
-    {
-      path: '/paper/:day',
-      resolve: async (p, origin) => {
-        const e = await prisma.newsEdition.findFirst({ where: { day: p.day, published: true } }).catch(() => null);
-        if (!e) return null;
-        let sixty: string[] = [];
-        try { sixty = JSON.parse(e.sixty || '[]'); } catch { sixty = []; }
-        const when = new Date(`${e.day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-        return {
-          title: `${e.headline} — AI News Daily`,
-          description: cleanDescription(sixty.slice(0, 3).join(' '), `${when}: ${e.storyCount} stories in AI, in one read.`),
-          url: `${origin}/paper/${e.day}`,
-          image: `${origin}/og-default.png`,
-        };
-      },
-    },
+    //
+    // The card is built by NewsPublicService, not reimplemented here. A second copy of "how does a
+    // share card read an edition" is a copy that drifts the first time one of them is touched.
+    { path: '/paper/:day', resolve: (p, origin) => (news ? news.ogMeta(p.day, origin) : Promise.resolve(null)) },
 
     // The SHORT document link — the one people actually paste. Same card, its own URL.
     {

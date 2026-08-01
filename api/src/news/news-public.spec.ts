@@ -128,6 +128,26 @@ describe('the share card a crawler reads (BEA-1261)', () => {
   });
 });
 
+describe('the public routes are rate-limited (BEA-1261)', () => {
+  // These are the first ANONYMOUS endpoints in the app and the link is meant to be shared widely.
+  // The throttler is registered but deliberately not global here — every public surface opts in,
+  // and forgetting to is invisible until someone points a scraper at it.
+  const CONTROLLER = readFileSync(join(__dirname, 'news.controller.ts'), 'utf8');
+  const publicBlock = CONTROLLER.slice(CONTROLLER.indexOf('public/editions') - 800, CONTROLLER.indexOf("@Get('editions')"));
+
+  it('both public routes carry the throttler guard', () => {
+    expect((publicBlock.match(/@UseGuards\(ThrottlerGuard\)/g) || []).length).toBe(2);
+  });
+
+  it('and an actual limit, not just the guard', () => {
+    expect((publicBlock.match(/@Throttle\(\{[^)]*limit:\s*\d+/g) || []).length).toBe(2);
+  });
+
+  it('every OTHER news route stays behind auth — @Public is only on the two public ones', () => {
+    expect((CONTROLLER.match(/@Public\(\)/g) || []).length).toBe(2);
+  });
+});
+
 describe('a story headline is readable (BEA-1261)', () => {
   it('cuts at the first sentence', () => {
     expect(NewsPublicService.headlineOf('DeepSeek shipped V4-Flash today. Then more happened.')).toBe('DeepSeek shipped V4-Flash today.');
@@ -162,5 +182,15 @@ describe('the public page shows no private controls (BEA-1261)', () => {
   it('does not pull in the app shell or the sidebar', () => {
     expect(PAGE).not.toContain('AppShell');
     expect(PAGE).not.toContain('ui/nav');
+  });
+
+  it('credits Smol AI in the masthead as well as the footer', () => {
+    // On a sixty-story edition a footer line is one most readers never reach, and this is built on
+    // someone else's daily work. Two mentions, both linked.
+    const masthead = PAGE.slice(PAGE.indexOf('<header'), PAGE.indexOf('</header>'));
+    expect(masthead).toContain('builtOn.link');
+    expect(masthead).toContain('builtOn.name');
+    const footer = PAGE.slice(PAGE.indexOf('<footer'));
+    expect(footer).toContain('builtOn.link');
   });
 });

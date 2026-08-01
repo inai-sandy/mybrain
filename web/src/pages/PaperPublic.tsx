@@ -127,6 +127,17 @@ export default function PaperPublic() {
         <p className="mt-3 text-xs text-stone-400">
           {edition.storyCount} {edition.storyCount === 1 ? 'story' : 'stories'} · about a {Math.max(2, Math.round(edition.storyCount / 8))} minute read
         </p>
+        {/*
+          The credit sits UNDER THE MASTHEAD, not only in the footer. On a sixty-story edition a
+          footer line is one most readers never scroll to, and this is built on someone else's
+          daily work — the acknowledgement should be where the paper introduces itself.
+        */}
+        <p className="mt-2 text-[11px] text-stone-400">
+          Sorted and written up from{' '}
+          <a href={edition.builtOn.link} target="_blank" rel="noreferrer" className="font-medium underline decoration-dotted underline-offset-2 hover:text-stone-700 dark:hover:text-stone-200">
+            {edition.builtOn.name}
+          </a>
+        </p>
       </header>
 
       {!edition.complete && (
