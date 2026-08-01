@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Send, Sparkles, X, CalendarClock, Check, ListChecks, Wrench } from 'lucide-react';
+import { Loader2, Sparkles, X, CalendarClock, Check, ListChecks, Wrench } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { DictateButton } from '../ui/DictateButton';
 import { Sheet } from '../ui/Sheet';
+import { ChatInput } from '../ui/ChatInput';
 import { ToolPicker, useCatalog } from '../ui/ToolPicker';
 
 /**
@@ -111,9 +111,11 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
     .map((t: any) => ({ id: t.id, why: String(t.why) }));
 
   return (
-    <Sheet onClose={onClose} size="lg">
+    <Sheet onClose={onClose} size="full">
       {(close) => (
-        <div className="flex max-h-[88vh] flex-col">
+        /* A real conversation gets a real window (BEA-1251): nearly full height on the phone, a
+           large tall window on the laptop — not a small card. */
+        <div className="flex h-[calc(var(--vvh,100vh)-6rem)] flex-col sm:h-[80vh] sm:max-h-[calc(var(--vvh,100vh)-8rem)]">
           <div className="flex items-start justify-between gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
             <div className="min-w-0">
               <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-emerald-600" />New job for {areaName}</h2>
@@ -227,20 +229,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
           )}
 
           <div className="border-t border-zinc-100 p-3 dark:border-zinc-800">
-            <div className="flex items-center gap-2">
-              <div className="relative min-w-0 flex-1">
-                <input
-                  value={msg}
-                  onChange={(e) => setMsg(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && send()}
-                  autoFocus
-                  placeholder={log.length ? 'Reply…' : 'What should this job do?'}
-                  className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-11 text-base outline-none focus:border-emerald-400 dark:border-zinc-700 sm:text-sm"
-                />
-                <DictateButton onText={(t) => setMsg((p) => (p ? p + ' ' : '') + t)} className="absolute right-2 top-1/2 -translate-y-1/2" />
-              </div>
-              <button onClick={send} disabled={busy || !msg.trim()} aria-label="Send" className="shrink-0 rounded-xl bg-emerald-600 p-2.5 text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
-            </div>
+            <ChatInput value={msg} onChange={setMsg} onSend={send} busy={busy} autoFocus placeholder={log.length ? 'Reply…' : 'What should this job do?'} />
           </div>
         </div>
       )}

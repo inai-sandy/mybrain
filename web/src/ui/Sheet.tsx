@@ -21,7 +21,7 @@ export function Sheet({
   // When this returns true, an accidental backdrop tap / drag-down is IGNORED (the user must use a button).
   // The explicit close passed to children still works — so Save/Cancel are never blocked. (BEA-512)
   blockBackdropClose?: () => boolean;
-  size?: 'sm' | 'lg';
+  size?: 'sm' | 'lg' | 'full';
 }) {
   const [show, setShow] = useState(true);
   const reduce = useReducedMotion();
@@ -74,7 +74,7 @@ export function Sheet({
             onDragEnd={(_e, info) => {
               if (info.offset.y > 110 || info.velocity.y > 700) dismissByGesture();
             }}
-            className={'relative w-full rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[calc(var(--vvh,100vh)-1.25rem)] overflow-y-auto ' + (size === 'sm' ? 'sm:max-w-sm' : 'sm:max-w-lg')}
+            className={'relative w-full rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[calc(var(--vvh,100vh)-1.25rem)] overflow-y-auto ' + (size === 'sm' ? 'sm:max-w-sm' : size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-lg')}
           >
             {/* grab handle (mobile) — drag this to dismiss */}
             <div className="sm:hidden mx-auto -mt-1.5 mb-3 h-1.5 w-10 rounded-full bg-zinc-300 dark:bg-zinc-700 cursor-grab touch-none" onPointerDown={(e) => controls.start(e)} />
