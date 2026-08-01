@@ -2604,6 +2604,7 @@ function BookmarksModelCard() {
             } else {
               setCustom(false);
               setModel(e.target.value);
+              void save(e.target.value);
             }
           }}
           className={sel}
@@ -2686,6 +2687,7 @@ function TasksModelCard() {
             } else {
               setCustom(false);
               setModel(e.target.value);
+              void save(e.target.value);
             }
           }}
           className={sel}
