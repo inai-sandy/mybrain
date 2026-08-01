@@ -55,6 +55,16 @@ export function ResearchModal({
   const toast = useToast();
   const navigate = useNavigate();
 
+  // Escape closes it, like every other dialog in the app. Not while it is creating the job —
+  // walking away mid-request is how you end up unsure whether a job was made.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
+
   useEffect(() => {
     let alive = true;
     fetch(`${endpointBase}/research`)

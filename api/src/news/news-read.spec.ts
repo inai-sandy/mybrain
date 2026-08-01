@@ -38,9 +38,10 @@ function svc(over: any = {}) {
   const prisma: any = {
     newsEdition: {
       findUnique: async () => edition,
+      // findFirst is what byDay uses now (it also requires published).
       // Membership test, not a nullish default: `latest: null` means "there is no latest",
       // and `null ?? edition` would hand back the edition instead.
-      findFirst: async () => ('latest' in over ? over.latest : edition),
+      findFirst: async ({ where }: any) => (where?.day ? edition : 'latest' in over ? over.latest : edition),
       findMany: async () => over.list || [edition],
     },
     newsIssue: { findUnique: async () => ('issue' in over ? over.issue : { title: 'not much happened today', link: 'https://news.smol.ai/issues/x/', pubDate: new Date() }) },
@@ -109,6 +110,19 @@ describe('one whole edition (BEA-1260)', () => {
 
   it('a day with no edition is a clean 404, not a crash', async () => {
     await expect(svc({ edition: null }).byDay('1999-01-01')).rejects.toThrow(/No edition for that day/);
+  });
+
+  it('a story with a category outside the fixed eight STILL appears, at the end', async () => {
+    // Skipping it would leave the story counted but unreachable on both axes — counted-but-invisible
+    // is the worst of both worlds, because the page would flag itself incomplete and still not show it.
+    const e: any = await svc({
+      stories: [
+        { id: 's1', text: 'known', theme: null, category: 'Research', sourceKind: 'twitter', links: '[]', flagged: false },
+        { id: 's2', text: 'renamed category', theme: null, category: 'Robotics', sourceKind: 'reddit', links: '[]', flagged: false },
+      ],
+    }).byDay('2026-07-31');
+    expect(e.sections.map((s: any) => s.category)).toEqual(['Research', 'Robotics']);
+    expect(e.shown).toBe(2);
   });
 
   it('a story whose category went missing still shows, as Uncategorised', async () => {

@@ -89,6 +89,17 @@ describe('the research popup (BEA-1258)', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('closes on Escape, like every other dialog', async () => {
+    const onClose = vi.fn();
+    render(
+      <MemoryRouter>
+        <ResearchModal title="x" endpointBase="/api/bookmarks/b1" onClose={onClose} />
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
   it('lists past research so it is never lost', async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,

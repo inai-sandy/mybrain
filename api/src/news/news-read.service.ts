@@ -66,7 +66,10 @@ export class NewsReadService {
    * plainer edition rather than a shorter one.
    */
   async byDay(day: string) {
-    const edition = await this.prisma.newsEdition.findUnique({ where: { day } });
+    // `published` guarded here too, like list() and latestDay(). Today every written edition is
+    // published, but a draft leaking by URL guess is exactly the kind of thing that stops being
+    // impossible the moment that invariant changes.
+    const edition = await this.prisma.newsEdition.findFirst({ where: { day, published: true } });
     if (!edition) throw new NotFoundException('No edition for that day');
 
     const issue = await this.prisma.newsIssue.findUnique({
@@ -98,7 +101,13 @@ export class NewsReadService {
 
     // Written sections first, in the fixed order. Then any category that somehow has stories but no
     // written section — visible rather than quietly missing, which is the point of the whole thing.
-    const sections = NEWS_CATEGORIES.filter((c) => byCategory.has(c)).map((category) => {
+    // Any category we do not recognise goes on the END rather than being skipped. A story dropped
+    // here would still be counted in storyCount — the page would flag itself incomplete but the
+    // story itself would be unreachable on both axes, which is precisely the loss this whole
+    // feature exists to prevent.
+    const known = NEWS_CATEGORIES.filter((c) => byCategory.has(c));
+    const unknown = [...byCategory.keys()].filter((c) => !(NEWS_CATEGORIES as readonly string[]).includes(c));
+    const sections = [...known, ...unknown].map((category) => {
       const w = written.find((x) => x.category === category);
       const mine = byCategory.get(category)!;
       return {

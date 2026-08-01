@@ -59,9 +59,10 @@ export default function News() {
   const [day, setDay] = useState<string | null>(dayParam || null);
   const [edition, setEdition] = useState<Edition | null>(null);
   const [archive, setArchive] = useState<ArchiveRow[] | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'today' | 'archive'>(dayParam ? 'today' : 'today');
+  const [tab, setTab] = useState<'today' | 'archive'>('today');
   const [axis, setAxis] = useState<'category' | 'source'>('category');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [researching, setResearching] = useState<Story | null>(null);
@@ -83,13 +84,15 @@ export default function News() {
           return;
         }
         const r = await fetch(`/api/news/editions/${target}`);
-        if (!r.ok) throw new Error('That edition could not be opened.');
+        if (!r.ok) throw new Error('EDITION_FAILED');
         const d = await r.json();
         if (!alive) return;
         setEdition(d);
         setDay(d.day);
-      } catch (e: any) {
-        if (alive) setError(e?.message || 'Something went wrong loading the edition.');
+        setOpen({}); // a new day starts collapsed, not carrying the last one's expansions
+      } catch {
+        // Same rule: our words, not the browser's.
+        if (alive) setError('That edition could not be opened. It may not exist, or the server could not be reached.');
       } finally {
         if (alive) setLoading(false);
       }
@@ -98,12 +101,19 @@ export default function News() {
   }, [dayParam]);
 
   useEffect(() => {
-    if (tab !== 'archive' || archive) return;
+    if (tab !== 'archive' || archive || archiveError) return;
+    // A failed request must NOT be coerced to an empty list: "no past editions yet" and "we could
+    // not reach the server" look identical to a reader, and only one of them is true.
     fetch('/api/news/editions')
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (!r.ok) throw new Error('The archive could not be loaded.');
+        return r.json();
+      })
       .then((d) => setArchive(Array.isArray(d) ? d : []))
-      .catch(() => setArchive([]));
-  }, [tab, archive]);
+      // Always our own words. A raw "offline" or "NetworkError" from the browser is not an
+      // error message a person can act on.
+      .catch(() => setArchiveError('The archive could not be loaded. Check your connection and try again.'));
+  }, [tab, archive, archiveError]);
 
   const bySource = useMemo(() => {
     if (!edition) return [];
@@ -161,7 +171,16 @@ export default function News() {
       </div>
 
       {tab === 'archive' ? (
-        <ArchiveList rows={archive} onOpen={(d) => { setArchive(archive); navigate(`/news/${d}`); setTab('today'); }} />
+        archiveError ? (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300">
+            <p>{archiveError}</p>
+            <button onClick={() => setArchiveError(null)} className="mt-2 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-500">
+              Try again
+            </button>
+          </div>
+        ) : (
+          <ArchiveList rows={archive} onOpen={(d) => { navigate(`/news/${d}`); setTab('today'); }} />
+        )
       ) : (
         <>
           {/* Masthead */}
@@ -346,8 +365,27 @@ function SectionCard({
         {head.map((s) => (
           <StoryRow key={s.id} story={s} onResearch={onResearch} />
         ))}
-        {expanded && rest.map((s) => <StoryRow key={s.id} story={s} onResearch={onResearch} />)}
       </ul>
+
+      {/*
+        The long tail is ALWAYS rendered, never conditionally mounted. `{expanded && rest.map(…)}`
+        looked equivalent and was not: those stories simply did not exist in the page until someone
+        clicked, so find-in-page could not reach them and they were gone entirely if scripting broke
+        after first paint. Complete coverage has to mean complete in the DOM, not complete in the
+        data we happen to hold. Collapsing with a 0fr grid row keeps every story present and
+        findable while still hiding it.
+      */}
+      {rest.length > 0 && (
+        <div className={'grid transition-[grid-template-rows] duration-200 ' + (expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+          <ul className="min-h-0 space-y-2 overflow-hidden" aria-hidden={!expanded}>
+            {rest.map((s) => (
+              <li key={s.id} className="pt-2 first:pt-2">
+                <StoryRow story={s} onResearch={onResearch} bare />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {rest.length > 0 && (
         <button onClick={onToggle} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400">
@@ -359,9 +397,12 @@ function SectionCard({
   );
 }
 
-function StoryRow({ story, onResearch }: { story: Story; onResearch: (s: Story) => void }) {
+function StoryRow({ story, onResearch, bare = false }: { story: Story; onResearch: (s: Story) => void; bare?: boolean }) {
+  // `bare` renders a <div> instead of an <li>, for the collapsed tail where the <li> is supplied
+  // by the caller. Nesting an <li> inside an <li> would be invalid markup.
+  const Tag: any = bare ? 'div' : 'li';
   return (
-    <li className="group rounded-xl border border-zinc-100 p-3 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700">
+    <Tag className="group rounded-xl border border-zinc-100 p-3 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700">
       <p className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{headlineOf(story)}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
         <span>{SOURCE_LABEL[story.sourceKind] || story.sourceKind}</span>
@@ -379,7 +420,7 @@ function StoryRow({ story, onResearch }: { story: Story; onResearch: (s: Story) 
           <Telescope size={13} />
         </button>
       </div>
-    </li>
+    </Tag>
   );
 }
 
