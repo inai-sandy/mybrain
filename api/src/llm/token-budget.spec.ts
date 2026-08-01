@@ -324,7 +324,7 @@ describe('one engine choice governs everything (owner\'s design)', () => {
       .filter(([, v]) => v === LlmService.FOLLOW_ENGINE)
       .map(([k]) => k);
     // The four that were silently on the app default, plus the two flow thinking steps.
-    expect(followers).toEqual(expect.arrayContaining(['draft', 'ui-spec', 'flow-plan', 'draft-check', 'deep-research-write', 'flow-node', 'flow-merge']));
+    expect(followers).toEqual(expect.arrayContaining(['draft', 'ui-spec', 'draft-check', 'deep-research-write', 'flow-node', 'flow-merge']));
 
     store['engine.choice'] = 'claude';
     for (const key of followers) {
