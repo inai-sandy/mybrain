@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2, Plus, Loader2, Sparkles, Shuffle, Telescope, FileText } from 'lucide-react';
+import { Bookmark, Search, RefreshCw, ExternalLink, Eye, Youtube, Link2, Share2, Play, LayoutGrid, List, FolderPlus, X, Trash2, Plus, Loader2, Sparkles, Shuffle, Telescope } from 'lucide-react';
 import { DataTable, Column } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { FOLDER_ICON_NAMES, FOLDER_ICONS, DEFAULT_FOLDER_ICON, FolderGlyph } from '../ui/folderIcons';
 import { StoreBadges } from '../ui/StoreBadges';
 import { useToast } from '../ui/Toast';
 import { ShareDialog } from '../ui/ShareDialog';
+import { ResearchModal } from '../ui/ResearchModal';
 
 type BM = {
   id: string;
@@ -643,7 +644,14 @@ export function Bookmarks() {
         <Plus className="h-4 w-4" /> Add link
       </button>
       {addingLink && <AddLinkModal onClose={() => setAddingLink(false)} onSaved={() => { setAddingLink(false); load(); }} />}
-      {researching && <ResearchModal b={researching} onClose={() => setResearching(null)} />}
+      {researching && (
+        <ResearchModal
+          title={researching.title}
+          endpointBase={`/api/bookmarks/${researching.id}`}
+          pastLabel="Past research on this bookmark"
+          onClose={() => setResearching(null)}
+        />
+      )}
 
       {sharing && (
         <ShareDialog
@@ -655,95 +663,6 @@ export function Bookmarks() {
         />
       )}
       {managing && <ManageBookmarkFolders folders={folders} onClose={() => setManaging(false)} onChanged={reloadFolders} />}
-    </div>
-  );
-}
-
-/**
- * Research a bookmark in your own words — a REAL agent run starts in the Agent module, the report
- * is saved as a Document, and past research shows right here so it's never lost. (BEA-1047)
- */
-function ResearchModal({ b, onClose }: { b: BM; onClose: () => void }) {
-  const [question, setQuestion] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [past, setPast] = useState<{ id: string; title: string | null; status: string; startedAt: string; outputDocId: string | null }[] | null>(null);
-  const toast = useToast();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    fetch(`/api/bookmarks/${b.id}/research`)
-      .then((r) => (r.ok ? r.json() : { runs: [] }))
-      .then((d) => setPast(d.runs || []))
-      .catch(() => setPast([]));
-  }, [b.id]);
-
-  async function start() {
-    if (!question.trim() || busy) return;
-    setBusy(true);
-    try {
-      const r = await fetch(`/api/bookmarks/${b.id}/research`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question: question.trim() }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || (!d.jobId && !d.runId)) {
-        toast('error', d.message || 'Could not create the research job');
-        return;
-      }
-      if (d.jobId) {
-        // BEA-1110: the research lands as a job inside Research Agent — created, you press Run.
-        toast('success', 'Research job created in Research Agent — press Run when ready');
-        navigate(d.url || `/agent/a/${d.jobId}`);
-      } else {
-        toast('success', 'Research started — watch it live');
-        navigate(`/agent/runs/${d.runId}`);
-      }
-    } catch {
-      toast('error', 'Could not start the research');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const statusDot = (s: string) =>
-    s === 'done' ? 'bg-emerald-500' : s === 'failed' || s === 'cancelled' ? 'bg-rose-500' : 'bg-amber-400 animate-pulse';
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={() => !busy && onClose()}>
-      <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="mb-1 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 font-bold"><Telescope size={17} className="text-indigo-500" /> Research this</h3>
-          <button onClick={onClose} disabled={busy} className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 disabled:opacity-50"><X size={18} /></button>
-        </div>
-        <p className="mb-3 line-clamp-1 text-xs text-zinc-500">{b.title}</p>
-        <textarea
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          rows={3}
-          autoFocus
-          placeholder="What do you want to research? Describe it in your own words…"
-          className="w-full resize-none rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-indigo-500 dark:border-zinc-700 dark:bg-zinc-950"
-        />
-        <button onClick={start} disabled={!question.trim() || busy} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50">
-          {busy ? (<><Loader2 size={15} className="animate-spin" /> Creating the job…</>) : 'Create research job'}
-        </button>
-        <p className="mt-1.5 text-center text-[11px] text-zinc-400">A real agent digs in — watch it live, the report is saved as a Document.</p>
-
-        {past && past.length > 0 && (
-          <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Past research on this bookmark</p>
-            <ul className="max-h-40 space-y-1.5 overflow-y-auto">
-              {past.map((r) => (
-                <li key={r.id} className="flex items-center gap-2 text-xs">
-                  <span className={'h-2 w-2 shrink-0 rounded-full ' + statusDot(r.status)} />
-                  <button onClick={() => navigate(`/agent/runs/${r.id}`)} className="min-w-0 flex-1 truncate text-left hover:text-indigo-500">{r.title || 'Research run'}</button>
-                  <span className="shrink-0 text-zinc-400">{shortDate(r.startedAt)}</span>
-                  {r.outputDocId && (
-                    <button onClick={() => navigate(`/documents/${r.outputDocId}`)} title="Open the report" className="shrink-0 rounded p-1 text-zinc-400 hover:text-indigo-500"><FileText size={13} /></button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

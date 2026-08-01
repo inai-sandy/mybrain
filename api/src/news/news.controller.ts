@@ -1,8 +1,9 @@
-import { Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { NewsFeedService } from './news-feed.service';
 import { NewsSplitService } from './news-split.service';
 import { NewsCategoriseService } from './news-categorise.service';
 import { NewsWriteService } from './news-write.service';
+import { NewsResearchService } from './news-research.service';
 
 @Controller('news')
 export class NewsController {
@@ -11,6 +12,7 @@ export class NewsController {
     private readonly split: NewsSplitService,
     private readonly categorise: NewsCategoriseService,
     private readonly write: NewsWriteService,
+    private readonly research: NewsResearchService,
   ) {}
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
@@ -56,6 +58,32 @@ export class NewsController {
   @Post('issues/:id/write')
   writeEdition(@Param('id') id: string) {
     return this.write.publishEdition(id);
+  }
+
+  /** Pick the stories worth digging into. (BEA-1258) */
+  @Post('issues/:id/flag')
+  flag(@Param('id') id: string) {
+    return this.research.flagIssue(id);
+  }
+
+  /** The stories flagged as worth digging into. (BEA-1258) */
+  @Get('issues/:id/flagged')
+  flagged(@Param('id') id: string) {
+    return this.research.flaggedFor(id);
+  }
+
+  /** Start researching one news story — same steps as a bookmark. (BEA-1258) */
+  @Post('stories/:id/research')
+  async researchStory(@Param('id') id: string, @Body() body: { question?: string }) {
+    const res = await this.research.research(id, body?.question || '');
+    if (!res.ok) throw new BadRequestException(res.message || 'Could not start the research');
+    return res;
+  }
+
+  /** Past research about one story. (BEA-1258) */
+  @Get('stories/:id/research')
+  researchRuns(@Param('id') id: string) {
+    return this.research.researchRuns(id);
   }
 
   /** The pieces of one issue, in the order they appeared. `?kind=story` for just the news. */
