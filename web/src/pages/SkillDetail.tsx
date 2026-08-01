@@ -25,7 +25,7 @@ export function SkillDetail() {
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
-  const TARGET_LABEL: Record<string, string> = { sandy: 'Claude · sandy', beakn: 'Claude · beakn', hermes: 'Hermes agent' };
+  const TARGET_LABEL: Record<string, string> = { sandy: 'Claude · sandy', beakn: 'Claude · beakn', hermes: 'Agent engine (legacy)' };
   const labelFor = (t: string) => TARGET_LABEL[t] || t;
 
   function load() {
@@ -229,7 +229,7 @@ export function SkillDetail() {
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-2 text-xs text-zinc-400">“Deploy everywhere” installs into all your Claude Code folders <b>and</b> the Hermes agent so your agents can use it.</p>
+                  <p className="mt-2 text-xs text-zinc-400">“Deploy everywhere” installs into all your Claude Code folders <b>and</b> the agent engine so your agents can use it.</p>
                 </div>
               )}
 
