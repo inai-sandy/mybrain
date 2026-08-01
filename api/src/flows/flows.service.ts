@@ -308,7 +308,7 @@ export class FlowsService {
   async decompose(question: string): Promise<string[]> {
     try {
       const out = await this.llm.complete(
-        `Break the user's request into 2-5 INDEPENDENT sub-questions that can each be worked on separately, then combined into one answer. Request:\n"${question.slice(0, 600)}"\n\nReply with ONLY a JSON array of short sub-question strings, e.g. ["...","..."]. No prose.`,
+        `Break the user's request into 2-5 INDEPENDENT sub-questions that can each be worked on separately, then combined into one answer. Request:\n"${question.slice(0, FlowsService.QUESTION_MAX)}"\n\nReply with ONLY a JSON array of short sub-question strings, e.g. ["...","..."]. No prose.`,
         400,
         'flow-decompose',
       );
@@ -362,7 +362,7 @@ export class FlowsService {
       // tune it. Its default deliberately does NOT add search_brain unless explicitly asked (BEA-1096).
       const tpl = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
       if (!tpl) return this.buildGraph(q, null, skillById, toolById);
-      const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, 800)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
+      const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, FlowsService.QUESTION_MAX)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
       const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 1100, 'flow-plan') : await this.llm.complete(planPrompt, 1100, 'flow-plan');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (m) plan = JSON.parse(m[0]);
@@ -392,14 +392,26 @@ export class FlowsService {
     return { kind: 'ask_ai', label: 'Ask AI' };
   }
 
+  /**
+   * A research question is LONG, and every point in it matters (BEA-1241).
+   *
+   * The owner's real question was 1,254 characters over ten numbered points. It was clipped in five
+   * separate places — the planner saw 600, the auto-planner 800, the canvas node 300, the merge goal
+   * 500 — so points 4 to 10 never reached a single search, and the run was then marked down for not
+   * answering them. Nothing said the question had been shortened.
+   *
+   * This cap exists only so a pasted novel cannot blow a prompt. It is far above any real question.
+   */
+  private static readonly QUESTION_MAX = 8000;
+
   private buildGraph(question: string, plan: any, skillById: Map<string, string>, toolById: Map<string, string>): { nodes: any[]; edges: any[] } {
     const nodes: any[] = [];
     const edges: any[] = [];
     const CX = 320, COL = 240, ROW = 110;
-    nodes.push({ id: 'question', type: 'box', position: { x: CX, y: 0 }, data: { kind: 'question', label: 'Question', sub: question.slice(0, 300) } });
+    nodes.push({ id: 'question', type: 'box', position: { x: CX, y: 0 }, data: { kind: 'question', label: 'Question', sub: question.slice(0, FlowsService.QUESTION_MAX) } });
 
     let branches: any[] = Array.isArray(plan?.branches) ? plan.branches.slice(0, 5) : [];
-    if (!branches.length) branches = [{ subquestion: question.slice(0, 200), steps: [{ kind: 'ask_ai' }] }];
+    if (!branches.length) branches = [{ subquestion: question.slice(0, FlowsService.QUESTION_MAX), steps: [{ kind: 'ask_ai' }] }];
     const startX = branches.length > 1 ? CX - ((branches.length - 1) * COL) / 2 : CX;
     const lasts: string[] = [];
     let maxY = ROW;
@@ -408,7 +420,7 @@ export class FlowsService {
       const x = startX + i * COL;
       let y = ROW + 20;
       const sqId = `b${i}_sq`;
-      nodes.push({ id: sqId, type: 'box', position: { x, y }, data: { kind: 'subquestion', label: `Branch ${i + 1}`, sub: String(br?.subquestion || '').slice(0, 200) } });
+      nodes.push({ id: sqId, type: 'box', position: { x, y }, data: { kind: 'subquestion', label: `Branch ${i + 1}`, sub: String(br?.subquestion || '').slice(0, FlowsService.QUESTION_MAX) } });
       edges.push({ id: `e_q_${sqId}`, source: 'question', target: sqId, animated: true });
       let prev = sqId;
       let steps: any[] = Array.isArray(br?.steps) ? br.steps.slice(0, 4) : [];
@@ -426,7 +438,7 @@ export class FlowsService {
     });
 
     const mergeY = maxY + ROW + 20;
-    nodes.push({ id: 'merge', type: 'box', position: { x: CX, y: mergeY }, data: { kind: 'merge', label: 'Merge', mode: plan?.merge === 'raw' ? 'raw' : 'ai', goal: question.slice(0, 500) } });
+    nodes.push({ id: 'merge', type: 'box', position: { x: CX, y: mergeY }, data: { kind: 'merge', label: 'Merge', mode: plan?.merge === 'raw' ? 'raw' : 'ai', goal: question.slice(0, FlowsService.QUESTION_MAX) } });
     lasts.forEach((l) => edges.push({ id: `e_${l}_merge`, source: l, target: 'merge', animated: true }));
     nodes.push({ id: 'output', type: 'box', position: { x: CX, y: mergeY + ROW }, data: { kind: 'output', label: 'Output' } });
     edges.push({ id: 'e_merge_output', source: 'merge', target: 'output', animated: true });
