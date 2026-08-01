@@ -1052,7 +1052,7 @@ export class FlowRunnerService implements OnModuleInit {
       // time runNode sees it the answer is just "pass the input through".
       case 'if': return input;
       case 'output': return input;
-      case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal);
+      case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal, onLine);
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
       case 'tool': {
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
@@ -1122,7 +1122,7 @@ export class FlowRunnerService implements OnModuleInit {
       // Ask AI is pure reasoning over the upstream input — a direct model call, not a Codex turn.
       case 'ask_ai': {
         const p = (input || node.data?.sub || '').trim();
-        return p ? this.askModel(`Based on the following, write a clear, well-structured answer. Be specific and useful; do not pad.\n\n${p}`) : '';
+        return p ? this.askModel(`Based on the following, write a clear, well-structured answer. Be specific and useful; do not pad.\n\n${p}`, 'flow-node', onLine) : '';
       }
       default: return input;
     }
@@ -1133,12 +1133,35 @@ export class FlowRunnerService implements OnModuleInit {
    * (BEA-1194) — this used to swallow every failure into '', which the flow then recorded as
    * "done, 0 chars". A step that could not think must say so, not look finished.
    */
-  private async askModel(prompt: string): Promise<string> {
+  private async askModel(prompt: string, purpose: 'flow-node' | 'flow-merge' = 'flow-node', onLine?: (t: string) => void, maxTokens = 1500): Promise<string> {
+    /**
+     * Follow THE engine (BEA-1236).
+     *
+     * `completeDetailed`'s third argument is only a usage LABEL — it never picked a model. So this
+     * step ran on the app's general setting, `qwen/qwen3.7-max`, which returned nothing twice in one
+     * real run and killed two of three branches. Resolving the helper first is what makes the
+     * owner's rule true here: choose Codex, and the thinking steps run on Codex.
+     */
+    const cfg = await this.llm.helperModel?.(purpose).catch(() => null);
+    if (cfg && this.llm.completeWithModel) {
+      const r = await this.llm.completeWithModel(cfg, prompt, maxTokens, purpose).catch((e: any) => ({ text: null, error: String(e?.message || e) } as any));
+      if (r?.text?.trim()) {
+        // Say when the answer did NOT come from the engine. completeWithModel walks the chain and,
+        // if every engine is down, pays for a model — which is the right insurance but must never be
+        // invisible (BEA-1201). Without this the owner sees a normal step and an unexplained bill.
+        if (r.flatRate === false || (r.provider && r.provider !== cfg.provider)) {
+          onLine?.(`   ⚠ your engine was unavailable — this step ran on ${r.model || 'another model'}${r.flatRate === false ? ' (paid)' : ''}`);
+        }
+        return r.text;
+      }
+      // No quiet hop to a different model — a step that could not think says so (BEA-1194).
+      throw new Error(`${cfg.model} could not answer: ${String((r as any)?.error || 'it returned nothing').slice(0, 160)}`);
+    }
     // Optional-call: some harnesses build this service with a partial llm stub.
-    const d = await this.llm.completeDetailed?.(prompt, 1500, 'flow-node').catch((e: any) => ({ text: null, error: String(e?.message || e) }));
+    const d = await this.llm.completeDetailed?.(prompt, maxTokens, purpose).catch((e: any) => ({ text: null, error: String(e?.message || e) }));
     if (d?.text?.trim()) return d.text;
     if (!d) {
-      const text = await this.llm.complete?.(prompt, 1500, 'flow-node').catch(() => null);
+      const text = await this.llm.complete?.(prompt, maxTokens, purpose).catch(() => null);
       if (text?.trim()) return text;
     }
     throw new Error(d?.error || 'the thinking step produced nothing');
@@ -1408,7 +1431,7 @@ export class FlowRunnerService implements OnModuleInit {
     });
   }
 
-  private async merge(mode: string, outputs: string[], goal?: string): Promise<string> {
+  private async merge(mode: string, outputs: string[], goal?: string, onLine?: (t: string) => void): Promise<string> {
     const parts = outputs.filter(Boolean);
     if (!parts.length) return '';
     // Every part is a "MISSING" note — there is nothing to synthesise, so say so plainly rather than
@@ -1419,11 +1442,16 @@ export class FlowRunnerService implements OnModuleInit {
     if (parts.length === 1) return parts[0];
     if (mode === 'raw') return parts.map((o, i) => `## Part ${i + 1}\n\n${o}`).join('\n\n');
     const goalBlock = (goal || '').trim() ? `The original question this must answer:\n"${goal!.trim()}"\n\n` : '';
-    const out = await this.llm.complete(
+    // Through the ENGINE, not the app default (BEA-1236). This call read `'flow-merge'` as a usage
+    // LABEL only, so the step that combines every branch into the final report ran on whatever the
+    // general `llm` setting was — the same qwen that returned nothing twice and killed two branches.
+    // Registering the helper was not enough; the call site had to change too.
+    const out = await this.askModel(
       // Cited synthesis over the branch findings, anchored to the original goal. (BEA-771)
       `${goalBlock}Write ONE clear, well-structured answer to the question above by synthesising the research parts below. Rules: stay strictly on the question's topic; keep every substantive finding; remove repetition; use headings where helpful; prefer points that more than one part supports; and KEEP the source citations/URLs from the parts inline so claims stay traceable. If the parts disagree or a key point is unverified, say so briefly. If a part is marked MISSING or is raw unsummarised research, use what it does contain and state plainly, near the top, which part is missing or incomplete — never present the answer as though every part arrived.\n\n${parts.map((p, i) => `--- Research part ${i + 1} ---\n${p}`).join('\n\n')}`,
-      1600,
       'flow-merge',
+      onLine,
+      1600, // a synthesis over every branch needs more room than a single thinking step
     );
     return out || parts.join('\n\n');
   }
