@@ -1307,6 +1307,39 @@ model NewsIssue {
   fetchedAt   DateTime  @default(now())
   filledAt    DateTime? // when a summary-only issue later gained its full content
 
+  // BEA-1255 — the count guarantee. extractedCount is EVERY piece the splitter produced; later
+  // stages assert against it, and a disagreement fails the run instead of publishing a short
+  // edition that looks complete.
+  extractedCount Int?
+  storyCount     Int?
+  splitAt        DateTime?
+  stories        NewsStory[]
+
   @@index([pubDate])
   @@index([summaryOnly])
+}
+
+/// One piece of a daily issue (BEA-1255). `kind` says what it is: `story` is the unit of news (a
+/// top-level list item, carrying its nested sub-bullets); `theme` is a section label; `intro` is the
+/// masthead blockquote; `unplaced` is text that fitted no known shape and is kept VISIBLE rather
+/// than dropped. Nothing in an issue is discarded — that is the whole point of the split.
+model NewsStory {
+  id          String   @id @default(uuid())
+  issueId     String
+  order       Int
+  kind        String
+  sourceKind  String // twitter | reddit | discord | unknown
+  sectionPath String   @default("")
+  theme       String?
+  text        String
+  html        String
+  links       String   @default("[]") // JSON string[]
+  category    String? // filled in by BEA-1256; null until then, never a silent default
+  createdAt   DateTime @default(now())
+  // Cascade added while the table was still new: deleting an issue must not leave its stories
+  // behind as orphans nobody can reach. Retro-fitting a foreign key later means a table rewrite.
+  issue       NewsIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([issueId])
+  @@index([issueId, kind])
 }
