@@ -36,6 +36,9 @@ const FALLBACK_TOOLS = [
   { id: 'drive', name: 'Drive', group: 'Google', description: 'Find / read files' },
   { id: 'ask_ai', name: 'Ask AI', group: 'AI', description: 'A plain reasoning step' },
   { id: 'http', name: 'HTTP request', group: 'Advanced', description: 'Call any external API' },
+  { id: 'news_collect', name: 'Collect the AI news', group: 'News', description: 'Fetch, split and file every story' },
+  { id: 'news_write', name: 'Write the edition', group: 'News', description: 'Headline, 60-second read, a section per category' },
+  { id: 'news_flag', name: 'Pick what needs research', group: 'News', description: 'Shortlist what is worth a proper dig' },
   { id: 'save_document', name: 'Save to Documents', group: 'Output', description: 'Save the result' },
   { id: 'telegram', name: 'Send to Telegram', group: 'Messaging', description: 'Message you on Telegram' },
 ].map((t) => ({ ...t, type: 'tool', kind: 'tool' as const, connected: true }));
@@ -78,8 +81,22 @@ export class FlowsService {
     });
     return this.shape(f);
   }
-  async update(id: string, patch: { name?: string; question?: string; graph?: unknown; schedule?: unknown }) {
+  async update(id: string, patch: { name?: string; question?: string; graph?: unknown; schedule?: unknown; locked?: boolean }) {
     const data: any = {};
+    // A locked flow's SHAPE is protected here too, not just from Auto-plan (BEA-1259). The canvas
+    // saves through this same endpoint on every edit, so guarding only planAndSave would have left
+    // the lock trivially bypassed: open AI News Daily, nudge one node, and the hand-drawn steps are
+    // gone. Renaming stays allowed — it changes nothing about what runs.
+    if (patch.graph !== undefined || patch.schedule !== undefined) {
+      const current = await this.prisma.flow.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException('Flow not found');
+      if ((current as any).locked && patch.locked !== false) {
+        throw new BadRequestException(
+          `"${current.name}" is a locked flow — its steps and schedule are fixed. Unlock it first if you really want to change them.`,
+        );
+      }
+    }
+    if (patch.locked !== undefined) data.locked = Boolean(patch.locked);
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120) || 'Untitled flow';
     if (patch.question !== undefined) data.question = patch.question?.trim() || null;
     if (patch.graph !== undefined) data.graph = JSON.stringify(patch.graph || { nodes: [], edges: [] });
@@ -136,6 +153,9 @@ export class FlowsService {
         save_document: 'Save the result as a document.',
         telegram: 'Send the result to me on Telegram.',
         http: 'Make the appropriate external API / HTTP request and use the result.',
+        news_collect: 'Pull the AI news feed, split every story out of it and file each one into a category.',
+        news_write: "Write the day's edition from the categorised stories: a headline, the 60-second read, and a section per category.",
+        news_flag: 'Shortlist the few stories worth researching properly, for the end of the edition.',
       };
       return withGuidance(map[node?.data?.refId] || `Use the ${label} tool.`);
     }
@@ -273,6 +293,14 @@ export class FlowsService {
   async planAndSave(id: string) {
     const f = await this.prisma.flow.findUnique({ where: { id } });
     if (!f) throw new NotFoundException('Flow not found');
+    // A locked flow is hand-drawn and correct (BEA-1259). Auto-plan would replace its real steps
+    // with generic search branches and quietly throw the working pipeline away — the same failure
+    // as BEA-1246, where one press downgraded a research flow to a single index. Refuse, in words.
+    if ((f as any).locked) {
+      throw new BadRequestException(
+        `"${f.name}" is a locked flow — it was drawn by hand and Auto-plan would replace its steps. Unlock it first if you really want it re-planned.`,
+      );
+    }
     // Plan within the job's toolbox (BEA-1174): a drawn step the job isn't allowed to run would be
     // a picture that lies — it would simply be refused at run time.
     const allowed = (f as any).agentId

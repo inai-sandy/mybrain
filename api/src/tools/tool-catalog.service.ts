@@ -16,7 +16,7 @@ import { LlmService } from '../llm/llm.service';
  * degrades to a plain reasoning step); renaming one silently breaks saved flows.
  */
 
-export type ToolGroup = 'Brain' | 'Web' | 'Google' | 'Messaging' | 'Output' | 'AI' | 'Skills' | 'MCP servers' | 'Advanced';
+export type ToolGroup = 'Brain' | 'Web' | 'Google' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
 
 export type CatalogTool = {
   id: string;
@@ -41,7 +41,7 @@ export function clip(s: string | null | undefined, max: number): string {
 }
 
 /** The order groups are shown in — most reached-for first. */
-export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'Google', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
+export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Google', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
 
 /** Tools that are simply part of the app — nothing to connect. */
 const BUILT_IN: CatalogTool[] = [
@@ -54,6 +54,12 @@ const BUILT_IN: CatalogTool[] = [
   { id: 'save_capture', name: 'Save a capture', group: 'Output', kind: 'tool', connected: true, description: 'File a note into your capture inbox' },
   { id: 'create_task', name: 'Create a task', group: 'Output', kind: 'tool', connected: true, description: 'Add a to-do to your task list' },
   { id: 'http', name: 'HTTP request', group: 'Advanced', kind: 'tool', connected: true, description: 'Call any external API directly' },
+  // AI News Daily (BEA-1259). Three real steps so the canvas can SHOW the pipeline, while the work
+  // itself stays in our code — an engine turn averages 118,000 tokens, and the engine must never be
+  // the thing deciding whether a story was kept.
+  { id: 'news_collect', name: 'Collect the AI news', group: 'News', kind: 'tool', connected: true, description: 'Pull the feed, split every story out and file each one into a category' },
+  { id: 'news_write', name: 'Write the edition', group: 'News', kind: 'tool', connected: true, description: 'Turn the categorised stories into the day\'s edition — headline, 60-second read, a section per category' },
+  { id: 'news_flag', name: 'Pick what needs research', group: 'News', kind: 'tool', connected: true, description: 'Shortlist the few stories worth a proper dig, for the end of the edition' },
   { id: 'cli', name: 'Run a command', group: 'Advanced', kind: 'tool', connected: true, description: 'Run a command line tool on the engine host' },
 ];
 

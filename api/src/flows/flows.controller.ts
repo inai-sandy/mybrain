@@ -118,7 +118,7 @@ export class FlowsController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: { name?: string; question?: string; graph?: unknown; schedule?: unknown }) {
+  update(@Param('id') id: string, @Body() body: { name?: string; question?: string; graph?: unknown; schedule?: unknown; locked?: boolean }) {
     return this.flows.update(id, body || {});
   }
 
