@@ -1,4 +1,4 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, StickyNote, Mic, Mail, Sparkles, Lock, FlaskConical, FileText, Bot, Workflow, Users, MessagesSquare, AudioLines, Disc3, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, StickyNote, Mic, Mail, Sparkles, Lock, FlaskConical, FileText, Bot, Workflow, Users, MessagesSquare, AudioLines, Disc3, Newspaper, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 export type NavGroup = { label?: string; items: NavItem[] };
@@ -54,6 +54,9 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Automation',
     items: [
       { to: '/agent', label: 'Agents', icon: Bot },
+      // AI News Daily writes an edition every day at noon (BEA-1260). It IS an agent, but the thing
+      // you actually want to open is the paper, not the job page.
+      { to: '/news', label: 'AI News Daily', icon: Newspaper },
       { to: '/flows', label: 'Flows', icon: Workflow },
       { to: '/skills', label: 'Skills', icon: Wand2 },
     ],
