@@ -28,6 +28,9 @@ export type ResearchSpend = {
   searches: number;
   extracts: number;
   sources: number;
+  /** How many calls went to Tavily. Explicit since BEA-1239 — every question now hits all three
+   *  indexes, so it can no longer be derived as "searches minus the others". */
+  tavilySearches?: number;
   /** Of those searches, how many went to Exa. Only the Tavily ones are priced in Tavily credits. */
   meaningSearches: number;
   /** Of those searches, how many went to Brave — one call there does search AND page reading. */
@@ -58,8 +61,18 @@ export class DeepResearchError extends WebSearchError {
 }
 
 /** Ceilings no setting may exceed. One step must never be able to run away with credits. */
-const HARD_CAP: ResearchBudget = { searches: 8, extracts: 10 };
-const DEFAULT_BUDGET: ResearchBudget = { searches: 6, extracts: 6 };
+/**
+ * The budget counts real index CALLS, not questions (BEA-1199) — one question can cost several
+ * Tavily attempts once the widening fallbacks fire, and counting questions under-reported the bill
+ * by up to 3x exactly when it mattered.
+ *
+ * Raised 3x for BEA-1239: every question now sweeps Tavily + Exa + Brave on purpose. Typically that
+ * is three calls a question, but the worst case is five — Tavily retries internally, narrow then
+ * wider, and each attempt is a real credit. The ceiling moves with the decision rather than silently
+ * strangling it down to two questions a run.
+ */
+const HARD_CAP: ResearchBudget = { searches: 24, extracts: 10 };
+const DEFAULT_BUDGET: ResearchBudget = { searches: 18, extracts: 6 };
 
 /** A Tavily advanced search is 2 credits. Only searches are priced here because that is the figure I verified. */
 const CREDITS_PER_SEARCH = 2;
@@ -164,7 +177,7 @@ export class DeepResearchService {
       extracts: this.cap(opts.budget?.extracts, DEFAULT_BUDGET.extracts, HARD_CAP.extracts),
     };
     const say = opts.onLine || (() => undefined);
-    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, braveSearches: 0, paidCalls: 0 };
+    const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, tavilySearches: 0, meaningSearches: 0, braveSearches: 0, paidCalls: 0 };
 
     // Work the date window and country out ONCE from the real question — a sub-question like
     // "AICTE approved intake" often loses the "2025 and 2026" the owner actually asked about.
@@ -187,72 +200,104 @@ export class DeepResearchService {
 
     // 2. Gather. One search per sub-question, deduplicated by URL across all of them.
     const seen = new Set<string>();
-    let useBraveFirst = false;
     const alreadyRead = new Set<string>(); // Brave hands back the page content with the search
+    /**
+     * Did the OWNER type these dates, or did we guess them from the wording?
+     *
+     * Brave only has a coarse freshness setting, so it cannot hold a window the owner pinned — and
+     * BEA-1209 promises a stated window is never widened. But testing `start_date || end_date` would
+     * also catch a window merely GUESSED from a question that happens to mention a year, which is
+     * most of them — quietly dropping one of the three indexes for the bulk of the traffic this
+     * whole change exists to widen. Only the owner's own dates count.
+     */
+    const ownerSetDates = !!stated;
+    if (ownerSetDates && have.brave) say('   (Brave is sitting this run out — it cannot hold your exact date range)');
     const found: WebResult[] = [];
     const failures: string[] = [];
     for (const ask of asks) {
       if (spend.searches >= budget.searches) break;
-      const meaning = DeepResearchService.prefersMeaning(ask) && have.exa;
-      // Which gatherer? (BEA-1205)
-      //  • Exa when the question has no keywords to match.
-      //  • Tavily when we need PRECISION — a real date window or a list of sites to stay inside.
-      //    Brave only has `site:` and a coarse freshness setting.
-      //  • Brave otherwise: one call does search AND extraction, and returns ranked chunks. Measured
-      //    at 3 calls / 11,111 words / 3.7s against Tavily's 15 / 69,702 / 23.7s for the same three
-      //    questions — and it found more sources.
-      const needsPrecision = !!(window.start_date || window.time_range || sites.length);
-      const useBrave = !meaning && have.brave && !needsPrecision;
       say(`   🔎 ${ask.slice(0, 80)}`);
-      if (meaning || useBrave) spend.searches++;
-      if (meaning) spend.meaningSearches++;
-      if (useBrave) { spend.braveSearches++; useBraveFirst = true; }
-      try {
-        const rows = meaning
-          ? await this.web.searchByMeaning(ask)
-          : useBrave
-            ? await this.web.braveContext(ask, { country, window })
-            : await this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; } });
-        // Brave already returned the page's content. Paying Tavily to open it again buys nothing.
-        if (useBrave) for (const r of rows) alreadyRead.add(r.url);
-        let fresh = 0;
-        for (const r of rows) {
-          const key = this.urlKey(r.url);
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          found.push(r);
-          fresh++;
+
+      /**
+       * ALL THREE INDEXES, every question (BEA-1239).
+       *
+       * This used to pick one gatherer by heuristic — Brave or Tavily, never both, with Exa only for
+       * conceptual-sounding questions. But measured head to head they shared just 3/6, 2/6 and on one
+       * question 0/6 sources. They are different indexes, not different doors to the same one. So a
+       * question was answered from about a third of what we could see, and "cannot be determined" was
+       * sometimes just the one index we happened to ask.
+       *
+       * Brave is skipped when the owner STATED a date range: it has only a coarse freshness setting,
+       * so including it would quietly widen a window BEA-1209 promises never to widen.
+       */
+      const jobs: Array<{ name: string; run: () => Promise<WebResult[]>; brave?: boolean }> = [];
+      // onAttempt, not a flat +1: Tavily retries internally (narrow, then wider) and every attempt
+      // is a real credit. Counting the call once would under-report what the run actually spent.
+      if (have.tavily) jobs.push({ name: 'Tavily', run: () => this.web.search(ask, 6, { includeDomains: sites, window, country, onAttempt: () => { spend.searches++; spend.tavilySearches = (spend.tavilySearches || 0) + 1; } }) });
+      if (have.exa) { jobs.push({ name: 'Exa', run: () => this.web.searchByMeaning(ask) }); spend.searches++; spend.meaningSearches++; }
+      if (have.brave && !ownerSetDates) { jobs.push({ name: 'Brave', run: () => this.web.braveContext(ask, { country, window }), brave: true }); spend.searches++; spend.braveSearches++; }
+
+      if (!jobs.length) { failures.push(`“${ask.slice(0, 60)}” — no search index is set up`); say('      failed: no search index is set up'); continue; }
+
+      const settled = await Promise.all(jobs.map(async (j) => {
+        try { return { name: j.name, brave: j.brave, rows: await j.run(), error: null as string | null }; }
+        catch (e: any) { return { name: j.name, brave: j.brave, rows: [] as WebResult[], error: String(e?.message || e) }; }
+      }));
+
+      let fresh = 0;
+      const perIndex: string[] = [];
+      for (const r of settled) {
+        if (r.error) {
+          // One index failing must never look like a full sweep that found nothing.
+          failures.push(`“${ask.slice(0, 60)}” on ${r.name} — ${r.error}`);
+          perIndex.push(`${r.name}: failed`);
+          continue;
         }
-        say(`      ${fresh} new source${fresh === 1 ? '' : 's'}`);
-      } catch (e: any) {
-        // One sub-question failing must not lose the whole report — but every failure is remembered,
-        // so if NOTHING worked we can say exactly why instead of shrugging.
-        const why = String(e?.message || e);
-        failures.push(`“${ask.slice(0, 60)}” — ${why}`);
-        say(`      failed: ${why.slice(0, 90)}`);
+        // Brave already returned the page's content. Paying Tavily to open it again buys nothing.
+        // By urlKey, not the raw string: the same page reaches us as https://x.test/p from one
+        // index and https://www.x.test/p/ from another, and whichever ran first is the one kept —
+        // so a raw-string check quietly paid to re-read a page Brave had already returned.
+        if (r.brave) for (const row of r.rows) { const k = this.urlKey(row.url); if (k) alreadyRead.add(k); }
+        let n = 0;
+        for (const row of r.rows) {
+          const key = this.urlKey(row.url);
+          if (!key || seen.has(key)) continue; // three indexes, not three times the reading
+          seen.add(key);
+          found.push(row);
+          n++; fresh++;
+        }
+        perIndex.push(`${r.name}: ${n}`);
       }
+      say(`      ${fresh} new source${fresh === 1 ? '' : 's'} (${perIndex.join(', ')})`);
     }
     spend.sources = found.length;
 
-    // Before concluding that nothing exists, ASK THE OTHER INDEX (BEA-1205).
-    //
-    // Measured: Brave and Tavily shared only 3/6, 2/6 and 0/6 hosts on three real questions — on one
-    // they returned completely different sources. So one index drawing a blank is weak evidence.
-    // "This data does not exist publicly" is the most consequential sentence this tool writes, and
-    // the owner's placement report turned on exactly that claim. It costs one extra call, only in
-    // the case where being wrong matters most.
-    if (!found.length && have.brave && have.tavily) {
-      say('   🔁 nothing found — asking the other index before saying so');
-      const second = await (useBraveFirst ? this.web.search(goal, 6, { country }) : this.web.braveContext(goal, { country }))
-        .catch(() => [] as WebResult[]);
-      spend.searches++;
-      if (!useBraveFirst) spend.braveSearches++;
-      for (const r of second) {
-        const key = this.urlKey(r.url);
-        if (key && !seen.has(key)) { seen.add(key); found.push(r); }
+    /**
+     * Before concluding that nothing exists, ASK THE WHOLE QUESTION (BEA-1205, reshaped by BEA-1239).
+     *
+     * This used to ask "the other index", which mattered when a question only ever reached one of
+     * them. Now every question sweeps all three, so a second index is no longer the missing angle —
+     * the WORDING is. The sub-questions are a plan, and a plan can be wrong. Asking the owner's own
+     * goal verbatim is a genuinely different query, and "this data does not exist publicly" is the
+     * most consequential sentence this tool writes.
+     */
+    // Gated on the budget like the main loop (review finding). Without this the last resort fired
+    // unconditionally and added up to five more charged calls — measured at 30 against a cap of 24,
+    // on precisely the "nothing found anywhere" path this feature exists to handle.
+    if (!found.length && spend.searches < budget.searches) {
+      say('   🔁 nothing found — asking your question as you wrote it, before saying so');
+      const retry: Array<Promise<WebResult[]>> = [];
+      if (have.tavily) retry.push(this.web.search(goal, 6, { country, window, onAttempt: () => { spend.searches++; spend.tavilySearches = (spend.tavilySearches || 0) + 1; } }).catch(() => []));
+      if (have.exa) { retry.push(this.web.searchByMeaning(goal).catch(() => [])); spend.searches++; spend.meaningSearches++; }
+      if (have.brave && !ownerSetDates) { retry.push(this.web.braveContext(goal, { country, window }).catch(() => [])); spend.searches++; spend.braveSearches++; }
+      for (const rows of await Promise.all(retry)) {
+        for (const r of rows) {
+          const key = this.urlKey(r.url);
+          if (key && !seen.has(key)) { seen.add(key); found.push(r); }
+        }
       }
       spend.sources = found.length;
-      if (found.length) say(`      the second index found ${found.length}`);
+      if (found.length) say(`      asking it your way found ${found.length}`);
     }
 
     if (!found.length) {
@@ -268,7 +313,7 @@ export class DeepResearchService {
 
     // 3. Read the best pages properly. A long snippet already says enough.
     // Brave already returned the page content, so re-reading those costs a credit for nothing.
-    const toRead = found.filter((r) => (r.snippet || '').length < SNIPPET_IS_ENOUGH && !alreadyRead.has(r.url)).slice(0, budget.extracts);
+    const toRead = found.filter((r) => (r.snippet || '').length < SNIPPET_IS_ENOUGH && !alreadyRead.has(this.urlKey(r.url))).slice(0, budget.extracts);
     const pages = new Map<string, string>();
     for (const r of toRead) {
       if (spend.extracts >= budget.extracts) break;
@@ -449,7 +494,11 @@ export class DeepResearchService {
 
   /** The cost, in the only units that are actually verified. */
   private costLine(spend: ResearchSpend): string {
-    const tavily = Math.max(0, spend.searches - spend.meaningSearches - spend.braveSearches);
+    // Explicit when present (BEA-1239); older stored runs fall back to the derivation they were
+    // written with, so a run from last week still reads correctly in the Runs list.
+    const tavily = typeof spend.tavilySearches === 'number'
+      ? spend.tavilySearches
+      : Math.max(0, spend.searches - spend.meaningSearches - spend.braveSearches);
     const bits = [`${spend.searches} search${spend.searches === 1 ? '' : 'es'}`, `${spend.extracts} page read${spend.extracts === 1 ? '' : 's'}`];
     // Only Tavily's rate is a figure I checked, so only Tavily searches are priced.
     const priced = tavily > 0 ? `${tavily * CREDITS_PER_SEARCH} Tavily credits` : '';
