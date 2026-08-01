@@ -97,8 +97,10 @@ export class LlmController {
         return { ...p, url: undefined, ready: false, reason: `not answering (${String(e?.message || e).slice(0, 60)})` };
       }
     }));
-    // The order jobs actually try them in, so the screen matches the behaviour.
-    return { chain: rows, fallback: 'A paid model, only when every one of these is unavailable.' };
+    // Since BEA-1243 the AUTOMATIC path is short: your chosen engine, then the paid API. The other
+    // runners stay listed because you can still pick them by hand — but they no longer cover for
+    // each other behind your back.
+    return { chain: rows, fallback: 'Jobs run on your chosen engine. If it cannot answer, they fall back to Claude Sonnet 5 on the API (paid, said out loud in the run log) — the other engines are manual choices, not automatic backups.' };
   }
 
   /**

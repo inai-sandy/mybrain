@@ -1315,11 +1315,11 @@ function BudgetAndEngines() {
 
       {eng?.chain?.length > 0 && (
         <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-          <h3 className="text-sm font-semibold">Engines, in the order jobs try them</h3>
+          <h3 className="text-sm font-semibold">Your engines</h3>
           <ul className="mt-1.5 space-y-1.5">
-            {eng.chain.map((e: any, i: number) => (
+            {eng.chain.map((e: any) => (
               <li key={e.name} className="flex items-start gap-2 text-xs">
-                <span className="mt-0.5 text-zinc-400">{i + 1}.</span>
+                {/* No numbering since BEA-1243 — these are options, not a relay order. */}
                 <span className={'mt-0.5 h-2 w-2 shrink-0 rounded-full ' + (e.ready ? 'bg-emerald-500' : 'bg-rose-500')} />
                 <span className="min-w-0">
                   <b className="text-zinc-800 dark:text-zinc-100">{e.label}</b>
@@ -1575,7 +1575,7 @@ function EnginePicker() {
     <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/5">
       <h2 className="text-sm font-semibold">Your engine</h2>
       <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
-        The one choice. Research write-ups, skills and agent runs all use it. If it is unavailable the others below cover for it automatically.
+        The one choice. Research write-ups, skills and agent runs all use it. If it cannot answer, the job falls back to Claude Sonnet 5 on the API — the other engines are manual choices, not automatic backups.
       </p>
       <div className="mt-2.5 space-y-1.5">
         {engines.map((e: any) => (
