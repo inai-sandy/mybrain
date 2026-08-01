@@ -35,6 +35,17 @@ export class AgentAreasService {
     const area = await this.create({
       name: 'Research Agent', icon: '🔬', color: '#22d3ee',
       description: 'Deep-dives you ask for — from bookmarks, voice, anywhere. One report per job.',
+      // Deep research MUST be in the standing toolbox (BEA-1252). Flows are planned inside the
+      // job's toolbox, and jobs without their own fall back to this one — leaving deep_research
+      // out meant every research job under this agent could only plan shallow, single-index
+      // searches. The owner's own re-planned flow proved it live.
+      tools: [
+        { id: 'deep_research', name: 'Deep research', group: 'Web', kind: 'api', note: 'Many searches across every index, reads the best pages, writes a cited report', status: 'installed' },
+        { id: 'web_search', name: 'Web search', group: 'Web', kind: 'api', note: 'Search the live web', status: 'installed' },
+        { id: 'web_read', name: 'Read a page', group: 'Web', kind: 'api', note: 'Open a link and read what it says', status: 'installed' },
+        { id: 'search_brain', name: 'Search my brain', group: 'Brain', kind: 'api', note: 'Everything you have saved — notes, documents and memories, searched by meaning', status: 'installed' },
+        { id: 'save_document', name: 'Save to Documents', group: 'Output', kind: 'api', note: 'Write the result into your document library', status: 'installed' },
+      ] as any,
     });
     return { id: area.id, created: true };
   }

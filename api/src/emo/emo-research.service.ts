@@ -102,7 +102,10 @@ export class EmoResearchService {
    * side effect of asking for research — "if required, I'll add it manually". They stay one tick
    * away in the picker.
    */
-  private static DEFAULT_KIT = ['web_search', 'web_read', 'save_document'];
+  // deep_research included on purpose (BEA-1252): a voice research is "full depth, no questions"
+  // (BEA-1175) — a fallback kit that cannot go deep quietly broke that promise whenever the
+  // tool-picker call failed.
+  private static DEFAULT_KIT = ['deep_research', 'web_search', 'web_read', 'save_document'];
 
   /** Tools that read the owner's own material — never chosen on his behalf. */
   private static BRAIN_TOOLS = new Set(['search_brain', 'search_rag', 'fetch_document', 'remember']);
@@ -129,7 +132,7 @@ export class EmoResearchService {
     try {
       const list = offerable.map((t: any) => `- ${t.id}: ${t.name} — ${t.description}`).join('\n');
       const out = await this.llm.complete(
-        `Pick the tools an assistant needs to research this properly. Use ONLY ids from the list.\n\nWhat was asked:\n"${text.slice(0, 500)}"\n\nTools:\n${list}\n\nReply with ONLY a JSON array of ids, e.g. ["web_search","save_document"]. Include a way to search the web, a way to read sources, and a way to save the result unless the request clearly does not need it. Do NOT pick anything that reads the owner's own notes or documents unless he explicitly asked for them.`,
+        `Pick the tools an assistant needs to research this properly. Use ONLY ids from the list.\n\nWhat was asked:\n"${text.slice(0, 500)}"\n\nTools:\n${list}\n\nReply with ONLY a JSON array of ids, e.g. ["web_search","save_document"]. Include deep_research when the request needs real digging (comparisons, costs, several places or sources), a way to search the web, a way to read sources, and a way to save the result unless the request clearly does not need it. Do NOT pick anything that reads the owner's own notes or documents unless he explicitly asked for them.`,
         200,
         'emo-research-tools',
       );
