@@ -365,7 +365,7 @@ export class FlowsService {
       const tpl = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
       if (!tpl) return this.buildGraph(q, null, skillById, toolById, webTools);
       const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, FlowsService.QUESTION_MAX)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
-      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 1100, 'flow-plan') : await this.llm.complete(planPrompt, 1100, 'flow-plan');
+      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 2200, 'flow-plan') : await this.llm.complete(planPrompt, 2200, 'flow-plan');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (m) plan = JSON.parse(m[0]);
     } catch { plan = null; }
@@ -376,7 +376,7 @@ export class FlowsService {
         try {
           const tpl2 = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
           const p2 = tpl2.replaceAll('{{question}}', short).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
-          const out2 = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', p2, 1100, 'flow-plan') : await this.llm.complete(p2, 1100, 'flow-plan');
+          const out2 = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', p2, 2200, 'flow-plan') : await this.llm.complete(p2, 2200, 'flow-plan');
           const m2 = (out2 || '').match(/\{[\s\S]*\}/);
           if (m2) plan = JSON.parse(m2[0]);
         } catch { /* keep the fallback graph */ }
