@@ -375,8 +375,11 @@ export class LlmService {
       // Charged up front like any engine turn — it reports nothing until it finishes (BEA-1204).
       // RESERVED too, not merely checked: two turns starting together would otherwise read the same
       // figure and both be allowed through.
-      await this.budget?.require(ENGINE_TURN_TOKENS);
-      const release = this.budget?.reserve(ENGINE_TURN_TOKENS) ?? (() => undefined);
+      // Charge what a turn on THIS engine really costs (BEA-1240) — one flat figure charged a Codex
+      // turn five times its measured cost and stopped runs that had spent almost nothing.
+      const estimate = (await this.budget?.estimateFor(cfg.provider).catch(() => ENGINE_TURN_TOKENS)) ?? ENGINE_TURN_TOKENS;
+      await this.budget?.require(estimate);
+      const release = this.budget?.reserve(estimate) ?? (() => undefined);
       try {
         // Walk the same chain as completeWith (BEA-1201). This used to try one engine and drop
         // straight to the paid model, so the Story of the Day, the Gmail brief and the research
