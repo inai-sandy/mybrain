@@ -200,3 +200,61 @@ describe('planning from a numbered job task (BEA-1174)', () => {
     expect(asked.length).toBe(1);
   });
 });
+
+/**
+ * BEA-1241 — the owner's 1,254-character, ten-point question was clipped in five separate places.
+ * The canvas node kept 300, the planner saw 600, the merge goal 500. Points 4 to 10 never reached a
+ * single search, and the run was then graded down for not answering them. Nothing said a word.
+ */
+describe('the WHOLE question reaches the flow (BEA-1241)', () => {
+  const longQuestion = [
+    '1. Study Engineering Degree and MBA students for 2025 and 2026 in Pune, Mumbai, Hyderabad, Bangalore, Chennai, and Ahmedabad.',
+    '2. Find reliable data on how many students passed out or are expected to pass out in each city.',
+    '3. Find placement data from colleges, placement reports, government data, industry reports.',
+    '4. Break placements into campus interviews, off-campus placements and fresher jobs.',
+    '5. Show placement percentages, not just counts.',
+    '6. Break placements by job category — IT, AI, core engineering, sales, finance, consulting.',
+    '7. Explain whether AI is reducing fresher jobs in India.',
+    '8. Include student interest in business or startup plans.',
+    '9. Compare the cities against each other on outcomes.',
+    '10. Save a detailed sourced report in Documents with tables, links, assumptions, gaps and clear conclusions.',
+  ].join('\n');
+
+  const build = (plan: any) => {
+    const svc = new FlowsService({} as any, {} as any, {} as any);
+    return (svc as any).buildGraph(longQuestion, plan, new Map(), new Map());
+  };
+
+  it('keeps every point in the question node — not the first 300 characters', () => {
+    const g = build({ branches: [{ subquestion: 'a', steps: [{ kind: 'ask_ai' }] }] });
+    const q = g.nodes.find((n: any) => n.data?.kind === 'question');
+    expect(q.data.sub).toBe(longQuestion);
+    expect(q.data.sub).toContain('AI is reducing fresher jobs');       // point 7 — used to be cut
+    expect(q.data.sub).toContain('Save a detailed sourced report');    // point 10 — used to be cut
+    expect(longQuestion.length).toBeGreaterThan(300);                  // the test is meaningful
+  });
+
+  it('gives the MERGE the whole goal, so the final answer knows what was asked', () => {
+    const g = build({ branches: [{ subquestion: 'a', steps: [{ kind: 'ask_ai' }] }] });
+    const merge = g.nodes.find((n: any) => n.data?.kind === 'merge');
+    expect(merge.data.goal).toBe(longQuestion);
+    expect(merge.data.goal).toContain('startup plans'); // point 8 — the merge used to stop at 500
+  });
+
+  it('does not cut a branch sub-question mid-word', () => {
+    // Real run, branch 3: "…Pune, Mumbai, Hyderabad, Bangalore, Chennai, and Ahmed" — exactly 200
+    // characters, cut inside "Ahmedabad", so one of the six cities was silently dropped.
+    const long = 'Find the distribution of job categories such as IT, AI, core engineering, sales, finance, and consulting for fresher Engineering and MBA roles in Pune, Mumbai, Hyderabad, Bangalore, Chennai, and Ahmedabad.';
+    const g = build({ branches: [{ subquestion: long, steps: [{ kind: 'ask_ai' }] }] });
+    const sq = g.nodes.find((n: any) => n.data?.kind === 'subquestion');
+    expect(sq.data.sub).toBe(long);
+    expect(sq.data.sub).toContain('Ahmedabad');
+    expect(long.length).toBeGreaterThan(200);
+  });
+
+  it('does not lose the question when the planner returns nothing', () => {
+    const g = build(null);
+    const sq = g.nodes.find((n: any) => n.data?.kind === 'subquestion');
+    expect(sq.data.sub).toBe(longQuestion); // the fallback branch used to keep only 200 characters
+  });
+});
