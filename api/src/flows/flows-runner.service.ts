@@ -407,6 +407,26 @@ export class FlowRunnerService implements OnModuleInit {
     }
     this.liveMemo.set(runId, memo);
 
+    /**
+     * The nearest thing this branch DID produce (BEA-1235).
+     *
+     * A branch is normally research → summarise → merge. When the summarise step dies, the research
+     * behind it is still sitting in `results`, already gathered and already paid for. One real run
+     * lost 31,204 characters that way — two branches whose research succeeded and whose one-line
+     * summary step failed, dropped without a word. Walking back one hop recovers them.
+     */
+    const rescueFrom = (id: string, seen = new Set<string>()): string => {
+      for (const up of incoming.get(id) || []) {
+        if (seen.has(up)) continue;
+        seen.add(up);
+        const r = results[up] as NodeResult;
+        if (r?.status === 'done' && (r.output || '').trim()) return r.output;
+        const deeper = rescueFrom(up, seen);
+        if (deeper) return deeper;
+      }
+      return '';
+    };
+
     const outputOf = (nodeId: string): Promise<string> => {
       if (memo.has(nodeId)) return memo.get(nodeId)!;
       const p = (async (): Promise<string> => {
@@ -431,8 +451,39 @@ export class FlowRunnerService implements OnModuleInit {
             return rs.condFalse ? '' : out;
           }
           if (marked) return failedUp ? `The previous step failed: ${rs?.output || 'unknown error'}` : '';
+          // A merge must never be handed SILENCE for a dead branch (BEA-1235). `''` is
+          // indistinguishable from "this branch found nothing", so the merge synthesised
+          // confidently from a third of the work and said nothing about the rest. Give it either
+          // the branch's own research or an explicit note that the branch is missing.
+          if (failedUp && kind === 'merge') {
+            const why = (rs?.output || 'unknown error').slice(0, 200);
+            const name = rs?.label || s;
+            const rescued = rescueFrom(s);
+            return rescued
+              ? `--- ${name}: its summary step failed (${why}). What follows is this part's RAW RESEARCH, unsummarised. ---\n\n${rescued}`
+              : `--- ${name}: MISSING. This part of the research failed (${why}) and produced nothing. ---`;
+          }
           return failedUp ? '' : out;
         }));
+        /**
+         * A step whose input NEVER ARRIVED cannot have succeeded (BEA-1235).
+         *
+         * Found by a test: when a branch's research died, its Ask AI step was handed '' and returned
+         * '' — and was recorded as DONE with an empty answer. So the branch failed twice over and
+         * reported success both times, and the merge dropped the empty string without a word. Same
+         * silence as the bug this issue is about, reached by a different route.
+         */
+        const steered = (sid: string) => errEdge.has(`${sid}->${nodeId}`) || (results[sid] as NodeResult)?.kind === 'if';
+        const deadUps = ups.filter((sid) => !steered(sid) && (results[sid] as NodeResult)?.status === 'failed');
+        if (ups.length && deadUps.length === ups.filter((sid) => !steered(sid)).length && deadUps.length) {
+          const why = deadUps
+            .map((sid) => `${(results[sid] as NodeResult)?.label || sid}: ${((results[sid] as NodeResult)?.output || 'failed').slice(0, 120)}`)
+            .join('; ');
+          results[nodeId] = { status: 'failed', output: `its input never arrived — ${why}`, kind, label };
+          await persist();
+          return '';
+        }
+
         // A node fed ONLY by error paths is skipped when nothing actually failed.
         if (ups.length && ups.every((s) => errEdge.has(`${s}->${nodeId}`)) && !upOuts.some(Boolean)) {
           results[nodeId] = { status: 'skipped', output: '', kind, label };
@@ -1342,7 +1393,7 @@ export class FlowRunnerService implements OnModuleInit {
     const goalBlock = (goal || '').trim() ? `The original question this must answer:\n"${goal!.trim()}"\n\n` : '';
     const out = await this.llm.complete(
       // Cited synthesis over the branch findings, anchored to the original goal. (BEA-771)
-      `${goalBlock}Write ONE clear, well-structured answer to the question above by synthesising the research parts below. Rules: stay strictly on the question's topic; keep every substantive finding; remove repetition; use headings where helpful; prefer points that more than one part supports; and KEEP the source citations/URLs from the parts inline so claims stay traceable. If the parts disagree or a key point is unverified, say so briefly.\n\n${parts.map((p, i) => `--- Research part ${i + 1} ---\n${p}`).join('\n\n')}`,
+      `${goalBlock}Write ONE clear, well-structured answer to the question above by synthesising the research parts below. Rules: stay strictly on the question's topic; keep every substantive finding; remove repetition; use headings where helpful; prefer points that more than one part supports; and KEEP the source citations/URLs from the parts inline so claims stay traceable. If the parts disagree or a key point is unverified, say so briefly. If a part is marked MISSING or is raw unsummarised research, use what it does contain and state plainly, near the top, which part is missing or incomplete — never present the answer as though every part arrived.\n\n${parts.map((p, i) => `--- Research part ${i + 1} ---\n${p}`).join('\n\n')}`,
       1600,
       'flow-merge',
     );

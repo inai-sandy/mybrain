@@ -719,3 +719,92 @@ describe('FlowRunnerService — a partly-failed run must never report done (BEA-
   });
 });
 
+
+describe('FlowRunnerService — a failed branch must not vanish into the merge (BEA-1235)', () => {
+  /**
+   * The real run's shape: subquestion → deep research → Ask AI → merge, three times over. Two Ask AI
+   * steps died. `merge()` did `outputs.filter(Boolean)`, dropped the two empty strings, then
+   * `if (parts.length === 1) return parts[0]` handed back the survivor verbatim — so 31,204
+   * characters of gathered, paid-for research never reached the report and nothing said so.
+   */
+  const graph = () => JSON.stringify({
+    nodes: [
+      { id: 'r0', data: { kind: 'tool', refId: 'search_brain', label: 'Research 1', sub: 'q1' } },
+      { id: 'r1', data: { kind: 'tool', refId: 'search_brain', label: 'Research 2', sub: 'q2' } },
+      { id: 'a0', data: { kind: 'ask_ai', label: 'Branch 1' } },
+      { id: 'a1', data: { kind: 'ask_ai', label: 'Branch 2' } },
+      { id: 'M', data: { kind: 'merge', mode: 'ai', label: 'Merge', goal: 'the question' } },
+      { id: 'O', data: { kind: 'output', label: 'Answer' } },
+    ],
+    edges: [
+      { source: 'r0', target: 'a0' }, { source: 'r1', target: 'a1' },
+      { source: 'a0', target: 'M' }, { source: 'a1', target: 'M' },
+      { source: 'M', target: 'O' },
+    ],
+  });
+
+  function harness(onComplete: (p: string) => string | null) {
+    const flowObj = { id: 'f1', name: 'F', graph: graph() };
+    const row: any = { id: 'r1x', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; }, updateMany: async () => ({ count: 0 }) },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+    const mergePrompts: string[] = [];
+    const llm: any = {
+      completeDetailed: async (p: string) => {
+        const t = onComplete(p);
+        return t === null ? { text: null, error: 'qwen/qwen3.7-max returned nothing' } : { text: t };
+      },
+      complete: async (p: string) => { mergePrompts.push(p); return 'MERGED'; },
+    };
+    const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, llm, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).saveDocuments = async () => [];
+    (svc as any).searchBrain = async (q: string) => `RESEARCH FINDINGS for ${q}`;
+    return { svc, row, flowObj, mergePrompts };
+  }
+
+  it('hands the merge the dead branch RAW RESEARCH instead of an empty string', async () => {
+    const { svc, flowObj, mergePrompts } = harness((p) => (p.includes('Branch 1') || p.includes('q1') ? 'branch 1 answer' : null));
+    await (svc as any).execute('r1x', flowObj);
+
+    expect(mergePrompts.length).toBe(1);
+    const sent = mergePrompts[0];
+    expect(sent).toContain('RESEARCH FINDINGS for q2'); // the rescued research — this used to be ''
+    expect(sent).toContain('RAW RESEARCH');
+    expect(sent).toContain('Branch 2');
+  });
+
+  it('tells the merge WHY the branch is missing, not just that it is', async () => {
+    const { svc, flowObj, mergePrompts } = harness((p) => (p.includes('q1') || p.includes('Branch 1') ? 'ok' : null));
+    await (svc as any).execute('r1x', flowObj);
+    expect(mergePrompts[0]).toContain('qwen/qwen3.7-max returned nothing');
+  });
+
+  it('instructs the merge to say what is missing rather than answer as if all parts arrived', async () => {
+    const { svc, flowObj, mergePrompts } = harness((p) => (p.includes('q1') || p.includes('Branch 1') ? 'ok' : null));
+    await (svc as any).execute('r1x', flowObj);
+    expect(mergePrompts[0]).toMatch(/which part is missing or incomplete/i);
+  });
+
+  it('says MISSING when the branch produced nothing at all to rescue', async () => {
+    // both the research and the summary die on branch 2 → nothing to walk back to
+    const { svc, flowObj, mergePrompts } = harness((p) => (p.includes('Branch 1') || p.includes('q1') ? 'ok' : null));
+    (svc as any).searchBrain = async (q: string) => { if (q === 'q2') throw new Error('search died'); return `RESEARCH FINDINGS for ${q}`; };
+    await (svc as any).execute('r1x', flowObj);
+    expect(mergePrompts[0]).toContain('MISSING');
+    expect(mergePrompts[0]).toContain('search died');
+  });
+
+  it('leaves a healthy run completely alone — no notes, both real answers', async () => {
+    const { svc, flowObj, mergePrompts } = harness(() => 'a real answer');
+    await (svc as any).execute('r1x', flowObj);
+    // The instruction itself mentions MISSING, so only the PARTS may be inspected here.
+    const parts = mergePrompts[0].slice(mergePrompts[0].indexOf('--- Research part 1 ---'));
+    expect(parts).not.toContain('MISSING');
+    expect(parts).not.toContain('RAW RESEARCH');
+    expect(parts.match(/--- Research part \d+ ---/g)?.length).toBe(2);
+  });
+});
