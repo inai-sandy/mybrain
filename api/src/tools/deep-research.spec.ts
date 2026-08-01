@@ -723,3 +723,44 @@ describe('a free fall-through is not a paid call (BEA-1201)', () => {
     expect(spend.paidCalls).toBe(2);
   });
 });
+
+/**
+ * BEA-1238 — the owner set "from 2025-08-01" and only ONE of three branches got it. The other two
+ * searched with no limit at all, and the one that WAS limited found nothing and became the report.
+ * The runner already reads a flow-level `graph.researchFrom`; nothing in the UI ever set it.
+ */
+describe('saying the date range in plain English (BEA-1238)', () => {
+  const lines = async (over: any, opts: any) => {
+    const out: string[] = [];
+    const { svc } = make({ plan: 'one question here', ...over });
+    await svc.run('a question about something', { ...opts, onLine: (t: string) => out.push(t) }).catch(() => undefined);
+    return out.join('\n');
+  };
+
+  it('never prints "undefined" for an open end date', async () => {
+    const said = await lines({}, { from: '2025-08-01' });
+    expect(said).not.toContain('undefined');
+    expect(said).toMatch(/onwards/);
+    expect(said).toContain('(your dates)');
+  });
+
+  it('says it in words for an open START date too', async () => {
+    const said = await lines({}, { to: '2025-08-01' });
+    expect(said).not.toContain('undefined');
+    expect(said).toMatch(/anything up to/);
+  });
+
+  it('reads as a range when both ends are given', async () => {
+    const said = await lines({}, { from: '2025-01-01', to: '2025-12-31' });
+    expect(said).not.toContain('undefined');
+    expect(said).toMatch(/to/);
+    expect(said).toContain('(your dates)');
+  });
+
+  it('does not claim they are YOUR dates when it guessed them', async () => {
+    const out: string[] = [];
+    const { svc } = make({ plan: 'one question here' });
+    await svc.run('engineering placements in 2025', { onLine: (t: string) => out.push(t) }).catch(() => undefined);
+    expect(out.join('\n')).not.toContain('(your dates)');
+  });
+});

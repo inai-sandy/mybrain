@@ -1014,3 +1014,47 @@ describe('FlowRunnerService — thinking steps follow THE engine (BEA-1236)', ()
   });
 });
 
+
+describe('FlowRunnerService — the flow\'s dates reach EVERY research step (BEA-1238)', () => {
+  /**
+   * The real graph: three branches, and only `b0_s0` carried `researchFrom`. Branches 2 and 3
+   * searched with no limit at all, while branch 1 — starved by the filter — was the one that reached
+   * the report and said "cannot be determined".
+   */
+  const threeResearchers = JSON.stringify({
+    researchFrom: '2025-08-01',
+    researchTo: '2026-01-31',
+    nodes: [
+      { id: 'r0', data: { kind: 'tool', refId: 'deep_research', label: 'R1', sub: 'q1' } },
+      { id: 'r1', data: { kind: 'tool', refId: 'deep_research', label: 'R2', sub: 'q2' } },
+      { id: 'r2', data: { kind: 'tool', refId: 'deep_research', label: 'R3', sub: 'q3', researchFrom: '2020-01-01' } },
+      { id: 'O', data: { kind: 'output', label: 'Answer' } },
+    ],
+    edges: [{ source: 'r0', target: 'O' }, { source: 'r1', target: 'O' }, { source: 'r2', target: 'O' }],
+  });
+
+  it('passes the flow dates to every research step, and lets one step override them', async () => {
+    const seen: Array<{ from?: string; to?: string }> = [];
+    const flowObj = { id: 'f1', name: 'F', graph: threeResearchers };
+    const row: any = { id: 'rd', status: 'running', flowId: 'f1', results: '{}', terminal: '[]', startedAt: new Date() };
+    const prisma: any = {
+      flowRun: { findUnique: async () => ({ ...row }), update: async ({ data }: any) => { Object.assign(row, data); return { ...row }; }, updateMany: async () => ({ count: 0 }) },
+      flow: { findUnique: async () => ({ ...flowObj }) },
+      agentRun: { update: async () => ({}) },
+    };
+    const deep: any = { run: async (_q: string, o: any) => { seen.push({ from: o.from, to: o.to }); return { report: 'a report', spend: {} }; } };
+    const telegram: any = { notifyFlowWaiting: async () => undefined, notifyFlowDone: async () => undefined };
+    const svc = new FlowRunnerService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, telegram, {} as any);
+    (svc as any).deep = deep;
+    (svc as any).saveDocuments = async () => [];
+    await (svc as any).execute('rd', flowObj);
+
+    expect(seen).toHaveLength(3); // every research step ran, not just the one that was clicked
+    // Two inherit the flow's dates…
+    expect(seen.filter((s) => s.from === '2025-08-01' && s.to === '2026-01-31')).toHaveLength(2);
+    // …and the step with its own dates keeps them.
+    expect(seen.some((s) => s.from === '2020-01-01')).toBe(true);
+    // Nothing may run with NO dates at all when the flow set them — that was the bug.
+    expect(seen.every((s) => !!s.from)).toBe(true);
+  });
+});

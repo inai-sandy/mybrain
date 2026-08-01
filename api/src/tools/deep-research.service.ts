@@ -185,8 +185,15 @@ export class DeepResearchService {
     const stated = DeepResearchService.statedWindow(opts.from, opts.to);
     const window = stated ?? WebResearchService.dateWindow(goal);
     const country = WebResearchService.countryOf(goal);
-    if (window.start_date) say(`   limiting to ${window.start_date} → ${window.end_date}${stated ? ' (your dates)' : ''}`);
-    else if (window.time_range) say(`   limiting to the last ${window.time_range}`);
+    // A start-only or end-only range is normal and deliberate (BEA-1209 made the range optional), so
+    // say it in words. This printed "limiting to 2025-08-01 → undefined" at the owner — a JavaScript
+    // value leaking into a line meant to reassure him his dates were respected.
+    if (window.start_date || window.end_date) {
+      const from = window.start_date ? this.day(window.start_date) : null;
+      const to = window.end_date ? this.day(window.end_date) : null;
+      const period = from && to ? `${from} to ${to}` : from ? `${from} onwards` : `anything up to ${to}`;
+      say(`   only looking at ${period}${stated ? ' (your dates)' : ''}`);
+    } else if (window.time_range) say(`   only looking at the last ${window.time_range}`);
     if (country) say(`   focused on ${country}`);
 
     const have = await this.web.available().catch(() => ({ tavily: false, exa: false, brave: false }) as any);
