@@ -1127,11 +1127,12 @@ function AiModelCard() {
   const avail = cfg.providers || {};
   const models = MODELS[provider] || [];
 
-  async function save() {
+  async function save(nextProvider: string, nextModel: string) {
+    if (!nextModel) return; // a provider switch alone has nothing to save yet
     const r = await fetch('/api/llm-config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, model }),
+      body: JSON.stringify({ provider: nextProvider, model: nextModel }),
     });
     if (r.ok) toast('success', 'AI model saved');
     else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
@@ -1169,6 +1170,7 @@ function AiModelCard() {
               } else {
                 setCustom(false);
                 setModel(e.target.value);
+                void save(provider, e.target.value);
               }
             }}
             className={sel}
@@ -1185,15 +1187,13 @@ function AiModelCard() {
         <input
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          placeholder="model id (e.g. openai/gpt-4o)"
+          onBlur={() => save(provider, model)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(provider, model); }}
+          placeholder="model id — saves on Enter or tap away"
           className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
       )}
-      <div className="mt-4 text-right">
-        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-          Save
-        </button>
-      </div>
+      <p className="mt-3 text-[11px] text-zinc-400">Saves instantly when you pick.</p>
     </AccordionCard>
   );
 }
@@ -1585,10 +1585,10 @@ function ModelsSection() {
 /** Reusable model picker for an engine that exposes GET/PUT `${base}` + GET `${base}s`. */
 function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: string; desc: string; icon: LucideIcon; base: string; agents?: boolean }) {
   const FALLBACK = [
-    { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6 (best, recommended)' },
-    { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6 (deepest)' },
+    { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 (best, recommended)' },
+    { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
     { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 (fast)' },
-    { id: 'openai/gpt-4.1', name: 'GPT-4.1' },
+    { id: 'openai/gpt-5', name: 'GPT-5' },
     { id: 'openai/gpt-4o', name: 'GPT-4o' },
   ];
   // Subscription agents (no per-use API cost) — offered where latency is OK. (BEA-360/361)
@@ -1621,8 +1621,11 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base]);
   if (!loaded) return null;
-  async function save() {
-    const r = await fetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+  // Saves the moment it changes — a picked value that needs a hidden Save press reads as broken.
+  // (owner feedback, BEA-1233)
+  async function save(next: string) {
+    if (!next) return;
+    const r = await fetch(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: next }) });
     if (r.ok) toast('success', 'Model saved');
     else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
   }
@@ -1632,17 +1635,15 @@ function EngineModelCard({ title, desc, icon: Icon, base, agents }: { title: str
       <p className="text-sm text-zinc-500 mb-4">{desc}</p>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
         Model
-        <select value={custom ? '__custom__' : model} onChange={(e) => { if (e.target.value === '__custom__') { setCustom(true); setModel(''); } else { setCustom(false); setModel(e.target.value); } }} className={sel}>
+        <select value={custom ? '__custom__' : model} onChange={(e) => { if (e.target.value === '__custom__') { setCustom(true); setModel(''); } else { setCustom(false); setModel(e.target.value); void save(e.target.value); } }} className={sel}>
           <option value="">Choose…</option>
           {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           <option value="__custom__">Custom…</option>
         </select>
       </label>
-      {custom && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openrouter model id (e.g. anthropic/claude-sonnet-4.6)" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
+      {custom && <input value={model} onChange={(e) => setModel(e.target.value)} onBlur={() => save(model)} onKeyDown={(e) => { if (e.key === 'Enter') save(model); }} placeholder="openrouter model id — saves when you press Enter or tap away" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
       {agents && <p className="mt-3 flex items-start gap-1.5 text-xs text-zinc-500 dark:text-zinc-400"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-emerald-600" />The free engines (✦/⚡) cost nothing but run on your server. If one is ever busy or offline, this feature automatically falls back to <b>Claude Sonnet</b> on the API — so it never silently fails.</p>}
-      <div className="mt-4 text-right">
-        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
-      </div>
+      <p className="mt-3 text-[11px] text-zinc-400">Saves instantly when you pick.</p>
     </AccordionCard>
   );
 }
@@ -1796,8 +1797,9 @@ function MeetingsEngineCard() {
       .finally(() => setLoaded(true));
   }, []);
   if (!loaded) return null;
-  async function save() {
-    const r = await fetch('/api/meetings/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine }) });
+  async function saveEngine(next: string) {
+    setEngine(next);
+    const r = await fetch('/api/meetings/engine', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: next }) });
     if (r.ok) toast('success', 'Transcription engine saved');
     else toast('error', 'Could not save');
   }
@@ -1811,7 +1813,7 @@ function MeetingsEngineCard() {
       <p className="text-sm text-zinc-500 mb-4">Which engine turns meeting recordings into text. Deepgram is the cheapest for long meetings; others need their API key in Integrations. (You can also pick per-meeting when you hit Transcribe.)</p>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
         Engine
-        <select value={engine} onChange={(e) => setEngine(e.target.value)} className={sel}>
+        <select value={engine} onChange={(e) => saveEngine(e.target.value)} className={sel}>
           {engines.map((e) => <option key={e.id} value={e.id} disabled={!e.configured}>{e.name}{e.configured ? '' : ' — needs API key'}</option>)}
         </select>
       </label>
@@ -1820,9 +1822,7 @@ function MeetingsEngineCard() {
         <input type="checkbox" checked={autoDelete} onChange={(e) => toggleAutoDelete(e.target.checked)} className="mt-0.5 h-4 w-4 accent-emerald-600" />
         <span><span className="font-medium">Delete the recording after transcribing</span><br /><span className="text-xs text-zinc-500">Frees disk on long meetings — the transcript and summary are kept. You can also delete a recording manually on its page.</span></span>
       </label>
-      <div className="mt-4 text-right">
-        <button onClick={save} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm">Save</button>
-      </div>
+      <p className="mt-3 text-[11px] text-zinc-400">Saves instantly when you pick.</p>
     </AccordionCard>
   );
 }
@@ -1856,8 +1856,9 @@ function ChatModelCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   if (!loaded) return null;
-  async function save() {
-    const r = await fetch('/api/chat/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+  async function save(next: string) {
+    if (!next) return;
+    const r = await fetch('/api/chat/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: next }) });
     if (r.ok) toast('success', 'Chat model saved');
     else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
   }
@@ -1867,27 +1868,28 @@ function ChatModelCard() {
       <p className="text-sm text-zinc-500 mb-4">Runs “talk to my brain”. Pick a <b>fast</b> model — a slow one makes replies take ages. Defaults to Claude Haiku. Uses your OpenRouter key.</p>
       <label className="text-sm text-zinc-600 dark:text-zinc-400 block">
         Model
-        <select value={custom ? '__custom__' : model} onChange={(e) => { if (e.target.value === '__custom__') { setCustom(true); setModel(''); } else { setCustom(false); setModel(e.target.value); } }} className={sel}>
+        <select value={custom ? '__custom__' : model} onChange={(e) => { if (e.target.value === '__custom__') { setCustom(true); setModel(''); } else { setCustom(false); setModel(e.target.value); void save(e.target.value); } }} className={sel}>
           <option value="">Choose…</option>
           {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           <option value="__custom__">Custom…</option>
         </select>
       </label>
-      {custom && <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openrouter model id (e.g. anthropic/claude-haiku-4.5)" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
-      <div className="mt-4 text-right">
-        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">Save</button>
-      </div>
+      {custom && <input value={model} onChange={(e) => setModel(e.target.value)} onBlur={() => save(model)} onKeyDown={(e) => { if (e.key === 'Enter') save(model); }} placeholder="openrouter model id — saves on Enter or tap away" className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500" />}
+      <p className="mt-3 text-[11px] text-zinc-400">Saves instantly when you pick.</p>
     </AccordionCard>
   );
 }
 
 /** Settings → EMO — the voice device token + the full Ears/Voice/Brain stack, kept separate from Voice input (BEA-895/896). */
-const EMO_BRAINS = [
-  { id: 'anthropic/claude-sonnet-5', name: 'Claude Sonnet 5 — best answers (default)' },
-  { id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6' },
-  { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5 — fast & cheap' },
-  { id: 'openai/gpt-5', name: 'GPT-5' },
-];
+/** Pretty label for a model id — the LIST always comes from the server, never from here. (BEA-1233) */
+const MODEL_LABELS: Record<string, string> = {
+  'anthropic/claude-sonnet-5': 'Claude Sonnet 5 — best answers',
+  'anthropic/claude-sonnet-4.6': 'Claude Sonnet 4.6',
+  'anthropic/claude-haiku-4.5': 'Claude Haiku 4.5 — fast & cheap',
+  'openai/gpt-5': 'GPT-5',
+  'openai/gpt-4o': 'GPT-4o',
+};
+const modelLabel = (id: string) => MODEL_LABELS[id] || id;
 function EmoSettingsSection() {
   const toast = useToast();
   const [token, setToken] = useState('');
@@ -1899,6 +1901,7 @@ function EmoSettingsSection() {
   const [brain, setBrain] = useState('');
   const [talk, setTalk] = useState('');
   const [router, setRouter] = useState('');
+  const [modelOpts, setModelOpts] = useState<string[]>([]);
   const [search, setSearch] = useState('auto');
   const [devVol, setDevVol] = useState(60);
   useEffect(() => {
@@ -1906,7 +1909,7 @@ function EmoSettingsSection() {
     fetch('/api/voice/tts-voice').then((r) => r.json()).then((d) => { setTtsVoice(d.voice || 'nova'); setTtsVoices(d.voices || []); }).catch(() => undefined);
     fetch('/api/voice/config').then((r) => r.json()).then((d) => { setEars(d.engine || ''); setEarsEngines(d.engines || []); }).catch(() => undefined);
     fetch('/api/explore/model').then((r) => r.json()).then((d) => setBrain(d.model || '')).catch(() => undefined);
-    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setRouter(d.routerModel || ''); setSearch(d.searchDefault || 'auto'); setDevVol(typeof d.deviceVolume === 'number' ? d.deviceVolume : 60); }).catch(() => undefined);
+    fetch('/api/emo/settings').then((r) => r.json()).then((d) => { setTalk(d.talkModel || ''); setRouter(d.routerModel || ''); setModelOpts(d.models || []); setSearch(d.searchDefault || 'auto'); setDevVol(typeof d.deviceVolume === 'number' ? d.deviceVolume : 60); }).catch(() => undefined);
   }, []);
   async function regen() {
     if (!window.confirm('Generate a new device token? The current one stops working — you’ll need to reflash your EMO device with the new token.')) return;
@@ -1947,8 +1950,11 @@ function EmoSettingsSection() {
   }
   const masked = token ? token.slice(0, 7) + '••••••••••••••' + token.slice(-4) : '';
   const sel = 'w-full max-w-[20rem] rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900';
-  const brainOpts = brain && !EMO_BRAINS.some((b) => b.id === brain) ? [...EMO_BRAINS, { id: brain, name: brain }] : EMO_BRAINS;
-  const talkOpts = talk && !EMO_BRAINS.some((b) => b.id === talk) ? [...EMO_BRAINS, { id: talk, name: talk }] : EMO_BRAINS;
+  // Options come from the SERVER'S allow-list — a select must never offer what the server rejects.
+  const withCurrent = (cur: string) => (cur && !modelOpts.includes(cur) ? [...modelOpts, cur] : modelOpts).map((id) => ({ id, name: modelLabel(id) }));
+  const brainOpts = withCurrent(brain);
+  const talkOpts = withCurrent(talk);
+  const routerOpts = withCurrent(router);
   return (
     <div className="space-y-5">
       <div>
@@ -1994,7 +2000,7 @@ function EmoSettingsSection() {
       <AccordionCard title="Router — how EMO understands what you meant" icon={Compass}>
         <p className="mb-3 text-sm text-zinc-500">The fast model that reads each thing you say and routes it to the right lane (task, note, reminder…). It runs on every utterance — keep it small and quick. Had no control at all until now.</p>
         <select value={router} onChange={(e) => pickRouter(e.target.value)} className={sel}>
-          {talkOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          {routerOpts.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </AccordionCard>
 
@@ -2574,8 +2580,9 @@ function BookmarksModelCard() {
 
   if (!loaded) return null;
 
-  async function save() {
-    const r = await fetch('/api/bookmarks/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+  async function save(next: string) {
+    if (!next) return;
+    const r = await fetch('/api/bookmarks/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: next }) });
     if (r.ok) toast('success', 'Bookmarks model saved');
     else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
   }
@@ -2612,15 +2619,13 @@ function BookmarksModelCard() {
         <input
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          placeholder="openrouter model id (e.g. google/gemini-3-pro-preview)"
+          onBlur={() => save(model)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(model); }}
+          placeholder="openrouter model id — saves on Enter or tap away"
           className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
       )}
-      <div className="mt-4 text-right">
-        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-          Save
-        </button>
-      </div>
+      <p className="mt-3 text-[11px] text-zinc-400">Saves instantly when you pick.</p>
     </AccordionCard>
   );
 }
@@ -2657,8 +2662,9 @@ function TasksModelCard() {
 
   if (!loaded) return null;
 
-  async function save() {
-    const r = await fetch('/api/tasks/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model }) });
+  async function save(next: string) {
+    if (!next) return;
+    const r = await fetch('/api/tasks/model', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: next }) });
     if (r.ok) toast('success', 'Tasks model saved');
     else toast('error', (await r.json().catch(() => ({}))).message || 'Could not save');
   }
@@ -2695,15 +2701,13 @@ function TasksModelCard() {
         <input
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          placeholder="openrouter model id (e.g. anthropic/claude-sonnet-4.6)"
+          onBlur={() => save(model)}
+          onKeyDown={(e) => { if (e.key === 'Enter') save(model); }}
+          placeholder="openrouter model id — saves on Enter or tap away"
           className="mt-3 w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
       )}
-      <div className="mt-4 text-right">
-        <button onClick={save} disabled={!model} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-sm disabled:opacity-50">
-          Save
-        </button>
-      </div>
+      <p className="mt-3 text-[11px] text-zinc-400">Saves instantly when you pick.</p>
     </AccordionCard>
   );
 }

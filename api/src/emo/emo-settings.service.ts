@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Curated, known-good model ids (openrouter). Brain = smart; Talk = fast. */
-export const EMO_MODELS = ['anthropic/claude-sonnet-4.6', 'anthropic/claude-haiku-4.5', 'openai/gpt-4o', 'openai/gpt-4o-mini'];
+// The ONE allow-list the web builds its selects from — anything offered here MUST save. (BEA-1233)
+export const EMO_MODELS = ['anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-4.6', 'anthropic/claude-haiku-4.5', 'openai/gpt-5', 'openai/gpt-4o'];
 export const EMO_VOICES = ['nova', 'alloy', 'echo', 'shimmer', 'onyx', 'fable', 'coral', 'sage'];
 export const STT_ENGINES = ['openai', 'deepgram'];
 
@@ -61,8 +62,9 @@ export class EmoSettingsService {
   async set(patch: Partial<EmoSettings>): Promise<EmoSettings & { voices: string[]; models: string[]; sttEngines: string[] }> {
     if (patch.ttsVoice && EMO_VOICES.includes(patch.ttsVoice)) await this.s('voice.ttsVoice', patch.ttsVoice);
     if (patch.sttEngine && STT_ENGINES.includes(patch.sttEngine)) await this.s('voice.engine', patch.sttEngine);
-    if (patch.brainModel) await this.s('explore.llm', JSON.stringify({ provider: 'openrouter', model: patch.brainModel }));
-    if (patch.talkModel) await this.s('emo.talk.model', JSON.stringify({ provider: 'openrouter', model: patch.talkModel }));
+    // One rule for all three: only what the allow-list offers may be stored. (BEA-1233 review)
+    if (patch.brainModel && EMO_MODELS.includes(patch.brainModel)) await this.s('explore.llm', JSON.stringify({ provider: 'openrouter', model: patch.brainModel }));
+    if (patch.talkModel && EMO_MODELS.includes(patch.talkModel)) await this.s('emo.talk.model', JSON.stringify({ provider: 'openrouter', model: patch.talkModel }));
     if (patch.routerModel && EMO_MODELS.includes(patch.routerModel)) await this.s('emo.router.model', JSON.stringify({ provider: 'openrouter', model: patch.routerModel }));
     if (patch.searchDefault && ['on', 'off', 'auto'].includes(patch.searchDefault)) await this.s('emo.search.default', patch.searchDefault);
     if (patch.vocabulary !== undefined) await this.s('voice.vocabulary', String(patch.vocabulary).slice(0, 2000));
