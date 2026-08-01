@@ -341,6 +341,9 @@ export class FlowsService {
       if (narrowed.length) usable = narrowed;
     }
     const toolById = new Map<string, string>(usable.map((t) => [t.id, t.name] as [string, string]));
+    // The Web tools only — the skill→tool collision remap is scoped to these (BEA-1250), because
+    // only there is a same-named skill guaranteed unable to do what its name promises.
+    const webTools = new Set<string>(usable.filter((t: any) => t.group === 'Web').map((t: any) => t.id as string));
     const skillList = skills.map((s) => `- skill:${s.id} — ${s.title}: ${(s.description || '').slice(0, 80)}`).join('\n');
     const toolList = usable.map((t) => `- tool:${t.id} — ${t.name}: ${t.description}`).join('\n');
 
@@ -360,7 +363,7 @@ export class FlowsService {
       // The planner prompt lives in the registry (Settings → Prompts → Agents) so the owner can
       // tune it. Its default deliberately does NOT add search_brain unless explicitly asked (BEA-1096).
       const tpl = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
-      if (!tpl) return this.buildGraph(q, null, skillById, toolById);
+      if (!tpl) return this.buildGraph(q, null, skillById, toolById, webTools);
       const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, FlowsService.QUESTION_MAX)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
       const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 1100, 'flow-plan') : await this.llm.complete(planPrompt, 1100, 'flow-plan');
       const m = (out || '').match(/\{[\s\S]*\}/);
@@ -380,14 +383,43 @@ export class FlowsService {
       }
     }
 
-    return this.buildGraph(q, plan, skillById, toolById);
+    return this.buildGraph(q, plan, skillById, toolById, webTools);
   }
 
-  private resolveStep(st: any, skillById: Map<string, string>, toolById: Map<string, string>): { kind: string; label: string; refId?: string } {
+  /** "deep-research", "Deep research" and `deep_research` are all the same words. */
+  private static normName(s: string): string {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  }
+
+  private resolveStep(st: any, skillById: Map<string, string>, toolById: Map<string, string>, webTools?: Set<string>): { kind: string; label: string; refId?: string; note?: string } {
     const kind = st?.kind;
     const id = st?.id;
     if (kind === 'tool' && toolById.has(id)) return { kind: 'tool', label: toolById.get(id)!, refId: id };
-    if (kind === 'skill' && skillById.has(id)) return { kind: 'skill', label: skillById.get(id)!, refId: id };
+    if (kind === 'skill' && skillById.has(id)) {
+      // A skill that shares its NAME with a WEB tool is a trap, not a choice (BEA-1250). The owner
+      // has a Claude-Code skill called "deep-research"; the planner picked it for a research task —
+      // obviously, given the name — and the branch ran on the engine, which cannot search the web
+      // (BEA-1202) or write files. It refused politely and a third of the research vanished.
+      //
+      // Scoped to the Web group on purpose: only there does the engine's no-search rule make the
+      // skill INCAPABLE of what its name promises. A skill called "Gmail" that does its own triage
+      // is a legitimate choice and must not be overridden by a coincidence of naming.
+      //
+      // The swap is written onto the node (`note` → canvas `sub`), never silent — quiet
+      // substitutions are the bug class this codebase keeps paying for.
+      //
+      // If the web tools are NOT connected they are absent from toolById, no remap can fire, and
+      // the planner prompt ("skills cannot search") is the only defence left.
+      const skillTitle = skillById.get(id)!;
+      const skillName = FlowsService.normName(skillTitle);
+      for (const [toolId, toolName] of toolById) {
+        if (!webTools?.has(toolId)) continue;
+        if (FlowsService.normName(toolId) === skillName || FlowsService.normName(toolName) === skillName) {
+          return { kind: 'tool', label: toolName, refId: toolId, note: `Swapped in for the "${skillTitle}" skill — skills run on the engine and cannot search the web` };
+        }
+      }
+      return { kind: 'skill', label: skillTitle, refId: id };
+    }
     return { kind: 'ask_ai', label: 'Ask AI' };
   }
 
@@ -403,7 +435,7 @@ export class FlowsService {
    */
   private static readonly QUESTION_MAX = 8000;
 
-  private buildGraph(question: string, plan: any, skillById: Map<string, string>, toolById: Map<string, string>): { nodes: any[]; edges: any[] } {
+  private buildGraph(question: string, plan: any, skillById: Map<string, string>, toolById: Map<string, string>, webTools?: Set<string>): { nodes: any[]; edges: any[] } {
     const nodes: any[] = [];
     const edges: any[] = [];
     const CX = 320, COL = 240, ROW = 110;
@@ -427,8 +459,8 @@ export class FlowsService {
       steps.forEach((st, j) => {
         y += ROW;
         const nidv = `b${i}_s${j}`;
-        const r = this.resolveStep(st, skillById, toolById);
-        nodes.push({ id: nidv, type: 'box', position: { x, y }, data: { kind: r.kind, label: r.label, refId: r.refId } });
+        const r = this.resolveStep(st, skillById, toolById, webTools);
+        nodes.push({ id: nidv, type: 'box', position: { x, y }, data: { kind: r.kind, label: r.label, refId: r.refId, ...(r.note ? { sub: r.note } : {}) } });
         edges.push({ id: `e_${prev}_${nidv}`, source: prev, target: nidv, animated: true });
         prev = nidv;
       });

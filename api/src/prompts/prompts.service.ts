@@ -1012,7 +1012,9 @@ Request:
 Steps you may place in a branch (use the EXACT id):
 TOOLS:
 {{tools}}
-SKILLS (only use one if its description is an OBVIOUS fit for THIS request — most tasks need NONE):
+SKILLS (only use one if its description is an OBVIOUS fit for THIS request — most tasks need NONE.
+Skills run on an engine that has NO web access and cannot search or save files — NEVER pick a skill
+to research, search or read the web, whatever its name suggests; researching is what the TOOLS above do):
 {{skills}}
 
 Rules:
