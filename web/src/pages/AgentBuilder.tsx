@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Send, Sparkles, X, CalendarClock, Wrench, Check } from 'lucide-react';
+import { Loader2, Sparkles, X, CalendarClock, Wrench, Check } from 'lucide-react';
 import { useToast } from '../ui/Toast';
-import { DictateButton } from '../ui/DictateButton';
+import { ChatInput } from '../ui/ChatInput';
 
 /**
  * The chat builder (BEA-1104): "＋ New agent" opens a conversation, not a form. The designer
@@ -58,7 +58,9 @@ export function AgentBuilder({ onCreated, onUseForm, onClose }: { onCreated: (ur
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={() => !busy && !creating && onClose()}>
-      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-t-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+      {/* A real conversation deserves a real window (BEA-1251): edge-to-edge on the phone, a large
+          tall window on the laptop — not a small card. */}
+      <div className="flex h-[calc(var(--vvh,100vh))] w-full flex-col border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900 sm:h-[90vh] sm:max-w-3xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
           <h2 className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-emerald-600" />New agent — just describe it</h2>
           <div className="flex items-center gap-2">
@@ -110,13 +112,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose }: { onCreated: (ur
         </div>
 
         <div className="border-t border-zinc-100 p-3 dark:border-zinc-800">
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <input value={msg} onChange={(e) => setMsg(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()} autoFocus placeholder={log.length ? 'Reply…' : 'What should this agent do?'} className="w-full rounded-xl border border-zinc-200 bg-transparent px-3 py-2.5 pr-11 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700" />
-              <DictateButton onText={(t) => setMsg((p) => (p ? p + ' ' : '') + t)} className="absolute right-2 top-1/2 -translate-y-1/2" />
-            </div>
-            <button onClick={send} disabled={busy || !msg.trim()} className="shrink-0 rounded-xl bg-emerald-600 p-2.5 text-white hover:bg-emerald-500 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
-          </div>
+          <ChatInput value={msg} onChange={setMsg} onSend={send} busy={busy} autoFocus placeholder={log.length ? 'Reply…' : 'What should this agent do?'} />
           <button onClick={onUseForm} className="mt-2 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">Prefer the quick form? Use it instead →</button>
         </div>
       </div>

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Play, Sparkles, FileText, CheckCircle2, RotateCcw, MessageSquare, Send, Save, Check, X, Settings as GearIcon, Workflow, Clock, ListChecks, History as HistoryIcon } from 'lucide-react';
+import { ArrowLeft, Loader2, Play, Sparkles, FileText, CheckCircle2, RotateCcw, MessageSquare, Save, Check, X, Settings as GearIcon, Workflow, Clock, ListChecks, History as HistoryIcon } from 'lucide-react';
 import { useGoBack } from '../ui/useGoBack';
+import { ChatInput } from '../ui/ChatInput';
 import { useToast } from '../ui/Toast';
 import { Markdown } from '../ui/markdown';
 import { DictateButton } from '../ui/DictateButton';
@@ -371,13 +372,7 @@ export function AgentApp() {
               </div>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="relative min-w-0 flex-1">
-              <input value={chatMsg} onChange={(e) => setChatMsg(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && sendChat()} placeholder="Tell it what to change…" className="w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-2 pr-10 text-sm outline-none focus:border-violet-400 dark:border-zinc-700" />
-              <DictateButton onText={(t) => setChatMsg((p) => (p ? p + ' ' : '') + t)} className="absolute right-1.5 top-1/2 -translate-y-1/2" />
-            </div>
-            <button onClick={sendChat} disabled={chatBusy || !chatMsg.trim()} title="Send" className="shrink-0 rounded-lg bg-violet-600 p-2 text-white hover:bg-violet-500 disabled:opacity-50">{chatBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}</button>
-          </div>
+          <ChatInput value={chatMsg} onChange={setChatMsg} onSend={sendChat} busy={chatBusy} accent="violet" placeholder="Tell it what to change…" />
         </section>
       )}
 
