@@ -37,6 +37,7 @@ import { HermesModule } from './hermes/hermes.module';
 import { PushModule } from './push/push.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
 import { ToolCatalogModule } from './tools/tool-catalog.module';
+import { NewsModule } from './news/news.module';
 import { EventsModule } from './events/events.module';
 import { PublicMcpModule } from './public-mcp/public-mcp.module';
 import { OAuthModule } from './oauth/oauth.module';
@@ -50,7 +51,7 @@ import { RecordingsModule } from './recordings/recordings.module';
     // Rate-limit config (BEA-829). NOT applied globally — a global guard would throttle the app's own
     // polling; only the sensitive endpoints opt in via @UseGuards(ThrottlerGuard)+@Throttle.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
-    PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, BriefingsModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, OgModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule, EmoModule, RecordingsModule, PushModule, EventsModule, WhatsappModule, ToolCatalogModule],
+    PrismaModule, AuthModule, ConnectorModule, LlmModule, PromptsModule, MemoryModule, ItemsModule, BookmarksModule, IdeasModule, SkillsModule, TasksModule, BriefingsModule, DailyModule, MentorModule, VoiceModule, NotesModule, UsageModule, TelegramModule, ChatModule, HomeModule, CodexModule, MeetingsModule, GoogleModule, ExploreModule, GeminiModule, AccountabilityModule, ConnectionsModule, VaultModule, MindModule, DocumentsModule, OgModule, AgentModule, HermesModule, PublicMcpModule, OAuthModule, FlowsModule, ContactsModule, EmoModule, RecordingsModule, PushModule, EventsModule, WhatsappModule, ToolCatalogModule, NewsModule],
   controllers: [HealthController],
 })
 export class AppModule {}

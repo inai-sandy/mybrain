@@ -1289,3 +1289,24 @@ model PushSubscription {
   userAgent String?
   createdAt DateTime @default(now())
 }
+
+/// One daily issue of Smol AI News (BEA-1254). The feed carries ~688 issues but only the newest
+/// ~10 include <content:encoded>; the rest are title + description + link. `rawHtml` holds the
+/// unescaped full HTML when we have it, and `summaryOnly` says plainly when we don't — an edition
+/// can only be built from an issue with real content.
+model NewsIssue {
+  id          String    @id @default(uuid())
+  link        String    @unique
+  title       String
+  pubDate     DateTime
+  description String    @default("")
+  rawHtml     String?
+  entities    String    @default("[]") // JSON string[] — model names, companies, handles, straight from <category>
+  summaryOnly Boolean   @default(true)
+  firstSeenAt DateTime  @default(now())
+  fetchedAt   DateTime  @default(now())
+  filledAt    DateTime? // when a summary-only issue later gained its full content
+
+  @@index([pubDate])
+  @@index([summaryOnly])
+}
