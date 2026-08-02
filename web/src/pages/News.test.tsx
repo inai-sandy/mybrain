@@ -99,6 +99,18 @@ describe('the edition page (BEA-1260)', () => {
     expect(screen.getByText('Smol AI News').getAttribute('href')).toContain('news.smol.ai');
   });
 
+  it('Share hands over the PUBLIC link, never the private one', async () => {
+    // Sending someone /news/<day> gives them a login screen. This is the whole reason the button
+    // takes an explicit url instead of reading window.location.
+    show();
+    await waitFor(() => expect(screen.getByText(/Share this edition/)).toBeTruthy());
+    const btn = screen.getByRole('button', { name: /Share this edition/i });
+    expect(btn.getAttribute('aria-label')).toContain('AI News Daily');
+    const publicLink = screen.getByText('see the public version') as HTMLAnchorElement;
+    expect(publicLink.getAttribute('href')).toBe('/paper/2026-07-31');
+    expect(publicLink.getAttribute('href')).not.toContain('/news/');
+  });
+
   it('offers both ways of reading it', async () => {
     show();
     await waitFor(() => expect(screen.getByText('Category')).toBeTruthy());

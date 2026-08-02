@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Newspaper, Telescope, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react';
 import { ResearchModal } from '../ui/ResearchModal';
 import { DataTable, Column } from '../ui/DataTable';
+import { ShareButton } from '../ui/ShareButton';
 
 /**
  * AI News Daily — your own view of an edition (BEA-1260).
@@ -191,6 +192,26 @@ export default function News() {
               {longDate(edition.day)} · Issue No. {edition.number} · {edition.storyCount} {edition.storyCount === 1 ? 'story' : 'stories'}
               {edition.complete ? ' · all shown' : ` · showing ${edition.shown}`}
             </p>
+            {/*
+              Shares the PUBLIC /paper link, not this private /news one. Sending someone the page
+              you are standing on would hand them a login screen.
+            */}
+            <div className="mt-3 flex items-center justify-center gap-2">
+              <ShareButton
+                url={`/paper/${edition.day}`}
+                title={`AI News Daily — ${edition.headline}`}
+                text={edition.sixty[0]}
+                label="Share this edition"
+              />
+              <a
+                href={`/paper/${edition.day}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-zinc-400 underline decoration-dotted underline-offset-2 hover:text-indigo-500"
+              >
+                see the public version
+              </a>
+            </div>
           </header>
 
           {!edition.engineOk && (
