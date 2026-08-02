@@ -62,7 +62,9 @@ export class NewsPublicService {
         prose: s.prose,
         storyCount: s.storyCount,
         stories: s.stories.map((st: any) => ({
-          headline: NewsPublicService.headlineOf(st.text),
+          // The written headline when there is one (BEA-1267), else the story's first sentence —
+          // which is what this always showed before, so an engine-down day still reads fine.
+          headline: st.headline || NewsPublicService.headlineOf(st.text),
           source: st.sourceKind,
           links: st.links,
         })),

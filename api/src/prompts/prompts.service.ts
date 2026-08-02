@@ -918,6 +918,10 @@ Rules:
 Reply in exactly this shape, plain text only:
 
 LINE: <one short line, under 90 characters, saying what this section is about today>
+HEADLINES:
+1. <a headline for story 1 — under 9 words>
+2. <a headline for story 2 — under 9 words>
+(one line per numbered story, in the same order, none skipped)
 WRITE-UP:
 <two to five short paragraphs>
 
@@ -927,7 +931,12 @@ Rules:
 - Names matter: say who did what — the company, the model, the person.
 - Plain everyday English. Short words, short sentences. No hype, no "in the rapidly evolving world of AI", no closing summary paragraph.
 - Do NOT write headings, bullet lists, links, HTML or markdown tables. Just the LINE and plain paragraphs.
-- Do not mention story numbers, "the stories above", or the fact that you were given a list.`,
+- Do not mention story numbers, "the stories above", or the fact that you were given a list.
+
+About the HEADLINES:
+- One per numbered story, in the same order, none skipped. Number them to match.
+- A headline, not a sentence: say what happened, in under 9 words. "DeepSeek open-weights V4-Flash hours after launch" — not "DeepSeek's biggest story of the day was the launch of..."
+- No full stop at the end. Names and numbers are good; hype is not.`,
   },
   {
     key: 'news.topline',

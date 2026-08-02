@@ -95,6 +95,14 @@ export class NewsWriteService {
         return null;
       });
 
+      // Write the headlines back onto the stories. A story the engine skipped keeps whatever it
+      // had, so a partial reply improves what it can and spoils nothing.
+      const heads = written?.headlines || [];
+      for (let i = 0; i < mine.length; i++) {
+        const h = heads[i];
+        if (h) await this.prisma.newsStory.update({ where: { id: (mine[i] as any).id }, data: { headline: h } }).catch(() => undefined);
+      }
+
       sections.push({
         category,
         line: written?.line || `${mine.length} ${mine.length === 1 ? 'story' : 'stories'}`,
@@ -196,7 +204,7 @@ export class NewsWriteService {
     throw new Error('could not assign an issue number');
   }
 
-  /** One category, one engine call. Returns a contents line and the prose. */
+  /** One category, one engine call. Returns a contents line, the prose, and a headline per story. */
   private async writeSection(category: NewsCategory, stories: { text: string; theme: string | null }[]) {
     const template = await this.prompts.get('news.section');
     const body = stories
@@ -213,7 +221,32 @@ export class NewsWriteService {
 
     const parsed = this.parseSection(out);
     if (!parsed.prose) throw new Error('the engine returned no write-up');
-    return parsed;
+    return { ...parsed, headlines: NewsWriteService.parseHeadlines(out, stories.length) };
+  }
+
+  /**
+   * Pull `HEADLINES: 1. …` out of a section reply (BEA-1267).
+   *
+   * Returns a sparse array — index i is story i's headline, or undefined. Sparse on purpose: a
+   * missing headline falls back to the story's first sentence, which is exactly what the page
+   * showed before this existed. Nothing breaks if the engine ignores the instruction.
+   */
+  static parseHeadlines(out: string, count: number): (string | undefined)[] {
+    const start = /^\s*HEADLINES\s*:\s*$/im.exec(out);
+    if (!start) return [];
+    const after = out.slice(start.index + start[0].length);
+    const end = /^\s*WRITE-?UP\s*:/im.exec(after);
+    const block = end ? after.slice(0, end.index) : after;
+    const found: (string | undefined)[] = [];
+    for (const line of block.split('\n')) {
+      const m = /^\s*(\d{1,3})[.)]\s*(.+?)\s*$/.exec(line);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (!Number.isInteger(n) || n < 1 || n > count) continue; // a number outside the batch is the model's slip
+      const text = m[2].replace(/^["'“]|["'”.]+$/g, '').trim();
+      if (text) found[n - 1] = text.slice(0, 120);
+    }
+    return found;
   }
 
   /** The headline and the five lines most readers will read instead of the rest. */
