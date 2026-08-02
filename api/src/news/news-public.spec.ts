@@ -194,10 +194,19 @@ describe('the public page shows no private controls (BEA-1261)', () => {
     expect((PAGE.match(/edition\.sections\.map/g) || []).length).toBe(1);
   });
 
-  it('renders stories at three sizes, not forty identical boxes', () => {
-    expect(PAGE).toMatch(/big \?/);
-    expect(PAGE).toContain('brief');
-    expect(PAGE).toContain('big={i === 0}');
+  it('uses the SAME design as the owner\'s own page, not a second one', () => {
+    // BEA-1269. He asked twice: "replicate the same design which we see to public". The first time
+    // I fixed the structure and kept a different skin, which is not what he asked for. These pin
+    // the three things that actually differed — palette, type and blocks.
+    const own = readFileSync(join(__dirname, '../../../web/src/pages/News.tsx'), 'utf8');
+    const tokens = (src: string) => ({
+      zinc: /(?:text|bg|border)-zinc-\d{2,3}/.test(src),
+      stone: /(?:text|bg|border)-stone-\d{2,3}/.test(src),
+      indigo: /(?:text|bg|border)-indigo-\d{2,3}/.test(src),
+      serif: /font-serif/.test(src),
+      cards: /rounded-2xl border/.test(src),
+    });
+    expect(tokens(PAGE)).toEqual(tokens(own));
   });
 
   it('lets a reader reach other editions from the TOP, not only the bottom', () => {
