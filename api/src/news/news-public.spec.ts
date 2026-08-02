@@ -93,15 +93,14 @@ describe('the public payload is narrower by construction (BEA-1261)', () => {
     expect(e.complete).toBe(false);
   });
 
-  it('credits Smol AI on every edition, with a link — it is their daily work', async () => {
+  it('carries NO reference to the upstream source — owner\'s decision, 2026-08-02', async () => {
+    // Not hidden by the page: never assembled. The public payload is built field by field, so a
+    // later edit cannot render back something that was only ever removed from the template.
     const e: any = await svc().byDay('2026-07-31');
-    expect(e.builtOn.name).toBe('Smol AI News');
-    expect(e.builtOn.link).toContain('news.smol.ai');
-  });
-
-  it('still credits them if the source issue has gone missing', async () => {
-    const e: any = await svc({ edition: { ...PRIVATE_EDITION, source: null } }).byDay('2026-07-31');
-    expect(e.builtOn.link).toContain('news.smol.ai');
+    expect(e.builtOn).toBeUndefined();
+    expect(e.source).toBeUndefined();
+    expect(JSON.stringify(e).toLowerCase()).not.toContain('smol');
+    expect(JSON.stringify(e)).not.toContain('news.smol.ai');
   });
 
   it('the index gives titles and days only', async () => {
@@ -184,13 +183,11 @@ describe('the public page shows no private controls (BEA-1261)', () => {
     expect(PAGE).not.toContain('ui/nav');
   });
 
-  it('still credits the source in the masthead', () => {
-    // The owner replaced the FOOTER credit with his own line on 2026-08-02 (BEA-1265). The masthead
-    // one stays: this is built on somebody else's daily work, and it is linked where a reader will
-    // actually see it rather than only at the bottom of a sixty-story page.
-    const masthead = PAGE.slice(PAGE.indexOf('<header'), PAGE.indexOf('</header>'));
-    expect(masthead).toContain('builtOn.link');
-    expect(masthead).toContain('builtOn.name');
+  it('names and links the upstream source NOWHERE on the page', () => {
+    // Owner's decision, 2026-08-02: "dont mention Smol AI News and dont link it to this page."
+    expect(PAGE.toLowerCase()).not.toContain('smol');
+    expect(PAGE).not.toContain('builtOn');
+    expect(PAGE).not.toContain('news.smol.ai');
   });
 
   it('the footer says what it is built from, with the TRUE subreddit count', () => {
