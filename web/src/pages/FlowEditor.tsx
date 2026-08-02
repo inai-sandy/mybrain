@@ -82,6 +82,12 @@ function NodeBox({ id, data, selected }: { id: string; data: any; selected?: boo
           <div className="truncate font-medium text-zinc-800 dark:text-zinc-100">{data.label}</div>
           {data.sub && <div className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-zinc-500">{data.sub}</div>}
           {data.kind === 'merge' && <div className="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400">{(data.mode || 'ai') === 'ai' ? 'AI synthesise' : 'Stack raw'}</div>}
+          {/* BEA-1253 — a bare fallback looks exactly like a real one-branch plan. Say which it is. */}
+          {data.warn && (
+            <div className="mt-1 rounded bg-amber-100 px-1.5 py-1 text-[10px] font-medium leading-snug text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+              ⚠ {data.warn}
+            </div>
+          )}
         </div>
         {TOGGLEABLE.has(data.kind) && (
           <button className="nodrag nopan mt-0.5 shrink-0" title={off ? 'Disabled — click to include' : 'Click to skip this branch'} onClick={(e) => { e.stopPropagation(); toggleEnabled(id); }}>
@@ -250,7 +256,11 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
       setNodes(g.nodes || []);
       setEdges(g.edges || []);
       setSelected(null);
-      toast('success', 'Planned the whole flow — tweak any block, then Run');
+      // BEA-1253: the planner returns 200 even when it could not plan, so a blanket success toast
+      // was telling the owner it worked while handing him a stand-in. Say which one he got.
+      const planFailed = (g.nodes || []).find((n: any) => n.id === 'question')?.data?.planFailed;
+      if (planFailed) toast('error', 'Could not plan this one — you have a single fallback step. Try again, or reword the question.');
+      else toast('success', 'Planned the whole flow — tweak any block, then Run');
       openProcess(); // show how it will run
     } catch { toast('error', 'Could not plan the flow'); } finally { setSplitting(false); }
   }

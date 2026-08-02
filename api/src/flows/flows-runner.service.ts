@@ -375,6 +375,14 @@ export class FlowRunnerService implements OnModuleInit {
     for (const [nid, rr] of Object.entries(results)) { const st = (rr as NodeResult)?.status; if (st === 'done' || st === 'skipped') memo.set(nid, Promise.resolve((rr as NodeResult).output || '')); }
     const persist = () => stale() || this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
+
+    // BEA-1253: say it in the run log too. A run on a bare fallback produces a thin answer for a
+    // reason, and the owner should be able to see that reason afterwards rather than wondering
+    // whether the flow or the question was at fault.
+    if (nodes.get('question')?.data?.planFailed) {
+      term(`⚠ ${FlowsService.PLAN_FAILED_NOTE}`);
+      this.log.warn(`run ${runId} is on a flow whose planning failed — one generic step, no real plan`);
+    }
     // What this run spent on search, totalled across every deep research step (BEA-1196). Recorded so
     // the owner reads the real cost of a report off the run instead of trusting an estimate.
     const spend: ResearchSpend = { searches: 0, extracts: 0, sources: 0, meaningSearches: 0, braveSearches: 0, paidCalls: 0 };

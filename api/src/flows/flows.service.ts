@@ -391,7 +391,7 @@ export class FlowsService {
       // The planner prompt lives in the registry (Settings → Prompts → Agents) so the owner can
       // tune it. Its default deliberately does NOT add search_brain unless explicitly asked (BEA-1096).
       const tpl = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
-      if (!tpl) return this.buildGraph(q, null, skillById, toolById, webTools);
+      if (!tpl) return this.buildGraph(q, null, skillById, toolById, webTools, true);
       const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, FlowsService.QUESTION_MAX)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
       const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 2200, 'flow-plan') : await this.llm.complete(planPrompt, 2200, 'flow-plan');
       const m = (out || '').match(/\{[\s\S]*\}/);
@@ -411,10 +411,21 @@ export class FlowsService {
       }
     }
 
-    return this.buildGraph(q, plan, skillById, toolById, webTools);
+    // BEA-1253: a bare fallback and a real one-branch plan look identical on the canvas. Carry the
+    // difference through so the picture can say which one this is.
+    // A non-empty array is not the same as a usable plan. `{"branches":[{}]}` and
+    // `{"branches":[null]}` both parse, both pass an Array.isArray/length check, and both fall
+    // through buildGraph to exactly the same blank Ask-AI box as a total failure — unflagged. Any
+    // branch that carries neither a sub-question nor a step is not a branch.
+    const branches: any[] = Array.isArray(plan?.branches) ? plan.branches : [];
+    const planFailed = !branches.length || !branches.some((b: any) => String(b?.subquestion || '').trim() || b?.steps?.length);
+    return this.buildGraph(q, plan, skillById, toolById, webTools, planFailed);
   }
 
   /** "deep-research", "Deep research" and `deep_research` are all the same words. */
+  /** Shown on the canvas and in the run log when a graph is a stand-in rather than a plan. */
+  static readonly PLAN_FAILED_NOTE = 'Planning failed — this is a bare fallback, not a plan. Press Auto-plan to try again.';
+
   private static normName(s: string): string {
     return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   }
@@ -463,11 +474,27 @@ export class FlowsService {
    */
   private static readonly QUESTION_MAX = 8000;
 
-  private buildGraph(question: string, plan: any, skillById: Map<string, string>, toolById: Map<string, string>, webTools?: Set<string>): { nodes: any[]; edges: any[] } {
+  /**
+   * `planFailed` marks a graph the planner never produced (BEA-1253). Without it, a failed plan and
+   * a genuine single-branch plan are the same picture: one Ask-AI box, a 200 from the endpoint, no
+   * toast, nothing to tell the owner that the thing he is looking at is a stand-in. He would run it
+   * and wonder why the answer was thin.
+   */
+  private buildGraph(question: string, plan: any, skillById: Map<string, string>, toolById: Map<string, string>, webTools?: Set<string>, planFailed = false): { nodes: any[]; edges: any[] } {
     const nodes: any[] = [];
     const edges: any[] = [];
     const CX = 320, COL = 240, ROW = 110;
-    nodes.push({ id: 'question', type: 'box', position: { x: CX, y: 0 }, data: { kind: 'question', label: 'Question', sub: question.slice(0, FlowsService.QUESTION_MAX) } });
+    nodes.push({
+      id: 'question',
+      type: 'box',
+      position: { x: CX, y: 0 },
+      data: {
+        kind: 'question',
+        label: 'Question',
+        sub: question.slice(0, FlowsService.QUESTION_MAX),
+        ...(planFailed ? { planFailed: true, warn: FlowsService.PLAN_FAILED_NOTE } : {}),
+      },
+    });
 
     let branches: any[] = Array.isArray(plan?.branches) ? plan.branches.slice(0, 5) : [];
     if (!branches.length) branches = [{ subquestion: question.slice(0, FlowsService.QUESTION_MAX), steps: [{ kind: 'ask_ai' }] }];
