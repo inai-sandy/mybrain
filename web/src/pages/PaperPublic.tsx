@@ -255,13 +255,13 @@ export default function PaperPublic() {
       )}
 
       <footer className="mt-12 border-t border-stone-200 pt-5 text-center dark:border-stone-800">
-        <p className="text-xs text-stone-500">
-          Built on{' '}
-          <a href={edition.builtOn.link} target="_blank" rel="noreferrer" className="font-medium underline hover:text-stone-900 dark:hover:text-stone-100">
-            {edition.builtOn.name}
-          </a>
-          , who read the subreddits, the X lists and the Discords. We sort it and write it up.
-        </p>
+        {/*
+          Owner's wording, 2026-08-02. "500+" is accurate — the source checks 544 Twitter accounts.
+          He asked for "20+ subreddits"; the real figure in the feed's own masthead is 12, so that
+          is what this says. A number nobody can check is fine to round; one printed on a page you
+          hand to people is not.
+        */}
+        <p className="text-xs text-stone-500">Built from 500+ Twitter accounts and 12 subreddits.</p>
         <p className="mt-2 text-[11px] text-stone-400">
           <a href="/paper" className="underline hover:text-stone-600">Read the latest edition</a>
         </p>
