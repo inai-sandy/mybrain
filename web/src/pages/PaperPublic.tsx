@@ -192,28 +192,8 @@ export default function PaperPublic() {
         </section>
       )}
 
-      {/*
-        THE LEAD. The page had no focal point after the masthead — everything below it sat within a
-        few pixels of the same size, so forty stories read as one undifferentiated block. Size is
-        what fixes that, not colour.
-      */}
-      {edition.sections[0] && (
-        <article className="mt-9">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-400">{edition.sections[0].category}</p>
-          <h2 className="font-serif text-[27px] font-bold leading-[1.2] tracking-tight">{edition.sections[0].line}</h2>
-          {edition.sections[0].prose && (
-            <div className="mt-3 space-y-3.5 text-[17px] leading-[1.68]">
-              {edition.sections[0].prose.split(/\n{2,}/).map((p, i) => (
-                <p key={i}>{p}</p>
-              ))}
-            </div>
-          )}
-          <div className="mt-6 h-0.5 bg-stone-900 dark:bg-stone-100" />
-        </article>
-      )}
-
       <div className="mt-8 space-y-6">
-        {edition.sections.map((sec, secIndex) => {
+        {edition.sections.map((sec) => {
           const head = sec.stories.slice(0, SHOWN);
           const rest = sec.stories.slice(SHOWN);
           const expanded = !!open[sec.category];
@@ -225,8 +205,13 @@ export default function PaperPublic() {
                 <span className="h-px flex-1 bg-stone-200 dark:bg-stone-800" />
                 <span className="shrink-0 font-medium tracking-normal text-stone-400">{sec.storyCount}</span>
               </h2>
-              {/* The first section already ran as the lead above — don't print it twice. */}
-              {secIndex > 0 && sec.prose && (
+              {/*
+                One block per category, exactly once — the same shape as the owner's own view.
+                A "lead" that reprinted the first section's write-up above the section itself put
+                its heading on the page three times, which is what made this read as repetition.
+              */}
+              {sec.line && <p className="mb-3 font-serif text-[19px] font-bold leading-[1.35] tracking-tight">{sec.line}</p>}
+              {sec.prose && (
                 <div className="mb-5 space-y-3 text-[15px] leading-[1.65] text-stone-600 dark:text-stone-300">
                   {sec.prose.split(/\n{2,}/).map((p, i) => (
                     <p key={i}>{p}</p>
