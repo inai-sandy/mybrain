@@ -11,6 +11,7 @@ import { ChatService } from '../chat/chat.service';
 import { ItemsService } from '../items/items.service';
 import { VoiceService } from '../voice/voice.service';
 import { AgentService } from '../agent/agent.service';
+import { clampTitle } from '../common/clamp-title';
 
 const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
@@ -984,7 +985,7 @@ export class TelegramService implements OnModuleInit {
     }
     if (!hm) return null;
 
-    let title = body.replace(/^to\s+/i, '').replace(/[\s,]+$/, '').trim().slice(0, 160) || 'Reminder';
+    let title = clampTitle(body.replace(/^to\s+/i, '').replace(/[\s,]+$/, '')) || 'Reminder';
     const day = tomorrow ? this.dayAdd(this.dayKey(tz), 1) : this.dayKey(tz);
     // Go through TasksService so the task is INDEXED — created straight on Prisma it never reached the
     // brain and stayed invisible to EMO until someone ran the manual reindex. `create` computes its own

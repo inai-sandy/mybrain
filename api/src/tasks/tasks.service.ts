@@ -6,6 +6,7 @@ import { PromptsService } from '../prompts/prompts.service';
 import { MemoryService } from '../memory/memory.service';
 import { matchContact, contactSpellings } from '../contacts/person-identity';
 import { MentionResolution, exactMatches, linkableIds, resolveMentions } from './mentions';
+import { clampTitle } from '../common/clamp-title';
 
 const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 
@@ -454,7 +455,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const created = [];
     let skipped = 0;
     for (const c of crafted.tasks) {
-      const title = String(c.title || '').trim().slice(0, 160);
+      const title = clampTitle(c.title);
       if (!title) continue;
       // Resolve WHO first — the duplicate check needs it (BEA-1188).
       const who = String((c as any).who || '').trim();
@@ -860,7 +861,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
 
   /** Manually add a single task (no dump). */
   async create(data: { title?: string; category?: string; tags?: string[]; priority?: string; sphere?: string; estimateMin?: number; note?: string; pinned?: boolean; reminderCount?: number; party?: string; dueDate?: string; auto?: boolean; day?: string; ownerContactId?: string | null; mentions?: string[]; briefingId?: string | null; kind?: string }) {
-    const title = String(data.title || '').trim().slice(0, 160);
+    const title = clampTitle(data.title);
     if (!title) return null;
     const tz = await this.tz();
     const priority = this.normPriority(data.priority);
@@ -926,7 +927,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   async createDoneTask(title: string, category: string | null, day: string) {
-    const t = String(title || '').trim().slice(0, 160);
+    const t = clampTitle(title);
     if (!t) return null;
     const row = await this.prisma.task.create({
       data: { title: t, category: category ? String(category).trim().slice(0, 40) : null, priority: 'medium', sphere: 'work', day, status: 'done', progress: 100, completedAt: new Date() },
@@ -947,7 +948,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       : { ownerContactId: (t as any).ownerContactId ?? null, party: t.party };
     if (!owner) return null; // an ownerContactId that doesn't exist — reject, don't guess
     const wordsTouched = data.title !== undefined || data.note !== undefined || data.mentions !== undefined;
-    const nextTitle = data.title?.trim() ? data.title.trim().slice(0, 160) : t.title;
+    const nextTitle = data.title?.trim() ? clampTitle(data.title) : t.title;
     const nextNote = data.note !== undefined ? (data.note ? String(data.note).trim().slice(0, 500) : null) : t.note;
     const priority = data.priority !== undefined ? this.normPriority(data.priority) : t.priority;
     const sphere = data.sphere !== undefined ? this.normSphere(data.sphere) : (t as any).sphere || 'work';
@@ -1084,7 +1085,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
     const fu = await this.prisma.task.create({
       data: {
-        title: `Follow up: ${orig.title}`.slice(0, 160),
+        title: clampTitle(`Follow up: ${orig.title}`),
         category: orig.category || null,
         priority: orig.priority || 'medium',
         note: orig.note || null,
@@ -1134,7 +1135,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     const clean = (text || '').trim();
     if (!clean) return { created: 0 };
     const crafted = await this.craft(clean).catch(() => null);
-    const items = crafted?.tasks?.length ? crafted.tasks : [{ title: clean.replace(/\s+/g, ' ').slice(0, 160) } as any];
+    const items = crafted?.tasks?.length ? crafted.tasks : [{ title: clampTitle(clean) } as any];
     let created = 0;
     for (const c of items.slice(0, 15)) {
       const t: any = await this.create({ title: c.title, note: (c as any).note, category: (c as any).category, priority: (c as any).priority || 'high', auto: true }).catch(() => null);

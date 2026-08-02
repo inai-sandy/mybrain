@@ -10,6 +10,7 @@ import { looseJsonParse, narrativeField } from '../common/llm-json';
 import { matchContact, contactSpellings, norm as normName } from '../contacts/person-identity';
 import { MentorService } from '../mentor/mentor.service';
 import { MentalModelService } from '../mind/mentalmodel.service';
+import { clampTitle } from '../common/clamp-title';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
@@ -268,7 +269,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     };
     const seen = new Set<string>();
     const candidates = list
-      .map((t) => ({ title: String(t?.title || '').trim().slice(0, 160), category: t?.category ? String(t.category).trim().slice(0, 40) : null }))
+      .map((t) => ({ title: clampTitle(t?.title), category: t?.category ? String(t.category).trim().slice(0, 40) : null }))
       .filter((t) => t.title && !isDup(t.title) && !seen.has(t.title.toLowerCase()) && seen.add(t.title.toLowerCase()))
       .slice(0, 12);
     // Everything the model said was finished — including what the dedupe above removed, because
@@ -317,7 +318,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const seen = new Set<string>();
     const todos = list
       .map((t) => ({
-        title: String(t?.title || '').trim().slice(0, 160),
+        title: clampTitle(t?.title),
         category: t?.category ? String(t.category).trim().slice(0, 40) : null,
         note: t?.note ? String(t.note).trim().slice(0, 500) : null,
         priority: /^(high|medium|low)$/i.test(String(t?.priority)) ? String(t?.priority).toLowerCase() : 'medium',
@@ -1366,7 +1367,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.prisma.mindChain.findFirst({ where: { status: 'active', NOT: { validated: 'refuted' } }, orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }] }),
       this.prisma.mentorDay.findFirst({ orderBy: { day: 'desc' }, select: { guidance: true } }),
     ]);
-    const focus = focusList.active?.[0]?.title || (latestMentor?.guidance ? latestMentor.guidance.split(/[.\n]/)[0].trim().slice(0, 160) : null);
+    const focus = focusList.active?.[0]?.title || (latestMentor?.guidance ? clampTitle(latestMentor.guidance.split(/[.\n]/)[0]) : null);
     const suggestion = sug ? { id: sug.id, title: sug.title, reason: sug.reason } : null;
     const lever = chain ? { goal: chain.goal, lever: chain.lever } : null;
     return { focus, suggestion, lever };
@@ -1434,7 +1435,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       const row = await this.prisma.suggestedTask.create({
         data: {
           forDay,
-          title: String(s.title).trim().slice(0, 160),
+          title: clampTitle(s.title),
           category: s.category ? String(s.category).trim().slice(0, 40) : null,
           reason: s.reason ? String(s.reason).trim().slice(0, 240) : null,
         },
