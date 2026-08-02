@@ -183,14 +183,15 @@ describe('the public page shows no private controls (BEA-1261)', () => {
     expect(PAGE).not.toContain('ui/nav');
   });
 
-  it('opens with a LEAD — a focal point before the ordinary sections', () => {
-    // Without this the page has nothing to land on after the masthead: forty stories all within a
-    // few pixels of the same size. Position, not existence — the lead must come BEFORE the loop.
-    const leadAt = PAGE.indexOf('THE LEAD.');
-    const loopAt = PAGE.indexOf('edition.sections.map');
-    expect(leadAt).toBeGreaterThan(-1);
-    expect(leadAt).toBeLessThan(loopAt);
-    expect(PAGE).toContain('edition.sections[0] &&');
+  it('prints each category ONCE — no section reprinted as a lead', () => {
+    // BEA-1268. A separate lead block that reprinted the first section's write-up above the
+    // section itself put "Models & releases" on the page three times, and the owner read the whole
+    // page as repetition. One block per category, the same shape as his own view.
+    expect(PAGE).not.toContain('edition.sections[0] &&');
+    expect(PAGE).not.toContain('THE LEAD.');
+    // exactly one place that renders a section's prose
+    expect((PAGE.match(/sec\.prose\.split/g) || []).length).toBe(1);
+    expect((PAGE.match(/edition\.sections\.map/g) || []).length).toBe(1);
   });
 
   it('renders stories at three sizes, not forty identical boxes', () => {
