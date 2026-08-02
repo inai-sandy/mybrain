@@ -8,6 +8,7 @@ import { MemoryService } from '../memory/memory.service';
 import { looseJsonParse } from '../common/llm-json';
 import { gradeBriefDraft, summaryContradicts, cadenceFromWords, chaseTimesFrom, DEFAULT_CHASE_TIMES, type Cadence } from './brief-guard';
 import { TASK_SETTING_KEYS, parseChaseTimes } from '../tasks/task-settings';
+import { clampTitle } from '../common/clamp-title';
 
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
@@ -96,12 +97,12 @@ export class BriefingsService {
     // The AI being unavailable must never lose what you said. Fall back to one task holding the
     // whole briefing — you can split it by hand, and nothing is dropped on the floor.
     if (!out || !Array.isArray(out.tasks) || !out.tasks.length) {
-      return { summary: raw.replace(/\s+/g, ' ').slice(0, 140), tasks: [{ title: raw.replace(/\s+/g, ' ').slice(0, 160), note: raw.slice(0, 500) }], cadence: cadenceFromWords(raw), dropped: [] };
+      return { summary: raw.replace(/\s+/g, ' ').slice(0, 140), tasks: [{ title: clampTitle(raw), note: raw.slice(0, 500) }], cadence: cadenceFromWords(raw), dropped: [] };
     }
 
     const tasks: DraftTask[] = out.tasks
       .map((t: any) => ({
-        title: String(t?.title || '').trim().slice(0, 160),
+        title: clampTitle(t?.title),
         note: t?.note ? String(t.note).trim().slice(0, 500) : undefined,
         category: t?.category ? String(t.category).trim().slice(0, 40) : undefined,
         priority: ['high', 'medium', 'low'].includes(t?.priority) ? t.priority : 'medium',
@@ -123,7 +124,7 @@ export class BriefingsService {
     if (!kept.length) {
       return {
         summary: raw.replace(/\s+/g, ' ').slice(0, 140),
-        tasks: [{ title: raw.replace(/\s+/g, ' ').slice(0, 160), note: raw.slice(0, 500) }],
+        tasks: [{ title: clampTitle(raw), note: raw.slice(0, 500) }],
         cadence: graded.cadence,
         dropped: graded.dropped,
       };
@@ -164,7 +165,7 @@ export class BriefingsService {
     const contact = await this.contactOrThrow(contactId);
     const raw = String(input?.text || '').trim();
     if (!raw) throw new BadRequestException('Tell me what is going on with them first');
-    const approved = (input?.tasks || []).map((t) => ({ ...t, title: String(t?.title || '').trim().slice(0, 160) })).filter((t) => t.title);
+    const approved = (input?.tasks || []).map((t) => ({ ...t, title: clampTitle(t?.title) })).filter((t) => t.title);
     if (!approved.length) throw new BadRequestException('Keep at least one task, or cancel');
 
     // Chase times are the owner's call — he said the frequency stays his decision.
