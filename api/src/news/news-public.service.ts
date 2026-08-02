@@ -10,7 +10,9 @@ import { NewsReadService } from './news-read.service';
  * somebody forgets to strip, because the private fields are never put in here at all.
  *
  * What is left out on purpose: story ids (they are the handle for the owner's research endpoints),
- * the `flagged` shortlist (that is his reading list, not news), and anything about runs or engines.
+ * the `flagged` shortlist (that is his reading list, not news), anything about runs or engines, and
+ * — owner's decision, 2026-08-02 — the upstream source's name and link. The field is not merely
+ * hidden by the page; it is never assembled, so it cannot be rendered back by a later edit.
  */
 
 export type PublicStory = {
@@ -65,9 +67,6 @@ export class NewsPublicService {
           links: st.links,
         })),
       })),
-      // Credit is part of the page, not a footnote we might forget: this is built on someone
-      // else's daily work, and every edition links back to the issue it came from.
-      builtOn: e.source ? { name: 'Smol AI News', link: e.source.link } : { name: 'Smol AI News', link: 'https://news.smol.ai/' },
     };
   }
 

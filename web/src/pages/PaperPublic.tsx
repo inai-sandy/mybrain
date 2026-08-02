@@ -23,7 +23,6 @@ type PublicEdition = {
   storyCount: number;
   complete: boolean;
   sections: PublicSection[];
-  builtOn: { name: string; link: string };
 };
 
 const SHOWN = 3;
@@ -140,12 +139,6 @@ export default function PaperPublic() {
         <div className="mt-3 flex justify-center">
           <ShareButton url={`/paper/${edition.day}`} title={`AI News Daily — ${edition.headline}`} text={edition.sixty[0]} />
         </div>
-        <p className="mt-3 text-[11px] text-stone-400">
-          Sorted and written up from{' '}
-          <a href={edition.builtOn.link} target="_blank" rel="noreferrer" className="font-medium underline decoration-dotted underline-offset-2 hover:text-stone-700 dark:hover:text-stone-200">
-            {edition.builtOn.name}
-          </a>
-        </p>
       </header>
 
       {!edition.complete && (
