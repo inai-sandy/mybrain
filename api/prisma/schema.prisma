@@ -1340,6 +1340,11 @@ model NewsStory {
   html        String
   links       String   @default("[]") // JSON string[]
   category    String? // filled in by BEA-1256; null until then, never a silent default
+  /// A short written headline (BEA-1267). Comes back from the SAME section call that writes the
+  /// prose, so it costs no extra engine turn. Null until an edition is written, and null after an
+  /// engine failure — the page falls back to the story's first sentence, which is what it used to
+  /// show all the time.
+  headline    String?
   createdAt   DateTime @default(now())
   // Cascade added while the table was still new: deleting an issue must not leave its stories
   // behind as orphans nobody can reach. Retro-fitting a foreign key later means a table rewrite.

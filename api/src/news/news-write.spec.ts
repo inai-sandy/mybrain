@@ -20,7 +20,16 @@ function svc(reply: string | null | ((prompt: string) => string | null), rows?: 
       { id: 's2', text: 'Open weights landed on Hugging Face.', theme: 'The launch', category: 'Models & releases', sourceKind: 'twitter', links: '[]' },
       { id: 's3', text: 'A court ruled on training data.', theme: null, category: 'Policy & law', sourceKind: 'reddit', links: '[]' },
     ];
-  const prisma: any = { newsStory: { findMany: async () => stories } };
+  const prisma: any = {
+    newsStory: {
+      findMany: async () => stories,
+      update: async ({ where, data }: any) => {
+        const row = stories.find((s: any) => s.id === where.id);
+        if (row) Object.assign(row, data);
+        return row;
+      },
+    },
+  };
   const seen: { prompt: string; key: string; maxTokens: number }[] = [];
   const llm: any = {
     completeHelper: async (key: string, prompt: string, maxTokens: number) => {
@@ -32,7 +41,14 @@ function svc(reply: string | null | ((prompt: string) => string | null), rows?: 
   return { service: new NewsWriteService(prisma, llm, prompts), seen, stories };
 }
 
-const SECTION = 'LINE: DeepSeek resets the price war\nWRITE-UP:\nDeepSeek launched V4-Flash and open-weighted it hours later.';
+const SECTION = [
+  'LINE: DeepSeek resets the price war',
+  'HEADLINES:',
+  '1. DeepSeek ships V4-Flash in public beta',
+  '2. Open weights land on Hugging Face',
+  'WRITE-UP:',
+  'DeepSeek launched V4-Flash and open-weighted it hours later.',
+].join('\n');
 const TOPLINE = 'HEADLINE: DeepSeek resets the price war\n- DeepSeek V4-Flash ships\n- Open weights follow\n- A court rules on training data';
 
 describe('writing an edition (BEA-1257)', () => {
@@ -100,6 +116,79 @@ describe('writing an edition (BEA-1257)', () => {
       expect(call.prompt).not.toContain('<item>');
       expect(call.prompt).not.toContain('content:encoded');
     }
+  });
+});
+
+describe('the engine writes a real headline per story (BEA-1267)', () => {
+  it('the REAL prompt asks for them — the fixture proves nothing on its own', async () => {
+    // Removing HEADLINES from the shipped prompt left every test green, because they all run
+    // against a fake template. This reads the registry the app actually uses.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { PromptsService } = require('../prompts/prompts.service');
+    const real = await new PromptsService({ setting: { findUnique: async () => null } } as any).get('news.section');
+    // A LINE that is exactly "HEADLINES:" — the block header. A loose contains() matched the
+    // explanatory "About the HEADLINES:" note further down and passed with the header deleted.
+    expect(real).toMatch(/^HEADLINES:\s*$/m);
+    expect(real).toMatch(/under 9 words/);
+    expect(real).toMatch(/one line per numbered story/i);
+  });
+
+  it('writes each story its own short headline, in order', async () => {
+    // Story text is narrative prose. At 20px serif a first sentence reads as a sentence pretending
+    // to be a headline — the bigger type did not cause that, it revealed it.
+    const { service, stories } = svc((p) => (p.includes('TEMPLATE:news.topline') ? TOPLINE : SECTION));
+    await service.writeEdition('i1');
+    expect(stories[0].headline).toBe('DeepSeek ships V4-Flash in public beta');
+    expect(stories[1].headline).toBe('Open weights land on Hugging Face');
+  });
+
+  it('costs no extra engine call — the headlines ride along with the prose', async () => {
+    const { service, seen } = svc((p) => (p.includes('TEMPLATE:news.topline') ? TOPLINE : SECTION));
+    await service.writeEdition('i1');
+    // 2 sections + 1 topline. Adding headlines must not add a call.
+    expect(seen).toHaveLength(3);
+  });
+
+  it('a story the engine skipped keeps what it had — a partial reply spoils nothing', async () => {
+    const partial = 'LINE: x\nHEADLINES:\n2. Only the second one\nWRITE-UP:\nSome prose.';
+    const { service, stories } = svc((p) => (p.includes('TEMPLATE:news.topline') ? TOPLINE : partial));
+    await service.writeEdition('i1');
+    expect(stories[0].headline).toBeUndefined();
+    expect(stories[1].headline).toBe('Only the second one');
+  });
+
+  it('ignores a number outside the section rather than headlining the wrong story', () => {
+    // Tested on the parser directly: going through writeEdition, an out-of-range index lands
+    // harmlessly off the end of the array, so the guard was invisible and the earlier version of
+    // this test passed with the guard removed.
+    const reply = 'LINE: x\nHEADLINES:\n1. Real one\n3. Beyond the section\n0. Before it\n-1. Nonsense\nWRITE-UP:\np';
+    const out = NewsWriteService.parseHeadlines(reply, 2);
+    expect(out[0]).toBe('Real one');
+    expect(out).toHaveLength(1); // nothing written at index 2, and no negative keys
+    expect(Object.keys(out)).toEqual(['0']);
+  });
+
+  it('reads only the HEADLINES block, not numbered lines in the prose', () => {
+    const reply = 'LINE: x\nHEADLINES:\n1. The headline\nWRITE-UP:\n1. This is prose that starts with a number.';
+    expect(NewsWriteService.parseHeadlines(reply, 2)).toEqual(['The headline']);
+  });
+
+  it('returns nothing when the engine ignored the instruction entirely', () => {
+    expect(NewsWriteService.parseHeadlines('LINE: x\nWRITE-UP:\nJust prose.', 3)).toEqual([]);
+  });
+
+  it('an engine failure leaves headlines alone — the page falls back to first sentences', async () => {
+    const { service, stories } = svc(null);
+    const d = await service.writeEdition('i1');
+    expect(d.engineOk).toBe(false);
+    expect(stories.every((s: any) => !s.headline)).toBe(true);
+  });
+
+  it('strips quotes and a trailing full stop — it is a headline, not a sentence', async () => {
+    const quoted = 'LINE: x\nHEADLINES:\n1. "DeepSeek ships V4-Flash."\nWRITE-UP:\nSome prose.';
+    const { service, stories } = svc((p) => (p.includes('TEMPLATE:news.topline') ? TOPLINE : quoted));
+    await service.writeEdition('i1');
+    expect(stories[0].headline).toBe('DeepSeek ships V4-Flash');
   });
 });
 

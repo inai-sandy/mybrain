@@ -14,6 +14,8 @@ import { NEWS_CATEGORIES, UNCATEGORISED } from './news-categorise.service';
 export type EditionStory = {
   id: string;
   text: string;
+  /** Written by the engine (BEA-1267); null falls back to the first sentence on the page. */
+  headline: string | null;
   theme: string | null;
   category: string;
   sourceKind: string;
@@ -79,12 +81,13 @@ export class NewsReadService {
     const rows = await this.prisma.newsStory.findMany({
       where: { issueId: edition.issueId, kind: 'story' },
       orderBy: { order: 'asc' },
-      select: { id: true, text: true, theme: true, category: true, sourceKind: true, links: true, flagged: true },
+      select: { id: true, text: true, theme: true, category: true, sourceKind: true, links: true, flagged: true, headline: true },
     });
 
     const stories: EditionStory[] = rows.map((s) => ({
       id: s.id,
       text: s.text,
+      headline: s.headline,
       theme: s.theme,
       category: s.category || UNCATEGORISED,
       sourceKind: s.sourceKind,

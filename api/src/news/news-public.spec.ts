@@ -183,6 +183,22 @@ describe('the public page shows no private controls (BEA-1261)', () => {
     expect(PAGE).not.toContain('ui/nav');
   });
 
+  it('opens with a LEAD — a focal point before the ordinary sections', () => {
+    // Without this the page has nothing to land on after the masthead: forty stories all within a
+    // few pixels of the same size. Position, not existence — the lead must come BEFORE the loop.
+    const leadAt = PAGE.indexOf('THE LEAD.');
+    const loopAt = PAGE.indexOf('edition.sections.map');
+    expect(leadAt).toBeGreaterThan(-1);
+    expect(leadAt).toBeLessThan(loopAt);
+    expect(PAGE).toContain('edition.sections[0] &&');
+  });
+
+  it('renders stories at three sizes, not forty identical boxes', () => {
+    expect(PAGE).toMatch(/big \?/);
+    expect(PAGE).toContain('brief');
+    expect(PAGE).toContain('big={i === 0}');
+  });
+
   it('lets a reader reach other editions from the TOP, not only the bottom', () => {
     // The bug the owner caught: the archive existed and linked correctly, 11 phone-screens down
     // past 40 stories. Asserting a thing renders is not the same as asserting a person can get to

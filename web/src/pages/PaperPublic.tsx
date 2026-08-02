@@ -177,9 +177,10 @@ export default function PaperPublic() {
         </p>
       )}
 
+      {/* Ruled, not a rounded card — it was the most "app" element on a page trying to be a paper. */}
       {edition.sixty.length > 0 && (
-        <section className="mt-6 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900">
-          <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-stone-400">The 60-second read</p>
+        <section className="mt-7 border-y border-stone-300 py-5 dark:border-stone-700">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">The 60-second read</p>
           <ol className="space-y-2.5">
             {edition.sixty.map((l, i) => (
               <li key={i} className="flex gap-3 text-[15px] leading-relaxed">
@@ -191,33 +192,52 @@ export default function PaperPublic() {
         </section>
       )}
 
+      {/*
+        THE LEAD. The page had no focal point after the masthead — everything below it sat within a
+        few pixels of the same size, so forty stories read as one undifferentiated block. Size is
+        what fixes that, not colour.
+      */}
+      {edition.sections[0] && (
+        <article className="mt-9">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-400">{edition.sections[0].category}</p>
+          <h2 className="font-serif text-[27px] font-bold leading-[1.2] tracking-tight">{edition.sections[0].line}</h2>
+          {edition.sections[0].prose && (
+            <div className="mt-3 space-y-3.5 text-[17px] leading-[1.68]">
+              {edition.sections[0].prose.split(/\n{2,}/).map((p, i) => (
+                <p key={i}>{p}</p>
+              ))}
+            </div>
+          )}
+          <div className="mt-6 h-0.5 bg-stone-900 dark:bg-stone-100" />
+        </article>
+      )}
+
       <div className="mt-8 space-y-6">
-        {edition.sections.map((sec) => {
+        {edition.sections.map((sec, secIndex) => {
           const head = sec.stories.slice(0, SHOWN);
           const rest = sec.stories.slice(SHOWN);
           const expanded = !!open[sec.category];
           return (
             <section key={sec.category}>
-              <div className="mb-3 flex items-baseline justify-between gap-3 border-b border-stone-200 pb-2 dark:border-stone-800">
-                <h2 className="flex items-center gap-2 text-[13px] font-bold uppercase tracking-wider">
-                  <span className="h-1.5 w-1.5 rounded-full bg-stone-900 dark:bg-stone-100" />
-                  {sec.category}
-                </h2>
-                <span className="shrink-0 text-xs text-stone-400">{sec.storyCount}</span>
-              </div>
-              {sec.line && <p className="mb-3 text-sm font-medium text-stone-600 dark:text-stone-300">{sec.line}</p>}
-              {sec.prose && (
-                <div className="mb-4 space-y-3 text-[15px] leading-relaxed text-stone-700 dark:text-stone-300">
+              <h2 className="mb-4 flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-[0.16em]">
+                <span className="h-px w-3.5 bg-stone-300 dark:bg-stone-700" />
+                {sec.category}
+                <span className="h-px flex-1 bg-stone-200 dark:bg-stone-800" />
+                <span className="shrink-0 font-medium tracking-normal text-stone-400">{sec.storyCount}</span>
+              </h2>
+              {/* The first section already ran as the lead above — don't print it twice. */}
+              {secIndex > 0 && sec.prose && (
+                <div className="mb-5 space-y-3 text-[15px] leading-[1.65] text-stone-600 dark:text-stone-300">
                   {sec.prose.split(/\n{2,}/).map((p, i) => (
                     <p key={i}>{p}</p>
                   ))}
                 </div>
               )}
 
-              <ul className="space-y-2">
+              <ul>
                 {head.map((s, i) => (
                   <li key={i}>
-                    <StoryCard story={s} />
+                    <StoryCard story={s} big={i === 0} />
                   </li>
                 ))}
               </ul>
@@ -225,10 +245,10 @@ export default function PaperPublic() {
               {/* Always rendered, only collapsed — every story stays in the page and findable. */}
               {rest.length > 0 && (
                 <div className={'grid transition-[grid-template-rows] duration-200 ' + (expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
-                  <ul className="min-h-0 space-y-2 overflow-hidden" aria-hidden={!expanded}>
+                  <ul className="min-h-0 overflow-hidden" aria-hidden={!expanded}>
                     {rest.map((s, i) => (
-                      <li key={i} className="pt-2">
-                        <StoryCard story={s} />
+                      <li key={i}>
+                        <StoryCard story={s} brief />
                       </li>
                     ))}
                   </ul>
@@ -295,21 +315,41 @@ export default function PaperPublic() {
   );
 }
 
-function StoryCard({ story }: { story: PublicStory }) {
+/**
+ * A story, at one of three sizes (BEA-1267).
+ *
+ * The page used to render forty identical bordered rectangles, which is most of why it read as one
+ * flat block. Now the first story in a section carries real weight, the next couple are mid-sized,
+ * and the tail is compact lines. Same information, a rhythm to scroll through.
+ */
+function StoryCard({ story, big = false, brief = false }: { story: PublicStory; big?: boolean; brief?: boolean }) {
   const label = SOURCE_LABEL[story.source] ?? story.source;
+  const meta = (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-stone-400">
+      {label && <span>{label}</span>}
+      {story.links.slice(0, 3).map((l, i) => (
+        <a key={i} href={l} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-stone-700 dark:hover:text-stone-200">
+          source{story.links.length > 1 ? ` ${i + 1}` : ''}
+        </a>
+      ))}
+    </div>
+  );
+
+  if (brief) {
+    return (
+      <div className="relative border-b border-stone-200 py-2.5 pl-4 dark:border-stone-800">
+        <span aria-hidden className="absolute left-0.5 top-2.5 font-bold text-stone-300 dark:text-stone-700">·</span>
+        <p className="text-[14px] leading-[1.5] text-stone-600 dark:text-stone-300">{story.headline}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-3.5 transition-colors hover:border-stone-400 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-600">
-      <p className="text-sm leading-relaxed text-stone-800 dark:text-stone-200">{story.headline}</p>
-      {(label || story.links.length > 0) && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-stone-400">
-          {label && <span>{label}</span>}
-          {story.links.slice(0, 3).map((l, i) => (
-            <a key={i} href={l} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-stone-700 dark:hover:text-stone-200">
-              source{story.links.length > 1 ? ` ${i + 1}` : ''}
-            </a>
-          ))}
-        </div>
-      )}
+    <div className="border-b border-stone-200 pb-4 pt-4 first:pt-0 dark:border-stone-800">
+      <h3 className={'font-serif font-bold tracking-tight ' + (big ? 'text-[20px] leading-[1.3]' : 'text-[16px] leading-[1.4]')}>
+        {story.headline}
+      </h3>
+      {meta}
     </div>
   );
 }
