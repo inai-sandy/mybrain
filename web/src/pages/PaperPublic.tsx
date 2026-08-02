@@ -90,6 +90,12 @@ export default function PaperPublic() {
     return () => { alive = false; };
   }, [day]);
 
+  // The editions either side of this one. The archive comes back newest-first, so the entry BEFORE
+  // this one is the newer paper and the entry after it is the older one.
+  const at = edition ? archive.findIndex((e) => e.day === edition.day) : -1;
+  const newer = at > 0 ? archive[at - 1] : null;
+  const older = at >= 0 && at < archive.length - 1 ? archive[at + 1] : null;
+
   if (state === 'loading') {
     return (
       <Frame>
@@ -131,15 +137,39 @@ export default function PaperPublic() {
         <p className="mt-3 text-xs text-stone-400">
           {edition.storyCount} {edition.storyCount === 1 ? 'story' : 'stories'} · about a {Math.max(2, Math.round(edition.storyCount / 8))} minute read
         </p>
-        {/*
-          The credit sits UNDER THE MASTHEAD, not only in the footer. On a sixty-story edition a
-          footer line is one most readers never scroll to, and this is built on someone else's
-          daily work — the acknowledgement should be where the paper introduces itself.
-        */}
         <div className="mt-3 flex justify-center">
           <ShareButton url={`/paper/${edition.day}`} title={`AI News Daily — ${edition.headline}`} text={edition.sixty[0]} />
         </div>
       </header>
+
+      {/*
+        Moving between editions belongs at the TOP, where a paper puts it. The archive at the foot
+        of the page was 11 phone-screens down past 40 stories — the links were right and nobody was
+        ever going to reach them, which for a reader is the same as their not existing.
+      */}
+      {(older || newer || archive.length > 1) && (
+        <nav className="mt-4 flex items-center justify-between gap-2 text-xs">
+          {newer ? (
+            <a href={`/paper/${newer.day}`} className="inline-flex min-w-0 items-center gap-1 text-stone-500 hover:text-stone-900 dark:hover:text-stone-100">
+              <span aria-hidden>←</span> <span className="truncate">Newer</span>
+            </a>
+          ) : (
+            <span className="text-stone-300 dark:text-stone-700" aria-hidden>←</span>
+          )}
+
+          <a href="#all-editions" className="shrink-0 rounded-full bg-stone-200/70 px-3 py-1 font-medium text-stone-600 hover:bg-stone-300 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700">
+            All {archive.length} edition{archive.length === 1 ? '' : 's'}
+          </a>
+
+          {older ? (
+            <a href={`/paper/${older.day}`} className="inline-flex min-w-0 items-center gap-1 text-stone-500 hover:text-stone-900 dark:hover:text-stone-100">
+              <span className="truncate">Older</span> <span aria-hidden>→</span>
+            </a>
+          ) : (
+            <span className="text-stone-300 dark:text-stone-700" aria-hidden>→</span>
+          )}
+        </nav>
+      )}
 
       {!edition.complete && (
         <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-center text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
@@ -224,8 +254,10 @@ export default function PaperPublic() {
         Someone who likes today's paper should be able to read back.
       */}
       {archive.filter((e) => e.day !== edition.day).length > 0 && (
-        <section className="mt-12 border-t border-stone-200 pt-6 dark:border-stone-800">
-          <h2 className="mb-3 text-[13px] font-bold uppercase tracking-wider">Earlier editions</h2>
+        <section id="all-editions" className="mt-12 scroll-mt-4 border-t border-stone-200 pt-6 dark:border-stone-800">
+          {/* "Earlier" was wrong: this lists every OTHER edition, which includes newer ones when
+              you are reading an old link. */}
+          <h2 className="mb-3 text-[13px] font-bold uppercase tracking-wider">All editions</h2>
           <ul className="space-y-2">
             {archive
               .filter((e) => e.day !== edition.day)
