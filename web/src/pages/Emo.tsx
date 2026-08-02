@@ -200,7 +200,9 @@ export default function Emo() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      {/* Stacked on phones: side by side, the title column was squeezed so hard the subtitle wrapped
+          to three lines next to the buttons. Same row as before from sm: up. (BEA-1273) */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">Emo</h1>
           <p className="text-xs text-zinc-400">Everything you captured by voice — one card per moment.</p>
@@ -226,7 +228,12 @@ export default function Emo() {
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitCapture(); }}
             placeholder="Hold the mic and speak — a question to search, or a task / reminder / story / research to file…"
             rows={2}
-            className="min-h-[3rem] flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500/50 dark:border-zinc-700 dark:bg-zinc-900"
+            /* Taller on phones so the whole prompt is readable. A 2-row box renders 58px, but the
+               placeholder needs 96px at 390px and 116px at 320px, where the textarea is only 199px
+               wide and the text runs to five lines — so it was cut mid-sentence behind an inner
+               scrollbar. 7.5rem = 120px clears the narrowest phone. `rows` cannot be made
+               responsive, min-height can. Desktop keeps 3rem. (BEA-1273) */
+            className="min-h-[7.5rem] flex-1 resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500/50 sm:min-h-[3rem] dark:border-zinc-700 dark:bg-zinc-900"
           />
           <DictateButton onText={(t) => setDictated((d) => (d ? d.replace(/\s*$/, '') + ' ' : '') + t.trim())} size={18} className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300" />
         </div>
@@ -263,9 +270,11 @@ export default function Emo() {
           <option value="">Anyone</option>
           {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <div className="relative ml-auto">
+        {/* `ml-auto` alone stranded this on a line of its own, right-aligned, at a different width
+            from the two selects. On phones it now shares their row and fills what is left. (BEA-1273) */}
+        <div className="relative min-w-[8rem] flex-1 sm:ml-auto sm:w-auto sm:min-w-0 sm:flex-none">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cards" className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cards" className="w-full rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-2 text-sm sm:w-44 dark:border-zinc-700 dark:bg-zinc-900" />
         </div>
       </div>
 
