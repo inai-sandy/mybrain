@@ -458,7 +458,12 @@ export function Find() {
             /* Two columns on a wide screen, stacked on a phone. As one full-width list this was four
                sections of identical weight with half the desktop empty. (BEA-1130) */
             <div className="grid gap-4 lg:grid-cols-5">
-              <div className="space-y-4 lg:col-span-3">
+              {/* min-w-0: a grid item defaults to min-width:auto, so it cannot shrink below its own
+                  content. The "you asked before" chips below use `truncate` (white-space: nowrap),
+                  which made this column 625px wide inside a 390px phone — and `max-w-full` on the
+                  chips could not help, because the parent had no definite width to be 100% of.
+                  With min-w-0 the column follows the viewport and the chips truncate. (BEA-1271) */}
+              <div className="min-w-0 space-y-4 lg:col-span-3">
                 {!!landing?.suggestions.length && (
                   <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
                     <h2 className="mb-2.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Try asking</h2>
@@ -503,7 +508,7 @@ export function Find() {
 
               {/* On a phone the stat is orientation — it belongs under the ask box, not at the very
                   bottom. On desktop it stays the right-hand sidebar. (BEA-1130) */}
-              <div className="order-first space-y-4 lg:order-none lg:col-span-2">
+              <div className="order-first min-w-0 space-y-4 lg:order-none lg:col-span-2">
                 <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
                   <h2 className="mb-0.5 text-xs font-bold uppercase tracking-wide text-zinc-400">Your brain</h2>
                   <p className="mb-2.5 text-2xl font-extrabold tabular-nums leading-none">
