@@ -183,6 +183,26 @@ describe('the public page shows no private controls (BEA-1261)', () => {
     expect(PAGE).not.toContain('ui/nav');
   });
 
+  it('lets a reader reach other editions from the TOP, not only the bottom', () => {
+    // The bug the owner caught: the archive existed and linked correctly, 11 phone-screens down
+    // past 40 stories. Asserting a thing renders is not the same as asserting a person can get to
+    // it. This pins POSITION — the navigation must appear before the first section of stories.
+    const navAt = PAGE.indexOf('#all-editions');
+    const firstStorySection = PAGE.indexOf('edition.sections.map');
+    const archiveAt = PAGE.indexOf('id="all-editions"');
+    expect(navAt).toBeGreaterThan(-1);
+    expect(navAt).toBeLessThan(firstStorySection);
+    // and the jump target is further down, so the link actually goes somewhere
+    expect(archiveAt).toBeGreaterThan(firstStorySection);
+  });
+
+  it('offers previous and next editions, not just a list', () => {
+    expect(PAGE).toContain('Newer');
+    expect(PAGE).toContain('Older');
+    expect(PAGE).toMatch(/archive\[at - 1\]/);
+    expect(PAGE).toMatch(/archive\[at \+ 1\]/);
+  });
+
   it('names and links the upstream source NOWHERE on the page', () => {
     // Owner's decision, 2026-08-02: "dont mention Smol AI News and dont link it to this page."
     expect(PAGE.toLowerCase()).not.toContain('smol');
