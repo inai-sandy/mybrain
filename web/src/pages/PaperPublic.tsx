@@ -26,7 +26,8 @@ type PublicEdition = {
 };
 
 const SHOWN = 3;
-const SOURCE_LABEL: Record<string, string> = { twitter: 'X', reddit: 'Reddit', discord: 'Discord', unknown: '' };
+// The owner's own labels, so the two pages read identically (BEA-1269).
+const SOURCE_LABEL: Record<string, string> = { twitter: 'X / Twitter', reddit: 'Reddit', discord: 'Discord', unknown: 'Elsewhere' };
 
 function longDate(day: string): string {
   const d = new Date(`${day}T12:00:00Z`);
@@ -311,7 +312,7 @@ function StoryCard({ story, big = false, brief = false }: { story: PublicStory; 
       {label && <span>{label}</span>}
       {story.links.slice(0, 3).map((l, i) => (
         <a key={i} href={l} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-zinc-700 dark:hover:text-zinc-200">
-          source{story.links.length > 1 ? ` ${i + 1}` : ''}
+          link{story.links.length > 1 ? ` ${i + 1}` : ''}
         </a>
       ))}
     </div>

@@ -16,7 +16,7 @@ import { ShareButton } from '../ui/ShareButton';
  * This is the private view. Research buttons live here and never on the public page (BEA-1261).
  */
 
-type Story = { id: string; text: string; theme: string | null; category: string; sourceKind: string; links: string[]; flagged: boolean };
+type Story = { id: string; text: string; theme: string | null; category: string; sourceKind: string; links: string[]; flagged: boolean; headline?: string | null };
 type Section = { category: string; line: string; prose: string; written: boolean; storyCount: number; stories: Story[] };
 type Edition = {
   number: number;
@@ -46,8 +46,15 @@ function longDate(day: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-/** A story's own headline: the first sentence, trimmed to something scannable. */
+/**
+ * A story's headline: the one the engine wrote (BEA-1267), else its first sentence.
+ *
+ * The written one was already coming back from the API and this page was ignoring it — so the
+ * public paper showed "DeepSeek launches V4-Flash public beta" while this one still showed thirty
+ * words of narrative. Claiming a page improves "for free" and not checking is how that happens.
+ */
 function headlineOf(s: Story): string {
+  if (s.headline) return s.headline;
   const first = s.text.split('\n')[0].trim();
   const stop = first.search(/[.!?](\s|$)/);
   const cut = stop > 30 ? first.slice(0, stop + 1) : first;

@@ -21,6 +21,7 @@ vi.mock('../ui/Toast', () => ({ useToast: () => vi.fn() }));
 
 const STORIES = Array.from({ length: 12 }, (_, i) => ({
   id: `s${i + 1}`,
+  headline: i === 0 ? 'DeepSeek launches V4-Flash public beta' : null,
   text: `Story number ${i + 1} about something that happened.`,
   theme: null,
   category: 'Models & releases',
@@ -68,9 +69,19 @@ describe('the edition page (BEA-1260)', () => {
     show();
     await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
     // All twelve, including the nine behind "9 more" — present before anything is clicked.
-    for (let i = 1; i <= 12; i++) {
+    // Story 1 renders its WRITTEN headline; the rest fall back to their first sentence.
+    expect(screen.getByText('DeepSeek launches V4-Flash public beta')).toBeTruthy();
+    for (let i = 2; i <= 12; i++) {
       expect(screen.getByText(new RegExp(`Story number ${i} about`))).toBeTruthy();
     }
+  });
+
+  it('shows the WRITTEN headline when there is one, and the first sentence when there is not', async () => {
+    // The API was already returning the written headline and this page ignored it, so the public
+    // paper read well and the owner's own page still showed thirty words of narrative.
+    show();
+    await waitFor(() => expect(screen.getByText('DeepSeek launches V4-Flash public beta')).toBeTruthy());
+    expect(screen.getByText(/Story number 2 about/)).toBeTruthy();
   });
 
   it('shows the masthead with the day, the issue number and the count', async () => {
