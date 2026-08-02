@@ -252,19 +252,22 @@ export function AppShell({ email, onSignOut }: { email?: string; onSignOut?: () 
           {isChat ? (
             <Outlet />
           ) : (
-            // A quick opacity-only fade — no y-slide, which felt jumpy and fought scroll restoration (BEA-1002).
-            <motion.div key={location.pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14, ease: 'easeOut' }}>
-              <Outlet />
-            </motion.div>
+            <>
+              {/* Inside the page column, above the content: on phones the banner is part of the flow,
+                  so it can never sit on top of a page's own sticky tab row (BEA-1270). Chat is left
+                  out on purpose — it is a fixed-height screen with nowhere to put a banner. */}
+              <InstallPrompt />
+              {/* A quick opacity-only fade — no y-slide, which felt jumpy and fought scroll restoration (BEA-1002). */}
+              <motion.div key={location.pathname} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14, ease: 'easeOut' }}>
+                <Outlet />
+              </motion.div>
+            </>
           )}
         </main>
       </div>
 
       {/* Global search overlay (find + ask) */}
       <SearchOverlay />
-
-      {/* Install-this-app banner (Android button / iOS hint) */}
-      <InstallPrompt />
 
       {/* Live voice-dictation banner — shows what's being heard + a Stop button, globally */}
       <DictationIndicator />
