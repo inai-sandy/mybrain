@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { ShareButton } from '../ui/ShareButton';
 
 /**
  * AI News Daily — the page strangers see (BEA-1261).
@@ -39,6 +40,7 @@ export default function PaperPublic() {
   const [edition, setEdition] = useState<PublicEdition | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'missing' | 'error'>('loading');
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [archive, setArchive] = useState<{ number: number; day: string; headline: string; storyCount: number }[]>([]);
 
   // A visitor here has never chosen a theme — they are a stranger following a link. The app
   // defaults to dark for its owner, which means someone on a light phone gets a black page as
@@ -63,7 +65,10 @@ export default function PaperPublic() {
     let alive = true;
     (async () => {
       try {
-        const target = day || (await fetch('/api/news/public/editions').then((r) => r.json())).at?.(0)?.day;
+        // One call gives both the day to land on and the archive underneath it.
+        const index = await fetch('/api/news/public/editions').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+        if (alive && Array.isArray(index)) setArchive(index);
+        const target = day || (Array.isArray(index) ? index[0]?.day : undefined);
         if (!target) {
           if (alive) setState('missing');
           return;
@@ -132,7 +137,10 @@ export default function PaperPublic() {
           footer line is one most readers never scroll to, and this is built on someone else's
           daily work — the acknowledgement should be where the paper introduces itself.
         */}
-        <p className="mt-2 text-[11px] text-stone-400">
+        <div className="mt-3 flex justify-center">
+          <ShareButton url={`/paper/${edition.day}`} title={`AI News Daily — ${edition.headline}`} text={edition.sixty[0]} />
+        </div>
+        <p className="mt-3 text-[11px] text-stone-400">
           Sorted and written up from{' '}
           <a href={edition.builtOn.link} target="_blank" rel="noreferrer" className="font-medium underline decoration-dotted underline-offset-2 hover:text-stone-700 dark:hover:text-stone-200">
             {edition.builtOn.name}
@@ -217,6 +225,35 @@ export default function PaperPublic() {
         })}
       </div>
 
+      {/*
+        The archive the footer link used to promise and never deliver — it pointed at /paper, which
+        is this same latest edition, so "All editions" landed you on the page you were reading.
+        Someone who likes today's paper should be able to read back.
+      */}
+      {archive.filter((e) => e.day !== edition.day).length > 0 && (
+        <section className="mt-12 border-t border-stone-200 pt-6 dark:border-stone-800">
+          <h2 className="mb-3 text-[13px] font-bold uppercase tracking-wider">Earlier editions</h2>
+          <ul className="space-y-2">
+            {archive
+              .filter((e) => e.day !== edition.day)
+              .slice(0, 30)
+              .map((e) => (
+                <li key={e.day}>
+                  <a
+                    href={`/paper/${e.day}`}
+                    className="block rounded-xl border border-stone-200 bg-white p-3.5 transition-colors hover:border-stone-400 dark:border-stone-800 dark:bg-stone-900 dark:hover:border-stone-600"
+                  >
+                    <span className="block text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+                      No. {e.number} · {longDate(e.day)} · {e.storyCount} {e.storyCount === 1 ? 'story' : 'stories'}
+                    </span>
+                    <span className="mt-1 block text-sm font-medium">{e.headline}</span>
+                  </a>
+                </li>
+              ))}
+          </ul>
+        </section>
+      )}
+
       <footer className="mt-12 border-t border-stone-200 pt-5 text-center dark:border-stone-800">
         <p className="text-xs text-stone-500">
           Built on{' '}
@@ -226,7 +263,7 @@ export default function PaperPublic() {
           , who read the subreddits, the X lists and the Discords. We sort it and write it up.
         </p>
         <p className="mt-2 text-[11px] text-stone-400">
-          <a href="/paper" className="underline hover:text-stone-600">All editions</a>
+          <a href="/paper" className="underline hover:text-stone-600">Read the latest edition</a>
         </p>
       </footer>
     </Frame>
