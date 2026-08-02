@@ -214,7 +214,7 @@ describe('the pipeline steps report what actually happened (BEA-1259)', () => {
     // `in` rather than `??` — a test that passes `issue: null` means "there is no issue", and
     // `null ?? default` would quietly hand back the default instead.
     const issue = 'issue' in over ? over.issue : { id: 'i1', title: 'not much happened today', pubDate: new Date('2026-07-31T05:44:39Z') };
-    const prisma: any = { newsIssue: { findFirst: async () => issue } };
+    const prisma: any = { newsIssue: { findFirst: async () => issue }, newsEdition: { findUnique: async () => null } };
     return new NewsPipelineService(
       prisma,
       { poll: async () => over.poll ?? { ok: true, fetched: 10, stored: 1, known: 9, filled: 0, unusable: 0 } } as any,
@@ -249,6 +249,34 @@ describe('the pipeline steps report what actually happened (BEA-1259)', () => {
   it('a clean day says so instead of looking broken', async () => {
     const out = await pipe({ flag: { ok: true, considered: 40, flagged: 0 } }).flagToday();
     expect(out).toContain('Nothing today needs chasing');
+  });
+
+  it('the run says WHERE the edition is — there is no file to go looking for', async () => {
+    // The owner ran it, found two markdown documents from the flow runner, no HTML anywhere, and
+    // had no idea the output was a page. A run that produces something unopenable is a run that
+    // did not finish.
+    const out = await pipe().writeToday();
+    expect(out).toContain('/news/2026-07-31');
+    expect(out).toContain('/paper/2026-07-31');
+  });
+
+  it('says plainly when the source has not published anything newer', async () => {
+    // Re-writing an older day and reporting it like a fresh one is how a run looks successful and
+    // still feels wrong.
+    const out = await pipe().collect();
+    expect(out).toContain('has not published since 2026-07-31');
+  });
+
+  it('the whole run ends with the headline and the two links', async () => {
+    // The last step's output becomes the run's saved "result" document, so it has to be the thing
+    // worth opening — not whatever the final step happened to say.
+    const p = pipe();
+    (p as any).prisma.newsEdition = { findUnique: async () => ({ number: 3, day: '2026-07-31', headline: 'DeepSeek resets the price war', storyCount: 40 }) };
+    const out = await p.runDaily();
+    expect(out).toContain('AI News Daily No. 3');
+    expect(out).toContain('DeepSeek resets the price war');
+    expect(out).toContain('no file to find');
+    expect(out).toContain('/paper/2026-07-31');
   });
 
   it('writing before collecting fails with a plain reason', async () => {

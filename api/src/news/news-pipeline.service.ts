@@ -6,6 +6,9 @@ import { NewsCategoriseService } from './news-categorise.service';
 import { NewsWriteService } from './news-write.service';
 import { NewsResearchService } from './news-research.service';
 
+/** Same convention as the rest of the app (telegram.service.ts). */
+const PUBLIC_URL = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
+
 /**
  * The three steps of AI News Daily, as things a flow can run (BEA-1259).
  *
@@ -56,9 +59,17 @@ export class NewsPipelineService {
     const cat = await this.categorise.categoriseIssue(issue.id);
     if (!cat.ok) throw new Error(`could not sort the stories into categories: ${cat.message}`);
 
+    // Say plainly when the source has not published since last time. Re-writing yesterday's
+    // edition and reporting it like a fresh one is how a run looks successful and feels wrong.
+    const day = new Date(issue.pubDate).toISOString().slice(0, 10);
+    const today = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10);
+    const stale = day !== today;
+
     const lines = [
-      `Collected today's AI news.`,
-      `Issue: ${issue.title} (${new Date(issue.pubDate).toISOString().slice(0, 10)})`,
+      stale
+        ? `The source has not published since ${day} — there is no newer issue yet, so this re-writes that day's edition.`
+        : `Collected today's AI news.`,
+      `Issue: ${issue.title} (${day})`,
       `Stories found: ${cat.total} — every one filed into a category.`,
       cat.uncategorised ? `${cat.uncategorised} could not be placed and are showing as Uncategorised.` : `None left uncategorised.`,
       splits.length ? `Issues split this run: ${splits.filter((s) => s.ok).length}.` : '',
@@ -76,6 +87,10 @@ export class NewsPipelineService {
     const lines = [
       `Wrote AI News Daily No. ${ed.number} for ${ed.day}.`,
       `${ed.storyCount} stories, all of them in the edition.`,
+      // The edition IS a page, not a file. Without this line a run finishes with nothing to open
+      // and the owner is left hunting for an output that was never going to be a document.
+      `Read it: ${PUBLIC_URL}/news/${ed.day}`,
+      `Share it: ${PUBLIC_URL}/paper/${ed.day}`,
       ed.engineOk
         ? `Every section was written.`
         : `NOT every section was written — the edition still carries every story and every link, and says so on the page.`,
@@ -106,6 +121,25 @@ export class NewsPipelineService {
     out.push(await this.collect());
     out.push(await this.writeToday());
     out.push(await this.flagToday());
+
+    // The last step's output becomes the run's "result" document, so it has to be the thing worth
+    // reading — not whatever the final step happened to say.
+    const issue = await this.latestUsable();
+    const ed = issue ? await this.prisma.newsEdition.findUnique({ where: { issueId: issue.id }, select: { number: true, day: true, headline: true, storyCount: true } }) : null;
+    if (ed) {
+      out.push(
+        [
+          `**AI News Daily No. ${ed.number} — ${ed.day}**`,
+          ``,
+          `${ed.headline}`,
+          ``,
+          `${ed.storyCount} stories. There is no file to find — the edition is a page:`,
+          ``,
+          `- Read it: ${PUBLIC_URL}/news/${ed.day}`,
+          `- Share it (no login needed): ${PUBLIC_URL}/paper/${ed.day}`,
+        ].join('\n'),
+      );
+    }
     return out.join('\n\n');
   }
 }
