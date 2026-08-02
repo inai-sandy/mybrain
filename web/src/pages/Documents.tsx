@@ -443,8 +443,12 @@ export function Documents() {
       </div>
 
       {/* Unified controls row: Search · Tags · Sort · View (BEA-589) */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 min-w-0">
+      {/* Wraps on phones: with tag + sort + starred + view all on one non-wrapping row there were
+          only ~13px left, so the search wrapper collapsed to zero width and its `w-full` input
+          painted outside it, underneath the tag filter. Search takes its own line below `sm:`, the
+          rest sit on the next one. From `sm:` up this is the same single row as before. (BEA-1272) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative basis-full min-w-0 sm:flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search documents…" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 pl-9 pr-9 py-2 text-sm outline-none focus:border-emerald-500" />
           {q && <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"><X size={15} /></button>}
