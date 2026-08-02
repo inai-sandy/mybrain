@@ -184,13 +184,25 @@ describe('the public page shows no private controls (BEA-1261)', () => {
     expect(PAGE).not.toContain('ui/nav');
   });
 
-  it('credits Smol AI in the masthead as well as the footer', () => {
-    // On a sixty-story edition a footer line is one most readers never reach, and this is built on
-    // someone else's daily work. Two mentions, both linked.
+  it('still credits the source in the masthead', () => {
+    // The owner replaced the FOOTER credit with his own line on 2026-08-02 (BEA-1265). The masthead
+    // one stays: this is built on somebody else's daily work, and it is linked where a reader will
+    // actually see it rather than only at the bottom of a sixty-story page.
     const masthead = PAGE.slice(PAGE.indexOf('<header'), PAGE.indexOf('</header>'));
     expect(masthead).toContain('builtOn.link');
     expect(masthead).toContain('builtOn.name');
+  });
+
+  it('the footer says what it is built from, with the TRUE subreddit count', () => {
+    // The owner asked for "20+ subreddits". The feed's own masthead says 12, and 544 Twitter
+    // accounts. "500+" is therefore true and "20+" is not — a number printed on a page he hands to
+    // people has to survive somebody checking it.
+    // Read the rendered TEXT, not the whole block — the comment above it quotes "20+ subreddits"
+    // to explain why the number was corrected, and a naive scan of the source matched that.
     const footer = PAGE.slice(PAGE.indexOf('<footer'));
-    expect(footer).toContain('builtOn.link');
+    const rendered = (footer.match(/>Built from[^<]*/) || [''])[0];
+    expect(rendered).toContain('500+ Twitter accounts');
+    expect(rendered).toContain('12 subreddits');
+    expect(rendered).not.toMatch(/2\d\+ subreddits/i);
   });
 });

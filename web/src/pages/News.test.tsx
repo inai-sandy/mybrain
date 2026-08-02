@@ -93,10 +93,12 @@ describe('the edition page (BEA-1260)', () => {
     expect(screen.getByText(/Policy & law could not be produced/)).toBeTruthy();
   });
 
-  it('credits Smol AI, with a link', async () => {
+  it('says what it is built from, and still links the source issue', async () => {
+    // The owner replaced the credit wording on 2026-08-02 (BEA-1265). The LINK stays — one tap to
+    // what the source actually wrote is the thing that makes a summary of a summary checkable.
     show();
-    await waitFor(() => expect(screen.getByText('Smol AI News')).toBeTruthy());
-    expect(screen.getByText('Smol AI News').getAttribute('href')).toContain('news.smol.ai');
+    await waitFor(() => expect(screen.getByText(/500\+ Twitter accounts and 12 subreddits/)).toBeTruthy());
+    expect(screen.getByText(/source issue/).getAttribute('href')).toContain('news.smol.ai');
   });
 
   it('Share hands over the PUBLIC link, never the private one', async () => {

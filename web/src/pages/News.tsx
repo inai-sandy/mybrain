@@ -317,11 +317,10 @@ export default function News() {
 
           {edition.source && (
             <p className="mt-6 text-center text-xs text-zinc-400">
-              Built on{' '}
+              Built from 500+ Twitter accounts and 12 subreddits ·{' '}
               <a href={edition.source.link} target="_blank" rel="noreferrer" className="underline hover:text-indigo-500">
-                Smol AI News
-              </a>{' '}
-              — they read the subreddits, the X lists and the Discords. We split, file and write it up.
+                today's source issue
+              </a>
             </p>
           )}
         </>
