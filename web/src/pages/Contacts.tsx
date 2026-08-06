@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
 import { useToast } from '../ui/Toast';
+import { DataTable, Column } from '../ui/DataTable';
 import { BriefModal, BriefingsTab } from './Briefings';
 import { ContactShareLink } from '../ui/ContactShareLink';
 import { ContactState, ContactTasks } from '../ui/ContactWork';
@@ -11,7 +12,7 @@ type Contact = { id: string; name: string; whatsappNumber: string | null; notes:
 /** The work signals behind one card on the team board. (BEA-1219) */
 type Board = { open: number; needsYou: number; chasing: number; lastHeardAt: string | null; report: 'in' | 'waiting' | 'missed' | null };
 type BoardContact = Contact & { board?: Board };
-type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; contact?: Contact; task?: { id: string; title: string } | null };
+type Reminder = { id: string; contactId: string; taskId: string | null; repeat?: string; subject?: string | null; message: string; notes?: string | null; count: number; times: string[]; status: string; pausedAuto?: boolean; needsOwner?: boolean; armedDay?: string | null; createdAt?: string; contact?: Contact; task?: { id: string; title: string } | null };
 
 /** One row in the WhatsApp-style conversation inbox (BEA-921). */
 type Conversation = { contactId: string; name: string; whatsappNumber: string | null; lastMessage: { body: string; direction: string; at: string } | null; lastAt: string | null; reminderId: string; times: string[]; activeReminderCount: number; needsOwner: boolean; unread: number };
@@ -478,6 +479,76 @@ function timesToSlots(times?: string[]): Slot[] {
 
 type Suggestion = { task: { id: string; title: string; party: string }; contact: Contact | null; noNumber: boolean; hasActiveReminder: boolean };
 
+/** List controls for the two lists on this page (BEA-1287). */
+const CHATS_PER_PAGE = 25;
+const SUGGESTIONS_SHOWN = 5;
+// 'stopped' sits with 'done' — the rest of this page already treats them as one "Done & stopped" bucket.
+const REM_RANK: Record<string, number> = { active: 0, paused: 1, done: 2, stopped: 2 };
+type RemRow = Reminder & { person: string; taskTitle: string; createdMs: number; activeFirst: number };
+// Columns exist for search only — the list always renders as cards (cardsOnly).
+const REM_COLUMNS: Column<RemRow>[] = [
+  { key: 'person', label: 'Person' },
+  { key: 'message', label: 'Message' },
+  { key: 'taskTitle', label: 'Task' },
+];
+const REM_FILTERS = [
+  {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'open', label: 'Active + paused' },
+      { value: 'active', label: 'Active' },
+      { value: 'paused', label: 'Paused' },
+      { value: 'done', label: 'Done + stopped' },
+    ],
+    match: (r: RemRow, v: string) =>
+      v === 'open' ? r.status === 'active' || r.status === 'paused' : v === 'done' ? r.status === 'done' || r.status === 'stopped' : r.status === v,
+  },
+  {
+    key: 'needsOwner',
+    label: 'Needs you',
+    options: [{ value: 'yes', label: 'Needs you' }],
+    match: (r: RemRow, v: string) => (v === 'yes' ? !!r.needsOwner : true),
+  },
+];
+const REM_SORTS = [
+  { label: 'Active first', key: 'activeFirst', dir: 1 as const },
+  { label: 'Person A–Z', key: 'person', dir: 1 as const },
+  { label: 'Newest', key: 'createdMs', dir: -1 as const },
+];
+
+/** One reminder card — unchanged look, reused by the DataTable's card mode (BEA-1287). */
+function ReminderCard({ rm, onChat, onEdit, onAct }: { rm: Reminder; onChat: () => void; onEdit: () => void; onAct: (id: string, kind: 'pause' | 'resume' | 'delete') => void }) {
+  const st = REM_STATUS[rm.status] || REM_STATUS.active;
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="flex items-start gap-2">
+        <button onClick={onChat} className="min-w-0 flex-1 text-left">
+          {/* flex-wrap + nowrap pills: on a phone the status pill drops to its own line instead of
+              smearing "Active · sends today" down the side of the card one word at a time. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
+            {rm.repeat === 'daily' && <span className="shrink-0 whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}<span className={'shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="shrink-0 whitespace-nowrap rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
+          </div>
+          {rm.task && <div className="text-xs text-zinc-400">re: {rm.task.title}</div>}
+          <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {isFutureReminder(rm) && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">📅 {fmtDayKey(rm.armedDay)}</span>}
+            {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
+          </div>
+        </button>
+        <div className="flex shrink-0 items-center">
+          <button onClick={onChat} title="Open chat" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><MessageCircle className="h-4 w-4" /></button>
+          {(rm.status === 'active' || rm.status === 'paused') && <button onClick={onEdit} title="Edit" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
+          {rm.status === 'active' && <button onClick={() => onAct(rm.id, 'pause')} title="Pause" className="rounded-lg p-1.5 text-zinc-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-500/10"><Pause className="h-4 w-4" /></button>}
+          {rm.status === 'paused' && <button onClick={() => onAct(rm.id, 'resume')} title="Resume" className="rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><Play className="h-4 w-4" /></button>}
+          <button onClick={() => onAct(rm.id, 'delete')} title="Delete" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RemindersTab() {
   const toast = useToast();
   const [reminders, setReminders] = useState<Reminder[] | null>(null);
@@ -491,6 +562,11 @@ export function RemindersTab() {
   const [convos, setConvos] = useState<Conversation[] | null>(null);
   const [drafting, setDrafting] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  // List controls (BEA-1287): the inbox gets search + chips, suggestions stop hogging the screen.
+  const [chatQ, setChatQ] = useState('');
+  const [chatChip, setChatChip] = useState<'all' | 'unread' | 'needs'>('all');
+  const [chatShown, setChatShown] = useState(CHATS_PER_PAGE);
+  const [showAllSugg, setShowAllSugg] = useState(false);
 
   async function scanTasks() {
     setScanning(true);
@@ -573,6 +649,38 @@ export function RemindersTab() {
   }
 
   const totalUnread = (convos || []).reduce((n, c) => n + (c.unread || 0), 0);
+  const needsCount = (convos || []).filter((c) => c.needsOwner).length;
+  const unreadCount = (convos || []).filter((c) => c.unread > 0).length;
+
+  // The inbox after search + chip. The 20s refresh replaces `convos` underneath; these are pure
+  // derivations, so a refresh never loses what the reader typed or picked.
+  const chatRows = useMemo(() => {
+    let r = convos || [];
+    if (chatChip === 'unread') r = r.filter((c) => c.unread > 0);
+    if (chatChip === 'needs') r = r.filter((c) => c.needsOwner);
+    const s = chatQ.trim().toLowerCase();
+    if (s) r = r.filter((c) => (c.name || '').toLowerCase().includes(s) || (c.lastMessage?.body || '').toLowerCase().includes(s));
+    return r;
+  }, [convos, chatQ, chatChip]);
+
+  // Rows for the reminders DataTable — flat searchable/sortable fields on top of each reminder.
+  const remRows = useMemo(
+    () =>
+      (reminders || []).map((rm) => {
+        const parsed = rm.createdAt ? new Date(rm.createdAt).getTime() : 0;
+        const createdMs = Number.isNaN(parsed) ? 0 : parsed;
+        return {
+          ...rm,
+          person: rm.contact?.name || '',
+          taskTitle: rm.task?.title || '',
+          createdMs,
+          // One ascending number = status groups in order (active, paused, done), newest inside each.
+          activeFirst: (REM_RANK[rm.status] ?? 3) * 1e15 - createdMs,
+        };
+      }),
+    [reminders],
+  );
+
   return (
     <div className="space-y-4">
       {/* Chats (conversations-first) | Reminders (management) — BEA-921/922 */}
@@ -590,9 +698,35 @@ export function RemindersTab() {
           <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-16 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
         ) : convos.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No conversations yet. Create a reminder — your WhatsApp chats show up here, newest reply on top.</div>
-        ) : (
+        ) : (<>
+          {/* Inbox controls (BEA-1287) — search + chips; still WhatsApp-shaped, never a table. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              aria-label="Search chats"
+              placeholder="Search chats…"
+              value={chatQ}
+              onChange={(e) => { setChatQ(e.target.value); setChatShown(CHATS_PER_PAGE); }}
+              className="w-full min-w-0 rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 sm:w-64"
+            />
+            {([
+              { id: 'all', label: `All · ${convos.length}` },
+              { id: 'unread', label: `Unread · ${unreadCount}` },
+              { id: 'needs', label: `Needs you · ${needsCount}` },
+            ] as const).map((ch) => (
+              <button
+                key={ch.id}
+                onClick={() => { setChatChip(ch.id); setChatShown(CHATS_PER_PAGE); }}
+                className={'rounded-full px-3 py-1.5 text-xs font-medium transition-colors ' + (chatChip === ch.id ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700')}
+              >
+                {ch.label}
+              </button>
+            ))}
+          </div>
+          {chatRows.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No chats match — clear the search or pick another filter.</div>
+          ) : (
           <ul className="divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-            {convos.map((c) => (
+            {chatRows.slice(0, chatShown).map((c) => (
               <li key={c.contactId}>
                 <button onClick={() => openConversation(c)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{(c.name || '?').trim().charAt(0).toUpperCase()}</div>
@@ -611,7 +745,16 @@ export function RemindersTab() {
               </li>
             ))}
           </ul>
-        ))}
+          )}
+          <div className="flex items-center justify-between text-sm text-zinc-500">
+            <span data-testid="chats-count">{chatRows.length} {chatRows.length === 1 ? 'chat' : 'chats'}</span>
+            {chatRows.length > chatShown && (
+              <button onClick={() => setChatShown((n) => n + CHATS_PER_PAGE)} className="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700">
+                Show more
+              </button>
+            )}
+          </div>
+        </>))}
 
       {view === 'manage' && (<>
       <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">WhatsApp sending is live — active reminders go out automatically at their scheduled times, and replies get handled for you. Open a reminder's 💬 to see the conversation.</p>
@@ -630,7 +773,7 @@ export function RemindersTab() {
             <button onClick={clearAllSuggestions} className="text-xs font-medium text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400">Clear all</button>
           </div>
           <ul className="space-y-2">
-            {suggestions.map((s) => (
+            {(showAllSugg ? suggestions : suggestions.slice(0, SUGGESTIONS_SHOWN)).map((s) => (
               <li key={s.task.id} className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{s.task.title}</div>
@@ -644,6 +787,11 @@ export function RemindersTab() {
               </li>
             ))}
           </ul>
+          {suggestions.length > SUGGESTIONS_SHOWN && (
+            <button onClick={() => setShowAllSugg((v) => !v)} className="text-xs font-medium text-emerald-600 hover:text-emerald-500 dark:text-emerald-400">
+              {showAllSugg ? 'Show fewer' : `Show ${suggestions.length - SUGGESTIONS_SHOWN} more`}
+            </button>
+          )}
         </section>
       )}
 
@@ -658,36 +806,23 @@ export function RemindersTab() {
       ) : reminders.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">No reminders yet. Create one below, or add them from your tasks.</div>
       ) : (
-        <ul className="space-y-2">
-          {reminders.map((rm) => {
-            const st = REM_STATUS[rm.status] || REM_STATUS.active;
-            return (
-              <li key={rm.id} className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="flex items-start gap-2">
-                  <button onClick={() => setChatReminder(rm)} className="min-w-0 flex-1 text-left">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{rm.contact?.name || 'Contact'}</span>
-                      {rm.repeat === 'daily' && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300" title="Repeats every day until the task is confirmed done">↻ chases daily</span>}<span className={'rounded-full px-2 py-0.5 text-[10px] font-medium ' + st.cls}>{remStatusLabel(rm)}</span>{rm.needsOwner && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Needs you</span>}
-                    </div>
-                    {rm.task && <div className="text-xs text-zinc-400">re: {rm.task.title}</div>}
-                    <p className="mt-1 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
-                    <div className="mt-1.5 flex flex-wrap gap-1">
-                      {isFutureReminder(rm) && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">📅 {fmtDayKey(rm.armedDay)}</span>}
-                      {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
-                    </div>
-                  </button>
-                  <div className="flex shrink-0 items-center">
-                    <button onClick={() => setChatReminder(rm)} title="Open chat" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-emerald-600 dark:hover:bg-zinc-800"><MessageCircle className="h-4 w-4" /></button>
-                    {(rm.status === 'active' || rm.status === 'paused') && <button onClick={() => { setEditing(rm); setShowForm(true); }} title="Edit" className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil className="h-4 w-4" /></button>}
-                    {rm.status === 'active' && <button onClick={() => act(rm.id, 'pause')} title="Pause" className="rounded-lg p-1.5 text-zinc-400 hover:bg-sky-50 hover:text-sky-600 dark:hover:bg-sky-500/10"><Pause className="h-4 w-4" /></button>}
-                    {rm.status === 'paused' && <button onClick={() => act(rm.id, 'resume')} title="Resume" className="rounded-lg p-1.5 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><Play className="h-4 w-4" /></button>}
-                    <button onClick={() => act(rm.id, 'delete')} title="Delete" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        // The list standard (BEA-1287): search, status filter (starts on the ones that still matter),
+        // sort, pages of 10 and a count — the same DataTable the rest of the app uses, in card mode.
+        <DataTable<RemRow>
+          columns={REM_COLUMNS}
+          rows={remRows}
+          filters={REM_FILTERS}
+          sortOptions={REM_SORTS}
+          defaultFilters={{ status: 'open' }}
+          defaultSort={{ key: 'activeFirst', dir: 1 }}
+          pageSize={10}
+          cardsOnly
+          gridClassName="grid grid-cols-1 gap-2"
+          emptyText="No reminders match — clear the search or filters."
+          renderCard={(rm) => (
+            <ReminderCard rm={rm} onChat={() => setChatReminder(rm)} onEdit={() => { setEditing(rm); setShowForm(true); }} onAct={act} />
+          )}
+        />
       )}
       </>)}
       <button onClick={() => { setEditing(null); setPrefill(null); setShowForm(true); }} className="fixed bottom-24 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-emerald-500"><Plus className="h-4 w-4" />New reminder</button>
