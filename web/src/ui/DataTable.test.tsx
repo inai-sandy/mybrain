@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
 import { DataTable, Column } from './DataTable';
 
 type Row = { name: string; n: number };
@@ -46,6 +46,21 @@ describe('DataTable', () => {
     );
     expect(screen.getByTestId('dt-count').textContent).toContain('1 result');
     expect((screen.getByLabelText('Name') as HTMLSelectElement).value).toBe('keep');
+  });
+
+  it('onFiltersChange reports the full active map on every pick — callers whose rows depend on a filter need it (BEA-1291)', () => {
+    const seen: Record<string, string>[] = [];
+    render(
+      <DataTable
+        columns={cols}
+        rows={[{ name: 'a', n: 1 }]}
+        filters={[{ key: 'name', label: 'Name', options: [{ value: 'a', label: 'A' }] }]}
+        defaultFilters={{ name: 'a' }}
+        onFiltersChange={(m) => seen.push(m)}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '' } });
+    expect(seen).toEqual([{ name: '' }]);
   });
 
   it('defaultSort orders the rows before the reader touches anything (BEA-1287)', () => {

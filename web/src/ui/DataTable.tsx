@@ -36,6 +36,7 @@ export function DataTable<T extends Record<string, any>>({
   sortOptions = [],
   defaultFilters,
   defaultSort = null,
+  onFiltersChange,
   onRowClick,
   tableLayoutFixed = false,
 }: {
@@ -52,6 +53,7 @@ export function DataTable<T extends Record<string, any>>({
   sortOptions?: SortOption[];
   defaultFilters?: Record<string, string>; // filters pre-selected on first render (user can still clear to "all")
   defaultSort?: { key: string; dir: 1 | -1 } | null; // order applied before the user touches the sort picker
+  onFiltersChange?: (active: Record<string, string>) => void; // observe filter picks — for callers whose ROWS depend on a filter (e.g. grouped rows, BEA-1291)
   onRowClick?: (row: T) => void;
   tableLayoutFixed?: boolean; // fixed layout: columns fill the width, content truncates, no horizontal scroll
 }) {
@@ -104,7 +106,9 @@ export function DataTable<T extends Record<string, any>>({
             aria-label={f.label}
             value={active[f.key] || ''}
             onChange={(e) => {
-              setActive((a) => ({ ...a, [f.key]: e.target.value }));
+              const next = { ...active, [f.key]: e.target.value };
+              setActive(next);
+              onFiltersChange?.(next);
               setPage(0);
             }}
             className={inputCls + ' w-full min-w-0 sm:w-auto'}
