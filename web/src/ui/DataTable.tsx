@@ -34,6 +34,8 @@ export function DataTable<T extends Record<string, any>>({
   cardsOnly = false,
   gridClassName,
   sortOptions = [],
+  defaultFilters,
+  defaultSort = null,
   onRowClick,
   tableLayoutFixed = false,
 }: {
@@ -48,12 +50,14 @@ export function DataTable<T extends Record<string, any>>({
   cardsOnly?: boolean;
   gridClassName?: string;
   sortOptions?: SortOption[];
+  defaultFilters?: Record<string, string>; // filters pre-selected on first render (user can still clear to "all")
+  defaultSort?: { key: string; dir: 1 | -1 } | null; // order applied before the user touches the sort picker
   onRowClick?: (row: T) => void;
   tableLayoutFixed?: boolean; // fixed layout: columns fill the width, content truncates, no horizontal scroll
 }) {
   const [q, setQ] = useState('');
-  const [active, setActive] = useState<Record<string, string>>({});
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+  const [active, setActive] = useState<Record<string, string>>(defaultFilters || {});
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(defaultSort);
   const [page, setPage] = useState(0);
 
   const filtered = useMemo(() => {

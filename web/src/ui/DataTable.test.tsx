@@ -31,4 +31,36 @@ describe('DataTable', () => {
     );
     expect(screen.getByTestId('dt-count').textContent).toContain('2 results');
   });
+
+  it('defaultFilters pre-select a filter, and the reader can still clear it to all (BEA-1287)', () => {
+    render(
+      <DataTable
+        columns={cols}
+        rows={[
+          { name: 'keep', n: 1 },
+          { name: 'drop', n: 2 },
+        ]}
+        filters={[{ key: 'name', label: 'Name', options: [{ value: 'keep', label: 'Keep' }] }]}
+        defaultFilters={{ name: 'keep' }}
+      />,
+    );
+    expect(screen.getByTestId('dt-count').textContent).toContain('1 result');
+    expect((screen.getByLabelText('Name') as HTMLSelectElement).value).toBe('keep');
+  });
+
+  it('defaultSort orders the rows before the reader touches anything (BEA-1287)', () => {
+    render(
+      <DataTable
+        columns={cols}
+        rows={[
+          { name: 'b', n: 2 },
+          { name: 'a', n: 1 },
+        ]}
+        sortOptions={[{ label: 'Name A–Z', key: 'name', dir: 1 }]}
+        defaultSort={{ key: 'name', dir: 1 }}
+      />,
+    );
+    const cells = screen.getAllByRole('cell').map((c) => c.textContent);
+    expect(cells.indexOf('a')).toBeLessThan(cells.indexOf('b'));
+  });
 });
