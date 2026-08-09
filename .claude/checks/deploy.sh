@@ -60,7 +60,10 @@ run_container() {
 }
 
 ensure_caddy() {
-  if ! sudo grep -q 'mybrain.1site.ai' "$CADDYFILE"; then
+  # No sudo: the Caddyfile is world-readable, and the needless sudo made every ship stop for a
+  # password on the locked-down sandy account (BEA-1287). Docker calls stay sudo — those are
+  # covered by the scoped NOPASSWD rule in /etc/sudoers.d/sandy-docker.
+  if ! grep -q 'mybrain.1site.ai' "$CADDYFILE"; then
     echo "!! Caddy route for mybrain.1site.ai missing in $CADDYFILE — add it once, then re-run." >&2
     exit 1
   fi
