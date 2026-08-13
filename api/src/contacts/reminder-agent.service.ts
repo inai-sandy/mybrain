@@ -6,7 +6,7 @@ import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { DelegationService } from '../tasks/delegation.service';
-import { replyWithClaimConfirmation } from './claim-reply';
+import { replyWithClaimConfirmation, ambiguousDoneReply, withSystemLine } from './claim-reply';
 import { RecurringService } from '../tasks/recurring.service';
 import { isOwedOn } from '../tasks/schedule';
 import { weekdayOf } from '../common/localday';
@@ -511,7 +511,10 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // the last outbound messages already carried their link, don't paste it again. (BEA-1217)
     if (replyText && reported.length === 0) {
       const owesToday = items.some((it) => it.taskId && it.recurring);
-      const linkAlreadySent = messages.slice(-12).some((m) => m.direction === 'out' && m.body?.includes('/t/'));
+      // Match the DAILY nudge's own link, not any link to their page. The "which one do you mean?"
+      // reply (BEA-1294) also carries a `/t/<slug>` link, and a bare '/t/' check let it suppress the
+      // real "fill today's update" nudge for the next several turns. (review finding)
+      const linkAlreadySent = messages.slice(-12).some((m) => m.direction === 'out' && m.body?.includes('?tab=updates'));
       if (owesToday && !linkAlreadySent) {
         const today = this.recurring.today();
         // Only reports OWED today count — on a rest day or an off-schedule day nothing is due, and
@@ -540,6 +543,46 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const confirmed = replyWithClaimConfirmation(replyText, claimedTitles);
     replyText = confirmed.text;
     if (confirmed.forceSend) parsed.send = true;
+
+    // They said it is finished — but not WHICH one. (BEA-1294)
+    //
+    // Deepthi has three open items. A bare "done sir" is genuinely ambiguous, and guessing is not a
+    // symmetric mistake: pausing the wrong chase means work everybody believes is finished quietly
+    // stops being asked about. So nothing is claimed, nothing is paused, and they get the list AND
+    // their own link — the owner asked for both.
+    // `isReport: true` on purpose, matching the other place that makes a decision on this signal
+    // (the backstop below). Without it the `isQuantityNotClaim` guard never engages, and a long
+    // numbers-heavy report containing one word like "dispatched" reads as a bare completion —
+    // interrupting a real update with "which one do you mean?". (review finding)
+    const readsDone = !!lastIn && readUpdate(lastIn, { isReport: true }).reads.includes('done');
+    // `claimed` as well as `claimedTitles`: the legacy fallback path fills only the former, so
+    // checking one alone could ask "which one?" about an item just correctly claimed. (review finding)
+    if (!claimedTitles.length && !claimed.length && !reported.length && lastIn && readsDone) {
+      const open = items.filter((it) => it.taskId && !it.recurring);
+      if (open.length > 1) {
+        const titles = new Map<string, string>(
+          ((await Promise.resolve(this.prisma.task?.findMany?.({ where: { id: { in: open.map((o) => o.taskId as string) } }, select: { id: true, title: true } })).catch(() => [])) ?? [])
+            .map((t: any) => [t.id, t.title]),
+        );
+        const ask = ambiguousDoneReply(
+          open.map((it) => ({ n: it.n, label: titles.get(it.taskId as string) || it.subject })),
+          await this.reminders.shareLinkFor?.(contactId).catch(() => null),
+        );
+        if (ask) {
+          // Normally this REPLACES the model's prose — a generic "thanks!" above a question about
+          // which item reads like the app was not listening.
+          //
+          // But when the same message also needs Sandeep, replacing would throw away the one line
+          // that matters: the person raised a real problem and would be answered with "which one do
+          // you mean?" and nothing else. A message can be both — `readUpdate` has a label for
+          // exactly that combination. In that case the question goes UNDER the reply. (review finding)
+          const alsoNeedsHim = !!parsed.needsSandeep || readUpdate(lastIn, { isReport: true }).reads.includes('needs_you');
+          replyText = alsoNeedsHim ? withSystemLine(replyText, ask) : ask;
+          parsed.send = true;
+          this.log.log(`agent: ${name} says done but not which — asked, claimed nothing`);
+        }
+      }
+    }
 
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();

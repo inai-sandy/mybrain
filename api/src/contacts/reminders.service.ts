@@ -800,6 +800,22 @@ export class RemindersService {
   }
 
   /**
+   * A contact's own page, as a link you can paste into a message. (BEA-1294)
+   *
+   * Creates the slug on first need, because three of the people being chased had none and a chase
+   * that says "tick it off here" with no link is worse than one that says nothing. Returns null when
+   * the owner has switched their page off — a dead door is worse than no door.
+   */
+  async shareLinkFor(contactId: string, tab?: string): Promise<string | null> {
+    const c = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { shareSlug: true, shareEnabled: true } }).catch(() => null);
+    if (!c || c.shareEnabled === false) return null;
+    const slug = c.shareSlug || (await this.contacts.share(contactId).then((r: any) => r.slug).catch(() => null));
+    if (!slug) return null;
+    const base = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
+    return `${base}/t/${slug}${tab ? `?tab=${tab}` : ''}`;
+  }
+
+  /**
    * Chases with no work behind them — the ones nobody can finish. (BEA-1292)
    *
    * Live at the time of writing: 9 of 24. Listed rather than fixed automatically, because the right

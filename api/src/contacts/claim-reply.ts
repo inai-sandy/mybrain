@@ -60,6 +60,29 @@ export function withSystemLine(reply: string, line: string): string {
  * `forceSend` matters as much as the text: if the model decided to stay quiet, a landed claim
  * overrides it. Going silent on somebody's completion is exactly what lost their trust.
  */
+/**
+ * They said it is finished, but not WHICH one. (BEA-1294)
+ *
+ * The owner: *"When they say it's done, you have to reply to them with which task they have
+ * finished, or else you have to provide them the link from where they can update the task."* He
+ * chose both — the list in the message AND the link.
+ *
+ * Deepthi has three open items, Radha two, Jayanth two. A bare "done sir" from any of them is
+ * genuinely ambiguous, and the cost of guessing is not symmetric: pausing the wrong chase means the
+ * work everyone believes is finished quietly stops being asked about. So nothing is claimed and
+ * nothing is paused until they say which.
+ *
+ * The numbers are the SAME numbers the assistant was given for these items, so a reply of "2" means
+ * the item they were shown as 2 — a separate numbering would have been a new way to pick wrong.
+ */
+export function ambiguousDoneReply(items: { n: number; label: string }[], link?: string | null): string {
+  const rows = items.filter((i) => i && i.label && Number.isInteger(i.n));
+  if (rows.length < 2) return '';
+  const list = rows.map((i) => `${i.n}. ${i.label}`).join('\n');
+  const tail = link ? `\n\nReply with the number, or tick it off here: ${link}` : '\n\nJust reply with the number.';
+  return `Which one do you mean?\n${list}${tail}`;
+}
+
 export function replyWithClaimConfirmation(reply: string, claimedTitles: string[]): { text: string; forceSend: boolean } {
   const line = claimConfirmedLine(claimedTitles || []);
   if (!line) return { text: String(reply || '').trim(), forceSend: false };
