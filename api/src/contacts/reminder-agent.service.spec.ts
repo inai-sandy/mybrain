@@ -47,10 +47,23 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
     expect(state.out[0]).toMatchObject({ contactId: 'c1', direction: 'out' });
   });
 
-  it('clears a stuck "needs you" flag once the agent handles the conversation (BEA-786)', async () => {
-    const { svc, state } = setup('{"send":true,"reply":"Thanks, noted!","needsSandeep":false,"items":[]}');
-    await svc.onContactReply('c1');
-    expect(state.flagged).toMatchObject({ needsOwner: false }); // prior flag cleared, not left stuck
+  it('clears a stuck "needs you" flag once the agent handles the conversation (BEA-786, narrowed by BEA-1297)', async () => {
+    // BEA-786 cleared the flag on ANY handled exchange, to stop a badge lingering. BEA-1297 showed
+    // the cost of that: a flag raised because the agent could not answer a question about item 1 was
+    // wiped by a later cheerful message about item 3, and the owner never learned he still owed an
+    // answer. The badge was not stale — it was right, and clearing it lost a real question.
+    //
+    // So it now clears when the exchange actually SETTLED the flagged item, and still clears the
+    // whole set when the flag was contact-wide (the fallback flags every active chase at once).
+    // A flag that neither applies to is left for the owner's own reply or for the work finishing —
+    // both of which still clear it (`sendManual`, `settleDelegation`).
+    const settled = setup('{"send":true,"reply":"Thanks, noted!","needsSandeep":false,"done":[1]}');
+    await settled.svc.onContactReply('c1');
+    expect(settled.state.flagged).toMatchObject({ needsOwner: false });
+
+    const unrelated = setup('{"send":true,"reply":"Thanks, noted!","needsSandeep":false,"items":[]}');
+    await unrelated.svc.onContactReply('c1');
+    expect(unrelated.state.flagged).toBeNull(); // nothing in this chat touched the flagged item
   });
 
   it('acknowledges even when the model returns send:false — never leaves them on read (BEA-923)', async () => {
