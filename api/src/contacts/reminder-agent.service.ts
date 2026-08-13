@@ -1,10 +1,12 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, Optional, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { promisesLater } from './promise-later';
 import { readUpdate, looksLikePartialProgress } from './update-read';
 import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
+import { DelegationService } from '../tasks/delegation.service';
+import { replyWithClaimConfirmation } from './claim-reply';
 import { RecurringService } from '../tasks/recurring.service';
 import { isOwedOn } from '../tasks/schedule';
 import { weekdayOf } from '../common/localday';
@@ -74,7 +76,11 @@ export function ackLine(name: string, lastIn: string): string {
   const who = (name || '').trim() || 'there';
   const b = (lastIn || '').toLowerCase();
   if (/\b(find|attach|shar(e|ing)|sheet|sent|sending|here'?s|link)\b|https?:\/\//.test(b)) return `Thanks ${who}, got it — I'll pass this on to Sandeep.`;
-  if (/\b(done|completed|finished|closed|sorted|resolved)\b/.test(b)) return `Great, thanks ${who} — noted that it's done!`;
+  // NOT "noted that it's done" (BEA-1293). This fires when the model returned nothing to send, so
+  // nothing has been recorded — and telling someone their report landed when it did not is the bug
+  // that made them stop trusting the replies. The real confirmation is built in `claim-reply.ts`
+  // and only ever appears when a claim actually landed.
+  if (/\b(done|completed|finished|closed|sorted|resolved)\b/.test(b)) return `Thanks ${who} — I've passed this to Sandeep.`;
   return `Great, thanks ${who}!`;
 }
 
@@ -150,6 +156,8 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     private readonly tasks: TasksService,
     private readonly prompts: PromptsService,
     private readonly updates: TeamUpdatesService,
+    // Last, and @Optional(): the spec harnesses build this service positionally. (BEA-1293)
+    @Optional() private readonly delegation?: DelegationService,
   ) {}
 
   // Self-healing watchdog (BEA-953): every 10 min, catch any contact reply we haven't answered —
@@ -370,6 +378,8 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // numbers the model was sure about arrive here; anything ambiguous it asks about instead. (BEA-1024)
     const lastIn = [...messages].reverse().find((m) => m.direction === 'in')?.body || '';
     const claimed: string[] = [];
+    /** Task titles whose claim genuinely landed — what the confirmation line names. (BEA-1293) */
+    const claimedTitles: string[] = [];
     // A daily report satisfies TODAY, and is owed again tomorrow. Recorded against the day, never
     // as a claim — so it never reaches the owner's review list and can never close the chase.
     // Independent of "done": Jayanth's real updates are figures and names, they never say
@@ -425,10 +435,21 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
           this.log.log(`agent: "${item.subject}" reported done, but the message reads as progress — not claiming`);
           continue;
         }
-        const row = await this.claims.claim({ taskId: item.taskId, contactId, quote: lastIn, source: 'whatsapp' }).catch(() => null);
-        if (row) claimed.push(item.subject);
+        // Through the one door (BEA-1296), which also PAUSES the chase rather than merely skipping
+        // each send. The owner's rule: "when they say it's done, let us pause the reminders. If I
+        // feel the task has been done, I will activate those reminders again." (BEA-1293)
+        if (this.delegation?.recordClaim) {
+          const res: any = await this.delegation.recordClaim({ taskId: item.taskId, contactId, quote: lastIn, source: 'whatsapp' }).catch(() => null);
+          // Only a claim that REALLY landed earns a confirmation naming it. Nothing recorded,
+          // nothing said — the whole point of the ticket.
+          if (res?.claimed) claimedTitles.push(res.task?.title || item.subject);
+          if (res?.claimed) claimed.push(item.subject);
+        } else {
+          const row = await this.claims.claim({ taskId: item.taskId, contactId, quote: lastIn, source: 'whatsapp' }).catch(() => null);
+          if (row) claimed.push(item.subject);
+        }
       }
-      if (claimed.length) this.log.log(`agent: ${name} says done — ${claimed.join('; ')} (waiting on Sandeep)`);
+      if (claimed.length) this.log.log(`agent: ${name} says done — ${claimed.join('; ')} (chase paused, waiting on Sandeep)`);
     }
 
     // Deterministic backstop (BEA-1210): a substantive status message satisfies today even when
@@ -509,6 +530,16 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         }
       }
     }
+
+    // Say WHAT was recorded, in our own words, not the model's. (BEA-1293)
+    //
+    // This is the line the owner asked for: *"you have to reply to them with which task they have
+    // finished."* It is appended only when a claim genuinely landed, so it can never tell somebody
+    // their report was saved when it was not — and if the model decided to stay quiet, a landed
+    // claim overrides that, because going silent on a completion is exactly what lost their trust.
+    const confirmed = replyWithClaimConfirmation(replyText, claimedTitles);
+    replyText = confirmed.text;
+    if (confirmed.forceSend) parsed.send = true;
 
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();

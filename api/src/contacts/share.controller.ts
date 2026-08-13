@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Post, UseGuards } fr
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { ContactsService } from './contacts.service';
 import { ClaimsService } from '../tasks/claims.service';
+import { DelegationService } from '../tasks/delegation.service';
 import { TeamUpdatesService } from './team-updates.service';
 import { Public } from '../auth/public.decorator';
 
@@ -15,6 +16,7 @@ export class ShareController {
     private readonly contacts: ContactsService,
     private readonly claims: ClaimsService,
     private readonly updates: TeamUpdatesService,
+    private readonly delegation: DelegationService,
   ) {}
 
   /**
@@ -62,7 +64,10 @@ export class ShareController {
     if (!owns) throw new BadRequestException('That is not on your list');
 
     if (body?.done === false) {
+      // Un-ticking withdraws the claim, so the chase must come back on — otherwise a mis-tap would
+      // silence a chase permanently with nothing waiting in the owner's review list. (BEA-1293)
       await this.claims.withdraw(taskId);
+      await this.delegation.resumeChases(taskId).catch(() => 0);
       return { ok: true, claimed: false };
     }
     // A daily report can't be "ticked off" — claim() records today's instead and returns null, so
@@ -79,8 +84,10 @@ export class ShareController {
         .record({ contactId: contact.id, text: typed, channel: 'link', taskId, isReport: kind === 'recurring' })
         .catch(() => undefined);
     }
-    const row = await this.claims.claim({ taskId, contactId: contact.id, quote: words, source: 'page' });
+    // Through the one door, so a tick on their page pauses the chase exactly like a "done" on
+    // WhatsApp does. Two routes to one outcome is what BEA-1296 removed. (BEA-1293)
+    const res: any = await this.delegation.recordClaim({ taskId, contactId: contact.id, quote: words, source: 'page' });
     if (kind === 'recurring') return { ok: true, claimed: false, recordedToday: true };
-    return { ok: true, claimed: !!row };
+    return { ok: true, claimed: !!res?.claimed };
   }
 }
