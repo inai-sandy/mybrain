@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ContactsService } from './contacts.service';
 import { PostboxService } from './postbox.service';
 import { TZ_OFFSET_MIN } from '../common/localday';
+import { TasksService } from '../tasks/tasks.service';
 
 /** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -201,11 +202,16 @@ export function scheduleOnDay(times: string[], dayKey: string, now: Date, offset
 
 @Injectable()
 export class RemindersService {
+  private readonly log = new Logger('Reminders');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
     private readonly contacts: ContactsService,
     private readonly postbox: PostboxService,
+    // Last, and @Optional(): dozens of specs build this service positionally with four arguments,
+    // and a `?` alone satisfies TypeScript while Nest still treats the parameter as required.
+    @Optional() private readonly tasks?: TasksService,
   ) {}
 
   /** When did this contact last message us? Drives the 24h free-text window. (BEA-1112) */
@@ -714,7 +720,7 @@ export class RemindersService {
     return { armed };
   }
 
-  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string; repeat?: string }) {
+  async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string; repeat?: string; taskKind?: string }) {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
@@ -731,10 +737,20 @@ export class RemindersService {
     // nudge reads "a gentle reminder about the …", not "about Ask Srikar to …". (BEA-754)
     // When left blank, derive a short topic FROM the message instead of dumping it. (BEA-924)
     const subject = (await this.cleanSubject(input.subject, contact.name)) || topicFromMessage(input.message);
+    // Every chase points at a piece of work. (BEA-1292)
+    //
+    // Nine of the owner's 24 live chases had nothing behind them, and the agent says why in one
+    // line: *"a chase with no task behind it has nothing to claim."* Someone replied "done", it was
+    // recorded nowhere, and the nudges carried on — while the owner had nothing to tick either.
+    //
+    // Enforced by CONSTRUCTION rather than by a guard: a guard would simply have rejected the voice
+    // path (EMO sets reminders with no task at all) and moved the failure somewhere else. If the
+    // caller has no task, one is made from what the chase is already about.
+    const taskId = input.taskId || (await this.taskForChase(input.contactId, contact.name, subject, input));
     const r = await this.prisma.reminder.create({
       data: {
         contactId: input.contactId,
-        taskId: input.taskId || null,
+        taskId,
         subject,
         message: input.message.trim(),
         notes: input.notes?.trim() || null,
@@ -748,6 +764,131 @@ export class RemindersService {
     });
     await this.reseed(r.id, times, startDay);
     return this.get(r.id);
+  }
+
+  /**
+   * The piece of work a new chase is about, made from the chase itself. (BEA-1292)
+   *
+   * If the work cannot be created, the chase is NOT created either — it FAILS. Swallowing that and
+   * saving the reminder anyway would rebuild the exact bug this ticket exists to close, just less
+   * often and with nothing in the log to say why. A reminder nobody can ever finish is worse than
+   * an error message the owner can act on.
+   *
+   * The one soft path is `TasksService` being absent altogether, which happens only in the spec
+   * harnesses that build this service with four arguments.
+   */
+  private async taskForChase(
+    contactId: string,
+    contactName: string,
+    subject: string,
+    input: { message?: string; notes?: string; taskKind?: string },
+  ): Promise<string | null> {
+    if (!this.tasks?.create) return null; // spec harness only — never a running app
+    const kind = input.taskKind === 'recurring' ? 'recurring' : 'assignment';
+    // The subject is already a cleaned topic ("the bill of materials status"), so it reads as work
+    // once it has a verb in front of it. The original message is kept as the note — it is the only
+    // record of what was actually asked for.
+    const title = kind === 'recurring' ? `Send ${subject}` : `Sort out ${subject}`;
+    const t: any = await this.tasks
+      .create({ title, note: input.notes?.trim() || input.message?.trim() || undefined, ownerContactId: contactId, party: contactName, kind, sphere: 'work' })
+      .catch((e: any) => {
+        this.log.error(`could not create the work behind a chase for ${contactName}: ${e?.message ?? e}`);
+        return null;
+      });
+    if (!t?.id) throw new BadRequestException('Could not set that up — the work behind the reminder could not be created');
+    return t.id;
+  }
+
+  /**
+   * Chases with no work behind them — the ones nobody can finish. (BEA-1292)
+   *
+   * Live at the time of writing: 9 of 24. Listed rather than fixed automatically, because the right
+   * answer differs per row and only the owner knows it. Karthik's two were duplicates of a daily
+   * report he already had; Swathi's two were the same hiring job written twice.
+   */
+  async loose() {
+    const rows = await this.prisma.reminder.findMany({
+      where: { taskId: null, status: { in: ['active', 'paused'] } },
+      orderBy: [{ contactId: 'asc' }, { createdAt: 'asc' }],
+      include: { contact: { select: { id: true, name: true } } },
+    });
+    const items = [] as any[];
+    for (const r of rows) {
+      // What this person already owes — so a duplicate can be merged into the real thing instead of
+      // becoming a second task about the same work.
+      const existing = await this.prisma.task
+        .findMany({
+          where: { ownerContactId: r.contactId, status: { not: 'done' } },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: { id: true, title: true, kind: true },
+        })
+        .catch(() => []);
+      items.push({
+        id: r.id,
+        subject: r.subject || '(no subject)',
+        message: r.message,
+        notes: r.notes,
+        status: r.status,
+        contact: r.contact,
+        existingTasks: existing,
+      });
+    }
+    return { items, count: items.length };
+  }
+
+  /**
+   * Give one loose chase something to point at, or stop it. (BEA-1292)
+   *
+   * `existing` is the one that matters most: pointing a duplicate at work the person already has
+   * stops them being chased twice about the same thing — Karthik was being nudged three times over
+   * one daily production update.
+   */
+  async linkLoose(id: string, body: { mode?: string; taskId?: string; title?: string }) {
+    const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: { select: { id: true, name: true } } } });
+    if (!r) throw new NotFoundException('Reminder not found');
+    if (r.taskId) return { ok: true, alreadyLinked: true, taskId: r.taskId };
+    const mode = String(body?.mode || '');
+
+    if (mode === 'stop') {
+      await this.prisma.reminder.update({ where: { id }, data: { status: 'stopped' } });
+      await this.prisma.reminderSend.deleteMany({ where: { reminderId: id, status: 'queued' } }).catch(() => undefined);
+      return { ok: true, stopped: true };
+    }
+
+    if (mode === 'existing') {
+      const taskId = String(body?.taskId || '');
+      const task = taskId ? await this.prisma.task.findUnique({ where: { id: taskId }, select: { id: true, ownerContactId: true, kind: true } }) : null;
+      if (!task) throw new BadRequestException('Pick the work this is about');
+      if (task.ownerContactId && task.ownerContactId !== r.contactId) throw new BadRequestException('That work belongs to someone else');
+      // Already chased on that task? Then this row is the duplicate — stop it rather than adding a
+      // second nudge about one piece of work.
+      const already = await this.prisma.reminder.count({ where: { taskId, status: { in: ['active', 'paused'] } } });
+      if (already > 0) {
+        await this.prisma.reminder.update({ where: { id }, data: { status: 'stopped', taskId } });
+        await this.prisma.reminderSend.deleteMany({ where: { reminderId: id, status: 'queued' } }).catch(() => undefined);
+        return { ok: true, merged: true, taskId };
+      }
+      await this.prisma.reminder.update({ where: { id }, data: { taskId, repeat: task.kind === 'recurring' ? 'daily' : r.repeat } });
+      return { ok: true, taskId };
+    }
+
+    if (mode !== 'task' && mode !== 'daily') throw new BadRequestException('Choose what to do with this one');
+    const kind = mode === 'daily' ? 'recurring' : 'assignment';
+    const title = String(body?.title || '').trim();
+    const t: any = this.tasks?.create
+      ? await this.tasks.create({
+          title: title || (kind === 'recurring' ? `Send ${r.subject}` : `Sort out ${r.subject}`),
+          note: r.notes?.trim() || r.message?.trim() || undefined,
+          ownerContactId: r.contactId,
+          party: r.contact?.name,
+          kind,
+          sphere: 'work',
+        }).catch(() => null)
+      : null;
+    if (!t?.id) throw new BadRequestException('Could not create the task');
+    await this.prisma.reminder.update({ where: { id }, data: { taskId: t.id, repeat: kind === 'recurring' ? 'daily' : r.repeat } });
+    return { ok: true, taskId: t.id, created: true, kind };
   }
 
   async get(id: string) {
