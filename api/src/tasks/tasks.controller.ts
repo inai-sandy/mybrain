@@ -3,6 +3,7 @@ import { TasksService } from './tasks.service';
 import { ClaimsService } from './claims.service';
 import { TaskHealthService } from './task-health.service';
 import { RecurringService } from './recurring.service';
+import { DelegationService } from './delegation.service';
 
 @Controller('tasks')
 export class TasksController {
@@ -11,6 +12,7 @@ export class TasksController {
     private readonly claims: ClaimsService,
     private readonly health: TaskHealthService,
     private readonly recurring: RecurringService,
+    private readonly delegation: DelegationService,
   ) {}
 
   /** Morning brain-dump -> tasks. */
@@ -108,22 +110,14 @@ export class TasksController {
   /** Confirm or reject one claim. Confirming is the ONLY way a claim becomes a completion. */
   @Post('claims/:id/decide')
   async decideClaim(@Param('id') id: string, @Body() body: { confirm?: boolean; reason?: string }) {
-    const r = await this.claims.decide(id, body?.confirm !== false, body?.reason);
-    if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
-    return r;
+    return this.delegation.decideClaim(id, body?.confirm !== false, body?.reason);
   }
 
   /** Confirm several obviously-fine claims at once. (BEA-1025) */
   @Post('claims/decide-many')
   async decideMany(@Body() body: { ids?: string[]; confirm?: boolean }) {
     const ids = (body?.ids || []).filter((x) => typeof x === 'string').slice(0, 100);
-    const confirm = body?.confirm !== false;
-    let done = 0;
-    for (const id of ids) {
-      const r = await this.claims.decide(id, confirm).catch(() => ({ ok: false }) as any);
-      if (r.ok && r.taskId) { await this.tasks.setDone(r.taskId, !!r.confirmed); done++; }
-    }
-    return { ok: true, decided: done, of: ids.length };
+    return this.delegation.decideManyClaims(ids, body?.confirm !== false);
   }
 
   /** What the `@names` in some text resolve to — so the form can show it as you type. (BEA-1019) */

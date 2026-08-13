@@ -7,6 +7,7 @@ import { MemoryService } from '../memory/memory.service';
 import { matchContact, contactSpellings } from '../contacts/person-identity';
 import { MentionResolution, exactMatches, linkableIds, resolveMentions } from './mentions';
 import { clampTitle } from '../common/clamp-title';
+import { settleDelegation } from './delegation';
 
 const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 
@@ -1027,56 +1028,21 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     this.indexTask(upd);
     this.touchPerson((upd as any).ownerContactId);
     await this.syncChases(id, done);
-    if (done) {
-      await this.settleReview(id);
-      await this.spawnFollowUp(t, followUpDate);
-    }
+    if (done) await this.spawnFollowUp(t, followUpDate);
     return this.shape(upd);
   }
 
   /**
-   * Marking a task done answers everything the review tab was asking about it (BEA-1211).
-   * Nothing else ever cleared these: the message rows stayed `needsYou`, the pending claim kept
-   * being swept back in, and "I closed it and it came back" was the result. The tick IS the
-   * owner's decision, so the claim is confirmed and the messages close with it.
-   * Optional-chained: spec harnesses build this service with partial Prisma stubs.
-   */
-  private async settleReview(taskId: string) {
-    try {
-      await (this.prisma as any).taskClaim?.updateMany?.({
-        where: { taskId, status: 'pending' },
-        data: { status: 'confirmed', decidedAt: new Date() },
-      });
-      await (this.prisma as any).teamUpdate?.updateMany?.({
-        where: { taskId, closedAt: null },
-        data: { closedAt: new Date() },
-      });
-    } catch (e: any) {
-      this.log.warn(`review settle for ${taskId}: ${e?.message ?? e}`);
-    }
-  }
-
-  /**
-   * A chase exists to get one piece of work finished, so confirming the work stops the chase — and
-   * re-opening it starts the chase again. Done here with plain queries rather than by injecting the
-   * reminders service, which would make tasks and contacts depend on each other. (BEA-1021)
+   * Everything that must move when this work finishes or re-opens: the chase, the claim waiting on
+   * it, the team-update thread, the "needs you" badge. (BEA-1021, BEA-1211, BEA-1296)
+   *
+   * The rule itself lives in `settleDelegation` so that every OTHER surface — the claim review, the
+   * Delegated list, the contact's own page — runs the identical list rather than its own version of
+   * it. It used to be written out here and half-written everywhere else, which is why the owner
+   * could close a task on one screen and still be chasing it on another.
    */
   private async syncChases(taskId: string, done: boolean) {
-    try {
-      if (done) {
-        const stopped = await this.prisma.reminder.updateMany({ where: { taskId, status: { in: ['active', 'paused'] } }, data: { status: 'done' } });
-        if (stopped.count) {
-          await this.prisma.reminderSend.deleteMany({ where: { reminder: { taskId }, status: 'queued' } });
-          this.log.log(`task ${taskId} confirmed done — stopped ${stopped.count} chase(s)`);
-        }
-        return;
-      }
-      // Re-opened: bring a repeating chase back to life. The day rollover re-arms it within a minute.
-      const back = await this.prisma.reminder.updateMany({ where: { taskId, status: 'done', repeat: 'daily' }, data: { status: 'active', armedDay: null } });
-      if (back.count) this.log.log(`task ${taskId} re-opened — resumed ${back.count} chase(s)`);
-    } catch (e: any) {
-      this.log.warn(`chase sync for ${taskId}: ${e?.message ?? e}`);
-    }
+    await settleDelegation(this.prisma, taskId, done, (m) => this.log.log(m));
   }
 
   /** Create a "Follow up: <task>" task dated to the chosen day. The morning Telegram nudge announces it. */
