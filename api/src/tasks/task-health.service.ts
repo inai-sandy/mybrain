@@ -60,6 +60,23 @@ export class TaskHealthService {
       where: 'Tasks → Delegated',
     });
 
+    // A chase with nothing behind it can never be finished — not by them, not by him. Saying "done"
+    // records nothing, and there is no task in his list to tick. Nine of his 24 live chases were in
+    // this state, and it is the single biggest reason his team kept being nudged after reporting
+    // work complete. (BEA-1292)
+    const noTask = await this.q(() => this.prisma.reminder.findMany({
+      where: { status: { in: ['active', 'paused'] }, taskId: null },
+      select: { subject: true, contact: { select: { name: true } } },
+      take: 50,
+    }));
+    add({
+      key: 'chase-without-task',
+      what: 'chases with no work behind them — nobody can mark these done',
+      count: noTask.length,
+      examples: titles(noTask, (r) => `${r.contact?.name || 'someone'}: ${r.subject || ''}`),
+      where: 'Reminders → Nothing to finish',
+    });
+
     const stuck = await this.q(() => this.prisma.reminderSend.findMany({ where: { status: 'sending' }, select: { id: true }, take: 20 }));
     add({ key: 'send-stuck', what: 'messages stuck mid-send', count: stuck.length, examples: [], where: 'Tasks → Delegated' });
 

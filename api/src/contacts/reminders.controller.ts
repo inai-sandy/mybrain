@@ -171,6 +171,18 @@ export class RemindersController {
     return this.updates.forContact(id);
   }
 
+  /** Chases with no work behind them — nobody can finish these. Static route, before :id. (BEA-1292) */
+  @Get('loose')
+  loose() {
+    return this.reminders.loose();
+  }
+
+  /** Give one loose chase something to point at, or stop it. (BEA-1292) */
+  @Post(':id/link-task')
+  linkLoose(@Param('id') id: string, @Body() body: { mode?: string; taskId?: string; title?: string }) {
+    return this.reminders.linkLoose(id, body || {});
+  }
+
   /** Chases the app switched off by itself, for the owner to resume. (BEA-1160) */
   @Get('auto-stopped')
   autoStopped() {

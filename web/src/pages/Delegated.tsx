@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AutoStoppedChases } from '../ui/AutoStoppedChases';
+import { LooseChases } from '../ui/LooseChases';
 import { Link } from 'react-router-dom';
 import { Hand, Radio, Clock, Plus, Search, Timer } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -90,6 +91,10 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
         <Stat icon={<Radio size={14} />} n={summary.chasing} label="being chased" />
         <Stat icon={<Timer size={14} />} n={summary.stalling || 0} label="not moving" tone={summary.stalling ? 'amber' : undefined} />
       </div>
+
+      {/* Chases with no work behind them — nobody can finish these. Above the auto-stopped card
+          because it is the more broken of the two: those still point at real work. (BEA-1292) */}
+      <LooseChases />
 
       {/* Chases the app switched off by itself, waiting to be turned back on. (BEA-1160) */}
       <AutoStoppedChases />
