@@ -83,6 +83,28 @@ export function ambiguousDoneReply(items: { n: number; label: string }[], link?:
   return `Which one do you mean?\n${list}${tail}`;
 }
 
+/**
+ * Today's standing report arrived. (BEA-1295)
+ *
+ * A daily report can never be "done" — confirming one would kill its chase forever and tomorrow's
+ * update would never be asked for. That is right, and it must not change. But from the reporter's
+ * side it looks identical to being ignored: they send the numbers, and the chase comes back.
+ *
+ * So the arrival is acknowledged in its own words, and the return is stated rather than sprung on
+ * them. Four people are on daily reports — Jayanth (production, OT), Karthik (Haasya production),
+ * Radha (3rd floor), Rakesh (Friday night status).
+ *
+ * `everyDay` false means the report has its own weekday schedule, so "tomorrow" would be a lie —
+ * Rakesh's is Friday-only, and telling him "I'll ask again tomorrow" on a Friday is wrong.
+ */
+export function dailyReceivedLine(subjects: string[], everyDay = true): string {
+  const list = subjects.map((s) => String(s || '').trim()).filter(Boolean);
+  if (!list.length) return '';
+  const what = list.length === 1 ? list[0] : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+  const when = everyDay ? 'tomorrow' : "next time it's due";
+  return `✅ Got it — ${what} ${list.length === 1 ? 'is' : 'are'} in. Nothing else needed today; I'll ask again ${when}.`;
+}
+
 export function replyWithClaimConfirmation(reply: string, claimedTitles: string[]): { text: string; forceSend: boolean } {
   const line = claimConfirmedLine(claimedTitles || []);
   if (!line) return { text: String(reply || '').trim(), forceSend: false };
