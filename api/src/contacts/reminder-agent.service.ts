@@ -502,9 +502,17 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // he never heard about. (BEA-1026)
     let reachedOwner = true;
     if (parsed.needsSandeep) {
-      await this.prisma.reminder.updateMany({ where: { contactId, status: 'active' }, data: { needsOwner: true } }).catch(() => undefined);
-      reachedOwner = await this.notifyOwner(name, lastInBody).catch(() => false);
-      this.log.log(`agent: flagged contact ${contactId} — needs Sandeep${reachedOwner ? '' : ' (could NOT reach him)'}`);
+      // Flag the ITEM it got stuck on, not everything this person owes. (BEA-1297)
+      //
+      // "Needs you" used to be set on every active chase for the contact, so it said a PERSON needs
+      // you and never what about — and each row in Contacts carries its own task line, so the badge
+      // appeared against work that was perfectly fine. When the model cannot tell which item it is,
+      // the flag stays contact-wide, which is honest rather than a guess.
+      const stuckOn = items.find((it) => it.n === Number(parsed.needsItem))?.reminderId;
+      const flagWhere: any = stuckOn ? { id: stuckOn } : { contactId, status: 'active' };
+      await this.prisma.reminder.updateMany({ where: flagWhere, data: { needsOwner: true } }).catch(() => undefined);
+      reachedOwner = await this.notifyOwner(name, lastInBody, stuckOn ? items.find((it) => it.reminderId === stuckOn)?.subject : null).catch(() => false);
+      this.log.log(`agent: needs Sandeep — ${stuckOn ? `about "${items.find((it) => it.reminderId === stuckOn)?.subject}"` : `contact ${contactId} (could not tell which item)`}${reachedOwner ? '' : ' (could NOT reach him)'}`);
       if (!reachedOwner) {
         // Do not promise a reply we cannot guarantee. Say something true instead.
         replyText = `Thanks ${name.split(/\s+/)[0] || ''} — I've noted this down for Sandeep.`.replace(/\s+/g, ' ').trim();
@@ -647,10 +655,35 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     }
 
     // The agent couldn't answer → flag the contact's reminders ("needs you") AND WhatsApp Sandeep. (BEA-766/767)
-    if (!parsed.needsSandeep) {
-      // The agent handled this exchange without getting stuck — clear any prior "needs you" flag so
-      // the badge doesn't stay stuck until the owner happens to type a manual message. (BEA-786)
-      await this.prisma.reminder.updateMany({ where: { contactId, needsOwner: true }, data: { needsOwner: false } }).catch(() => undefined);
+    // The agent handled this exchange without getting stuck — clear any prior "needs you" flag so
+    // the badge doesn't stay stuck until the owner happens to type a manual message. (BEA-786)
+    //
+    // But NOT while they are still raising something. A person can write again about the same
+    // problem in words the agent happens to be able to answer politely, and clearing the flag there
+    // drops a real question on the floor: the owner never sees it, and they are left waiting on an
+    // answer nobody knows they are owed. (BEA-1297)
+    if (!parsed.needsSandeep && !(lastInBody && readUpdate(lastInBody).reads.includes('needs_you'))) {
+      // …and only for the item this exchange was actually about. Clearing every flag for the person
+      // is the same bug on the other side: a flag raised on Monday about the payment would be wiped
+      // by a cheerful Wednesday message about the videos, and the owner would never learn he still
+      // owed an answer. (review finding)
+      //
+      // Which flags were item-specific is read from the data rather than stored: the fallback flags
+      // EVERY active chase at once, so several flagged rows means it was a contact-wide flag and
+      // clearing them together is right. A single flagged row was aimed at that item, so it waits
+      // for something that actually settles it — this exchange touching it, the owner replying
+      // (`sendManual`), or the work being finished (`settleDelegation`).
+      const touched = new Set<string>();
+      for (const raw of [...(Array.isArray(parsed.done) ? parsed.done : []), ...(Array.isArray(parsed.statusToday) ? parsed.statusToday : []), parsed.promise?.item]) {
+        if (raw === undefined || raw === null) continue;
+        const hit = items.find((it) => it.n === Number(raw));
+        if (hit) touched.add(hit.reminderId);
+      }
+      const flagged: any[] = ((await Promise.resolve(this.prisma.reminder?.findMany?.({ where: { contactId, needsOwner: true }, select: { id: true } })).catch(() => [])) ?? []) as any[];
+      const clearIds = flagged.length > 1 ? flagged.map((f) => f.id) : flagged.filter((f) => touched.has(f.id)).map((f) => f.id);
+      if (clearIds.length) {
+        await this.prisma.reminder.updateMany({ where: { id: { in: clearIds } }, data: { needsOwner: false } }).catch(() => undefined);
+      }
     }
 
     // NOTE: the agent no longer auto-closes reminders from a chat (BEA-948). These are often ongoing
@@ -659,11 +692,14 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** WhatsApp Sandeep when the agent is stuck: nice free-text in-window, template fallback cold. (BEA-767) */
-  private async notifyOwner(contactName: string, lastMsg: string): Promise<boolean> {
+  private async notifyOwner(contactName: string, lastMsg: string, about?: string | null): Promise<boolean> {
     const owner = ((await this.prisma.setting.findUnique({ where: { key: 'owner.whatsapp' } }))?.value || '').replace(/[^\d]/g, '');
     if (!owner || !this.postbox.isConfigured()) return false;
     const snippet = lastMsg ? `: "${lastMsg.replace(/\s+/g, ' ').trim().slice(0, 200)}"` : '';
-    const res = await this.postbox.sendText(owner, `⚠ ${contactName} messaged and needs you${snippet}. Open My Brain to reply.`);
+    // Name the work when we know it — the app now does, and "needs you about the Elleys PCBs" is
+    // answerable from a phone in a way that "needs you" is not. (review finding)
+    const topic = about ? ` about ${about}` : '';
+    const res = await this.postbox.sendText(owner, `⚠ ${contactName} messaged and needs you${topic}${snippet}. Open My Brain to reply.`);
     if (!res.error) return true;
     // Outside the 24h free-text window → fall back to the approved template so it still lands.
     const fb = await this.postbox.sendReminderTemplate(owner, 'Sandeep', `${contactName}, who needs your reply in My Brain`).catch(() => ({ error: 'failed' }) as any);
