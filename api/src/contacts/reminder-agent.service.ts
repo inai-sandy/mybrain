@@ -6,12 +6,12 @@ import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { DelegationService } from '../tasks/delegation.service';
-import { replyWithClaimConfirmation, ambiguousDoneReply, withSystemLine } from './claim-reply';
+import { replyWithClaimConfirmation, ambiguousDoneReply, withSystemLine, dailyReceivedLine } from './claim-reply';
 import { RecurringService } from '../tasks/recurring.service';
-import { isOwedOn } from '../tasks/schedule';
+import { isOwedOn, parseSchedule } from '../tasks/schedule';
 import { weekdayOf } from '../common/localday';
 import { TasksService } from '../tasks/tasks.service';
-import { RemindersService, topicFromMessage } from './reminders.service';
+import { RemindersService, topicFromMessage, dailySubject, REMINDER_TZ_OFFSET } from './reminders.service';
 import { PromptsService } from '../prompts/prompts.service';
 
 /** Watchdog decision for an unanswered inbound of a given age. Pure + unit-tested. (BEA-953) */
@@ -394,6 +394,8 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     }
 
     const reported: string[] = [];
+    /** Task ids whose standing report landed today — what the acknowledgement names. (BEA-1295) */
+    const reportedTaskIds: string[] = [];
     // "Update sheet sending 12 clock" is a promise, not a report. On 27 Jul that message arrived
     // 50 seconds AFTER a share-page tick and the board still said received. The later message
     // wins, so it un-marks the day and the chase resumes. (BEA-1152)
@@ -414,6 +416,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         if (promisesLater(lastIn)) continue;
         await this.recurring.markReceived(item.taskId, today, lastIn, contactId, { source: 'whatsapp' });
         reported.push(item.subject);
+        reportedTaskIds.push(item.taskId);
       }
       if (reported.length) this.log.log(`agent: ${name} sent today's ${reported.join('; ')}`);
     }
@@ -427,6 +430,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
           if (!promisesLater(lastIn)) {
             await this.recurring.markReceived(item.taskId, this.recurring.today(), lastIn, contactId, { source: 'whatsapp' });
             reported.push(item.subject); // the day is settled — the backstop below must not mark it twice (BEA-1210)
+            reportedTaskIds.push(item.taskId);
           }
           continue;
         }
@@ -465,6 +469,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
         for (const it of recurringItems) {
           await this.recurring.markReceived(it.taskId, today, lastIn, contactId, { source: 'whatsapp' });
           reported.push(it.subject);
+          reportedTaskIds.push(it.taskId as string);
         }
         this.log.log(`agent: ${name}'s message reads as a report — settled today's ${reported.join('; ')} (backstop)`);
       }
@@ -542,7 +547,38 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // claim overrides that, because going silent on a completion is exactly what lost their trust.
     const confirmed = replyWithClaimConfirmation(replyText, claimedTitles);
     replyText = confirmed.text;
+    /** This pass carries a FACT — a claim landed, or today's report arrived. Such a message must
+     *  reach them even if the wording matches something sent on an earlier day. (review finding) */
+    let carriesFact = confirmed.forceSend;
     if (confirmed.forceSend) parsed.send = true;
+
+    // Today's standing report landed — say so, and say when it comes round again. (BEA-1295)
+    //
+    // A daily report is never "done", so it never earns the completion line above. Without its own
+    // acknowledgement the reporter sends real numbers, hears a generic "thanks", and the chase comes
+    // back — which from their side is indistinguishable from being ignored.
+    if (reportedTaskIds.length) {
+      const ids = [...new Set(reportedTaskIds)];
+      const rows: any[] = ((await Promise.resolve(this.prisma.task?.findMany?.({ where: { id: { in: ids } }, select: { id: true, title: true, scheduleDays: true } })).catch(() => [])) ?? []) as any[];
+      if (rows.length) {
+        // "tomorrow" is only true for a report owed every working day. Rakesh's is Friday-only, and
+        // telling him "I'll ask again tomorrow" on a Friday would be a plain untruth.
+        // "tomorrow" has to be a day the report is genuinely owed. Its OWN weekdays matter (Rakesh's
+        // is Friday-only) and so do the app's rest days — an unscheduled report submitted on a
+        // Saturday is not owed on Sunday, so "I'll ask again tomorrow" would be untrue there too.
+        // (review finding)
+        const rest = ((await Promise.resolve(this.recurring.restDays?.()).catch(() => ['Sun'])) ?? ['Sun']) as string[];
+        const tomorrowKey = new Date(new Date(`${this.recurring.today()}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+        const tomorrowWeekday = weekdayOf(tomorrowKey);
+        const everyDay = rows.every((t) => !parseSchedule(t.scheduleDays)) && !rest.includes(tomorrowWeekday);
+        const line = dailyReceivedLine(rows.map((t) => dailySubject(t.title || '')), everyDay);
+        if (line) {
+          replyText = withSystemLine(replyText, line);
+          parsed.send = true;
+          carriesFact = true;
+        }
+      }
+    }
 
     // They said it is finished — but not WHICH one. (BEA-1294)
     //
@@ -586,7 +622,19 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
 
     // Stay quiet if the agent decided so (BEA-737) or the reply repeats one already sent (BEA-735).
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
-    const alreadySent = messages.some((m) => m.direction === 'out' && norm(m.body) === norm(replyText));
+    // The duplicate guard compares against the last 30 messages, which can span weeks. That is
+    // right for chit-chat and wrong for a fact: "today's production update is in" carries no date,
+    // so an identical line sent last Tuesday would silently swallow today's — and the reporter would
+    // hear nothing on the exact day they sent their numbers, which is the bug this ticket exists to
+    // fix. A fact-carrying message is only suppressed by an identical one sent TODAY. (review finding)
+    const dayKeyOf = (d: any) => (d ? new Date(new Date(d).getTime() + REMINDER_TZ_OFFSET * 60000).toISOString().slice(0, 10) : '');
+    const todayKeyLocal = dayKeyOf(new Date());
+    const alreadySent = messages.some(
+      (m) =>
+        m.direction === 'out' &&
+        norm(m.body) === norm(replyText) &&
+        (!carriesFact || dayKeyOf(m.createdAt) === todayKeyLocal),
+    );
     if (parsed.send === false || !replyText) {
       this.log.log(`agent: staying quiet for contact ${contactId}`);
     } else if (alreadySent) {
