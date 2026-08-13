@@ -70,8 +70,16 @@ describe('ackLine — short varied acknowledgment (BEA-923)', () => {
     expect(ackLine('Rakesh', 'Good morning sir, please find update sheet')).toMatch(/pass this on to Sandeep/i);
     expect(ackLine('Rakesh', 'https://youtube.com/@x')).toMatch(/pass this on to Sandeep/i);
   });
-  it('recognises "done"', () => {
-    expect(ackLine('Swathi', "it's done")).toMatch(/noted that it's done/i);
+  it('recognises "done" — but NEVER says it was recorded (BEA-1293)', () => {
+    // This line only fires when the model returned nothing to send, which means nothing was
+    // recorded. The old wording — "noted that it's done!" — said the opposite, so a lost report and
+    // a saved one produced the identical message and the owner's team stopped trusting the replies.
+    // The real confirmation is built in `claim-reply.ts` and appears only when a claim landed.
+    const line = ackLine('Swathi', "it's done");
+    expect(line).toMatch(/passed this to Sandeep/i);
+    expect(line.toLowerCase()).not.toContain("noted that it's done");
+    expect(line).not.toMatch(/marked .* as done/i);
+    expect(line).not.toMatch(/won't get reminders/i);
   });
   it('falls back to a plain thanks and uses the contact name', () => {
     expect(ackLine('Deepthi', 'ok')).toBe('Great, thanks Deepthi!');

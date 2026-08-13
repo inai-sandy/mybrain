@@ -71,6 +71,13 @@ export class DelegationService {
       .catch(() => null);
     if (!task) return { claimed: false as const, task: null };
 
+    // Was one ALREADY waiting on the owner? `claim()` is idempotent — a second "it's done" updates
+    // the words rather than stacking rows, and returns truthy either way. Without this check every
+    // later pass would look like a fresh claim, and the caller would send "✅ I've marked … as done"
+    // again and again for one piece of work. (review finding, BEA-1293)
+    // Optional-chained + Promise.resolve: spec harnesses pass partial claims stubs, and a missing
+    // method must degrade rather than throw inside a path that messages real people.
+    const wasAlreadyClaimed = (await Promise.resolve(this.claims.isPending?.(input.taskId)).catch(() => false)) || false;
     const row = await this.claims.claim(input).catch(() => null);
 
     // A recurring report returns null from claim() by design — it satisfied TODAY, it is not done.
@@ -80,6 +87,9 @@ export class DelegationService {
     if (!row) return { claimed: false as const, task };
 
     await this.pauseChases(input.taskId, 'they say it is done').catch(() => undefined);
+    // Re-affirming something already waiting is not news. The chase is already quiet and the owner
+    // already has it — saying it a second time reads as a bot repeating itself.
+    if (wasAlreadyClaimed) return { claimed: false as const, alreadyClaimed: true as const, task, claimId: (row as any).id as string };
     return { claimed: true as const, task, claimId: (row as any).id as string };
   }
 

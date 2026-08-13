@@ -134,7 +134,10 @@ export class ReminderSenderService implements OnModuleInit {
     const stale = await this.prisma.reminder.findMany({ where: { status: 'active', OR: [{ armedDay: null }, { armedDay: { lt: todayKey } }] } });
     let rearmed = 0;
     let stopped = 0;
+    /** Rows this pass has already decided on, so the second sweep below cannot double-handle one. */
+    const handled = new Set<string>();
     for (const r of stale) {
+      handled.add(r.id);
       const done = await this.chaseFinished(r);
       if (done) { await this.stopChase(r.id, done); stopped++; continue; }
       const stale2 = await this.claimWentUnreviewed(r, now);
@@ -146,6 +149,23 @@ export class ReminderSenderService implements OnModuleInit {
       await this.rearmChase(r, todayKey, now);
       rearmed++;
     }
+    // Chases paused because somebody CLAIMED the work is done. (BEA-1293)
+    //
+    // The sweep above only looks at `status: 'active'`, so the moment a claim started pausing the
+    // chase these became invisible to it — and with them, the owner's own rule: *"If I am not
+    // marking it as done for two straight days, then you can stop it."* A claim he never reviewed
+    // would have sat paused forever, which is "stop on done" wearing the word "pause".
+    //
+    // These are only ever STOPPED here, never re-armed. A pause is his to lift.
+    const claimPaused = await this.prisma.reminder.findMany({ where: { status: 'paused', pausedAuto: true, taskId: { not: null } } });
+    for (const r of claimPaused) {
+      if (handled.has(r.id)) continue; // already dealt with in the sweep above
+      const done = await this.chaseFinished(r);
+      if (done) { await this.stopChase(r.id, done); stopped++; continue; }
+      const unreviewed = await this.claimWentUnreviewed(r, now);
+      if (unreviewed) { await this.stopChase(r.id, unreviewed); stopped++; }
+    }
+
     if (stopped) this.log.log(`stopped ${stopped} chase(s) — finished, or a claim you didn't review`);
     if (rearmed) this.log.log(`re-armed ${rearmed} chase(s) for ${todayKey}`);
   }
@@ -197,7 +217,11 @@ export class ReminderSenderService implements OnModuleInit {
     for (const send of due) {
       const r: any = send.reminder;
       if (!r || r.status !== 'active') {
-        await this.mark(send.id, 'failed', null, r ? `reminder is ${r.status}` : 'reminder gone');
+        // A PAUSED chase is not a failure. Since BEA-1293 a chase is paused the moment someone says
+        // the work is done, so this is the ordinary, intended path — logging it as "failed" put a
+        // red row in front of the owner for the system working correctly.
+        const paused = r?.status === 'paused';
+        await this.mark(send.id, paused ? 'skipped' : 'failed', null, r ? (paused ? 'paused — they say it is done' : `reminder is ${r.status}`) : 'reminder gone');
         continue;
       }
       const number = (r.contact?.whatsappNumber || '').replace(/[^\d]/g, '');

@@ -163,10 +163,30 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress, extraActio
               🤝 Promise → {t.party}
             </span>
           )}
-          {/* The chase on a delegated task — running, quiet, or none. (BEA-1044) */}
+          {/* The chase on a delegated task — running, paused because they say it's done, or none.
+              (BEA-1044, BEA-1293). "Paused" used to read as "no chase", which hid the single most
+              important state on this screen: the person has reported it finished and is waiting on
+              you, and until you decide they are getting no reminders. */}
           {t.chaseStatus !== undefined && t.status !== 'done' && (
-            <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ' + (t.chaseStatus === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400')} title={t.chaseCount ? `Chased ${t.chaseCount} time(s) so far` : 'Never chased yet'}>
-              ↻ {t.chaseStatus === 'active' ? 'chasing' : 'no chase'}{t.chaseCount ? ` · ${t.chaseCount}×` : ''}
+            <span
+              className={
+                'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ' +
+                (t.chaseStatus === 'active'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  : t.chaseStatus === 'paused'
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                    : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400')
+              }
+              title={
+                t.chaseStatus === 'paused'
+                  ? 'Paused — they reported this done. Confirm it to close it, or reject it and the chase starts again.'
+                  : t.chaseCount
+                    ? `Chased ${t.chaseCount} time(s) so far`
+                    : 'Never chased yet'
+              }
+            >
+              ↻ {t.chaseStatus === 'active' ? 'chasing' : t.chaseStatus === 'paused' ? 'paused — they say it’s done' : 'no chase'}
+              {t.chaseCount ? ` · ${t.chaseCount}×` : ''}
             </span>
           )}
           {/* What they promised — and how many times they've re-promised. (BEA-1022) */}
