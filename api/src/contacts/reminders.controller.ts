@@ -3,6 +3,7 @@ import { RemindersService } from './reminders.service';
 import { TeamUpdatesService } from './team-updates.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { TasksService } from '../tasks/tasks.service';
+import { DelegationService } from '../tasks/delegation.service';
 
 @Controller('reminders')
 export class RemindersController {
@@ -11,6 +12,7 @@ export class RemindersController {
     private readonly updates: TeamUpdatesService,
     private readonly claims: ClaimsService,
     private readonly tasks: TasksService,
+    private readonly delegation: DelegationService,
   ) {}
 
   @Get()
@@ -141,14 +143,11 @@ export class RemindersController {
     return this.updates.decide(
       id,
       confirm,
-      async (claimId, ok) => {
-        const r = await this.claims.decide(claimId, ok);
-        if (r.ok && r.taskId) await this.tasks.setDone(r.taskId, !!r.confirmed);
-        return r;
-      },
+      // Both callbacks go through the ONE door, so this screen can never drift from the others.
+      async (claimId, ok) => this.delegation.decideClaim(claimId, ok),
       // They said "all done" but only one claim was ever raised — a yes on the others marks them
       // done directly, which is the same end state and stops their chase the same way. (BEA-1159)
-      async (taskId, done) => this.tasks.setDone(taskId, done),
+      async (taskId, done) => this.delegation.finishTask(taskId, done),
       // The exact claim the screen showed — a host item carries an attached claim id, and
       // re-guessing it server-side breaks when the contact holds two. (BEA-1221)
       body?.claimId || undefined,
