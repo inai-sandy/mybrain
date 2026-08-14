@@ -24,6 +24,14 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // News sits high on purpose (BEA-1322): parked at the bottom it fell below the
+    // sidebar's scroll fold, where the entry was clipped and clicks landed on dead
+    // space — it looked broken until a reload. It is a daily-read section and more
+    // feeds join this group, so it lives right under Daily.
+    label: 'News',
+    items: [{ to: '/news', label: 'News', icon: Newspaper }],
+  },
+  {
     label: 'People',
     items: [
       { to: '/contacts', label: 'Contacts', icon: Users },
@@ -49,12 +57,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: '/bookmarks', label: 'Bookmarks', icon: Bookmark },
       { to: '/meetings', label: 'Meetings', icon: Mic },
     ],
-  },
-  {
-    // News got its own group (BEA-1318): two feeds live at /news — AI News Daily (the
-    // radar) and AI News Twitter (the written edition) — behind the Daily|Twitter toggle.
-    label: 'News',
-    items: [{ to: '/news', label: 'News', icon: Newspaper }],
   },
   {
     label: 'Automation',

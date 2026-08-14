@@ -184,8 +184,11 @@ function AuthedApp() {
         <Route path="mentor" element={<Navigate to="/lab?tab=plan" replace />} />
         <Route path="notes" element={<Notes />} />
         <Route path="notes/:id" element={<NoteView />} />
-        <Route path="news" element={<News />} />
-        <Route path="news/:day" element={<News />} />
+        {/* News is lazy-loaded — WITHOUT a Suspense boundary a click-navigation here
+            suspends mid-click and React blanks the whole app (BEA-1322). Same pattern
+            as the /paper routes below. */}
+        <Route path="news" element={<Suspense fallback={<RouteSkeleton />}><News /></Suspense>} />
+        <Route path="news/:day" element={<Suspense fallback={<RouteSkeleton />}><News /></Suspense>} />
         <Route path="documents" element={<Documents />} />
         <Route path="documents/:id" element={<DocumentView />} />
         <Route path="vault" element={<Vault />} />
