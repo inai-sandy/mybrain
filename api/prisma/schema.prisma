@@ -1484,6 +1484,9 @@ model RadarItem {
   sources       String   @default("[]")
   /// True when the item is in daily-brief.json (the Scout Picks).
   isPick        Boolean  @default(false)
+  /// How many outlets carry this story (from stories-merged.json). 1 = single-source;
+  /// 2+ = "hot" — the Hot now section and Hot sort read this. (BEA-1323)
+  heat          Int      @default(1)
   /// One plain-English sentence written by the engine (BEA-1312). Null = pending.
   whyItMatters  String?
   publishedAt   DateTime
