@@ -276,6 +276,23 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const number = (contact.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number || !this.postbox.isConfigured()) return;
 
+    // They have LEFT. (BEA-1307)
+    //
+    // The scheduled sender was guarded and this was not, which left the worse hole of the two: she
+    // messages, and an AI carries on a conversation on the owner's behalf with somebody who no
+    // longer works here — chasing, asking for updates, promising to pass things on.
+    //
+    // Her words are still recorded, and the owner is told so he can answer himself if he wants to.
+    // What does not happen is the app deciding to talk to her.
+    if (contact.leftAt) {
+      this.log.log(`agent: ${contact.name} has left — recorded their message, not replying`);
+      const lastIn = await this.prisma.reminderMessage
+        .findFirst({ where: { contactId, direction: 'in' }, orderBy: { createdAt: 'desc' }, select: { body: true } })
+        .catch(() => null);
+      await this.notifyOwner(`${contact.name} (who has left)`, lastIn?.body || '').catch(() => false);
+      return;
+    }
+
     // Process a reply for ANY reminder relationship — active, paused, OR done. The conversation must
     // never die just because a reminder was closed or paused. We ALWAYS read + reply; a reminder's
     // status only governs whether WE send scheduled nudges, never whether we answer THEM. (BEA-948)

@@ -1,16 +1,18 @@
 import { randomBytes } from 'crypto';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { isOwedOn, parseSchedule, scheduleLabel } from '../tasks/schedule';
 import { localDayKey, weekdayOf } from '../common/localday';
 import { matchContact, matchContactsAll, contactSpellings, similarity, norm } from './person-identity';
-import { TASK_OPEN, isOpen, isDone } from '../tasks/task-status';
+import { TASK_OPEN, OPEN_WORK, isOpen, isDone } from '../tasks/task-status';
 
 const todayKey = () => localDayKey(new Date());
 
 /** Contacts — people you can send WhatsApp reminders to (BEA-719). */
 @Injectable()
 export class ContactsService {
+  private readonly log = new Logger('Contacts');
+
   constructor(private readonly prisma: PrismaService) {}
 
   private parse(s: any): string[] {
@@ -21,7 +23,7 @@ export class ContactsService {
     }
   }
   private shape(c: any) {
-    return { ...c, tags: this.parse(c.tags), aliases: this.parse(c.aliases) };
+    return { ...c, tags: this.parse(c.tags), aliases: this.parse(c.aliases), hasLeft: !!c.leftAt };
   }
   private cleanNames(list?: string[]): string[] {
     if (!Array.isArray(list)) return [];
@@ -40,8 +42,12 @@ export class ContactsService {
     return d ? d : null;
   }
 
-  async list(q?: string, page = 1, pageSize = 20) {
+  async list(q?: string, page = 1, pageSize = 20, include: 'active' | 'left' | 'all' = 'active') {
     const where: any = q ? { OR: [{ name: { contains: q } }, { whatsappNumber: { contains: q } }, { notes: { contains: q } }] } : {};
+    // Out of the way by default, never hidden: they are one filter away and clearly labelled where
+    // they do appear. Someone who left is still part of the record. (BEA-1307)
+    if (include === 'active') where.leftAt = null;
+    else if (include === 'left') where.leftAt = { not: null };
     const ps = Math.max(1, Math.min(100, pageSize));
     const p = Math.max(1, page);
     const [rows, total] = await Promise.all([
@@ -57,8 +63,8 @@ export class ContactsService {
    * and when they were last heard. Signals are batched over the visible page, so 20 cards cost a
    * handful of queries rather than a handful each.
    */
-  async board(q?: string, page = 1, pageSize = 20) {
-    const base = await this.list(q, page, pageSize);
+  async board(q?: string, page = 1, pageSize = 20, include: 'active' | 'left' | 'all' = 'active') {
+    const base = await this.list(q, page, pageSize, include);
     const ids = base.contacts.map((c: any) => c.id);
     if (!ids.length) return base;
     const [openTasks, needs, claims, chasing, lastIns, reports, restDays] = await Promise.all([
@@ -100,7 +106,9 @@ export class ContactsService {
 
   /** Every contact as {id, name, aliases} — the small payload pickers and @mentions need. (BEA-1019) */
   async allForPicker() {
-    const rows = await this.prisma.contact.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, aliases: true } });
+    // Someone who has left is not offered new work. Being able to pick them is how a departed
+    // person ends up with a task and a chase all over again. (BEA-1307)
+    const rows = await this.prisma.contact.findMany({ where: { leftAt: null }, orderBy: { name: 'asc' }, select: { id: true, name: true, aliases: true } });
     return {
       contacts: rows.map((r) => {
         let aliases: string[] = [];
@@ -188,12 +196,99 @@ export class ContactsService {
     return { suggestions };
   }
 
-  async remove(id: string) {
+  /**
+   * They have left. (BEA-1307)
+   *
+   * One action for what used to be impossible. Every chase stops — STOPPED, by the owner's hand, so
+   * nothing resumes it automatically and the history stays. Their page goes dark. They leave the
+   * pickers. Nothing is destroyed, and their open work is handed back to the owner to deal with
+   * rather than being quietly closed or quietly hidden.
+   *
+   * The work is deliberately NOT auto-dropped: what happens to it is a decision (hand it on, or
+   * drop it), and making that decision for him is how work disappears without anyone noticing.
+   */
+  async markLeft(id: string, note?: string) {
+    const c = await this.prisma.contact.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException('Contact not found');
+    if (c.leftAt) return { ok: true, alreadyLeft: true, ...(await this.openWorkFor(id)) };
+
+    await this.prisma.contact.update({
+      where: { id },
+      data: { leftAt: new Date(), leftNote: String(note || '').trim().slice(0, 300) || null, shareEnabled: false },
+    });
+    // `stopped`, not `done`: the owner's own hand. `done` is what the app writes when it decides,
+    // and those get offered back for resuming — which is not what "they have left" means. (BEA-1160)
+    const stopped = await this.prisma.reminder
+      .updateMany({ where: { contactId: id, status: { in: ['active', 'paused'] } }, data: { status: 'stopped' } })
+      .catch(() => ({ count: 0 }));
+    await this.prisma.reminderSend.deleteMany({ where: { reminder: { contactId: id }, status: 'queued' } }).catch(() => undefined);
+    this.log.log(`${c.name} marked as left — stopped ${stopped.count} chase(s)`);
+    return { ok: true, stoppedChases: stopped.count, ...(await this.openWorkFor(id)) };
+  }
+
+  /** They are back. Chases are NOT resurrected — restarting them is his call, one at a time. */
+  async markBack(id: string) {
+    const c = await this.prisma.contact.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException('Contact not found');
+    await this.prisma.contact.update({ where: { id }, data: { leftAt: null, leftNote: null, shareEnabled: true } });
+    this.log.log(`${c.name} is back`);
+    return { ok: true };
+  }
+
+  /** Work still open with this person — what the owner has to decide about when they leave. */
+  private async openWorkFor(id: string) {
+    const openWork = await this.prisma.task
+      .findMany({ where: { ownerContactId: id, ...OPEN_WORK }, select: { id: true, title: true, kind: true }, orderBy: { createdAt: 'asc' } })
+      .catch(() => [] as any[]);
+    return { openWork };
+  }
+
+  /**
+   * Delete, honestly. (BEA-1307)
+   *
+   * The old comment here read "nothing else to clean", which was wrong in a way that mattered:
+   * deleting a contact cascades away every briefing the owner wrote about them, every team update
+   * they ever sent, their weekly profile and every chase — and leaves their WhatsApp messages as
+   * rows nothing can reach again, because a conversation only surfaces through a reminder.
+   *
+   * So it now says what it will destroy, and refuses when there is real history to lose. Marking
+   * them as left does everything deletion was being used for, and keeps the record.
+   */
+  async remove(id: string, force = false) {
+    const c = await this.prisma.contact.findUnique({ where: { id } });
+    if (!c) throw new NotFoundException('Contact not found');
+    // Optional-chained: spec harnesses build this service with partial Prisma stubs, and a count
+    // that throws would take DELETE down entirely rather than just leaving the warning vaguer.
+    const count = async (fn: any): Promise<number> => (await Promise.resolve(fn).catch(() => 0)) || 0;
+    // Every table that cascades. The first version counted four of them and the docstring promised
+    // six — so a contact with only a weekly profile and a chase had "no history", deleted without a
+    // word, and lost both. A warning that is wrong about what it protects is worse than none.
+    const [briefings, updates, messages, tasks, chases, profile] = await Promise.all([
+      count(this.prisma.briefing?.count?.({ where: { contactId: id } })),
+      count(this.prisma.teamUpdate?.count?.({ where: { contactId: id } })),
+      count(this.prisma.reminderMessage?.count?.({ where: { contactId: id } })),
+      count(this.prisma.task?.count?.({ where: { ownerContactId: id } })),
+      count(this.prisma.reminder?.count?.({ where: { contactId: id } })),
+      count(this.prisma.contactProfile?.count?.({ where: { contactId: id } })),
+    ]);
+    const history = briefings + updates + messages + tasks + chases + profile;
+    if (history && !force) {
+      const bits = [
+        briefings && `${briefings} briefing${briefings === 1 ? '' : 's'} you wrote`,
+        updates && `${updates} update${updates === 1 ? '' : 's'} they sent`,
+        messages && `${messages} WhatsApp message${messages === 1 ? '' : 's'}`,
+        tasks && `${tasks} task${tasks === 1 ? '' : 's'}`,
+        chases && `${chases} chase${chases === 1 ? '' : 's'}`,
+        profile && 'their profile',
+      ].filter(Boolean);
+      throw new BadRequestException(
+        `Deleting ${c.name} would destroy ${bits.join(', ')}. If they have left, mark them as left instead — that stops everything and keeps the record.`,
+      );
+    }
     await this.prisma.contact.delete({ where: { id } }).catch(() => {
       throw new NotFoundException('Contact not found');
     });
-    // Their profile row cascades with the contact (FK); nothing else to clean. (BEA-1216)
-    return { ok: true };
+    return { ok: true, destroyed: { briefings, updates, messages, tasks, chases, profile } };
   }
 
   /** Resolve a name to a contact by its name OR any alias (used by reminders + people links). (BEA-763) */

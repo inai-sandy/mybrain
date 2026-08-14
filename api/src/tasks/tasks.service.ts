@@ -665,10 +665,25 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, slip };
   }
 
-  /** Contacts in the shape the matchers want. (BEA-1019) */
+  /**
+   * Contacts who can be given work. (BEA-1019, narrowed by BEA-1307)
+   *
+   * Excludes anyone who has LEFT. Hiding them from the picker was not enough on its own — this list
+   * also drives an explicit `ownerContactId`, plain party-name matching and `@mention` resolution,
+   * so a brain-dump saying "@Radha to send the report" would have handed new work to somebody who
+   * left the organisation, picker or no picker.
+   */
   private async allContacts() {
-    const rows = await this.prisma.contact.findMany({ select: { id: true, name: true, aliases: true } });
+    const rows = await this.prisma.contact.findMany({ where: { leftAt: null }, select: { id: true, name: true, aliases: true } });
     return rows.map((c) => ({ id: c.id, name: c.name, aliases: jarr((c as any).aliases) }));
+  }
+
+  /** Someone who has left, looked up by id — so a refusal can say WHY rather than "not in contacts". */
+  private async departed(id: string): Promise<{ name: string } | null> {
+    const c = await this.prisma.contact
+      .findUnique({ where: { id }, select: { name: true, leftAt: true } })
+      .catch(() => null);
+    return c?.leftAt ? { name: c.name } : null;
   }
 
   /** What the `@names` in a piece of text resolve to — matched, ambiguous, or unknown. (BEA-1019) */
@@ -693,7 +708,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       const c = contacts.find((x) => x.id === ownerContactId);
       // An id we don't recognise is a mistake, not a hint. Say so plainly instead of dropping it
       // and quietly leaving the task owned by nobody. (BEA-1019)
-      if (!c) throw new BadRequestException('That person is not in your contacts');
+      if (!c) {
+        // Tell him WHICH mistake. "Not in your contacts" about somebody who is plainly there, and
+        // whose whole history he can see, would send him hunting for a bug that is not there.
+        const gone = await this.departed(ownerContactId);
+        if (gone) throw new BadRequestException(`${gone.name} has left, so new work cannot be given to them.`);
+        throw new BadRequestException('That person is not in your contacts');
+      }
       return { ownerContactId: c.id, party: c.name.slice(0, 80) };
     }
     if (party === undefined) return undefined as any; // nothing to change

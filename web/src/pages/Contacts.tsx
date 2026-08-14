@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
+import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, UserMinus, UserCheck, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { DataTable, Column } from '../ui/DataTable';
 import { BriefModal, BriefingsTab } from './Briefings';
 import { ContactShareLink } from '../ui/ContactShareLink';
 import { ContactState, ContactTasks } from '../ui/ContactWork';
 import { Accordion } from '../ui/Accordion';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
-type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[] };
+type Contact = { id: string; name: string; whatsappNumber: string | null; notes: string | null; tags: string[]; aliases?: string[]; leftAt?: string | null; leftNote?: string | null; hasLeft?: boolean };
 /** The work signals behind one card on the team board. (BEA-1219) */
 type Board = { open: number; needsYou: number; chasing: number; lastHeardAt: string | null; report: 'in' | 'waiting' | 'missed' | null };
 type BoardContact = Contact & { board?: Board };
@@ -275,6 +276,11 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   // Seed search + page from the URL so opening a contact and pressing Back restores the same view (BEA-1001).
   const [q, setQ] = useState(() => params.get('q') || '');
   const [page, setPage] = useState(() => Math.max(1, parseInt(params.get('page') || '1', 10) || 1));
+  const [leftFor, setLeftFor] = useState<Contact | null>(null);
+  const [delFor, setDelFor] = useState<Contact | null>(null);
+  const [forceDelFor, setForceDelFor] = useState<{ contact: Contact; what: string } | null>(null);
+  /** Departed people are one filter away, never hidden. (BEA-1307) */
+  const [scope, setScope] = useState<'active' | 'left' | 'all'>('active');
   const [editing, setEditing] = useState<Contact | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -292,21 +298,61 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const reqId = useRef(0);
   function load() {
     const my = ++reqId.current; // latest-wins: ignore a slow response once a newer request started (BEA-814)
-    fetch(`/api/contacts/board?q=${encodeURIComponent(q)}&page=${page}&pageSize=${PAGE_SIZE}`)
+    fetch(`/api/contacts/board?q=${encodeURIComponent(q)}&page=${page}&pageSize=${PAGE_SIZE}&include=${scope}`)
       .then((r) => r.json())
       .then((d) => { if (my !== reqId.current) return; setContacts(d.contacts || []); setTotal(d.total || 0); })
       .catch(() => { if (my === reqId.current) setContacts([]); });
   }
   // reset to page 1 when the query changes; debounce the actual fetch so typing doesn't fire one
   // request per keystroke (and stale ones can't overwrite newer via the latest-wins guard). (BEA-814)
-  useEffect(() => { setPage(1); }, [q]);
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, page]);
+  useEffect(() => { setPage(1); }, [q, scope]);
+  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q, page, scope]);
 
-  async function del(c: Contact) {
-    if (!window.confirm(`Delete "${c.name}"? Any reminders to them are removed too.`)) return;
+  /**
+   * They have left. (BEA-1307)
+   *
+   * The action that did not exist when Radha left: every chase stops, their page goes dark, they
+   * leave the pickers — and every briefing, message and update stays exactly where it is.
+   */
+  async function markLeft(c: Contact) {
     try {
-      const r = await fetch(`/api/contacts/${c.id}`, { method: 'DELETE' });
+      const r = await fetch(`/api/contacts/${c.id}/left`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error();
+      const open = (d.openWork || []).length;
+      toast('success', `${c.name} marked as left — ${d.stoppedChases || 0} chase(s) stopped${open ? `. ${open} job(s) still open: hand them on or close them as not done.` : ''}`);
+      setLeftFor(null);
+      load();
+    } catch { toast('error', 'Could not do that'); }
+  }
+
+  async function markBack(c: Contact) {
+    try {
+      const r = await fetch(`/api/contacts/${c.id}/back`, { method: 'POST' });
+      if (!r.ok) throw new Error();
+      toast('success', `${c.name} is back. Their chases stay off until you switch them on.`);
+      load();
+    } catch { toast('error', 'Could not do that'); }
+  }
+
+  /**
+   * Delete. (BEA-1307)
+   *
+   * The API refuses while there is real history and says exactly what would be destroyed. That
+   * refusal is shown as a second, harder confirm rather than a dead end — the owner asked for real
+   * delete, and "you can never remove this person" would be its own kind of broken. He has to read
+   * the list of what goes first.
+   */
+  async function del(c: Contact, force = false) {
+    setDelFor(null);
+    try {
+      const r = await fetch(`/api/contacts/${c.id}${force ? '?force=1' : ''}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (!force && d?.message) { setForceDelFor({ contact: c, what: d.message }); return; }
+        toast('error', d?.message || 'Could not delete');
+        return;
+      }
       toast('success', 'Contact deleted');
       // If that was the last contact on this page, step back a page so we don't strand an empty
       // "No contacts yet" view with no pager to return. (BEA-815)
@@ -323,6 +369,12 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
         <Search className="h-4 w-4 shrink-0 text-zinc-400" />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, number or note…" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-400" />
         {contacts && <span className="shrink-0 text-xs text-zinc-400">{total}</span>}
+        {/* Departed people are one tap away, never hidden. (BEA-1307) */}
+        <select value={scope} onChange={(e) => setScope(e.target.value as any)} aria-label="Who to show" className="shrink-0 rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          <option value="active">Here now</option>
+          <option value="left">Left</option>
+          <option value="all">Everyone</option>
+        </select>
       </div>
 
       {contacts === null ? (
@@ -343,7 +395,11 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
               <button onClick={() => onOpen(c.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left" title="Open contact">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 font-bold text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">{c.name.slice(0, 1).toUpperCase()}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{c.name}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={'truncate font-semibold ' + (c.hasLeft ? 'text-zinc-400' : '')}>{c.name}</span>
+                    {/* Labelled wherever they appear, so nobody is quietly half-present. (BEA-1307) */}
+                    {c.hasLeft && <span title={c.leftNote || 'They have left'} className="shrink-0 rounded-full bg-zinc-500/10 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:text-zinc-400">left</span>}
+                  </div>
                   <div className="mt-0.5 truncate text-xs text-zinc-500">
                     {[c.tags?.[0], b?.lastHeardAt ? `heard ${fmtRel(b.lastHeardAt)}` : null].filter(Boolean).join(' · ') || (c.whatsappNumber ? `+${c.whatsappNumber}` : 'no number yet')}
                   </div>
@@ -365,7 +421,14 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
                 )}
                 <div className="flex gap-0.5 opacity-60 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                   <button onClick={() => { setEditing(c); setShowForm(true); }} title="Edit" className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"><Pencil className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => del(c)} title="Delete" className="rounded-lg p-1 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>
+                  {/* The action that did not exist when Radha left. Deleting was the only way to make
+                      someone stop, and it destroyed their whole record. (BEA-1307) */}
+                  {c.hasLeft ? (
+                    <button onClick={() => markBack(c)} title="They are back" className="rounded-lg p-1 text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10"><UserCheck className="h-3.5 w-3.5" /></button>
+                  ) : (
+                    <button onClick={() => setLeftFor(c)} title="They have left" className="rounded-lg p-1 text-zinc-400 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10"><UserMinus className="h-3.5 w-3.5" /></button>
+                  )}
+                  <button onClick={() => setDelFor(c)} title="Delete" className="rounded-lg p-1 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
             </li>
@@ -401,6 +464,33 @@ function ContactsTab({ onOpen }: { onOpen: (id: string) => void }) {
       </button>
 
       {showForm && <ContactForm contact={editing} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load(); }} />}
+      {leftFor && (
+        <ConfirmDialog
+          title={`${leftFor.name} has left?`}
+          message={`Every chase on ${leftFor.name} stops, their page goes dark, and they leave the pickers. Nothing is deleted — every message, briefing and update stays. Any work still open with them is listed afterwards so you can hand it on or close it as not done.`}
+          confirmLabel="They have left"
+          onConfirm={() => markLeft(leftFor)}
+          onCancel={() => setLeftFor(null)}
+        />
+      )}
+      {forceDelFor && (
+        <ConfirmDialog
+          title={`Really delete ${forceDelFor.contact.name}?`}
+          message={`${forceDelFor.what}\n\nThis cannot be undone.`}
+          confirmLabel="Yes, destroy it all"
+          onConfirm={() => del(forceDelFor.contact, true)}
+          onCancel={() => setForceDelFor(null)}
+        />
+      )}
+      {delFor && (
+        <ConfirmDialog
+          title={`Delete ${delFor.name}?`}
+          message={`This destroys everything about them — every briefing you wrote, every message, every update. If they have simply left, use "They have left" instead: it stops everything and keeps the record.`}
+          confirmLabel="Delete for good"
+          onConfirm={() => del(delFor)}
+          onCancel={() => setDelFor(null)}
+        />
+      )}
     </div>
   );
 }

@@ -263,8 +263,18 @@ export class RemindersService {
    * accepted and only fails later on the delivery webhook, so the app would report success while the
    * person heard nothing — which is how a rejected claim went silent for two days. (BEA-1112)
    */
+  /** Refuses to message somebody who has left — the same rule as creating a chase. (BEA-1307) */
+  private async refuseIfLeft(contactId?: string | null) {
+    if (!contactId) return;
+    // Optional-chained: spec harnesses build this service with partial Prisma stubs, and a guard
+    // that throws would take the whole send down rather than just failing to check.
+    const c: any = await Promise.resolve(this.prisma.contact?.findUnique?.({ where: { id: contactId }, select: { name: true, leftAt: true } })).catch(() => null);
+    if (c?.leftAt) throw new BadRequestException(`${c.name} has left. Their history is all here, but the app does not message them.`);
+  }
+
   async sendManual(id: string, body: string, threadContactId?: string) {
     const { contact, reminder } = await this.anchorFor(id, threadContactId);
+    await this.refuseIfLeft(contact?.id);
     const text = (body || '').trim();
     if (!text) throw new BadRequestException('Type a message');
     const number = (contact?.whatsappNumber || '').replace(/[^\d]/g, '');
@@ -319,6 +329,7 @@ export class RemindersService {
    */
   async resendTemplate(id: string, threadContactId?: string) {
     const { contact, reminder } = await this.anchorFor(id, threadContactId);
+    await this.refuseIfLeft(contact?.id);
     const number = (contact?.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number) throw new BadRequestException('This contact has no WhatsApp number');
     if (!this.postbox.isConfigured()) throw new BadRequestException('WhatsApp sending is not connected yet');
@@ -725,6 +736,9 @@ export class RemindersService {
     if (!input.contactId) throw new BadRequestException('Pick a contact');
     const contact = await this.prisma.contact.findUnique({ where: { id: input.contactId } });
     if (!contact) throw new NotFoundException('Contact not found');
+    // Nobody who has left gets chased again. Without this, one stray create — from the voice lane,
+    // an agent, an old screen — starts messaging a person who is gone. (BEA-1307)
+    if ((contact as any).leftAt) throw new BadRequestException(`${contact.name} has left, so they are not chased any more.`);
     if (!input.message?.trim()) throw new BadRequestException('Write the reminder message');
     // Explicit chosen slots (BEA-755) win; else spread `count` across the day (back-compat).
     const chosen = sanitizeTimes(input.times);
