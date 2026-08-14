@@ -259,6 +259,68 @@ describe('picks mirror the current daily brief (review fix, BEA-1311)', () => {
   });
 });
 
+describe('heat and timelines come from the merged stories (BEA-1323)', () => {
+  const MERGED = {
+    stories: [
+      {
+        story_id: 'st-en1',
+        source_count: 3,
+        sources: [
+          // The real feed's items carry NO story_id — the merged story names its member
+          // item ids instead, so the map must match by this id.
+          { id: 'en-1', source: 'OpenAI News', url: 'https://a.example/1', title_en: 'OpenAI ships a new eval suite', published_at: '2026-08-14T10:00:00Z' },
+          { source: 'hackernews', url: 'https://a.example/hn', title_en: 'OpenAI eval suite', published_at: '2026-08-14T11:30:00Z' },
+          { source: 'Techmeme', url: 'https://a.example/tm', title_en: 'OpenAI ships evals', published_at: '2026-08-14T10:45:00Z' },
+        ],
+      },
+    ],
+  };
+
+  it('stores heat and a time-ordered English timeline on matching items', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    svc.files['latest-24h.json'] = { items: [{ ...LATEST.items[0] }] }; // deliberately NO story_id — like the real feed
+    svc.files['stories-merged.json'] = MERGED;
+    await svc.sync();
+    const row = prisma.items.get('en-1');
+    expect(row.heat).toBe(3);
+    const timeline = JSON.parse(row.sources);
+    expect(timeline.map((t: any) => t.name)).toEqual(['OpenAI News', 'Techmeme', 'hackernews']); // time order
+    expect(timeline[0].title).toBe('OpenAI ships a new eval suite');
+  });
+
+  it('heat decays when a story leaves the merged file, but NEVER during an outage', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    svc.files['latest-24h.json'] = { items: [{ ...LATEST.items[0] }] };
+    svc.files['stories-merged.json'] = MERGED;
+    await svc.sync();
+    expect(prisma.items.get('en-1').heat).toBe(3);
+
+    // Merged file unreachable → the story keeps its heat (outage, not a cool-down).
+    delete svc.files['stories-merged.json'];
+    await svc.sync();
+    expect(prisma.items.get('en-1').heat).toBe(3);
+
+    // Merged file back but the story is gone → it really cooled: heat resets.
+    svc.files['stories-merged.json'] = { stories: [] };
+    await svc.sync();
+    expect(prisma.items.get('en-1').heat).toBe(1);
+    expect(JSON.parse(prisma.items.get('en-1').sources)).toEqual([]);
+  });
+
+  it('an unreachable merged file costs nothing — items stay heat 1', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    const r = await svc.sync(); // no stories-merged.json in files at all
+    expect(r.ok).toBe(true);
+    expect(prisma.items.get('en-1').heat).toBe(1);
+  });
+});
+
 describe('the radar is a rolling window (review fix, BEA-1313)', () => {
   it('prunes rows unseen for 48h, but never during an outage', async () => {
     const prisma = makePrisma();

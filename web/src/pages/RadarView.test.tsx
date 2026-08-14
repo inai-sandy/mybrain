@@ -31,7 +31,22 @@ const ITEMS = [
     url: 'https://x/4', source: 'GitHub AI & ML', category: 'devtools', aiScore: 0.87,
     sources: [], isPick: false, whyItMatters: null, publishedAt: '2026-08-14T10:00:00Z',
   },
-];
+  {
+    id: 'hot1', title: 'Cursor is acquired by SpaceX', titleOriginal: 'Cursor is acquired by SpaceX', translated: false,
+    url: 'https://x/5', source: 'TechCrunch AI', category: 'industry', aiScore: 0.5,
+    sources: [
+      { name: 'TechCrunch AI', url: 'https://x/5', title: 'Cursor acquired', at: '2026-08-14T09:00:00Z' },
+      { name: 'The Verge AI', url: 'https://x/6', title: 'SpaceX buys Cursor', at: '2026-08-14T10:15:00Z' },
+      { name: 'hackernews', url: 'https://x/7', at: '2026-08-14T11:00:00Z' },
+    ],
+    isPick: false, whyItMatters: null, publishedAt: '2026-08-14T09:00:00Z', heat: 3,
+  },
+  {
+    id: 'low1', title: 'A quiet minor library update', titleOriginal: 'A quiet minor library update', translated: false,
+    url: 'https://x/8', source: 'hackernews', category: 'devtools', aiScore: 0.3,
+    sources: [], isPick: false, whyItMatters: null, publishedAt: '2026-08-14T11:30:00Z', heat: 1,
+  },
+].map((i) => ({ heat: 1, ...i }));
 
 const STATUS = {
   lastSyncAt: '2026-08-14T17:00:00Z', lastOkAt: '2026-08-14T17:00:00Z', lastError: null,
@@ -73,6 +88,41 @@ describe('QA polish stays fixed (BEA-1313)', () => {
   });
 });
 
+describe('Hot now, Curated/All and the timeline (BEA-1323)', () => {
+  it('multi-source stories appear under Hot now with their heat', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    render(<RadarView />);
+    expect(await screen.findByText('Hot now')).toBeTruthy();
+    expect(screen.getByText('🔥 3 sources')).toBeTruthy();
+    expect(screen.getAllByText('Cursor is acquired by SpaceX').length).toBeGreaterThan(0);
+  });
+
+  it('the timeline expands to show who reported it, in order, with links', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    render(<RadarView />);
+    await screen.findByText('Hot now');
+    fireEvent.click(screen.getByText('Timeline · 3 reports ›'));
+    const items = screen.getAllByRole('listitem').map((li) => li.textContent || '');
+    const inTimeline = items.filter((t) => /TechCrunch AI|The Verge AI|hackernews/.test(t));
+    expect(inTimeline.length).toBe(3);
+    // Time order: TechCrunch first, hackernews last.
+    expect(inTimeline[0]).toContain('TechCrunch AI');
+    expect(inTimeline[2]).toContain('hackernews');
+  });
+
+  it('Curated hides the low-value tail; All brings it back', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    render(<RadarView />);
+    await screen.findByText('All stories');
+    // Curated is the default — the 0.3-score single-source story is not in the list.
+    expect(screen.queryByText('A quiet minor library update')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    await waitFor(() => expect(screen.getAllByText('A quiet minor library update').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: 'Curated' }));
+    await waitFor(() => expect(screen.queryByText('A quiet minor library update')).toBeNull());
+  });
+});
+
 describe('the mockup chrome drives the list (BEA-1320)', () => {
   it('a category chip filters the stories with one tap', async () => {
     vi.stubGlobal('fetch', mockFetch());
@@ -83,7 +133,7 @@ describe('the mockup chrome drives the list (BEA-1320)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Models' }));
     // The devtools story leaves the LIST; the picks section above is curated and stays.
     await waitFor(() => expect(screen.queryAllByText('GitHub agent apps walkthrough')).toHaveLength(0));
-    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    fireEvent.click(screen.getByRole('button', { name: 'All categories' }));
     await waitFor(() => expect(screen.getAllByText('GitHub agent apps walkthrough').length).toBeGreaterThan(0));
   });
 

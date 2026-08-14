@@ -194,6 +194,45 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
       this.log.warn(briefError);
     }
 
+    // stories-merged.json is best-effort too (BEA-1323): it tells us how many outlets
+    // carry a story (heat) and gives the story's TIMELINE — who reported it, when, in
+    // order. Without it items simply stay heat=1 with whatever sources they had.
+    const storyHeat = new Map<string, { heat: number; timeline: string }>();
+    // Whether the merged file was actually read this sync — heat may only DECAY when we
+    // know the story really left the file, never because the file was unreachable.
+    let mergedOk = false;
+    try {
+      const mergedFile = await this.fetchJson('stories-merged.json');
+      mergedOk = true;
+      for (const st of Array.isArray(mergedFile?.stories) ? mergedFile.stories : []) {
+        const sid = String(st?.story_id || '').trim();
+        const entries = Array.isArray(st?.sources) ? st.sources : [];
+        if (!sid || entries.length < 2) continue;
+        const timeline = entries
+          .map((s: any) => ({
+            name: String(s?.source || s?.source_name || '').trim(),
+            url: String(s?.url || '').trim(),
+            title: this.englishCandidate([s?.title_en, s?.title_original, s?.title]) || '',
+            at: String(s?.published_at || '').trim(),
+          }))
+          .filter((s: any, i: number, arr: any[]) => s.url && arr.findIndex((o) => o.url === s.url) === i) // upstream repeats outlets sometimes
+          .sort((a: any, b: any) => (a.at < b.at ? -1 : 1));
+        // Heat = the DEDUPED timeline length, so the 🔥 badge can never contradict the
+        // visible source list (upstream's source_count counts the repeats).
+        if (timeline.length < 2) continue;
+        const value = { heat: timeline.length, timeline: JSON.stringify(timeline) };
+        // Index by the story id (matches picks) AND by every member item's id — the
+        // 24-hour feed's items carry NO story_id, so this is how they find their story.
+        storyHeat.set(sid, value);
+        for (const s of entries) {
+          const itemId = String(s?.id || '').trim();
+          if (itemId) storyHeat.set(itemId, value);
+        }
+      }
+    } catch (e: any) {
+      this.log.warn(`stories-merged unreachable: ${e?.message || e}`);
+    }
+
     const blocklist = this.blocklist();
     type Incoming = {
       id: string; url: string; source: string; category: string; aiScore: number; storyId: string;
@@ -261,6 +300,9 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
     let translatedBudget = RadarFeedService.TRANSLATE_CAP;
     for (const item of incoming.values()) {
       const known = existing.has(item.id) ? existing.get(item.id) : null;
+      // Heat and the timeline come from the merged-stories map, keyed by the story id
+      // (picks ARE stories, so their own id matches too).
+      const hot = storyHeat.get(item.storyId || item.id);
       try {
         if (known) {
           // A known row only moves forward: bump lastSeenAt, refresh score/pick status.
@@ -270,6 +312,16 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
           if (item.isPick) {
             data.isPick = true;
             data.sources = item.sources;
+          }
+          if (hot) {
+            data.heat = hot.heat;
+            data.sources = hot.timeline; // the timeline is richer than the brief's outlet list
+          } else if (mergedOk) {
+            // The merged file was read and this story is no longer in it — the story has
+            // COOLED. Without this, an item still in the 24h feed would keep yesterday's
+            // 🔥 forever (review finding). An unreachable file never decays anything.
+            data.heat = 1;
+            if (!item.isPick) data.sources = '[]';
           }
           if (known.pendingTranslation) {
             let title = item.english;
@@ -314,7 +366,8 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
             data: {
               id: item.id, title, titleOriginal: item.original, translated, pendingTranslation,
               url: item.url, source: item.source, category: item.category, aiScore: item.aiScore,
-              storyId: item.storyId, sources: item.sources, isPick: item.isPick,
+              storyId: item.storyId, sources: hot ? hot.timeline : item.sources, isPick: item.isPick,
+              heat: hot ? hot.heat : 1,
               publishedAt: item.publishedAt, firstSeenAt: now, lastSeenAt: now,
             },
           });

@@ -21,8 +21,11 @@ type RadarRow = {
   source: string;
   category: string;
   aiScore: number;
-  sources: { name: string; url: string }[];
+  /** For multi-source stories this is the TIMELINE — who reported it, when, in order. */
+  sources: { name: string; url: string; title?: string; at?: string }[];
   isPick: boolean;
+  /** How many outlets carry the story (1 = single-source, 2+ = hot). */
+  heat: number;
   whyItMatters: string | null;
   publishedAt: string;
 };
@@ -133,16 +136,42 @@ export function RadarView() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [sortMode, setSortMode] = useState<'time' | 'score'>('time');
+  const [sortMode, setSortMode] = useState<'time' | 'score' | 'hot'>('time');
+  // Curated (default) = the good stuff: picks, hot multi-source stories, high scores.
+  // One tap to All — the whole rolling window. (BEA-1323)
+  const [curated, setCurated] = useState(true);
   // Memoised so unrelated re-renders (health polls, notices) don't churn the table's memo.
   const tableControls = useMemo(
     () => ({
       search,
       filters: { category, source: sourceFilter },
-      sort: sortMode === 'score' ? { key: 'aiScore', dir: -1 as const } : { key: 'publishedAt', dir: -1 as const },
+      sort:
+        sortMode === 'score' ? { key: 'aiScore', dir: -1 as const }
+        : sortMode === 'hot' ? { key: 'heat', dir: -1 as const }
+        : { key: 'publishedAt', dir: -1 as const },
     }),
     [search, category, sourceFilter, sortMode],
   );
+  const listRows = useMemo(
+    () => (curated ? (rows || []).filter((r) => r.isPick || r.heat >= 2 || r.aiScore >= 0.8) : rows || []),
+    [rows, curated],
+  );
+  // Hot now: multi-source stories, hottest first. Picks stay in their own section above.
+  // Every member item of a story carries the same heat + timeline, so the section
+  // dedupes by timeline — one card per STORY, not one per outlet.
+  const hotNow = useMemo(() => {
+    const seen = new Set<string>();
+    const out: RadarRow[] = [];
+    const sorted = (rows || []).filter((r) => r.heat >= 2 && !r.isPick).sort((a, b) => b.heat - a.heat || (a.publishedAt < b.publishedAt ? 1 : -1));
+    for (const r of sorted) {
+      const key = (r.sources || []).map((s) => s.url).sort().join('|') || r.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+      if (out.length >= 6) break;
+    }
+    return out;
+  }, [rows]);
 
   const columns: Column<RadarRow>[] = [
     {
@@ -245,10 +274,37 @@ export function RadarView() {
             </section>
           )}
 
+          {/* Hot now — stories several outlets carry at once, hottest first. (BEA-1323) */}
+          {hotNow.length > 0 && (
+            <section className="mb-6">
+              <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Hot now</h2>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {hotNow.map((r) => (
+                  <HotCard key={r.id} row={r} />
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* All stories — the shared house list wearing the mockup's chrome */}
           <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">All stories</h2>
 
           <div className="mb-2 flex flex-wrap items-center gap-2">
+            <div className="flex rounded-[10px] border border-zinc-200 bg-white p-[3px] text-xs dark:border-zinc-800 dark:bg-zinc-900">
+              {([true, false] as const).map((v) => (
+                <button
+                  key={String(v)}
+                  aria-pressed={curated === v}
+                  onClick={() => setCurated(v)}
+                  className={
+                    'rounded-lg px-3 py-[4px] transition-colors ' +
+                    (curated === v ? 'bg-indigo-500 font-semibold text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
+                  }
+                >
+                  {v ? 'Curated' : 'All'}
+                </button>
+              ))}
+            </div>
             <input
               aria-label="Search stories"
               placeholder="Search stories…"
@@ -270,10 +326,11 @@ export function RadarView() {
             <select
               aria-label="Sort"
               value={sortMode}
-              onChange={(e) => setSortMode(e.target.value === 'score' ? 'score' : 'time')}
+              onChange={(e) => setSortMode(e.target.value === 'score' ? 'score' : e.target.value === 'hot' ? 'hot' : 'time')}
               className="rounded-[10px] border border-zinc-200 bg-white px-3 py-[7px] text-xs text-zinc-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
             >
               <option value="time">Sort: Newest</option>
+              <option value="hot">Sort: Hot</option>
               <option value="score">Sort: Score</option>
             </select>
           </div>
@@ -284,6 +341,8 @@ export function RadarView() {
               <button
                 key={c || 'all'}
                 aria-pressed={category === c}
+                // Distinct from the Curated|All toggle's "All" for screen readers.
+                aria-label={c ? undefined : 'All categories'}
                 onClick={() => setCategory(c)}
                 className={
                   'whitespace-nowrap rounded-full border px-3 py-1 text-xs transition-colors ' +
@@ -299,7 +358,7 @@ export function RadarView() {
 
           <DataTable<RadarRow>
             columns={columns}
-            rows={rows || []}
+            rows={listRows}
             controls={tableControls}
             pageSize={20}
             tableLayoutFixed
@@ -390,6 +449,59 @@ function PickCard({ pick }: { pick: RadarRow }) {
         <ScorePill score={pick.aiScore} />
         <span>{timeAgo(pick.publishedAt)}</span>
       </div>
+      <Timeline row={pick} />
+    </div>
+  );
+}
+
+/** A Hot-now story: several outlets at once, with its timeline one tap away. (BEA-1323) */
+function HotCard({ row }: { row: RadarRow }) {
+  return (
+    <div className="rounded-xl border border-amber-200/70 bg-gradient-to-b from-amber-50/60 to-white p-4 dark:border-amber-900/40 dark:from-amber-950/20 dark:to-zinc-900">
+      <a href={row.url} target="_blank" rel="noreferrer" className="font-semibold leading-snug text-zinc-900 hover:text-indigo-600 dark:text-zinc-50 dark:hover:text-indigo-400">
+        {row.title}
+      </a>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">🔥 {row.heat} sources</span>
+        <SourceBadges row={row} />
+        <ScorePill score={row.aiScore} />
+        <span>{timeAgo(row.publishedAt)}</span>
+      </div>
+      <Timeline row={row} />
+    </div>
+  );
+}
+
+/**
+ * Who reported the story, in order — the part Sandeep liked on the upstream site.
+ * Collapsed behind one tap; every entry links to that outlet's version.
+ */
+function Timeline({ row }: { row: RadarRow }) {
+  const [open, setOpen] = useState(false);
+  const entries = (row.sources || []).filter((s) => s.url);
+  if (entries.length < 2) return null;
+  return (
+    <div className="mt-2">
+      <button
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="text-[11px] font-semibold text-indigo-500 hover:text-indigo-400"
+      >
+        {open ? 'Hide timeline' : `Timeline · ${entries.length} reports ›`}
+      </button>
+      {open && (
+        <ol className="mt-1.5 space-y-1 border-l border-zinc-200 pl-3 dark:border-zinc-800">
+          {entries.map((s, i) => (
+            <li key={i} className="text-[11.5px] leading-snug">
+              <a href={s.url} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-indigo-500 dark:text-zinc-300">
+                <span className="font-semibold">{prettySource(s.name) || 'source'}</span>
+                {s.at ? <span className="text-zinc-400 dark:text-zinc-500"> · {timeAgo(s.at)}</span> : null}
+                {s.title ? <span className="text-zinc-400 dark:text-zinc-500"> — {s.title}</span> : null}
+              </a>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
