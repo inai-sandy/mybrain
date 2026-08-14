@@ -1115,6 +1115,7 @@ model Contact {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]
+  messages       ReminderMessage[] // their conversation — deleted with them, never orphaned (BEA-1309)
   /// Brain doc ids for this person's rolling "where things stand" doc. (BEA-1031)
   supermemoryId  String?
   ragId          String?
@@ -1207,7 +1208,14 @@ model ReminderSend {
 /// C1 records these; the two-way agent (C2) reads/acts on them.
 model ReminderMessage {
   id         String    @id @default(uuid())
-  contactId  String? // the conversation this belongs to (one per contact) — BEA-742
+  /// The conversation this belongs to — one per contact. (BEA-742)
+  ///
+  /// A REAL relation since BEA-1309. It was a bare column, and a conversation only surfaces in the
+  /// Chats inbox through a live Reminder — so deleting a contact cascaded their reminders away and
+  /// left the messages behind, pointing at an id that no longer existed: unreachable by any screen
+  /// and undeletable by any code. Seven such rows were sitting in the live database.
+  contactId  String?
+  contact    Contact?  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   reminderId String? // the reminder that triggered it (a combined nudge covers several)
   reminder   Reminder? @relation(fields: [reminderId], references: [id], onDelete: SetNull)
   direction  String // out | in
@@ -1229,6 +1237,19 @@ model ReminderMessage {
   @@index([contactId])
   @@index([reminderId])
   @@index([wamid])
+}
+
+/// A WhatsApp message the owner deleted, remembered by its id alone. (BEA-1309)
+///
+/// Deleting a chat message used to be impossible, so the inbound de-duplication could safely ask
+/// "have I stored this wamid before?" — the row was immortal. Now that messages can be deleted, a
+/// redelivered webhook (Postbox retries, and WhatsApp is at-least-once) would find nothing, store
+/// the message again, and set the two-way agent replying to something the owner had just removed.
+///
+/// So the id outlives the message. Nothing else is kept — no body, no sender, no conversation.
+model DeletedMessage {
+  wamid String   @id
+  at    DateTime @default(now())
 }
 
 /// A third-party OAuth client that registered (Dynamic Client Registration) to reach the public MCP. (BEA-758)

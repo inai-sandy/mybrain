@@ -171,6 +171,28 @@ export class RemindersController {
     return this.updates.forContact(id);
   }
 
+  /**
+   * Delete one message from a conversation. (BEA-1309)
+   *
+   * Only the words go — the task, the chase and any claim behind them are untouched.
+   */
+  @Delete('messages/:id')
+  deleteMessage(@Param('id') id: string) {
+    return this.reminders.deleteMessage(id);
+  }
+
+  /** Clear a whole conversation with one person. Per-conversation only, never all of them. */
+  @Delete('contact/:contactId/messages')
+  clearConversation(@Param('contactId') contactId: string) {
+    return this.reminders.clearConversation(contactId);
+  }
+
+  /** How many messages are in a conversation — so the confirm can say what it will remove. */
+  @Get('contact/:contactId/message-count')
+  messageCount(@Param('contactId') contactId: string) {
+    return this.reminders.messageCount(contactId);
+  }
+
   /** Chases with no work behind them — nobody can finish these. Static route, before :id. (BEA-1292) */
   @Get('loose')
   loose() {

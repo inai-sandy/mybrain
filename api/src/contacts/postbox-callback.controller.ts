@@ -53,8 +53,18 @@ export class PostboxCallbackController {
       const text = (body.text || '').trim();
       if (from && text) {
         // Dedupe: Postbox may retry a callback — never store/act on the same inbound twice.
+        // Seen before? Either it is still in the conversation, or the owner DELETED it and the id
+        // was kept precisely so a redelivery cannot bring it back and set the agent replying to
+        // something he just removed. (BEA-1309)
         const dup = body.wamid ? await this.prisma.reminderMessage.findFirst({ where: { wamid: body.wamid, direction: 'in' } }) : null;
         if (dup) return { ok: true };
+        const wasDeleted = body.wamid
+          ? await Promise.resolve(this.prisma.deletedMessage?.findUnique?.({ where: { wamid: body.wamid } })).catch(() => null)
+          : null;
+        if (wasDeleted) {
+          this.log.log(`ignored a redelivery of a message the owner deleted (${body.wamid})`);
+          return { ok: true };
+        }
         // Store the reply on this CONTACT's conversation (shared across their reminders). (BEA-742)
         // WhatsApp's `from` always carries the country code, but a contact may be saved without it
         // (e.g. a 10-digit number). Try an exact match, then fall back to the last 10 digits so those
