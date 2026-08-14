@@ -8,6 +8,7 @@ import { matchContact, contactSpellings } from '../contacts/person-identity';
 import { MentionResolution, exactMatches, linkableIds, resolveMentions } from './mentions';
 import { clampTitle } from '../common/clamp-title';
 import { settleDelegation } from './delegation';
+import { TASK_OPEN, TASK_DROPPED, isOpen } from './task-status';
 
 const jarr = (s?: string | null): string[] => { try { const a = JSON.parse(s || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 
@@ -248,7 +249,7 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   /** Delete the memory docs of every non-done task that still has them (deletion only — no AI). (BEA-546) */
   async purgeOpenTaskMemory(): Promise<{ purged: number }> {
     const open = await this.prisma.task.findMany({
-      where: { status: { not: 'done' }, OR: [{ NOT: { supermemoryId: null } }, { NOT: { ragId: null } }] },
+      where: { status: TASK_OPEN, OR: [{ NOT: { supermemoryId: null } }, { NOT: { ragId: null } }] },
       select: { id: true, supermemoryId: true, ragId: true },
     });
     for (const t of open) {
@@ -789,9 +790,9 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return {
       rows: shaped,
       summary: {
-        open: shaped.filter((t) => t.status !== 'done').length,
+        open: shaped.filter((t) => isOpen(t)).length,
         awaitingYou: shaped.filter((t) => !!t.claim).length,
-        chasing: shaped.filter((t) => t.status !== 'done' && t.chaseStatus === 'active').length,
+        chasing: shaped.filter((t) => isOpen(t) && t.chaseStatus === 'active').length,
         stalling: shaped.filter((t) => !!t.stalling).length,
       },
     };
@@ -1008,6 +1009,40 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     return this.shape(await this.prisma.task.findUnique({ where: { id }, include: PEOPLE_INCLUDE }));
   }
 
+  /**
+   * The work ended WITHOUT being finished. (BEA-1306)
+   *
+   * Kept separate from `setDone` on purpose: everything that counts finished work reads `status` and
+   * `completedAt`, so a dropped task recorded as done would be counted as an achievement, and the
+   * person would be thanked for completing something they never did. Radha left with two jobs open
+   * and there was nothing to close them as — this is that missing word.
+   *
+   * Everything else behaves exactly as finishing does, through the same one door (BEA-1296): the
+   * chase stops, a pending claim settles, "needs you" clears. Ending is ending.
+   */
+  async setDropped(id: string, reason?: string) {
+    const t = await this.prisma.task.findUnique({ where: { id } });
+    if (!t) return null;
+    if (t.status === TASK_DROPPED) return this.shape(t); // already dropped — do not restamp the date
+    const upd = await this.prisma.task.update({
+      where: { id },
+      data: {
+        status: TASK_DROPPED,
+        droppedAt: new Date(),
+        droppedReason: String(reason || '').trim().slice(0, 500) || null,
+        // Never `completedAt`, and never progress 100. Those two are what the reports read.
+        completedAt: null,
+      },
+    });
+    this.indexTask(upd);
+    this.touchPerson((upd as any).ownerContactId);
+    // It has ended: stop the chase, settle the claim, clear the flag. `dropped` so a claim waiting
+    // on the owner is not recorded as "yes, you finished it" for work just recorded as not done.
+    await this.syncChases(id, true, 'dropped');
+    this.log.log(`task ${id} dropped${reason ? ` — ${String(reason).slice(0, 60)}` : ''}`);
+    return this.shape(upd);
+  }
+
   /** Mark done/undone. On done, capture the one-tap "how long did it really take?" actual,
    *  and optionally spawn a follow-up task for a chosen day (YYYY-MM-DD). */
   async setDone(id: string, done: boolean, actualMin?: number, followUpDate?: string) {
@@ -1017,6 +1052,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       where: { id },
       data: {
         status: done ? 'done' : 'open',
+        // Re-opening clears the drop as well, so a task cannot be both dropped and open. (BEA-1306)
+        ...(done ? {} : { droppedAt: null, droppedReason: null }),
         // Un-checking a done task resets progress to 0 — it was overwritten to 100 when marked done,
         // so "keep prior progress" wrongly left it at 100 and every weighted metric counted the
         // now-open task as fully complete. (A genuinely-open task's progress is left untouched.) (BEA-807)
@@ -1041,8 +1078,8 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
    * it. It used to be written out here and half-written everywhere else, which is why the owner
    * could close a task on one screen and still be chasing it on another.
    */
-  private async syncChases(taskId: string, done: boolean) {
-    await settleDelegation(this.prisma, taskId, done, (m) => this.log.log(m));
+  private async syncChases(taskId: string, done: boolean, ended: 'done' | 'dropped' = 'done') {
+    await settleDelegation(this.prisma, taskId, done, (m) => this.log.log(m), ended);
   }
 
   /** Create a "Follow up: <task>" task dated to the chosen day. The morning Telegram nudge announces it. */
@@ -1082,10 +1119,13 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       // Auto-spotting: open tasks carried again and again are exactly the ones that eat the brain.
       this.prisma.task.findMany({ where: { brainEater: false, status: 'open', rolloverCount: { gte: TasksService.EATER_CARRY_DAYS } }, orderBy: { rolloverCount: 'desc' }, take: 10 }),
     ]);
-    const sorted = [...rows.filter((r) => r.status !== 'done'), ...rows.filter((r) => r.status === 'done')];
+    // Open first, then everything that has ENDED — done or dropped. This was an open/done partition,
+    // which was exhaustive with two states and silently swallowed dropped rows with three: they
+    // matched neither bucket and disappeared from the tab altogether. (BEA-1306)
+    const sorted = [...rows.filter((r) => isOpen(r)), ...rows.filter((r) => !isOpen(r))];
     return {
       tasks: sorted.map((t) => this.shape(t)),
-      openCount: rows.filter((r) => r.status !== 'done').length,
+      openCount: rows.filter((r) => isOpen(r)).length,
       candidates: candidates.map((t) => ({ id: t.id, title: t.title, carried: t.rolloverCount })),
     };
   }

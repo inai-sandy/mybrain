@@ -15,6 +15,7 @@ import { weekdayOf } from '../common/localday';
 import { TasksService } from '../tasks/tasks.service';
 import { RemindersService, topicFromMessage, dailySubject, REMINDER_TZ_OFFSET } from './reminders.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { TASK_OPEN, isOpen } from '../tasks/task-status';
 
 /** Watchdog decision for an unanswered inbound of a given age. Pure + unit-tested. (BEA-953) */
 export function watchdogAction(ageMs: number, graceMs = 8 * 60_000, escalateMs = 45 * 60_000): 'skip' | 'retry' | 'escalate' {
@@ -255,7 +256,7 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const pick = { id: true, rawText: true, createdAt: true };
     const [withOpenTask, latest] = await Promise.all([
       this.prisma.briefing
-        .findMany({ where: { contactId, tasks: { some: { status: { not: 'done' } } } }, orderBy: { createdAt: 'desc' }, take: THREAD_KEEP.briefs, select: pick })
+        .findMany({ where: { contactId, tasks: { some: { status: TASK_OPEN } } }, orderBy: { createdAt: 'desc' }, take: THREAD_KEEP.briefs, select: pick })
         .catch(() => [] as any[]),
       this.prisma.briefing
         .findMany({ where: { contactId }, orderBy: { createdAt: 'desc' }, take: 1, select: pick })
@@ -334,13 +335,13 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
           people: { select: { contact: { select: { name: true } } } },
         };
         const [openRows, doneRows] = await Promise.all([
-          this.prisma.task.findMany({ where: { ownerContactId: contactId, status: { not: 'done' } }, orderBy: { createdAt: 'desc' }, take: 40, select: sel }),
+          this.prisma.task.findMany({ where: { ownerContactId: contactId, status: TASK_OPEN }, orderBy: { createdAt: 'desc' }, take: 40, select: sel }),
           this.prisma.task.findMany({ where: { ownerContactId: contactId, status: 'done' }, orderBy: { completedAt: 'desc' }, take: 20, select: sel }),
         ]);
         return [...openRows, ...doneRows];
       })().catch(() => [] as any[]),
     ]);
-    const openWork = (work as any[]).filter((t) => t.status !== 'done');
+    const openWork = (work as any[]).filter((t) => isOpen(t));
     // Recently finished work is still named so the agent cannot chase something they just did —
     // narrowed from 21 days to 7, since older completions are noise by now. (BEA-1115)
     const doneRecently = (work as any[])

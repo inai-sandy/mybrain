@@ -63,7 +63,7 @@ export function BrainEatersTab({ onCountChange }: { onCountChange?: (open: numbe
     if (yes) load();
   }
 
-  const open = (tasks || []).filter((t) => t.status !== 'done');
+  const open = (tasks || []).filter((t) => t.status === 'open'); // dropped work has ended, not left open (BEA-1306)
   const done = (tasks || []).filter((t) => t.status === 'done');
 
   return (

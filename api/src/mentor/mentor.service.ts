@@ -8,6 +8,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { AlertsService } from '../push/alerts.service';
 import { pickWeeklyLine, weeklyMessage } from './weekly-line';
 import { surfacedWhere } from '../mind/surfacing';
+import { isOpen } from '../tasks/task-status';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const MENTOR_AT = '23:59'; // runs just after the Story of the Day (23:58)
@@ -242,7 +243,7 @@ export class MentorService implements OnModuleInit, OnModuleDestroy {
     if (!narrative && !dayTasks.length) return null; // nothing to mentor on
 
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}${(t as any).sphere === 'personal' ? ' [personal]' : ''}`);
-    const openList = dayTasks.filter((t) => t.status !== 'done').map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}%)` : ''}${(t as any).sphere === 'personal' ? ' [personal]' : ''}`);
+    const openList = dayTasks.filter((t) => isOpen(t)).map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}%)` : ''}${(t as any).sphere === 'personal' ? ' [personal]' : ''}`);
     const focusLines = focus.map((f) => `- ${f.title}${f.description ? `: ${f.description}` : ''}`);
     const yesterday = recent[0] || null; // most recent prior read
     const recentGuide = [...recent].reverse().map((m) => `(${m.day}, score ${m.adherenceScore}) ${m.guidance.slice(0, 300)}`);

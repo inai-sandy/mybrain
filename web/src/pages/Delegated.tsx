@@ -6,6 +6,7 @@ import { Hand, Radio, Clock, Plus, Search, Timer } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TaskFormModal, TaskCard, type Task } from './taskShared';
+import { isOpen, tickMeans } from '../ui/taskStatus';
 
 type Row = Task & {
   who: string;
@@ -28,6 +29,7 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
   const [editing, setEditing] = useState<Task | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const [dropFor, setDropFor] = useState<Row | null>(null);
   const [q, setQ] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [person, setPerson] = useState('');
@@ -59,7 +61,7 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
     if (needs === 'claim') r = r.filter((x) => !!x.claim);
     else if (needs === 'chasing') r = r.filter((x) => x.chaseStatus === 'active');
     else if (needs === 'stalling') r = r.filter((x) => !!x.stalling);
-    else if (needs === 'quiet') r = r.filter((x) => x.chaseStatus !== 'active' && x.status !== 'done');
+    else if (needs === 'quiet') r = r.filter((x) => x.chaseStatus !== 'active' && isOpen(x));
     const t = q.trim().toLowerCase();
     if (t) r = r.filter((x) => `${x.title} ${x.who} ${x.note || ''}`.toLowerCase().includes(t));
     return r;
@@ -67,9 +69,11 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
 
   async function toggle(t: Task) {
     const res = await fetch(`/api/tasks/${t.id}/done`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: t.status !== 'done' }),
+      // A DROPPED task must not be completed by a tick — that would record it as finished, which is
+      // the opposite of what dropping it said. It reopens instead. (BEA-1306)
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: tickMeans(t) }),
     });
-    toast(res.ok ? 'success' : 'error', res.ok ? (t.status === 'done' ? 'Back to open — chase resumes' : 'Confirmed done — chase stopped') : 'Could not save');
+    toast(res.ok ? 'success' : 'error', res.ok ? (tickMeans(t) ? 'Confirmed done — chase stopped' : 'Back to open — chase resumes') : 'Could not save');
     load();
   }
 
@@ -77,6 +81,22 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
     const res = await fetch(`/api/tasks/${r.id}`, { method: 'DELETE' });
     toast(res.ok ? 'success' : 'error', res.ok ? 'Removed — its chase went with it' : 'Could not remove');
     setConfirm(null);
+    load();
+  }
+
+  /**
+   * Closed as not done. (BEA-1306)
+   *
+   * The word that was missing when Radha left with two jobs open: they were not finished, and they
+   * were not hers. Marking them done would have counted them as her achievements; deleting them
+   * would have destroyed the record.
+   */
+  async function drop(r: Row) {
+    const res = await fetch(`/api/tasks/${r.id}/drop`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'not doing this' }),
+    });
+    toast(res.ok ? 'success' : 'error', res.ok ? `Closed as not done — ${r.who} won't be chased about it` : 'Could not do that');
+    setDropFor(null);
     load();
   }
 
@@ -136,7 +156,7 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
       ) : (
         <div className="space-y-2.5">
           {filtered.slice(0, shown).map((r) => (
-            <TaskCard key={r.id} t={r} onToggle={toggle} onEdit={(t) => setEditing(t)} onDelete={(t) => setConfirm(t as Row)} />
+            <TaskCard key={r.id} t={r} onToggle={toggle} onEdit={(t) => setEditing(t)} onDelete={(t) => setConfirm(t as Row)} onDrop={(t) => setDropFor(t as Row)} />
           ))}
           {filtered.length > shown && (
             <button onClick={() => setShown((n) => n + 12)} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">
@@ -157,10 +177,19 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
       {confirm && (
         <ConfirmDialog
           title="Remove this?"
-          message={`"${confirm.title}" and its chase will be deleted. ${confirm.who} won't be asked about it again.`}
+          message={`"${confirm.title}" and its chase will be deleted for good. To stop it without losing the record, use "Not doing this" instead.`}
           confirmLabel="Remove"
           onConfirm={() => remove(confirm)}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+      {dropFor && (
+        <ConfirmDialog
+          title="Not doing this?"
+          message={`"${dropFor.title}" will be closed as not done. ${dropFor.who} stops being chased about it, it is never counted as finished, and it stays in your history.`}
+          confirmLabel="Not doing it"
+          onConfirm={() => drop(dropFor)}
+          onCancel={() => setDropFor(null)}
         />
       )}
     </div>

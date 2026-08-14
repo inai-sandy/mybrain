@@ -402,8 +402,15 @@ describe('finished work leaves the review tab (BEA-1211)', () => {
     };
     p.taskClaim = {
       findFirst: async () => null,
-      findMany: async (args: any = {}) =>
-        args?.where?.task?.status?.not === 'done' ? claims.filter((c) => taskStatus[c.taskId] !== 'done') : claims,
+      findMany: async (args: any = {}) => {
+        // Match on the MEANING — "only claims on work that is still owed" — not on one phrasing of
+        // it. This stub used to test for `status: { not: 'done' }` and silently stopped filtering
+        // when the real query became `status: 'open'` (BEA-1306), so the assertion passed for the
+        // wrong reason until the whole test failed.
+        const st = args?.where?.task?.status;
+        const wantsOpenOnly = st === 'open' || st?.not === 'done';
+        return wantsOpenOnly ? claims.filter((c) => taskStatus[c.taskId] !== 'done') : claims;
+      },
     };
     p.task = { findMany: async () => [], count: async () => 0, findUnique: async () => null };
     return { svc };

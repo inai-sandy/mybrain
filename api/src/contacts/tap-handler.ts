@@ -1,4 +1,5 @@
 import { readTap, TapMeaning } from './tap';
+import { isOpen } from '../tasks/task-status';
 
 /**
  * Turning a tap into an exact answer. (BEA-1300)
@@ -58,5 +59,5 @@ export async function resolveTap(
 
   // Work already finished is not a candidate. A tap arriving after the owner closed something must
   // not reopen it or claim it again — the message simply has nothing left to act on.
-  return { meaning, reminderIds, tasks: tasks.filter((t) => t.status !== 'done') };
+  return { meaning, reminderIds, tasks: tasks.filter((t) => isOpen(t)) };
 }

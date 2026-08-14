@@ -120,6 +120,19 @@ export class TasksController {
     return this.delegation.decideManyClaims(ids, body?.confirm !== false);
   }
 
+  /**
+   * The work ended without being finished. (BEA-1306)
+   *
+   * Separate from done on purpose — dropped work must never be counted as an achievement, and the
+   * person must never be thanked for completing it.
+   */
+  @Post(':id/drop')
+  async drop(@Param('id') id: string, @Body() body: { reason?: string }) {
+    const r = await this.tasks.setDropped(id, body?.reason);
+    if (!r) throw new BadRequestException('That task no longer exists.');
+    return r;
+  }
+
   /** What the `@names` in some text resolve to — so the form can show it as you type. (BEA-1019) */
   @Post('mentions/resolve')
   async resolveMentions(@Body() body: { text?: string }) {

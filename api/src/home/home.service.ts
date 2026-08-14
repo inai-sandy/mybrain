@@ -6,6 +6,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { DailyService } from '../daily/daily.service';
 import { RecurringService } from '../tasks/recurring.service';
 import { MemoryService } from '../memory/memory.service';
+import { TASK_OPEN } from '../tasks/task-status';
 
 type NeedItem = { kind: string; icon: string; title: string; sub: string; href: string; action: string };
 type CookItem = { icon: string; label: string; href: string };
@@ -33,7 +34,7 @@ export class HomeService {
   private async dailyOwedToday(dayKey: string, restDays: string[]): Promise<number> {
     try {
       const rows = await this.prisma.task.findMany({
-        where: { kind: 'recurring', status: { not: 'done' } },
+        where: { kind: 'recurring', status: TASK_OPEN },
         select: { scheduleDays: true },
       });
       const weekday = weekdayOf(dayKey);
@@ -164,14 +165,14 @@ export class HomeService {
       toReview, delegatedOpen, dailyOwed, dailyIn, dailyMissed, overdueCount, carriedOver, doneToday, openTasks, brainSize,
     ] = await Promise.all([
       this.safeCount('taskClaim', { status: 'pending' }),
-      this.safeCount('task', { status: { not: 'done' }, kind: { not: 'recurring' }, NOT: { ownerContactId: null } }),
+      this.safeCount('task', { status: TASK_OPEN, kind: { not: 'recurring' }, NOT: { ownerContactId: null } }),
       this.dailyOwedToday(dayKey, restDays), // only reports actually due today (BEA-1147)
       this.safeCount('taskStatusDay', { day: dayKey, status: 'received' }),
       this.safeCount('taskStatusDay', { day: dayKey, status: 'missed' }),
-      this.safeCount('task', { status: { not: 'done' }, dueDate: { lt: todayStart } }),
-      this.safeCount('task', { status: { not: 'done' }, rolloverCount: { gt: 0 }, kind: { not: 'recurring' } }), // carried over must be a subset of open
+      this.safeCount('task', { status: TASK_OPEN, dueDate: { lt: todayStart } }),
+      this.safeCount('task', { status: TASK_OPEN, rolloverCount: { gt: 0 }, kind: { not: 'recurring' } }), // carried over must be a subset of open
       this.safeCount('task', { status: 'done', completedAt: { gte: todayStart, lt: todayEnd } }),
-      this.safeCount('task', { status: { not: 'done' }, kind: { not: 'recurring' } }),
+      this.safeCount('task', { status: TASK_OPEN, kind: { not: 'recurring' } }),
       this.brainSize().catch(() => 0),
     ]);
     const stalling = await (this.tasks.stalling?.() ?? Promise.resolve([])).then((r: any[]) => r.length).catch(() => 0);

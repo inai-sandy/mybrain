@@ -451,7 +451,12 @@ model Task {
   reminderSuggestDismissed Boolean @default(false) // user cleared this from "Suggested reminders" (BEA-882)
   brainEater    Boolean   @default(false) // circles his head, keeps getting skipped — lives in its own tab (BEA-1056)
   dueDate       DateTime?
-  status        String    @default("open") // open | done
+  /// open | done | dropped. (BEA-1306)
+  /// `dropped` = it ended WITHOUT being finished — the person left, it was called off, it stopped
+  /// mattering. It must never be counted as finished work, and it is not deleted: what was dropped,
+  /// and why, is worth keeping. Ask for open work by name (`OPEN_WORK` in tasks/task-status.ts),
+  /// never as "not done" — that phrasing silently counts dropped work as still owed.
+  status        String    @default("open")
   /// Does this work ever FINISH? (BEA-1117)
   ///   assignment — a one-off deliverable: they claim it, the owner confirms, the chase ends.
   ///   recurring  — a standing daily report (production update, OT update). It NEVER completes;
@@ -466,6 +471,10 @@ model Task {
   ragId         String?
   createdAt     DateTime  @default(now())
   completedAt   DateTime?
+  /// When it was dropped, and why. Separate from `completedAt` on purpose: that one means FINISHED,
+  /// and every report that counts finished work reads it. (BEA-1306)
+  droppedAt     DateTime?
+  droppedReason String?
 
   @@index([ownerContactId])
   @@index([briefingId])
@@ -527,7 +536,12 @@ model TaskClaim {
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
   source    String    @default("whatsapp") // whatsapp | page | owner
   quote     String // their exact words — what the owner reads before deciding
-  status    String    @default("pending") // pending | confirmed | rejected
+  /// pending | confirmed | rejected | moot
+  /// `moot` = the work was DROPPED before the owner ruled on the claim (BEA-1306). Not confirmed,
+  /// which would say "yes, you finished it" about work just recorded as not done; not rejected,
+  /// which would say "no, you didn't" when nobody decided that either. The question simply stopped
+  /// needing an answer, and it leaves the review list without a verdict being invented.
+  status    String    @default("pending")
   reason    String? // why the owner rejected it
   createdAt DateTime  @default(now())
   decidedAt DateTime?

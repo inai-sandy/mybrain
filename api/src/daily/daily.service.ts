@@ -11,6 +11,7 @@ import { matchContact, contactSpellings, norm as normName } from '../contacts/pe
 import { MentorService } from '../mentor/mentor.service';
 import { MentalModelService } from '../mind/mentalmodel.service';
 import { clampTitle } from '../common/clamp-title';
+import { TASK_OPEN, isOpen } from '../tasks/task-status';
 
 const DEFAULT_TZ = 'Asia/Kolkata';
 const SUMMARY_AT = '21:30'; // local time the auto day-summary fires
@@ -238,7 +239,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const existingTitles = existing.map((e) => e.title);
     // Still-open tasks, so an overlap can TICK ONE OFF instead of being silently dropped. (BEA-1146)
     const openNow = await this.prisma.task.findMany({
-      where: { status: { not: 'done' }, day: { lte: day }, kind: { not: 'recurring' } },
+      where: { status: TASK_OPEN, day: { lte: day }, kind: { not: 'recurring' } },
       select: { id: true, title: true },
     });
     const tmpl = await this.prompts.get('daily.doneExtract');
@@ -289,7 +290,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     if (text.length < 15) return { day, todos: [] };
 
     // Every still-open task, not just the ones added on these two days. (BEA-1018)
-    const existing = await this.prisma.task.findMany({ where: { status: { not: 'done' }, day: { lte: today } }, select: { title: true } });
+    const existing = await this.prisma.task.findMany({ where: { status: TASK_OPEN, day: { lte: today } }, select: { title: true } });
     const existingTitles = existing.map((e) => e.title);
     const tmpl = await this.prompts.get('daily.todoExtract');
     const prompt =
@@ -383,7 +384,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       // Recurring tasks are left out: they are never completed by design, so asking to close them
       // every single night is pure noise. Their record is the per-day received/missed stamp. (BEA-1146)
       this.prisma.task.findMany({
-        where: { status: { not: 'done' }, day: { lte: day }, kind: { not: 'recurring' } },
+        where: { status: TASK_OPEN, day: { lte: day }, kind: { not: 'recurring' } },
         orderBy: { createdAt: 'asc' },
         select: { id: true, title: true, rolloverCount: true, ownerContact: { select: { name: true } } },
       }),
@@ -463,8 +464,13 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       if (r) rolled++;
     }
     for (const id of (drop || []).slice(0, 50)) {
-      if (closedSet.has(id)) continue; // closed beats deleted — never bin work he just finished
-      const r = await this.prisma.task.delete({ where: { id } }).catch(() => null);
+      if (closedSet.has(id)) continue; // closed beats dropped — never bin work he just finished
+      // DROPPED, not deleted. (BEA-1306)
+      //
+      // This used to be `task.delete()`, so "not doing this" at the nightly close destroyed the row
+      // — the work, its chase, its claims and the record that it ever existed. There was no third
+      // state to move it to, so deleting was the only way to get it off the board. There is now.
+      const r = await this.tasks.setDropped(id, 'not doing this — dropped at day close').catch(() => null);
       if (r) dropped++;
     }
     return { day, created, workedMinutes: wm, rolled, dropped, closed };
@@ -557,13 +563,14 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     return {
       tasksTotal: dayTasks.length,
       tasksDone: done.length,
-      tasksOpen: dayTasks.length - done.length,
+      // Counted, not inferred: `total - done` counts dropped work as still open. (BEA-1306)
+      tasksOpen: dayTasks.filter(isOpen).length,
       minutesSpent,
       minutesEstimated: estimated,
       // the user-stated working minutes for the day (the real working-hours figure); null if not set
       workedMinutes: story?.workedMinutes ?? null,
       // weighted view: part-done tasks count for their % (a 60% task = 60), done = 100. (BEA-761)
-      tasksPartial: dayTasks.filter((t) => t.status !== 'done' && (t.progress || 0) > 0).length,
+      tasksPartial: dayTasks.filter((t) => isOpen(t) && (t.progress || 0) > 0).length,
       progressPct: this.avgProg(dayTasks),
     };
   }
@@ -593,8 +600,8 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
 
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
     // Part-done (30/60) get their own line so the summary credits real progress, not just finished. (BEA-761)
-    const partialList = dayTasks.filter((t) => t.status !== 'done' && (t.progress || 0) > 0).map((t) => `◐ ${t.title} — ${t.progress}% done`);
-    const openList = dayTasks.filter((t) => t.status !== 'done' && !(t.progress || 0)).map((t) => `○ ${t.title}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
+    const partialList = dayTasks.filter((t) => isOpen(t) && (t.progress || 0) > 0).map((t) => `◐ ${t.title} — ${t.progress}% done`);
+    const openList = dayTasks.filter((t) => isOpen(t) && !(t.progress || 0)).map((t) => `○ ${t.title}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
     const activityLines = timeline.filter((e) => e.type !== 'task').map((e) => `- ${e.title}`);
 
     const tmpl = await this.prompts.get('daily.summary');
@@ -715,7 +722,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // `day <= day` (not `day === day`): open tasks keep the day they were ADDED (BEA-1014), so keying to
     // the exact day closed captured only what was created that day and the Lab's "skipped" signal went
     // empty again for every carried task — the very thing BEA-808 fixed. (BEA-1016)
-    const skippedSnapshot = day < today ? await this.prisma.task.findMany({ where: { day: { lte: day }, status: { not: 'done' } } }) : [];
+    const skippedSnapshot = day < today ? await this.prisma.task.findMany({ where: { day: { lte: day }, status: TASK_OPEN } }) : [];
     // Roll the day's genuine leftovers forward: a past day → today; closing today → tomorrow.
     const target = day < today ? today : this.dayAdd(day, 1);
     const rolled = (await this.tasks.rollDayForward(day, target)).rolled;
@@ -876,7 +883,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       if (!t.day || closed.has(t.day)) continue;
       const e = (byDay[t.day] = byDay[t.day] || { day: t.day, openTasks: 0, totalTasks: 0, hasStory: false });
       e.totalTasks++;
-      if (t.status !== 'done') e.openTasks++;
+      if (isOpen(t)) e.openTasks++;
     }
     for (const s of stories) {
       if (!s.day || closed.has(s.day)) continue;
@@ -906,9 +913,9 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       // Marked loudly so the story celebrates it. (BEA-1056)
       .map((t) => `${(t as any).brainEater ? '🧠⚡ FINALLY DONE (this one circled his head for days): ' : '✓ '}${t.title}${t.category ? ` [${t.category}]` : ''}${t.actualMin ? ` (${t.actualMin}m)` : ''}`);
     const partialList = dayTasks
-      .filter((t) => t.status !== 'done' && (t.progress || 0) > 0)
+      .filter((t) => isOpen(t) && (t.progress || 0) > 0)
       .map((t) => `◐ ${t.title} — ${t.progress}% done`);
-    const openList = dayTasks.filter((t) => t.status !== 'done' && !(t.progress || 0)).map((t) => `○ ${t.title}`);
+    const openList = dayTasks.filter((t) => isOpen(t) && !(t.progress || 0)).map((t) => `○ ${t.title}`);
     const activityLines = timeline.filter((e) => e.type !== 'task').map((e) => `- ${e.title}${e.detail ? ` (${e.detail})` : ''}`);
 
     const tmpl = await this.prompts.get('story.daily');
@@ -1386,7 +1393,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
       this.mentor.listFocusAreas().catch(() => ({ active: [] as { title: string; description?: string | null }[], proposed: [] })),
     ]);
 
-    const openTasks = dayTasks.filter((t) => t.status !== 'done');
+    const openTasks = dayTasks.filter((t) => isOpen(t));
     const doneList = dayTasks.filter((t) => t.status === 'done').map((t) => `✓ ${t.title}`);
     const openList = openTasks.map((t) => `○ ${t.title}${(t.progress || 0) > 0 ? ` (${t.progress}% done)` : ''}${t.rolloverCount ? ` [carried ${t.rolloverCount}d]` : ''}`);
     const narrative = dayStory?.text || told?.rawText || '';
@@ -1731,10 +1738,10 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     const [stories, dayStories, ownedOpen, ownedDone, promised, eaters, oldestOpen] = await Promise.all([
       this.prisma.story.findMany({ where: { day: { gte: start } }, select: { day: true, emotions: true, mood: true } }),
       this.prisma.dayStory.findMany({ where: { day: { gte: start } }, select: { day: true, moodScore: true } }),
-      this.prisma.task.findMany({ where: { ownerContactId: { not: null }, status: { not: 'done' } }, select: { id: true, title: true, party: true, promisedFor: true, rolloverCount: true } }),
+      this.prisma.task.findMany({ where: { ownerContactId: { not: null }, status: TASK_OPEN }, select: { id: true, title: true, party: true, promisedFor: true, rolloverCount: true } }),
       this.prisma.task.count({ where: { ownerContactId: { not: null }, status: 'done', completedAt: { gte: (await this.tasks.dayWindow(start, tz)).start } } }),
       this.prisma.task.findMany({ where: { promisedFor: { not: null } }, select: { id: true, title: true, party: true, promisedFor: true, promiseSlips: true, status: true } }),
-      this.prisma.task.findMany({ where: { brainEater: true, status: { not: 'done' } }, select: { id: true, title: true, day: true, rolloverCount: true } }),
+      this.prisma.task.findMany({ where: { brainEater: true, status: TASK_OPEN }, select: { id: true, title: true, day: true, rolloverCount: true } }),
       this.prisma.task.findMany({ where: { status: 'open', ownerContactId: null, brainEater: false }, orderBy: { day: 'asc' }, take: 5, select: { title: true, day: true, rolloverCount: true } }),
     ]);
 
@@ -1752,7 +1759,7 @@ export class DailyService implements OnModuleInit, OnModuleDestroy {
     // 2) Delegation & promise health.
     const teamOpen = ownedOpen.length;
     const teamTotal = teamOpen + ownedDone;
-    const promisesOpen = promised.filter((p) => p.status !== 'done');
+    const promisesOpen = promised.filter((p) => isOpen(p));
     const promisesKept = promised.filter((p) => p.status === 'done').length;
     const promisesSlipping = promisesOpen
       .filter((p) => (p.promiseSlips || 0) > 0 || (p.promisedFor && p.promisedFor < today))

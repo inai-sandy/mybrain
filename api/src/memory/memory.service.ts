@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy 
 import { PrismaService } from '../prisma/prisma.service';
 import { SuperMemoryStore } from './supermemory.store';
 import { RagStore } from './rag.store';
+import { isOpen } from '../tasks/task-status';
 
 const MAX_ATTEMPTS = 3;
 const DRAIN_INTERVAL_MS = Number(process.env.MEMORY_DRAIN_MS) || 5000;
@@ -887,7 +888,7 @@ export class MemoryService implements OnModuleInit, OnModuleDestroy {
       case 'contact': {
         const name = row.name || 'Someone';
         const tasks: any[] = row.ownedTasks || [];
-        const open = tasks.filter((t) => t.status !== 'done');
+        const open = tasks.filter((t) => isOpen(t));
         const done = tasks.filter((t) => t.status === 'done');
         const days = (d: any) => { try { return Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)); } catch { return 0; } };
         const lines = [

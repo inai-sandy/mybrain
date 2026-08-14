@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { isOwedOn, parseSchedule, scheduleLabel } from '../tasks/schedule';
 import { localDayKey, weekdayOf } from '../common/localday';
 import { matchContact, matchContactsAll, contactSpellings, similarity, norm } from './person-identity';
+import { TASK_OPEN, isOpen, isDone } from '../tasks/task-status';
 
 const todayKey = () => localDayKey(new Date());
 
@@ -61,15 +62,15 @@ export class ContactsService {
     const ids = base.contacts.map((c: any) => c.id);
     if (!ids.length) return base;
     const [openTasks, needs, claims, chasing, lastIns, reports, restDays] = await Promise.all([
-      this.prisma.task.groupBy({ by: ['ownerContactId'], where: { ownerContactId: { in: ids }, status: { not: 'done' } }, _count: { _all: true } }).catch(() => [] as any[]),
+      this.prisma.task.groupBy({ by: ['ownerContactId'], where: { ownerContactId: { in: ids }, status: TASK_OPEN }, _count: { _all: true } }).catch(() => [] as any[]),
       // The same reading the review inbox uses: needs him, not closed, work not already done. (BEA-1211)
-      this.prisma.teamUpdate.findMany({ where: { contactId: { in: ids }, needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: { not: 'done' } } }] }, select: { contactId: true } }).catch(() => [] as any[]),
-      this.prisma.taskClaim.findMany({ where: { contactId: { in: ids }, status: 'pending', task: { status: { not: 'done' } } }, select: { contactId: true } }).catch(() => [] as any[]),
+      this.prisma.teamUpdate.findMany({ where: { contactId: { in: ids }, needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: TASK_OPEN } }] }, select: { contactId: true } }).catch(() => [] as any[]),
+      this.prisma.taskClaim.findMany({ where: { contactId: { in: ids }, status: 'pending', task: { status: TASK_OPEN } }, select: { contactId: true } }).catch(() => [] as any[]),
       this.prisma.reminder.groupBy({ by: ['contactId'], where: { contactId: { in: ids }, status: 'active' }, _count: { _all: true } }).catch(() => [] as any[]),
       // Exact per-contact latest — a flat row cap could let one chatty contact push a quiet one's
       // last message out of the window and make them look never-heard. (review finding)
       this.prisma.reminderMessage.groupBy({ by: ['contactId'], where: { contactId: { in: ids }, direction: 'in' }, _max: { createdAt: true } }).catch(() => [] as any[]),
-      this.prisma.task.findMany({ where: { ownerContactId: { in: ids }, kind: 'recurring', status: { not: 'done' } }, select: { id: true, ownerContactId: true, scheduleDays: true } }).catch(() => [] as any[]),
+      this.prisma.task.findMany({ where: { ownerContactId: { in: ids }, kind: 'recurring', status: TASK_OPEN }, select: { id: true, ownerContactId: true, scheduleDays: true } }).catch(() => [] as any[]),
       this.restDaysSafe(),
     ]);
     const statusRows = (reports as any[]).length
@@ -301,7 +302,7 @@ export class ContactsService {
       // different screen. (BEA-1149)
       this.prisma.task
         .findMany({
-          where: { ownerContactId: id, kind: 'recurring', status: { not: 'done' } },
+          where: { ownerContactId: id, kind: 'recurring', status: TASK_OPEN },
           // The last days, not just today (BEA-1223): while today's is still out, the section
           // shows the most recent report's SUMMARY instead of a bare "waiting".
           select: { id: true, title: true, scheduleDays: true, statusDays: { orderBy: { day: 'desc' }, take: 8 } },
@@ -310,7 +311,7 @@ export class ContactsService {
         .catch(() => [] as any[]),
       this.restDaysSafe(),
     ]);
-    const open = tasks.filter((t) => t.status !== 'done');
+    const open = tasks.filter((t) => isOpen(t));
     const oldest = open.reduce<number | null>((m, t) => {
       const d = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 86400000);
       return m === null || d > m ? d : m;
@@ -339,7 +340,10 @@ export class ContactsService {
     const dueToday = today.filter((r) => r.due);
     return {
       open: open.length,
-      done: tasks.length - open.length,
+      // Counted, never inferred by subtraction. `total - open` quietly counted DROPPED work as
+      // finished the moment a third state existed — the exact lie BEA-1306 exists to stop, on the
+      // page about how a person stands.
+      done: tasks.filter(isDone).length,
       awaitingYou: claims,
       chasing,
       oldestOpenDays: oldest,
@@ -376,7 +380,7 @@ export class ContactsService {
   /** Does this task actually belong to this contact? Nobody may tick someone else's work. */
   async ownsTask(contactId: string, taskId: string): Promise<boolean> {
     const t = await this.prisma.task.findUnique({ where: { id: String(taskId || '') }, select: { ownerContactId: true, status: true } });
-    return !!t && t.ownerContactId === contactId && t.status !== 'done';
+    return !!t && t.ownerContactId === contactId && isOpen(t);
   }
 
   /**
@@ -430,7 +434,7 @@ export class ContactsService {
         : null,
     });
 
-    const open = rows.filter((t) => t.status !== 'done').map(shape);
+    const open = rows.filter((t) => isOpen(t)).map(shape);
     // A standing report is only asked for on ITS OWN days. BEA-1147 fixed this for the owner's board
     // and the chase, and never reached the page his team actually looks at — on a Tuesday Rakesh was
     // being asked for Friday's, Wednesday's AND Monday's updates, all at once. (BEA-1156)

@@ -159,7 +159,7 @@ function ContactDetail({ contactId }: { contactId: string }) {
         <Accordion dense icon={CheckCircle2} tile="bg-emerald-500/10 text-emerald-500"
           title="Their work"
           badge={tasks?.length ? <span className="text-xs font-normal text-zinc-400">· {tasks.length}</span> : null}
-          summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">{tasks?.length ? tasks.filter((t) => t.status !== 'done').slice(0, 3).map((t) => t.title).join(' · ') || 'All finished.' : `Nothing is with ${contact.name} yet.`}</span>}>
+          summary={<span className="line-clamp-2 block text-xs font-normal text-zinc-400">{tasks?.length ? tasks.filter((t) => t.status === 'open').slice(0, 3).map((t) => t.title).join(' · ') || 'All finished.' : `Nothing is with ${contact.name} yet.`}</span>}>
           <ContactTasks contactId={contact.id} contactName={contact.name} reload={briefReload} legacy={tasks} />
         </Accordion>
       )}

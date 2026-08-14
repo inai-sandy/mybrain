@@ -5,6 +5,7 @@ import { ContactsService } from './contacts.service';
 import { PostboxService } from './postbox.service';
 import { TZ_OFFSET_MIN } from '../common/localday';
 import { TasksService } from '../tasks/tasks.service';
+import { TASK_OPEN } from '../tasks/task-status';
 
 /** Default engine for the reminder "Clean up" / draft — a dependable API model (changeable in Settings). */
 const REMINDER_FORMAT_DEFAULT: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
@@ -834,7 +835,7 @@ export class RemindersService {
       // becoming a second task about the same work.
       const existing = await this.prisma.task
         .findMany({
-          where: { ownerContactId: r.contactId, status: { not: 'done' } },
+          where: { ownerContactId: r.contactId, status: TASK_OPEN },
           orderBy: { createdAt: 'desc' },
           take: 20,
           select: { id: true, title: true, kind: true },

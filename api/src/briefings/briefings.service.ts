@@ -9,6 +9,7 @@ import { looseJsonParse } from '../common/llm-json';
 import { gradeBriefDraft, summaryContradicts, cadenceFromWords, chaseTimesFrom, DEFAULT_CHASE_TIMES, type Cadence } from './brief-guard';
 import { TASK_SETTING_KEYS, parseChaseTimes } from '../tasks/task-settings';
 import { clampTitle } from '../common/clamp-title';
+import { isOpen } from '../tasks/task-status';
 
 const DEFAULT_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' };
 
@@ -263,7 +264,7 @@ export class BriefingsService {
       updatedAt: b.updatedAt,
       tasks: (b.tasks || []).map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
       taskCount: (b.tasks || []).length,
-      openCount: (b.tasks || []).filter((t: any) => t.status !== 'done').length,
+      openCount: (b.tasks || []).filter((t: any) => isOpen(t)).length,
     };
   }
 }
