@@ -139,10 +139,100 @@ describe('finishing delegated work lands in the same place from every screen (BE
     expect(store.reminderSend).toHaveLength(0);
   });
 
+  // ---- the job page is the FIFTH door (BEA-1310/1315) ----
+  //
+  // It shows the whole story of one job and now acts on it too. It was written to reuse the same
+  // endpoints, but "was written to" is not a guarantee — so it is asserted here with the others,
+  // against the same shared database, rather than trusted.
+  it('from the job page — the tick', async () => {
+    // `POST /tasks/:id/done {done:true}` — what the Mark done button sends.
+    const { tasks, row } = db();
+    await tasks.setDone('t1', true);
+    expect(finishedState(row)).toEqual(FINISHED);
+  });
+
+  it('from the job page — answering the claim there', async () => {
+    // `POST /tasks/claims/:id/decide {confirm:true}` — the "Yes, it is done" button. It answers the
+    // CLAIM rather than ticking the task, which is why the claim ends up confirmed instead of
+    // sitting pending under a finished job.
+    const { delegation, row } = db();
+    await delegation.decideClaim('cl1', true);
+    expect(finishedState(row)).toEqual(FINISHED);
+  });
+
   it('another person\'s chase is untouched — the switch is per task, not global', async () => {
     const { tasks, row } = db();
     await tasks.setDone('t1', true);
     expect(row('reminder', 'other')).toMatchObject({ status: 'active', needsOwner: true });
+  });
+});
+
+describe('closing it as NOT done stops the chase just as hard (BEA-1306/1315)', () => {
+  // The job page's "Not doing it" (and "Stop this report" on a daily report). The chase must stop —
+  // being messaged every morning about work you have already decided against is the exact
+  // frustration this whole run exists to remove — but nobody is thanked for finishing it.
+  it('the chase stops, the badge clears, and the claim is settled as moot', async () => {
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'Radha left the organisation');
+    expect({
+      task: row('task', 't1').status,
+      chase: row('reminder', 'r1').status,
+      pausedChase: row('reminder', 'r2').status,
+      needsYou: row('reminder', 'r1').needsOwner,
+      claim: row('taskClaim', 'cl1').status,
+      teamUpdateClosed: row('teamUpdate', 'u1').closedAt !== null,
+    }).toEqual({ task: 'dropped', chase: 'done', pausedChase: 'done', needsYou: false, claim: 'moot', teamUpdateClosed: true });
+  });
+
+  it('and it is never recorded as an achievement', async () => {
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'not needed any more');
+    expect(row('task', 't1').completedAt).toBeNull();
+    expect(row('task', 't1').droppedReason).toBe('not needed any more');
+  });
+
+  it('re-opening it from the job page clears the ending', async () => {
+    // `POST /tasks/:id/done {done:false}` — the button that would have been a silent no-op had it
+    // gone through `PUT /tasks/:id` instead. (BEA-1315)
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'Radha left');
+    await tasks.setDone('t1', false);
+    expect(row('task', 't1')).toMatchObject({ status: 'open', droppedAt: null, droppedReason: null });
+  });
+
+  it('and the ONE-OFF chase comes back too, not just the daily one', async () => {
+    // This used to be the gap. Only `repeat: 'daily'` was revived, so a one-off chase stayed
+    // stopped for ever: the job open again, sitting on somebody, nobody asking about it — the
+    // original complaint pointing the other way. (BEA-1317)
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'Radha left');
+    await tasks.setDone('t1', false);
+    expect(row('reminder', 'r2')).toMatchObject({ status: 'active', armedDay: null });
+    expect(row('reminder', 'r2').repeat).not.toBe('daily'); // the kind that used to be left behind
+  });
+});
+
+describe('re-opening never resurrects what the owner switched off (BEA-1317)', () => {
+  // Reviving broadly is only safe because `done` has one author: the app, when the work ended.
+  // These two are the proof of that claim rather than a restatement of it.
+  it('a chase he STOPPED by hand stays stopped', async () => {
+    const { tasks, store, row } = db();
+    store.reminder.push({ id: 'byhand', taskId: 't1', status: 'stopped', repeat: 'none', needsOwner: false, pausedAuto: false });
+    await tasks.setDone('t1', true);
+    await tasks.setDone('t1', false);
+    expect(row('reminder', 'byhand').status).toBe('stopped');
+  });
+
+  it('and one the app paused ITSELF is stopped, and does come back', async () => {
+    // The pair to the test above. `pausedAuto: true` means the app paused it because somebody
+    // claimed the work was finished — so ending the work may stop it, and re-opening (the owner
+    // saying that claim was wrong) has to bring it back. (BEA-1293/1317)
+    const { tasks, store, row } = db();
+    store.reminder.push({ id: 'claimpaused', taskId: 't1', status: 'paused', repeat: 'none', needsOwner: false, pausedAuto: true });
+    await tasks.setDone('t1', true);
+    expect(row('reminder', 'claimpaused').status).toBe('done');
+    await tasks.setDone('t1', false);
+    expect(row('reminder', 'claimpaused').status).toBe('active');
   });
 });
 
@@ -161,11 +251,16 @@ describe('re-opening runs it in reverse (BEA-1296)', () => {
   it('a chase the OWNER paused by hand stays paused when the work re-opens', async () => {
     // `pausedAuto: false` means he made that call himself. Waking it would override a deliberate
     // decision with an automatic one. (BEA-1160)
+    //
+    // It now stays literally paused, where it used to be swept to `done` along with the rest and
+    // left there. Both keep it silent, but only this one keeps the reason legible: `done` means
+    // "the app stopped this because the work ended", and nothing else. That is exactly what makes
+    // re-opening able to revive every `done` chase without ever resurrecting one of his. (BEA-1317)
     const { tasks, store, row } = db();
     store.reminder.push({ id: 'his', taskId: 't1', status: 'paused', repeat: 'none', needsOwner: false, pausedAuto: false });
     await tasks.setDone('t1', true);
     await tasks.setDone('t1', false);
-    expect(row('reminder', 'his').status).toBe('done'); // stopped with the task, not resurrected
+    expect(row('reminder', 'his').status).toBe('paused'); // his call, untouched by either step
   });
 });
 

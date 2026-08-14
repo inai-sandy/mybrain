@@ -37,6 +37,9 @@ function TaskRow({ t, onToggle, onEdit }: { t: Task; onToggle: (t: Task) => void
   return (
     <li className="flex items-start gap-2.5 rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
       <button onClick={() => onToggle(t)} aria-label={done ? 'Reopen' : 'Mark done'} className={'mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 transition-colors ' + (done ? 'border-emerald-500 bg-emerald-500' : 'border-zinc-300 hover:border-emerald-500 dark:border-zinc-600')} />
+      {/* Tapping the row still opens Edit — that habit is older than this page and people rely on
+          it. The way through to the job's own page is its own control, so nothing changes underfoot
+          and a link is never nested inside a button. (BEA-1310) */}
       <button onClick={() => onEdit(t)} className="min-w-0 flex-1 text-left">
         <span className={'block text-sm font-medium leading-snug ' + (done ? 'text-zinc-400 line-through' : '')}>
           {t.pinned && <Star size={12} className="mr-1 inline fill-amber-500 text-amber-500" />}
@@ -53,6 +56,14 @@ function TaskRow({ t, onToggle, onEdit }: { t: Task; onToggle: (t: Task) => void
           {!!t.progress && <span className="text-emerald-500">{t.progress}%</span>}
         </span>
       </button>
+      <Link
+        to={`/tasks/${t.id}`}
+        aria-label={`Everything about: ${t.title}`}
+        title="Everything about this job"
+        className="mt-0.5 shrink-0 rounded p-1 text-zinc-300 hover:bg-zinc-100 hover:text-emerald-600 dark:text-zinc-600 dark:hover:bg-zinc-800"
+      >
+        <ChevronRight size={16} />
+      </Link>
     </li>
   );
 }
