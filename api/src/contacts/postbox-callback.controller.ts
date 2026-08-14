@@ -64,8 +64,19 @@ export class PostboxCallbackController {
           contact = await this.prisma.contact.findFirst({ where: { whatsappNumber: { endsWith: from.slice(-10) } } });
         }
         if (contact) {
+          // Keep what makes a tap exact, so "did they tap or write?" is answerable from the stored
+          // conversation and not only in the moment it arrived. (BEA-1300)
           await this.prisma.reminderMessage
-            .create({ data: { contactId: contact.id, direction: 'in', body: text, wamid: body.wamid || null } })
+            .create({
+              data: {
+                contactId: contact.id,
+                direction: 'in',
+                body: text,
+                wamid: body.wamid || null,
+                replyToWamid: body.replyToWamid || null,
+                buttonId: body.buttonId || null,
+              },
+            })
             .catch(() => undefined);
           // Kick off the two-way agent (C2) for the whole contact — fire-and-forget so the callback returns fast.
           void this.agent.onContactReply(contact.id).catch((e) => this.log.warn(`agent onContactReply: ${e?.message}`));

@@ -1167,6 +1167,15 @@ model ReminderMessage {
   wamid      String?
   status     String? // out: sent | delivered | read | failed (WhatsApp receipts, BEA-916); in: null
   error      String? // provider error when status=failed
+  /// Which of OUR messages this one answers, when they tapped a button or quote-replied. (BEA-1300)
+  /// The link that makes a tap exact: it resolves through ReminderSend.providerId to the precise
+  /// set of work that nudge was about, instead of a model guessing from the words.
+  /// NOT guaranteed to be one of ours — someone can quote-reply to their own message — so a lookup
+  /// that finds nothing is an ordinary outcome, not an error.
+  replyToWamid String?
+  /// The id of the button or list row they pressed. Its PRESENCE is the useful part: it proves this
+  /// was a tap rather than the same word typed inside a sentence. (BEA-1300)
+  buttonId   String?
   createdAt  DateTime  @default(now())
 
   @@index([contactId])

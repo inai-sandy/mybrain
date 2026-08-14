@@ -7,6 +7,7 @@ import { PostboxService } from './postbox.service';
 import { ClaimsService } from '../tasks/claims.service';
 import { DelegationService } from '../tasks/delegation.service';
 import { replyWithClaimConfirmation, ambiguousDoneReply, withSystemLine, dailyReceivedLine } from './claim-reply';
+import { resolveTap } from './tap-handler';
 import { RecurringService } from '../tasks/recurring.service';
 import { isOwedOn, parseSchedule } from '../tasks/schedule';
 import { weekdayOf } from '../common/localday';
@@ -293,6 +294,17 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     const name = (contact.name || 'them').trim();
     // The model sees a tighter slice than the duplicate-reply guard below, which uses `messages`.
     const thread = trimThread(messages).map((m) => `${m.direction === 'out' ? 'Me' : name}: ${m.body}`).join('\n');
+
+    // They TAPPED a button. (BEA-1300)
+    //
+    // A tap is a certain answer, so it is settled here — before the model is asked anything. This is
+    // the one decision in the whole loop where a guess can silence a chase for work that is still
+    // open, and a button press removes the need to guess entirely.
+    //
+    // Anything not certain returns null and carries on below exactly as before: a typed message, a
+    // button we do not recognise, a reply to something that is not one of our nudges.
+    const tapped = await resolveTap(this.prisma, [...messages].reverse().find((m) => m.direction === 'in'));
+    if (tapped && (await this.actOnTap(contactId, name, tapped))) return;
 
     const todayKey = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); // IST, for date wording
 
@@ -689,6 +701,84 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // NOTE: the agent no longer auto-closes reminders from a chat (BEA-948). These are often ongoing
     // reporting relationships (e.g. daily production updates) that are never really "done" — closing
     // them silenced the conversation. Only the user closes a reminder now, from the app.
+  }
+
+  /**
+   * Act on a tap, and say something true back. (BEA-1300)
+   *
+   * Returns true when the tap fully settled the exchange, so the caller stops — no model call, no
+   * invented wording. Returns false when it did not, and the ordinary path takes over: several jobs
+   * on one nudge still needs a question, and that question is written where it already lives.
+   */
+  private async actOnTap(contactId: string, name: string, tapped: Awaited<ReturnType<typeof resolveTap>>): Promise<boolean> {
+    if (!tapped) return false;
+    const number = (await this.prisma.contact.findUnique({ where: { id: contactId }, select: { whatsappNumber: true } }).catch(() => null))?.whatsappNumber;
+    const say = async (text: string) => {
+      if (!text || !number) return;
+      const res = await this.postbox.sendText(String(number).replace(/[^\d]/g, ''), text).catch(() => ({}) as any);
+      await this.prisma.reminderMessage
+        .create({ data: { contactId, reminderId: tapped.reminderIds[0] || null, direction: 'out', body: text, wamid: res?.wamid || null, status: 'sent' } })
+        .catch(() => undefined);
+    };
+    const first = name.split(/\s+/)[0] || name;
+
+    // Nothing left to act on — the work was finished or the chase closed between the nudge and the
+    // tap. Answer them rather than leaving it on read, but change nothing.
+    if (!tapped.tasks.length) {
+      await say(`Thanks ${first} — nothing pending on that one now.`);
+      return true;
+    }
+
+    if (tapped.meaning === 'working') {
+      // Progress, never a claim. The chase carries on untouched — that is the whole point of the
+      // button existing separately from Done.
+      await say(`Thanks ${first} — I've let Sandeep know you're still on it.`);
+      this.log.log(`agent: ${name} tapped "still working" on ${tapped.tasks.length} item(s) — nothing claimed`);
+      return true;
+    }
+
+    if (tapped.meaning === 'will-reply') {
+      await say(`Sure ${first} — go ahead, I'm reading.`);
+      return true;
+    }
+
+    // Done. A standing daily report can never be finished, so a tap settles TODAY and says so.
+    const daily = tapped.tasks.filter((t) => t.kind === 'recurring');
+    const oneOff = tapped.tasks.filter((t) => t.kind !== 'recurring');
+
+    // A tap that could mean more than one piece of work is not an answer, it is a narrower question.
+    // Nothing is claimed and nothing is paused — the ordinary path below asks which. (BEA-1294)
+    //
+    // MIXED counts as ambiguous too: one daily report and one one-off on the same nudge used to fall
+    // through to claiming the one-off, silently dropping the report and closing the exchange, so the
+    // question was never asked either. That is the exact mistake this ticket exists to remove, made
+    // by the code meant to remove it. (review finding)
+    if (oneOff.length > 1 || (oneOff.length === 1 && daily.length > 0)) return false;
+
+    if (!oneOff.length && daily.length) {
+      const today = this.recurring.today();
+      for (const t of daily) await this.recurring.markReceived(t.id, today, 'Tapped Done', contactId, { source: 'whatsapp' }).catch(() => undefined);
+      // "tomorrow" only when tomorrow is genuinely owed — the same rule the ordinary path applies.
+      // Rakesh's report is Friday-only, and telling him "I'll ask again tomorrow" on a Friday is a
+      // plain untruth. BEA-1295 fixed that wording once; skipping the check here would undo it.
+      const rest = ((await Promise.resolve(this.recurring.restDays?.()).catch(() => ['Sun'])) ?? ['Sun']) as string[];
+      const tomorrow = weekdayOf(new Date(new Date(`${today}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10));
+      const everyDay = daily.every((t) => !parseSchedule(t.scheduleDays)) && !rest.includes(tomorrow);
+      await say(dailyReceivedLine(daily.map((t) => dailySubject(t.title || '')), everyDay));
+      this.log.log(`agent: ${name} tapped done on ${daily.length} daily report(s) — today settled`);
+      return true;
+    }
+
+    const task = oneOff[0];
+    const res: any = await this.delegation?.recordClaim?.({ taskId: task.id, contactId, quote: 'Tapped Done', source: 'whatsapp' }).catch(() => null);
+    if (!res?.claimed) {
+      // Already waiting on the owner — going quiet is right, saying it twice is not.
+      await say(`Thanks ${first} — Sandeep already has that one to check.`);
+      return true;
+    }
+    await say(replyWithClaimConfirmation('', [res.task?.title || task.title]).text);
+    this.log.log(`agent: ${name} tapped done on "${task.title}" — claimed exactly, no model`);
+    return true;
   }
 
   /** WhatsApp Sandeep when the agent is stuck: nice free-text in-window, template fallback cold. (BEA-767) */
