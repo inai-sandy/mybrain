@@ -133,6 +133,25 @@ export class TasksController {
     return r;
   }
 
+  /**
+   * Hand this work to somebody else. (BEA-1308)
+   *
+   * The old chase stops and the new person's starts. Before this, a job belonged to whoever it
+   * started with for ever — reassigning moved it on screen while the old person kept getting the
+   * WhatsApp messages.
+   */
+  @Post(':id/hand-over')
+  handOver(@Param('id') id: string, @Body() body: { toContactId?: string; reason?: string }) {
+    if (!body?.toContactId) throw new BadRequestException('Who is taking it on?');
+    return this.delegation.handOver(id, body.toContactId, body.reason);
+  }
+
+  /** Undo the last handover — give it straight back. (BEA-1308) */
+  @Post(':id/hand-back')
+  handBack(@Param('id') id: string) {
+    return this.delegation.undoHandOver(id);
+  }
+
   /** What the `@names` in some text resolve to — so the form can show it as you type. (BEA-1019) */
   @Post('mentions/resolve')
   async resolveMentions(@Body() body: { text?: string }) {
