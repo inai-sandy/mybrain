@@ -90,11 +90,13 @@ describe('the edition page (BEA-1260)', () => {
     expect(screen.getByText(/Story number 2 about/)).toBeTruthy();
   });
 
-  it('shows the masthead with the day, the issue number and the count', async () => {
+  it('shows the hero with the day, the issue number and the count', async () => {
     show();
-    await waitFor(() => expect(screen.getByText(/Issue No. 4/)).toBeTruthy());
-    expect(screen.getByText(/12 stories/)).toBeTruthy();
+    // The hero splits "Issue No. 4" across elements, so match the bolded number itself.
+    await waitFor(() => expect(screen.getByText('No. 4')).toBeTruthy());
+    expect(screen.getAllByText(/stories/).length).toBeGreaterThan(0);
     expect(screen.getByText(/all shown/)).toBeTruthy();
+    expect(screen.getByText('Past editions ›')).toBeTruthy();
   });
 
   it('says so loudly when the stories on the page do not match the count', async () => {
@@ -122,12 +124,15 @@ describe('the edition page (BEA-1260)', () => {
     // Sending someone /news/<day> gives them a login screen. This is the whole reason the button
     // takes an explicit url instead of reading window.location.
     show();
-    await waitFor(() => expect(screen.getByText(/Share this edition/)).toBeTruthy());
-    const btn = screen.getByRole('button', { name: /Share this edition/i });
-    expect(btn.getAttribute('aria-label')).toContain('AI News Twitter');
-    const publicLink = screen.getByText('see the public version') as HTMLAnchorElement;
-    expect(publicLink.getAttribute('href')).toBe('/paper/2026-07-31');
-    expect(publicLink.getAttribute('href')).not.toContain('/news/');
+    // Share renders twice on purpose — the hero row (phone) and the rail card (desktop).
+    await waitFor(() => expect(screen.getAllByText(/Share this edition/).length).toBeGreaterThan(0));
+    for (const btn of screen.getAllByRole('button', { name: /Share this edition/i })) {
+      expect(btn.getAttribute('aria-label')).toContain('AI News Twitter');
+    }
+    for (const link of screen.getAllByText('see the public version')) {
+      expect(link.getAttribute('href')).toBe('/paper/2026-07-31');
+      expect(link.getAttribute('href')).not.toContain('/news/');
+    }
   });
 
   it('offers both ways of reading it', async () => {
