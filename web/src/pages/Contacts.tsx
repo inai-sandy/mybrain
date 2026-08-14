@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, UserMinus, UserCheck, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { DataTable, Column } from '../ui/DataTable';
@@ -632,7 +632,18 @@ function ReminderLine({ rm, onEdit, onAct }: { rm: Reminder; onEdit: () => void;
           {isFutureReminder(rm) && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">📅 {fmtDayKey(rm.armedDay)}</span>}
           {rm.times.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"><Send className="h-2.5 w-2.5" />{t}</span>)}
         </div>
-        {rm.task && <div className="mt-0.5 text-xs text-zinc-400">re: {rm.task.title}</div>}
+        {/* The way from a message back to the work it is about. It was the one direction that did
+            not exist: a chase card named its job in plain grey text and led nowhere. (BEA-1310) */}
+        {rm.task && (
+          <div className="mt-0.5 text-xs text-zinc-400">
+            re:{' '}
+            {/* Underlined at rest, not only on hover: on a phone there is no hover, so a
+                hover-only affordance is simply invisible. */}
+            <Link to={`/tasks/${rm.task.id}`} className="underline decoration-zinc-300 underline-offset-2 hover:text-emerald-600 hover:decoration-emerald-500 dark:decoration-zinc-600">
+              {rm.task.title}
+            </Link>
+          </div>
+        )}
         <p className="mt-0.5 line-clamp-2 text-sm text-zinc-600 dark:text-zinc-300">{rm.message}</p>
       </div>
       <div className="flex shrink-0 items-center">

@@ -162,13 +162,25 @@ export function TaskDetail() {
         </div>
       )}
 
-      {/* The conversation about this work — with a way through to the full thread. */}
+      {/* Said about THIS work — not everything that person has ever said. A section showing the
+          wrong conversation is worse than one showing none, because it looks like an answer. */}
+      {t.owner && t.messages.length === 0 && (
+        <div className={card}>
+          <h2 className="mb-1 text-sm font-bold">What was said</h2>
+          <p className="text-sm text-zinc-500">
+            Nothing about this one yet.{' '}
+            <button onClick={() => navigate(`/contacts?contact=${t.owner!.id}`)} className="text-emerald-600 hover:underline">
+              Open your whole chat with {t.owner.name}
+            </button>
+          </p>
+        </div>
+      )}
       {t.messages.length > 0 && (
         <div className={card}>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-bold">What was said</h2>
+            <h2 className="text-sm font-bold">What was said about this</h2>
             {t.owner && (
-              <button onClick={() => navigate(`/contacts?contact=${t.owner!.id}`)} className="text-xs text-emerald-600 hover:underline">Open the full chat</button>
+              <button onClick={() => navigate(`/contacts?contact=${t.owner!.id}`)} className="text-xs text-emerald-600 hover:underline">Whole chat</button>
             )}
           </div>
           <ul className="space-y-2">
