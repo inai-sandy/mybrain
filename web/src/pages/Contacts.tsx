@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Search, Plus, Trash2, Pencil, X, Phone, Loader2, MessageCircle, Send, Clock, CheckCircle2, Sparkles, UserPlus, UserMinus, UserCheck, Pause, Play, ArrowLeft, Moon, MessageSquare, MessageSquareQuote } from 'lucide-react';
 import { useToast } from '../ui/Toast';
@@ -1005,12 +1005,42 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [resending, setResending] = useState(false);
+  const [delMsg, setDelMsg] = useState<{ id: string; body: string } | null>(null);
+  const [clearAll, setClearAll] = useState<number | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  /** Delete one message. Only the words go — the work behind them is untouched. (BEA-1309) */
+  async function removeMessage(id: string) {
+    setDelMsg(null);
+    const r = await fetch(`/api/reminders/messages/${id}`, { method: 'DELETE' });
+    toast(r.ok ? 'success' : 'error', r.ok ? 'Message deleted' : 'Could not delete it');
+    if (r.ok) load();
+  }
+
+  /** Clear the whole conversation with this person. Per-conversation only, never all of them. */
+  async function askClear() {
+    const cid = reminder.contactId || reminder.contact?.id;
+    if (!cid) return;
+    const d = await fetch(`/api/reminders/contact/${cid}/message-count`).then((x) => x.json()).catch(() => ({ count: 0 }));
+    setClearAll(d.count || 0);
+  }
+
+  async function doClear() {
+    const cid = reminder.contactId || reminder.contact?.id;
+    setClearAll(null);
+    if (!cid) return;
+    const r = await fetch(`/api/reminders/contact/${cid}/messages`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    toast(r.ok ? 'success' : 'error', r.ok ? `Cleared ${d.deleted ?? 0} message(s)` : 'Could not clear it');
+    if (r.ok) load();
+  }
+
   const openItems = (data?.items || []).filter((i) => i.status === 'active');
   const doneItems = (data?.items || []).filter((i) => i.status === 'done' && i.feedback);
-  useEffect(() => {
+  /** Named so the delete actions can refresh the thread after removing something. (BEA-1309) */
+  const load = useCallback(() => {
     fetch(`/api/reminders/contact/${reminder.contactId}/thread`).then((r) => r.json()).then(setData).catch(() => setData({ contactName: null, messages: [], items: [] }));
   }, [reminder.contactId]);
+  useEffect(() => { load(); }, [load]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [data]);
   const fmt = (s: string) => new Date(s).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
 
@@ -1064,6 +1094,13 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
               {openItems.length > 0 && <> · chasing {openItems.map((i) => i.subject).filter(Boolean).join(', ')}</>}
             </div>
           </div>
+          {/* Clear the whole conversation. Per-conversation only — there is deliberately no
+              "delete every chat" anywhere, because this holds his real history. (BEA-1309) */}
+          {(data?.messages.length ?? 0) > 0 && (
+            <button onClick={askClear} title="Clear this conversation" aria-label="Clear this conversation" className="ml-auto shrink-0 rounded-lg p-1.5 text-zinc-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         {/* Messages */}
@@ -1078,7 +1115,7 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
             </div>
           ) : (
             data.messages.map((m) => (
-              <div key={m.id} className={'flex flex-col ' + (m.direction === 'out' ? 'items-end' : 'items-start')}>
+              <div key={m.id} className={'group/msg flex flex-col ' + (m.direction === 'out' ? 'items-end' : 'items-start')}>
                 <div className={'max-w-[82%] rounded-2xl px-3 py-2 text-sm ' + (m.direction === 'out' ? (m.status === 'failed' ? 'rounded-br-sm bg-red-500/15 text-red-900 dark:text-red-100 border border-red-400/40' : 'rounded-br-sm bg-emerald-500/20 text-emerald-950 dark:text-emerald-50') : 'rounded-bl-sm bg-white text-zinc-800 shadow-sm dark:bg-zinc-800 dark:text-zinc-100')}>
                   <p className="whitespace-pre-wrap">{m.body}</p>
                 </div>
@@ -1086,6 +1123,11 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
                   {m.direction === 'out' ? 'You' : reminder.contact?.name?.split(' ')[0] || 'Them'} · {fmt(m.at)}
                   {m.direction === 'out' && <MsgStatus status={m.status} error={m.error} />}
                   {m.status === 'failed' && <button onClick={resendTemplate} disabled={resending} className="font-medium text-emerald-600 hover:underline disabled:opacity-50">Retry</button>}
+                  {/* Chats were the only thing here with no delete at all. Only the words go — the
+                      task, the chase and any claim behind them are untouched. (BEA-1309) */}
+                  <button onClick={() => setDelMsg(m)} aria-label="Delete this message" title="Delete this message" className="opacity-60 transition-opacity hover:text-rose-500 focus:opacity-100 sm:opacity-0 sm:group-hover/msg:opacity-100">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
                 </span>
               </div>
             ))
@@ -1139,6 +1181,26 @@ function ReminderChat({ reminder, onClose }: { reminder: Reminder; onClose: () =
           </div>
         )}
       </div>
+
+      {/* Deleting words never changes the work — say so, so he does not fear it. (BEA-1309) */}
+      {delMsg && (
+        <ConfirmDialog
+          title="Delete this message?"
+          message={`“${delMsg.body.slice(0, 120)}${delMsg.body.length > 120 ? '…' : ''}” will be removed from this conversation. The work it was about, and any chase on it, are not touched.`}
+          confirmLabel="Delete"
+          onConfirm={() => removeMessage(delMsg.id)}
+          onCancel={() => setDelMsg(null)}
+        />
+      )}
+      {clearAll !== null && (
+        <ConfirmDialog
+          title="Clear this conversation?"
+          message={`All ${clearAll} message${clearAll === 1 ? '' : 's'} with ${reminder.contact?.name || 'them'} will be removed. Their tasks, chases and everything they have claimed stay exactly as they are. This cannot be undone.`}
+          confirmLabel={`Clear ${clearAll} message${clearAll === 1 ? '' : 's'}`}
+          onConfirm={doClear}
+          onCancel={() => setClearAll(null)}
+        />
+      )}
     </div>
   );
 }

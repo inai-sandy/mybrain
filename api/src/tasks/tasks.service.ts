@@ -777,6 +777,76 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * One job, with everything that has happened to it. (BEA-1310)
+   *
+   * The owner: *"Tasks, contacts, reminders, delegated tasks, chats: all these have to have a proper
+   * connection."* They were connected in the database and nowhere on screen — there was no page for
+   * a job at all. Answering "what is going on with the Elleys PCBs?" meant looking in three places
+   * and joining them in his head.
+   *
+   * Nothing here is new. The chase, the claims, the handovers, the day-by-day ledger and the
+   * messages have all been recorded for months; they had simply never been put in one place.
+   */
+  async detail(id: string) {
+    const t: any = await this.prisma.task.findUnique({
+      where: { id },
+      include: {
+        ...PEOPLE_INCLUDE,
+        chases: { orderBy: { createdAt: 'desc' }, select: { id: true, status: true, repeat: true, times: true, subject: true, createdAt: true, contact: { select: { id: true, name: true } } } },
+      },
+    });
+    if (!t) return null;
+
+    const [allClaims, handovers, days] = await Promise.all([
+      // Every claim, not just the one waiting — including ones settled as `moot` when the work was
+      // dropped or handed on, which is otherwise invisible anywhere.
+      this.prisma.taskClaim
+        .findMany({ where: { taskId: id }, orderBy: { createdAt: 'asc' }, select: { id: true, quote: true, status: true, source: true, reason: true, createdAt: true, decidedAt: true, contact: { select: { id: true, name: true } } } })
+        .catch(() => [] as any[]),
+      Promise.resolve(this.prisma.taskHandover?.findMany?.({ where: { taskId: id }, orderBy: { at: 'asc' } })).catch(() => [] as any[]),
+      t.kind === 'recurring'
+        ? this.prisma.taskStatusDay
+            .findMany({ where: { taskId: id }, orderBy: { day: 'desc' }, take: 60, select: { day: true, status: true, quote: true, summary: true, contactId: true, source: true } })
+            .catch(() => [] as any[])
+        : Promise.resolve([] as any[]),
+    ]);
+    const hos: any[] = handovers ?? [];
+    const dys: any[] = days ?? [];
+
+    // Put names on the handover chain. Read separately and tolerantly: those ids deliberately have
+    // no foreign key so the history survives a contact being deleted, which means a missing name is
+    // a real outcome rather than a bug.
+    const ids = [...new Set([...hos.flatMap((h: any) => [h.fromContactId, h.toContactId]), ...dys.map((d: any) => d.contactId)].filter(Boolean))] as string[];
+    const names = new Map<string, string>(
+      ids.length
+        ? ((await this.prisma.contact.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }).catch(() => [] as any[])) as any[]).map((c: any) => [c.id, c.name])
+        : [],
+    );
+    const who = (cid?: string | null) => (cid ? names.get(cid) || 'someone since removed' : null);
+
+    // The conversation ABOUT this work: messages on a chase for this task, plus messages from the
+    // person who owns it. Capped — a long relationship has thousands, and this is a summary.
+    const chaseIds = (t.chases || []).map((c: any) => c.id);
+    const messages: any[] = ((await this.prisma.reminderMessage
+      .findMany({
+        where: { OR: [...(chaseIds.length ? [{ reminderId: { in: chaseIds } }] : []), ...(t.ownerContactId ? [{ contactId: t.ownerContactId }] : [])] },
+        orderBy: { createdAt: 'desc' },
+        take: 40,
+        select: { id: true, direction: true, body: true, createdAt: true, status: true, contactId: true },
+      })
+      .catch(() => [] as any[])) ?? []) as any[];
+
+    return {
+      ...this.shape(t),
+      chases: (t.chases || []).map((c: any) => ({ ...c, times: jarr(c.times) })),
+      claims: (allClaims as any[]).map((c: any) => ({ ...c, by: c.contact?.name || null })),
+      handovers: hos.map((h: any) => ({ ...h, from: who(h.fromContactId), to: who(h.toContactId) })),
+      days: dys.map((d: any) => ({ ...d, by: who(d.contactId) })),
+      messages: [...messages].reverse().map((m: any) => ({ ...m, by: m.direction === 'out' ? null : who(m.contactId) })),
+    };
+  }
+
+  /**
    * Everything handed to someone else. Kept OFF the personal board on purpose — the owner's Tasks
    * screen stays what HE has to do; this is what he is waiting on. (BEA-1029)
    */

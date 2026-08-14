@@ -1,0 +1,6 @@
+-- CreateTable
+CREATE TABLE "DeletedMessage" (
+    "wamid" TEXT NOT NULL PRIMARY KEY,
+    "at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+

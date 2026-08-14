@@ -922,6 +922,63 @@ export class RemindersService {
     return { ok: true, taskId: t.id, created: true, kind };
   }
 
+  /**
+   * Delete ONE message from a conversation. (BEA-1309)
+   *
+   * Chats were the only one of the five things with no delete at all — not a message, not a
+   * conversation, not ever. A message sent by mistake was permanent.
+   *
+   * Only the words go. The task, the chase and any claim behind them are untouched: deleting what
+   * somebody said must never quietly change what is owed.
+   */
+  async deleteMessage(id: string) {
+    const m = await this.prisma.reminderMessage.findUnique({ where: { id }, select: { id: true, contactId: true, wamid: true, direction: true } });
+    if (!m) throw new NotFoundException('That message is not there any more');
+    await this.prisma.reminderMessage.delete({ where: { id } });
+    await this.rememberDeleted([m]);
+    this.log.log(`deleted one message from ${m.contactId || 'an unknown conversation'}`);
+    return { ok: true, contactId: m.contactId };
+  }
+
+  /**
+   * Clear a whole conversation — every message with one person. (BEA-1309)
+   *
+   * Deliberately per-conversation. There is no "delete every chat" anywhere, because the app holds
+   * his real history and a single mis-tap must never be able to take all of it.
+   */
+  async clearConversation(contactId: string) {
+    const contact = await this.prisma.contact.findUnique({ where: { id: contactId }, select: { name: true } });
+    if (!contact) throw new NotFoundException('Contact not found');
+    // Optional-chained: spec harnesses build this service with partial Prisma stubs, and failing to
+    // note the ids must never stop the delete the owner asked for.
+    const doomed: any[] = ((await Promise.resolve(
+      this.prisma.reminderMessage?.findMany?.({ where: { contactId }, select: { wamid: true, direction: true } }),
+    ).catch(() => [])) ?? []) as any[];
+    const gone = await this.prisma.reminderMessage.deleteMany({ where: { contactId } });
+    await this.rememberDeleted(doomed);
+    this.log.log(`cleared ${gone.count} message(s) with ${contact.name}`);
+    return { ok: true, deleted: gone.count };
+  }
+
+  /**
+   * Remember the ids of deleted INBOUND messages. (BEA-1309)
+   *
+   * The inbound de-duplication asks "have I stored this id before?", which was safe while messages
+   * were immortal. Now that they can be deleted, a redelivered webhook would find nothing, store the
+   * message again, and set the two-way agent replying to something just removed. So the id outlives
+   * the message — and nothing else does.
+   */
+  private async rememberDeleted(rows: { wamid?: string | null; direction?: string | null }[]) {
+    const ids = rows.filter((r) => r.direction === 'in' && r.wamid).map((r) => ({ wamid: r.wamid as string }));
+    if (!ids.length) return;
+    await Promise.resolve((this.prisma.deletedMessage as any)?.createMany?.({ data: ids, skipDuplicates: true })).catch(() => undefined);
+  }
+
+  /** How many messages are in a conversation — so a confirm can say what it is about to remove. */
+  async messageCount(contactId: string) {
+    return { count: await this.prisma.reminderMessage.count({ where: { contactId } }).catch(() => 0) };
+  }
+
   async get(id: string) {
     const r = await this.prisma.reminder.findUnique({ where: { id }, include: { contact: true, sends: { orderBy: { at: 'asc' } } } });
     if (!r) throw new NotFoundException('Reminder not found');

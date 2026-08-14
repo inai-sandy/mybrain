@@ -340,7 +340,9 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
                   <CheckCircle2 className={'h-4 w-4 ' + (r.status === 'done' ? 'text-emerald-500' : 'text-zinc-300 hover:text-emerald-500 dark:text-zinc-600')} />
                 </button>
                 <div className="min-w-0 flex-1">
-                  <p className={'text-sm ' + (isClosed(r) ? 'text-zinc-400 line-through' : 'font-medium')}>{r.title}</p>
+                  <p className={'text-sm ' + (isClosed(r) ? 'text-zinc-400 line-through' : 'font-medium')}>
+                    <Link to={`/tasks/${r.id}`} className="hover:underline decoration-emerald-500/60 underline-offset-2">{r.title}</Link>
+                  </p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-500">
                     <span className="inline-flex items-center gap-1"><Clock size={10} />{isDone(r) ? 'finished' : isDropped(r) ? 'not done' : r.openDays === 0 ? 'today' : `open ${r.openDays}d`}</span>
                     {r.chaseCount > 0 && <span>chased {r.chaseCount}×</span>}

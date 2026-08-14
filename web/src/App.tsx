@@ -13,6 +13,7 @@ import { IdeaDetail } from './pages/IdeaDetail';
 import { Skills } from './pages/Skills';
 import { SkillDetail } from './pages/SkillDetail';
 import { Tasks } from './pages/Tasks';
+import { TaskDetail } from './pages/TaskDetail';
 import { TaskShare } from './pages/TaskShare';
 import { Today } from './pages/Today';
 import { Activity } from './pages/Activity';
@@ -167,6 +168,8 @@ function AuthedApp() {
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="today" element={<Today />} />
         <Route path="tasks" element={<Tasks />} />
+        {/* One job, and everything that has happened to it. (BEA-1310) */}
+        <Route path="tasks/:id" element={<TaskDetail />} />
         {/* Old destinations fold into the Tasks tabs — deep links and habits keep working. (BEA-1044) */}
         {/* Review is no longer a place — old links land on Today, where claims now appear. (BEA-1150) */}
         <Route path="review" element={<Navigate to="/today" replace />} />

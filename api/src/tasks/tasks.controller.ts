@@ -273,4 +273,17 @@ export class TasksController {
   async remove(@Param('id') id: string) {
     return this.tasks.remove(id);
   }
+
+  /**
+   * One job, with everything that has happened to it. (BEA-1310)
+   *
+   * Declared after every static route so "delegated", "claims", "health" and the rest are never
+   * read as a task id.
+   */
+  @Get(':id')
+  async detail(@Param('id') id: string) {
+    const t = await this.tasks.detail(id);
+    if (!t) throw new BadRequestException('That work no longer exists.');
+    return t;
+  }
 }

@@ -8,6 +8,7 @@ import { loadDraft, clearDraft, useDraftPersist } from '../ui/useDraft';
 import { motion } from 'framer-motion';
 import { PersonPicker } from '../ui/PersonPicker';
 import { MentionChips, useMentions } from '../ui/Mentions';
+import { Link } from 'react-router-dom';
 
 export type Task = {
   brainEater?: boolean; // circles his head, lives in the Brain Eaters tab (BEA-1056)
@@ -110,11 +111,14 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onDrop, onProgress, ex
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
+          {/* The title opens the job — everything about it in one place. Nothing on this card used
+              to lead anywhere, so the chase, the conversation and the claims had to be joined up in
+              your head across three screens. (BEA-1310) */}
           <h3 className={'font-medium leading-snug flex-1 ' + (closed ? 'line-through text-zinc-400' : '')}>
             {t.pinned && <Star size={13} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
             {t.followUp && <RotateCcw size={12} className="inline -mt-0.5 mr-1 text-indigo-500" />}
             {t.brainEater && <span title="Brain eater" className="mr-1">🧠</span>}
-            {t.title}
+            <Link to={`/tasks/${t.id}`} className="hover:underline decoration-emerald-500/60 underline-offset-2">{t.title}</Link>
           </h3>
           <div className="flex items-center gap-0.5 shrink-0 opacity-60 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
             {extraAction && (

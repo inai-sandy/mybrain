@@ -154,7 +154,27 @@ export class TaskHealthService {
     // the owner is told "all clear" on a night when nothing was actually checked. Silence is this
     // feature's entire signal, so it has to be earned — a failure is reported AS a finding.
     try {
-      for (const f of await this.agreementChecks(titles)) add(f);
+    // Messages that outlived the person they belong to. (BEA-1309)
+    //
+    // A real foreign key now makes this impossible going forward, and seven such rows were sitting
+    // in the live database before it existed — unreachable by any screen and undeletable by any
+    // code. If one ever appears again, something has bypassed the constraint and is worth knowing.
+    const orphanMsgs = await this.q(async () => {
+      const rows = await this.prisma.reminderMessage.findMany({ where: { contactId: { not: null } }, select: { contactId: true }, take: 5000 });
+      const ids = [...new Set(rows.map((r: any) => r.contactId))] as string[];
+      if (!ids.length) return [];
+      const live = new Set((await this.prisma.contact.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((c: any) => c.id));
+      return rows.filter((r: any) => !live.has(r.contactId));
+    });
+    add({
+      key: 'orphan-messages',
+      what: 'chat messages belonging to a contact that no longer exists',
+      count: orphanMsgs.length,
+      examples: [],
+      where: 'Tell Claude',
+    });
+
+    for (const f of await this.agreementChecks(titles)) add(f);
     } catch (e: any) {
       this.log.error(`agreement checks could not run: ${e?.message ?? e}`);
       out.push({
