@@ -79,3 +79,32 @@ describe('DataTable', () => {
     expect(cells.indexOf('a')).toBeLessThan(cells.indexOf('b'));
   });
 });
+
+describe('external-controls mode (BEA-1320)', () => {
+  const ROWS = [
+    { name: 'alpha', kind: 'a', rank: 2 },
+    { name: 'bravo', kind: 'b', rank: 1 },
+    { name: 'charlie', kind: 'a', rank: 3 },
+  ];
+  const COLS = [{ key: 'name' as const, label: 'Name' }];
+
+  it('filters, sorts and hides the built-in strip from external values', () => {
+    render(
+      <DataTable
+        columns={COLS}
+        rows={ROWS}
+        controls={{ search: '', filters: { kind: 'a' }, sort: { key: 'rank', dir: -1 } }}
+      />,
+    );
+    // No built-in controls in external mode — the caller draws its own.
+    expect(screen.queryByLabelText('Search')).toBeNull();
+    const cells = screen.getAllByRole('cell').map((c) => c.textContent);
+    expect(cells).toEqual(['charlie', 'alpha']); // kind=a only, rank desc
+  });
+
+  it('external search narrows rows without any filter definitions', () => {
+    render(<DataTable columns={COLS} rows={ROWS} controls={{ search: 'brav', filters: {}, sort: null }} />);
+    const cells = screen.getAllByRole('cell').map((c) => c.textContent);
+    expect(cells).toEqual(['bravo']);
+  });
+});

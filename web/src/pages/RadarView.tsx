@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, Languages, RefreshCw, Sparkles, AlertTriangle } from 'lucide-react';
-import { DataTable, Column, Filter, SortOption } from '../ui/DataTable';
+import { DataTable, Column } from '../ui/DataTable';
 import { timeAgo } from './Agents';
 
 /**
@@ -128,26 +128,21 @@ export function RadarView() {
 
   const picks = useMemo(() => (rows || []).filter((r) => r.isPick).sort((a, b) => b.aiScore - a.aiScore), [rows]);
 
-  const filters: Filter[] = useMemo(
-    () => [
-      {
-        key: 'category',
-        label: 'Category',
-        options: (status?.categories || []).map((c) => ({ value: c, label: prettyLabel(c) })),
-      },
-      {
-        key: 'source',
-        label: 'Source',
-        options: (status?.sources || []).map((s) => ({ value: s, label: prettySource(s) })),
-      },
-    ],
-    [status],
+  // The mockup's control chrome (BEA-1320): one-tap category chips + pill controls,
+  // driving the shared DataTable through its external-controls mode.
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [sortMode, setSortMode] = useState<'time' | 'score'>('time');
+  // Memoised so unrelated re-renders (health polls, notices) don't churn the table's memo.
+  const tableControls = useMemo(
+    () => ({
+      search,
+      filters: { category, source: sourceFilter },
+      sort: sortMode === 'score' ? { key: 'aiScore', dir: -1 as const } : { key: 'publishedAt', dir: -1 as const },
+    }),
+    [search, category, sourceFilter, sortMode],
   );
-
-  const sortOptions: SortOption[] = [
-    { label: 'Newest', key: 'publishedAt', dir: -1 },
-    { label: 'Score', key: 'aiScore', dir: -1 },
-  ];
 
   const columns: Column<RadarRow>[] = [
     {
@@ -250,14 +245,62 @@ export function RadarView() {
             </section>
           )}
 
-          {/* All stories — the shared house list */}
+          {/* All stories — the shared house list wearing the mockup's chrome */}
           <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">All stories</h2>
+
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <input
+              aria-label="Search stories"
+              placeholder="Search stories…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="min-w-[150px] flex-1 rounded-[10px] border border-zinc-200 bg-white px-3 py-[7px] text-xs text-zinc-700 outline-none placeholder:text-zinc-400 focus:border-indigo-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
+            />
+            <select
+              aria-label="Source"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="rounded-[10px] border border-zinc-200 bg-white px-3 py-[7px] text-xs text-zinc-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+            >
+              <option value="">Source: all</option>
+              {(status?.sources || []).map((s) => (
+                <option key={s} value={s}>{prettySource(s)}</option>
+              ))}
+            </select>
+            <select
+              aria-label="Sort"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value === 'score' ? 'score' : 'time')}
+              className="rounded-[10px] border border-zinc-200 bg-white px-3 py-[7px] text-xs text-zinc-600 outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+            >
+              <option value="time">Sort: Newest</option>
+              <option value="score">Sort: Score</option>
+            </select>
+          </div>
+
+          {/* One-tap category chips — horizontally scrollable on phones. */}
+          <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+            {['', ...(status?.categories || [])].map((c) => (
+              <button
+                key={c || 'all'}
+                aria-pressed={category === c}
+                onClick={() => setCategory(c)}
+                className={
+                  'whitespace-nowrap rounded-full border px-3 py-1 text-xs transition-colors ' +
+                  (category === c
+                    ? 'border-indigo-400 bg-indigo-500/15 font-medium text-indigo-600 dark:border-indigo-500 dark:text-indigo-300'
+                    : 'border-zinc-200 bg-zinc-50 text-zinc-500 hover:text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400 dark:hover:text-zinc-200')
+                }
+              >
+                {c ? prettyLabel(c) : 'All'}
+              </button>
+            ))}
+          </div>
+
           <DataTable<RadarRow>
             columns={columns}
             rows={rows || []}
-            filters={filters}
-            sortOptions={sortOptions}
-            defaultSort={{ key: 'publishedAt', dir: -1 }}
+            controls={tableControls}
             pageSize={20}
             tableLayoutFixed
             emptyText="No stories match — clear the search or filters."
