@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 
 export type Column<T> = {
   key: keyof T & string;
@@ -39,6 +39,7 @@ export function DataTable<T extends Record<string, any>>({
   onFiltersChange,
   onRowClick,
   tableLayoutFixed = false,
+  controls,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -56,28 +57,55 @@ export function DataTable<T extends Record<string, any>>({
   onFiltersChange?: (active: Record<string, string>) => void; // observe filter picks — for callers whose ROWS depend on a filter (e.g. grouped rows, BEA-1291)
   onRowClick?: (row: T) => void;
   tableLayoutFixed?: boolean; // fixed layout: columns fill the width, content truncates, no horizontal scroll
+  /**
+   * External-controls mode (BEA-1320): the caller renders its own search/filter/sort UI
+   * (chips, pills, whatever the screen calls for) and passes the values here. The built-in
+   * control strip hides itself and header sort-clicks turn off (one control per list);
+   * filtering, sorting, pagination, count, cards/table and the states all keep working.
+   */
+  controls?: { search?: string; filters?: Record<string, string>; sort?: { key: string; dir: 1 | -1 } | null };
 }) {
   const [q, setQ] = useState('');
   const [active, setActive] = useState<Record<string, string>>(defaultFilters || {});
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(defaultSort);
   const [page, setPage] = useState(0);
 
+  // In external mode the caller's values win outright — internal state is simply unused.
+  const effQ = controls ? (controls.search ?? '') : q;
+  const effActive = controls ? (controls.filters ?? {}) : active;
+  const effSort = controls ? (controls.sort ?? null) : sort;
+  const controlsKey = controls ? `${effQ}|${JSON.stringify(effActive)}|${effSort?.key ?? ''}:${effSort?.dir ?? ''}` : '';
+  useEffect(() => {
+    // A changed search/filter/sort must land the reader on page one, same as internal mode.
+    if (controls) setPage(0);
+  }, [controlsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const filtered = useMemo(() => {
     let r = rows;
-    if (q.trim()) {
-      const s = q.toLowerCase();
+    if (effQ.trim()) {
+      const s = effQ.toLowerCase();
       r = r.filter((row) => columns.some((c) => String(row[c.key] ?? '').toLowerCase().includes(s)));
     }
-    for (const f of filters) {
-      const val = active[f.key];
-      if (!val) continue;
-      r = f.match ? r.filter((row) => f.match!(row, val)) : r.filter((row) => String(row[f.key]) === val);
+    if (controls) {
+      // External mode filters by whatever keys the caller sent — a matching `filters`
+      // definition still supplies a custom match, but is not required.
+      for (const [key, val] of Object.entries(effActive)) {
+        if (!val) continue;
+        const def = filters.find((f) => f.key === key);
+        r = def?.match ? r.filter((row) => def.match!(row, val)) : r.filter((row) => String(row[key]) === val);
+      }
+    } else {
+      for (const f of filters) {
+        const val = effActive[f.key];
+        if (!val) continue;
+        r = f.match ? r.filter((row) => f.match!(row, val)) : r.filter((row) => String(row[f.key]) === val);
+      }
     }
-    if (sort) {
-      r = [...r].sort((a, b) => (a[sort.key] > b[sort.key] ? 1 : a[sort.key] < b[sort.key] ? -1 : 0) * sort.dir);
+    if (effSort) {
+      r = [...r].sort((a, b) => (a[effSort.key] > b[effSort.key] ? 1 : a[effSort.key] < b[effSort.key] ? -1 : 0) * effSort.dir);
     }
     return r;
-  }, [rows, q, active, sort, columns, filters]);
+  }, [rows, effQ, effActive, effSort, columns, filters, controls]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pages - 1);
@@ -87,6 +115,7 @@ export function DataTable<T extends Record<string, any>>({
 
   return (
     <div>
+      {!controls && (
       <div className="mb-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {searchable && (
           <input
@@ -140,6 +169,7 @@ export function DataTable<T extends Record<string, any>>({
           </select>
         )}
       </div>
+      )}
 
       {/* Cards (mobile always; all sizes when cardsOnly) */}
       {renderCard && (
@@ -166,13 +196,13 @@ export function DataTable<T extends Record<string, any>>({
                   style={tableLayoutFixed && c.width ? { width: c.width } : undefined}
                   className={'px-3 py-2 font-semibold text-zinc-500 dark:text-zinc-400 select-none ' + (c.align === 'right' ? 'text-right' : '')}
                 >
-                  {c.sortable ? (
+                  {c.sortable && !controls ? (
                     <button
                       className="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-white"
                       onClick={() => setSort((s) => (s?.key === c.key ? { key: c.key, dir: s.dir === 1 ? -1 : 1 } : { key: c.key, dir: 1 }))}
                     >
                       {c.label}
-                      {sort?.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+                      {effSort?.key === c.key ? (effSort.dir === 1 ? ' ▲' : ' ▼') : ''}
                     </button>
                   ) : (
                     c.label

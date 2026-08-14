@@ -73,6 +73,30 @@ describe('QA polish stays fixed (BEA-1313)', () => {
   });
 });
 
+describe('the mockup chrome drives the list (BEA-1320)', () => {
+  it('a category chip filters the stories with one tap', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    render(<RadarView />);
+    await screen.findByText('All stories');
+    // Both categories start visible (models pick + devtools story).
+    expect(screen.getAllByText('GitHub agent apps walkthrough').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Models' }));
+    // The devtools story leaves the LIST; the picks section above is curated and stays.
+    await waitFor(() => expect(screen.queryAllByText('GitHub agent apps walkthrough')).toHaveLength(0));
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    await waitFor(() => expect(screen.getAllByText('GitHub agent apps walkthrough').length).toBeGreaterThan(0));
+  });
+
+  it('the search pill narrows the stories', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    render(<RadarView />);
+    await screen.findByText('All stories');
+    fireEvent.change(screen.getByPlaceholderText('Search stories…'), { target: { value: 'github' } });
+    await waitFor(() => expect(screen.queryAllByText(/Qwen open-sources/)).toHaveLength(1)); // only the pick card remains
+    expect(screen.getAllByText('GitHub agent apps walkthrough').length).toBeGreaterThan(0);
+  });
+});
+
 describe('the Radar tab shows picks, stories, and health (BEA-1313)', () => {
   it('renders the picks with their lines, the table, and the sources strip', async () => {
     vi.stubGlobal('fetch', mockFetch());
