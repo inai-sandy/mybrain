@@ -181,6 +181,9 @@ export class LlmService {
     // Fallback translator for AI Radar headlines when the free endpoint fails — a one-line
     // translate job, so the small fast model. (BEA-1311)
     'radar-translate': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // The daily "why it matters" lines under the Radar picks — one batched writing call a
+    // day, so it follows the flat-rate engine like the other content jobs. (BEA-1312)
+    'radar-why': LlmService.FOLLOW_ENGINE,
     // Writes each contact's weekly character profile — a once-a-week reasoning job over a month of
     // real messages, so Sonnet by default. (BEA-1216)
     'character-profile': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },

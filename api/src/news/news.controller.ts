@@ -9,6 +9,7 @@ import { NewsAgentService } from './news-agent.service';
 import { NewsReadService } from './news-read.service';
 import { NewsPublicService } from './news-public.service';
 import { RadarFeedService } from './radar-feed.service';
+import { RadarWriteService } from './radar-write.service';
 import { Public } from '../auth/public.decorator';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
@@ -25,7 +26,14 @@ export class NewsController {
     private readonly read: NewsReadService,
     private readonly pub: NewsPublicService,
     private readonly radar: RadarFeedService,
+    private readonly radarWrite: RadarWriteService,
   ) {}
+
+  /** Write the picks' "why it matters" lines now instead of waiting for noon. (BEA-1312) */
+  @Post('radar/annotate')
+  radarAnnotate() {
+    return this.radarWrite.annotate();
+  }
 
   /** The Radar view's list — always English, paginated, filtered. (BEA-1311) */
   @Get('radar')
