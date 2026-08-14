@@ -8,7 +8,7 @@ import { timeAgo } from './Agents';
  *
  * All heavy lifting happened before this page: the collector fork gathers and dedupes
  * on GitHub (BEA-1311 syncs it in, translating anything Chinese), and the engine writes
- * the picks' one-liners at noon (BEA-1312). This view only reads: Today's picks on top,
+ * the picks' one-liners on an hourly check (BEA-1312/1314). This view only reads: Today's picks on top,
  * every story in the shared DataTable below, and the per-feed health strip at the end.
  */
 
@@ -340,7 +340,7 @@ function PickCard({ pick }: { pick: RadarRow }) {
           {pick.whyItMatters}
         </p>
       ) : (
-        <p className="mt-1.5 text-xs italic text-zinc-400 dark:text-zinc-500">The one-line note arrives with the noon run.</p>
+        <p className="mt-1.5 text-xs italic text-zinc-400 dark:text-zinc-500">The one-line note arrives within the hour.</p>
       )}
       <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
         <SourceBadges row={pick} />
