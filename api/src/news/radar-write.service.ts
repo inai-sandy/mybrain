@@ -17,24 +17,33 @@ export type RadarAnnotateResult = {
 /**
  * Writes the one-line "why it matters" note under each Scout Pick (BEA-1312).
  *
- * One batched engine call per day — never one call per article. Runs at 12:00 IST,
- * the same hour as AI News Daily, plus a catch-up on boot because deploys restart
- * the container and would otherwise skip a day. A failed engine call leaves picks
- * pending — the run reports the failure instead of claiming done (honest-runs rule).
+ * Batched engine calls, never one call per article. An hourly check (plus a boot
+ * catch-up, since deploys restart the container) runs the engine ONLY when at least
+ * one pick is missing its line — picks rotate through the day, so waiting for a fixed
+ * hour left fresh picks blank (BEA-1314 live finding). A failed engine call leaves
+ * picks pending — the run reports the failure instead of claiming done (honest-runs).
  */
 @Injectable()
 export class RadarWriteService implements OnModuleInit, OnModuleDestroy {
-  /** IST is UTC+5:30 with no daylight saving — the offset is safe to hard-code. */
-  static readonly IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  static readonly NOON_IST_HOUR = 12;
+  /**
+   * First check after boot. Five minutes, not two: the live gap on ship day (BEA-1314)
+   * was the boot check racing the first radar sync — it looked before any picks existed,
+   * found nothing, and the day's lines would have waited a full cycle.
+   */
+  static readonly BOOT_DELAY_MS = 5 * 60 * 1000;
+  /**
+   * The picks rotate through the day as the radar's brief updates, so the check runs
+   * hourly — the ENGINE only runs when at least one pick is missing its line, so a
+   * quiet day still costs at most a few small batched calls, never per-article ones.
+   */
+  static readonly CHECK_MS = 60 * 60 * 1000;
   /** One brief holds ~20 picks; 25 leaves headroom without letting the prompt balloon. */
   static readonly BATCH_CAP = 25;
   static readonly LINE_TOKENS = 1200;
 
   private readonly log = new Logger('RadarWrite');
   private bootTimer: ReturnType<typeof setTimeout> | null = null;
-  private noonTimer: ReturnType<typeof setTimeout> | null = null;
-  private dailyTimer: ReturnType<typeof setInterval> | null = null;
+  private checkTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
 
   constructor(
@@ -43,37 +52,22 @@ export class RadarWriteService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    // Catch-up shortly after boot — but only when there is actually work, so container
-    // restarts do not burn engine calls. The delay lets the first radar sync land first.
+    // Catch-up after boot — after the first radar sync has had time to land, and only
+    // when there is actually work, so container restarts do not burn engine calls.
     this.bootTimer = setTimeout(() => {
       this.annotateIfNeeded().catch((e) => this.log.error(`boot annotate failed: ${e?.message || e}`));
-    }, 2 * 60 * 1000);
+    }, RadarWriteService.BOOT_DELAY_MS);
     if (typeof this.bootTimer.unref === 'function') this.bootTimer.unref();
 
-    const wait = RadarWriteService.msUntilNextNoonIst(new Date());
-    this.noonTimer = setTimeout(() => {
-      this.annotateIfNeeded().catch((e) => this.log.error(`noon annotate failed: ${e?.message || e}`));
-      this.dailyTimer = setInterval(() => {
-        this.annotateIfNeeded().catch((e) => this.log.error(`daily annotate failed: ${e?.message || e}`));
-      }, 24 * 60 * 60 * 1000);
-      if (typeof this.dailyTimer.unref === 'function') this.dailyTimer.unref();
-    }, wait);
-    if (typeof this.noonTimer.unref === 'function') this.noonTimer.unref();
+    this.checkTimer = setInterval(() => {
+      this.annotateIfNeeded().catch((e) => this.log.error(`hourly annotate failed: ${e?.message || e}`));
+    }, RadarWriteService.CHECK_MS);
+    if (typeof this.checkTimer.unref === 'function') this.checkTimer.unref();
   }
 
   onModuleDestroy() {
     if (this.bootTimer) clearTimeout(this.bootTimer);
-    if (this.noonTimer) clearTimeout(this.noonTimer);
-    if (this.dailyTimer) clearInterval(this.dailyTimer);
-  }
-
-  /** Milliseconds until the next 12:00 in IST. Pure so the arithmetic is testable. */
-  static msUntilNextNoonIst(now: Date): number {
-    const ist = new Date(now.getTime() + RadarWriteService.IST_OFFSET_MS);
-    const next = new Date(ist);
-    next.setUTCHours(RadarWriteService.NOON_IST_HOUR, 0, 0, 0);
-    if (next.getTime() <= ist.getTime()) next.setUTCDate(next.getUTCDate() + 1);
-    return next.getTime() - ist.getTime();
+    if (this.checkTimer) clearInterval(this.checkTimer);
   }
 
   /** Skips the engine entirely when every pick already has its line. */

@@ -80,7 +80,7 @@ describe('the Radar tab shows picks, stories, and health (BEA-1313)', () => {
     expect(await screen.findByText('Today’s picks')).toBeTruthy();
     expect(screen.getByText('Shows where open models really get used.')).toBeTruthy();
     // A pick still waiting for its line says so instead of sitting blank.
-    expect(screen.getByText('The one-line note arrives with the noon run.')).toBeTruthy();
+    expect(screen.getByText('The one-line note arrives within the hour.')).toBeTruthy();
     expect(screen.getByText('All stories')).toBeTruthy();
     expect(screen.getAllByText('GitHub agent apps walkthrough').length).toBeGreaterThan(0);
     // Merged story badge and the health strip.

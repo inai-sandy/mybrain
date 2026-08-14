@@ -144,11 +144,11 @@ describe('review fixes stay fixed (BEA-1312)', () => {
   });
 });
 
-describe('the noon-IST timer arithmetic (BEA-1312)', () => {
-  it('targets the coming 12:00 IST from either side of it', () => {
-    // 05:00 UTC = 10:30 IST — noon IST is 1.5 hours away.
-    expect(RadarWriteService.msUntilNextNoonIst(new Date('2026-08-14T05:00:00Z'))).toBe(1.5 * 60 * 60 * 1000);
-    // 07:00 UTC = 12:30 IST — noon has passed, so 23.5 hours to the next one.
-    expect(RadarWriteService.msUntilNextNoonIst(new Date('2026-08-14T07:00:00Z'))).toBe(23.5 * 60 * 60 * 1000);
+describe('the scheduling constants (BEA-1314)', () => {
+  it('boots after the first sync window and then checks hourly', () => {
+    // 5 minutes: the first radar sync (with its translation budget) takes ~4 — checking
+    // at 2 was the ship-day bug that left every pick blank until the next fixed run.
+    expect(RadarWriteService.BOOT_DELAY_MS).toBe(5 * 60 * 1000);
+    expect(RadarWriteService.CHECK_MS).toBe(60 * 60 * 1000);
   });
 });
