@@ -800,7 +800,10 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       where: { id },
       include: {
         ...PEOPLE_INCLUDE,
-        chases: { orderBy: { createdAt: 'desc' }, select: { id: true, status: true, repeat: true, times: true, subject: true, createdAt: true, contact: { select: { id: true, name: true } } } },
+        // `pausedAuto` distinguishes the two reasons a chase is quiet: the app paused it because
+        // somebody claimed the work was done, or the owner paused it himself. The page described
+        // every pause as the first, which is a plain untruth on the second. (BEA-1317)
+        chases: { orderBy: { createdAt: 'desc' }, select: { id: true, status: true, repeat: true, times: true, subject: true, createdAt: true, pausedAuto: true, contact: { select: { id: true, name: true } } } },
       },
     });
     if (!t) return null;

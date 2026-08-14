@@ -287,7 +287,9 @@ describe('a paused chase is still reached by the grace-period sweep (BEA-1293)',
   it('stops a claim-paused chase once the grace period runs out', async () => {
     const { svc, updates } = sender({ claimAt: new Date(Date.now() - 3 * 86400000), graceDays: '2' });
     await svc.rollDay();
-    expect(updates).toContainEqual({ id: 'p1', status: 'done' });
+    // `stopped` rather than `done`: this is the end of the road, not work that finished. Only
+    // `done` is revived when the owner re-opens the job. (BEA-1317)
+    expect(updates).toContainEqual({ id: 'p1', status: 'stopped' });
   });
 
   it('leaves it paused while the claim is still fresh — it is waiting for HIM', async () => {

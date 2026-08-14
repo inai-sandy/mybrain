@@ -724,12 +724,23 @@ export class RemindersService {
   async resumeToday() {
     const paused = await this.prisma.reminder.findMany({ where: { status: 'paused' } });
     let armed = 0;
+    let skipped = 0;
     for (const r of paused) {
+      // Never wake a chase for work that has already ended. This could not happen before: a chase
+      // the owner paused by hand was swept to `done` when the work finished, so this sweep never
+      // saw it. Now that his pause is left as his pause, it is visible here — and "send today's
+      // chases" asking Deepthi about something she finished last week is exactly the message this
+      // whole system exists to prevent. (BEA-1317)
+      if (r.taskId) {
+        const t = await this.prisma.task.findUnique({ where: { id: r.taskId }, select: { status: true } }).catch(() => null);
+        if (t && t.status !== 'open') { skipped++; continue; }
+      }
       await this.prisma.reminder.update({ where: { id: r.id }, data: { status: 'active' } });
       await this.reseed(r.id, this.parse(r.times));
       armed++;
     }
-    return { armed };
+    if (skipped) this.log.log(`resumeToday: left ${skipped} chase(s) alone — their work has ended`);
+    return { armed, skipped };
   }
 
   async create(input: { contactId?: string; taskId?: string; subject?: string; message?: string; notes?: string; count?: number; times?: string[]; startDay?: string; repeat?: string; taskKind?: string }) {
@@ -1011,7 +1022,11 @@ export class RemindersService {
       times = spreadTimes(count);
       data.times = JSON.stringify(times);
     }
-    if (patch.status !== undefined && ['active', 'paused', 'done', 'stopped'].includes(patch.status)) data.status = patch.status;
+    // `done` is deliberately NOT settable from here. It means one thing — the app stopped this
+    // because the work ended — and re-opening the work revives every chase in that state. A generic
+    // PATCH able to write it is a door into that behaviour from anywhere. Finishing work goes
+    // through `settleDelegation`; the owner's own switch-off is `paused` or `stopped`. (BEA-1317)
+    if (patch.status !== undefined && ['active', 'paused', 'stopped'].includes(patch.status)) data.status = patch.status;
     await this.prisma.reminder.update({ where: { id }, data });
     // Keep today's queued sends in sync with the reminder's state.
     const targetStatus: string = data.status ?? cur.status;

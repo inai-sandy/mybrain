@@ -41,18 +41,39 @@ export async function settleDelegation(
   //    depend on each other. (BEA-1021)
   try {
     if (done) {
+      // Everything the APP is entitled to switch off: one that was running, and one it paused
+      // itself because somebody claimed the work was finished.
       const stopped = await p.reminder?.updateMany?.({
-        where: { taskId, status: { in: ['active', 'paused'] } },
+        where: { taskId, status: 'active' },
         data: { status: 'done' },
       });
-      if (stopped?.count) {
+      const autoPaused = await p.reminder?.updateMany?.({
+        where: { taskId, status: 'paused', pausedAuto: true },
+        data: { status: 'done' },
+      });
+      // A chase the OWNER paused by hand is deliberately left alone — it is already silent, so
+      // nobody is messaged about finished work either way, and leaving it untouched is what makes
+      // re-opening safe: `done` then means "the app stopped this", and only that. Sweeping his
+      // pause in here too is what made the two states indistinguishable afterwards. (BEA-1160/1317)
+      const n = (stopped?.count || 0) + (autoPaused?.count || 0);
+      if (n) {
         await p.reminderSend?.deleteMany?.({ where: { reminder: { taskId }, status: 'queued' } });
-        say(`task ${taskId} finished — stopped ${stopped.count} chase(s)`);
+        say(`task ${taskId} finished — stopped ${n} chase(s)`);
       }
     } else {
-      // Re-opened: bring a repeating chase back to life. The day rollover re-arms it within a minute.
+      // Re-opened: bring the chase back to life. The day rollover re-arms it within a minute —
+      // `rollDay` sweeps active rows with a null `armedDay`, re-checks the work really is still
+      // open, and reseeds the day's sends.
+      //
+      // Every kind of chase, not only `repeat: 'daily'`. A one-off used to stay stopped for ever,
+      // so the job came back open, sitting on somebody, with nobody being asked about it — the
+      // original complaint pointing the other way. (BEA-1317)
+      //
+      // Safe to do broadly because `done` has exactly one author: this function, when the work
+      // ended. The owner's own Stop writes `stopped` and their own Pause writes `paused`, and
+      // neither is in this query — so nothing he switched off by hand can be resurrected here.
       const back = await p.reminder?.updateMany?.({
-        where: { taskId, status: 'done', repeat: 'daily' },
+        where: { taskId, status: 'done' },
         data: { status: 'active', armedDay: null },
       });
       // …and one the app paused because somebody CLAIMED this finished. Re-opening the work is the

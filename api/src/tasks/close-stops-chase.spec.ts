@@ -41,9 +41,13 @@ describe('closing a task stops its chase (BEA-1187)', () => {
   it('stops the chase when progress is dragged to 100', async () => {
     const { svc, reminderUpdates, sendDeletes } = build(delegated);
     await svc.update('t1', { progress: 100 });
+    // Two updates, not one: what was RUNNING, and what the app had paused itself because somebody
+    // claimed the work was done. A chase the owner paused by hand is deliberately not in either —
+    // it is already silent, and leaving it alone is what lets re-opening tell them apart. (BEA-1317)
     const stop = didUpdate(reminderUpdates, { status: 'done' });
-    expect(stop).toHaveLength(1);
-    expect(stop[0].where).toMatchObject({ taskId: 't1' });
+    expect(stop.every((c) => c.where?.taskId === 't1')).toBe(true);
+    expect(stop.map((c) => c.where?.status).sort()).toEqual(['active', 'paused']);
+    expect(stop.find((c) => c.where?.status === 'paused')?.where).toMatchObject({ pausedAuto: true });
     expect(sendDeletes.length).toBe(1); // queued sends cleared too
   });
 
@@ -62,7 +66,11 @@ describe('closing a task stops its chase (BEA-1187)', () => {
     await svc.update('t1', { progress: 50 });
     const woken = didUpdate(reminderUpdates, { status: 'active' });
     expect(woken.length).toBeGreaterThan(0);
-    expect(woken.some((c) => c.where?.repeat === 'daily')).toBe(true);
+    // No longer limited to `repeat: 'daily'`. A one-off chase used to stay stopped for ever, so the
+    // job came back open with nobody being asked about it. (BEA-1317)
+    const fromDone = woken.find((c) => c.where?.status === 'done');
+    expect(fromDone).toBeTruthy();
+    expect(fromDone!.where.repeat).toBeUndefined();
   });
 
   it('re-opening also wakes a chase that was paused by a claim (BEA-1293)', async () => {

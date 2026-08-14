@@ -226,6 +226,21 @@ describe('acting on the chase (BEA-1315)', () => {
   });
 });
 
+describe('the two kinds of quiet chase read differently (BEA-1317)', () => {
+  it('one the app paused says they claim it is done', async () => {
+    mount(JOB({ chases: [{ id: 'r1', status: 'paused', repeat: 'daily', times: ['10:00'], createdAt: '2026-08-01T09:00:00Z', pausedAuto: true }] }));
+    expect(await screen.findByText(/they say it.s done/i)).toBeTruthy();
+  });
+
+  it('one HE paused says so, instead of putting words in their mouth', async () => {
+    // Both were captioned "paused — they say it's done". On a chase he switched off himself that is
+    // simply untrue, and it matters more now that his own pause survives the work being finished.
+    mount(JOB({ chases: [{ id: 'r1', status: 'paused', repeat: 'daily', times: ['10:00'], createdAt: '2026-08-01T09:00:00Z', pausedAuto: false }] }));
+    expect(await screen.findByText('paused by you')).toBeTruthy();
+    expect(screen.queryByText(/they say it.s done/i)).toBeNull();
+  });
+});
+
 describe('undoing a handover (BEA-1315)', () => {
   const HANDED = JOB({
     owner: { id: 'deepthi', name: 'Deepthi' },

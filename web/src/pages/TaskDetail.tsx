@@ -51,7 +51,7 @@ type Detail = {
   estimateMin?: number | null;
   reminderCount?: number;
   dueDate?: string | null;
-  chases: { id: string; status: string; repeat: string; times: string[]; subject?: string | null; createdAt: string; contact?: { id: string; name: string } | null }[];
+  chases: { id: string; status: string; repeat: string; times: string[]; subject?: string | null; createdAt: string; pausedAuto?: boolean; contact?: { id: string; name: string } | null }[];
   claims: { id: string; quote: string; status: string; source: string; reason?: string | null; createdAt: string; decidedAt?: string | null; by?: string | null }[];
   handovers: { id: string; from?: string | null; to?: string | null; reason?: string | null; at: string }[];
   days: { day: string; status: string; quote?: string | null; summary?: string | null; by?: string | null }[];
@@ -180,7 +180,9 @@ export function TaskDetail() {
           {t.kind === 'recurring' && <span className="rounded-full bg-indigo-500/10 px-2 py-1 text-indigo-600 dark:text-indigo-400">🔁 daily report</span>}
           {liveChase && (
             <span className={'inline-flex items-center gap-1 rounded-full px-2 py-1 ' + (liveChase.status === 'active' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400')}>
-              <Radio className="h-3 w-3" /> {liveChase.status === 'active' ? `chased at ${liveChase.times.join(', ')}` : 'paused — they say it’s done'}
+              {/* Two different silences, and they had the same caption. Only the app's own pause
+                  means "they say it's done"; his own pause means he decided to stop asking. */}
+              <Radio className="h-3 w-3" /> {liveChase.status === 'active' ? `chased at ${liveChase.times.join(', ')}` : liveChase.pausedAuto === false ? 'paused by you' : 'paused — they say it’s done'}
             </span>
           )}
           {!liveChase && t.status === 'open' && <span className="rounded-full bg-zinc-100 px-2 py-1 text-zinc-500 dark:bg-zinc-800">not being chased</span>}

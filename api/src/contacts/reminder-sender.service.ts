@@ -108,8 +108,21 @@ export class ReminderSenderService implements OnModuleInit {
   }
 
   /** Stop a chase for good and clear anything still queued. */
-  private async stopChase(id: string, why: string) {
-    await this.prisma.reminder.update({ where: { id }, data: { status: 'done' } }).catch(() => undefined);
+  /**
+   * Switch a chase off, and say WHICH KIND of off. (BEA-1317)
+   *
+   * The two are not interchangeable, and this wrote `done` for all of them. `done` means "the app
+   * stopped this because the work ended" — and re-opening the work revives every one of those. So
+   * a chase stopped because the person LEFT THE COMPANY was one done→re-open cycle away from
+   * messaging them again, which is the bug BEA-1307 exists to prevent and the rule
+   * `ContactsService.markLeft` already states in as many words: *"`stopped`, not `done`… `done` is
+   * what the app writes when it decides, and those get offered back for resuming — which is not
+   * what 'they have left' means."*
+   *
+   * `stopped` is the end of the road: nothing revives it by itself.
+   */
+  private async stopChase(id: string, why: string, status: 'done' | 'stopped' = 'done') {
+    await this.prisma.reminder.update({ where: { id }, data: { status } }).catch(() => undefined);
     await this.prisma.reminderSend.deleteMany({ where: { reminderId: id, status: 'queued' } }).catch(() => undefined);
     this.log.log(`chase ${id} stopped — ${why}`);
   }
@@ -141,7 +154,9 @@ export class ReminderSenderService implements OnModuleInit {
       const done = await this.chaseFinished(r);
       if (done) { await this.stopChase(r.id, done); stopped++; continue; }
       const stale2 = await this.claimWentUnreviewed(r, now);
-      if (stale2) { await this.stopChase(r.id, stale2); stopped++; continue; }
+      // Also `stopped`: he let the claim lapse past his own grace period, so restarting it is his
+      // call. It is not work that finished, and must not be revived as though it were. (BEA-1317)
+      if (stale2) { await this.stopChase(r.id, stale2, 'stopped'); stopped++; continue; }
       // Still has a future send queued — mid-lifecycle (just armed, or spilling to a later day).
       // Leave it alone rather than re-arming on top of itself. (BEA-790)
       const pending = await this.prisma.reminderSend.count({ where: { reminderId: r.id, status: 'queued', at: { gt: now } } });
@@ -163,7 +178,7 @@ export class ReminderSenderService implements OnModuleInit {
       const done = await this.chaseFinished(r);
       if (done) { await this.stopChase(r.id, done); stopped++; continue; }
       const unreviewed = await this.claimWentUnreviewed(r, now);
-      if (unreviewed) { await this.stopChase(r.id, unreviewed); stopped++; }
+      if (unreviewed) { await this.stopChase(r.id, unreviewed, 'stopped'); stopped++; }
     }
 
     if (stopped) this.log.log(`stopped ${stopped} chase(s) — finished, or a claim you didn't review`);
@@ -235,7 +250,8 @@ export class ReminderSenderService implements OnModuleInit {
       // most embarrassing thing this system could do. (BEA-1307)
       if ((r.contact as any)?.leftAt) {
         await this.mark(send.id, 'skipped', null, 'they have left');
-        await this.stopChase(r.id, 'they have left');
+        // `stopped`, never `done` — nothing may ever bring this back by itself. (BEA-1307/1317)
+        await this.stopChase(r.id, 'they have left', 'stopped');
         continue;
       }
       // Last line of defence: never chase someone about work that is already finished. The day
