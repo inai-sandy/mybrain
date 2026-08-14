@@ -8,6 +8,8 @@ import { NewsPipelineService } from './news-pipeline.service';
 import { NewsAgentService } from './news-agent.service';
 import { NewsReadService } from './news-read.service';
 import { NewsPublicService } from './news-public.service';
+import { RadarFeedService } from './radar-feed.service';
+import { RadarWriteService } from './radar-write.service';
 import { Public } from '../auth/public.decorator';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 
@@ -23,7 +25,53 @@ export class NewsController {
     private readonly agent: NewsAgentService,
     private readonly read: NewsReadService,
     private readonly pub: NewsPublicService,
+    private readonly radar: RadarFeedService,
+    private readonly radarWrite: RadarWriteService,
   ) {}
+
+  /** Write the picks' "why it matters" lines now instead of waiting for noon. (BEA-1312) */
+  @Post('radar/annotate')
+  radarAnnotate() {
+    return this.radarWrite.annotate();
+  }
+
+  /** The Radar view's list — always English, paginated, filtered. (BEA-1311) */
+  @Get('radar')
+  radarList(
+    @Query('search') search?: string,
+    @Query('category') category?: string,
+    @Query('source') source?: string,
+    @Query('picks') picks?: string,
+    @Query('sort') sort?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.radar.list({
+      search, category, source,
+      picksOnly: picks === '1' || picks === 'true',
+      sort: sort === 'score' ? 'score' : 'time',
+      page: Number(page) || 1,
+      pageSize: Number(pageSize) || 20,
+    });
+  }
+
+  /** Sync state + filter values for the Radar view. (BEA-1311) */
+  @Get('radar/status')
+  radarStatus() {
+    return this.radar.status();
+  }
+
+  /** Per-feed health for the Sources strip. (BEA-1311) */
+  @Get('radar/sources')
+  radarSources() {
+    return this.radar.sourceHealth();
+  }
+
+  /** Sync now instead of waiting for the hourly poll. (BEA-1311) */
+  @Post('radar/sync')
+  radarSync() {
+    return this.radar.sync();
+  }
 
   /** Pull the feed now instead of waiting for the hourly poll. (BEA-1254) */
   @Post('poll')

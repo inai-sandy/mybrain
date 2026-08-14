@@ -88,13 +88,17 @@ describe('a chase does not die at midnight (BEA-1160)', () => {
     const threeDaysAgo = new Date(Date.now() - 3 * 86400000);
     const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["09:00"]', taskId: 't1' }], claimAt: threeDaysAgo, graceDays: '2' });
     await svc.rollDay();
-    expect(updates).toContainEqual({ id: 'r1', status: 'done' });
+    // `stopped`, not `done`. Both stop it; only `done` is brought back to life when the work is
+    // re-opened. He let this claim lapse past his own grace period without answering it, so
+    // restarting is his call — nothing should auto-resume chasing somebody who reported the work
+    // finished and was never told otherwise. (BEA-1317)
+    expect(updates).toContainEqual({ id: 'r1', status: 'stopped' });
   });
 
   it('keeps chasing while a fresh claim is still within his grace period', async () => {
     const { svc, updates } = rollPrisma({ stale: [{ id: 'r1', status: 'active', armedDay: '2000-01-01', times: '["09:00"]', taskId: 't1' }], claimAt: new Date(), graceDays: '2' });
     await svc.rollDay();
-    expect(updates.find((u) => u.status === 'done')).toBeUndefined();
+    expect(updates.find((u) => u.status === 'done' || u.status === 'stopped')).toBeUndefined();
   });
 
   it('"never" means a claim can wait forever without stopping the chase', async () => {

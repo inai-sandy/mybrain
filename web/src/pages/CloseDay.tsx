@@ -552,6 +552,11 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                 const dropped = (t: OpenTask) => carry[t.id] === 'drop';
                 const nDone = Object.values(doneIds).filter(Boolean).length;
 
+                // Deliberately NOT a link through to the job page, unlike every other list.
+                // Nothing on this screen is saved until the close is submitted — the ticks, the
+                // drops and the carried days all live in component state — so navigating away
+                // throws the whole night's review away. Checking one job is not worth losing the
+                // other twenty. (BEA-1310)
                 const row = (t: OpenTask) => (
                   <li key={t.id} className={'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 ' + (dropped(t) ? 'border-rose-300/60 opacity-50 dark:border-rose-500/30' : doneIds[t.id] ? 'border-emerald-400/70 bg-emerald-500/5' : 'border-zinc-200 dark:border-zinc-800')}>
                     <button
