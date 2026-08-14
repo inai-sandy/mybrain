@@ -1,6 +1,11 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { RemindersTab } from './Contacts';
+
+// The chase card links its job through to /tasks/:id, so the tab needs router context to render
+// at all — the same context it always has in the app. (BEA-1310)
+const renderTab = () => render(<RemindersTab />, { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> });
 
 /**
  * BEA-1287 — the /reminders page follows the list standard. Before this, the manage view rendered
@@ -64,7 +69,7 @@ function mockFetch(over: { reminders?: any[]; convos?: any[]; suggestions?: any[
 }
 
 const openManage = async () => {
-  render(<RemindersTab />);
+  renderTab();
   fireEvent.click(await screen.findByRole('button', { name: 'Reminders' }));
 };
 
@@ -156,7 +161,7 @@ describe('the reminders list groups by person (BEA-1291) and keeps the list stan
 
 describe('the chats inbox gets search and chips, and stays an inbox (BEA-1287)', () => {
   it('shows the chips with counts and the total', async () => {
-    render(<RemindersTab />);
+    renderTab();
     await waitFor(() => expect(screen.getByText('Ravi')).toBeTruthy());
     expect(screen.getByText('All · 2')).toBeTruthy();
     expect(screen.getByText('Unread · 1')).toBeTruthy();
@@ -165,7 +170,7 @@ describe('the chats inbox gets search and chips, and stays an inbox (BEA-1287)',
   });
 
   it('search matches the name and the last message', async () => {
-    render(<RemindersTab />);
+    renderTab();
     await waitFor(() => expect(screen.getByText('Ravi')).toBeTruthy());
     fireEvent.change(screen.getByLabelText('Search chats'), { target: { value: 'confirm tomorrow' } });
     expect(screen.getByText('Meena')).toBeTruthy();
@@ -174,7 +179,7 @@ describe('the chats inbox gets search and chips, and stays an inbox (BEA-1287)',
   });
 
   it('the Unread chip narrows to unread chats, and a no-match says so honestly', async () => {
-    render(<RemindersTab />);
+    renderTab();
     await waitFor(() => expect(screen.getByText('Ravi')).toBeTruthy());
     fireEvent.click(screen.getByText('Unread · 1'));
     expect(screen.getByText('Ravi')).toBeTruthy();

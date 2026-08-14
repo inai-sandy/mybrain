@@ -533,6 +533,14 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
       rolloverCount: t.rolloverCount,
       createdAt: t.createdAt,
       completedAt: t.completedAt,
+      // How it ENDED, when it did not end by being finished. (BEA-1306)
+      //
+      // These were added to the table and never to the shape, so every screen received a dropped
+      // task with no trace of when or why — the job page's story simply stopped, with no closing
+      // line at all. Nine months of "not done, because Radha left" existing in the database and
+      // being invisible everywhere.
+      droppedAt: t.droppedAt ?? null,
+      droppedReason: t.droppedReason ?? null,
     };
   }
 
@@ -797,44 +805,62 @@ export class TasksService implements OnModuleInit, OnModuleDestroy {
     });
     if (!t) return null;
 
-    const [allClaims, handovers, days] = await Promise.all([
+    // What was said ABOUT THIS WORK — messages on a chase for this task, and nothing else.
+    //
+    // It used to widen to every message from the person who owns it, which read far worse than it
+    // sounds: the page for "Confirm the payment amount" showed a conversation about placing PCBs for
+    // the Elleys order, under a heading saying "What was said". A section showing the wrong
+    // conversation is worse than one showing none, because it looks like an answer.
+    //
+    // Their whole thread is one tap away instead, clearly labelled as their whole thread.
+    const chaseIds = (t.chases || []).map((c: any) => c.id);
+
+    const [allClaims, handovers, days, msgRows] = await Promise.all([
       // Every claim, not just the one waiting — including ones settled as `moot` when the work was
       // dropped or handed on, which is otherwise invisible anywhere.
       this.prisma.taskClaim
-        .findMany({ where: { taskId: id }, orderBy: { createdAt: 'asc' }, select: { id: true, quote: true, status: true, source: true, reason: true, createdAt: true, decidedAt: true, contact: { select: { id: true, name: true } } } })
+        // Capped like the rest. A handful is normal, but nothing should be able to read unbounded.
+        .findMany({ where: { taskId: id }, orderBy: { createdAt: 'asc' }, take: 50, select: { id: true, quote: true, status: true, source: true, reason: true, createdAt: true, decidedAt: true, contact: { select: { id: true, name: true } } } })
         .catch(() => [] as any[]),
-      Promise.resolve(this.prisma.taskHandover?.findMany?.({ where: { taskId: id }, orderBy: { at: 'asc' } })).catch(() => [] as any[]),
+      Promise.resolve(this.prisma.taskHandover?.findMany?.({ where: { taskId: id }, orderBy: { at: 'asc' }, take: 50 })).catch(() => [] as any[]),
       t.kind === 'recurring'
         ? this.prisma.taskStatusDay
             .findMany({ where: { taskId: id }, orderBy: { day: 'desc' }, take: 60, select: { day: true, status: true, quote: true, summary: true, contactId: true, source: true } })
             .catch(() => [] as any[])
         : Promise.resolve([] as any[]),
+      chaseIds.length
+        ? this.prisma.reminderMessage
+            .findMany({
+              where: { reminderId: { in: chaseIds } },
+              orderBy: { createdAt: 'desc' },
+              // Exactly what the page shows. Fetching 40 to render 8 was pure waste.
+              take: 8,
+              select: { id: true, direction: true, body: true, createdAt: true, status: true, contactId: true },
+            })
+            .catch(() => [] as any[])
+        : Promise.resolve([] as any[]),
     ]);
     const hos: any[] = handovers ?? [];
     const dys: any[] = days ?? [];
+    const messages: any[] = msgRows ?? [];
 
     // Put names on the handover chain. Read separately and tolerantly: those ids deliberately have
     // no foreign key so the history survives a contact being deleted, which means a missing name is
     // a real outcome rather than a bug.
-    const ids = [...new Set([...hos.flatMap((h: any) => [h.fromContactId, h.toContactId]), ...dys.map((d: any) => d.contactId)].filter(Boolean))] as string[];
+    // Message senders belong in here too. They were left out, so every inbound message resolved to
+    // "someone since removed" — invisible today only because the page does not print the sender
+    // yet, and wrong the moment it does. (review finding)
+    const ids = [...new Set([
+      ...hos.flatMap((h: any) => [h.fromContactId, h.toContactId]),
+      ...dys.map((d: any) => d.contactId),
+      ...messages.map((m: any) => m.contactId),
+    ].filter(Boolean))] as string[];
     const names = new Map<string, string>(
       ids.length
         ? ((await this.prisma.contact.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }).catch(() => [] as any[])) as any[]).map((c: any) => [c.id, c.name])
         : [],
     );
     const who = (cid?: string | null) => (cid ? names.get(cid) || 'someone since removed' : null);
-
-    // The conversation ABOUT this work: messages on a chase for this task, plus messages from the
-    // person who owns it. Capped — a long relationship has thousands, and this is a summary.
-    const chaseIds = (t.chases || []).map((c: any) => c.id);
-    const messages: any[] = ((await this.prisma.reminderMessage
-      .findMany({
-        where: { OR: [...(chaseIds.length ? [{ reminderId: { in: chaseIds } }] : []), ...(t.ownerContactId ? [{ contactId: t.ownerContactId }] : [])] },
-        orderBy: { createdAt: 'desc' },
-        take: 40,
-        select: { id: true, direction: true, body: true, createdAt: true, status: true, contactId: true },
-      })
-      .catch(() => [] as any[])) ?? []) as any[];
 
     return {
       ...this.shape(t),
