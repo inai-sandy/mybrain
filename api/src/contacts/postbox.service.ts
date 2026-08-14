@@ -141,4 +141,24 @@ export class PostboxService {
       return { wamid: null, status: 'failed', error: e?.message || 'send failed' };
     }
   }
+
+  /**
+   * A pickable list — one tappable row per choice, each carrying an id. (BEA-1302)
+   *
+   * The row id comes back on the tap, so the answer needs no interpreting. Only deliverable inside
+   * the 24-hour window; Postbox refuses outside it rather than pretending to send, and that refusal
+   * arrives here as `status: 'failed'` with a reason the caller can act on.
+   */
+  async sendList(
+    to: string,
+    msg: { header?: string; body: string; footer?: string; buttonText?: string; rows: { id: string; title: string; description?: string }[] },
+  ) {
+    if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured.' };
+    try {
+      const r = await this.post('/v1/messages/list', { to, ...msg });
+      return { wamid: r?.wamid || null, status: r?.status || 'sent', error: r?.error || null };
+    } catch (e: any) {
+      return { wamid: null, status: 'failed', error: e?.message || 'send failed' };
+    }
+  }
 }
