@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Newspaper, Telescope, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react';
 import { ResearchModal } from '../ui/ResearchModal';
 import { DataTable, Column } from '../ui/DataTable';
 import { ShareButton } from '../ui/ShareButton';
+import { RadarView } from './RadarView';
 
 /**
  * AI News Daily — your own view of an edition (BEA-1260).
@@ -70,12 +71,34 @@ export default function News() {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'today' | 'archive'>('today');
+  // The Radar tab lives in the URL (?view=radar) so back/forward and shares land on the
+  // right view — house rule: view state belongs in the URL, not only in memory.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState<'today' | 'archive' | 'radar'>(searchParams.get('view') === 'radar' ? 'radar' : 'today');
+  useEffect(() => {
+    const fromUrl = searchParams.get('view') === 'radar' ? 'radar' : null;
+    setTab((t) => (fromUrl ? 'radar' : t === 'radar' ? 'today' : t));
+  }, [searchParams]);
+  const selectTab = (t: 'today' | 'archive' | 'radar') => {
+    setTab(t);
+    // Merge, never replace — a future ?param on /news must survive a tab click.
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (t === 'radar') next.set('view', 'radar');
+      else next.delete('view');
+      return next;
+    });
+  };
   const [axis, setAxis] = useState<'category' | 'source'>('category');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [researching, setResearching] = useState<Story | null>(null);
 
+  // Which dayParam the edition effect last completed for — so landing straight on the
+  // Radar tab skips the fetch, and later tab switches load it exactly once.
+  const editionLoadedFor = useRef<string | null>(null);
   useEffect(() => {
+    if (tab === 'radar') return;
+    if (editionLoadedFor.current === (dayParam || 'latest')) return;
     let alive = true;
     setLoading(true);
     setError(null);
@@ -88,6 +111,7 @@ export default function News() {
           target = d?.day || undefined;
         }
         if (!target) {
+          editionLoadedFor.current = dayParam || 'latest';
           if (alive) { setEdition(null); setDay(null); setLoading(false); }
           return;
         }
@@ -95,6 +119,7 @@ export default function News() {
         if (!r.ok) throw new Error('EDITION_FAILED');
         const d = await r.json();
         if (!alive) return;
+        editionLoadedFor.current = dayParam || 'latest'; // errors do NOT mark — a retry stays possible
         setEdition(d);
         setDay(d.day);
         setOpen({}); // a new day starts collapsed, not carrying the last one's expansions
@@ -106,7 +131,7 @@ export default function News() {
       }
     })();
     return () => { alive = false; };
-  }, [dayParam]);
+  }, [dayParam, tab]);
 
   useEffect(() => {
     if (tab !== 'archive' || archive || archiveError) return;
@@ -135,6 +160,17 @@ export default function News() {
     return [...groups.entries()].map(([kind, stories]) => ({ kind, stories }));
   }, [edition]);
 
+  // The Radar tab does not depend on an edition existing — it renders before the
+  // edition's own loading/error/empty returns so it is reachable on day zero too.
+  if (tab === 'radar') {
+    return (
+      <Shell>
+        <TabStrip tab={tab} onSelect={selectTab} />
+        <RadarView />
+      </Shell>
+    );
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) {
@@ -162,21 +198,7 @@ export default function News() {
   return (
     <Shell>
       {/* Tabs */}
-      <div className="mb-4 flex items-center gap-1 border-b border-zinc-200 dark:border-zinc-800">
-        {(['today', 'archive'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={
-              'relative px-3 py-2 text-sm font-medium transition-colors ' +
-              (tab === t ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
-            }
-          >
-            {t === 'today' ? 'The edition' : 'Past editions'}
-            {tab === t && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-indigo-500" />}
-          </button>
-        ))}
-      </div>
+      <TabStrip tab={tab} onSelect={selectTab} />
 
       {tab === 'archive' ? (
         archiveError ? (
@@ -342,6 +364,32 @@ export default function News() {
         />
       )}
     </Shell>
+  );
+}
+
+const TAB_LABEL: Record<'today' | 'archive' | 'radar', string> = {
+  today: 'The edition',
+  archive: 'Past editions',
+  radar: 'Radar',
+};
+
+function TabStrip({ tab, onSelect }: { tab: 'today' | 'archive' | 'radar'; onSelect: (t: 'today' | 'archive' | 'radar') => void }) {
+  return (
+    <div className="mb-4 flex items-center gap-1 border-b border-zinc-200 dark:border-zinc-800">
+      {(['today', 'archive', 'radar'] as const).map((t) => (
+        <button
+          key={t}
+          onClick={() => onSelect(t)}
+          className={
+            'relative px-3 py-2 text-sm font-medium transition-colors ' +
+            (tab === t ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
+          }
+        >
+          {TAB_LABEL[t]}
+          {tab === t && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-indigo-500" />}
+        </button>
+      ))}
+    </div>
   );
 }
 

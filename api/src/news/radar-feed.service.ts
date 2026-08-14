@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
+import { decodeEntities } from './feed-parse';
 
 export type RadarSyncResult = {
   ok: boolean;
@@ -16,6 +17,8 @@ export type RadarSyncResult = {
   pending: number;
   /** Items dropped by the source blocklist. */
   blocked: number;
+  /** Old rows removed — the radar is a rolling window, not an archive. */
+  pruned: number;
   /** Items we could not write down. Never silently zero. */
   failed: number;
   message?: string;
@@ -50,6 +53,12 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
   static readonly POLL_MS = 60 * 60 * 1000;
   /** Politeness cap per sync on the free translate endpoint; the rest stay pending and retry. */
   static readonly TRANSLATE_CAP = 60;
+  /**
+   * Rows unseen for this long are deleted. The radar is a rolling live window (the daily
+   * paper is the archive); without this the table grows forever and quietly drifts away
+   * from what the view's capped fetch can show (review finding, BEA-1313).
+   */
+  static readonly RETENTION_MS = 48 * 60 * 60 * 1000;
 
   private readonly log = new Logger('RadarFeed');
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -128,10 +137,14 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
       .filter(Boolean);
   }
 
-  /** Pick the first candidate that is already fully English. */
+  /**
+   * Pick the first candidate that is already fully English. The radar serves titles with
+   * raw HTML entities in them ("Gemini&#8217;s") — seen in the first real sync — so every
+   * candidate is decoded before it can become a stored title.
+   */
   private englishCandidate(candidates: Array<string | null | undefined>): string | null {
     for (const c of candidates) {
-      const t = String(c || '').trim();
+      const t = decodeEntities(String(c || '')).trim();
       if (t && !CJK_RE.test(t)) return t;
     }
     return null;
@@ -147,7 +160,7 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sync(): Promise<RadarSyncResult> {
-    if (this.syncing) return { ok: false, fetched: 0, stored: 0, known: 0, translated: 0, pending: 0, blocked: 0, failed: 0, message: 'sync already running' };
+    if (this.syncing) return { ok: false, fetched: 0, stored: 0, known: 0, translated: 0, pending: 0, blocked: 0, pruned: 0, failed: 0, message: 'sync already running' };
     this.syncing = true;
     try {
       return await this.doSync();
@@ -157,7 +170,7 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async doSync(): Promise<RadarSyncResult> {
-    const counts: RadarSyncResult = { ok: true, fetched: 0, stored: 0, known: 0, translated: 0, pending: 0, blocked: 0, failed: 0 };
+    const counts: RadarSyncResult = { ok: true, fetched: 0, stored: 0, known: 0, translated: 0, pending: 0, blocked: 0, pruned: 0, failed: 0 };
     const now = new Date();
 
     // latest-24h.json is the sync's backbone — without it we change nothing and say so.
@@ -195,7 +208,7 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
       counts.fetched += 1;
       const source = String(it?.source || it?.site_name || '').trim();
       if (blocklist.includes(source.toLowerCase())) { counts.blocked += 1; continue; }
-      const original = String(it?.title_original || it?.title || '').trim();
+      const original = decodeEntities(String(it?.title_original || it?.title || '')).trim();
       incoming.set(id, {
         id, url, source,
         category: String(it?.ai_label || '').trim(),
@@ -219,7 +232,7 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
       const outlets = (Array.isArray(pick?.sources) ? pick.sources : [])
         .map((s: any) => ({ name: String(s?.source || s?.source_name || s?.site_name || '').trim(), url: String(s?.url || '').trim() }))
         .filter((s: any) => s.url);
-      const original = String(pick?.title || '').trim();
+      const original = decodeEntities(String(pick?.title || '')).trim();
       incoming.set(id, {
         id, url, source,
         category: String(pick?.ai_label || pick?.category || '').trim(),
@@ -339,6 +352,16 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
           this.log.warn(`could not finish translating ${row.id}: ${e?.message || e}`);
         }
       }
+    }
+
+    // Prune the rolling window — only after a successful fetch, so an outage can never
+    // erase the stories we are showing as "stale but real".
+    try {
+      const cutoff = new Date(now.getTime() - RadarFeedService.RETENTION_MS);
+      const gone = await this.prisma.radarItem.deleteMany({ where: { lastSeenAt: { lt: cutoff } } });
+      counts.pruned = Number(gone?.count) || 0;
+    } catch (e: any) {
+      this.log.warn(`prune failed: ${e?.message || e}`);
     }
 
     counts.message = briefError || undefined;

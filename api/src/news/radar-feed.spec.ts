@@ -94,6 +94,17 @@ function makePrisma() {
         }
         return { count };
       },
+      deleteMany: async ({ where }: any) => {
+        let count = 0;
+        for (const [id, row] of [...items.entries()]) {
+          const lt = where?.lastSeenAt?.lt;
+          if (lt && row.lastSeenAt instanceof Date && row.lastSeenAt.getTime() < new Date(lt).getTime()) {
+            items.delete(id);
+            count += 1;
+          }
+        }
+        return { count };
+      },
     },
     radarSync: {
       upsert: async ({ update, create }: any) => {
@@ -199,6 +210,19 @@ describe('an item is never shown untranslated (BEA-1311, spec B4)', () => {
   });
 });
 
+describe('titles are stored as text, not HTML entities (real-data fix, BEA-1313)', () => {
+  it('decodes entities before storing — seen live: "Gemini&#8217;s"', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.files['latest-24h.json'] = {
+      items: [{ id: 'e1', title: 'You can turn off Gemini&#8217;s watermarks &amp; more', url: 'https://a.example/e1', source: 'X', ai_score: 0.5, published_at: '2026-08-14T10:00:00Z' }],
+    };
+    svc.files['daily-brief.json'] = { items: [] };
+    await svc.sync();
+    expect(prisma.items.get('e1').title).toBe('You can turn off Gemini’s watermarks & more');
+  });
+});
+
 describe('sync counters tell the truth about the stored rows (review fix, BEA-1311)', () => {
   it('does not count an already-translated row as pending when a re-sync finds no English', async () => {
     const prisma = makePrisma();
@@ -232,6 +256,30 @@ describe('picks mirror the current daily brief (review fix, BEA-1311)', () => {
     svc.files['daily-brief.json'] = { items: [] };
     await svc.sync();
     expect(prisma.items.get('story-1').isPick).toBe(false);
+  });
+});
+
+describe('the radar is a rolling window (review fix, BEA-1313)', () => {
+  it('prunes rows unseen for 48h, but never during an outage', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    await svc.sync();
+    // Age one row far past retention.
+    prisma.items.get('en-1').lastSeenAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+    // Outage: nothing is pruned — stale stories must survive an unreachable radar.
+    const files = svc.files;
+    svc.files = {};
+    await svc.sync();
+    expect(prisma.items.has('en-1')).toBe(true);
+
+    // Healthy sync that no longer offers en-1: the old row goes, and says so.
+    svc.files = files;
+    svc.files['latest-24h.json'] = { items: LATEST.items.filter((i) => i.id !== 'en-1') };
+    const r = await svc.sync();
+    expect(r.pruned).toBe(1);
+    expect(prisma.items.has('en-1')).toBe(false);
   });
 });
 

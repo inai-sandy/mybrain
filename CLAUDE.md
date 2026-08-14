@@ -61,6 +61,9 @@ The machine backs these rules: tests block on red, files auto-format, dangerous 
 - Tests: `( cd api && npm test )` then `( cd web && npm test )` — the value in `.claude/checks/test-command`.
 - Types: `npx tsc --noEmit` in each of `api/` and `web/`. Do this before shipping; it catches more than the tests.
 
+**AI Radar (BEA-1311→1313)**
+The Radar tab on `/news?view=radar` mirrors an external collector — the fork `inai-sandy/ai-news-radar`, which fetches/dedupes/scores AI news hourly on GitHub Actions and publishes JSON to GitHub Pages (`RADAR_BASE_URL`, default `https://inai-sandy.github.io/ai-news-radar/data`). `RadarFeedService` syncs it hourly into `RadarItem` with counted results and translates any Chinese title at sync (free Google endpoint, `radar-translate` helper fallback) — an item is NEVER listed untranslated (`pendingTranslation` hides it). `RadarWriteService` writes the picks' one-line notes in ONE batched `radar-why` engine call at 12:00 IST (honest-runs: failures leave picks pending). The upstream feed list lives in the fork's `FOLLOW_OPML_B64` repo secret, not in this repo.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 
