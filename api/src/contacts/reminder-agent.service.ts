@@ -8,6 +8,7 @@ import { ClaimsService } from '../tasks/claims.service';
 import { DelegationService } from '../tasks/delegation.service';
 import { replyWithClaimConfirmation, ambiguousDoneReply, withSystemLine, dailyReceivedLine } from './claim-reply';
 import { resolveTap } from './tap-handler';
+import { buildPickList, taskIdFromRow } from './pick-list';
 import { RecurringService } from '../tasks/recurring.service';
 import { isOwedOn, parseSchedule } from '../tasks/schedule';
 import { weekdayOf } from '../common/localday';
@@ -303,7 +304,16 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     //
     // Anything not certain returns null and carries on below exactly as before: a typed message, a
     // button we do not recognise, a reply to something that is not one of our nudges.
-    const tapped = await resolveTap(this.prisma, [...messages].reverse().find((m) => m.direction === 'in'));
+    const latestIn = [...messages].reverse().find((m) => m.direction === 'in');
+
+    // They picked a ROW from a list we sent. (BEA-1302)
+    //
+    // The row carried the task's own id, so this is the least ambiguous message the system can
+    // receive — more certain even than a Done button, which only narrows to a nudge. Handled first.
+    const pickedTaskId = taskIdFromRow(latestIn?.buttonId);
+    if (pickedTaskId && (await this.actOnPick(contactId, name, pickedTaskId))) return;
+
+    const tapped = await resolveTap(this.prisma, latestIn);
     if (tapped && (await this.actOnTap(contactId, name, tapped))) return;
 
     const todayKey = new Date(Date.now() + 330 * 60000).toISOString().slice(0, 10); // IST, for date wording
@@ -620,9 +630,30 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
           ((await Promise.resolve(this.prisma.task?.findMany?.({ where: { id: { in: open.map((o) => o.taskId as string) } }, select: { id: true, title: true } })).catch(() => [])) ?? [])
             .map((t: any) => [t.id, t.title]),
         );
+        const link = (await this.reminders.shareLinkFor?.(contactId).catch(() => null)) || null;
+
+        // One tap instead of typing a number. (BEA-1302)
+        //
+        // Their message opened the 24-hour window, so a list is deliverable right now. If it cannot
+        // be built (two rows would read the same) or cannot be sent (the window shut, Postbox
+        // refused), the numbered text below goes instead — a silent failure here means they are
+        // never asked at all, so the fallback is tested, not assumed.
+        const pick = buildPickList(open.map((it) => ({ id: it.taskId as string, title: titles.get(it.taskId as string) || it.subject })), { name, link });
+        if (pick && number) {
+          const sent = await this.postbox.sendList?.(number, { body: pick.body, buttonText: pick.buttonText, rows: pick.rows }).catch(() => null);
+          if (sent && sent.status !== 'failed') {
+            await this.prisma.reminderMessage
+              .create({ data: { contactId, direction: 'out', body: [pick.body, ...pick.rows.map((r, i) => `${i + 1}. ${r.title}`)].join('\n'), wamid: sent.wamid || null, status: 'sent' } })
+              .catch(() => undefined);
+            this.log.log(`agent: ${name} says done but not which — sent a list of ${pick.rows.length}, claimed nothing`);
+            return;
+          }
+          this.log.warn(`agent: list to ${name} failed (${sent?.error || 'no result'}) — falling back to the numbered text`);
+        }
+
         const ask = ambiguousDoneReply(
           open.map((it) => ({ n: it.n, label: titles.get(it.taskId as string) || it.subject })),
-          await this.reminders.shareLinkFor?.(contactId).catch(() => null),
+          link,
         );
         if (ask) {
           // Normally this REPLACES the model's prose — a generic "thanks!" above a question about
@@ -635,6 +666,11 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
           const alsoNeedsHim = !!parsed.needsSandeep || readUpdate(lastIn, { isReport: true }).reads.includes('needs_you');
           replyText = alsoNeedsHim ? withSystemLine(replyText, ask) : ask;
           parsed.send = true;
+          // This question is now the LAST line of defence — the list could not be built or could not
+          // be sent. Its wording is fixed, so an identical one sent any time in the last 30 messages
+          // would have had it silently swallowed, and the person would never be asked at all. That is
+          // the worst outcome this whole path exists to avoid. (review finding)
+          carriesFact = true;
           this.log.log(`agent: ${name} says done but not which — asked, claimed nothing`);
         }
       }
@@ -701,6 +737,70 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     // NOTE: the agent no longer auto-closes reminders from a chat (BEA-948). These are often ongoing
     // reporting relationships (e.g. daily production updates) that are never really "done" — closing
     // them silenced the conversation. Only the user closes a reminder now, from the app.
+  }
+
+  /**
+   * They picked a row from a list. The most certain message this system can receive. (BEA-1302)
+   *
+   * The row carried the task's own id, so there is nothing to resolve and nothing to interpret.
+   * Returns true when it was handled, false if the row pointed at something that is no longer a
+   * candidate — then the ordinary path takes over rather than leaving them on read.
+   */
+  private async actOnPick(contactId: string, name: string, taskId: string): Promise<boolean> {
+    const task = await this.prisma.task
+      .findUnique({ where: { id: taskId }, select: { id: true, title: true, kind: true, status: true, ownerContactId: true, scheduleDays: true } })
+      .catch(() => null);
+    const number0 = (await this.prisma.contact.findUnique({ where: { id: contactId }, select: { whatsappNumber: true } }).catch(() => null))?.whatsappNumber;
+    const refuse = async (why: string) => {
+      // Say so, rather than letting it fall through to a general reply. Someone who tapped a
+      // specific choice and got back conversational small talk has no idea their choice did not
+      // land — and the row will not resolve as anything else, so nothing downstream would tell
+      // them either. (review finding)
+      this.log.warn(`agent: ${name} picked a row that is no longer valid — ${why}`);
+      const first0 = name.split(/\s+/)[0] || name;
+      if (number0) {
+        const res = await this.postbox.sendText(String(number0).replace(/[^\d]/g, ''), `Thanks ${first0} — that one is not on your list any more. Sandeep may have changed it.`).catch(() => ({}) as any);
+        await this.prisma.reminderMessage
+          .create({ data: { contactId, direction: 'out', body: `Thanks ${first0} — that one is not on your list any more. Sandeep may have changed it.`, wamid: res?.wamid || null, status: 'sent' } })
+          .catch(() => undefined);
+      }
+      return true;
+    };
+    if (!task) return refuse('no such task');
+    // A row id from someone else's list must never touch this person's work. `null` counts as a
+    // mismatch too: an unowned task is not theirs either, and a task unassigned after the list went
+    // out would otherwise sail straight through the guard written to stop exactly that. (review finding)
+    if (task.ownerContactId !== contactId) return refuse('owned by someone else');
+    const number = (await this.prisma.contact.findUnique({ where: { id: contactId }, select: { whatsappNumber: true } }).catch(() => null))?.whatsappNumber;
+    const say = async (text: string) => {
+      if (!text || !number) return;
+      const res = await this.postbox.sendText(String(number).replace(/[^\d]/g, ''), text).catch(() => ({}) as any);
+      await this.prisma.reminderMessage
+        .create({ data: { contactId, direction: 'out', body: text, wamid: res?.wamid || null, status: 'sent' } })
+        .catch(() => undefined);
+    };
+    const first = name.split(/\s+/)[0] || name;
+
+    if (task.status === 'done') {
+      await say(`Thanks ${first} — that one is already closed.`);
+      return true;
+    }
+    if (task.kind === 'recurring') {
+      await this.recurring.markReceived(task.id, this.recurring.today(), 'Picked from the list', contactId, { source: 'whatsapp' }).catch(() => undefined);
+      const rest = ((await Promise.resolve(this.recurring.restDays?.()).catch(() => ['Sun'])) ?? ['Sun']) as string[];
+      const tomorrow = weekdayOf(new Date(new Date(`${this.recurring.today()}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10));
+      const everyDay = !parseSchedule(task.scheduleDays) && !rest.includes(tomorrow);
+      await say(dailyReceivedLine([dailySubject(task.title || '')], everyDay));
+      return true;
+    }
+    const res: any = await this.delegation?.recordClaim?.({ taskId: task.id, contactId, quote: 'Picked from the list', source: 'whatsapp' }).catch(() => null);
+    if (!res?.claimed) {
+      await say(`Thanks ${first} — Sandeep already has that one to check.`);
+      return true;
+    }
+    await say(replyWithClaimConfirmation('', [res.task?.title || task.title]).text);
+    this.log.log(`agent: ${name} picked "${task.title}" from the list — claimed exactly, no model`);
+    return true;
   }
 
   /**
