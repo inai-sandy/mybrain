@@ -84,7 +84,7 @@ export class NewsPublicService {
     }
     const when = new Date(`${e.day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
     return {
-      title: `${e.headline} — AI News Daily`,
+      title: `${e.headline} — AI News Twitter`,
       description: sixty.slice(0, 3).join(' ') || `${when}: ${e.storyCount} stories in AI, in one read.`,
       url: `${origin}/paper/${e.day}`,
       image: `${origin}/og-default.png`,

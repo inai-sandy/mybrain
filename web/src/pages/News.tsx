@@ -7,7 +7,7 @@ import { ShareButton } from '../ui/ShareButton';
 import { RadarView } from './RadarView';
 
 /**
- * AI News Daily — your own view of an edition (BEA-1260).
+ * AI News Twitter (renamed from AI News Daily in BEA-1318) — your own view of an edition (BEA-1260).
  *
  * Complete coverage, layered. Every one of the day's 31–79 stories is in the page from the first
  * render, so nothing can go missing and browser-find works on all of it. What changes is size:
@@ -71,20 +71,23 @@ export default function News() {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // The Radar tab lives in the URL (?view=radar) so back/forward and shares land on the
-  // right view — house rule: view state belongs in the URL, not only in memory.
+  // Which feed is open lives in the URL (BEA-1318): /news = Daily (the radar),
+  // ?view=twitter = the written edition. Legacy ?view=radar links keep landing on Daily.
+  // A DAY url (/news/2026-08-14) is inherently an edition link — every "Read it" link the
+  // pipeline ever wrote points there bare — so it opens the edition unless explicitly told
+  // otherwise (review finding, BEA-1318).
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<'today' | 'archive' | 'radar'>(searchParams.get('view') === 'radar' ? 'radar' : 'today');
-  useEffect(() => {
-    const fromUrl = searchParams.get('view') === 'radar' ? 'radar' : null;
-    setTab((t) => (fromUrl ? 'radar' : t === 'radar' ? 'today' : t));
-  }, [searchParams]);
-  const selectTab = (t: 'today' | 'archive' | 'radar') => {
-    setTab(t);
-    // Merge, never replace — a future ?param on /news must survive a tab click.
+  const urlView = searchParams.get('view');
+  const view: 'daily' | 'twitter' =
+    urlView === 'twitter' ? 'twitter' : urlView === 'radar' ? 'daily' : dayParam ? 'twitter' : 'daily';
+  // Inside the Twitter feed, the archive is a sub-view reached by its "Past editions" link.
+  const [tab, setTab] = useState<'today' | 'archive'>('today');
+  const selectView = (v: 'daily' | 'twitter') => {
+    setTab('today');
+    // Merge, never replace — a future ?param on /news must survive a toggle click.
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (t === 'radar') next.set('view', 'radar');
+      if (v === 'twitter') next.set('view', 'twitter');
       else next.delete('view');
       return next;
     });
@@ -97,7 +100,7 @@ export default function News() {
   // Radar tab skips the fetch, and later tab switches load it exactly once.
   const editionLoadedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (tab === 'radar') return;
+    if (view === 'daily') return;
     if (editionLoadedFor.current === (dayParam || 'latest')) return;
     let alive = true;
     setLoading(true);
@@ -131,7 +134,7 @@ export default function News() {
       }
     })();
     return () => { alive = false; };
-  }, [dayParam, tab]);
+  }, [dayParam, view]);
 
   useEffect(() => {
     if (tab !== 'archive' || archive || archiveError) return;
@@ -160,12 +163,12 @@ export default function News() {
     return [...groups.entries()].map(([kind, stories]) => ({ kind, stories }));
   }, [edition]);
 
-  // The Radar tab does not depend on an edition existing — it renders before the
+  // Daily (the radar) does not depend on an edition existing — it renders before the
   // edition's own loading/error/empty returns so it is reachable on day zero too.
-  if (tab === 'radar') {
+  if (view === 'daily') {
     return (
       <Shell>
-        <TabStrip tab={tab} onSelect={selectTab} />
+        <ViewToggle view={view} onSelect={selectView} />
         <RadarView />
       </Shell>
     );
@@ -176,6 +179,7 @@ export default function News() {
   if (error) {
     return (
       <Shell>
+        <ViewToggle view={view} onSelect={selectView} />
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>
       </Shell>
     );
@@ -184,11 +188,12 @@ export default function News() {
   if (!edition) {
     return (
       <Shell>
+        <ViewToggle view={view} onSelect={selectView} />
         <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center dark:border-zinc-800 dark:bg-zinc-900">
           <Newspaper size={30} className="mx-auto mb-3 text-zinc-300 dark:text-zinc-600" />
           <p className="font-semibold">No edition yet</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
-            AI News Daily writes one every day at noon. The first one will appear here as soon as it runs.
+            AI News Twitter writes one every day at noon. The first one will appear here as soon as it runs.
           </p>
         </div>
       </Shell>
@@ -197,8 +202,16 @@ export default function News() {
 
   return (
     <Shell>
-      {/* Tabs */}
-      <TabStrip tab={tab} onSelect={selectTab} />
+      <ViewToggle view={view} onSelect={selectView} />
+
+      {/* Interim archive entry point — moves into the hero with the BEA-1319 redesign. */}
+      <div className="mb-3 flex justify-end">
+        {tab === 'archive' ? (
+          <button onClick={() => setTab('today')} className="text-xs font-semibold text-indigo-500 hover:text-indigo-400">‹ Back to the edition</button>
+        ) : (
+          <button onClick={() => setTab('archive')} className="text-xs font-semibold text-indigo-500 hover:text-indigo-400">Past editions ›</button>
+        )}
+      </div>
 
       {tab === 'archive' ? (
         archiveError ? (
@@ -209,13 +222,14 @@ export default function News() {
             </button>
           </div>
         ) : (
-          <ArchiveList rows={archive} onOpen={(d) => { navigate(`/news/${d}`); setTab('today'); }} />
+          // Keep ?view=twitter — without it the day URL would land on the Daily feed and hide the edition.
+          <ArchiveList rows={archive} onOpen={(d) => { navigate(`/news/${d}?view=twitter`); setTab('today'); }} />
         )
       ) : (
         <>
           {/* Masthead */}
           <header className="mb-5 border-y-2 border-zinc-900 py-4 text-center dark:border-zinc-100">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-500">A I &nbsp; N E W S &nbsp; D A I L Y</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-500">A I &nbsp; N E W S &nbsp; T W I T T E R</p>
             <h1 className="mx-auto mt-2 max-w-2xl text-balance text-xl font-bold leading-snug sm:text-2xl">{edition.headline}</h1>
             <p className="mt-2 text-xs text-zinc-500">
               {longDate(edition.day)} · Issue No. {edition.number} · {edition.storyCount} {edition.storyCount === 1 ? 'story' : 'stories'}
@@ -228,7 +242,7 @@ export default function News() {
             <div className="mt-3 flex items-center justify-center gap-2">
               <ShareButton
                 url={`/paper/${edition.day}`}
-                title={`AI News Daily — ${edition.headline}`}
+                title={`AI News Twitter — ${edition.headline}`}
                 text={edition.sixty[0]}
                 label="Share this edition"
               />
@@ -367,28 +381,25 @@ export default function News() {
   );
 }
 
-const TAB_LABEL: Record<'today' | 'archive' | 'radar', string> = {
-  today: 'The edition',
-  archive: 'Past editions',
-  radar: 'Radar',
-};
-
-function TabStrip({ tab, onSelect }: { tab: 'today' | 'archive' | 'radar'; onSelect: (t: 'today' | 'archive' | 'radar') => void }) {
+/** The mockup's segmented toggle: Daily = the radar feed, Twitter = the written edition. */
+function ViewToggle({ view, onSelect }: { view: 'daily' | 'twitter'; onSelect: (v: 'daily' | 'twitter') => void }) {
   return (
-    <div className="mb-4 flex items-center gap-1 border-b border-zinc-200 dark:border-zinc-800">
-      {(['today', 'archive', 'radar'] as const).map((t) => (
-        <button
-          key={t}
-          onClick={() => onSelect(t)}
-          className={
-            'relative px-3 py-2 text-sm font-medium transition-colors ' +
-            (tab === t ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
-          }
-        >
-          {TAB_LABEL[t]}
-          {tab === t && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-indigo-500" />}
-        </button>
-      ))}
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h1 className="text-base font-bold">News</h1>
+      <div className="flex rounded-[10px] border border-zinc-200 bg-white p-[3px] text-[12.5px] dark:border-zinc-800 dark:bg-zinc-900">
+        {(['daily', 'twitter'] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => onSelect(v)}
+            className={
+              'rounded-lg px-4 py-[5px] transition-colors ' +
+              (view === v ? 'bg-indigo-500 font-semibold text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
+            }
+          >
+            {v === 'daily' ? 'Daily' : 'Twitter'}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

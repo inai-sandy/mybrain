@@ -85,7 +85,7 @@ export class NewsPipelineService {
 
     const ed = await this.write.publishEdition(issue.id);
     const lines = [
-      `Wrote AI News Daily No. ${ed.number} for ${ed.day}.`,
+      `Wrote AI News Twitter No. ${ed.number} for ${ed.day}.`,
       `${ed.storyCount} stories, all of them in the edition.`,
       // The edition IS a page, not a file. Without this line a run finishes with nothing to open
       // and the owner is left hunting for an output that was never going to be a document.
@@ -129,7 +129,7 @@ export class NewsPipelineService {
     if (ed) {
       out.push(
         [
-          `**AI News Daily No. ${ed.number} — ${ed.day}**`,
+          `**AI News Twitter No. ${ed.number} — ${ed.day}**`,
           ``,
           `${ed.headline}`,
           ``,

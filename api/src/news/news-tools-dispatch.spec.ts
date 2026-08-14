@@ -29,7 +29,7 @@ describe('the news tools run real code (BEA-1259)', () => {
     const calls: string[] = [];
     const news = {
       collect: async () => { calls.push('collect'); return 'Stories found: 40'; },
-      writeToday: async () => { calls.push('write'); return 'Wrote AI News Daily No. 3'; },
+      writeToday: async () => { calls.push('write'); return 'Wrote AI News Twitter No. 3'; },
       flagToday: async () => { calls.push('flag'); return '3 of 40 look worth digging into'; },
     };
     const r: any = runner(news);

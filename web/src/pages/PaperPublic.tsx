@@ -83,7 +83,7 @@ export default function PaperPublic() {
         if (!alive) return;
         setEdition(d);
         setState('ready');
-        document.title = `${d.headline} — AI News Daily`;
+        document.title = `${d.headline} — AI News Twitter`;
       } catch {
         if (alive) setState('error');
       }
@@ -114,7 +114,7 @@ export default function PaperPublic() {
     return (
       <Frame>
         <div className="pt-16 text-center">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-400">A I &nbsp; N E W S &nbsp; D A I L Y</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-400">A I &nbsp; N E W S &nbsp; T W I T T E R</p>
           <h1 className="mt-4 text-xl font-bold">{state === 'missing' ? 'No paper for that day' : 'The paper could not be loaded'}</h1>
           <p className="mx-auto mt-2 max-w-sm text-sm text-zinc-500">
             {state === 'missing'
@@ -132,14 +132,14 @@ export default function PaperPublic() {
   return (
     <Frame>
       <header className="border-y-2 border-zinc-900 py-5 text-center dark:border-zinc-100">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-500">A I &nbsp; N E W S &nbsp; D A I L Y</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-500">A I &nbsp; N E W S &nbsp; T W I T T E R</p>
         <p className="mt-1 text-[11px] text-zinc-400">{longDate(edition.day)} &nbsp;·&nbsp; Issue No. {edition.number}</p>
         <h1 className="mx-auto mt-3 max-w-2xl text-balance text-2xl font-bold leading-snug sm:text-3xl">{edition.headline}</h1>
         <p className="mt-3 text-xs text-zinc-400">
           {edition.storyCount} {edition.storyCount === 1 ? 'story' : 'stories'} · about a {Math.max(2, Math.round(edition.storyCount / 8))} minute read
         </p>
         <div className="mt-3 flex justify-center">
-          <ShareButton url={`/paper/${edition.day}`} title={`AI News Daily — ${edition.headline}`} text={edition.sixty[0]} />
+          <ShareButton url={`/paper/${edition.day}`} title={`AI News Twitter — ${edition.headline}`} text={edition.sixty[0]} />
         </div>
       </header>
 
