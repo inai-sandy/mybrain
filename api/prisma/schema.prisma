@@ -432,6 +432,8 @@ model Task {
   people        TaskPerson[]
   /// The chases running on this task. (BEA-1021)
   chases        Reminder[]
+  /// Every time this work changed hands. (BEA-1308)
+  handovers     TaskHandover[]
   /// Times someone said this was finished. A claim is NOT done — the owner confirms. (BEA-1024)
   claims        TaskClaim[]
   /// For a recurring task: one row per day, did today's status arrive? (BEA-1117)
@@ -478,6 +480,27 @@ model Task {
 
   @@index([ownerContactId])
   @@index([briefingId])
+}
+
+/// One handover of a piece of work from one person to another. (BEA-1308)
+///
+/// A job used to belong to whoever it started with, for ever — which is why, when Radha left, her
+/// open work had nowhere to go and the only options were to pretend it was finished or delete it.
+///
+/// Kept as its own row rather than a "previous owner" column so the whole chain survives: work that
+/// passes through three people remembers all three. It is also the first piece of real history on a
+/// task, which the app has never had.
+model TaskHandover {
+  id            String   @id @default(uuid())
+  taskId        String
+  task          Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  /// Null when the work was the owner's own before it was given to somebody.
+  fromContactId String?
+  toContactId   String
+  reason        String?
+  at            DateTime @default(now())
+
+  @@index([taskId])
 }
 
 /// Did a recurring task's status arrive on a given day? One row per task per local day (IST).

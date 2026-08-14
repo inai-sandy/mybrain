@@ -220,9 +220,25 @@ export class RecurringService implements OnModuleInit {
     const owed = (tasks as any[]).filter((t) => isOwedOn(t.scheduleDays, weekday, rest));
     if (!owed.length) { await markClosed(); return null; } // nothing was due — nothing can be missed
 
+    // Work that changed hands TODAY is not missed by anybody. (BEA-1308)
+    //
+    // The miss summary reads the owner at close time, so a report handed over this morning would
+    // name the NEW person for a day that was mostly not theirs — and, before the handover started a
+    // chase for them, for a day they were never once asked about. Nobody is blamed for a disrupted
+    // day; tomorrow is theirs properly.
+    const dayStart = new Date(`${day}T00:00:00.000Z`);
+    const movedToday = new Set<string>(
+      (
+        ((await Promise.resolve(
+          this.prisma.taskHandover?.findMany?.({ where: { taskId: { in: owed.map((t: any) => t.id) }, at: { gte: dayStart } }, select: { taskId: true } }),
+        ).catch(() => [])) ?? []) as any[]
+      ).map((h: any) => h.taskId),
+    );
+
     const missed: { title: string; contact: string | null }[] = [];
     for (const t of owed) {
       if (await this.isReceived(t.id, day)) continue;
+      if (movedToday.has(t.id)) continue;
       const fresh = await this.markMissed(t.id, day);
       if (fresh) missed.push({ title: t.title, contact: t.ownerContact?.name || null });
     }

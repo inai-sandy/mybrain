@@ -7,6 +7,7 @@ import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TaskFormModal, TaskCard, type Task } from './taskShared';
 import { isOpen, tickMeans } from '../ui/taskStatus';
+import { HandOverSheet } from '../ui/HandOverSheet';
 
 type Row = Task & {
   who: string;
@@ -30,6 +31,8 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<Row | null>(null);
   const [dropFor, setDropFor] = useState<Row | null>(null);
+  const [handOver, setHandOver] = useState<Row | null>(null);
+  const [undoFor, setUndoFor] = useState<{ id: string; to: string } | null>(null);
   const [q, setQ] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [person, setPerson] = useState('');
@@ -91,6 +94,15 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
    * were not hers. Marking them done would have counted them as her achievements; deleting them
    * would have destroyed the record.
    */
+  /** Give it straight back. The undo the sheet promises. (BEA-1308) */
+  async function undoHandOver(taskId: string) {
+    setUndoFor(null);
+    const res = await fetch(`/api/tasks/${taskId}/hand-back`, { method: 'POST' });
+    const d = await res.json().catch(() => ({}));
+    toast(res.ok ? 'success' : 'error', res.ok ? `Given back to ${d.to || 'you'}` : d?.message || 'Could not undo it');
+    load();
+  }
+
   async function drop(r: Row) {
     const res = await fetch(`/api/tasks/${r.id}/drop`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'not doing this' }),
@@ -156,7 +168,15 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
       ) : (
         <div className="space-y-2.5">
           {filtered.slice(0, shown).map((r) => (
-            <TaskCard key={r.id} t={r} onToggle={toggle} onEdit={(t) => setEditing(t)} onDelete={(t) => setConfirm(t as Row)} onDrop={(t) => setDropFor(t as Row)} />
+            <TaskCard
+              key={r.id}
+              t={r}
+              onToggle={toggle}
+              onEdit={(t) => setEditing(t)}
+              onDelete={(t) => setConfirm(t as Row)}
+              onDrop={(t) => setDropFor(t as Row)}
+              extraAction={isOpen(r) ? { label: 'Hand over', onClick: () => setHandOver(r) } : undefined}
+            />
           ))}
           {filtered.length > shown && (
             <button onClick={() => setShown((n) => n + 12)} className="w-full rounded-xl border border-dashed border-zinc-300 py-2 text-sm text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700">
@@ -181,6 +201,28 @@ export function DelegatedTab({ onCountChange }: { onCountChange?: (open: number)
           confirmLabel="Remove"
           onConfirm={() => remove(confirm)}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+      {handOver && (
+        <HandOverSheet
+          task={{ id: handOver.id, title: handOver.title, who: handOver.who }}
+          onClose={() => setHandOver(null)}
+          onDone={(res) => {
+            setHandOver(null);
+            // "You can undo this" has to be reachable, not just true in principle. Offered right
+            // here, while it is still the thing he just did. (BEA-1308)
+            if (res?.to) setUndoFor({ id: handOver.id, to: res.to });
+            load();
+          }}
+        />
+      )}
+      {undoFor && (
+        <ConfirmDialog
+          title="Undo that handover?"
+          message={`"${undoFor.to}" gives it back, and their chase stops. Whoever had it before does not start being chased again automatically — set that up if you want it.`}
+          confirmLabel="Undo it"
+          onConfirm={() => undoHandOver(undoFor.id)}
+          onCancel={() => setUndoFor(null)}
         />
       )}
       {dropFor && (
