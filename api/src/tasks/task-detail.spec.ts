@@ -185,6 +185,19 @@ describe('the whole picture of one job (BEA-1310)', () => {
     expect((await (s as any).detail('t1')).messages[0].by).toBeNull();
   });
 
+  it('carries every field the edit form posts back, so editing cannot blank them', async () => {
+    // The job page opens the SAME edit modal as the task board, and that form reads these off the
+    // task it is handed and posts all of them back. `ownerContactId` is the dangerous one: if this
+    // payload stopped carrying it, the form would read null and save null — quietly unassigning the
+    // job from whoever is doing it, just for fixing a typo in the title. (BEA-1315)
+    const { svc: s } = svc();
+    const d: any = await (s as any).detail('t1');
+    for (const f of ['ownerContactId', 'category', 'tags', 'priority', 'sphere', 'pinned', 'estimateMin', 'reminderCount', 'kind', 'dueDate', 'note']) {
+      expect({ field: f, present: f in d }).toEqual({ field: f, present: true });
+    }
+    expect(d.ownerContactId).toBe('deepthi');
+  });
+
   it('a job that is gone returns nothing rather than half a page', async () => {
     const { svc: s } = svc({ task: null });
     expect(await (s as any).detail('gone')).toBeNull();
