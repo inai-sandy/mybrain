@@ -151,6 +151,25 @@ export default function News() {
       .catch(() => setArchiveError('The archive could not be loaded. Check your connection and try again.'));
   }, [tab, archive, archiveError]);
 
+  // Rail index → scroll to that section's card. Sections only exist on the category
+  // axis, so reading by source switches back first; the scroll then fires from an
+  // effect AFTER the category cards have actually committed — a fixed delay could
+  // fire before the anchor exists and silently do nothing.
+  const pendingJump = useRef<string | null>(null);
+  const jumpToSection = (category: string) => {
+    if (axis !== 'category') {
+      pendingJump.current = category;
+      setAxis('category');
+    } else {
+      document.getElementById(`sec-${category}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+  useEffect(() => {
+    if (axis !== 'category' || !pendingJump.current) return;
+    document.getElementById(`sec-${pendingJump.current}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    pendingJump.current = null;
+  }, [axis]);
+
   const bySource = useMemo(() => {
     if (!edition) return [];
     const groups = new Map<string, Story[]>();
@@ -204,14 +223,11 @@ export default function News() {
     <Shell>
       <ViewToggle view={view} onSelect={selectView} />
 
-      {/* Interim archive entry point — moves into the hero with the BEA-1319 redesign. */}
-      <div className="mb-3 flex justify-end">
-        {tab === 'archive' ? (
+      {tab === 'archive' && (
+        <div className="mb-3">
           <button onClick={() => setTab('today')} className="text-xs font-semibold text-indigo-500 hover:text-indigo-400">‹ Back to the edition</button>
-        ) : (
-          <button onClick={() => setTab('archive')} className="text-xs font-semibold text-indigo-500 hover:text-indigo-400">Past editions ›</button>
-        )}
-      </div>
+        </div>
+      )}
 
       {tab === 'archive' ? (
         archiveError ? (
@@ -227,19 +243,27 @@ export default function News() {
         )
       ) : (
         <>
-          {/* Masthead */}
-          <header className="mb-5 border-y-2 border-zinc-900 py-4 text-center dark:border-zinc-100">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-zinc-500">A I &nbsp; N E W S &nbsp; T W I T T E R</p>
-            <h1 className="mx-auto mt-2 max-w-2xl text-balance text-xl font-bold leading-snug sm:text-2xl">{edition.headline}</h1>
-            <p className="mt-2 text-xs text-zinc-500">
-              {longDate(edition.day)} · Issue No. {edition.number} · {edition.storyCount} {edition.storyCount === 1 ? 'story' : 'stories'}
-              {edition.complete ? ' · all shown' : ` · showing ${edition.shown}`}
-            </p>
+          {/* The hero card (BEA-1319) — replaces the old newspaper masthead. */}
+          <header className="mb-4 rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-white to-white p-5 dark:border-indigo-900/50 dark:from-indigo-950/40 dark:via-zinc-900 dark:to-zinc-900">
+            <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-indigo-500 dark:text-indigo-300">A I &nbsp; N E W S &nbsp; T W I T T E R</p>
+            <h1 className="mt-2 max-w-3xl text-balance text-xl font-bold leading-snug sm:text-[22px]">{edition.headline}</h1>
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+              <span>{longDate(edition.day)}</span>
+              <span>Issue <b className="font-semibold text-zinc-700 dark:text-zinc-200">No. {edition.number}</b></span>
+              <span>
+                <b className="font-semibold text-zinc-700 dark:text-zinc-200">{edition.storyCount}</b> {edition.storyCount === 1 ? 'story' : 'stories'}
+                {edition.complete ? ' · all shown' : ` · showing ${edition.shown}`}
+              </span>
+              <button onClick={() => setTab('archive')} className="ml-auto whitespace-nowrap text-xs font-semibold text-indigo-500 hover:text-indigo-400">
+                Past editions ›
+              </button>
+            </div>
             {/*
               Shares the PUBLIC /paper link, not this private /news one. Sending someone the page
-              you are standing on would hand them a login screen.
+              you are standing on would hand them a login screen. On large screens the Share card
+              lives in the right rail instead, so this row hides itself there.
             */}
-            <div className="mt-3 flex items-center justify-center gap-2">
+            <div className="mt-3 flex items-center gap-2 lg:hidden">
               <ShareButton
                 url={`/paper/${edition.day}`}
                 title={`AI News Twitter — ${edition.headline}`}
@@ -256,6 +280,10 @@ export default function News() {
               </a>
             </div>
           </header>
+
+          {/* Desktop reads in two columns (BEA-1319): the paper, and a slim rail beside it. */}
+          <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_250px] lg:items-start lg:gap-5">
+          <div className="min-w-0">
 
           {!edition.engineOk && (
             <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
@@ -366,6 +394,45 @@ export default function News() {
               </a>
             </p>
           )}
+
+          </div>
+
+          {/* The rail — index of the issue plus the share card, desktop only. */}
+          <aside className="hidden lg:block">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">In this issue</p>
+              {edition.sections.map((sec) => (
+                <button
+                  key={sec.category}
+                  onClick={() => jumpToSection(sec.category)}
+                  className="flex w-full items-center justify-between border-b border-zinc-100 py-1.5 text-left text-[12.5px] last:border-b-0 dark:border-zinc-800"
+                >
+                  <span className="font-semibold text-zinc-700 hover:text-indigo-500 dark:text-zinc-200">{sec.category}</span>
+                  <span className="text-zinc-400">{sec.storyCount}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">Share</p>
+              <div className="flex flex-col items-start gap-2">
+                <ShareButton
+                  url={`/paper/${edition.day}`}
+                  title={`AI News Twitter — ${edition.headline}`}
+                  text={edition.sixty[0]}
+                  label="Share this edition"
+                />
+                <a
+                  href={`/paper/${edition.day}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-zinc-400 underline decoration-dotted underline-offset-2 hover:text-indigo-500"
+                >
+                  see the public version
+                </a>
+              </div>
+            </div>
+          </aside>
+          </div>
         </>
       )}
 
@@ -430,10 +497,10 @@ function SectionCard({
   const head = section.stories.slice(0, SHOWN_PER_SECTION);
   const rest = section.stories.slice(SHOWN_PER_SECTION);
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-5">
+    <section id={`sec-${section.category}`} className="scroll-mt-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-5">
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-zinc-900 dark:text-zinc-100">{section.category}</h2>
-        <span className="shrink-0 text-xs text-zinc-400">{section.storyCount}</span>
+        <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500 dark:text-zinc-400">{section.category}</h2>
+        <span className="shrink-0 text-xs text-zinc-400">{section.storyCount} {section.storyCount === 1 ? 'story' : 'stories'}</span>
       </div>
       {section.line && <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-300">{section.line}</p>}
 
@@ -465,7 +532,7 @@ function SectionCard({
         <div className={'grid transition-[grid-template-rows] duration-200 ' + (expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
           <ul className="min-h-0 space-y-2 overflow-hidden" aria-hidden={!expanded}>
             {rest.map((s) => (
-              <li key={s.id} className="pt-2 first:pt-2">
+              <li key={s.id}>
                 <StoryRow story={s} onResearch={onResearch} bare />
               </li>
             ))}
@@ -476,7 +543,7 @@ function SectionCard({
       {rest.length > 0 && (
         <button onClick={onToggle} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400">
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          {expanded ? 'Show fewer' : `${rest.length} more in ${section.category}`}
+          {expanded ? 'Show fewer' : `${rest.length} more ${rest.length === 1 ? 'story' : 'stories'}`}
         </button>
       )}
     </section>
@@ -488,9 +555,11 @@ function StoryRow({ story, onResearch, bare = false }: { story: Story; onResearc
   // by the caller. Nesting an <li> inside an <li> would be invalid markup.
   const Tag: any = bare ? 'div' : 'li';
   return (
-    <Tag className="group rounded-xl border border-zinc-100 p-3 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700">
-      <p className="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{headlineOf(story)}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+    <Tag className="group flex items-start gap-2.5 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
+      <span className="mt-[7px] h-[5px] w-[5px] flex-none rounded-full bg-indigo-500" aria-hidden />
+      <div className="min-w-0 flex-1">
+      <p className="text-[13px] font-semibold leading-snug text-zinc-800 dark:text-zinc-200">{headlineOf(story)}</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
         <span>{SOURCE_LABEL[story.sourceKind] || story.sourceKind}</span>
         {story.links.slice(0, 3).map((l, i) => (
           <a key={i} href={l} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-indigo-500">
@@ -505,6 +574,7 @@ function StoryRow({ story, onResearch, bare = false }: { story: Story; onResearc
         >
           <Telescope size={13} />
         </button>
+      </div>
       </div>
     </Tag>
   );
