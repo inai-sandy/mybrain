@@ -147,7 +147,167 @@ export class TaskHealthService {
       where: 'Tasks → Delegated',
     });
 
+    // A broken check must never look like a healthy app. (BEA-1298)
+    //
+    // The notifier does `check().catch(() => [])`, so anything thrown here becomes an empty list and
+    // the owner is told "all clear" on a night when nothing was actually checked. Silence is this
+    // feature's entire signal, so it has to be earned — a failure is reported AS a finding.
+    try {
+      for (const f of await this.agreementChecks(titles)) add(f);
+    } catch (e: any) {
+      this.log.error(`agreement checks could not run: ${e?.message ?? e}`);
+      out.push({
+        key: 'health-check-broken',
+        what: 'I could not finish checking — treat tonight\'s silence as unknown, not healthy',
+        count: 1,
+        examples: [String(e?.message ?? e).slice(0, 120)],
+        where: 'Tell Claude',
+      });
+    }
+
     return out;
+  }
+
+  /**
+   * Does the app still agree with itself about delegated work? (BEA-1298)
+   *
+   * Where things stand is worked out from several separate columns — the task's status, the chase's
+   * status, whether a claim is waiting, whether the owner was flagged. They are meant to move
+   * together, and BEA-1296 made every change go through one door so that they do.
+   *
+   * Run against live data on 2026-08-14, ten of these came back clean and one had a single harmless
+   * leftover. That is the point: the owner and I dropped a planned rebuild because the evidence did
+   * not support it, and kept this instead. It is a fraction of the work and it says, every night,
+   * whether that decision still holds.
+   *
+   * Every check is a contradiction — a state the app should not be able to reach — never a matter
+   * of taste. A check that fires on something merely unusual would turn the whole report into noise,
+   * and noise gets ignored, which is worse than not having it.
+   */
+  private async agreementChecks(titles: (rows: any[], pick: (r: any) => string) => string[]): Promise<HealthFinding[]> {
+    const found: HealthFinding[] = [];
+    const push = (f: HealthFinding) => { if (f.count > 0) found.push(f); };
+    // Name the WORK, not the nudge. A chase's `subject` is a short topic written for a WhatsApp
+    // sentence ("the videos"); the task title is the thing the owner would recognise in his own
+    // list ("Add all videos to the Beacon Hub"). Prefer it wherever both exist.
+    const who = (r: any) => `${r.contact?.name || r.ownerContact?.name || 'someone'}: ${r.task?.title || r.title || r.subject || ''}`;
+
+    // They said it is finished and it is sitting in the review list — so the chase should be quiet.
+    // Being chased about work you have already reported finished is what loses people. (BEA-1293)
+    const chasingClaimed = await this.q(() => this.prisma.reminder.findMany({
+      where: { status: 'active', task: { claims: { some: { status: 'pending' } } } },
+      select: { subject: true, contact: { select: { name: true } }, task: { select: { title: true } } },
+      take: 50,
+    }));
+    push({
+      key: 'chasing-claimed-work',
+      what: 'still chasing someone about work they have already reported finished',
+      count: chasingClaimed.length,
+      examples: titles(chasingClaimed, who),
+      where: 'Tasks → Needs you',
+    });
+
+    // A chase the APP switched off while the work is still open and nobody claimed it. `stopped` is
+    // the owner's own hand and is left alone; `done` means the app decided, and the reasons it may
+    // decide are: the task finished, or a claim went unreviewed. Neither holds here.
+    const silentlyOff = await this.q(async () => {
+      const rows = await this.prisma.reminder.findMany({
+        where: { status: 'done', taskId: { not: null }, task: { status: { not: 'done' }, claims: { none: { status: 'pending' } } } },
+        select: { taskId: true, subject: true, contact: { select: { name: true } }, task: { select: { title: true } } },
+        take: 50,
+      });
+      // A sibling chase still running means the work is covered — this row is a merged duplicate.
+      const live = await this.prisma.reminder.findMany({
+        where: { taskId: { in: rows.map((r: any) => r.taskId as string) }, status: { in: ['active', 'paused'] } },
+        select: { taskId: true },
+      });
+      const covered = new Set(live.map((r: any) => r.taskId));
+      return rows.filter((r: any) => !covered.has(r.taskId));
+    });
+    push({
+      key: 'chase-silently-off',
+      what: 'work still open, nobody said it was done, and the chase switched itself off',
+      count: silentlyOff.length,
+      examples: titles(silentlyOff, who),
+      where: 'Tasks → Delegated',
+    });
+
+    // Confirming a claim IS the completion. A confirmed claim over an open task means the two halves
+    // came apart — the review list looks settled while the work is still counted as owed.
+    const confirmedButOpen = await this.q(() => this.prisma.task.findMany({
+      where: { status: { not: 'done' }, claims: { some: { status: 'confirmed' } } },
+      select: { title: true, ownerContact: { select: { name: true } } },
+      take: 50,
+    }));
+    push({
+      key: 'confirmed-but-open',
+      what: 'you confirmed the work was finished but the task never closed',
+      count: confirmedButOpen.length,
+      examples: titles(confirmedButOpen, who),
+      where: 'Tasks → Delegated',
+    });
+
+    // A badge asking for the owner's attention on work that is over. This is the one that fired on
+    // live data: a merged duplicate row kept its flag after the chase was stopped. (BEA-1297)
+    const staleNeedsYou = await this.q(() => this.prisma.reminder.findMany({
+      where: { needsOwner: true, OR: [{ status: { in: ['done', 'stopped'] } }, { task: { status: 'done' } }] },
+      select: { subject: true, contact: { select: { name: true } }, task: { select: { title: true } } },
+      take: 50,
+    }));
+    push({
+      key: 'needs-you-on-finished-work',
+      what: '"needs you" flags sitting on work that is already over',
+      count: staleNeedsYou.length,
+      examples: titles(staleNeedsYou, who),
+      where: 'Contacts',
+    });
+
+    // A standing report can never be finished — closing one kills its chase for good and tomorrow's
+    // update is never asked for again. (BEA-1118)
+    const recurringDone = await this.q(() => this.prisma.task.findMany({
+      where: { kind: 'recurring', status: 'done' },
+      select: { title: true, ownerContact: { select: { name: true } } },
+      take: 50,
+    }));
+    push({
+      key: 'recurring-marked-done',
+      what: 'standing daily reports closed for good — they will never be asked for again',
+      count: recurringDone.length,
+      examples: titles(recurringDone, who),
+      where: 'Tasks → Daily',
+    });
+
+    // …and for the same reason one can never be waiting on a yes/no decision.
+    const recurringInReview = await this.q(() => this.prisma.taskClaim.findMany({
+      where: { status: 'pending', task: { kind: 'recurring' } },
+      select: { task: { select: { title: true, ownerContact: { select: { name: true } } } } },
+      take: 50,
+    }));
+    push({
+      key: 'recurring-in-review',
+      what: 'daily reports sitting in your review list, which can never be answered',
+      count: recurringInReview.length,
+      examples: titles(recurringInReview, (r) => `${r.task?.ownerContact?.name || 'someone'}: ${r.task?.title || ''}`),
+      where: 'Tasks → Needs you',
+    });
+
+    // Messages still on the board for a chase that is off. The sender refuses to send them, so they
+    // are harmless in themselves — but they mean a stop did not clean up after itself, and the next
+    // one might not either.
+    const orphanQueued = await this.q(() => this.prisma.reminderSend.findMany({
+      where: { status: 'queued', reminder: { status: { not: 'active' } } },
+      select: { reminder: { select: { subject: true, contact: { select: { name: true } } } } },
+      take: 50,
+    }));
+    push({
+      key: 'queued-for-stopped-chase',
+      what: 'messages still queued for chases that are switched off',
+      count: orphanQueued.length,
+      examples: titles(orphanQueued, (r) => `${r.reminder?.contact?.name || 'someone'}: ${r.reminder?.subject || ''}`),
+      where: 'Tasks → Delegated',
+    });
+
+    return found;
   }
 
   /** A check that cannot read its table must not take the whole report down with it. */
