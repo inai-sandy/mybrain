@@ -178,6 +178,9 @@ export class LlmService {
     // Reads one team reply and says whether it needs the owner's eyes — tiny in, tiny out, runs on
     // every inbound WhatsApp message, so a small fast model is the right default. (BEA-1213)
     'review-read': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Fallback translator for AI Radar headlines when the free endpoint fails — a one-line
+    // translate job, so the small fast model. (BEA-1311)
+    'radar-translate': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     // Writes each contact's weekly character profile — a once-a-week reasoning job over a month of
     // real messages, so Sonnet by default. (BEA-1216)
     'character-profile': { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' },

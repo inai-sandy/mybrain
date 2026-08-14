@@ -1457,3 +1457,52 @@ model NewsEdition {
 
   @@index([createdAt])
 }
+
+// ---- AI Radar (BEA-1311) -------------------------------------------------
+// Items synced from the collector fork's published JSON (inai-sandy/ai-news-radar
+// on GitHub Pages). The radar's own item/story id is the primary key, which is
+// what makes a re-sync update `lastSeenAt` instead of duplicating the row.
+
+model RadarItem {
+  /// The radar's stable id — item sha for 24h items, story id for daily picks.
+  id            String   @id
+  /// The title shown in the UI — always English (translated when the source was not).
+  title         String
+  /// Exactly what the radar gave us, kept for the "translated" marker's tooltip.
+  titleOriginal String
+  translated    Boolean  @default(false)
+  /// A non-English title we could not translate yet. Hidden from every list until a
+  /// later sync manages it — an item is never shown untranslated (spec B4).
+  pendingTranslation Boolean @default(false)
+  url           String
+  source        String   @default("")
+  /// The radar's ai_label — used as the category filter.
+  category      String   @default("")
+  aiScore       Float    @default(0)
+  storyId       String   @default("")
+  /// JSON [{name,url}] — the outlets behind a merged story, for the "N sources" badge.
+  sources       String   @default("[]")
+  /// True when the item is in daily-brief.json (the Scout Picks).
+  isPick        Boolean  @default(false)
+  /// One plain-English sentence written by the engine (BEA-1312). Null = pending.
+  whyItMatters  String?
+  publishedAt   DateTime
+  firstSeenAt   DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
+
+  @@index([publishedAt])
+  @@index([pendingTranslation, publishedAt])
+}
+
+// Singleton sync state — the UI's "last synced X ago" and the honest counts of the
+// last run come from here, and an unreachable fork records its error here instead
+// of touching the items.
+model RadarSync {
+  id         String    @id @default("singleton")
+  lastSyncAt DateTime?
+  lastOkAt   DateTime?
+  lastError  String?
+  /// JSON of the last sync's counts (fetched/stored/known/translated/pending/blocked/failed).
+  counts     String    @default("{}")
+  updatedAt  DateTime  @updatedAt
+}

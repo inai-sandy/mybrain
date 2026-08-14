@@ -1,0 +1,295 @@
+import { RadarFeedService } from './radar-feed.service';
+
+/**
+ * BEA-1311 — sync the AI Radar collector fork into RadarItem.
+ *
+ * The promises tested here are the ones the spec makes: a re-sync never duplicates,
+ * a Chinese title is translated before anyone sees it (and hidden until then), the
+ * blocklist drops noise, and an unreachable fork changes nothing but the error state.
+ */
+
+const LATEST = {
+  items: [
+    { id: 'en-1', title: 'OpenAI ships a new eval suite', title_original: 'OpenAI ships a new eval suite', title_en: 'OpenAI ships a new eval suite', url: 'https://a.example/1', source: 'OpenAI News', ai_label: 'models', ai_score: 0.9, published_at: '2026-08-14T10:00:00Z' },
+    { id: 'en-2', title: 'GitHub agent apps walkthrough', title_original: 'GitHub agent apps walkthrough', url: 'https://a.example/2', source: 'GitHub AI & ML', ai_label: 'devtools', ai_score: 0.8, published_at: '2026-08-14T11:00:00Z' },
+    { id: 'zh-1', title: '通义千问开源新模型', title_original: '通义千问开源新模型', url: 'https://a.example/3', source: '公众号：智谱', ai_label: 'models', ai_score: 0.85, published_at: '2026-08-14T09:00:00Z' },
+  ],
+};
+
+const BRIEF = {
+  items: [
+    {
+      story_id: 'story-1',
+      title: 'Open Models 现状 / State of Open Models',
+      url: 'https://a.example/story',
+      source: 'Hugging Face Blog',
+      ai_score: 0.92,
+      published_at: '2026-08-14T08:00:00Z',
+      sources: [
+        { source: 'Hugging Face Blog', url: 'https://a.example/story', title_en: 'State of Open Models' },
+        { source: 'The Verge AI', url: 'https://a.example/verge' },
+      ],
+    },
+  ],
+};
+
+/** In-memory Prisma covering exactly the query shapes the service uses. */
+function makePrisma() {
+  const items = new Map<string, any>();
+  const state: { row: any } = { row: null };
+  const matches = (row: any, where: any = {}): boolean => {
+    if (where.id?.in && !where.id.in.includes(row.id)) return false;
+    if (where.id?.notIn && where.id.notIn.includes(row.id)) return false;
+    if (where.pendingTranslation !== undefined && row.pendingTranslation !== where.pendingTranslation) return false;
+    if (where.isPick !== undefined && row.isPick !== where.isPick) return false;
+    if (where.category !== undefined) {
+      if (typeof where.category === 'string' && row.category !== where.category) return false;
+      if (where.category?.not !== undefined && row.category === where.category.not) return false;
+    }
+    if (where.source !== undefined) {
+      if (typeof where.source === 'string' && row.source !== where.source) return false;
+      if (where.source?.not !== undefined && row.source === where.source.not) return false;
+    }
+    if (where.title?.contains && !String(row.title).toLowerCase().includes(String(where.title.contains).toLowerCase())) return false;
+    return true;
+  };
+  return {
+    items,
+    state,
+    radarItem: {
+      findMany: async ({ where, select, distinct, skip, take, orderBy }: any = {}) => {
+        let rows = [...items.values()].filter((r) => matches(r, where));
+        if (orderBy) {
+          const first = Array.isArray(orderBy) ? orderBy[0] : orderBy;
+          const key = Object.keys(first || {})[0];
+          if (key) rows.sort((a, b) => (a[key] < b[key] ? 1 : -1));
+        }
+        if (distinct) {
+          const seen = new Set();
+          rows = rows.filter((r) => (seen.has(r[distinct[0]]) ? false : (seen.add(r[distinct[0]]), true)));
+        }
+        if (skip) rows = rows.slice(skip);
+        if (take) rows = rows.slice(0, take);
+        if (select) return rows.map((r) => Object.fromEntries(Object.keys(select).map((k) => [k, r[k]])));
+        return rows.map((r) => ({ ...r }));
+      },
+      count: async ({ where }: any = {}) => [...items.values()].filter((r) => matches(r, where)).length,
+      create: async ({ data }: any) => {
+        if (items.has(data.id)) throw new Error('unique constraint');
+        items.set(data.id, { ...data });
+        return { ...data };
+      },
+      update: async ({ where, data }: any) => {
+        const row = items.get(where.id);
+        if (!row) throw new Error('not found');
+        for (const [k, v] of Object.entries(data)) if (v !== undefined) row[k] = v;
+        return { ...row };
+      },
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const row of items.values()) {
+          if (!matches(row, where)) continue;
+          for (const [k, v] of Object.entries(data)) if (v !== undefined) row[k] = v;
+          count += 1;
+        }
+        return { count };
+      },
+    },
+    radarSync: {
+      upsert: async ({ update, create }: any) => {
+        state.row = state.row ? { ...state.row, ...update } : { ...create };
+        return { ...state.row };
+      },
+      findUnique: async () => (state.row ? { ...state.row } : null),
+    },
+  };
+}
+
+/** The service with the network replaced: canned JSON and a controllable translator. */
+class TestRadar extends RadarFeedService {
+  files: Record<string, any> = {};
+  translations: Record<string, string | null> = {};
+  translateCalls: string[] = [];
+  protected async fetchJson(file: string): Promise<any> {
+    const body = this.files[file];
+    if (body === undefined) throw new Error(`${file}: HTTP 404`);
+    return JSON.parse(JSON.stringify(body));
+  }
+  protected async translateText(text: string): Promise<string | null> {
+    this.translateCalls.push(text);
+    return this.translations[text] ?? null;
+  }
+}
+
+function makeService(prisma: any) {
+  // Positional on purpose (house rule): LlmService is optional and comes last.
+  const svc = new TestRadar(prisma as any);
+  svc.files = { 'latest-24h.json': LATEST, 'daily-brief.json': BRIEF };
+  return svc;
+}
+
+describe('radar sync stores and counts honestly (BEA-1311)', () => {
+  it('stores every offered item on first sync, translating the Chinese one', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'Tongyi Qianwen open-sources a new model';
+    const r = await svc.sync();
+    expect(r.ok).toBe(true);
+    expect(r.fetched).toBe(4);
+    expect(r.stored).toBe(4);
+    expect(r.known).toBe(0);
+    expect(r.translated).toBe(1);
+    expect(r.pending).toBe(0);
+    expect(r.failed).toBe(0);
+    const zh = prisma.items.get('zh-1');
+    expect(zh.title).toBe('Tongyi Qianwen open-sources a new model');
+    expect(zh.titleOriginal).toBe('通义千问开源新模型');
+    expect(zh.translated).toBe(true);
+  });
+
+  it('a bilingual pick title needs no translation — the English half wins', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    await svc.sync();
+    const pick = prisma.items.get('story-1');
+    expect(pick.isPick).toBe(true);
+    expect(pick.title).toBe('State of Open Models');
+    expect(JSON.parse(pick.sources)).toHaveLength(2);
+    // Only the genuinely Chinese title went to the translator.
+    expect(svc.translateCalls).toEqual(['通义千问开源新模型']);
+  });
+
+  it('re-syncing the same data updates instead of duplicating', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'Tongyi Qianwen open-sources a new model';
+    await svc.sync();
+    const firstSeen = prisma.items.get('en-1').lastSeenAt;
+    await new Promise((r) => setTimeout(r, 5));
+    const r2 = await svc.sync();
+    expect(r2.stored).toBe(0);
+    expect(r2.known).toBe(4);
+    expect(prisma.items.size).toBe(4);
+    expect(prisma.items.get('en-1').lastSeenAt.getTime()).toBeGreaterThanOrEqual(firstSeen.getTime());
+  });
+});
+
+describe('an item is never shown untranslated (BEA-1311, spec B4)', () => {
+  it('hides a failed translation as pending, then finishes it on a later sync', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    // Translator down: the Chinese item goes pending and stays out of the list.
+    const r1 = await svc.sync();
+    expect(r1.pending).toBe(1);
+    expect(prisma.items.get('zh-1').pendingTranslation).toBe(true);
+    const hidden = await svc.list({});
+    expect(hidden.items.map((i: any) => i.id)).not.toContain('zh-1');
+
+    // Next sync only offers the English items — the pending row is retried anyway.
+    svc.files['latest-24h.json'] = { items: LATEST.items.filter((i) => i.id !== 'zh-1') };
+    svc.translations['通义千问开源新模型'] = 'Tongyi Qianwen open-sources a new model';
+    const r2 = await svc.sync();
+    expect(r2.translated).toBe(1);
+    const row = prisma.items.get('zh-1');
+    expect(row.pendingTranslation).toBe(false);
+    expect(row.title).toBe('Tongyi Qianwen open-sources a new model');
+    const shown = await svc.list({});
+    expect(shown.items.map((i: any) => i.id)).toContain('zh-1');
+  });
+});
+
+describe('sync counters tell the truth about the stored rows (review fix, BEA-1311)', () => {
+  it('does not count an already-translated row as pending when a re-sync finds no English', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'Tongyi Qianwen open-sources a new model';
+    await svc.sync(); // translated and visible
+
+    // Translator goes down; the same Chinese item arrives again.
+    svc.translations = {};
+    const r = await svc.sync();
+    expect(r.pending).toBe(0); // the stored row still shows its good English title
+    expect(prisma.items.get('zh-1').pendingTranslation).toBe(false);
+    expect(prisma.items.get('zh-1').title).toBe('Tongyi Qianwen open-sources a new model');
+  });
+});
+
+describe('picks mirror the current daily brief (review fix, BEA-1311)', () => {
+  it('clears isPick when a story drops out of the brief, but not when the brief is unreachable', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    await svc.sync();
+    expect(prisma.items.get('story-1').isPick).toBe(true);
+
+    // Brief unreachable → yesterday's picks survive the hour.
+    delete svc.files['daily-brief.json'];
+    await svc.sync();
+    expect(prisma.items.get('story-1').isPick).toBe(true);
+
+    // Brief back with different picks → the old story stops being a pick.
+    svc.files['daily-brief.json'] = { items: [] };
+    await svc.sync();
+    expect(prisma.items.get('story-1').isPick).toBe(false);
+  });
+});
+
+describe('an unreachable fork changes nothing but the error state (BEA-1311)', () => {
+  it('keeps old rows and records the error', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'x';
+    await svc.sync();
+    svc.files = {}; // radar gone
+    const r = await svc.sync();
+    expect(r.ok).toBe(false);
+    expect(r.message).toContain('unreachable');
+    expect(prisma.items.size).toBe(4);
+    expect(prisma.state.row.lastError).toContain('unreachable');
+    const status = await svc.status();
+    expect(status.lastError).toContain('unreachable');
+    expect(status.total).toBe(4);
+  });
+});
+
+describe('the source blocklist drops noise and says so (BEA-1311)', () => {
+  const OLD = process.env.RADAR_SOURCE_BLOCKLIST;
+  afterEach(() => {
+    if (OLD === undefined) delete process.env.RADAR_SOURCE_BLOCKLIST;
+    else process.env.RADAR_SOURCE_BLOCKLIST = OLD;
+  });
+
+  it('counts blocked items instead of storing them', async () => {
+    process.env.RADAR_SOURCE_BLOCKLIST = '公众号：智谱, Something Else';
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    const r = await svc.sync();
+    expect(r.blocked).toBe(1);
+    expect(prisma.items.has('zh-1')).toBe(false);
+    expect(r.stored).toBe(3);
+  });
+});
+
+describe('the radar list behaves like every list here (BEA-1311)', () => {
+  it('searches, filters, and paginates with a real total', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'Tongyi Qianwen open-sources a new model';
+    await svc.sync();
+
+    const all = await svc.list({ pageSize: 2 });
+    expect(all.total).toBe(4);
+    expect(all.items).toHaveLength(2);
+    expect(all.pages).toBe(2);
+
+    const search = await svc.list({ search: 'github' });
+    expect(search.items.map((i: any) => i.id)).toEqual(['en-2']);
+
+    const picks = await svc.list({ picksOnly: true });
+    expect(picks.items.map((i: any) => i.id)).toEqual(['story-1']);
+
+    const byCategory = await svc.list({ category: 'models' });
+    expect(byCategory.total).toBe(2);
+  });
+});
