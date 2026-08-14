@@ -1,4 +1,4 @@
-import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, StickyNote, Mic, Mail, Sparkles, Lock, FlaskConical, FileText, Bot, Workflow, Users, MessagesSquare, AudioLines, Disc3, Newspaper, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, FilePlus2, Bookmark, Lightbulb, Wand2, CheckSquare, Activity, Sun, MessageCircle, StickyNote, Mic, Mail, Sparkles, Lock, FlaskConical, FileText, Bot, Workflow, Users, MessagesSquare, AudioLines, Disc3, Newspaper, Radar as RadarIcon, type LucideIcon } from 'lucide-react';
 
 export type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 export type NavGroup = { label?: string; items: NavItem[] };
@@ -26,10 +26,13 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     // News sits high on purpose (BEA-1322): parked at the bottom it fell below the
     // sidebar's scroll fold, where the entry was clipped and clicks landed on dead
-    // space — it looked broken until a reload. It is a daily-read section and more
-    // feeds join this group, so it lives right under Daily.
+    // space — it looked broken until a reload. Two separate pages (BEA-1321), and
+    // more feeds will join this group.
     label: 'News',
-    items: [{ to: '/news', label: 'News', icon: Newspaper }],
+    items: [
+      { to: '/news', label: 'AI News Daily', icon: RadarIcon, end: true },
+      { to: '/news/tweets', label: 'AI Tweets Daily', icon: Newspaper },
+    ],
   },
   {
     label: 'People',
