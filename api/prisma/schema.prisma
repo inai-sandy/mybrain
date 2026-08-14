@@ -1078,6 +1078,17 @@ model Contact {
   /// not guessable by trying another name. Null until the owner shares it. (BEA-1027)
   shareSlug      String?      @unique
   shareEnabled   Boolean      @default(true) // turn the page off without losing the link
+  /// They have left. (BEA-1307)
+  ///
+  /// LEFT IS NOT DELETED. Deleting a contact cascades away every briefing the owner ever wrote about
+  /// them, every word they ever said, and their weekly profile — and orphans their WhatsApp history
+  /// into rows nothing can ever reach again. When Radha left there was no correct action available:
+  /// delete lost the record, and stopping each chase by hand did nothing about her open work.
+  ///
+  /// Someone who has left keeps everything. They simply stop being part of the working system: no
+  /// chasing, no new work, no share page, out of the pickers.
+  leftAt         DateTime?
+  leftNote       String?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   reminders      Reminder[]

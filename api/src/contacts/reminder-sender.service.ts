@@ -229,6 +229,15 @@ export class ReminderSenderService implements OnModuleInit {
         await this.mark(send.id, 'failed', null, 'contact has no WhatsApp number');
         continue;
       }
+      // They have left. Belt and braces: marking someone as left already stops their chases, but a
+      // send queued moments before, or a chase created by some path that skipped the guard, would
+      // still go out — and a WhatsApp message to someone who has left the company is the single
+      // most embarrassing thing this system could do. (BEA-1307)
+      if ((r.contact as any)?.leftAt) {
+        await this.mark(send.id, 'skipped', null, 'they have left');
+        await this.stopChase(r.id, 'they have left');
+        continue;
+      }
       // Last line of defence: never chase someone about work that is already finished. The day
       // rollover stops a chase, but the task can be confirmed done between rollovers — and sending
       // "where is this?" about something they completed this morning is the worst possible bug in a

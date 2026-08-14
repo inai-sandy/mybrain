@@ -11,8 +11,27 @@ export class ContactsController {
   ) {}
 
   @Get()
-  list(@Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
-    return this.contacts.list(q || undefined, Number(page) || 1, Number(pageSize) || 20);
+  list(@Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('include') include?: string) {
+    const scope = include === 'left' || include === 'all' ? include : 'active';
+    return this.contacts.list(q || undefined, Number(page) || 1, Number(pageSize) || 20, scope);
+  }
+
+  /**
+   * They have left the organisation. (BEA-1307)
+   *
+   * Stops every chase, turns off their page, takes them out of the pickers — and keeps every word,
+   * briefing and message. Returns their still-open work, because what happens to it is the owner's
+   * decision, not something to be made silently on his behalf.
+   */
+  @Post(':id/left')
+  markLeft(@Param('id') id: string, @Body() body: { note?: string }) {
+    return this.contacts.markLeft(id, body?.note);
+  }
+
+  /** They are back. Chases are not resurrected — restarting them is a decision, one at a time. */
+  @Post(':id/back')
+  markBack(@Param('id') id: string) {
+    return this.contacts.markBack(id);
   }
 
   /** Every contact, name + spellings only — for pickers and @mention matching. Must come before
@@ -39,8 +58,9 @@ export class ContactsController {
 
   /** The team board: contacts with their work signals for the list page. (BEA-1219) */
   @Get('board')
-  board(@Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
-    return this.contacts.board(q || undefined, Number(page) || 1, Number(pageSize) || 20);
+  board(@Query('q') q?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string, @Query('include') include?: string) {
+    const scope = include === 'left' || include === 'all' ? include : 'active';
+    return this.contacts.board(q || undefined, Number(page) || 1, Number(pageSize) || 20, scope);
   }
 
   /** The weekly character profile. Empty until the weekly writer ships (BEA-1216) — the page
@@ -101,8 +121,9 @@ export class ContactsController {
     return this.contacts.update(id, body || {});
   }
 
+  /** Refuses when there is real history to lose, unless the owner insists. (BEA-1307) */
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.contacts.remove(id);
+  remove(@Param('id') id: string, @Query('force') force?: string) {
+    return this.contacts.remove(id, force === '1' || force === 'true');
   }
 }

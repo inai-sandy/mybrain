@@ -261,6 +261,10 @@ export class TeamUpdatesService {
     if (!u) return { ok: false, message: 'That is not there any more' };
     const number = (u.contact?.whatsappNumber || '').replace(/[^\d]/g, '');
     if (!number) return { ok: false, message: `${u.contact?.name || 'They'} has no WhatsApp number` };
+    // Old review items stay readable after someone leaves, so replying to one is a real path to
+    // messaging them. Their history is all here; the app just does not write to them. (BEA-1307)
+    const person: any = await Promise.resolve(this.prisma.contact?.findUnique?.({ where: { id: u.contactId }, select: { leftAt: true } })).catch(() => null);
+    if (person?.leftAt) return { ok: false, message: `${u.contact?.name || 'They'} has left, so the app does not message them.` };
     if (!this.postbox.isConfigured()) return { ok: false, message: 'WhatsApp is not connected' };
 
     const res = await this.postbox.sendText(number, body);
