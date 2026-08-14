@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DaySignals, TaskSignal } from './mind.types';
+import { isOpen } from '../tasks/task-status';
 
 // Local day-key helpers (the app stores days as YYYY-MM-DD local keys).
 function ymd(d: Date): string {
@@ -38,7 +39,7 @@ export class MindIngestionService {
 
     const planned = await this.prisma.task.findMany({ where: { day } });
     const done = planned.filter((t) => t.status === 'done').map(sig);
-    const openPlanned = planned.filter((t) => t.status !== 'done');
+    const openPlanned = planned.filter((t) => isOpen(t));
     // Skipped = planned for a day already in the past but never done. Use the pre-rollover snapshot
     // when the caller (close) provides it, since the rollover has already moved them off the day. (BEA-808)
     const skipped = (skippedOverride ?? (day < today ? openPlanned : [])).map(sig);

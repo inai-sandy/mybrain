@@ -569,7 +569,7 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
                         {preTicked[t.id] && <span className="text-emerald-600 dark:text-emerald-400">your story says you did this</span>}
                       </span>
                     </button>
-                    <button onClick={() => (dropped(t) ? setCarry((m) => ({ ...m, [t.id]: undefined })) : setConfirmDrop(t))} title={dropped(t) ? 'Keep it after all' : 'Delete for good'} className={'mt-0.5 shrink-0 rounded-md p-1 ' + (dropped(t) ? 'text-rose-600' : 'text-zinc-400 hover:text-rose-600')}>
+                    <button onClick={() => (dropped(t) ? setCarry((m) => ({ ...m, [t.id]: undefined })) : setConfirmDrop(t))} title={dropped(t) ? 'Keep it after all' : 'Not doing this'} className={'mt-0.5 shrink-0 rounded-md p-1 ' + (dropped(t) ? 'text-rose-600' : 'text-zinc-400 hover:text-rose-600')}>
                       <Trash2 size={14} />
                     </button>
                   </li>
@@ -637,12 +637,14 @@ export function CloseDaySheet({ day, onClose, onClosed }: { day: string; onClose
       )}
     </Sheet>
 
-      {/* Deleting is permanent and sat one tap away from the tick box — it now asks first. (BEA-1146) */}
+      {/* It sits one tap away from the tick box, so it asks first. (BEA-1146)
+          It no longer DELETES: the task is recorded as dropped and stays in your history, and is
+          never counted as finished work. (BEA-1306) */}
       <ConfirmDialog
         open={!!confirmDrop}
-        title="Delete this task?"
-        message={`“${confirmDrop?.title || ''}” will be deleted for good — this does not mark it finished, and it cannot be undone. To finish it instead, tick it.`}
-        confirmLabel="Delete for good"
+        title="Not doing this?"
+        message={`“${confirmDrop?.title || ''}” will be closed as not done. It leaves your list and stops being chased, but it stays in your history and is never counted as finished. To finish it instead, tick it.`}
+        confirmLabel="Not doing it"
         onCancel={() => setConfirmDrop(null)}
         onConfirm={() => { if (confirmDrop) setCarry((m) => ({ ...m, [confirmDrop.id]: 'drop' })); setConfirmDrop(null); }}
       />

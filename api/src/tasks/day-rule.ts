@@ -7,6 +7,8 @@
  * A day's record is everything FINISHED that day (judged by completedAt, so a task added on the 1st and
  * finished on the 20th is the 20th's work) plus everything that was STILL OPEN at the end of it.
  */
+
+import { TASK_OPEN } from './task-status';
 export function whereForDayRule(day: string, start: Date, end: Date): any {
   return {
     // A recurring daily report is never finished and never leaves — it would appear in every day's
@@ -16,7 +18,7 @@ export function whereForDayRule(day: string, start: Date, end: Date): any {
     kind: { not: 'recurring' },
     OR: [
       { completedAt: { gte: start, lt: end } },
-      { day: { lte: day }, OR: [{ status: { not: 'done' } }, { completedAt: { gte: end } }] },
+      { day: { lte: day }, OR: [{ status: TASK_OPEN }, { completedAt: { gte: end } }] },
       // A finished task with no completedAt can't be placed by when it was done, so fall back to the day
       // it holds — otherwise it would vanish from history altogether rather than land a day off.
       { status: 'done', completedAt: null, day },

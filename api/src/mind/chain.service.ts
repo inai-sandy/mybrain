@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { TasksService } from '../tasks/tasks.service';
 import { PromptsService } from '../prompts/prompts.service';
+import { isOpen } from '../tasks/task-status';
 
 // Cheap model for turning a plain sentence into a goal/blocker/lever chain.
 const PARSE_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' };
@@ -211,7 +212,7 @@ export class MindChainService {
       this.prisma.story.findFirst({ where: { day }, orderBy: { createdAt: 'desc' }, select: { rawText: true } }),
       this.prisma.mindChain.findMany({ where: { status: { not: 'retired' } }, select: { goal: true, blocker: true } }),
     ]);
-    const deferred = tasks.filter((t) => (t.rolloverCount || 0) > 0 && t.status !== 'done');
+    const deferred = tasks.filter((t) => (t.rolloverCount || 0) > 0 && isOpen(t));
     const storyText = (story?.rawText || '').trim();
     if (!storyText) return 0; // a Situation must be grounded in the day's OWN story; no story → infer nothing
 

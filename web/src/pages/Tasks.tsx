@@ -10,6 +10,7 @@ import { UnlinkedPeople } from '../ui/UnlinkedPeople';
 import { DelegatedTab } from './Delegated';
 import { BrainEatersTab } from './BrainEaters';
 import { DailyTab } from './DailyTab';
+import { isOpen } from '../ui/taskStatus';
 
 export function Tasks() {
   const { data, loading, load } = useToday();
@@ -32,6 +33,8 @@ export function Tasks() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [doneFor, setDoneFor] = useState<Task | null>(null);
   const [delFor, setDelFor] = useState<Task | null>(null);
+  const [dropFor, setDropFor] = useState<Task | null>(null);
+  const toast = useToast();
   const [review, setReview] = useState<Task[] | null>(null);
 
   const [finished, setFinished] = useState(false);
@@ -97,6 +100,16 @@ export function Tasks() {
     const r = await fetch(`/api/tasks/${t.id}`, { method: 'DELETE' });
     if (r.ok) refresh();
     setDelFor(null);
+  }
+
+  /** Closed as not done — it leaves the board and stops being chased, but it is not finished. (BEA-1306) */
+  async function drop(t: Task) {
+    const r = await fetch(`/api/tasks/${t.id}/drop`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'not doing this' }),
+    });
+    toast(r.ok ? 'success' : 'error', r.ok ? 'Closed as not done — it stays in your history' : 'Could not do that');
+    if (r.ok) refresh();
+    setDropFor(null);
   }
 
   // filter
@@ -276,7 +289,7 @@ export function Tasks() {
                 <span className="flex-1 h-px bg-zinc-100 dark:bg-zinc-800" />
               </div>
               <div className="space-y-2.5">
-                {g.items.map((t) => <TaskCard key={t.id} t={t} onToggle={toggle} onEdit={setEditing} onDelete={setDelFor} onProgress={progress} />)}
+                {g.items.map((t) => <TaskCard key={t.id} t={t} onToggle={toggle} onEdit={setEditing} onDelete={setDelFor} onDrop={setDropFor} onProgress={progress} />)}
               </div>
             </div>
           ))}
@@ -304,7 +317,16 @@ export function Tasks() {
       {adding && <TaskFormModal task={null} onClose={() => setAdding(false)} onSaved={load} />}
       {editing && <TaskFormModal task={editing} onClose={() => setEditing(null)} onSaved={load} />}
       {doneFor && <DoneModal task={doneFor} onClose={() => setDoneFor(null)} onSaved={load} />}
-      {delFor && <ConfirmDialog title="Delete task?" message={`“${delFor.title}” will be removed.`} confirmLabel="Delete" onConfirm={() => remove(delFor)} onCancel={() => setDelFor(null)} />}
+      {delFor && <ConfirmDialog title="Delete task?" message={`“${delFor.title}” will be removed. To close it without finishing it, use "Not doing this" instead — that keeps the record.`} confirmLabel="Delete" onConfirm={() => remove(delFor)} onCancel={() => setDelFor(null)} />}
+      {dropFor && (
+        <ConfirmDialog
+          title="Not doing this?"
+          message={`“${dropFor.title}” will be closed as not done. It leaves your board and stops being chased, but it stays in your history and is never counted as finished.`}
+          confirmLabel="Not doing it"
+          onConfirm={() => drop(dropFor)}
+          onCancel={() => setDropFor(null)}
+        />
+      )}
       {dedup && <DedupeSheet onClose={() => setDedup(false)} onDone={refresh} />}
       {finished && <FinishedTasksModal onClose={() => setFinished(false)} />}
     </div>
@@ -556,7 +578,8 @@ function TaskHistory() {
   }
 
   const finished = (dayTasks || []).filter((t) => t.status === 'done');
-  const stillOpen = (dayTasks || []).filter((t) => t.status !== 'done');
+  // Not "everything that is not finished" — a dropped task ended, it was not left open. (BEA-1306)
+  const stillOpen = (dayTasks || []).filter((t) => isOpen(t));
   const openCount = stillOpen.length;
   const minutes = finished.reduce((s, t) => s + (t.actualMin || 0), 0);
 

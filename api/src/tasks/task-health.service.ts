@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { parseSchedule, daysFromTitle } from './schedule';
+import { TASK_OPEN } from './task-status';
 
 /**
  * The nightly health check (BEA-1190).
@@ -111,7 +112,7 @@ export class TaskHealthService {
     // A standing report that names a weekday but has no schedule is chased every working day —
     // which is how a Friday report got chased on a Monday (BEA-1147).
     const recurring = await this.q(() => this.prisma.task.findMany({
-      where: { kind: 'recurring', status: { not: 'done' } },
+      where: { kind: 'recurring', status: TASK_OPEN },
       select: { title: true, scheduleDays: true }, take: 100,
     }));
     const wrongDay = recurring.filter((t: any) => !parseSchedule(t.scheduleDays) && daysFromTitle(t.title || ''));
@@ -212,7 +213,7 @@ export class TaskHealthService {
     // decide are: the task finished, or a claim went unreviewed. Neither holds here.
     const silentlyOff = await this.q(async () => {
       const rows = await this.prisma.reminder.findMany({
-        where: { status: 'done', taskId: { not: null }, task: { status: { not: 'done' }, claims: { none: { status: 'pending' } } } },
+        where: { status: 'done', taskId: { not: null }, task: { status: TASK_OPEN, claims: { none: { status: 'pending' } } } },
         select: { taskId: true, subject: true, contact: { select: { name: true } }, task: { select: { title: true } } },
         take: 50,
       });
@@ -235,7 +236,7 @@ export class TaskHealthService {
     // Confirming a claim IS the completion. A confirmed claim over an open task means the two halves
     // came apart — the review list looks settled while the work is still counted as owed.
     const confirmedButOpen = await this.q(() => this.prisma.task.findMany({
-      where: { status: { not: 'done' }, claims: { some: { status: 'confirmed' } } },
+      where: { status: TASK_OPEN, claims: { some: { status: 'confirmed' } } },
       select: { title: true, ownerContact: { select: { name: true } } },
       take: 50,
     }));

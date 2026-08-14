@@ -6,6 +6,7 @@ import { ConnectorService } from '../connectors/connector.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { PersonContact } from '../contacts/person-identity';
 import { findPeople, buildSearchQuery } from './query-prep';
+import { TASK_OPEN } from '../tasks/task-status';
 
 export type WebMode = 'on' | 'off' | 'auto';
 
@@ -375,7 +376,7 @@ ${context}
     const out: string[] = [];
     const [doneTask, person, story] = await Promise.all([
       this.prisma.task.findFirst({ where: { status: 'done' }, orderBy: { completedAt: 'desc' }, select: { title: true } }).catch(() => null),
-      this.prisma.contact.findFirst({ where: { ownedTasks: { some: { status: { not: 'done' } } } }, orderBy: { updatedAt: 'desc' }, select: { name: true } }).catch(() => null),
+      this.prisma.contact.findFirst({ where: { ownedTasks: { some: { status: TASK_OPEN } } }, orderBy: { updatedAt: 'desc' }, select: { name: true } }).catch(() => null),
       this.prisma.story.findFirst({ orderBy: { createdAt: 'desc' }, select: { day: true } }).catch(() => null),
     ]);
     if (person?.name) out.push(`Where does ${person.name} stand right now?`);

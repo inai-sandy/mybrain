@@ -9,6 +9,7 @@ import { PromptsService } from '../prompts/prompts.service';
 import { looseJsonParse } from '../common/llm-json';
 import { matchContact } from '../contacts/person-identity';
 import { cacheDecision, storyFingerprint } from './mine-cache';
+import { TASK_OPEN } from '../tasks/task-status';
 
 /** One mined section item, ready for the owner's tick. Nothing here is saved until applied. */
 export type MinedDelegation = { contactName: string; contactId: string | null; title: string; chase: boolean };
@@ -179,7 +180,7 @@ export class StoryMiningService {
     // What's already logged, so the model doesn't re-propose known work.
     const [existing, openAll, contacts] = await Promise.all([
       this.prisma.task.findMany({ where: await this.tasks.whereForDay(day), select: { title: true } }),
-      this.prisma.task.findMany({ where: { status: { not: 'done' } }, select: { title: true } }),
+      this.prisma.task.findMany({ where: { status: TASK_OPEN }, select: { title: true } }),
       this.contacts(),
     ]);
     const contactNames = contacts.map((c) => c.name).join(', ');

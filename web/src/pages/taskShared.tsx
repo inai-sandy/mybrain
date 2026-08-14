@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock } from 'lucide-react';
+import { Brain, X, Mic, Check, Circle, Star, Pencil, Trash2, Clock, Bell, RotateCcw, CalendarClock, Ban } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { isDictating } from '../ui/useDictation';
 import { DictateButton } from '../ui/DictateButton';
@@ -39,7 +39,9 @@ export type Task = {
   chaseStatus?: 'active' | 'paused' | 'done' | 'stopped' | 'none';
   chaseCount?: number;
   dueDate?: string | null; // ISO due date
-  status: 'open' | 'done';
+  status: 'open' | 'done' | 'dropped';
+  droppedAt?: string | null;
+  droppedReason?: string | null;
   progress?: number; // 0 | 30 | 60 | 100
   followUp?: boolean;
   rolloverCount: number;
@@ -87,12 +89,16 @@ export function sortTasksBy(list: Task[], mode: string): Task[] {
 }
 
 // ---- the task card (presentational; actions via callbacks) ----
-export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress, extraAction }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void; onProgress?: (t: Task, pct: number) => void; extraAction?: { label: string; onClick: () => void } }) {
+export function TaskCard({ t, onToggle, onEdit, onDelete, onDrop, onProgress, extraAction }: { t: Task; onToggle: (t: Task) => void; onEdit: (t: Task) => void; onDelete: (t: Task) => void; onDrop?: (t: Task) => void; onProgress?: (t: Task, pct: number) => void; extraAction?: { label: string; onClick: () => void } }) {
   const p = PRIO[t.priority] || PRIO.medium;
   const done = t.status === 'done';
+  // Dropped work has ENDED, but it was never finished — so it looks closed without wearing the tick
+  // or the green that means "well done". (BEA-1306)
+  const dropped = t.status === 'dropped';
+  const closed = done || dropped;
   const prog = t.progress ?? 0;
   return (
-    <div className={'group rounded-xl border bg-white dark:bg-zinc-900 p-3.5 flex items-start gap-3 transition-all ' + (done ? 'opacity-60 border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm') + (t.pinned && !done ? ' ring-1 ring-amber-400/40' : '')}>
+    <div className={'group rounded-xl border bg-white dark:bg-zinc-900 p-3.5 flex items-start gap-3 transition-all ' + (closed ? 'opacity-60 border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 hover:shadow-sm') + (t.pinned && !closed ? ' ring-1 ring-amber-400/40' : '')}>
       <button onClick={() => onToggle(t)} title={done ? 'Mark open' : 'Mark done'} className={'mt-0.5 shrink-0 ' + (done ? 'text-emerald-600' : 'text-zinc-300 dark:text-zinc-600 hover:text-emerald-600')}>
         {done ? (
           <motion.span initial={{ scale: 0, rotate: -25 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 500, damping: 16 }} className="inline-flex">
@@ -104,7 +110,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress, extraActio
       </button>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <h3 className={'font-medium leading-snug flex-1 ' + (done ? 'line-through text-zinc-400' : '')}>
+          <h3 className={'font-medium leading-snug flex-1 ' + (closed ? 'line-through text-zinc-400' : '')}>
             {t.pinned && <Star size={13} className="inline -mt-0.5 mr-1 text-amber-500 fill-amber-500" />}
             {t.followUp && <RotateCcw size={12} className="inline -mt-0.5 mr-1 text-indigo-500" />}
             {t.brainEater && <span title="Brain eater" className="mr-1">🧠</span>}
@@ -115,11 +121,20 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress, extraActio
               <button onClick={extraAction.onClick} className="rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] text-zinc-500 hover:border-fuchsia-500 hover:text-fuchsia-600 dark:border-zinc-700">{extraAction.label}</button>
             )}
             <button onClick={() => onEdit(t)} title="Edit" className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Pencil size={14} /></button>
+            {onDrop && !closed && (
+              <button onClick={() => onDrop(t)} title="Not doing this" className="p-1 rounded text-zinc-400 hover:text-amber-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Ban size={14} /></button>
+            )}
             <button onClick={() => onDelete(t)} title="Delete" className="p-1 rounded text-zinc-400 hover:text-rose-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"><Trash2 size={14} /></button>
           </div>
         </div>
         {t.note && <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2">{t.note}</p>}
         <div className="flex items-center flex-wrap gap-1.5 mt-2 text-[11px]">
+          {/* Never green, never a tick — this ended, it was not achieved. (BEA-1306) */}
+          {dropped && (
+            <span title={t.droppedReason || 'Closed as not done'} className="inline-flex items-center gap-1 rounded-full bg-zinc-500/10 px-1.5 py-0.5 font-medium text-zinc-500 dark:text-zinc-400">
+              <Ban size={11} /> not done
+            </span>
+          )}
           <span className={'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 ' + p.cls}><span className={'h-1.5 w-1.5 rounded-full ' + p.dot} />{p.label}</span>
           {!done && t.rolloverCount > 0 && (() => {
             // A carried task keeps the day it was ADDED (BEA-1014) — show that honestly next to the
@@ -167,7 +182,7 @@ export function TaskCard({ t, onToggle, onEdit, onDelete, onProgress, extraActio
               (BEA-1044, BEA-1293). "Paused" used to read as "no chase", which hid the single most
               important state on this screen: the person has reported it finished and is waiting on
               you, and until you decide they are getting no reminders. */}
-          {t.chaseStatus !== undefined && t.status !== 'done' && (
+          {t.chaseStatus !== undefined && !closed && (
             <span
               className={
                 'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ' +

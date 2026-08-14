@@ -4,6 +4,7 @@ import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { MemoryService } from '../memory/memory.service';
 import { localDayKey, localHour } from '../common/localday';
+import { isOpen } from '../tasks/task-status';
 
 /** Sunday evening (owner's clock), after the day has settled but before the mentor's 23:59 run. */
 const WRITE_HOUR = 21;
@@ -126,7 +127,7 @@ export class ProfileWriterService implements OnModuleInit, OnModuleDestroy {
     const received = (statusDays as any[]).filter((s) => s.status === 'received').length;
     const missed = (statusDays as any[]).filter((s) => s.status === 'missed').length;
     const slips = (tasks as any[]).reduce((n, t) => n + (t.promiseSlips || 0), 0);
-    const open = (tasks as any[]).filter((t) => t.status !== 'done');
+    const open = (tasks as any[]).filter((t) => isOpen(t));
     const facts = [
       `Name: ${contact.name}${contact.notes ? ` — ${contact.notes}` : ''}`,
       `Open work (${open.length}): ${open.slice(0, 8).map((t) => t.title).join('; ') || 'none'}`,

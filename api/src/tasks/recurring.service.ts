@@ -6,6 +6,7 @@ import { localDayKey, localHour, weekdayOf } from '../common/localday';
 import { isOwedOn, parseSchedule, serialiseSchedule, daysFromTitle, scheduleLabel } from './schedule';
 import { laterWins } from '../contacts/promise-later';
 import { TASK_SETTING_KEYS, TASK_DEFAULTS, parseChaseTimes, parseClaimGraceDays } from './task-settings';
+import { TASK_OPEN } from './task-status';
 
 /** Weekday names a rest day can be set to. */
 export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -118,7 +119,7 @@ export class RecurringService implements OnModuleInit {
   /** Every recurring task belonging to a contact that is still live. */
   async recurringTasksFor(contactId: string) {
     return this.prisma.task
-      .findMany({ where: { ownerContactId: contactId, kind: 'recurring', status: { not: 'done' } }, select: { id: true, title: true } })
+      .findMany({ where: { ownerContactId: contactId, kind: 'recurring', status: TASK_OPEN }, select: { id: true, title: true } })
       .catch(() => [] as { id: string; title: string }[]);
   }
 
@@ -211,7 +212,7 @@ export class RecurringService implements OnModuleInit {
 
     const tasks = await this.prisma.task
       .findMany({
-        where: { kind: 'recurring', status: { not: 'done' } },
+        where: { kind: 'recurring', status: TASK_OPEN },
         select: { id: true, title: true, scheduleDays: true, ownerContact: { select: { name: true } } },
         orderBy: { createdAt: 'asc' },
       })
@@ -314,7 +315,7 @@ export class RecurringService implements OnModuleInit {
    */
   async seedSchedulesFromTitles(): Promise<{ set: { title: string; days: string[] }[]; untouched: string[] }> {
     const tasks = await this.prisma.task
-      .findMany({ where: { kind: 'recurring', status: { not: 'done' }, scheduleDays: null }, select: { id: true, title: true } })
+      .findMany({ where: { kind: 'recurring', status: TASK_OPEN, scheduleDays: null }, select: { id: true, title: true } })
       .catch(() => [] as any[]);
     const set: { title: string; days: string[] }[] = [];
     const untouched: string[] = [];
@@ -333,7 +334,7 @@ export class RecurringService implements OnModuleInit {
     const key = day || this.today();
     const [tasks, rows, rest] = await Promise.all([
       this.prisma.task.findMany({
-        where: { kind: 'recurring', status: { not: 'done' } },
+        where: { kind: 'recurring', status: TASK_OPEN },
         select: { id: true, title: true, scheduleDays: true, ownerContact: { select: { id: true, name: true } } },
         orderBy: { createdAt: 'asc' },
       }).catch(() => [] as any[]),

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2, BarChart3, UserRound, RefreshCw } from 'lucide-react';
+import { CheckCircle2, Clock, MessageSquare, Plus, Pencil, Trash2, Loader2, BarChart3, UserRound, RefreshCw, Ban } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmDialog } from './ConfirmDialog';
 import { PersonTimeline } from './PersonTimeline';
 import { Accordion } from './Accordion';
 import { TaskFormModal, type Task } from '../pages/taskShared';
+import { isOpen, isDone, isDropped, isClosed, tickMeans } from './taskStatus';
 
 type Report = {
   taskId: string; title: string; schedule: string[] | null; scheduleLabel: string;
@@ -254,6 +255,7 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
   const [editing, setEditing] = useState<Task | null>(null);
   const [adding, setAdding] = useState(false);
   const [confirm, setConfirm] = useState<Row | null>(null);
+  const [dropFor, setDropFor] = useState<Row | null>(null);
   const [shown, setShown] = useState(8);
   const [chasing, setChasing] = useState<string | null>(null); // row id with a chase call in flight
   const toast = useToast();
@@ -287,10 +289,22 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
   useEffect(() => { setRows(null); load(); }, [load, reload]);
 
   async function toggle(r: Row) {
+    // Dropped work reopens on a tick rather than completing — recording it as finished is exactly
+    // what dropping it said it was not. (BEA-1306)
     const res = await fetch(`/api/tasks/${r.id}/done`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: r.status !== 'done' }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done: tickMeans(r) }),
     });
-    toast(res.ok ? 'success' : 'error', res.ok ? (r.status === 'done' ? 'Back to open' : 'Confirmed done — chase stopped') : 'Could not save');
+    toast(res.ok ? 'success' : 'error', res.ok ? (tickMeans(r) ? 'Confirmed done — chase stopped' : 'Back to open') : 'Could not save');
+    load();
+  }
+
+  /** Closed as not done. The word that was missing when Radha left with work open. (BEA-1306) */
+  async function drop(r: Row) {
+    const res = await fetch(`/api/tasks/${r.id}/drop`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'not doing this' }),
+    });
+    toast(res.ok ? 'success' : 'error', res.ok ? 'Closed as not done — it stays in the history' : 'Could not do that');
+    setDropFor(null);
     load();
   }
 
@@ -326,12 +340,12 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
                   <CheckCircle2 className={'h-4 w-4 ' + (r.status === 'done' ? 'text-emerald-500' : 'text-zinc-300 hover:text-emerald-500 dark:text-zinc-600')} />
                 </button>
                 <div className="min-w-0 flex-1">
-                  <p className={'text-sm ' + (r.status === 'done' ? 'text-zinc-400 line-through' : 'font-medium')}>{r.title}</p>
+                  <p className={'text-sm ' + (isClosed(r) ? 'text-zinc-400 line-through' : 'font-medium')}>{r.title}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-500">
-                    <span className="inline-flex items-center gap-1"><Clock size={10} />{r.status === 'done' ? 'finished' : r.openDays === 0 ? 'today' : `open ${r.openDays}d`}</span>
+                    <span className="inline-flex items-center gap-1"><Clock size={10} />{isDone(r) ? 'finished' : isDropped(r) ? 'not done' : r.openDays === 0 ? 'today' : `open ${r.openDays}d`}</span>
                     {r.chaseCount > 0 && <span>chased {r.chaseCount}×</span>}
                     {r.chaseStatus === 'active' && <span className="text-emerald-600 dark:text-emerald-400">chasing</span>}
-                    {r.status !== 'done' && (
+                    {isOpen(r) && (
                       <button onClick={() => toggleChase(r)} disabled={chasing === r.id} className="inline-flex items-center gap-1 rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50 dark:border-zinc-700">
                         {chasing === r.id ? <Loader2 size={9} className="animate-spin" /> : null}
                         {r.chaseStatus === 'active' ? 'Stop chase' : 'Chase daily'}
@@ -342,6 +356,9 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <button onClick={() => setEditing(r)} aria-label="Edit" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><Pencil size={13} /></button>
+                  {isOpen(r) && (
+                    <button onClick={() => setDropFor(r)} aria-label="Not doing this" title="Not doing this" className="p-1 text-zinc-400 hover:text-amber-600"><Ban size={13} /></button>
+                  )}
                   <button onClick={() => setConfirm(r)} aria-label="Remove" className="p-1 text-zinc-400 hover:text-rose-500"><Trash2 size={13} /></button>
                 </div>
               </div>
@@ -381,10 +398,19 @@ export function ContactTasks({ contactId, contactName, reload, legacy }: { conta
       {confirm && (
         <ConfirmDialog
           title="Remove this?"
-          message={`"${confirm.title}" and its chase will be deleted. ${contactName} won't be asked about it again.`}
+          message={`"${confirm.title}" and its chase will be deleted for good. To stop it without losing the record, use "Not doing this" instead.`}
           confirmLabel="Remove"
           onConfirm={() => remove(confirm)}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+      {dropFor && (
+        <ConfirmDialog
+          title="Not doing this?"
+          message={`"${dropFor.title}" will be closed as not done. ${contactName} stops being chased about it, it is never counted as finished, and it stays in the history.`}
+          confirmLabel="Not doing it"
+          onConfirm={() => drop(dropFor)}
+          onCancel={() => setDropFor(null)}
         />
       )}
     </div>

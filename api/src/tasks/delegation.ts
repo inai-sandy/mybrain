@@ -23,6 +23,15 @@ export async function settleDelegation(
   taskId: string,
   done: boolean,
   log?: (msg: string) => void,
+  /**
+   * The work ENDED without being finished. (BEA-1306)
+   *
+   * It changes one thing, and it matters: a claim waiting on the owner is not confirmed. Confirming
+   * means "yes, you finished it" — which is the opposite of what dropping the work says. Nor is it
+   * rejected, because that means "no, you didn't", and nobody decided that either. It is settled as
+   * `moot`: the question stopped needing an answer.
+   */
+  ended?: 'done' | 'dropped',
 ): Promise<void> {
   const say = log || (() => undefined);
   const p: any = prisma;
@@ -69,7 +78,7 @@ export async function settleDelegation(
   try {
     await p.taskClaim?.updateMany?.({
       where: { taskId, status: 'pending' },
-      data: { status: 'confirmed', decidedAt: new Date() },
+      data: { status: ended === 'dropped' ? 'moot' : 'confirmed', decidedAt: new Date() },
     });
     await p.teamUpdate?.updateMany?.({ where: { taskId, closedAt: null }, data: { closedAt: new Date() } });
   } catch (e: any) {

@@ -4,6 +4,7 @@ import { PostboxService } from './postbox.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { readUpdate, readLabel, type Read, type ReadResult } from './update-read';
+import { TASK_OPEN } from '../tasks/task-status';
 
 
 /**
@@ -113,7 +114,7 @@ export class TeamUpdatesService {
     const rows = await this.prisma.teamUpdate.findMany({
       // A message about a task that is already DONE has nothing left to review — the base filter
       // never looked at the task at all, so completed work sat in the inbox forever. (BEA-1211)
-      where: { needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: { not: 'done' } } }] },
+      where: { needsYou: true, closedAt: null, OR: [{ taskId: null }, { task: { status: TASK_OPEN } }] },
       orderBy: { at: 'asc' },
       take: 100,
       include: {
@@ -141,7 +142,7 @@ export class TeamUpdatesService {
        */
       if (reads.includes('done')) {
         const theirTasks = await this.prisma.task
-          .findMany({ where: { ownerContactId: u.contactId, status: { not: 'done' }, kind: { not: 'recurring' } }, select: { id: true, title: true, status: true }, orderBy: { createdAt: 'asc' }, take: 12 })
+          .findMany({ where: { ownerContactId: u.contactId, status: TASK_OPEN, kind: { not: 'recurring' } }, select: { id: true, title: true, status: true }, orderBy: { createdAt: 'asc' }, take: 12 })
           .catch(() => [] as any[]);
         if (theirTasks.length > 1) {
           const done = new Set(safeIds((u as any).answered));
@@ -208,7 +209,7 @@ export class TeamUpdatesService {
       .findMany({
         // Same rule as the base list: a claim on work that is already done needs no yes/no — the
         // unfiltered sweep was resurrecting items for tasks the owner had long closed. (BEA-1211)
-        where: { status: 'pending', task: { status: { not: 'done' } } },
+        where: { status: 'pending', task: { status: TASK_OPEN } },
         orderBy: { createdAt: 'asc' },
         include: { contact: { select: { id: true, name: true, whatsappNumber: true } }, task: { select: { id: true, title: true, status: true } } },
       })
@@ -375,7 +376,7 @@ export class TeamUpdatesService {
     // message itself close — otherwise ruling on the geyser job would take the PCB job off his
     // list too, which is the exact thing splitting exists to prevent.
     const left = await this.prisma.task
-      .count({ where: { ownerContactId: u.contactId, status: { not: 'done' }, kind: { not: 'recurring' }, NOT: { id: { in: [...answered] } } } })
+      .count({ where: { ownerContactId: u.contactId, status: TASK_OPEN, kind: { not: 'recurring' }, NOT: { id: { in: [...answered] } } } })
       .catch(() => 0);
     await this.prisma.teamUpdate
       .update({ where: { id: updateId }, data: { answered: JSON.stringify([...answered]), ...(left === 0 ? { closedAt: new Date() } : {}) } })
@@ -391,7 +392,7 @@ export class TeamUpdatesService {
     // Closing a message never decides a claim (never-guess) — but he must HEAR that one is still
     // waiting, or the count looks stuck for no reason. (BEA-1221)
     const pending = ((await Promise.resolve(
-      this.prisma.taskClaim?.count?.({ where: { contactId: u.contactId, status: 'pending', task: { status: { not: 'done' } } } }),
+      this.prisma.taskClaim?.count?.({ where: { contactId: u.contactId, status: 'pending', task: { status: TASK_OPEN } } }),
     ).catch(() => 0)) ?? 0) as number;
     return { ok: true, pendingClaim: pending > 0 };
   }
