@@ -139,10 +139,85 @@ describe('finishing delegated work lands in the same place from every screen (BE
     expect(store.reminderSend).toHaveLength(0);
   });
 
+  // ---- the job page is the FIFTH door (BEA-1310/1315) ----
+  //
+  // It shows the whole story of one job and now acts on it too. It was written to reuse the same
+  // endpoints, but "was written to" is not a guarantee — so it is asserted here with the others,
+  // against the same shared database, rather than trusted.
+  it('from the job page — the tick', async () => {
+    // `POST /tasks/:id/done {done:true}` — what the Mark done button sends.
+    const { tasks, row } = db();
+    await tasks.setDone('t1', true);
+    expect(finishedState(row)).toEqual(FINISHED);
+  });
+
+  it('from the job page — answering the claim there', async () => {
+    // `POST /tasks/claims/:id/decide {confirm:true}` — the "Yes, it is done" button. It answers the
+    // CLAIM rather than ticking the task, which is why the claim ends up confirmed instead of
+    // sitting pending under a finished job.
+    const { delegation, row } = db();
+    await delegation.decideClaim('cl1', true);
+    expect(finishedState(row)).toEqual(FINISHED);
+  });
+
   it('another person\'s chase is untouched — the switch is per task, not global', async () => {
     const { tasks, row } = db();
     await tasks.setDone('t1', true);
     expect(row('reminder', 'other')).toMatchObject({ status: 'active', needsOwner: true });
+  });
+});
+
+describe('closing it as NOT done stops the chase just as hard (BEA-1306/1315)', () => {
+  // The job page's "Not doing it" (and "Stop this report" on a daily report). The chase must stop —
+  // being messaged every morning about work you have already decided against is the exact
+  // frustration this whole run exists to remove — but nobody is thanked for finishing it.
+  it('the chase stops, the badge clears, and the claim is settled as moot', async () => {
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'Radha left the organisation');
+    expect({
+      task: row('task', 't1').status,
+      chase: row('reminder', 'r1').status,
+      pausedChase: row('reminder', 'r2').status,
+      needsYou: row('reminder', 'r1').needsOwner,
+      claim: row('taskClaim', 'cl1').status,
+      teamUpdateClosed: row('teamUpdate', 'u1').closedAt !== null,
+    }).toEqual({ task: 'dropped', chase: 'done', pausedChase: 'done', needsYou: false, claim: 'moot', teamUpdateClosed: true });
+  });
+
+  it('and it is never recorded as an achievement', async () => {
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'not needed any more');
+    expect(row('task', 't1').completedAt).toBeNull();
+    expect(row('task', 't1').droppedReason).toBe('not needed any more');
+  });
+
+  it('re-opening it from the job page clears the ending', async () => {
+    // `POST /tasks/:id/done {done:false}` — the button that would have been a silent no-op had it
+    // gone through `PUT /tasks/:id` instead. (BEA-1315)
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'Radha left');
+    await tasks.setDone('t1', false);
+    expect(row('task', 't1')).toMatchObject({ status: 'open', droppedAt: null, droppedReason: null });
+  });
+
+  it('but a ONE-OFF chase does not come back with it — written down because it surprises', async () => {
+    // Ending the work sets every chase on it to `done`. Re-opening revives only the ones with
+    // `repeat: 'daily'`, so a one-off chase stays stopped for ever: the job is open again, sitting
+    // on somebody, and nobody is being asked about it.
+    //
+    // A reminder at `done` can only have got there one way — the app ended it because the work
+    // ended. The owner's own stop writes `stopped` and their own pause writes `paused`. So reviving
+    // all of them would be safe from a "don't resurrect what he switched off" point of view. It is
+    // not done here because it means WhatsApp messages starting up again to real people, which is
+    // his call and not mine.
+    //
+    // Asserted as it actually behaves, not as it ought to. A test that quietly asserted the wish
+    // would go green and hide this. (BEA-1315)
+    const { tasks, row } = db();
+    await tasks.setDropped('t1', 'Radha left');
+    await tasks.setDone('t1', false);
+    expect(row('reminder', 'r2').status).toBe('done'); // the gap, in one line
+    expect(row('reminder', 'r2').repeat).not.toBe('daily');
   });
 });
 
