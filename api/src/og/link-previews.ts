@@ -75,7 +75,7 @@ type Deps = {
   docs: { ogMeta(slug: string, origin: string): Promise<OgMeta | null>; resolveShortCode(code: string): Promise<{ slug: string } | null> };
   /** Prisma — the other surfaces only need "is it shared" + a title, so no service wiring needed. */
   prisma: any;
-  /** NewsPublicService — AI News Daily builds its own card, so the logic lives in one place. */
+  /** NewsPublicService — AI Tweets Daily builds its own card, so the logic lives in one place. */
   news?: { ogMeta(day: string, origin: string): Promise<OgMeta | null> };
 };
 
@@ -86,7 +86,7 @@ export function buildOgRoutes({ docs, prisma, news }: Deps): OgRoute[] {
     // Documents — unchanged behaviour (BEA-900).
     { path: '/d/:slug', resolve: (p, origin) => docs.ogMeta(p.slug, origin) },
 
-    // AI News Daily (BEA-1261). This page is MEANT to be shared, so it gets a real card: the day's
+    // AI Tweets Daily (BEA-1261). This page is MEANT to be shared, so it gets a real card: the day's
     // headline and the top of the 60-second read. Server-rendered, because crawlers do not run
     // JavaScript — a card built in React is a card nobody ever sees.
     //

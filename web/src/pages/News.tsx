@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Newspaper, Telescope, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Loader2, ArrowLeft } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Newspaper, Telescope, ExternalLink, ChevronDown, ChevronRight, AlertTriangle, Loader2 } from 'lucide-react';
 import { ResearchModal } from '../ui/ResearchModal';
 import { DataTable, Column } from '../ui/DataTable';
 import { ShareButton } from '../ui/ShareButton';
-import { RadarView } from './RadarView';
+import { NewsShell, NewsToggle } from './NewsShell';
 
 /**
- * AI News Twitter (renamed from AI News Daily in BEA-1318) — your own view of an edition (BEA-1260).
+ * AI Tweets Daily (renamed from AI News Daily in BEA-1318) — your own view of an edition (BEA-1260).
  *
  * Complete coverage, layered. Every one of the day's 31–79 stories is in the page from the first
  * render, so nothing can go missing and browser-find works on all of it. What changes is size:
@@ -71,36 +71,18 @@ export default function News() {
   const [archiveError, setArchiveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Which feed is open lives in the URL (BEA-1318): /news = Daily (the radar),
-  // ?view=twitter = the written edition. Legacy ?view=radar links keep landing on Daily.
-  // A DAY url (/news/2026-08-14) is inherently an edition link — every "Read it" link the
-  // pipeline ever wrote points there bare — so it opens the edition unless explicitly told
-  // otherwise (review finding, BEA-1318).
-  const [searchParams, setSearchParams] = useSearchParams();
-  const urlView = searchParams.get('view');
-  const view: 'daily' | 'twitter' =
-    urlView === 'twitter' ? 'twitter' : urlView === 'radar' ? 'daily' : dayParam ? 'twitter' : 'daily';
-  // Inside the Twitter feed, the archive is a sub-view reached by its "Past editions" link.
+  // This is a single-purpose PAGE now (BEA-1321): AI Tweets Daily at /news/tweets and
+  // /news/:day. The radar lives on its own page. The archive stays a sub-view here,
+  // reached by the hero's "Past editions" link.
   const [tab, setTab] = useState<'today' | 'archive'>('today');
-  const selectView = (v: 'daily' | 'twitter') => {
-    setTab('today');
-    // Merge, never replace — a future ?param on /news must survive a toggle click.
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (v === 'twitter') next.set('view', 'twitter');
-      else next.delete('view');
-      return next;
-    });
-  };
   const [axis, setAxis] = useState<'category' | 'source'>('category');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [researching, setResearching] = useState<Story | null>(null);
 
-  // Which dayParam the edition effect last completed for — so landing straight on the
-  // Radar tab skips the fetch, and later tab switches load it exactly once.
+  // Which dayParam the edition effect last completed for — tab switches and re-renders
+  // on this page must not refetch an edition that is already loaded.
   const editionLoadedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (view === 'daily') return;
     if (editionLoadedFor.current === (dayParam || 'latest')) return;
     let alive = true;
     setLoading(true);
@@ -134,7 +116,7 @@ export default function News() {
       }
     })();
     return () => { alive = false; };
-  }, [dayParam, view]);
+  }, [dayParam]);
 
   useEffect(() => {
     if (tab !== 'archive' || archive || archiveError) return;
@@ -182,46 +164,35 @@ export default function News() {
     return [...groups.entries()].map(([kind, stories]) => ({ kind, stories }));
   }, [edition]);
 
-  // Daily (the radar) does not depend on an edition existing — it renders before the
-  // edition's own loading/error/empty returns so it is reachable on day zero too.
-  if (view === 'daily') {
-    return (
-      <Shell>
-        <ViewToggle view={view} onSelect={selectView} />
-        <RadarView />
-      </Shell>
-    );
-  }
-
   if (loading) return <Skeleton />;
 
   if (error) {
     return (
-      <Shell>
-        <ViewToggle view={view} onSelect={selectView} />
+      <NewsShell>
+        <NewsToggle active="tweets" title="AI Tweets Daily" />
         <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300">{error}</div>
-      </Shell>
+      </NewsShell>
     );
   }
 
   if (!edition) {
     return (
-      <Shell>
-        <ViewToggle view={view} onSelect={selectView} />
+      <NewsShell>
+        <NewsToggle active="tweets" title="AI Tweets Daily" />
         <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center dark:border-zinc-800 dark:bg-zinc-900">
           <Newspaper size={30} className="mx-auto mb-3 text-zinc-300 dark:text-zinc-600" />
           <p className="font-semibold">No edition yet</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
-            AI News Twitter writes one every day at noon. The first one will appear here as soon as it runs.
+            AI Tweets Daily writes one every day at noon. The first one will appear here as soon as it runs.
           </p>
         </div>
-      </Shell>
+      </NewsShell>
     );
   }
 
   return (
-    <Shell>
-      <ViewToggle view={view} onSelect={selectView} />
+    <NewsShell>
+      <NewsToggle active="tweets" title="AI Tweets Daily" />
 
       {tab === 'archive' && (
         <div className="mb-3">
@@ -238,14 +209,13 @@ export default function News() {
             </button>
           </div>
         ) : (
-          // Keep ?view=twitter — without it the day URL would land on the Daily feed and hide the edition.
-          <ArchiveList rows={archive} onOpen={(d) => { navigate(`/news/${d}?view=twitter`); setTab('today'); }} />
+          <ArchiveList rows={archive} onOpen={(d) => { navigate(`/news/${d}`); setTab('today'); }} />
         )
       ) : (
         <>
           {/* The hero card (BEA-1319) — replaces the old newspaper masthead. */}
           <header className="mb-4 rounded-2xl border border-indigo-200/80 bg-gradient-to-br from-indigo-50 via-white to-white p-5 dark:border-indigo-900/50 dark:from-indigo-950/40 dark:via-zinc-900 dark:to-zinc-900">
-            <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-indigo-500 dark:text-indigo-300">A I &nbsp; N E W S &nbsp; T W I T T E R</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.35em] text-indigo-500 dark:text-indigo-300">A I &nbsp; T W E E T S &nbsp; D A I L Y</p>
             <h1 className="mt-2 max-w-3xl text-balance text-xl font-bold leading-snug sm:text-[22px]">{edition.headline}</h1>
             <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
               <span>{longDate(edition.day)}</span>
@@ -266,7 +236,7 @@ export default function News() {
             <div className="mt-3 flex items-center gap-2 lg:hidden">
               <ShareButton
                 url={`/paper/${edition.day}`}
-                title={`AI News Twitter — ${edition.headline}`}
+                title={`AI Tweets Daily — ${edition.headline}`}
                 text={edition.sixty[0]}
                 label="Share this edition"
               />
@@ -417,7 +387,7 @@ export default function News() {
               <div className="flex flex-col items-start gap-2">
                 <ShareButton
                   url={`/paper/${edition.day}`}
-                  title={`AI News Twitter — ${edition.headline}`}
+                  title={`AI Tweets Daily — ${edition.headline}`}
                   text={edition.sixty[0]}
                   label="Share this edition"
                 />
@@ -444,42 +414,7 @@ export default function News() {
           onClose={() => setResearching(null)}
         />
       )}
-    </Shell>
-  );
-}
-
-/** The mockup's segmented toggle: Daily = the radar feed, Twitter = the written edition. */
-function ViewToggle({ view, onSelect }: { view: 'daily' | 'twitter'; onSelect: (v: 'daily' | 'twitter') => void }) {
-  return (
-    <div className="mb-4 flex items-center justify-between gap-3">
-      <h1 className="text-base font-bold">News</h1>
-      <div className="flex rounded-[10px] border border-zinc-200 bg-white p-[3px] text-[12.5px] dark:border-zinc-800 dark:bg-zinc-900">
-        {(['daily', 'twitter'] as const).map((v) => (
-          <button
-            key={v}
-            onClick={() => onSelect(v)}
-            className={
-              'rounded-lg px-4 py-[5px] transition-colors ' +
-              (view === v ? 'bg-indigo-500 font-semibold text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200')
-            }
-          >
-            {v === 'daily' ? 'Daily' : 'Twitter'}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Shell({ children }: { children: React.ReactNode }) {
-  const navigate = useNavigate();
-  return (
-    <div className="mx-auto w-full max-w-3xl px-4 pb-16 pt-4 sm:px-6">
-      <button onClick={() => navigate(-1)} className="mb-3 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
-        <ArrowLeft size={14} /> Back
-      </button>
-      {children}
-    </div>
+    </NewsShell>
   );
 }
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import News from './News';
@@ -13,12 +13,8 @@ import News from './News';
  * complete in the data we happen to hold.
  */
 
-// Only navigation is stubbed — useParams stays real so day-URL tests exercise the
-// actual /news/:day route the pipeline's "Read it" links point at.
-vi.mock('react-router-dom', async () => {
-  const actual: any = await vi.importActual('react-router-dom');
-  return { ...actual, useNavigate: () => vi.fn() };
-});
+// Nothing from the router is stubbed: the pages are SEPARATE routes now (BEA-1321), so
+// the toggle's real navigation inside MemoryRouter is exactly what these tests exercise.
 vi.mock('../ui/Toast', () => ({ useToast: () => vi.fn() }));
 // The Daily feed has its own tests; here it only needs to be present, not to fetch.
 vi.mock('./RadarView', () => ({ RadarView: () => <div>daily-radar-feed</div> }));
@@ -63,9 +59,8 @@ function mockFetch(over: Record<string, any> = {}) {
   }) as any;
 }
 
-// The section now opens on the Daily (radar) feed by default (BEA-1318); these are the
-// edition page's tests, so they enter through ?view=twitter like a reader would.
-const show = () => render(<MemoryRouter initialEntries={['/news?view=twitter']}><News /></MemoryRouter>);
+// AI Tweets Daily is its own page now (BEA-1321) — these are its tests, entered at its URL.
+const show = () => render(<MemoryRouter initialEntries={['/news/tweets']}><News /></MemoryRouter>);
 
 beforeEach(() => mockFetch());
 afterEach(() => vi.restoreAllMocks());
@@ -127,7 +122,7 @@ describe('the edition page (BEA-1260)', () => {
     // Share renders twice on purpose — the hero row (phone) and the rail card (desktop).
     await waitFor(() => expect(screen.getAllByText(/Share this edition/).length).toBeGreaterThan(0));
     for (const btn of screen.getAllByRole('button', { name: /Share this edition/i })) {
-      expect(btn.getAttribute('aria-label')).toContain('AI News Twitter');
+      expect(btn.getAttribute('aria-label')).toContain('AI Tweets Daily');
     }
     for (const link of screen.getAllByText('see the public version')) {
       expect(link.getAttribute('href')).toBe('/paper/2026-07-31');
@@ -142,38 +137,49 @@ describe('the edition page (BEA-1260)', () => {
   });
 });
 
-describe('the Daily|Twitter shell (BEA-1318)', () => {
-  it('opens on the Daily feed by default, with the toggle present', async () => {
-    render(<MemoryRouter initialEntries={['/news']}><News /></MemoryRouter>);
+describe('the two separate pages (BEA-1321)', () => {
+  const showBothPages = async (entry: string) => {
+    const { Routes, Route } = await vi.importActual<any>('react-router-dom');
+    const { default: NewsDaily } = await import('./NewsDaily');
+    render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/news" element={<NewsDaily />} />
+          <Route path="/news/tweets" element={<News />} />
+          <Route path="/news/:day" element={<News />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  };
+
+  it('/news is the AI News Daily page with the page-switcher toggle', async () => {
+    await showBothPages('/news');
     expect(await screen.findByText('daily-radar-feed')).toBeTruthy();
-    expect(screen.getByText('Daily')).toBeTruthy();
-    expect(screen.getByText('Twitter')).toBeTruthy();
+    expect(screen.getByText('AI News Daily')).toBeTruthy();
+    expect(screen.getByText('Tweets')).toBeTruthy();
   });
 
-  it('legacy ?view=radar links still land on Daily', async () => {
-    render(<MemoryRouter initialEntries={['/news?view=radar']}><News /></MemoryRouter>);
+  it('legacy one-page links keep working: ?view=twitter lands on Tweets, ?view=radar on Daily', async () => {
+    await showBothPages('/news?view=twitter');
+    await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
+    expect(screen.queryByText('daily-radar-feed')).toBeNull();
+    cleanup();
+    await showBothPages('/news?view=radar');
     expect(await screen.findByText('daily-radar-feed')).toBeTruthy();
   });
 
   it('a bare day URL opens that edition, never the Daily feed', async () => {
     // Every "Read it" link the pipeline has ever written is /news/<day> with no ?view —
     // those links must keep opening the edition they point at.
-    const { Routes, Route } = await vi.importActual<any>('react-router-dom');
-    render(
-      <MemoryRouter initialEntries={['/news/2026-07-31']}>
-        <Routes>
-          <Route path="/news/:day" element={<News />} />
-        </Routes>
-      </MemoryRouter>,
-    );
+    await showBothPages('/news/2026-07-31');
     await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
     expect(screen.queryByText('daily-radar-feed')).toBeNull();
   });
 
-  it('the toggle switches to the Twitter edition and back', async () => {
-    render(<MemoryRouter initialEntries={['/news']}><News /></MemoryRouter>);
+  it('the toggle navigates between the two pages', async () => {
+    await showBothPages('/news');
     await screen.findByText('daily-radar-feed');
-    fireEvent.click(screen.getByText('Twitter'));
+    fireEvent.click(screen.getByText('Tweets'));
     await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
     fireEvent.click(screen.getByText('Daily'));
     expect(await screen.findByText('daily-radar-feed')).toBeTruthy();

@@ -174,7 +174,7 @@ export class NewsResearchService {
 
     const shortTitle = (story.theme || story.text).replace(/\s+/g, ' ').slice(0, 80);
     const prompt =
-      `${this.researchTag(storyId)} Research request about one story from Sandeep's AI News Twitter.\n\n` +
+      `${this.researchTag(storyId)} Research request about one story from Sandeep's AI Tweets Daily.\n\n` +
       `Category: ${story.category || 'Uncategorised'}\n` +
       (story.theme ? `Theme: ${story.theme}\n` : '') +
       `What the news said:\n${story.text.replace(/\s+/g, ' ').slice(0, 2000)}\n` +
