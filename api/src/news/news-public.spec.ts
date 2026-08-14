@@ -112,7 +112,7 @@ describe('the public payload is narrower by construction (BEA-1261)', () => {
 describe('the share card a crawler reads (BEA-1261)', () => {
   it('carries the day\'s real headline and the top of the 60-second read', async () => {
     const m: any = await svc().ogMeta('2026-07-31', 'https://mybrain.1site.ai');
-    expect(m.title).toBe('DeepSeek resets the price war — AI News Daily');
+    expect(m.title).toBe('DeepSeek resets the price war — AI News Twitter');
     expect(m.description).toContain('One thing happened.');
     expect(m.url).toBe('https://mybrain.1site.ai/paper/2026-07-31');
   });

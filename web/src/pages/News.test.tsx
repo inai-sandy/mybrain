@@ -13,11 +13,15 @@ import News from './News';
  * complete in the data we happen to hold.
  */
 
+// Only navigation is stubbed — useParams stays real so day-URL tests exercise the
+// actual /news/:day route the pipeline's "Read it" links point at.
 vi.mock('react-router-dom', async () => {
   const actual: any = await vi.importActual('react-router-dom');
-  return { ...actual, useNavigate: () => vi.fn(), useParams: () => ({}) };
+  return { ...actual, useNavigate: () => vi.fn() };
 });
 vi.mock('../ui/Toast', () => ({ useToast: () => vi.fn() }));
+// The Daily feed has its own tests; here it only needs to be present, not to fetch.
+vi.mock('./RadarView', () => ({ RadarView: () => <div>daily-radar-feed</div> }));
 
 const STORIES = Array.from({ length: 12 }, (_, i) => ({
   id: `s${i + 1}`,
@@ -59,7 +63,9 @@ function mockFetch(over: Record<string, any> = {}) {
   }) as any;
 }
 
-const show = () => render(<MemoryRouter><News /></MemoryRouter>);
+// The section now opens on the Daily (radar) feed by default (BEA-1318); these are the
+// edition page's tests, so they enter through ?view=twitter like a reader would.
+const show = () => render(<MemoryRouter initialEntries={['/news?view=twitter']}><News /></MemoryRouter>);
 
 beforeEach(() => mockFetch());
 afterEach(() => vi.restoreAllMocks());
@@ -118,7 +124,7 @@ describe('the edition page (BEA-1260)', () => {
     show();
     await waitFor(() => expect(screen.getByText(/Share this edition/)).toBeTruthy());
     const btn = screen.getByRole('button', { name: /Share this edition/i });
-    expect(btn.getAttribute('aria-label')).toContain('AI News Daily');
+    expect(btn.getAttribute('aria-label')).toContain('AI News Twitter');
     const publicLink = screen.getByText('see the public version') as HTMLAnchorElement;
     expect(publicLink.getAttribute('href')).toBe('/paper/2026-07-31');
     expect(publicLink.getAttribute('href')).not.toContain('/news/');
@@ -131,6 +137,44 @@ describe('the edition page (BEA-1260)', () => {
   });
 });
 
+describe('the Daily|Twitter shell (BEA-1318)', () => {
+  it('opens on the Daily feed by default, with the toggle present', async () => {
+    render(<MemoryRouter initialEntries={['/news']}><News /></MemoryRouter>);
+    expect(await screen.findByText('daily-radar-feed')).toBeTruthy();
+    expect(screen.getByText('Daily')).toBeTruthy();
+    expect(screen.getByText('Twitter')).toBeTruthy();
+  });
+
+  it('legacy ?view=radar links still land on Daily', async () => {
+    render(<MemoryRouter initialEntries={['/news?view=radar']}><News /></MemoryRouter>);
+    expect(await screen.findByText('daily-radar-feed')).toBeTruthy();
+  });
+
+  it('a bare day URL opens that edition, never the Daily feed', async () => {
+    // Every "Read it" link the pipeline has ever written is /news/<day> with no ?view —
+    // those links must keep opening the edition they point at.
+    const { Routes, Route } = await vi.importActual<any>('react-router-dom');
+    render(
+      <MemoryRouter initialEntries={['/news/2026-07-31']}>
+        <Routes>
+          <Route path="/news/:day" element={<News />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
+    expect(screen.queryByText('daily-radar-feed')).toBeNull();
+  });
+
+  it('the toggle switches to the Twitter edition and back', async () => {
+    render(<MemoryRouter initialEntries={['/news']}><News /></MemoryRouter>);
+    await screen.findByText('daily-radar-feed');
+    fireEvent.click(screen.getByText('Twitter'));
+    await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
+    fireEvent.click(screen.getByText('Daily'));
+    expect(await screen.findByText('daily-radar-feed')).toBeTruthy();
+  });
+});
+
 describe('the archive (BEA-1260)', () => {
   it('a failed load says so and offers a retry — it does NOT pretend there are no editions', async () => {
     // "No past editions yet" and "we could not reach the server" look identical to a reader, and
@@ -138,7 +182,7 @@ describe('the archive (BEA-1260)', () => {
     mockFetch({ archiveFails: true });
     show();
     await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
-    fireEvent.click(screen.getByText('Past editions'));
+    fireEvent.click(screen.getByText('Past editions ›'));
     await waitFor(() => expect(screen.getByText(/archive could not be loaded/i)).toBeTruthy());
     expect(screen.getByText('Try again')).toBeTruthy();
     expect(screen.queryByText(/No past editions yet/)).toBeNull();
@@ -148,7 +192,7 @@ describe('the archive (BEA-1260)', () => {
     mockFetch({ archive: [] });
     show();
     await waitFor(() => expect(screen.getByText(/DeepSeek resets the price war/)).toBeTruthy());
-    fireEvent.click(screen.getByText('Past editions'));
+    fireEvent.click(screen.getByText('Past editions ›'));
     await waitFor(() => expect(screen.getAllByText(/No past editions yet/).length).toBeGreaterThan(0));
   });
 });

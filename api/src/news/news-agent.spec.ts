@@ -273,7 +273,7 @@ describe('the pipeline steps report what actually happened (BEA-1259)', () => {
     const p = pipe();
     (p as any).prisma.newsEdition = { findUnique: async () => ({ number: 3, day: '2026-07-31', headline: 'DeepSeek resets the price war', storyCount: 40 }) };
     const out = await p.runDaily();
-    expect(out).toContain('AI News Daily No. 3');
+    expect(out).toContain('AI News Twitter No. 3');
     expect(out).toContain('DeepSeek resets the price war');
     expect(out).toContain('no file to find');
     expect(out).toContain('/paper/2026-07-31');

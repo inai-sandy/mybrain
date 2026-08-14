@@ -51,12 +51,15 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // News got its own group (BEA-1318): two feeds live at /news — AI News Daily (the
+    // radar) and AI News Twitter (the written edition) — behind the Daily|Twitter toggle.
+    label: 'News',
+    items: [{ to: '/news', label: 'News', icon: Newspaper }],
+  },
+  {
     label: 'Automation',
     items: [
       { to: '/agent', label: 'Agents', icon: Bot },
-      // AI News Daily writes an edition every day at noon (BEA-1260). It IS an agent, but the thing
-      // you actually want to open is the paper, not the job page.
-      { to: '/news', label: 'AI News Daily', icon: Newspaper },
       { to: '/flows', label: 'Flows', icon: Workflow },
       { to: '/skills', label: 'Skills', icon: Wand2 },
     ],
