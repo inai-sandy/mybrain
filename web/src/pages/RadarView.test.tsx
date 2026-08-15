@@ -153,6 +153,46 @@ describe('the controls row (BEA-1324)', () => {
   });
 });
 
+describe('one card per story (BEA-1327)', () => {
+  // The same story arriving through several feeds — the live case was Hacker News four ways.
+  const TL = [
+    { name: 'TechCrunch AI', url: 'https://x/5', at: '2026-08-14T09:00:00Z' },
+    { name: 'The Verge AI', url: 'https://x/6', at: '2026-08-14T10:15:00Z' },
+  ];
+  const DUPES = [
+    { id: 'd1', title: 'Cursor is acquired by SpaceX', titleOriginal: 'Cursor is acquired by SpaceX', translated: false, url: 'https://x/5', source: 'TechCrunch AI', category: 'industry', aiScore: 0.5, sources: TL, isPick: false, whyItMatters: null, publishedAt: '2026-08-14T10:00:00Z', heat: 2 },
+    { id: 'd2', title: 'Cursor is acquired by SpaceX', titleOriginal: 'Cursor is acquired by SpaceX', translated: false, url: 'https://x/6', source: 'The Verge AI', category: 'industry', aiScore: 0.5, sources: TL, isPick: false, whyItMatters: null, publishedAt: '2026-08-14T09:30:00Z', heat: 2 },
+    { id: 'p9', title: 'Cursor is acquired by SpaceX', titleOriginal: 'Cursor is acquired by SpaceX', translated: false, url: 'https://x/5', source: 'TechCrunch AI', category: 'industry', aiScore: 0.9, sources: TL, isPick: true, whyItMatters: 'Big deal.', publishedAt: '2026-08-14T09:00:00Z', heat: 2 },
+    { id: 't1', title: 'AI driven testing', titleOriginal: 'AI driven testing', translated: false, url: 'https://x/8', source: 'Feed A', category: 'devtools', aiScore: 0.9, sources: [], isPick: false, whyItMatters: null, publishedAt: '2026-08-14T08:00:00Z', heat: 1 },
+    { id: 't2', title: 'AI driven testing', titleOriginal: 'AI driven testing', translated: false, url: 'https://x/9', source: 'Feed B', category: 'devtools', aiScore: 0.85, sources: [], isPick: false, whyItMatters: null, publishedAt: '2026-08-14T07:00:00Z', heat: 1 },
+  ];
+
+  it('collapses shared-timeline rows and title twins; the pick survives its duplicates', async () => {
+    vi.stubGlobal('fetch', mockFetch({ list: { items: DUPES, total: DUPES.length, page: 1, pageSize: 100, pages: 1 } }));
+    render(<RadarView />);
+    await screen.findByText('Today, hour by hour');
+    // Three raw Cursor rows → ONE feed card (plus the one Hot-now line).
+    expect(screen.getAllByText('Cursor is acquired by SpaceX')).toHaveLength(2);
+    // The surviving card is the pick, with its why-line.
+    expect(screen.getByText('★ Top pick')).toBeTruthy();
+    expect(screen.getByText('Big deal.')).toBeTruthy();
+    // Two same-title rows with no merged data also collapse to one card.
+    expect(screen.getAllByText('AI driven testing')).toHaveLength(1);
+  });
+
+  it('two DIFFERENT stories sharing a generic headline both stay on the page', async () => {
+    const TWO = [
+      { id: 's1', title: 'Weekly AI roundup', titleOriginal: 'Weekly AI roundup', translated: false, url: 'https://a/1', source: 'Feed A', category: 'ai_general', aiScore: 0.9, sources: [{ name: 'Feed A', url: 'https://a/1', at: '2026-08-14T09:00:00Z' }], isPick: false, whyItMatters: null, publishedAt: '2026-08-14T09:00:00Z', heat: 1 },
+      { id: 's2', title: 'Weekly AI roundup', titleOriginal: 'Weekly AI roundup', translated: false, url: 'https://b/2', source: 'Feed B', category: 'ai_general', aiScore: 0.9, sources: [{ name: 'Feed B', url: 'https://b/2', at: '2026-08-14T08:00:00Z' }], isPick: false, whyItMatters: null, publishedAt: '2026-08-14T08:00:00Z', heat: 1 },
+    ];
+    vi.stubGlobal('fetch', mockFetch({ list: { items: TWO, total: 2, page: 1, pageSize: 100, pages: 1 } }));
+    render(<RadarView />);
+    await screen.findByText('Today, hour by hour');
+    // Different merged timelines = different stories, whatever the headline says.
+    expect(screen.getAllByText('Weekly AI roundup')).toHaveLength(2);
+  });
+});
+
 describe('the public page (BEA-1325)', () => {
   it('publicMode reads the no-login routes and shows no Sync button', async () => {
     const fetchMock = mockFetch();
