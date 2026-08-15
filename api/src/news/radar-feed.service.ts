@@ -505,23 +505,31 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
     return { lastOkAt: s.lastOkAt, total: s.total, categories: s.categories, sources: s.sources };
   }
 
-  /** The share card a crawler reads for /radar — today's hottest stories, or a plain line. */
-  async ogMeta(origin: string) {
+  /**
+   * Today's hottest headlines, one line per STORY — shared by the /radar card text and the
+   * card image (BEA-1326). Member items of one merged story share its heat, so the same
+   * headline arrives more than once — seen on the first live card. Deduped by title.
+   */
+  async hotTitles(take = 3): Promise<string[]> {
     const rows = await this.prisma.radarItem
       .findMany({ where: { pendingTranslation: false, heat: { gte: 2 } }, orderBy: [{ heat: 'desc' }, { publishedAt: 'desc' }], take: 10, select: { title: true } })
       .catch(() => []);
-    // Member items of one merged story share its heat, so the same headline arrives more than
-    // once — seen on the first live card. One story, one line.
     const seen = new Set<string>();
-    const titles = rows
+    return rows
       .map((r: any) => String(r.title || '').trim())
       .filter((t: string) => t && !seen.has(t.toLowerCase()) && (seen.add(t.toLowerCase()), true))
-      .slice(0, 3);
+      .slice(0, take);
+  }
+
+  /** The share card a crawler reads for /radar — today's hottest stories, or a plain line. */
+  async ogMeta(origin: string) {
+    const titles = await this.hotTitles(3);
     return {
       title: 'AI News Daily — My Brain',
       description: (titles.length ? `Hot now: ${titles.join(' · ')}` : 'AI news from around the world — refreshed every hour, in English.').slice(0, 180),
       url: `${origin}/radar`,
-      image: `${origin}/og-default.png`,
+      // A real generated image (BEA-1326), not the static default — today's hot list, drawn hourly.
+      image: `${origin}/api/og/radar/card.png`,
     };
   }
 
