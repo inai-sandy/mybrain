@@ -176,6 +176,18 @@ describe('the two separate pages (BEA-1321)', () => {
     expect(screen.queryByText('daily-radar-feed')).toBeNull();
   });
 
+  it('the top Share hands out the PUBLIC /radar link, never the private /news URL (BEA-1330)', async () => {
+    const write = vi.fn(async (_text: string) => {});
+    Object.assign(navigator, { clipboard: { writeText: write } });
+    await showBothPages('/news');
+    await screen.findByText('daily-radar-feed');
+    fireEvent.click(screen.getByText('Share public link'));
+    await waitFor(() => expect(write).toHaveBeenCalled());
+    const shared = String(write.mock.calls[0][0]);
+    expect(shared).toContain('/radar');
+    expect(shared).not.toContain('/news');
+  });
+
   it('the toggle navigates between the two pages', async () => {
     await showBothPages('/news');
     await screen.findByText('daily-radar-feed');
