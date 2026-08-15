@@ -450,6 +450,8 @@ describe('the public radar is a separate, narrower shape (BEA-1325)', () => {
     expect(m.url).toBe('https://mybrain.example/radar');
     expect(m.title).toBe('AI News Daily — My Brain');
     expect(m.description).toContain('AI news');
+    // The generated live card (BEA-1326), not the static default.
+    expect(m.image).toBe('https://mybrain.example/api/og/radar/card.png');
 
     prisma.items.get('en-1').heat = 3;
     m = await svc.ogMeta('https://mybrain.example');
