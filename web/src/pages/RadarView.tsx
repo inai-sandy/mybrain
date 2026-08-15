@@ -79,7 +79,7 @@ function storyKey(r: RadarRow): string {
   return (r.sources || []).map((s) => s.url).sort().join('|') || r.id;
 }
 
-export function RadarView() {
+export function RadarView({ publicMode = false }: { publicMode?: boolean } = {}) {
   const toast = useToast();
   const [rows, setRows] = useState<RadarRow[] | null>(null);
   const [status, setStatus] = useState<RadarStatus | null>(null);
@@ -96,16 +96,20 @@ export function RadarView() {
   const [search, setSearch] = useState('');
   const [limit, setLimit] = useState(FEED_STEP);
 
+  // The public page (BEA-1325) reads the no-login routes; they return the same shape,
+  // minus the sync-error text a visitor has no use for.
+  const base = publicMode ? '/api/news/public/radar' : '/api/news/radar';
+
   const load = useCallback(async () => {
     setError(null);
     try {
-      const st = await fetch('/api/news/radar/status').then((r) => {
+      const st = await fetch(`${base}/status`).then((r) => {
         if (!r.ok) throw new Error('status');
         return r.json();
       });
       const collected: RadarRow[] = [];
       for (let page = 1; page <= MAX_PAGES; page += 1) {
-        const d = await fetch(`/api/news/radar?page=${page}&pageSize=${PAGE_SIZE}`).then((r) => {
+        const d = await fetch(`${base}?page=${page}&pageSize=${PAGE_SIZE}`).then((r) => {
           if (!r.ok) throw new Error('list');
           return r.json();
         });
@@ -119,7 +123,7 @@ export function RadarView() {
       // load remain on screen under the stale-data note.
       setError('The radar could not be loaded. Check your connection and try again.');
     }
-  }, []);
+  }, [base]);
 
   useEffect(() => {
     load();
@@ -286,15 +290,17 @@ export function RadarView() {
           {feed.length} of {status?.total ?? (rows || []).length} stories
           {status?.lastOkAt ? ` · synced ${timeAgo(status.lastOkAt)}` : ''}
         </span>
-        <button
-          onClick={syncNow}
-          disabled={syncing}
-          className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 py-[3px] font-medium text-zinc-600 hover:text-indigo-600 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-indigo-400"
-        >
-          <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Syncing…' : 'Sync now'}
-        </button>
-        {notice && <span>{notice}</span>}
+        {!publicMode && (
+          <button
+            onClick={syncNow}
+            disabled={syncing}
+            className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 py-[3px] font-medium text-zinc-600 hover:text-indigo-600 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-indigo-400"
+          >
+            <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Syncing…' : 'Sync now'}
+          </button>
+        )}
+        {!publicMode && notice && <span>{notice}</span>}
       </div>
 
       {(status?.lastError || error) && (rows || []).length > 0 && (
@@ -309,7 +315,7 @@ export function RadarView() {
           <Sparkles size={30} className="mx-auto mb-3 text-zinc-300 dark:text-zinc-600" />
           <p className="font-semibold">The radar is warming up</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-zinc-500">
-            It refreshes itself every hour. The first stories will appear after the next sync — or tap “Sync now”.
+            It refreshes itself every hour. The first stories will appear after the next sync{publicMode ? '.' : ' — or tap “Sync now”.'}
           </p>
         </div>
       ) : (

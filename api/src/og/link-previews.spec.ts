@@ -102,6 +102,16 @@ describe('link previews (BEA-1133 / BEA-1134)', () => {
       expect(m?.image).toBe(`${ORIGIN}/api/og/item/i1/card.png`);
     });
 
+    it('serves the public radar card through RadarFeedService, and skips it when unwired (BEA-1325)', async () => {
+      const radar = { ogMeta: jest.fn(async (origin: string) => ({ title: 'AI News Daily — My Brain', description: 'Hot now: X', image: `${origin}/og-default.png`, url: `${origin}/radar` })) };
+      const withRadar = buildOgRoutes({ docs: docs as any, prisma, radar });
+      const m = await withRadar.find((r) => r.path === '/radar')!.resolve({}, ORIGIN);
+      expect(m?.title).toBe('AI News Daily — My Brain');
+      expect(m?.url).toBe(`${ORIGIN}/radar`);
+      // Without the dep the route resolves null → the default card, never a crash.
+      expect(await byPath('/radar').resolve({}, ORIGIN)).toBeNull();
+    });
+
     it('does NOT register the private contact board or Gmail request pages', () => {
       const paths = routes.map((r) => r.path);
       expect(paths).not.toContain('/t/:slug');

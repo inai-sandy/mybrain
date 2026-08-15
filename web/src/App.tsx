@@ -57,6 +57,7 @@ const RecordingView = lazy(() => import('./pages/RecordingView'));
 const News = lazy(() => import('./pages/News'));
 const NewsDaily = lazy(() => import('./pages/NewsDaily'));
 const PaperPublic = lazy(() => import('./pages/PaperPublic'));
+const RadarPublic = lazy(() => import('./pages/RadarPublic'));
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -88,6 +89,8 @@ export default function App() {
           {/* AI News Daily — meant to be shared, so no login and no personal controls (BEA-1261). */}
           <Route path="/paper" element={<Suspense fallback={<RouteSkeleton />}><PaperPublic /></Suspense>} />
           <Route path="/paper/:day" element={<Suspense fallback={<RouteSkeleton />}><PaperPublic /></Suspense>} />
+          {/* AI News Daily's radar, public at /radar — same v4.1 view, no admin controls (BEA-1325). */}
+          <Route path="/radar" element={<Suspense fallback={<RouteSkeleton />}><RadarPublic /></Suspense>} />
           {/* Everything else is behind auth. */}
           <Route path="/*" element={<AuthedApp />} />
         </Routes>

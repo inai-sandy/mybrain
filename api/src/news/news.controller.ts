@@ -145,6 +145,24 @@ export class NewsController {
     return this.pub.byDay(day);
   }
 
+  /** The radar anyone may read — same stories as /news, no login. (BEA-1325) */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('public/radar')
+  publicRadar(@Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.radar.publicList({ page: Number(page) || 1, pageSize: Number(pageSize) || 100 });
+  }
+
+  /** Public radar status — filter values and freshness, never our internal error text. (BEA-1325) */
+  @Public()
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('public/radar/status')
+  publicRadarStatus() {
+    return this.radar.publicStatus();
+  }
+
   /** Every edition, newest first — the archive. (BEA-1260) */
   @Get('editions')
   editions(@Query('limit') limit?: string) {

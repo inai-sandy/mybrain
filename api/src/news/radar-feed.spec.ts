@@ -51,6 +51,7 @@ function makePrisma() {
       if (where.source?.not !== undefined && row.source === where.source.not) return false;
     }
     if (where.title?.contains && !String(row.title).toLowerCase().includes(String(where.title.contains).toLowerCase())) return false;
+    if (where.heat?.gte !== undefined && !(Number(row.heat) >= where.heat.gte)) return false;
     return true;
   };
   return {
@@ -401,5 +402,57 @@ describe('the radar list behaves like every list here (BEA-1311)', () => {
 
     const byCategory = await svc.list({ category: 'models' });
     expect(byCategory.total).toBe(2);
+  });
+});
+
+describe('the public radar is a separate, narrower shape (BEA-1325)', () => {
+  it('publicList maps items field by field — sync bookkeeping never leaves the house', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    svc.translations['通义千问开源新模型'] = 'Tongyi Qianwen open-sources a new model';
+    await svc.sync();
+
+    const r: any = await svc.publicList({ page: 1, pageSize: 100 });
+    expect(r.total).toBe(4);
+    const item = r.items.find((i: any) => i.id === 'en-1');
+    expect(item.title).toBe('OpenAI ships a new eval suite');
+    expect(item.heat).toBe(1);
+    expect(item).not.toHaveProperty('firstSeenAt');
+    expect(item).not.toHaveProperty('lastSeenAt');
+    expect(item).not.toHaveProperty('pendingTranslation');
+  });
+
+  it('publicStatus keeps freshness and filters but never our internal error text', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    await svc.sync();
+    delete svc.files['latest-24h.json'];
+    await svc.sync(); // the fork goes down → lastError is set privately
+
+    const priv: any = await svc.status();
+    expect(priv.lastError).toBeTruthy();
+    const s: any = await svc.publicStatus();
+    expect(s.lastOkAt).toBeTruthy();
+    expect(s.total).toBeGreaterThan(0);
+    expect(s.categories.length).toBeGreaterThan(0);
+    expect(s).not.toHaveProperty('lastError');
+    expect(s).not.toHaveProperty('lastSyncAt');
+    expect(s).not.toHaveProperty('counts');
+    expect(s).not.toHaveProperty('pendingTranslation');
+  });
+
+  it('the /radar share card carries the hottest stories, or a plain line when nothing is hot', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    await svc.sync();
+
+    let m: any = await svc.ogMeta('https://mybrain.example');
+    expect(m.url).toBe('https://mybrain.example/radar');
+    expect(m.title).toBe('AI News Daily — My Brain');
+    expect(m.description).toContain('AI news');
+
+    prisma.items.get('en-1').heat = 3;
+    m = await svc.ogMeta('https://mybrain.example');
+    expect(m.description).toContain('OpenAI ships a new eval suite');
   });
 });
