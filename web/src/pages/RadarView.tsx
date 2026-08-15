@@ -79,6 +79,35 @@ function storyKey(r: RadarRow): string {
   return (r.sources || []).map((s) => s.url).sort().join('|') || r.id;
 }
 
+/**
+ * One card per STORY in the feed (BEA-1327). The collector follows several feeds that are
+ * the same site under different names (Hacker News alone arrives four ways), so one story
+ * lands as several raw items. Collapse rows that share a merged timeline — or, when a pair
+ * carries no merged data, the same title. Rows keep their order; when a duplicate group
+ * contains a pick, the pick survives, because it is the row with the why-it-matters line.
+ */
+export function dedupeStories(rows: RadarRow[]): RadarRow[] {
+  const at = new Map<string, number>();
+  const out: RadarRow[] = [];
+  for (const r of rows) {
+    const own = storyKey(r);
+    const titleKey = `title:${(r.title || '').trim().toLowerCase()}`;
+    // A row WITH a merged timeline only ever matches its own story — two different clusters
+    // that happen to share a generic headline ("Weekly AI roundup") must both stay on the
+    // page. The title is a fallback for rows the merger did not cluster (review fix).
+    const candidates = (r.sources || []).length ? [own] : [own, titleKey];
+    const hit = candidates.map((k) => at.get(k)).find((i) => i !== undefined);
+    if (hit !== undefined) {
+      if (r.isPick && !out[hit].isPick) out[hit] = r;
+      continue;
+    }
+    at.set(own, out.length);
+    if (!at.has(titleKey)) at.set(titleKey, out.length);
+    out.push(r);
+  }
+  return out;
+}
+
 export function RadarView({ publicMode = false }: { publicMode?: boolean } = {}) {
   const toast = useToast();
   const [rows, setRows] = useState<RadarRow[] | null>(null);
@@ -171,8 +200,16 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
       const q = search.toLowerCase();
       r = r.filter((x) => x.title.toLowerCase().includes(q) || x.source.toLowerCase().includes(q));
     }
-    return [...r].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+    // One card per story — the raw items behind it stay reachable in the card's reports list.
+    // Re-sorted afterwards: when a pick replaces its newer duplicate, its own (older) clock
+    // time must also move the card, or the hour-by-hour axis lies (review fix).
+    return dedupeStories([...r].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1)))
+      .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
   }, [rows, curated, category, sourceFilter, search]);
+
+  // The count line compares stories to stories — the raw item total would overstate the
+  // universe now that the feed collapses duplicates (review fix).
+  const totalStories = useMemo(() => dedupeStories(rows || []).length, [rows]);
 
   // A changed filter lands the reader back at the top of the feed.
   useEffect(() => {
@@ -287,7 +324,7 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
 
       <div className="mb-4 mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
         <span>
-          {feed.length} of {status?.total ?? (rows || []).length} stories
+          {feed.length} of {totalStories} stories
           {status?.lastOkAt ? ` · synced ${timeAgo(status.lastOkAt)}` : ''}
         </span>
         {!publicMode && (
