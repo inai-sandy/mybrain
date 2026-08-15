@@ -127,23 +127,26 @@ describe('the share card a crawler reads (BEA-1261)', () => {
   });
 });
 
-describe('the public routes are rate-limited (BEA-1261)', () => {
-  // These are the first ANONYMOUS endpoints in the app and the link is meant to be shared widely.
+describe('the public routes are rate-limited (BEA-1261, BEA-1325)', () => {
+  // These are ANONYMOUS endpoints and the links are meant to be shared widely.
   // The throttler is registered but deliberately not global here — every public surface opts in,
   // and forgetting to is invisible until someone points a scraper at it.
+  //
+  // Exactly FOUR public surfaces exist on purpose: the paper's index + day (BEA-1261) and the
+  // radar's list + status (BEA-1325). A fifth @Public() must raise this count knowingly, here.
   const CONTROLLER = readFileSync(join(__dirname, 'news.controller.ts'), 'utf8');
   const publicBlock = CONTROLLER.slice(CONTROLLER.indexOf('public/editions') - 800, CONTROLLER.indexOf("@Get('editions')"));
 
-  it('both public routes carry the throttler guard', () => {
-    expect((publicBlock.match(/@UseGuards\(ThrottlerGuard\)/g) || []).length).toBe(2);
+  it('all four public routes carry the throttler guard', () => {
+    expect((publicBlock.match(/@UseGuards\(ThrottlerGuard\)/g) || []).length).toBe(4);
   });
 
   it('and an actual limit, not just the guard', () => {
-    expect((publicBlock.match(/@Throttle\(\{[^)]*limit:\s*\d+/g) || []).length).toBe(2);
+    expect((publicBlock.match(/@Throttle\(\{[^)]*limit:\s*\d+/g) || []).length).toBe(4);
   });
 
-  it('every OTHER news route stays behind auth — @Public is only on the two public ones', () => {
-    expect((CONTROLLER.match(/@Public\(\)/g) || []).length).toBe(2);
+  it('every OTHER news route stays behind auth — @Public is only on the four public ones', () => {
+    expect((CONTROLLER.match(/@Public\(\)/g) || []).length).toBe(4);
   });
 });
 

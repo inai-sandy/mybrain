@@ -77,14 +77,20 @@ type Deps = {
   prisma: any;
   /** NewsPublicService — AI Tweets Daily builds its own card, so the logic lives in one place. */
   news?: { ogMeta(day: string, origin: string): Promise<OgMeta | null> };
+  /** RadarFeedService — the public AI News Daily page's card (BEA-1325). */
+  radar?: { ogMeta(origin: string): Promise<OgMeta | null> };
 };
 
 const card = (origin: string, type: string, id: string) => `${origin}/api/og/${type}/${encodeURIComponent(id)}/card.png`;
 
-export function buildOgRoutes({ docs, prisma, news }: Deps): OgRoute[] {
+export function buildOgRoutes({ docs, prisma, news, radar }: Deps): OgRoute[] {
   return [
     // Documents — unchanged behaviour (BEA-900).
     { path: '/d/:slug', resolve: (p, origin) => docs.ogMeta(p.slug, origin) },
+
+    // The public AI News Daily radar (BEA-1325) — meant to be shared, like /paper. The card
+    // carries today's hottest stories, built by RadarFeedService so the logic lives in one place.
+    { path: '/radar', resolve: (_p, origin) => (radar ? radar.ogMeta(origin) : Promise.resolve(null)) },
 
     // AI Tweets Daily (BEA-1261). This page is MEANT to be shared, so it gets a real card: the day's
     // headline and the top of the 60-second read. Server-rendered, because crawlers do not run

@@ -11,6 +11,7 @@ import { DocumentsService } from './documents/documents.service';
 import { PrismaService } from './prisma/prisma.service';
 import { registerLinkPreviews } from './og/link-previews';
 import { NewsPublicService } from './news/news-public.service';
+import { RadarFeedService } from './news/radar-feed.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -53,7 +54,7 @@ async function bootstrap() {
     // default card that ships in index.html. (BEA-1133 / BEA-1134)
     registerLinkPreviews(server, {
       pub,
-      deps: { docs, prisma: app.get(PrismaService), news: app.get(NewsPublicService) },
+      deps: { docs, prisma: app.get(PrismaService), news: app.get(NewsPublicService), radar: app.get(RadarFeedService) },
       origin: (req) => oauth.origin(req as unknown as express.Request),
     });
 

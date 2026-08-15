@@ -472,6 +472,53 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /**
+   * The radar anyone may read — no login (BEA-1325). A deliberately separate shape, like the
+   * public paper (BEA-1261): each item is mapped field by field, so a private column added to
+   * RadarItem later can never leak through a spread nobody re-checked.
+   */
+  async publicList(params: { page?: number; pageSize?: number }) {
+    const r = await this.list({ page: params.page, pageSize: params.pageSize, sort: 'time' });
+    return {
+      ...r,
+      items: r.items.map((it: any) => ({
+        id: it.id,
+        title: it.title,
+        titleOriginal: it.titleOriginal,
+        translated: it.translated,
+        url: it.url,
+        source: it.source,
+        category: it.category,
+        aiScore: it.aiScore,
+        sources: it.sources,
+        isPick: it.isPick,
+        whyItMatters: it.whyItMatters,
+        publishedAt: it.publishedAt,
+        heat: it.heat,
+      })),
+    };
+  }
+
+  /** Public status: what the filters need and when the news was last fresh — never our error text. */
+  async publicStatus() {
+    const s = await this.status();
+    return { lastOkAt: s.lastOkAt, total: s.total, categories: s.categories, sources: s.sources };
+  }
+
+  /** The share card a crawler reads for /radar — today's hottest stories, or a plain line. */
+  async ogMeta(origin: string) {
+    const rows = await this.prisma.radarItem
+      .findMany({ where: { pendingTranslation: false, heat: { gte: 2 } }, orderBy: [{ heat: 'desc' }, { publishedAt: 'desc' }], take: 3, select: { title: true } })
+      .catch(() => []);
+    const titles = rows.map((r: any) => r.title).filter(Boolean);
+    return {
+      title: 'AI News Daily — My Brain',
+      description: (titles.length ? `Hot now: ${titles.join(' · ')}` : 'AI news from around the world — refreshed every hour, in English.').slice(0, 180),
+      url: `${origin}/radar`,
+      image: `${origin}/og-default.png`,
+    };
+  }
+
   /** Per-feed health for the view's Sources strip — proxied with a short cache. */
   async sourceHealth() {
     const FIVE_MIN = 5 * 60 * 1000;

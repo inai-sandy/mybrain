@@ -153,6 +153,21 @@ describe('the controls row (BEA-1324)', () => {
   });
 });
 
+describe('the public page (BEA-1325)', () => {
+  it('publicMode reads the no-login routes and shows no Sync button', async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<RadarView publicMode />);
+    await screen.findByText('Today, hour by hour');
+    expect(screen.queryByText('Sync now')).toBeNull();
+    const urls = fetchMock.mock.calls.map(([u]: any[]) => String(u));
+    expect(urls.some((u) => u.includes('/api/news/public/radar/status'))).toBe(true);
+    expect(urls.some((u) => u.startsWith('/api/news/public/radar?'))).toBe(true);
+    // Not one call may fall back to the owner-only routes.
+    expect(urls.every((u) => !/\/api\/news\/radar(\/|\?|$)/.test(u))).toBe(true);
+  });
+});
+
 describe('states stay honest (carried from BEA-1313)', () => {
   it('shows the warming-up empty state when the radar has nothing yet', async () => {
     vi.stubGlobal('fetch', mockFetch({ list: { items: [], total: 0, page: 1, pageSize: 100, pages: 1 }, status: { ...STATUS, total: 0 } }));
