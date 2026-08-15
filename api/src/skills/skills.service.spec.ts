@@ -319,3 +319,43 @@ describe('SkillsService.targetLabels — which ENGINE reads each folder (BEA-122
     }
   });
 });
+
+describe('SkillsService.aiDescribe token ceiling (BEA-1332)', () => {
+  // The description decides WHEN a skill gets picked, so one chopped off before its trigger
+  // words ("use it when someone says /x") quietly stops the skill firing. The old ceiling of
+  // 200 was below complete()'s own default of 400 and produced exactly that.
+  const build = (spy: any[]) =>
+    new SkillsService(
+      {} as any,
+      {} as any,
+      { complete: async (p: string, max: number, label: string) => { spy.push({ max, label }); return 'a full description.'; } } as any,
+      { get: async () => 'tmpl' } as any,
+    );
+
+  it('asks for enough tokens to clear the 600-character trim', async () => {
+    const calls: any[] = [];
+    await build(calls).aiDescribe('---\nname: x\n---\nbody');
+    expect(calls).toHaveLength(1);
+    // 600 chars of output needs ~150 tokens; the ceiling must be comfortably above that.
+    expect(calls[0].max).toBeGreaterThanOrEqual(400);
+  });
+
+  it('names the skill in the label so a CUT OFF warning says which one', async () => {
+    const calls: any[] = [];
+    await build(calls).aiDescribe('---\nname: x\n---\nbody', undefined, 'setup-existing-project');
+    expect(calls[0].label).toBe('skill-describe:setup-existing-project');
+  });
+
+  it('still works when no name is given', async () => {
+    const calls: any[] = [];
+    const out = await build(calls).aiDescribe('---\nname: x\n---\nbody');
+    expect(calls[0].label).toBe('skill-describe');
+    expect(out).toBe('a full description.');
+  });
+
+  it('falls back to the given text when there is no content to describe', async () => {
+    const calls: any[] = [];
+    expect(await build(calls).aiDescribe('', 'the fallback')).toBe('the fallback');
+    expect(calls).toHaveLength(0); // no pointless LLM call
+  });
+});
