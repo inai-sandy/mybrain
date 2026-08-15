@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { TasksSettings } from './settings/TasksSettings';
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { ListChecks, User, Plug, Palette, Brain, Database, FileText, Send, Bookmark, Globe, Sparkles, Boxes, Check, Cpu, RefreshCw, Wand2, CheckSquare, MessageSquare, RotateCcw, Moon, Compass, Mic, Volume2, Wallet, Terminal, ShieldCheck, AlertTriangle, FlaskConical, BellRing, ChevronDown, Bot, Loader2, Search, ArrowLeft, ChevronRight, Newspaper, type LucideIcon } from 'lucide-react';
@@ -2587,30 +2587,100 @@ function DocumentIngestCard() {
   );
 }
 
+/**
+ * A scan walks every mounted skill folder and AI-describes each changed one — comfortably over
+ * a minute, and longer with every skill added. This used to hold ONE request open for the whole
+ * job, so a connection dropped in between reported "Scan failed" for a scan that had actually
+ * succeeded (BEA-1331). Now it starts the scan and then watches from the outside, which is also
+ * the only way to show the result to someone who reloaded the page while it ran.
+ */
+const SCAN_POLL_MS = 3000;
+const SCAN_GIVE_UP_MS = 15 * 60 * 1000;
+
+/** Mirrors SkillsService.scanStatus(). Typed rather than `any` so a backend shape change breaks
+ *  the build instead of quietly printing "undefined new, undefined updated" in a toast. */
+type ScanStatus = {
+  lastScan: string | null;
+  scanning: boolean;
+  finishedAt: string | null;
+  lastResult: { created?: number; updated?: number; total?: number; lastScan?: string; error?: string } | null;
+};
+
 function SkillsSyncCard() {
   const [busy, setBusy] = useState(false);
   const [last, setLast] = useState<string | null>(null);
   const toast = useToast();
-  useEffect(() => {
-    fetch('/api/skills/scan-status')
-      .then((r) => r.json())
-      .then((d) => setLast(d.lastScan))
-      .catch(() => undefined);
-  }, []);
-  async function run() {
-    setBusy(true);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+  }
+  // Don't keep polling into a component that has gone away.
+  useEffect(() => stopPolling, []);
+
+  async function readStatus(): Promise<ScanStatus | null> {
     try {
-      const r = await fetch('/api/skills/scan', { method: 'POST' });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) {
-        toast('success', `Synced — ${d.created} new, ${d.updated} updated (${d.total} found)`);
-        if (d.lastScan) setLast(d.lastScan);
-      } else toast('error', d.message || 'Scan failed');
+      const r = await fetch('/api/skills/scan-status');
+      if (!r.ok) return null;
+      return await r.json();
     } catch {
-      toast('error', 'Scan failed');
-    } finally {
-      setBusy(false);
+      return null; // a blip mid-poll is not a failed scan — keep watching
     }
+  }
+
+  useEffect(() => {
+    readStatus().then((d) => {
+      if (!d) return;
+      setLast(d.lastScan);
+      // A scan started elsewhere (or before a reload) is still worth following.
+      if (d.scanning) watch(d.finishedAt);
+    });
+  }, []);
+
+  /** Poll until the scan finishes, then report what it did. */
+  function watch(startedFrom: string | null) {
+    setBusy(true);
+    stopPolling();
+    const deadline = Date.now() + SCAN_GIVE_UP_MS;
+    pollRef.current = setInterval(async () => {
+      // Check the deadline FIRST. If the server is unreachable, readStatus() returns null every
+      // tick — and testing the deadline after an early return meant we polled forever with the
+      // button stuck disabled, needing a page reload to recover.
+      if (Date.now() > deadline) {
+        stopPolling();
+        setBusy(false);
+        toast('error', 'Gave up waiting for the scan. It may still be running — reopen this page shortly to see the result.');
+        return;
+      }
+      const d = await readStatus();
+      if (!d) return;
+      // Finished = not running AND the end-of-scan stamp moved on. That stamp is written whether
+      // the scan succeeded or failed, so a crashed scan is reported promptly instead of leaving
+      // us waiting for a success that will never come.
+      if (!d.scanning && d.finishedAt && d.finishedAt !== startedFrom) {
+        stopPolling();
+        setBusy(false);
+        if (d.lastScan) setLast(d.lastScan);
+        const res = d.lastResult;
+        if (res && res.error) toast('error', `Scan failed: ${res.error}`);
+        else if (res && typeof res.total === 'number') toast('success', `Synced — ${res.created} new, ${res.updated} updated (${res.total} found)`);
+        else toast('success', 'Synced.');
+      }
+    }, SCAN_POLL_MS);
+  }
+
+  async function run() {
+    if (busy) return;
+    setBusy(true);
+    // Read the current end-of-scan stamp first so we can tell OUR scan's completion from a stamp
+    // that was already there.
+    const before = await readStatus();
+    // Fire the scan, then follow it from scan-status. We deliberately do NOT treat a failure of
+    // this request as a failed scan: the server carries on regardless of whether we are still
+    // listening, and reporting failure here is the exact bug being fixed.
+    fetch('/api/skills/scan', { method: 'POST' }).catch(() => undefined);
+    watch(before?.finishedAt ?? null);
   }
   return (
     <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5">

@@ -359,3 +359,72 @@ describe('SkillsService.aiDescribe token ceiling (BEA-1332)', () => {
     expect(calls).toHaveLength(0); // no pointless LLM call
   });
 });
+
+describe('SkillsService.scanStatus (BEA-1331)', () => {
+  // The Sync button used to hold one request open for the whole ~90s scan and reported
+  // "Scan failed" when the connection dropped — for a scan that had actually succeeded.
+  // The UI now follows the scan from here, so this has to report the running flag and the
+  // finished counts, not just the date.
+  const svcWith = (settings: Record<string, string>) =>
+    new SkillsService(
+      { setting: { findUnique: async ({ where }: any) => (settings[where.key] ? { value: settings[where.key] } : null) } } as any,
+      {} as any, {} as any, {} as any,
+    );
+
+  it('reports the last scan time, the running flag, the counts and the end stamp', async () => {
+    const svc = svcWith({
+      'skills.lastScan': '2026-08-15T14:28:28.613Z',
+      'skills.lastScanFinishedAt': '2026-08-15T14:28:29.000Z',
+      'skills.lastScanResult': JSON.stringify({ created: 2, updated: 5, total: 62, lastScan: '2026-08-15T14:28:28.613Z' }),
+    });
+    const s = await svc.scanStatus();
+    expect(s.lastScan).toBe('2026-08-15T14:28:28.613Z');
+    expect(s.scanning).toBe(false);
+    expect(s.finishedAt).toBe('2026-08-15T14:28:29.000Z');
+    expect(s.lastResult).toEqual({ created: 2, updated: 5, total: 62, lastScan: '2026-08-15T14:28:28.613Z' });
+  });
+
+  it('surfaces a FAILED scan, so a watcher stops waiting for a success that never comes', async () => {
+    // A scan that throws leaves lastScan untouched. If finishedAt did not move too, the UI could
+    // only time out and then wrongly claim the scan was still running.
+    const svc = svcWith({
+      'skills.lastScan': '2026-08-15T10:00:00.000Z',
+      'skills.lastScanFinishedAt': '2026-08-15T14:31:00.000Z',
+      'skills.lastScanResult': JSON.stringify({ error: 'provider timed out' }),
+    });
+    const s = await svc.scanStatus();
+    expect(s.scanning).toBe(false);
+    expect(s.finishedAt).toBe('2026-08-15T14:31:00.000Z'); // moved even though lastScan did not
+    expect(s.lastScan).toBe('2026-08-15T10:00:00.000Z');
+    expect((s.lastResult as any).error).toBe('provider timed out');
+  });
+
+  it('says a scan is running while one is in flight', async () => {
+    const svc = svcWith({});
+    (svc as any).scanning = true;
+    expect((await svc.scanStatus()).scanning).toBe(true);
+  });
+
+  it('survives a database read that throws, rather than 500ing the endpoint the UI polls', async () => {
+    // If this endpoint dies, the UI cannot tell "scan failed" from "server unreachable" — the
+    // exact ambiguity this issue removes.
+    const svc = new SkillsService(
+      { setting: { findUnique: async () => { throw new Error('db down'); } } } as any,
+      {} as any, {} as any, {} as any,
+    );
+    await expect(svc.scanStatus()).resolves.toEqual({ lastScan: null, scanning: false, lastResult: null, finishedAt: null });
+  });
+
+  it('survives a corrupt stored result instead of taking the poll endpoint down', async () => {
+    // The UI polls this while it waits — a throw here would look exactly like the bug we fixed.
+    const svc = svcWith({ 'skills.lastScan': 'x', 'skills.lastScanResult': 'not json{' });
+    const s = await svc.scanStatus();
+    expect(s.lastResult).toBeNull();
+    expect(s.lastScan).toBe('x');
+  });
+
+  it('copes with a store that has never held a scan', async () => {
+    const s = await svcWith({}).scanStatus();
+    expect(s).toEqual({ lastScan: null, scanning: false, lastResult: null, finishedAt: null });
+  });
+});

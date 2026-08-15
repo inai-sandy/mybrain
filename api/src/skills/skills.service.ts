@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { promises as fs, createWriteStream } from 'fs';
 import { createHash } from 'crypto';
 import { join } from 'path';
@@ -70,12 +70,21 @@ function skillsDir() {
 
 type SourceMeta = { sourceRepo?: string; sourceRef?: string; skillPath?: string; sourceUrl?: string; folderHash?: string; packId?: string; packName?: string; bundlePaths?: string[] };
 type CreateInput = { title?: string; description?: string; content?: string; origin?: string; platform?: string; downloadUrl?: string; aiDescribe?: boolean; source?: SourceMeta; allowDuplicateTitle?: boolean };
+/**
+ * What a finished scan produced — kept so the UI can show the outcome it wasn't connected for,
+ * including a failure. A scan that throws used to leave no trace at all, so the UI could only sit
+ * there until it timed out and then wrongly claim the scan was still running (BEA-1331).
+ */
+export type ScanResult =
+  | { created: number; updated: number; total: number; lastScan: string; error?: undefined }
+  | { error: string; created?: undefined; updated?: undefined; total?: undefined; lastScan?: undefined };
 
 /** Engine ids as the owner sees them on screen ("codex" is written Codex, not codex). */
 const engineName = (id: string) => (id === 'codex' ? 'Codex' : id === 'claude' ? 'Claude' : id.charAt(0).toUpperCase() + id.slice(1));
 
 @Injectable()
 export class SkillsService {
+  private readonly log = new Logger('Skills');
   private scanning = false; // re-entrancy guard: a slow scan clicked twice must not run concurrently (BEA-961)
 
   constructor(
@@ -645,6 +654,58 @@ export class SkillsService {
     return row?.value || null;
   }
 
+  /**
+   * Everything the UI needs to follow a scan it did not stay connected for (BEA-1331).
+   *
+   * A scan walks every mounted skill folder and AI-describes each changed one, which takes
+   * well over a minute. The old Sync button held one request open for the whole thing, so a
+   * connection dropped in between made it report "Scan failed" for a scan that actually
+   * succeeded. The fix is to let the UI start the scan and then watch from here instead —
+   * which needs the running flag and the finished counts to be readable, not just the date.
+   */
+  async scanStatus(): Promise<{ lastScan: string | null; scanning: boolean; lastResult: ScanResult | null; finishedAt: string | null }> {
+    // Every read is individually guarded. The UI polls this endpoint, so a throw from any one of
+    // them would leave the caller unable to tell "scan failed" from "server unreachable" — which
+    // is the whole class of bug this issue exists to remove.
+    const get = (key: string) => this.prisma.setting.findUnique({ where: { key } }).catch(() => null);
+    const [lastRow, resultRow, finishedRow] = await Promise.all([
+      get('skills.lastScan'),
+      get('skills.lastScanResult'),
+      get('skills.lastScanFinishedAt'),
+    ]);
+    let lastResult: ScanResult | null = null;
+    if (resultRow?.value) {
+      try { lastResult = JSON.parse(resultRow.value); } catch { lastResult = null; }
+    }
+    return {
+      lastScan: lastRow?.value || null,
+      scanning: this.scanning,
+      lastResult,
+      finishedAt: finishedRow?.value || null,
+    };
+  }
+
+  /**
+   * Record that a scan attempt ENDED, succeeded or not.
+   *
+   * `lastScan` only moves on success (it is what the UI shows as "last synced"), so it cannot be
+   * the signal a watcher waits on — a scan that throws would never move it and the watcher would
+   * hang until its own timeout, then report "still running" about something that died minutes ago.
+   * `finishedAt` moves on every attempt, so it is the honest end-of-scan signal.
+   */
+  private async recordScanFinished(result: ScanResult): Promise<void> {
+    const at = new Date().toISOString();
+    const put = (key: string, value: string) =>
+      this.prisma.setting
+        .upsert({ where: { key }, create: { key, value }, update: { value } })
+        .catch((e: any) => {
+          // Losing this silently would show the UI a fresh timestamp beside stale counts.
+          this.log.warn(`skills scan: could not save ${key}: ${e?.message || e}`);
+        });
+    await put('skills.lastScanResult', JSON.stringify(result));
+    await put('skills.lastScanFinishedAt', at);
+  }
+
   /** Recursively collect .jsonl transcript files (dir names may start with '-'). */
   private async walkJsonl(dir: string, out: string[], depth = 0): Promise<void> {
     if (depth > 6) return;
@@ -774,7 +835,19 @@ export class SkillsService {
     await this.applyUsage().catch(() => undefined);
     const lastScan = new Date().toISOString();
     await this.prisma.setting.upsert({ where: { key: 'skills.lastScan' }, create: { key: 'skills.lastScan', value: lastScan }, update: { value: lastScan } }).catch(() => undefined);
-    return { created, updated, total, lastScan };
+    // Save the outcome, not just the timestamp: whoever started this scan has usually stopped
+    // waiting by now, so the counts have to be readable afterwards or they are lost (BEA-1331).
+    const result: ScanResult = { created, updated, total, lastScan };
+    await this.recordScanFinished(result);
+    return result;
+    } catch (e: any) {
+      // A scan that dies (a provider blip mid-describe is enough) used to leave no trace, so a
+      // watching UI saw an unchanged timestamp and could only conclude "still running" — about
+      // something that stopped minutes ago. Record the failure so it can be reported promptly.
+      const message = e?.message || String(e);
+      this.log.warn(`skills scan failed: ${message}`);
+      await this.recordScanFinished({ error: message });
+      throw e;
     } finally {
       this.scanning = false;
     }
