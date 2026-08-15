@@ -153,6 +153,23 @@ describe('the controls row (BEA-1324)', () => {
   });
 });
 
+describe('the Sources footer (BEA-1328)', () => {
+  it('cleans, dedupes and sorts the names — no "( )" artefacts from CJK stripping', async () => {
+    const { sourceDisplayNames } = await import('./RadarView');
+    expect(sourceDisplayNames(['Hacker News (黑客新闻)', 'Hacker News', 'hackernews', 'X：通义千问 / Qwen (@Alibaba_Qwen)', '数字生命'])).toEqual([
+      'Hacker News', 'hackernews', 'X Qwen (@Alibaba_Qwen)', '数字生命',
+    ]);
+  });
+
+  it('renders the quiet list at the bottom with a count', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    render(<RadarView />);
+    await screen.findByText('Today, hour by hour');
+    expect(screen.getByText('Sources · 4')).toBeTruthy();
+    expect(screen.getByText(/Hugging Face Blog · Qwen · TechCrunch AI/)).toBeTruthy();
+  });
+});
+
 describe('one card per story (BEA-1327)', () => {
   // The same story arriving through several feeds — the live case was Hacker News four ways.
   const TL = [

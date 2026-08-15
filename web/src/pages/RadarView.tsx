@@ -67,6 +67,23 @@ export function prettySource(name: string): string {
   return latin.length >= 2 ? latin : name;
 }
 
+/**
+ * The names for the Sources footer (BEA-1328): English where possible, no leftover "( )"
+ * artefacts from CJK stripping, deduped, alphabetical.
+ */
+export function sourceDisplayNames(sources: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of sources || []) {
+    const clean = prettySource(s).replace(/\(\s*\)/g, '').replace(/\s+/g, ' ').trim();
+    const key = clean.toLowerCase();
+    if (!clean || seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+  }
+  return out.sort((a, b) => a.localeCompare(b));
+}
+
 /** 14:32 — the clock time that sits on the axis next to each card. */
 function clockTime(iso: string): string {
   const d = new Date(iso);
@@ -210,6 +227,9 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
   // The count line compares stories to stories — the raw item total would overstate the
   // universe now that the feed collapses duplicates (review fix).
   const totalStories = useMemo(() => dedupeStories(rows || []).length, [rows]);
+
+  // The Sources footer (BEA-1328) — owner's choice: a simple, quiet list, nothing clickable.
+  const sourceNames = useMemo(() => sourceDisplayNames(status?.sources || []), [status?.sources]);
 
   // A changed filter lands the reader back at the top of the feed.
   useEffect(() => {
@@ -401,6 +421,13 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
             <p className="py-8 text-center text-sm text-zinc-400">No stories match — clear the search or filters.</p>
           )}
         </>
+      )}
+
+      {sourceNames.length > 0 && (
+        <footer className="mt-10 border-t border-zinc-200 pb-2 pt-4 dark:border-zinc-800">
+          <h2 className="mb-2 px-0.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-zinc-500">Sources · {sourceNames.length}</h2>
+          <p className="text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500">{sourceNames.join(' · ')}</p>
+        </footer>
       )}
     </div>
   );
