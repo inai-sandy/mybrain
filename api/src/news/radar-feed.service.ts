@@ -508,9 +508,15 @@ export class RadarFeedService implements OnModuleInit, OnModuleDestroy {
   /** The share card a crawler reads for /radar — today's hottest stories, or a plain line. */
   async ogMeta(origin: string) {
     const rows = await this.prisma.radarItem
-      .findMany({ where: { pendingTranslation: false, heat: { gte: 2 } }, orderBy: [{ heat: 'desc' }, { publishedAt: 'desc' }], take: 3, select: { title: true } })
+      .findMany({ where: { pendingTranslation: false, heat: { gte: 2 } }, orderBy: [{ heat: 'desc' }, { publishedAt: 'desc' }], take: 10, select: { title: true } })
       .catch(() => []);
-    const titles = rows.map((r: any) => r.title).filter(Boolean);
+    // Member items of one merged story share its heat, so the same headline arrives more than
+    // once — seen on the first live card. One story, one line.
+    const seen = new Set<string>();
+    const titles = rows
+      .map((r: any) => String(r.title || '').trim())
+      .filter((t: string) => t && !seen.has(t.toLowerCase()) && (seen.add(t.toLowerCase()), true))
+      .slice(0, 3);
     return {
       title: 'AI News Daily — My Brain',
       description: (titles.length ? `Hot now: ${titles.join(' · ')}` : 'AI news from around the world — refreshed every hour, in English.').slice(0, 180),
