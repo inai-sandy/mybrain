@@ -455,4 +455,15 @@ describe('the public radar is a separate, narrower shape (BEA-1325)', () => {
     m = await svc.ogMeta('https://mybrain.example');
     expect(m.description).toContain('OpenAI ships a new eval suite');
   });
+
+  it('the card never repeats a headline — member items share a merged story\'s heat (live fix)', async () => {
+    const prisma = makePrisma();
+    const svc = makeService(prisma);
+    await svc.sync();
+    prisma.items.get('en-1').heat = 3;
+    prisma.items.get('en-2').heat = 3;
+    prisma.items.get('en-2').title = 'OpenAI ships a new eval suite'; // same story, second outlet
+    const m: any = await svc.ogMeta('https://mybrain.example');
+    expect(m.description.match(/OpenAI ships a new eval suite/g)).toHaveLength(1);
+  });
 });
