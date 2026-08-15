@@ -85,13 +85,31 @@ export class SkillsService {
     private readonly prompts: PromptsService,
   ) {}
 
+  /**
+   * Token ceiling for a skill description (BEA-1332).
+   *
+   * Was 200 — below `complete()`'s own default of 400 — and descriptions came back chopped
+   * mid-word ("Use it when someone says \"/setup-existing-"). A truncated description is not
+   * cosmetic: the description is what decides when a skill gets picked, so a cut-off one that
+   * stops before its trigger words makes the skill less likely to fire.
+   *
+   * The result is trimmed to 600 CHARACTERS below (~150 tokens), so this ceiling only needs to
+   * be comfortably clear of that. It is deliberately generous because the general model is a
+   * moving target and a thinking model spends part of this budget before writing a word — and,
+   * as the app's own warning says, an unused ceiling costs nothing.
+   */
+  private static readonly DESCRIBE_TOKENS = 600;
+
   /** AI-write a short description of a skill from its SKILL.md (falls back to the given text). */
-  async aiDescribe(content: string, fallback?: string): Promise<string> {
+  async aiDescribe(content: string, fallback?: string, name?: string): Promise<string> {
     const fb = (fallback || '').trim();
     if (!content?.trim()) return fb;
     const tmpl = await this.prompts.get('skills.describe');
     const prompt = `${tmpl}\n\nSKILL.md:\n${content.slice(0, 5000)}`;
-    const text = await this.llm.complete(prompt, 200, 'skill-describe');
+    // Name the skill in the label so a future "CUT OFF" warning says WHICH skill was clipped —
+    // otherwise finding it means reading every row in the table.
+    const label = name ? `skill-describe:${name}` : 'skill-describe';
+    const text = await this.llm.complete(prompt, SkillsService.DESCRIBE_TOKENS, label);
     return (text?.trim() || fb).slice(0, 600);
   }
 
@@ -143,7 +161,7 @@ export class SkillsService {
     const fallbackDesc = (input.description?.trim() || parsed.description || '').trim();
     const description = input.aiDescribe === false
       ? (fallbackDesc || 'Imported skill.').slice(0, 600)
-      : await this.aiDescribe(input.content || '', fallbackDesc || undefined);
+      : await this.aiDescribe(input.content || '', fallbackDesc || undefined, input.title || parsed.name);
     const origin = input.origin === 'downloaded' ? 'downloaded' : 'created';
     const platform = input.platform === 'chat' ? 'chat' : 'code';
     const src = input.source || {};
@@ -733,7 +751,7 @@ export class SkillsService {
         // Re-describe only when the skill is new OR its SKILL.md changed since last scan
         // (keeps existing descriptions on unchanged skills → no needless LLM calls).
         const changed = !existing || (existing.content || '') !== md || !existing.description?.trim();
-        const description = changed ? await this.aiDescribe(md, existing?.description || parsed.description) : existing.description;
+        const description = changed ? await this.aiDescribe(md, existing?.description || parsed.description, title) : existing.description;
         const zipPath = join(zipDir, `scan-${slug}.zip`);
         const zipped = await this.zipFolder(folder, zipPath);
         if (existing) {
