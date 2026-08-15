@@ -40,9 +40,10 @@ export class SkillsController {
     return this.skills.scan();
   }
 
+  /** Poll target while a scan runs — see SkillsService.scanStatus (BEA-1331). */
   @Get('scan-status')
   async scanStatus() {
-    return { lastScan: await this.skills.lastScan() };
+    return this.skills.scanStatus();
   }
 
   @Get('deploy-targets')
