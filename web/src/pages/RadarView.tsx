@@ -423,13 +423,29 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
         </>
       )}
 
-      {sourceNames.length > 0 && (
-        <footer className="mt-10 border-t border-zinc-200 pb-2 pt-4 dark:border-zinc-800">
-          <h2 className="mb-2 px-0.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-zinc-500">Sources · {sourceNames.length}</h2>
-          <p className="text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500">{sourceNames.join(' · ')}</p>
-        </footer>
-      )}
+      {sourceNames.length > 0 && <SourcesFooter names={sourceNames} />}
     </div>
+  );
+}
+
+/**
+ * The Sources footer, variant A of the approved mockup — owner's final choice (BEA-1329):
+ * every feed as a small pill in the house chip style, always visible.
+ */
+function SourcesFooter({ names }: { names: string[] }) {
+  return (
+    <footer className="mt-10 border-t border-zinc-200 pb-2 pt-4 dark:border-zinc-800">
+      <h2 className="mb-2.5 px-0.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-zinc-500">
+        Sources · <span className="text-indigo-500 dark:text-indigo-400">{names.length}</span>
+      </h2>
+      <div className="flex flex-wrap gap-1.5">
+        {names.map((n) => (
+          <span key={n} className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-[3px] text-[10.5px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+            {n}
+          </span>
+        ))}
+      </div>
+    </footer>
   );
 }
 

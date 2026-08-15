@@ -161,12 +161,14 @@ describe('the Sources footer (BEA-1328)', () => {
     ]);
   });
 
-  it('renders the quiet list at the bottom with a count', async () => {
+  it('renders every source as a pill under the count — always visible (BEA-1329, variant A)', async () => {
     vi.stubGlobal('fetch', mockFetch());
     render(<RadarView />);
     await screen.findByText('Today, hour by hour');
-    expect(screen.getByText('Sources · 4')).toBeTruthy();
-    expect(screen.getByText(/Hugging Face Blog · Qwen · TechCrunch AI/)).toBeTruthy();
+    expect(screen.getByText(/Sources ·/)).toBeTruthy();
+    // The name also lives inside a card's collapsed reports list, so assert the PILL exists.
+    expect(screen.getAllByText('hackernews').some((el) => el.className.includes('rounded-full'))).toBe(true);
+    expect(screen.queryByText('⌄ Show all')).toBeNull();
   });
 });
 
