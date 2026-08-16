@@ -59,7 +59,10 @@ export function DocumentView() {
   }
 
   // In-place editing for text/markdown docs (BEA-965) — no cramped popup.
-  const isText = !!doc && !['pdf', 'image', 'html', 'site'].includes(doc.kind);
+  // 'doc' (a converted Word/Excel/PowerPoint file) renders as markdown but is NOT edited here: the
+  // original file is what Download and Export serve, so edits to the rendered text would silently
+  // diverge from the file the user gets back. Edit opens the metadata editor instead. (BEA-1339)
+  const isText = !!doc && !['pdf', 'image', 'html', 'site', 'doc'].includes(doc.kind);
   function startInline() { if (!doc) return; setETitle(doc.title); setEContent(doc.contentText || ''); setInline(true); }
   async function saveInline() {
     if (!doc) return;

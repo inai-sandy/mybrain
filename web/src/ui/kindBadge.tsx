@@ -6,6 +6,7 @@ const KIND_STYLES: Record<string, string> = {
   markdown: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
   image: 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
   site: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  doc: 'bg-blue-500/15 text-blue-600 dark:text-blue-400', // Word/Excel/PowerPoint etc. (BEA-1339)
 };
 
 export function KindBadge({ kind, className = '' }: { kind: string; className?: string }) {

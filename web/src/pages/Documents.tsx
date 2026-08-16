@@ -214,15 +214,24 @@ export function Documents() {
     if (!files?.length) return;
     setUploading(true);
     let ok = 0;
+    let failed = '';
+    const notices: string[] = [];
     for (const f of Array.from(files)) {
       const fd = new FormData();
       fd.append('file', f);
       const r = await fetch('/api/documents/upload', { method: 'POST', body: fd }).catch(() => null);
-      if (r?.ok) ok++;
+      const body = await r?.json().catch(() => null);
+      if (r?.ok) {
+        ok++;
+        if (body?.notice) notices.push(body.notice); // e.g. a scanned PDF with no readable text (BEA-1339)
+      } else if (!failed) failed = body?.message || `Could not read “${f.name}”.`;
     }
     setUploading(false);
     if (fileInput.current) fileInput.current.value = '';
-    toast(ok ? 'success' : 'error', ok ? `Uploaded ${ok} file${ok > 1 ? 's' : ''}` : 'Upload failed');
+    if (ok) toast('success', `Uploaded ${ok} file${ok > 1 ? 's' : ''}`);
+    if (failed) toast('error', failed);
+    else if (!ok) toast('error', 'Upload failed');
+    notices.forEach((n) => toast('info', n));
     load();
   }
 
@@ -420,7 +429,8 @@ export function Documents() {
           <h1 className="text-xl font-bold flex items-center gap-2"><FileText size={20} className="text-emerald-600" /> Documents</h1>
           <p className="text-sm text-zinc-500">Your own files to write, share and re-use — kept out of memory unless you convert one to Capture.</p>
         </div>
-        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.zip,image/*,application/zip" className="hidden" onChange={(e) => upload(e.target.files)} />
+        {/* Office extensions must stay in step with OFFICE_EXTS in api/src/documents/office-convert.ts (BEA-1339). */}
+        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.zip,image/*,application/zip,.doc,.docx,.docm,.ppt,.pps,.pot,.pptx,.pptm,.ppsx,.ppsm,.xls,.xlsx,.xlsm,.xlsb,.odt,.ods,.odp,.rtf,.epub,.csv" className="hidden" onChange={(e) => upload(e.target.files)} />
         <div className="hidden sm:flex shrink-0 items-center gap-2 ml-auto">
           <button onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Link2 size={16} /> Import URL</button>
           <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"><Upload size={16} /> {uploading ? 'Uploading…' : 'Upload'}</button>
@@ -693,7 +703,9 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
   const [filling, setFilling] = useState(false);
   const [loaded, setLoaded] = useState(!doc);
   const toast = useToast();
-  const isBinary = doc?.kind === 'pdf' || doc?.kind === 'image';
+  // Backed by a file on disk that we serve verbatim, so the content is not ours to rewrite —
+  // pdf/image have no text form, and a converted office file must keep matching its original. (BEA-1339)
+  const isFileBacked = doc?.kind === 'pdf' || doc?.kind === 'image' || doc?.kind === 'doc';
 
   useEffect(() => {
     if (collections.length === 0) {
@@ -752,7 +764,7 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
     setBusy(true);
     const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean);
     const body: Record<string, unknown> = { title: title.trim(), description: description.trim(), tags: tagList, collectionId: collectionId || null };
-    if (!isBinary) body.contentText = content;
+    if (!isFileBacked) body.contentText = content;
     const r = doc
       ? await fetch(`/api/documents/${doc.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       : await fetch('/api/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -774,7 +786,7 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="w-full rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-medium outline-none focus:border-emerald-500" />
           {!loaded ? (
             <p className="text-sm text-zinc-400 py-8 text-center">Loading…</p>
-          ) : isBinary ? (
+          ) : isFileBacked ? (
             <p className="text-sm text-zinc-500 rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2">This is a {doc?.kind?.toUpperCase()} file — you can edit its title, description and tags here.</p>
           ) : (
             <div className="space-y-2">
@@ -793,7 +805,7 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
           )}
           <div className="flex items-center justify-between gap-2 pt-1">
             <label className="text-xs font-medium text-zinc-500">Description &amp; tags</label>
-            {!isBinary && (
+            {!isFileBacked && (
               <button type="button" onClick={autoFill} disabled={filling} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs hover:bg-emerald-500/10 disabled:opacity-50">
                 <Sparkles size={13} /> {filling ? 'Thinking…' : 'Auto-fill with AI'}
               </button>

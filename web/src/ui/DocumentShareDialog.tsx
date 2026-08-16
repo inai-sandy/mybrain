@@ -60,7 +60,7 @@ export function DocumentShareDialog({
   const prettyUrl = `${location.origin}/d/${slug}`;
   const shortUrl = shortCode ? `${location.origin}/s/${shortCode}` : '';
   // Direct plain-text link Claude/curl can read (no JS). Only text docs, and not when password-locked. (BEA-970)
-  const isText = kind === 'md' || kind === 'html' || kind == null;
+  const isText = kind === 'md' || kind === 'html' || kind === 'doc' || kind == null; // 'doc' = converted office file (BEA-1339)
   const rawUrl = `${prettyUrl}.md`;
   const showRaw = isText && !hasPassword;
 

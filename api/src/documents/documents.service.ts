@@ -9,6 +9,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
+import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead } from './office-convert';
 import TurndownService from 'turndown';
 
 // Shared HTML→Markdown converter for the raw share link (BEA-970). ATX headings + fenced code.
@@ -371,11 +372,14 @@ export class DocumentsService {
   }
 
   /** Detect the document kind from a filename/mime. */
-  private kindOf(name: string, mime?: string): 'md' | 'html' | 'pdf' | 'image' {
+  private kindOf(name: string, mime?: string): 'md' | 'html' | 'pdf' | 'image' | 'doc' {
     const ext = extname(name || '').toLowerCase().replace('.', '');
     if ((mime || '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) return 'image';
     if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
     if (mime === 'text/html' || ['html', 'htm'].includes(ext)) return 'html';
+    // Word/Excel/PowerPoint/OpenDocument/RTF/EPUB/CSV — converted to markdown on upload. Checked
+    // BEFORE the 'md' fallback: these used to land there and get stored as mojibaked binary. (BEA-1339)
+    if (isOfficeFile(name)) return 'doc';
     return 'md';
   }
 
@@ -385,7 +389,7 @@ export class DocumentsService {
     try { return Buffer.from(name, 'latin1').toString('utf8'); } catch { return name; }
   }
 
-  /** Create a document from an uploaded file (md/html/pdf/image). (BEA-534) */
+  /** Create a document from an uploaded file (md/html/pdf/image/office). (BEA-534, BEA-1339) */
   async createFromUpload(file: UploadFile) {
     const name = this.fixFilename(file.originalname || 'upload');
     const ext = extname(name).toLowerCase();
@@ -400,6 +404,12 @@ export class DocumentsService {
       return this.create({ title, contentText: content, kind });
     }
 
+    // Office files convert BEFORE anything is written, so a file we cannot read leaves no orphan
+    // on the volume — the upload just fails with a readable reason. (BEA-1339)
+    let text = '';
+    let notice = '';
+    if (kind === 'doc') text = await officeToMarkdown(file.buffer, name);
+
     // Binary: store on the volume, then summarise from extracted text (pdf) or just the name (image).
     await fs.mkdir(docsDir(), { recursive: true });
     const id = randomUUID();
@@ -408,33 +418,44 @@ export class DocumentsService {
 
     let description = '';
     let tags: string[] = [];
-    let pdfText = '';
     if (kind === 'pdf') {
-      pdfText = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
-      if (pdfText.trim()) {
-        const ai = await this.summarize(pdfText).catch(() => ({ description: '', tags: [] as string[] }));
-        description = ai.description;
-        tags = ai.tags;
+      text = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
+      // A scan and a broken PDF both come back empty from pdf-parse, with no error — which is how
+      // scans were saved silently blank. Ask anydoc which it is and say so. (BEA-1339)
+      if (!text.trim() && (await pdfHasNoTextToRead(file.buffer).catch(() => false))) {
+        notice = `“${title}” has no text we can read — it looks like a scan or an image-only PDF. The file is saved, but it won’t be searchable until it’s run through OCR.`;
       }
     } else if (kind === 'image') {
       const ai = await this.summarizeImage(file.buffer, file.mimetype || 'image/png').catch(() => ({ description: '', tags: [] as string[] }));
       description = ai.description;
       tags = ai.tags;
     }
-    if (!description) description = kind === 'pdf' ? `PDF · ${name}` : `Image · ${name}`;
+    if (text.trim() && kind !== 'image') {
+      const ai = await this.summarize(text).catch(() => ({ description: '', tags: [] as string[] }));
+      description = ai.description;
+      tags = ai.tags;
+    }
+    if (!description) {
+      description = notice ? `No readable text · needs OCR · ${name}`
+        : kind === 'pdf' ? `PDF · ${name}`
+        : kind === 'doc' ? `${extname(name).replace('.', '').toUpperCase()} · ${name}`
+        : `Image · ${name}`;
+    }
 
-    return this.insert({
+    const doc = await this.insert({
       title,
       description: description.slice(0, 200),
       kind,
       tags,
-      // Keep the extracted PDF text so the doc is searchable; the viewer still renders the file, not this. (BEA-538)
-      contentText: kind === 'pdf' && pdfText.trim() ? pdfText : null,
+      // Keep the extracted text so the doc is searchable. For a pdf the viewer still renders the
+      // file, not this (BEA-538); for a converted office file the markdown IS what you read.
+      contentText: text.trim() ? text : null,
       filePath,
       mime: file.mimetype || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
       filename: name,
       bytes: file.size ?? file.buffer.length,
     });
+    return notice ? { ...(doc as any), notice } : doc;
   }
 
   /** Unzip a multi-file site into its own folder; keep the original zip for download. (BEA-587) */
@@ -796,7 +817,9 @@ export class DocumentsService {
     if (!row || !row.shared) return null;
     if (row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now()) return null;
     if (row.sharePassword) return null; // password-protected shares get no plain-text bypass
-    if (row.kind !== 'md' && row.kind !== 'html') return null; // only text docs have a markdown form
+    // Only text docs have a markdown form — a converted office file does too, since its
+    // contentText IS the markdown we generated on upload. (BEA-970, BEA-1339)
+    if (!['md', 'html', 'doc'].includes(row.kind)) return null;
     // Count the open, best-effort — consistent with getShared(). (BEA-586)
     void this.prisma.document.update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } }).catch(() => undefined);
     const src = row.contentText || '';
