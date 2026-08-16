@@ -35,7 +35,11 @@
     {
       "id": "BEA-1350",
       "title": "Triggers",
-      "status": "in_progress"
+      "status": "shipped",
+      "sha": "2bce51f",
+      "note": "LIVE + verified. Linear still shows In Progress \u2014 MCP was down at close time, needs setting to Done."
     }
-  ]
+  ],
+  "completedAt": "2026-08-16T22:00:00Z",
+  "result": "6/6 shipped and live. BEA-1351 untouched (blocked, by design)."
 }
