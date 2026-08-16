@@ -163,6 +163,8 @@ describe('Chat can use connected services (BEA-1349)', () => {
     expect(r!.message.gate).toBeTruthy();
     expect(r!.message.gate.headline).toContain('Delete a repository on GitHub');
     expect(r!.message.gate.detail).toContain('inai-sandy');
+    // His own message is one inch above the card — it is not read back to him inside it.
+    expect(r!.message.gate.detail).not.toMatch(/why:/i);
     // Two buttons, from the one place that owns them — and no decision yet.
     expect(r!.message.gate.options).toHaveLength(2);
     expect(r!.message.gate.decision).toBeUndefined();

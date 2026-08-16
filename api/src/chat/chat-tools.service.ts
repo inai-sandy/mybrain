@@ -241,15 +241,16 @@ export class ChatToolsService {
    * The middle of the gate's own question — what it will run with, on which account, and why.
    *
    * The question is built in one place for every surface (`ServiceGatesService.build`), so it is
-   * reused rather than rewritten here. Two lines of it are dropped: the headline, which the card
-   * already shows as its title, and the closing "say yes / say no", which describes an unattended
-   * run carrying on — not a card with two buttons an inch below it.
+   * reused rather than rewritten here. Three lines of it are dropped: the headline, which the card
+   * already shows as its title; the closing "say yes / say no", which describes an unattended run
+   * carrying on rather than a card with two buttons an inch below it; and "why", which on an agent
+   * run explains what the step was up to and in a chat only reads his own message back at him.
    */
   private detailOf(gate: PendingGate): string {
     return String(gate.question || '')
       .split('\n')
       .slice(1)
-      .filter((l) => !/^say yes/i.test(l.trim()))
+      .filter((l) => !/^(say yes|why:)/i.test(l.trim()))
       .join('\n')
       .trim();
   }
