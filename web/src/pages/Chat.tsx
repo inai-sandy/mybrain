@@ -87,7 +87,10 @@ function SourceChip({ s }: { s: Source }) {
  * Shown whatever happened, and it names the service, the action and the real reason on a failure —
  * the reply above it is written by a model, this card is not.
  */
-function ToolCallCard({ t }: { t: ToolChip }) {
+function ToolCallCard({ t, echo }: { t: ToolChip; echo?: string }) {
+  // On a failure the reply itself IS the service's reason, so the chip does not say it twice.
+  const detail = t.error || t.result;
+  const line = detail && detail.trim() !== (echo || '').trim() ? detail : '';
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 px-3 py-2">
       <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -95,16 +98,16 @@ function ToolCallCard({ t }: { t: ToolChip }) {
           ? <Check size={12} className="shrink-0 text-emerald-500" />
           : <AlertTriangle size={12} className="shrink-0 text-rose-500" />}
         <span className="font-medium text-zinc-700 dark:text-zinc-200">{t.serviceName}</span>
-        <span className="text-zinc-300 dark:text-zinc-600">·</span>
-        <span className="min-w-0 break-words text-zinc-500 dark:text-zinc-400">{t.action}</span>
+        {/* The dot travels with the action, so a wrap on a phone never leaves it dangling. */}
+        <span className="min-w-0 break-words text-zinc-500 dark:text-zinc-400">· {t.action}</span>
         {t.link && (
           <a href={t.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-600 hover:underline">
             <ExternalLink size={10} /> Open
           </a>
         )}
       </div>
-      {(t.error || t.result) && (
-        <p className={'mt-1 text-xs break-words ' + (t.ok ? 'text-zinc-600 dark:text-zinc-300' : 'text-rose-600 dark:text-rose-400')}>{t.error || t.result}</p>
+      {line && (
+        <p className={'mt-1 text-xs break-words ' + (t.ok ? 'text-zinc-600 dark:text-zinc-300' : 'text-rose-600 dark:text-rose-400')}>{line}</p>
       )}
     </div>
   );
@@ -187,7 +190,7 @@ export function Bubble({ m, onStar, onFollow, onUpdate }: { m: Msg; onStar?: (m:
           </div>
         )}
         {!user && m.gate && <div className="mt-3"><GateCard m={m} onUpdate={onUpdate} /></div>}
-        {!user && m.tools && m.tools.length > 0 && <div className="mt-3 space-y-1.5">{m.tools.map((t, i) => <ToolCallCard key={i} t={t} />)}</div>}
+        {!user && m.tools && m.tools.length > 0 && <div className="mt-3 space-y-1.5">{m.tools.map((t, i) => <ToolCallCard key={i} t={t} echo={m.content} />)}</div>}
         {!user && m.sources?.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{m.sources.map((s, i) => <SourceChip key={i} s={s} />)}</div>}
         {!user && m.followups?.length > 0 && onFollow && (
           <div className="mt-3 flex flex-wrap gap-1.5">
