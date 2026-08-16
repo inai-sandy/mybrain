@@ -29,12 +29,13 @@
     {
       "id": "BEA-1349",
       "title": "Chat can act",
-      "status": "in_progress"
+      "status": "shipped",
+      "sha": "cf9bcbf"
     },
     {
       "id": "BEA-1350",
       "title": "Triggers",
-      "status": "pending"
+      "status": "in_progress"
     }
   ]
 }

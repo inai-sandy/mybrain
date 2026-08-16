@@ -105,6 +105,24 @@ it did before: `ChatToolsService.available()` returns early with no prompt built
 and `chat-tools.spec.ts` locks that down.** A gate and a failure both skip the answer call, so a
 refusal reaches the owner in the service's own words instead of as a polite apology.
 
+**And the other direction: a service event starts a flow (BEA-1350).** `api/src/triggers/` — its own
+module, because `FlowsModule` already imports `ToolCatalogModule` and a triggers service inside the
+catalog would be a cycle. Events land on the ONE public route `POST /api/tools/triggers/events/<secret>`
+(`@Public()`, the secret is the last path segment, compared with `timingSafeEqual`), which answers
+**202 before doing the work** — a provider kept waiting retries, and a retry is a duplicate run. The
+address is masked wherever it is shown, because the secret IS the last segment. Ids are `evt:<service>.<event>`,
+the mirror of `svc:` and for the same reason. Counts are per service and can be **zero** (Sentry,
+Vercel), which the UI says in a sentence rather than drawing an empty picker, and each event says
+whether it is instant or polled (and how often) from the provider's own answer.
+**The two guards are the point:** the echo guard (`triggers/echo-guard.ts`) drops events we caused —
+a read is never blamed, then identity, then subject — and it must **never filter on `runKind`**,
+because Chat writes to the same `ToolCall` log and a chat-sent message echoes exactly like an
+agent's; and the rate cap (20 runs/hour) makes a runaway binding pause itself, drop its subscription,
+record why and push a Telegram message. **Switching a binding off, pausing it or deleting it removes
+the trigger instance at the provider** — an orphan keeps billing events for a rule the owner thinks
+is gone. A trigger-started run has nobody watching it, so it uses the durable pause, never Chat's
+inline card, and `FlowRunnerService.start(flowId, { input })` carries the payload in on the run row.
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).
