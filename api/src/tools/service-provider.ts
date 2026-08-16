@@ -87,6 +87,48 @@ export type ServiceAction = {
   deprecated?: boolean;
 };
 
+/**
+ * One kind of event a service can tell us about (BEA-1350) — "a pull request was opened".
+ *
+ * `instant` and `everyMinutes` are read off the provider at run time and never guessed. The vendor
+ * says for each event whether it is pushed the moment it happens or looked up on a timer, and the
+ * timer's length is a field on the event's own settings. The owner is told which one he is picking,
+ * because "new email" meaning "within a few minutes" changes what a rule is worth building.
+ */
+export type ServiceTrigger = {
+  /** `evt:<service>.<event>` — the only id anything above this seam sees. */
+  id: string;
+  name: string;
+  description: string;
+  service: string;
+  /** True when the service pushes it as it happens; false when it is looked up on a timer. */
+  instant: boolean;
+  /** How often it is looked up, in minutes, when it is not instant. */
+  everyMinutes?: number;
+  /** The JSON schema of the event's own settings — which repo, which channel, which label. */
+  config: any;
+  /** What one of these events looks like, when the provider publishes it. */
+  payloadSchema?: any;
+};
+
+/** What happened when we asked the provider to start (or stop) listening. */
+export type TriggerInstanceResult = {
+  ok?: boolean;
+  /** The provider's id for the live subscription — what stops it again later. */
+  instanceId?: string;
+  /** Plain English, safe to show. */
+  message?: string;
+};
+
+/** Where the provider should post events, and the secret it signs them with. */
+export type EventDelivery = {
+  ok?: boolean;
+  url?: string;
+  /** The provider's own signing secret, when it gives one. Never shown to the owner. */
+  signingSecret?: string;
+  message?: string;
+};
+
 /** The result of starting a connection. Optional fields, never a union — this repo is `strict: false`. */
 export type ConnectResult = {
   ok?: boolean;
@@ -146,6 +188,22 @@ export interface ServiceProvider {
   refresh?(): void;
   /** Run one action. `actionId` is our `svc:` id, never the vendor's. */
   execute(actionId: string, args?: Record<string, any>, opts?: { connectionId?: string }): Promise<ExecuteResult>;
+
+  // ---- events (BEA-1350) — optional, so a stub provider in a spec need not implement them -------
+
+  /**
+   * The events this service can tell us about. **Enumerate; never assume there are any.** Read live
+   * on 2026-08-16: GitHub 46, Linear 12, Slack 9, Notion 8, Google Calendar 7, Drive 7, Gmail 2 —
+   * and Sentry and Vercel have NONE at all, so a connected service with an empty list is normal and
+   * the UI must say so rather than draw an empty picker.
+   */
+  listTriggers?(service: string): Promise<ServiceTrigger[]>;
+  /** Start listening. `triggerId` is our `evt:` id, never the vendor's. */
+  createTriggerInstance?(triggerId: string, config?: Record<string, any>, opts?: { connectionId?: string }): Promise<TriggerInstanceResult>;
+  /** Stop listening, and take the subscription away at the provider so it bills nothing more. */
+  deleteTriggerInstance?(instanceId: string): Promise<TriggerInstanceResult>;
+  /** Point the provider's event delivery at one URL of ours, and learn what it signs with. */
+  ensureEventDelivery?(url: string): Promise<EventDelivery>;
   /** Is a key set, and does it work? Never throws. */
   status(): Promise<ProviderStatus>;
 }
@@ -194,6 +252,53 @@ export function toolIdFromVendorSlug(service: string, slug: string): string {
   const prefix = `${svc.toUpperCase()}_`;
   const action = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw;
   return serviceToolId(svc, action);
+}
+
+// ---- event ids (BEA-1350) ------------------------------------------------------------------
+
+/**
+ * The same shape as a tool id, for the other direction: `evt:github.pull_request_event`.
+ *
+ * Same reason, too. A binding row stores this id for as long as the rule exists, so a vendor name
+ * inside it would make the provider unswappable — and a rule the owner set up a year ago is exactly
+ * the thing that must survive a change of supplier.
+ */
+export const SERVICE_EVENT_ID_RE = /^evt:[a-z0-9_]+\.[a-z0-9_]+$/;
+
+export function isServiceEventId(id: string): boolean {
+  return SERVICE_EVENT_ID_RE.test(String(id || ''));
+}
+
+/** `('github','GITHUB_PULL_REQUEST_EVENT')` → `evt:github.pull_request_event`. */
+export function serviceEventId(service: string, trigger: string): string {
+  const svc = String(service || '').toLowerCase();
+  const raw = String(trigger || '');
+  const prefix = `${svc.toUpperCase()}_`;
+  const body = raw.toUpperCase().startsWith(prefix) ? raw.slice(prefix.length) : raw;
+  return `evt:${svc}.${body.toLowerCase()}`;
+}
+
+/** `evt:github.pull_request_event` → `{ service:'github', trigger:'pull_request_event' }`, else null. */
+export function parseServiceEventId(id: string): { service: string; trigger: string } | null {
+  if (!isServiceEventId(id)) return null;
+  const rest = String(id).slice(4);
+  const dot = rest.indexOf('.');
+  return { service: rest.slice(0, dot), trigger: rest.slice(dot + 1) };
+}
+
+/**
+ * Our id → the vendor's event slug. `evt:github.pull_request_event` → `GITHUB_PULL_REQUEST_EVENT`.
+ *
+ * A pure round trip, checked against the live API on 2026-08-16: **all 362 event types** across
+ * every toolkit are `[A-Z0-9_]+` and start with their toolkit's slug upper-cased, exactly like the
+ * action slugs. So there is no lookup table here either, and none to fall out of date.
+ */
+export function vendorTriggerSlug(id: string): string | null {
+  const parsed = parseServiceEventId(id);
+  if (!parsed) return null;
+  const prefix = parsed.service.toUpperCase();
+  const trigger = parsed.trigger.toUpperCase();
+  return trigger.startsWith(`${prefix}_`) ? trigger : `${prefix}_${trigger}`;
 }
 
 // ---- what we never hand out --------------------------------------------------------------
@@ -284,6 +389,31 @@ const ALLOWED: [string, string][] = [
   ['REMOVE', 'STAR'], ['DELETE', 'STAR'],              // un-starring
 ];
 
+/** The action's own words, with the service prefix taken off. `svc:` id or vendor slug, either way. */
+function actionWords(action: string, service?: string): string[] {
+  const asId = parseServiceToolId(action);
+  const svc = (asId?.service || service || '').toUpperCase();
+  let body = (asId?.action || String(action || '')).toUpperCase();
+  if (svc && body.startsWith(`${svc}_`)) body = body.slice(svc.length + 1);
+  return body.split(/[^A-Z0-9]+/).filter(Boolean);
+}
+
+/**
+ * Does this action only LOOK at something?
+ *
+ * One definition, used twice: the gate never stops a read (BEA-1348), and the echo guard never
+ * blames one for an event (BEA-1350) — reading a list of issues cannot have created an issue.
+ *
+ * Only the FIRST word counts, and that is deliberate: every action slug in this catalog is
+ * `<VERB>_<the rest>` (checked across 1,061 live slugs on 2026-08-16 — GitHub, Slack, Stripe,
+ * Linear, Notion, Gmail), so the first token IS the verb. Matching a read verb ANYWHERE would be the
+ * dangerous version: `DELETE_A_LIST` would stop being gated.
+ */
+export function isReadAction(action: string, service?: string): boolean {
+  const words = actionWords(action, service);
+  return !!words.length && READ_VERBS.includes(words[0]);
+}
+
 /**
  * Takes the action, with or without its service prefix — `GITHUB_DELETE_A_REPOSITORY`,
  * `delete_a_repository`, or a whole `svc:` id.
@@ -301,14 +431,9 @@ export function isRiskyAction(action: string, service?: string): boolean {
   if (!words.length) return false;
 
   /**
-   * 1. A read is never gated, and nothing below can overturn it.
-   *
-   * Only the FIRST word counts, and that is deliberate: every action slug in this catalog is
-   * `<VERB>_<the rest>` (checked across 1,061 live slugs on 2026-08-16 — GitHub, Slack, Stripe,
-   * Linear, Notion, Gmail), so the first token IS the verb and a read cannot be hiding a delete
-   * behind it. Matching a read verb ANYWHERE would be the dangerous version: `DELETE_A_LIST` would
-   * stop being gated. If a provider ever ships `GET_AND_DELETE_X`, this line is where it slips
-   * through — the test below is the tripwire.
+   * 1. A read is never gated, and nothing below can overturn it. `isReadAction()` above is the one
+   * definition of "a read", and it explains why only the first word counts. If a provider ever ships
+   * `GET_AND_DELETE_X`, that line is where it slips through — the test below is the tripwire.
    */
   if (READ_VERBS.includes(words[0])) return false;
   // 2. Hand-kept: the ones the rules miss.

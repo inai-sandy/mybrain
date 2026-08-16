@@ -1088,6 +1088,10 @@ model FlowRun {
   waitKind     String? // free_text | choice
   waitOptions  String    @default("[]") // JSON array of choices
   waitToken    String? // opaque resume token
+  /// What this run was STARTED with, when something outside the flow handed it material — a service
+  /// event's payload today (BEA-1350). Kept on the row so it survives a restart and a durable pause:
+  /// the walk feeds it to every step that has nothing upstream, and to the Question box.
+  input        String?
   startedAt    DateTime  @default(now())
   endedAt      DateTime?
 }
@@ -1601,4 +1605,66 @@ model ServiceGate {
 
   @@index([service, action])
   @@index([runId, nodeId])
+}
+
+/// One "when this happens in a service, run that flow" rule (BEA-1350).
+///
+/// The vendor's own event subscription lives behind `triggerInstanceId`. It is created when the
+/// binding is switched on and DELETED when it is switched off or thrown away — an instance left
+/// behind keeps billing events against the owner's account for a rule he thinks he turned off.
+model TriggerBinding {
+  id                String    @id @default(uuid())
+  /// Service slug, e.g. "github" — never a vendor-specific name.
+  service           String
+  /// OUR id for the event: `evt:github.pull_request_event`. Never the vendor's slug.
+  triggerType       String
+  /// The vendor's id for the live subscription. Null whenever the binding is not listening.
+  triggerInstanceId String?
+  /// What the event starts. One of the two is set; a flow today, an agent later.
+  flowId            String?
+  agentId           String?
+  /// The event's own settings (which repo, which channel), as JSON.
+  config            String?
+  /// Which connected account it listens on, when the service has more than one.
+  accountId         String?
+  /// The owner's own words for this rule, shown in the list.
+  label             String?
+  enabled           Boolean   @default(true)
+  /// Runs an hour before the binding pauses itself. The loop guard of last resort.
+  rateCap           Int       @default(20)
+  lastFiredAt       DateTime?
+  /// Why it stopped listening, in plain English. Null while it is healthy.
+  pausedReason      String?
+  createdAt         DateTime  @default(now())
+
+  @@index([service])
+  @@index([triggerType])
+}
+
+/// Every event that arrived for a binding, and what we did with it (BEA-1350).
+///
+/// A dropped event is written down exactly like a run: "we caused this ourselves" and "this one was
+/// over the cap" are the two things the owner will want to see when a rule looks quiet.
+model TriggerEvent {
+  id          String   @id @default(uuid())
+  bindingId   String?
+  service     String
+  /// OUR id for the event, as on the binding.
+  triggerType String?
+  /// ran | echo | capped | failed | ignored | busy
+  status      String
+  /// One line of plain English: what happened to this event.
+  detail      String?
+  /// The flow run it started, when it started one.
+  runId       String?
+  /// A short readable line about the event itself — who did what, where.
+  summary     String?
+  /// The `ToolCall` row we blamed, when this was dropped as our own echo.
+  echoOfId    String?
+  /// A trimmed copy of what arrived, so the history can be read back honestly.
+  payload     String?
+  createdAt   DateTime @default(now())
+
+  @@index([bindingId, createdAt])
+  @@index([createdAt])
 }

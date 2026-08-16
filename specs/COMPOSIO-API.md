@@ -148,3 +148,41 @@ Proven again end to end on 2026-08-16 (BEA-1347) through a real flow step:
 filled from its schema) both returned real data, and a bad repo name came back as
 `successful:false` with GitHub's own `{"message":"Not Found",…}` body inside `error` — HTTP 200
 throughout, which is why the verdict is only ever read from `successful`.
+
+## Events — verified live 2026-08-16 (BEA-1350)
+
+`GET /triggers_types?toolkit_slugs=<slug>&limit=N` → `{ items[], total_items }`. Counted with our own
+key: **github 46 · linear 12 · slack 9 · notion 8 · googlecalendar 7 · googledrive 7 · gmail 2 · sentry
+0 · vercel 0** — 362 event types in all. A toolkit with none is normal; enumerate, never assume.
+
+Each item carries what the UI has to say out loud:
+- `type` — **`webhook`** (pushed as it happens, 108 of 362) or **`poll`** (looked up on a timer, 254).
+- `config` — the JSON schema of the event's own settings (`owner`/`repo` are REQUIRED for GitHub),
+  including `interval`, the polling gap **in minutes**. Its default is **2**, not the 15 the docs
+  imply — read it, don't quote the docs.
+- `payload` — the schema of what an event looks like.
+
+**Every one of the 362 slugs round-trips on the toolkit prefix** (`SLACK_RECEIVE_MESSAGE` →
+`evt:slack.receive_message`), exactly like the action slugs, so there is no lookup table.
+
+Start / stop listening:
+```
+POST /trigger_instances/<TRIGGER_SLUG>/upsert  {"user_id":"mybrain-owner","trigger_config":{…},
+                                                "connected_account_id":"ca_…"}  → {"trigger_id":"ti_…"}
+DELETE /trigger_instances/manage/<trigger_id>   → {"trigger_id":"ti_…"}
+GET    /trigger_instances/active?user_ids=…     → { items:[{ id, trigger_name, trigger_config, … }] }
+```
+
+Where events are delivered — **one subscription per account**, so read it and move it, never add a second:
+```
+GET   /webhook_subscriptions                    → { items:[{ id, webhook_url, enabled_events, secret }] }
+POST  /webhook_subscriptions                    {"webhook_url":"https://…","enabled_events":[…],"version":"V3"}
+PATCH /webhook_subscriptions/<id>               {"webhook_url":"https://…","enabled_events":[…]}
+GET   /webhook_subscriptions/event_types        → composio.trigger.message · composio.connected_account.expired
+                                                  · composio.trigger.disabled
+```
+The response carries a **signing secret**. Ours is not the only door anyway: the delivery URL we
+register ends in a secret of our own, which is what the endpoint actually checks.
+
+⚠️ The full OpenAPI document is at `https://backend.composio.dev/api/v3/openapi.json` (847KB) and is
+the fastest way to settle a shape argument — the docs site disagrees with it.

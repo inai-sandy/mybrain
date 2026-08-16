@@ -52,8 +52,23 @@ const TOOLS: Record<string, any[]> = {
   ],
 };
 
+/**
+ * Event types, exactly as the live API answers them (BEA-1350): the vendor says per event whether it
+ * is pushed (`webhook`) or looked up on a timer (`poll`), and a polled one carries its own interval
+ * in minutes — the real default is 2, not the 15 the docs pages imply.
+ */
+const TRIGGERS: Record<string, any[]> = {
+  slack: [{ slug: 'SLACK_RECEIVE_MESSAGE', name: 'New message', description: 'A message arrived', type: 'webhook', toolkit: { slug: 'slack' }, config: { type: 'object', properties: {}, required: [] } }],
+  github: [
+    { slug: 'GITHUB_ISSUE_CREATED_TRIGGER', name: 'Issue created', description: 'An issue was opened', type: 'poll', toolkit: { slug: 'github' }, config: { type: 'object', required: ['owner', 'repo'], properties: { owner: { title: 'Owner' }, repo: { title: 'Repo' }, interval: { default: 2 } } } },
+  ],
+  // Verified live: Sentry and Vercel really do have none. A connected service with nothing to
+  // listen for is a normal answer, not a failure.
+  sentry: [],
+};
+
 /** A stand-in for Composio's REST API — every route answers with a recorded shape. */
-function fakeApi(opts: { accounts?: any[]; fail?: boolean; execFails?: boolean; noAuthConfigs?: boolean } = {}) {
+function fakeApi(opts: { accounts?: any[]; fail?: boolean; execFails?: boolean; noAuthConfigs?: boolean; subscription?: any; deleteMissing?: boolean } = {}) {
   const calls: { method: string; url: string; body?: any }[] = [];
   const fetchMock = async (url: string, init: any = {}) => {
     const method = init.method || 'GET';
@@ -87,6 +102,22 @@ function fakeApi(opts: { accounts?: any[]; fail?: boolean; execFails?: boolean; 
     if (u.pathname.endsWith('/connected_accounts/link')) {
       return json({ link_token: 'lk_1', redirect_url: 'https://connect.composio.dev/link/lk_1', connected_account_id: 'ca_new' });
     }
+    // ---- events (BEA-1350), in the shapes recorded live in specs/COMPOSIO-API.md ----
+    if (u.pathname.endsWith('/triggers_types')) {
+      return json({ items: TRIGGERS[u.searchParams.get('toolkit_slugs') || ''] || [], total_items: 0, next_cursor: null });
+    }
+    if (u.pathname.endsWith('/upsert')) return json({ trigger_id: 'ti_made' });
+    if (u.pathname.includes('/trigger_instances/manage/')) {
+      return opts.deleteMissing ? ({ ok: false, status: 404, text: async () => 'gone' } as any) : json({ trigger_id: 'ti_made' });
+    }
+    if (u.pathname.endsWith('/webhook_subscriptions/event_types')) {
+      return json({ items: [{ event_type: 'composio.trigger.message' }, { event_type: 'composio.trigger.disabled' }] });
+    }
+    if (u.pathname.endsWith('/webhook_subscriptions')) {
+      if (method === 'POST') return json({ id: 'ws_1', webhook_url: body?.webhook_url, secret: 'whsec_new' });
+      return json({ items: opts.subscription ? [opts.subscription] : [], next_cursor: null });
+    }
+    if (u.pathname.includes('/webhook_subscriptions/')) return json({ id: 'ws_1', webhook_url: body?.webhook_url, secret: 'whsec_moved' });
     if (u.pathname.includes('/tools/execute/')) {
       // A failure still answers 200 — the verdict is in the body.
       return opts.execFails
@@ -338,5 +369,103 @@ describe('ComposioProvider', () => {
     const p = new ComposioProvider(connectors('k')); // no prisma at all
     expect((await p.listServices({ connectedOnly: true })).map((s) => s.slug)).toEqual(['github']);
     expect((await p.connect('github')).ok).toBe(true);
+  });
+
+  // ---- events (BEA-1350) --------------------------------------------------------------------
+
+  it('reads whether an event is instant or on a timer from the API, and never guesses', async () => {
+    const { fetchMock } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+
+    const [slack] = await p.listTriggers('slack');
+    expect(slack).toMatchObject({ id: 'evt:slack.receive_message', name: 'New message', instant: true });
+    expect(slack.everyMinutes).toBeUndefined();
+
+    const [github] = await p.listTriggers('github');
+    // The real default is 2 minutes. The docs pages say otherwise; the API wins.
+    expect(github).toMatchObject({ id: 'evt:github.issue_created_trigger', instant: false, everyMinutes: 2 });
+    expect(github.config.required).toEqual(['owner', 'repo']);
+  });
+
+  it('a service with no events answers with an empty list, not an error', async () => {
+    const { fetchMock } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    expect(await p.listTriggers('sentry')).toEqual([]);
+  });
+
+  it('subscribes with OUR id and the vendor’s slug, and hands back what stops it again', async () => {
+    const { fetchMock, calls } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+
+    const made = await p.createTriggerInstance('evt:github.issue_created_trigger', { owner: 'inai-sandy', repo: 'mybrain' }, { connectionId: 'ca_1' });
+    expect(made).toEqual({ ok: true, instanceId: 'ti_made' });
+    const call = calls.find((c) => c.url.includes('/upsert'));
+    expect(call.url).toContain('/trigger_instances/GITHUB_ISSUE_CREATED_TRIGGER/upsert');
+    expect(call.body).toEqual({ user_id: 'mybrain-owner', trigger_config: { owner: 'inai-sandy', repo: 'mybrain' }, connected_account_id: 'ca_1' });
+  });
+
+  it('refuses an id that is not ours, and never calls out with it', async () => {
+    const { fetchMock, calls } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    expect((await p.createTriggerInstance('svc:github.create_an_issue')).ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('deletes a subscription — and one that is already gone counts as done', async () => {
+    const { fetchMock, calls } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    expect((await p.deleteTriggerInstance('ti_made')).ok).toBe(true);
+    expect(calls.find((c) => c.method === 'DELETE').url).toContain('/trigger_instances/manage/ti_made');
+
+    // The wanted state is "not there", so a 404 is a success, not something to make the owner read.
+    const gone = fakeApi({ deleteMissing: true });
+    global.fetch = gone.fetchMock as any;
+    const q = new ComposioProvider(connectors('k'), prisma());
+    expect((await q.deleteTriggerInstance('ti_made')).ok).toBe(true);
+    // Nothing to delete at all is a success too, without a request.
+    expect((await q.deleteTriggerInstance('')).ok).toBe(true);
+  });
+
+  it('points event delivery at our address, and gives back the signing secret', async () => {
+    const { fetchMock, calls } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const r = await p.ensureEventDelivery('https://mybrain.1site.ai/api/tools/triggers/events/abc');
+    expect(r).toMatchObject({ ok: true, signingSecret: 'whsec_new' });
+    const made = calls.find((c) => c.method === 'POST' && c.url.endsWith('/webhook_subscriptions'));
+    expect(made.body.webhook_url).toContain('/events/abc');
+    expect(made.body.enabled_events).toContain('composio.trigger.message');
+  });
+
+  it('MOVES the one subscription that already exists rather than adding a second', async () => {
+    const { fetchMock, calls } = fakeApi({ subscription: { id: 'ws_old', webhook_url: 'https://somewhere.else/hook', secret: 'whsec_old' } });
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const r = await p.ensureEventDelivery('https://mybrain.1site.ai/api/tools/triggers/events/abc');
+    expect(r.ok).toBe(true);
+    expect(calls.some((c) => c.method === 'PATCH' && c.url.includes('/webhook_subscriptions/ws_old'))).toBe(true);
+    expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/webhook_subscriptions'))).toBe(false);
+  });
+
+  it('leaves a subscription that is already pointing at us alone', async () => {
+    const url = 'https://mybrain.1site.ai/api/tools/triggers/events/abc';
+    const { fetchMock, calls } = fakeApi({ subscription: { id: 'ws_old', webhook_url: url, secret: 'whsec_old' } });
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    expect(await p.ensureEventDelivery(url)).toMatchObject({ ok: true, signingSecret: 'whsec_old' });
+    expect(calls.every((c) => c.method === 'GET')).toBe(true);
+  });
+
+  it('will not send events anywhere that is not https', async () => {
+    const { fetchMock, calls } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    expect((await p.ensureEventDelivery('http://mybrain.1site.ai/hook')).ok).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 });

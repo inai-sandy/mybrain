@@ -119,6 +119,38 @@ Two guards, both required:
 - **Echo guard** — every inbound event is checked against the `ToolCall` log; if we caused it, it is dropped. Without this: agent posts to Slack → trigger fires → flow posts again → forever.
 - **Rate cap** — per binding (default 20 runs/hour); on breach the binding pauses itself and tells the owner.
 
+**Built (BEA-1350).** `api/src/triggers/` — its own module, and that is forced rather than chosen:
+`FlowsModule` already imports `ToolCatalogModule`, so a triggers service inside the tool catalog
+would be a cycle. Events arrive at ONE public route, `POST /api/tools/triggers/events/<secret>`,
+whose last path segment is the secret (the shape the document ingest endpoint has used since
+BEA-535) — compared in constant time, and answered **202 before the work starts**, because a
+provider kept waiting retries and a retry is a duplicate run. The address is registered with the
+provider by us (`POST /webhook_subscriptions`, one per account) and is **masked everywhere it is
+shown**: printing it on a screen is printing the secret.
+
+The counts are read per service at run time and a service may have **none** (Sentry and Vercel have
+zero), which the UI says in a sentence instead of drawing an empty picker. The provider also says
+per event whether it is pushed or polled (`webhook` 108 · `poll` 254 of 362 live types) and a polled
+one carries its own interval, so "as it happens" versus "checked every 2 minutes" is read, never
+guessed — and it is on every row of the picker, because they are different promises.
+
+**The guards are the point of the issue**, because the owner chose no confirmation on normal writes:
+- **Echo** (`triggers/echo-guard.ts`) — a read is never blamed; then identity (something our call was
+  handed back appears inside the event — the precise rule); then subject (the event and a recent call
+  of ours are about the same *thing*). It must **never filter on `runKind`**: Chat writes to the same
+  log now (BEA-1349), and a message the owner sent from Chat echoes back exactly like an agent's.
+  The window is built from the event's own interval (5–30 minutes) and every drop is written down
+  with the `ToolCall` it blamed, because a loose rule that drops silently is a rule nobody can trust.
+- **Rate cap** — 20 runs an hour by default, counted over a rolling hour from the binding's own
+  history. On breach the binding **pauses itself, removes its subscription, records why and pushes a
+  Telegram message** — nobody is watching a background rule, so a screen would not do.
+
+`TriggerBinding.triggerInstanceId` is removed at the provider whenever a rule is switched off,
+paused or thrown away, and the row is only written after the subscription exists — an orphan
+subscription bills the owner for a rule he thinks is gone. A trigger-started run uses the **durable**
+pause (BEA-795/1348), never Chat's inline card, and a flow that fails leaves the rule ON with the
+failure in its history.
+
 ## Data
 | Where | What |
 |---|---|

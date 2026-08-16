@@ -122,6 +122,23 @@ export class TelegramService implements OnModuleInit {
     await this.send(owner, `⏸️ <b>${name} is waiting for you</b>\n\n${this.esc(args.question)}\n\nOpen My Brain to answer and continue.`);
   }
 
+  /**
+   * A trigger rule stopped listening on its own (BEA-1350) — it went over its hourly limit, or the
+   * service switched it off at its end.
+   *
+   * Pushed rather than left on a screen on purpose: the whole point of a rule that pauses itself is
+   * that nobody is watching it. A rule that quietly stopped working is indistinguishable from a
+   * quiet week, and the owner would only find out when the thing it was meant to catch went past.
+   */
+  async notifyTriggerPaused(args: { what: string; reason: string }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    await this.send(
+      owner,
+      `⏸️ <b>${this.esc(args.what)} stopped listening</b>\n\n${this.esc(String(args.reason).slice(0, 400))}\n\nOpen Tools in My Brain to look at it and switch it back on.`,
+    );
+  }
+
   private agentBtnLabel(o: any): string {
     const s = typeof o === 'string' ? o : o?.label || o?.text || o?.value || JSON.stringify(o);
     return String(s).slice(0, 60);

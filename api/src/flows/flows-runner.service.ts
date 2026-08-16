@@ -44,6 +44,13 @@ type NodeResult = {
 class PauseSignal { constructor(public nodeId: string) {} }
 
 /**
+ * How much of a run's starting material is kept (BEA-1350). A service event's payload is a whole API
+ * object and can be enormous; this is plenty to work from and small enough that the run row, which is
+ * read on every poll of the live view, does not become the payload.
+ */
+const RUN_INPUT_CHARS = 8000;
+
+/**
  * FlowRunner (BEA-646) — runs a saved Flow's graph. Memoised async walk so independent branches run
  * in parallel; skill/tool/ask_ai nodes run through the agent engine; merge synthesises (AI or raw).
  */
@@ -339,13 +346,20 @@ export class FlowRunnerService implements OnModuleInit {
     return this.start(old.flowId); // the no-stacking guard hands back a live run if one exists
   }
 
-  async start(flowId: string, opts: { skipBranches?: number[] } = {}): Promise<{ runId: string }> {
+  /**
+   * `input` is material from outside the flow — today, the payload of a service event that woke it
+   * (BEA-1350). It is written on the run row rather than held in memory so it survives a restart and
+   * a durable pause, and the walk hands it to every step that has nothing upstream.
+   */
+  async start(flowId: string, opts: { skipBranches?: number[]; input?: string } = {}): Promise<{ runId: string; joined?: boolean }> {
     const flow = await this.prisma.flow.findUnique({ where: { id: flowId } });
     if (!flow) throw new NotFoundException('Flow not found');
     // No stacking: if this flow already has a live run, return it instead of starting another. (BEA-772)
     const active = await this.prisma.flowRun.findFirst({ where: { flowId, status: { in: ['running', 'waiting'] } }, orderBy: { startedAt: 'desc' } });
-    if (active) return { runId: active.id };
-    const run = await this.prisma.flowRun.create({ data: { flowId, status: 'running', results: '{}' } });
+    // `joined` is said out loud for the caller (a trigger has nobody watching, so "it ran" and "one
+    // was already going" must not look the same in its history).
+    if (active) return { runId: active.id, joined: true };
+    const run = await this.prisma.flowRun.create({ data: { flowId, status: 'running', results: '{}', input: opts.input ? String(opts.input).slice(0, RUN_INPUT_CHARS) : null } });
     const flowForRun = this.applySkip(flow, opts.skipBranches); // per-run selection; saved flow untouched (BEA-796)
     void this.execute(run.id, flowForRun).catch(async (e) => {
       this.log.error(`flow run ${run.id} crashed: ${e?.message || e}`);
@@ -399,6 +413,9 @@ export class FlowRunnerService implements OnModuleInit {
 
     // Resume-safe (Move B): start from whatever finished before a pause/restart so we don't re-run it.
     const runRow = await this.prisma.flowRun.findUnique({ where: { id: runId } });
+    // What this run was handed from outside — a service event's payload (BEA-1350). Read off the row
+    // on every drive, so a run that paused and resumed days later still knows what woke it.
+    const runInput = String((runRow as any)?.input || '');
     const results: Record<string, NodeResult> = this.parse(runRow?.results) || {};
     const terminal: { text: string; at: number }[] = this.parseArr(runRow?.terminal);
     const memo = new Map<string, Promise<string>>();
@@ -567,7 +584,10 @@ export class FlowRunnerService implements OnModuleInit {
           return '';
         }
         const live = upOuts.filter(Boolean);
-        const input = live.join('\n\n');
+        // A step with NOTHING upstream is where the run's own material goes in (BEA-1350) — it is
+        // the only place in the graph that can be handed something from outside. A step fed by other
+        // steps is unaffected, so a flow started by hand behaves exactly as it always did.
+        const input = live.join('\n\n') || (!ups.length && runInput ? runInput : '');
         // "Ask me" block — pause durably until the user answers (Move B). An already-answered one
         // is seeded in the memo above, so reaching here means it still needs an answer.
         if (kind === 'ask_user') {
@@ -1156,7 +1176,19 @@ export class FlowRunnerService implements OnModuleInit {
       return `This step was skipped: "${label || refId}" is not in this agent's toolbox. Add it on the agent's page if it should be allowed.`;
     }
     switch (kind) {
-      case 'question': return node.data?.sub || input || '';
+      /**
+       * The Question box. Normally it just is the flow's own question.
+       *
+       * When the run was started with material — a service event that woke it (BEA-1350) — the box
+       * carries BOTH: the standing question the flow was built to answer, and what has just
+       * happened. Replacing one with the other would lose half the job either way round.
+       */
+      case 'question': {
+        const q = String(node.data?.sub || '');
+        const given = String(input || '');
+        if (q && given && given !== q) return `${q}\n\n${given}`;
+        return q || given;
+      }
       // Thread the whole research goal into every branch so a sub-search can't drift off-topic. (BEA-771)
       case 'subquestion': {
         const goal = (input || '').trim(); // upstream = the original question (+ prior branch findings)

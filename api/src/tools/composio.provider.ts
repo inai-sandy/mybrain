@@ -5,17 +5,23 @@ import {
   BLOCKED_SERVICES,
   ConnectResult,
   CredentialField,
+  EventDelivery,
   ExecuteResult,
   isBlockedService,
   isRiskyAction,
+  parseServiceEventId,
   parseServiceToolId,
   ProviderStatus,
   ServiceAccount,
   ServiceAction,
   ServiceInfo,
   ServiceProvider,
+  serviceEventId,
+  ServiceTrigger,
   toolIdFromVendorSlug,
+  TriggerInstanceResult,
   vendorActionSlug,
+  vendorTriggerSlug,
 } from './service-provider';
 
 /**
@@ -336,7 +342,139 @@ export class ComposioProvider implements ServiceProvider {
     }
   }
 
+  // ---- events (BEA-1350) -----------------------------------------------------------------
+
+  /**
+   * The events this service can tell us about — enumerated, never assumed.
+   *
+   * Read live on 2026-08-16 with our own key: GitHub 46, Linear 12, Slack 9, Notion 8, Google
+   * Calendar 7, Drive 7, Gmail 2 — and **Sentry 0, Vercel 0**. A connected service with no events at
+   * all is a normal answer, so this returns an empty list rather than treating it as a failure.
+   */
+  async listTriggers(service: string): Promise<ServiceTrigger[]> {
+    const slug = String(service || '').toLowerCase();
+    if (!slug || isBlockedService(slug) || !(await this.apiKey())) return [];
+    try {
+      const items = await this.paged('/triggers_types', { toolkit_slugs: slug }, 200);
+      return items.map((t: any) => this.toTrigger(slug, t)).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (e: any) {
+      this.log.warn(`listTriggers(${slug}) failed: ${this.plainError(e)}`);
+      return [];
+    }
+  }
+
+  /**
+   * Start listening for one event. Takes OUR `evt:` id and nothing else.
+   *
+   * `user_id` alone is enough when there is a single connection — the provider resolves it the same
+   * way a tool call does — but the account is passed whenever we know it, because a rule set up on
+   * one of two GitHub orgs must not quietly listen to the other.
+   */
+  async createTriggerInstance(triggerId: string, config: Record<string, any> = {}, opts: { connectionId?: string } = {}): Promise<TriggerInstanceResult> {
+    const parsed = parseServiceEventId(triggerId);
+    const slug = vendorTriggerSlug(triggerId);
+    if (!parsed || !slug) return { ok: false, message: `"${triggerId}" is not a service event.` };
+    if (isBlockedService(parsed.service)) return { ok: false, message: `${parsed.service} is not available as an outside service.` };
+    if (!(await this.apiKey())) return { ok: false, message: 'Add your Composio API key in Settings → Connections first.' };
+    try {
+      const body: Record<string, any> = { user_id: USER_ID, trigger_config: config || {} };
+      if (opts.connectionId) body.connected_account_id = opts.connectionId;
+      const r = await this.post(`/trigger_instances/${encodeURIComponent(slug)}/upsert`, body);
+      const id = r?.trigger_id || r?.triggerId || r?.id;
+      if (!id) return { ok: false, message: 'The service did not give us anything to listen on.' };
+      return { ok: true, instanceId: String(id) };
+    } catch (e: any) {
+      return { ok: false, message: this.plainError(e) };
+    }
+  }
+
+  /**
+   * Stop listening, and take the subscription away for good.
+   *
+   * Deleted, not disabled: a disabled subscription is still a row on the owner's account, and the
+   * whole point of removing it is that a rule he switched off cannot go on costing him events. A
+   * subscription that is already gone counts as a success — the wanted state is "not there".
+   */
+  async deleteTriggerInstance(instanceId: string): Promise<TriggerInstanceResult> {
+    const id = String(instanceId || '').trim();
+    if (!id) return { ok: true };
+    if (!(await this.apiKey())) return { ok: false, message: 'No Composio API key saved.' };
+    try {
+      await this.request('DELETE', `/trigger_instances/manage/${encodeURIComponent(id)}`);
+      return { ok: true, instanceId: id };
+    } catch (e: any) {
+      if (e?.status === 404) return { ok: true, instanceId: id, message: 'It was already gone.' };
+      return { ok: false, message: this.plainError(e) };
+    }
+  }
+
+  /**
+   * Point the provider's event delivery at one URL of ours, and learn what it signs with.
+   *
+   * The provider allows **one** delivery address per account, so this reads what is there and moves
+   * it rather than adding a second one. The signing secret comes back on the subscription itself and
+   * is handed straight to the caller — it is never logged and never shown on a screen.
+   */
+  async ensureEventDelivery(url: string): Promise<EventDelivery> {
+    const want = String(url || '').trim();
+    if (!/^https:\/\//i.test(want)) return { ok: false, message: 'The address events are sent to must be https.' };
+    if (!(await this.apiKey())) return { ok: false, message: 'Add your Composio API key in Settings → Connections first.' };
+    try {
+      const list = await this.get('/webhook_subscriptions', { limit: '10' }).catch(() => null);
+      const existing = (list?.items || [])[0];
+      if (existing?.id) {
+        if (String(existing.webhook_url || '') !== want) {
+          const patched = await this.request('PATCH', `/webhook_subscriptions/${encodeURIComponent(existing.id)}`, { body: { webhook_url: want, enabled_events: await this.eventTypes() } });
+          return { ok: true, url: want, signingSecret: patched?.secret || existing?.secret };
+        }
+        return { ok: true, url: want, signingSecret: existing?.secret };
+      }
+      const made = await this.post('/webhook_subscriptions', { webhook_url: want, enabled_events: await this.eventTypes(), version: 'V3' });
+      return { ok: true, url: made?.webhook_url || want, signingSecret: made?.secret };
+    } catch (e: any) {
+      return { ok: false, message: this.plainError(e) };
+    }
+  }
+
+  /** Every event type the provider says it can send us, read live. Falls back to the one that matters. */
+  private async eventTypes(): Promise<string[]> {
+    const fallback = ['composio.trigger.message'];
+    try {
+      const r = await this.get('/webhook_subscriptions/event_types');
+      const names = (r?.items || []).map((i: any) => String(i?.event_type || '')).filter(Boolean);
+      return names.length ? names : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   // ---- shapes ----------------------------------------------------------------------------
+
+  /**
+   * One event type, in our own words.
+   *
+   * `type` is the vendor's own answer to "is this pushed or looked up?" (`webhook` vs `poll`, 108
+   * and 254 of the 362 live event types), and a polled one carries its own `interval` in minutes.
+   * Both are read here rather than guessed, because the UI has to tell the owner plainly which kind
+   * he is picking — "new email" that means "within a couple of minutes" is a different promise.
+   */
+  private toTrigger(service: string, t: any): ServiceTrigger {
+    const slug = String(t?.slug || '');
+    const config = t?.config || { type: 'object', properties: {} };
+    const interval = Number(config?.properties?.interval?.default);
+    const instant = String(t?.type || '').toLowerCase() === 'webhook';
+    return {
+      id: serviceEventId(service, slug),
+      name: t?.name || slug,
+      description: String(t?.description || '').trim(),
+      service,
+      instant,
+      everyMinutes: !instant && Number.isFinite(interval) && interval > 0 ? interval : undefined,
+      config,
+      payloadSchema: t?.payload,
+    };
+  }
+
 
   private toServiceInfo(t: any, accounts: ServiceAccount[]): ServiceInfo {
     const meta = t?.meta || {};

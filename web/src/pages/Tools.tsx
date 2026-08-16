@@ -1,7 +1,7 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, ArrowRight, Check, Cable, ExternalLink, KeyRound, Loader2, Pencil, Plug, PlugZap, RefreshCw, Search, Trash2, X, Zap,
+  AlertTriangle, ArrowRight, Bell, Check, Cable, Clock, ExternalLink, History, KeyRound, Loader2, Pencil, Plug, PlugZap, RefreshCw, Search, Trash2, X, Zap,
 } from 'lucide-react';
 import { Column, DataTable, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -410,6 +410,419 @@ function Gates({ slug, name }: { slug: string; name: string }) {
   );
 }
 
+// ---- triggers: when this happens, run that (BEA-1350) -----------------------------------------
+
+/** One kind of event a service can tell us about. `instant`/`everyMinutes` are read live, never guessed. */
+type TriggerOption = { id: string; name: string; description?: string; instant?: boolean; everyMinutes?: number; config?: any };
+/** One of the owner's rules. */
+type Binding = {
+  id: string; service: string; triggerType: string; eventName: string; listening: boolean;
+  flowId: string; flowName?: string | null; config?: Record<string, any>; label?: string | null;
+  enabled: boolean; rateCap: number; lastFiredAt?: string | null; pausedReason?: string | null; ranLastHour?: number;
+};
+/** One thing that arrived, and what we did with it. */
+type TriggerEvent = { id: string; status: string; detail?: string; runId?: string | null; summary?: string; at: string };
+type FlowRow = { id: string; name: string };
+
+/**
+ * How often it is checked, in the owner's words.
+ *
+ * This is the sentence the issue asks for out loud: some events are pushed the moment they happen
+ * and some are looked up on a timer, and a rule built on the second kind is a different promise.
+ * Both facts come from the provider at run time — 108 of the 362 live event types are instant and
+ * 254 are polled, and each polled one carries its own interval.
+ */
+function howOften(t: { instant?: boolean; everyMinutes?: number }): string {
+  if (t?.instant) return 'As it happens';
+  const n = Number(t?.everyMinutes);
+  if (!Number.isFinite(n) || n <= 0) return 'Checked on a timer';
+  return `Checked every ${n === 1 ? 'minute' : `${n} minutes`}`;
+}
+
+/** The event's own settings, minus the one that is ours to read rather than his to fill in. */
+function configFields(t: TriggerOption | null): { name: string; label: string; description?: string; required: boolean }[] {
+  const props = (t?.config?.properties || {}) as Record<string, any>;
+  const required: string[] = Array.isArray(t?.config?.required) ? t!.config.required : [];
+  return Object.keys(props)
+    .filter((k) => k !== 'interval')
+    .map((k) => ({ name: k, label: props[k]?.title || k, description: props[k]?.description, required: required.includes(k) }))
+    .sort((a, b) => Number(b.required) - Number(a.required) || a.label.localeCompare(b.label));
+}
+
+const EVENT_WORDS: Record<string, { label: string; cls: string }> = {
+  ran: { label: 'Started the flow', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' },
+  busy: { label: 'Joined a run already going', cls: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300' },
+  echo: { label: 'We caused it — dropped', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
+  capped: { label: 'Over the limit', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300' },
+  failed: { label: 'Could not start', cls: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300' },
+  ignored: { label: 'Nothing to do', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
+};
+
+function whenText(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 24 * 60) return `${Math.round(mins / 60)}h ago`;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+/**
+ * The rules for one service: when this happens there, run that flow here.
+ *
+ * Shown only once a service is connected, because nothing can listen before that. Two facts shape
+ * the whole panel: **a connected service may offer no events at all** (Sentry and Vercel offer
+ * none), so it says so in a sentence instead of drawing an empty picker; and every event says
+ * plainly whether it is instant or looked up on a timer, because that changes what a rule is worth.
+ */
+function Triggers({ slug, name, triggerCount }: { slug: string; name: string; triggerCount: number }) {
+  const [bindings, setBindings] = useState<Binding[] | null>(null);
+  const [options, setOptions] = useState<TriggerOption[] | null>(null);
+  const [flows, setFlows] = useState<FlowRow[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [confirm, setConfirm] = useState<Binding | null>(null);
+  const [openHistory, setOpenHistory] = useState('');
+  const toast = useToast();
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/tools/triggers?service=${encodeURIComponent(slug)}`);
+      const d = await r.json().catch(() => ({}));
+      setBindings(Array.isArray(d?.bindings) ? d.bindings : []);
+    } catch {
+      setBindings([]);
+    }
+  }, [slug]);
+
+  useEffect(() => { load(); }, [load]);
+
+  /** The events and the flows are only fetched when he actually goes to make a rule. */
+  async function openForm() {
+    setAdding(true);
+    if (options) return;
+    setLoadingOptions(true);
+    try {
+      const [t, f] = await Promise.all([
+        fetch(`/api/tools/triggers/available/${encodeURIComponent(slug)}`).then((r) => r.json()).catch(() => ({})),
+        fetch('/api/flows').then((r) => r.json()).catch(() => ({})),
+      ]);
+      setOptions(Array.isArray(t?.triggers) ? t.triggers : []);
+      setFlows(Array.isArray(f?.flows) ? f.flows.map((x: any) => ({ id: x.id, name: x.name })) : []);
+    } finally {
+      setLoadingOptions(false);
+    }
+  }
+
+  async function save(body: any) {
+    setBusy('new');
+    try {
+      const r = await fetch('/api/tools/triggers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ service: slug, ...body }) });
+      const d = await r.json().catch(() => ({}));
+      if (!d?.ok) { toast('error', d?.message || 'That did not work. Try again in a moment.'); return; }
+      setAdding(false);
+      await load();
+      toast('success', `${name} will now start that flow when this happens.`);
+    } catch {
+      toast('error', 'We could not reach the server. Try again in a moment.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function patch(b: Binding, body: any, said: string) {
+    setBusy(b.id);
+    try {
+      const r = await fetch(`/api/tools/triggers/${encodeURIComponent(b.id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (!d?.ok) { toast('error', d?.message || 'That did not work. Try again in a moment.'); return; }
+      await load();
+      toast('success', said);
+    } catch {
+      toast('error', 'We could not reach the server. Try again in a moment.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function remove() {
+    const b = confirm;
+    if (!b) return;
+    setBusy(b.id);
+    try {
+      const r = await fetch(`/api/tools/triggers/${encodeURIComponent(b.id)}`, { method: 'DELETE' });
+      const d = await r.json().catch(() => ({}));
+      if (!d?.ok) { toast('error', d?.message || 'We could not remove that rule.'); return; }
+      setConfirm(null);
+      await load();
+      toast('success', 'That rule is gone, and the service will stop sending it.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  if (bindings === null) return <div className="mb-4"><Skeleton className="h-4 w-40" /></div>;
+
+  // A connected service with nothing to listen for. Said plainly — never an empty picker.
+  const nothingToListenFor = triggerCount <= 0 && !bindings.length;
+
+  return (
+    <div className="mb-4">
+      <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <Bell size={12} /> When something happens{bindings.length ? ` · ${bindings.length}` : ''}
+      </h4>
+      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+        {nothingToListenFor
+          ? `${name} does not offer any events, so there is nothing here to listen for. Your agents can still use it whenever they need to.`
+          : `Pick something that happens in ${name} and the flow it should start. The event itself is handed to the flow to work on.`}
+      </p>
+
+      {bindings.length > 0 && (
+        <ul className="space-y-2">
+          {bindings.map((b) => (
+            <li key={b.id} className="rounded-lg border border-zinc-200 p-2.5 dark:border-zinc-800">
+              <div className="flex min-w-0 items-start gap-2">
+                <span className={'mt-1.5 h-2 w-2 shrink-0 rounded-full ' + (b.enabled ? 'bg-emerald-500' : b.pausedReason ? 'bg-amber-400' : 'bg-zinc-400')} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{b.label || b.eventName}</p>
+                  <p className="truncate text-xs text-zinc-400">
+                    Runs <span className="text-zinc-500 dark:text-zinc-300">{b.flowName || 'a flow that is no longer there'}</span>
+                    {b.lastFiredAt ? ` · last ${whenText(b.lastFiredAt)}` : ' · not yet'}
+                    {` · up to ${b.rateCap}/hour`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => patch(b, { enabled: !b.enabled }, b.enabled ? 'It has stopped listening.' : 'It is listening again.')}
+                  disabled={busy === b.id}
+                  className={'shrink-0 rounded-md px-2 py-1 text-xs font-medium disabled:opacity-50 ' + (b.enabled ? 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800' : 'text-emerald-600 hover:bg-emerald-500/10')}
+                >
+                  {busy === b.id ? <Loader2 size={13} className="animate-spin" /> : b.enabled ? 'Switch off' : 'Switch on'}
+                </button>
+                <button onClick={() => setConfirm(b)} title="Remove this rule" aria-label={`Remove ${b.label || b.eventName}`} className="shrink-0 rounded-md p-1.5 text-zinc-400 hover:bg-red-500/10 hover:text-red-600">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              {/* It stopped itself. The reason is the whole point — never just "paused". */}
+              {!b.enabled && b.pausedReason && (
+                <p className="mt-2 flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-[11px] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/5 dark:text-amber-300">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" /> <span className="min-w-0">{b.pausedReason}</span>
+                </p>
+              )}
+
+              <button
+                onClick={() => setOpenHistory(openHistory === b.id ? '' : b.id)}
+                className="mt-2 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                <History size={12} /> {openHistory === b.id ? 'Hide what has arrived' : 'What has arrived'}
+              </button>
+              {openHistory === b.id && <TriggerHistory bindingId={b.id} />}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!adding && !nothingToListenFor && (
+        <button onClick={openForm} className={GHOST_BTN + ' mt-2 !py-1.5 !text-xs'}>
+          <Bell size={13} /> {bindings.length ? 'Add another rule' : 'Add a rule'}
+        </button>
+      )}
+
+      {adding && (
+        <TriggerForm
+          name={name}
+          options={options}
+          flows={flows}
+          loading={loadingOptions}
+          busy={busy === 'new'}
+          onCancel={() => setAdding(false)}
+          onSave={save}
+        />
+      )}
+
+      <ConfirmDialog
+        open={!!confirm}
+        title="Remove this rule?"
+        message={confirm ? `“${confirm.label || confirm.eventName}” will stop starting ${confirm.flowName || 'that flow'}, and ${name} will be told to stop sending it. Everything it has already done is kept.` : ''}
+        confirmLabel="Remove"
+        busy={!!busy}
+        onCancel={() => setConfirm(null)}
+        onConfirm={remove}
+      />
+    </div>
+  );
+}
+
+/** What has arrived for one rule — including everything we deliberately did not run. */
+function TriggerHistory({ bindingId }: { bindingId: string }) {
+  const [rows, setRows] = useState<TriggerEvent[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/tools/triggers/${encodeURIComponent(bindingId)}/events?limit=25`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setRows(Array.isArray(d?.events) ? d.events : []); })
+      .catch(() => { if (alive) setRows([]); });
+    return () => { alive = false; };
+  }, [bindingId]);
+
+  if (rows === null) return <div className="mt-2"><Skeleton className="h-3 w-32" /></div>;
+  if (!rows.length) return <p className="mt-2 text-[11px] text-zinc-400">Nothing has come in yet. It will show up here the moment it does.</p>;
+
+  return (
+    <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
+      {rows.map((e) => {
+        const word = EVENT_WORDS[e.status] || { label: e.status, cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' };
+        return (
+          <li key={e.id} className="min-w-0 rounded-md bg-zinc-50 p-2 dark:bg-zinc-800/40">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className={CHIP + ' ' + word.cls}>{word.label}</span>
+              <span className="text-[11px] text-zinc-400">{whenText(e.at)}</span>
+            </div>
+            {e.summary && <p className="mt-1 line-clamp-2 break-words text-[11px] text-zinc-600 dark:text-zinc-300">{e.summary}</p>}
+            {e.detail && <p className="mt-0.5 break-words text-[11px] text-zinc-400">{e.detail}</p>}
+            {/* Straight to what it started — "it ran" is only half an answer. */}
+            {e.runId && (
+              <Link to={`/flows/runs/${e.runId}`} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 hover:underline">
+                See the run <ArrowRight size={11} />
+              </Link>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Pick the event, pick the flow, save. Everything the provider needs is asked for here, up front. */
+function TriggerForm({
+  name, options, flows, loading, busy, onCancel, onSave,
+}: {
+  name: string;
+  options: TriggerOption[] | null;
+  flows: FlowRow[];
+  loading: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (body: any) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState<TriggerOption | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [flowId, setFlowId] = useState('');
+  const [label, setLabel] = useState('');
+  const [cap, setCap] = useState('20');
+
+  const inputCls = 'w-full rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950';
+  const list = (options || []).filter((t) => !q.trim() || `${t.name} ${t.description || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const fields = configFields(picked);
+  const missing = fields.filter((f) => f.required && !String(values[f.name] || '').trim());
+  const ready = !!picked && !!flowId && !missing.length;
+
+  if (loading) return <div className="mt-2 space-y-2 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800"><Skeleton className="h-4 w-40" /><Skeleton className="h-9 w-full" /><Skeleton className="h-9 w-2/3" /></div>;
+
+  // Asked for and answered: the count can only be read from the service itself, and it can be nought.
+  if (options && !options.length) {
+    return (
+      <div className="mt-2 rounded-lg border border-zinc-200 p-3 text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+        {name} does not offer any events to listen for.
+        <button onClick={onCancel} className="ml-2 font-medium text-emerald-600 hover:underline">Close</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      <div>
+        <p className="mb-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">1. What should we watch for?</p>
+        {(options || []).length > 8 && (
+          <div className="relative mb-2">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${name} events`} aria-label={`Search ${name} events`} className={inputCls + ' py-1.5 pl-8'} />
+          </div>
+        )}
+        <ul className="max-h-48 space-y-1 overflow-y-auto">
+          {list.map((t) => (
+            <li key={t.id}>
+              <button
+                onClick={() => { setPicked(t); setValues({}); }}
+                className={'w-full min-w-0 rounded-lg border p-2 text-left transition-colors ' + (picked?.id === t.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50')}
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</span>
+                  {/* Said on every single row, not once in a footnote: instant and "every few
+                      minutes" are different promises, and he is choosing between them here. */}
+                  <span className={CHIP + ' shrink-0 ' + (t.instant ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>
+                    {t.instant ? <Zap size={11} /> : <Clock size={11} />} {howOften(t)}
+                  </span>
+                </div>
+                {t.description && <p className="mt-0.5 line-clamp-2 break-words text-[11px] text-zinc-400">{t.description}</p>}
+              </button>
+            </li>
+          ))}
+          {!list.length && <li className="px-1 py-2 text-xs text-zinc-400">Nothing matches “{q}”.</li>}
+        </ul>
+      </div>
+
+      {picked && fields.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">2. Where should we watch?</p>
+          {fields.map((f) => (
+            <label key={f.name} className="block text-xs text-zinc-500">
+              {f.label}{!f.required && <span className="text-zinc-400"> (optional)</span>}
+              <input value={values[f.name] || ''} onChange={(e) => setValues({ ...values, [f.name]: e.target.value })} className={inputCls + ' mt-1'} />
+              {f.description && <span className="mt-1 block break-words text-[11px] text-zinc-400">{f.description}</span>}
+            </label>
+          ))}
+        </div>
+      )}
+
+      {picked && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{fields.length ? '3' : '2'}. What should it start?</p>
+          {flows.length ? (
+            <select value={flowId} onChange={(e) => setFlowId(e.target.value)} aria-label="The flow to start" className={inputCls}>
+              <option value="">Pick a flow…</option>
+              {flows.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          ) : (
+            <p className="rounded-lg border border-zinc-200 p-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              You have no flows yet. Build one on the Flows page first, then come back and point this at it.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <label className="min-w-0 flex-1 text-xs text-zinc-500">
+              Call it
+              <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={picked.name} className={inputCls + ' mt-1'} />
+            </label>
+            <label className="w-28 text-xs text-zinc-500">
+              Runs an hour
+              <input value={cap} onChange={(e) => setCap(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric" className={inputCls + ' mt-1'} />
+            </label>
+          </div>
+          <p className="text-[11px] text-zinc-400">
+            If it starts more runs than that in an hour it stops itself and tells you, so a rule that goes wrong cannot run away.
+          </p>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => onSave({ triggerType: picked?.id, flowId, config: values, label, rateCap: Number(cap) || 20 })}
+          disabled={!ready || busy}
+          className={PRIMARY_BTN}
+        >
+          {busy ? <><Loader2 size={15} className="animate-spin" /> Saving…</> : <>Save this rule</>}
+        </button>
+        <button onClick={onCancel} disabled={busy} className={GHOST_BTN}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 const PRIMARY_BTN = 'inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50';
 const GHOST_BTN = 'inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3.5 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50';
 
@@ -732,6 +1145,10 @@ function ServiceSheet({ slug, onClose, onChanged }: { slug: string; onClose: () 
 
               {/* What stops and asks first (BEA-1348) — only worth showing once it can actually run. */}
               {!loading && svc && (accounts.length > 0 || svc.noAuth) && <Gates slug={slug} name={svc.name} />}
+
+              {/* And the other direction (BEA-1350): what this service can tell US about. Needs a
+                  real connection — an event has to arrive on a login that exists. */}
+              {!loading && svc && accounts.length > 0 && <Triggers slug={slug} name={svc.name} triggerCount={num(svc.triggerCount)} />}
 
               {/* Waiting on the provider's own sign-in page, in the other tab. */}
               {waiting && (
