@@ -94,6 +94,42 @@ describe('DocumentsService', () => {
     expect(prisma._rows[0].collectionId).toBeNull();
   });
 
+  // The owner's "Markdown" button on the document page. (BEA-1342)
+  describe('markdownOf', () => {
+    const build = () => {
+      const prisma = fakePrisma();
+      return { prisma, svc: new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any) };
+    };
+
+    it('returns the text of a markdown document as-is', async () => {
+      const { svc } = build();
+      const doc = await svc.create({ title: 'Note', contentText: '# Hello\n\nBody.' });
+      expect(await svc.markdownOf(doc.id)).toBe('# Hello\n\nBody.');
+    });
+
+    it('converts an HTML document to real markdown, not raw HTML', async () => {
+      const { svc } = build();
+      const doc = await svc.create({ title: 'Page', kind: 'html', contentText: '<h1>Title</h1><p>Some <b>bold</b> text.</p>' });
+      const md = await svc.markdownOf(doc.id);
+      expect(md).toContain('# Title');
+      expect(md).toContain('**bold**');
+      expect(md).not.toContain('<h1>'); // showing HTML and calling it markdown would be a lie
+    });
+
+    it('has no markdown form for a pdf, an image or a multi-file site', async () => {
+      const { svc } = build();
+      for (const kind of ['pdf', 'image', 'site']) {
+        const doc = await svc.create({ title: `A ${kind}`, kind, contentText: 'ignored' });
+        expect(await svc.markdownOf(doc.id)).toBeNull();
+      }
+    });
+
+    it('complains clearly when the document is gone', async () => {
+      const { svc } = build();
+      await expect(svc.markdownOf('nope')).rejects.toThrow(/not found/i);
+    });
+  });
+
   it('recovers a UTF-8 filename that multer decoded as latin1 (em-dash) (BEA-801)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);

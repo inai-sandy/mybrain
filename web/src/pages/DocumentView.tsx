@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2, Star, Save, X } from 'lucide-react';
+import { ArrowLeft, Download, Share2, Trash2, Pencil, Brain, Maximize2, Star, Save, X, FileCode2, Eye, Copy, Check } from 'lucide-react';
 import { mdComponents, extractHeadings, OutlineLayout } from '../ui/markdown';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { DocumentShareDialog } from '../ui/DocumentShareDialog';
@@ -25,6 +25,11 @@ export function DocumentView() {
   const [eTitle, setETitle] = useState('');
   const [eContent, setEContent] = useState('');
   const [saving, setSaving] = useState(false);
+  // Read the markdown behind a document — the source is the document itself for a converted Word /
+  // Excel / PowerPoint file, an email or a Drive file. (BEA-1342)
+  const [raw, setRaw] = useState(false);
+  const [rawMd, setRawMd] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [del, setDel] = useState(false);
 
@@ -38,6 +43,11 @@ export function DocumentView() {
       .catch(() => setError('Document not found.'));
   }
   useEffect(() => {
+    // The route reuses this component across ids, so the markdown view must be cleared by hand —
+    // otherwise opening another document shows the previous one's markdown. (BEA-1342)
+    setRaw(false);
+    setRawMd(null);
+    setCopied(false);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -63,13 +73,41 @@ export function DocumentView() {
   // original file is what Download and Export serve, so edits to the rendered text would silently
   // diverge from the file the user gets back. Edit opens the metadata editor instead. (BEA-1339)
   const isText = !!doc && !['pdf', 'image', 'html', 'site', 'doc'].includes(doc.kind);
+  // Which documents have markdown worth showing. A pdf/image has none; a 'site' is a file bundle. (BEA-1342)
+  const hasMarkdown = !!doc && !['pdf', 'image', 'site'].includes(doc.kind) && !!(doc.contentText || '').trim();
+
+  /** An HTML doc's stored text is HTML, so the markdown form comes from the server. (BEA-1342) */
+  async function showMarkdown() {
+    setRaw(true);
+    if (rawMd !== null) return;
+    try {
+      const r = await fetch(`/api/documents/${id}/markdown`);
+      if (!r.ok) throw new Error();
+      const d = await r.json();
+      setRawMd(d.markdown ?? '');
+    } catch {
+      // Never cache a blank on failure — that reads as "this document is empty", which is a lie.
+      setRaw(false);
+      toast('error', 'Could not load the markdown just now');
+    }
+  }
+
+  async function copyMarkdown() {
+    try {
+      await navigator.clipboard.writeText(rawMd ?? doc?.contentText ?? '');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast('error', 'Could not copy — select the text and copy it by hand');
+    }
+  }
   function startInline() { if (!doc) return; setETitle(doc.title); setEContent(doc.contentText || ''); setInline(true); }
   async function saveInline() {
     if (!doc) return;
     setSaving(true);
     const r = await fetch(`/api/documents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: eTitle.trim() || doc.title, contentText: eContent }) });
     setSaving(false);
-    if (r.ok) { toast('success', 'Saved'); setInline(false); load(); } else toast('error', 'Could not save');
+    if (r.ok) { toast('success', 'Saved'); setInline(false); setRawMd(null); load(); } else toast('error', 'Could not save');
   }
 
   async function toggleStar() {
@@ -117,6 +155,15 @@ export function DocumentView() {
                 <>
                   <button onClick={toggleStar} className={btn + (doc.starred ? ' text-amber-500 border-amber-300 dark:border-amber-500/40' : ' hover:text-amber-500')}><Star size={15} fill={doc.starred ? 'currentColor' : 'none'} /> {doc.starred ? 'Starred' : 'Star'}</button>
                   <button onClick={() => (isText ? startInline() : setEditing(true))} className={btn}><Pencil size={15} /> Edit</button>
+                  {hasMarkdown && (
+                    <button
+                      onClick={() => (raw ? setRaw(false) : showMarkdown())}
+                      title={raw ? 'Back to the formatted document' : 'See the markdown behind this document'}
+                      className={btn + (raw ? ' border-emerald-500 text-emerald-600' : '')}
+                    >
+                      {raw ? <><Eye size={15} /> Preview</> : <><FileCode2 size={15} /> Markdown</>}
+                    </button>
+                  )}
                   <a href={`/api/documents/${doc.id}/download`} className={btn}><Download size={15} /> Download</a>
                   <button onClick={() => setSharing(true)} className={btn}><Share2 size={15} /> Share</button>
                   {doc.kind !== 'image' && <button onClick={toMemory} className={btn} title="Copy into Capture / memory"><Brain size={15} /> To Memory</button>}
@@ -126,7 +173,24 @@ export function DocumentView() {
             </div>
           </div>
 
-          {doc.kind === 'pdf' ? (
+          {raw && hasMarkdown ? (
+            /* The markdown behind the document — read-only, with a copy button. (BEA-1342) */
+            <div className="border-t border-zinc-200 dark:border-zinc-800 pt-5">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-medium text-zinc-500">Markdown</p>
+                <button onClick={copyMarkdown} className={btn + ' !py-1'}>
+                  {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+                </button>
+              </div>
+              {rawMd === null ? (
+                <div className="h-40 rounded-xl bg-zinc-100 dark:bg-zinc-800/60 animate-pulse" />
+              ) : (
+                <pre className="w-full max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4 text-[13px] leading-relaxed font-mono text-zinc-800 dark:text-zinc-200">
+                  {rawMd || '(empty document)'}
+                </pre>
+              )}
+            </div>
+          ) : doc.kind === 'pdf' ? (
             <iframe title={doc.title} src={`/api/documents/${doc.id}/file`} className="w-full min-h-[80vh] rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
           ) : doc.kind === 'image' ? (
             <img src={`/api/documents/${doc.id}/file`} alt={doc.title} className="max-w-full rounded-xl border border-zinc-200 dark:border-zinc-800" />
