@@ -214,7 +214,7 @@ export function Documents() {
     if (!files?.length) return;
     setUploading(true);
     let ok = 0;
-    let failed = '';
+    const failures: string[] = [];
     const notices: string[] = [];
     for (const f of Array.from(files)) {
       const fd = new FormData();
@@ -224,12 +224,14 @@ export function Documents() {
       if (r?.ok) {
         ok++;
         if (body?.notice) notices.push(body.notice); // e.g. a scanned PDF with no readable text (BEA-1339)
-      } else if (!failed) failed = body?.message || `Could not read “${f.name}”.`;
+      } else failures.push(body?.message || `Could not read “${f.name}”.`);
     }
     setUploading(false);
     if (fileInput.current) fileInput.current.value = '';
     if (ok) toast('success', `Uploaded ${ok} file${ok > 1 ? 's' : ''}`);
-    if (failed) toast('error', failed);
+    // Report EVERY failure, not just the first — a second bad file used to fail silently.
+    if (failures.length === 1) toast('error', failures[0]);
+    else if (failures.length > 1) toast('error', `${failures.length} files couldn’t be added. ${failures[0]}`);
     else if (!ok) toast('error', 'Upload failed');
     notices.forEach((n) => toast('info', n));
     load();
@@ -805,7 +807,7 @@ export function DocEditor({ doc, collections = [], defaultCollectionId = null, o
           )}
           <div className="flex items-center justify-between gap-2 pt-1">
             <label className="text-xs font-medium text-zinc-500">Description &amp; tags</label>
-            {!isFileBacked && (
+            {!['pdf', 'image'].includes(doc?.kind || '') && (
               <button type="button" onClick={autoFill} disabled={filling} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 text-xs hover:bg-emerald-500/10 disabled:opacity-50">
                 <Sparkles size={13} /> {filling ? 'Thinking…' : 'Auto-fill with AI'}
               </button>

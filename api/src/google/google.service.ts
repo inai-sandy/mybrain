@@ -421,7 +421,10 @@ export class GoogleService {
     for (const m of messages) {
       for (const att of collectAttachments(m?.payload)) {
         try {
-          if (await this.library.findImported(link, att.filename)) continue; // already brought in
+          // Key on the attachment's own id, not its name: two different files in one thread can
+          // both be called "invoice.pdf", and the revised one must not be mistaken for the first.
+          const attLink = `${link}#att=${att.attachmentId}`;
+          if (await this.library.findImported(attLink, att.filename)) continue; // already brought in
           const got = await this.run([
             'gmail', 'users', 'messages', 'attachments', 'get',
             '--params', JSON.stringify({ userId: 'me', messageId: m.id, id: att.attachmentId }),
@@ -432,7 +435,7 @@ export class GoogleService {
           if (!buffer.length) continue;
           await this.library.createFromUpload(
             { originalname: att.filename, mimetype: att.mimeType, buffer, size: buffer.length },
-            { collectionId, sourceUrl: link },
+            { collectionId, sourceUrl: attLink },
           );
           saved++;
         } catch (e) {
@@ -471,10 +474,14 @@ export class GoogleService {
    * to refuse them outright.
    */
   async driveImport(id: string): Promise<{ id: string; title: string }> {
-    const meta = await this.run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, fields: 'id,name,mimeType,webViewLink' }), '--format', 'json']);
+    const meta = await this.run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, fields: 'id,name,mimeType,webViewLink,size' }), '--format', 'json']);
     const name = String(meta?.name || 'Drive file');
     const mt = String(meta?.mimeType || '');
     const link = meta?.webViewLink || undefined;
+    // Refuse early. The cap used to be applied only after the bridge had downloaded the whole file
+    // to the host, so a huge file cost the full download before being rejected. (BEA-1343)
+    const declared = Number(meta?.size || 0);
+    if (declared > 40 * 1024 * 1024) throw new Error(`“${name}” is too big to bring in (max 40 MB).`);
 
     // Google-native → the Office format that keeps the most structure, plus the extension anydoc needs.
     const exportAs: Record<string, { mime: string; ext: string }> = {
@@ -489,7 +496,9 @@ export class GoogleService {
     const want = exportAs[mt];
     if (want) {
       buffer = await this.runBinary(['drive', 'files', 'export', '--params', JSON.stringify({ fileId: id, mimeType: want.mime })]);
-      filename = /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}${want.ext}`;
+      // ALWAYS carry the export's own extension. A Doc titled "Report.pdf" is still a .docx once
+      // exported, and trusting the title filed real Word bytes as a PDF. (BEA-1343)
+      filename = name.toLowerCase().endsWith(want.ext) ? name : `${name}${want.ext}`;
       mime = want.mime;
     } else if (mt.startsWith('application/vnd.google-apps.')) {
       // Forms, Drawings, Sites and friends have no document form we can read.
@@ -502,10 +511,14 @@ export class GoogleService {
     if (!buffer?.length) throw new Error('That file appears to be empty.');
 
     const collectionId = await this.library.ensureCollection('Google Drive', 'Folder');
-    const doc: any = await this.library.createFromUpload(
-      { originalname: filename, mimetype: mime, buffer, size: buffer.length },
-      { collectionId, sourceUrl: link },
-    );
+    const upload = { originalname: filename, mimetype: mime, buffer, size: buffer.length };
+
+    // Importing the same Drive file twice refreshes it, rather than leaving a second copy —
+    // matching what saving the same email conversation twice does. (BEA-1343)
+    const already = link ? await this.library.findImported(link, filename) : null;
+    const doc: any = already
+      ? await this.library.refreshFromUpload(already.id, upload)
+      : await this.library.createFromUpload(upload, { collectionId, sourceUrl: link });
     return { id: doc.id, title: doc.title };
   }
 

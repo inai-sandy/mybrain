@@ -5,6 +5,10 @@ import archiver from 'archiver';
 import { DocumentsService, DocInput } from './documents.service';
 import { Public } from '../auth/public.decorator';
 
+/** A filename safe to put inside a quoted Content-Disposition value. Attachment names now come from
+ *  whoever sent the email, not just the owner's own uploads, so a stray quote must not break it. */
+const safeHeaderName = (n?: string | null) => String(n || 'file').replace(/["\\]/g, '_').replace(/[\r\n]/g, ' ');
+
 const PUBLIC_BASE = process.env.PUBLIC_URL || 'https://mybrain.1site.ai';
 
 @Controller('documents')
@@ -138,7 +142,7 @@ export class DocumentsController {
     const f = await this.docs.file(id);
     if (!f) throw new NotFoundException('File not found');
     res.setHeader('Content-Type', f.mime);
-    res.setHeader('Content-Disposition', `inline; filename="${f.filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${safeHeaderName(f.filename)}"`);
     res.sendFile(f.filePath);
   }
 
@@ -236,7 +240,7 @@ export class DocumentsController {
   async publicDownload(@Param('slug') slug: string, @Query('t') token: string, @Res() res: Response) {
     const f = await this.docs.sharedDownload(slug, token);
     if (!f) throw new NotFoundException('Not available for download.');
-    res.setHeader('Content-Disposition', `attachment; filename="${f.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeHeaderName(f.filename)}"`);
     if ('filePath' in f && f.filePath) {
       res.setHeader('Content-Type', f.mime);
       res.sendFile(f.filePath);
@@ -253,7 +257,7 @@ export class DocumentsController {
     const f = await this.docs.sharedFile(slug, token);
     if (!f) throw new NotFoundException('Not shared.');
     res.setHeader('Content-Type', f.mime);
-    res.setHeader('Content-Disposition', `inline; filename="${f.filename}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${safeHeaderName(f.filename)}"`);
     res.sendFile(f.filePath);
   }
 
@@ -292,14 +296,14 @@ export class DocumentsController {
     const f = await this.docs.file(id);
     if (f) {
       res.setHeader('Content-Type', f.mime);
-      res.setHeader('Content-Disposition', `attachment; filename="${f.filename}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${safeHeaderName(f.filename)}"`);
       res.sendFile(f.filePath);
       return;
     }
     const raw = await this.docs.raw(id);
     if (!raw) throw new NotFoundException('Document not found');
     res.setHeader('Content-Type', raw.mime + '; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${raw.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeHeaderName(raw.filename)}"`);
     res.send(raw.content);
   }
 

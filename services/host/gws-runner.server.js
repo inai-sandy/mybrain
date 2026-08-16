@@ -81,8 +81,16 @@ async function status() {
 function readBody(req) {
   return new Promise((resolve) => {
     let b = '';
-    req.on('data', (c) => { b += c; if (b.length > 1_000_000) req.destroy(); });
-    req.on('end', () => resolve(b));
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    req.on('data', (c) => {
+      b += c;
+      // Resolve from the SAME branch that destroys the socket — destroy() means 'end' never fires,
+      // so the old code left the promise (and the response) hanging forever.
+      if (b.length > 1_000_000) { req.destroy(); finish(''); }
+    });
+    req.on('end', () => finish(b));
+    req.on('error', () => finish(''));
   });
 }
 
@@ -110,6 +118,12 @@ const server = http.createServer(async (req, res) => {
       if (!Array.isArray(argv) || argv.length === 0 || argv.length > MAX_ARGV || argv.some((x) => typeof x !== 'string')) {
         res.statusCode = 400;
         return res.end(JSON.stringify({ ok: false, error: 'bad argv' }));
+      }
+      // This endpoint owns the output flag. A caller-supplied -o would write the bytes somewhere we
+      // never read, and the request would fail with a confusing "download failed".
+      if (argv.some((a) => a === '-o' || a === '--output')) {
+        res.statusCode = 400;
+        return res.end(JSON.stringify({ ok: false, error: 'argv must not set --output' }));
       }
       return res.end(JSON.stringify(await runGwsToFile(argv)));
     }

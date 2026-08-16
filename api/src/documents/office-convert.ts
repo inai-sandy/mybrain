@@ -37,6 +37,38 @@ const extOf = (name: string) => extname(name || '').toLowerCase().replace('.', '
 export const isOfficeFile = (name: string): boolean => OFFICE_EXTS.includes(extOf(name));
 
 /**
+ * What the BYTES say this file is, ignoring whatever the name claims. (BEA-1343)
+ *
+ * The extension is a claim, not a fact. A Word file saved as "report.docx.txt", or a PDF renamed
+ * ".md", used to fall through to the plain-text path and get stored as `toString('utf8')` — pages
+ * of `PK\x03\x04…`. anydoc reads real file markers, so ask it first and let the name lose.
+ * Returns 'doc' for anything it converts, 'pdf' for a PDF, or null when there is no marker to read
+ * (genuine text, markdown, CSV — those have none).
+ */
+export function kindFromBytes(buffer: Buffer): 'doc' | 'pdf' | null {
+  const fmt = formatFromBytes(buffer);
+  if (!fmt) return null;
+  if (String(fmt) === 'pdf') return 'pdf';
+  return OFFICE_EXTS.includes(String(fmt)) ? 'doc' : null;
+}
+
+/**
+ * Does this look like text a person could read? Used as the last gate before storing a file's bytes
+ * as a document's words. A NUL byte or invalid UTF-8 in the first few KB means binary — storing it
+ * would fill the library with mojibake and, worse, index that mojibake into the brain. (BEA-1343)
+ */
+export function looksLikeText(buffer: Buffer): boolean {
+  if (!buffer?.length) return true; // an empty file is handled elsewhere
+  if (buffer.subarray(0, 8192).includes(0)) return false;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, 4096));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Convert an office file to markdown. Throws with a plain-English message the upload route can show.
  *
  * Format detection reads the file's own markers first, so a mislabelled file still converts. CSV has
