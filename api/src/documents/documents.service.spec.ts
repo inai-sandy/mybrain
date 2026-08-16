@@ -65,6 +65,35 @@ describe('DocumentsService', () => {
     expect(doc.contentText).toContain('Heading');
   });
 
+  // The folder was declared on the input type but never written to the row, so EVERY document made
+  // through create() — the "New Document" folder picker, and every email saved from Gmail — landed
+  // with no folder at all, silently. (BEA-1341)
+  it('actually saves the folder a document was created in', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
+    const doc = await svc.create({ title: 'Filed note', contentText: 'hello', collectionId: 'col-email' });
+    expect(prisma._rows[0].collectionId).toBe('col-email');
+    expect(doc.collectionId).toBe('col-email');
+  });
+
+  it('files an uploaded markdown file into the folder it was given', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
+    // This is the exact path a saved email takes: a .md upload routed through create().
+    await svc.createFromUpload(
+      { originalname: 'Quote for 25 boards.md', mimetype: 'text/markdown', buffer: Buffer.from('# Quote', 'utf8') },
+      { collectionId: 'col-email' },
+    );
+    expect(prisma._rows[0].collectionId).toBe('col-email');
+  });
+
+  it('leaves the folder empty when none was asked for', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
+    await svc.create({ title: 'Loose note', contentText: 'hello' });
+    expect(prisma._rows[0].collectionId).toBeNull();
+  });
+
   it('recovers a UTF-8 filename that multer decoded as latin1 (em-dash) (BEA-801)', async () => {
     const prisma = fakePrisma();
     const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);

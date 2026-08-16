@@ -95,13 +95,18 @@ function safeFilename(name: string): string {
 
 /**
  * Every real attachment in a Gmail payload tree. Inline images (a signature logo, a tracking pixel)
- * carry a Content-ID and would otherwise flood the library, so they are left out. (BEA-1341)
+ * would otherwise flood the library, so they are left out. (BEA-1341)
+ *
+ * "Inline" is decided by Content-Disposition, NOT by the presence of a Content-ID: Outlook puts a
+ * Content-ID on genuinely attached files too, so treating that as inline silently dropped real
+ * attachments — the worst kind of failure here, because the count looks right and nothing errors.
  */
 function collectAttachments(payload: any, out: { filename: string; mimeType: string; attachmentId: string }[] = []) {
   if (!payload) return out;
   const filename = String(payload.filename || '').trim();
   const attachmentId = payload.body?.attachmentId;
-  const inline = (payload.headers || []).some((x: any) => String(x?.name).toLowerCase() === 'content-id');
+  const disposition = (payload.headers || []).find((x: any) => String(x?.name).toLowerCase() === 'content-disposition')?.value;
+  const inline = /^\s*inline\b/i.test(String(disposition || ''));
   if (filename && attachmentId && !inline) {
     out.push({ filename, mimeType: String(payload.mimeType || 'application/octet-stream'), attachmentId });
   }
@@ -400,15 +405,23 @@ export class GoogleService {
 
     const collectionId = await this.library.ensureCollection('Email', 'Mail');
     const link = `https://mail.google.com/mail/u/0/#all/${threadId}`;
-    const doc: any = await this.library.createFromUpload(
-      { originalname: `${safeFilename(subject)}.md`, mimetype: 'text/markdown', buffer: Buffer.from(md, 'utf8') },
-      { collectionId, sourceUrl: link },
-    );
+    const emailFile = `${safeFilename(subject)}.md`;
+
+    // Saving the same conversation twice refreshes it (a thread grows new replies) instead of
+    // leaving a second copy in the folder. (BEA-1341)
+    const already = await this.library.findImported(link, emailFile);
+    const doc: any = already
+      ? await this.library.replaceContent(already.id, md)
+      : await this.library.createFromUpload(
+          { originalname: emailFile, mimetype: 'text/markdown', buffer: Buffer.from(md, 'utf8') },
+          { collectionId, sourceUrl: link },
+        );
 
     let saved = 0;
     for (const m of messages) {
       for (const att of collectAttachments(m?.payload)) {
         try {
+          if (await this.library.findImported(link, att.filename)) continue; // already brought in
           const got = await this.run([
             'gmail', 'users', 'messages', 'attachments', 'get',
             '--params', JSON.stringify({ userId: 'me', messageId: m.id, id: att.attachmentId }),
