@@ -588,7 +588,9 @@ function Triggers({ slug, name, triggerCount }: { slug: string; name: string; tr
                 <span className={'mt-1.5 h-2 w-2 shrink-0 rounded-full ' + (b.enabled ? 'bg-emerald-500' : b.pausedReason ? 'bg-amber-400' : 'bg-zinc-400')} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{b.label || b.eventName}</p>
-                  <p className="truncate text-xs text-zinc-400">
+                  {/* Wraps, not truncates: on a phone the limit is the half that would be cut off,
+                      and the limit is the thing that explains a quiet rule. */}
+                  <p className="break-words text-xs text-zinc-400">
                     Runs <span className="text-zinc-500 dark:text-zinc-300">{b.flowName || 'a flow that is no longer there'}</span>
                     {b.lastFiredAt ? ` · last ${whenText(b.lastFiredAt)}` : ' · not yet'}
                     {` · up to ${b.rateCap}/hour`}
@@ -715,10 +717,12 @@ function TriggerForm({
   const [flowId, setFlowId] = useState('');
   const [label, setLabel] = useState('');
   const [cap, setCap] = useState('20');
+  const [showFilters, setShowFilters] = useState(false);
 
   const inputCls = 'w-full rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950';
   const list = (options || []).filter((t) => !q.trim() || `${t.name} ${t.description || ''}`.toLowerCase().includes(q.trim().toLowerCase()));
   const fields = configFields(picked);
+  const optional = fields.filter((f) => !f.required);
   const missing = fields.filter((f) => f.required && !String(values[f.name] || '').trim());
   const ready = !!picked && !!flowId && !missing.length;
 
@@ -748,11 +752,14 @@ function TriggerForm({
           {list.map((t) => (
             <li key={t.id}>
               <button
-                onClick={() => { setPicked(t); setValues({}); }}
+                onClick={() => { setPicked(t); setValues({}); setShowFilters(false); }}
                 className={'w-full min-w-0 rounded-lg border p-2 text-left transition-colors ' + (picked?.id === t.id ? 'border-emerald-500 bg-emerald-500/5' : 'border-zinc-200 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50')}
               >
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{t.name}</span>
+                {/* Wraps rather than truncates: on a phone the name and the chip do not fit on one
+                    line, and cutting "Branch Changed" down to "Branch Cha…" hides the very thing he
+                    is choosing between. The chip drops to its own line instead. */}
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="min-w-0 break-words text-sm font-medium">{t.name}</span>
                   {/* Said on every single row, not once in a footnote: instant and "every few
                       minutes" are different promises, and he is choosing between them here. */}
                   <span className={CHIP + ' shrink-0 ' + (t.instant ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400')}>
@@ -770,13 +777,21 @@ function TriggerForm({
       {picked && fields.length > 0 && (
         <div className="space-y-2">
           <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">2. Where should we watch?</p>
-          {fields.map((f) => (
+          {/* Only what the event actually NEEDS is up front. GitHub's issue event has two required
+              fields and five optional filters; showing all seven pushes "what should it start?"
+              off the screen and makes a two-box job look like a form. */}
+          {fields.filter((f) => f.required || showFilters).map((f) => (
             <label key={f.name} className="block text-xs text-zinc-500">
               {f.label}{!f.required && <span className="text-zinc-400"> (optional)</span>}
               <input value={values[f.name] || ''} onChange={(e) => setValues({ ...values, [f.name]: e.target.value })} className={inputCls + ' mt-1'} />
               {f.description && <span className="mt-1 block break-words text-[11px] text-zinc-400">{f.description}</span>}
             </label>
           ))}
+          {optional.length > 0 && (
+            <button onClick={() => setShowFilters(!showFilters)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              {showFilters ? 'Hide' : 'Add'} {optional.length === 1 ? 'a filter' : `filters (${optional.length})`}
+            </button>
+          )}
         </div>
       )}
 
