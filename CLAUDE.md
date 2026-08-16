@@ -64,6 +64,17 @@ The machine backs these rules: tests block on red, files auto-format, dangerous 
 **AI Radar (BEA-1311→1313)**
 The Radar tab on `/news?view=radar` mirrors an external collector — the fork `inai-sandy/ai-news-radar`, which fetches/dedupes/scores AI news hourly on GitHub Actions and publishes JSON to GitHub Pages (`RADAR_BASE_URL`, default `https://inai-sandy.github.io/ai-news-radar/data`). `RadarFeedService` syncs it hourly into `RadarItem` with counted results and translates any Chinese title at sync (free Google endpoint, `radar-translate` helper fallback) — an item is NEVER listed untranslated (`pendingTranslation` hides it). `RadarWriteService` writes the picks' one-line notes in batched `radar-why` engine calls — an hourly check that only calls the engine when a pick lacks its line (honest-runs: failures leave picks pending). The upstream feed list lives in the fork's `FOLLOW_OPML_B64` repo secret, not in this repo.
 
+**Outside services (BEA-1345)**
+Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
+`api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
+API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).
+Ids are `svc:<service>.<action>` and **the vendor's name may never appear in one** — they are
+dispatched on and stored inside saved flows, so a vendor name would make the provider unswappable.
+Counts (`871 GitHub tools`…) are always read from the API at run time; Composio's own docs and
+marketing pages disagree with it and with each other. The key is the `composio` connector (encrypted,
+Settings → Connections) and `COMPOSIO_API_KEY` in `deploy.sh`; `exa · firecrawl · tavily · perplexity
+· telegram · whatsapp` are blocked because we already do them better or they are ours.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

@@ -1,4 +1,5 @@
 import { clip, GROUP_ORDER, ToolCatalogService } from './tool-catalog.service';
+import { SERVICE_TOOL_ID_RE } from './service-provider';
 
 describe('clip', () => {
   it('leaves a short description alone', () => {
@@ -35,8 +36,9 @@ describe('ToolCatalogService', () => {
     const svc = new ToolCatalogService(connectors(['tavily', 'telegram']), skills([]), google(true));
     const { groups } = await svc.catalog();
     const names = groups.map((g) => g.group);
-    // Skills is absent when there are none; every other group must be present.
-    expect(names).toEqual(GROUP_ORDER.filter((g) => g !== 'Skills'));
+    // Skills is absent when there are none, and Services when no Composio key is set (BEA-1345);
+    // every other group must be present.
+    expect(names).toEqual(GROUP_ORDER.filter((g) => g !== 'Skills' && g !== 'Services'));
     expect(groups.every((g) => g.tools.length > 0)).toBe(true);
   });
 
@@ -131,6 +133,90 @@ describe('ToolCatalogService', () => {
     expect(r.ok.map((t) => t.id)).toEqual(['search_brain', 'web_search']);
     expect(r.unknown).toEqual(['not_a_tool']);
     expect(r.notConnected.map((t) => t.id)).toEqual(['web_search']);
+  });
+
+  /**
+   * Outside services reaching the one catalog (BEA-1345).
+   *
+   * The catalog must be exactly what it is today when there is no Composio key, must never learn
+   * the vendor's name, and must survive the vendor being down with every built-in tool intact.
+   */
+  describe('outside services', () => {
+    const baseline = async () => {
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true));
+      return svc.catalog();
+    };
+    const provider = (over: any = {}) => ({
+      status: async () => ({ configured: true, reachable: true }),
+      listServices: async () => [
+        { slug: 'github', name: 'GitHub', category: 'Developer Tools', connected: true, accounts: [{ id: 'ca_1', label: 'sandy', status: 'ACTIVE' }], actionCount: 871 },
+      ],
+      listActions: async () => [
+        { id: 'svc:github.create_issue', name: 'Create issue', description: 'Open an issue', schema: {}, risky: false, service: 'github' },
+        { id: 'svc:github.delete_a_repository', name: 'Delete repository', description: 'Gone for good', schema: {}, risky: true, service: 'github' },
+        { id: 'svc:github.old_thing', name: 'Old', description: '', schema: {}, risky: false, service: 'github', deprecated: true },
+      ],
+      ...over,
+    }) as any;
+
+    it('with no key, returns exactly what it returns today — no Services group, no error', async () => {
+      const before = await baseline();
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true), undefined, {
+        status: async () => ({ configured: false, reachable: false }),
+        listServices: async () => { throw new Error('must not be asked'); },
+        listActions: async () => { throw new Error('must not be asked'); },
+      } as any);
+      const after = await svc.catalog();
+      expect(after.groups.map((g) => g.group)).not.toContain('Services');
+      expect(after.tools.map((t) => t.id)).toEqual(before.tools.map((t) => t.id));
+    });
+
+    it('with a working key, adds a Services group whose ids all have the one shape', async () => {
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true), undefined, provider());
+      const { groups, tools } = await svc.catalog();
+      const services = groups.find((g) => g.group === 'Services')!;
+      expect(services).toBeTruthy();
+      expect(services.tools.length).toBeGreaterThan(0);
+      for (const t of services.tools) {
+        expect(t.id).toMatch(SERVICE_TOOL_ID_RE);
+        expect(t.id).not.toMatch(/composio/i); // the vendor name may never reach an id
+      }
+      expect(services.tools.map((t) => t.id)).toEqual(['svc:github.create_issue', 'svc:github.delete_a_repository']); // deprecated dropped
+      expect(services.tools[0].name).toBe('GitHub: Create issue');
+      expect(services.tools[1].risky).toBe(true);
+      expect(tools.find((t) => t.id === 'search_brain')).toBeTruthy(); // built-ins untouched
+    });
+
+    it('keeps the group when the key works but nothing is connected yet', async () => {
+      const svc = new ToolCatalogService(connectors([]), skills([]), google(false), undefined, provider({ listServices: async () => [] }));
+      const { groups } = await svc.catalog();
+      const services = groups.find((g) => g.group === 'Services')!;
+      expect(services).toBeTruthy();
+      expect(services.tools).toEqual([]);
+    });
+
+    it('never lists a blocked service, even if the provider hands one back', async () => {
+      const svc = new ToolCatalogService(connectors([]), skills([]), google(false), undefined, provider({
+        listServices: async () => [{ slug: 'tavily', name: 'Tavily', category: 'Search', connected: true, accounts: [{ id: 'x', label: 'x', status: 'ACTIVE' }] }],
+        listActions: async () => [{ id: 'svc:tavily.search', name: 'Search', description: '', schema: {}, risky: false, service: 'tavily' }],
+      }));
+      const { tools } = await svc.catalog();
+      expect(tools.filter((t) => t.id.startsWith('svc:tavily.'))).toEqual([]);
+    });
+
+    it('survives the service layer being down — every built-in tool is still there', async () => {
+      const before = await baseline();
+      for (const broken of [
+        { status: async () => { throw new Error('network'); } },
+        { status: async () => ({ configured: true, reachable: false, message: 'no' }) },
+        { listServices: async () => { throw new Error('boom'); } },
+        { listActions: async () => { throw new Error('boom'); } },
+      ]) {
+        const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true), undefined, provider(broken));
+        const { tools } = await svc.catalog();
+        for (const id of before.tools.map((t) => t.id)) expect(tools.map((t) => t.id)).toContain(id);
+      }
+    });
   });
 
   it('survives every probe failing — the catalog still comes back', async () => {

@@ -1,0 +1,12 @@
+{
+  "startedAt": "2026-08-16T18:30:00Z",
+  "note": "Tools / Composio batch. Design: specs/TOOLS.md (4e9ea22). BEA-1351 is BLOCKED and must not run.",
+  "issues": [
+    { "id": "BEA-1345", "title": "ServiceProvider seam + Composio provider", "status": "pending" },
+    { "id": "BEA-1346", "title": "/tools page", "status": "pending" },
+    { "id": "BEA-1347", "title": "Run a service action + call log", "status": "pending" },
+    { "id": "BEA-1348", "title": "Gates", "status": "pending" },
+    { "id": "BEA-1349", "title": "Chat can act", "status": "pending" },
+    { "id": "BEA-1350", "title": "Triggers", "status": "pending" }
+  ]
+}

@@ -28,6 +28,7 @@ const INTEGRATIONS: Integration[] = [
   { name: 'openai_admin', label: 'OpenAI Admin (usage)', desc: 'Optional — unlocks your OpenAI spend in the API-usage card. Create an Admin key with the usage-read scope at platform.openai.com → Settings → API keys.', icon: Sparkles, fields: [{ key: 'apiKey', label: 'Admin key', type: 'password' }] },
   { name: 'elevenlabs', label: 'ElevenLabs', desc: 'Optional voice engine — Scribe (most accurate on English)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'deepgram', label: 'Deepgram', desc: 'Optional voice engine — Nova-3 (fast)', icon: Mic, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
+  { name: 'composio', label: 'Composio', desc: 'Connects outside services (GitHub, Slack, Linear, Notion, Jira…) so your agents can use them. One key for the whole app — get it at composio.dev → Settings → API keys.', icon: Boxes, testable: true, fields: [{ key: 'apiKey', label: 'API key', type: 'password' }] },
   { name: 'apify', label: 'Apify (Instagram)', desc: 'Fetches the real caption + a permanent image for Instagram bookmarks (so images stop expiring and descriptions match the reel). Create a free token at apify.com → Settings → Integrations.', icon: Globe, fields: [{ key: 'apiKey', label: 'API token', type: 'password' }] },
 ];
 
@@ -127,7 +128,7 @@ const CATS: Cat[] = [
     { label: 'Gmail Daily Brief model', keywords: 'gmail brief email model nightly' },
   ] },
   { id: 'connections', label: 'Connections', icon: Plug, desc: 'Keys, Telegram & CLI', group: 'Connections', search: [
-    { label: 'API keys & connectors', keywords: 'integrations keys supermemory rag notion raindrop tavily brave exa deepgram apify openai openrouter anthropic elevenlabs connector' },
+    { label: 'API keys & connectors', keywords: 'integrations keys supermemory rag notion raindrop tavily brave exa deepgram apify composio openai openrouter anthropic elevenlabs connector' },
     { label: 'Telegram', keywords: 'telegram bot notify link unlink' },
     { label: 'Public MCP access (RAG server)', keywords: 'mcp public rag token external access server' },
     { label: 'CLI engines (Codex / Gemini)', keywords: 'cli terminal command line codex gemini subscription' },

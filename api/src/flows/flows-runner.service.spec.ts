@@ -558,6 +558,19 @@ describe('the toolbox is enforced on a flow step (BEA-1168)', () => {
     expect(out).toBe('');
   });
 
+  /**
+   * BEA-1345 — the catalog can offer an outside service before we can run one.
+   *
+   * An `svc:` id is not in AGENT_TOOLS, so without this it would reach askModel and come back with
+   * an invented answer. For `svc:github.delete_a_repository` that reads as "the repo was deleted"
+   * when nothing happened at all. Until BEA-1347 wires execution, the step must fail out loud.
+   */
+  it('fails an outside-service step out loud instead of letting the model invent one', async () => {
+    const svcId = 'svc:github.delete_a_repository';
+    await expect((svc() as any).runNode(node('tool', svcId, 'GitHub: Delete repository'), 'go', [], new Set([svcId])))
+      .rejects.toThrow(/github.*not switched on yet/i);
+  });
+
   it('never blocks a plain building block, only tools and skills', async () => {
     const out = await (svc() as any).runNode({ data: { kind: 'text', text: 'hello' } }, '', [], new Set(['web_search']));
     expect(out).toBe('hello');

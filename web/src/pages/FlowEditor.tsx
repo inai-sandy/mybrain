@@ -561,7 +561,7 @@ function Editor({ flowId, embedded }: { flowId?: string; embedded?: boolean }) {
 }
 
 /** The catalog's group order (BEA-1167) — anything unrecognised falls into a plain "Tools" heading. */
-const TOOL_GROUPS = ['Brain', 'Web', 'Google', 'Messaging', 'Output', 'AI', 'MCP servers', 'Advanced'];
+const TOOL_GROUPS = ['Brain', 'Web', 'Google', 'Services', 'Messaging', 'Output', 'AI', 'MCP servers', 'Advanced'];
 
 function BlockPicker({ palette, onPick, onClose }: { palette: Palette; onPick: (i: PaletteItem) => void; onClose: () => void }) {
   const [q, setQ] = useState('');

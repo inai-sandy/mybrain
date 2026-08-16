@@ -27,6 +27,7 @@ const TOOL_GROUP: Record<string, string> = {
   Brain: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300',
   Web: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300',
   Google: 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300',
+  Services: 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300',
   Messaging: 'bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300',
   Output: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300',
   AI: 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',

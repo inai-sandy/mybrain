@@ -50,6 +50,7 @@ run_container() {
     -e TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}" \
     -e RAINDROP_TOKEN="${RAINDROP_TOKEN:-}" \
     -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    -e COMPOSIO_API_KEY="${COMPOSIO_API_KEY:-}" \
     -e POSTBOX_URL="${POSTBOX_URL:-https://postbox.1site.ai/api}" \
     -e POSTBOX_API_KEY="${POSTBOX_API_KEY:-}" \
     -e POSTBOX_ADMIN_TOKEN="${POSTBOX_ADMIN_TOKEN:-}" \
