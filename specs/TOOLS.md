@@ -92,6 +92,26 @@ watch another go. Saying no fails the step with a sentence that says why, and it
 row to pause on, so a gated action there stops and says where the question can be answered. Released
 permanently = a `ServiceGate` row with `scope: 'always'`, managed per service in `/tools`.
 
+**Built in Chat too (BEA-1349), and inline.** Chat gets the same `svc:*` entries the agents get,
+scoped to what is connected, and the gate becomes a card in the thread with two buttons instead of a
+durable waitpoint — the owner is sitting right there, so there is nothing to survive a restart for.
+Same `ServiceGatesService`, same `ServiceGate` row, same approved arguments re-run; only the waiting
+is different. Every chat call writes its `ToolCall` row with `runKind: 'chat'`, keyed on the session
+and the **user message id**, which is what makes a yes spendable exactly once.
+
+Two rules the chat side adds:
+- **Nothing connected ⇒ nothing changes.** `ChatToolsService` asks the catalog first and returns
+  before any prompt is built or any model is called. Chat is the screen the owner is on all day, and
+  a feature he has not set up may not cost him a millisecond or a new failure mode.
+- **A failure is never written up by a model.** A gate and a refusal both skip the answer call
+  entirely: the reply IS the service's own sentence ("GitHub could not do that: Not Found (404)").
+  Handing that to a model to phrase nicely is exactly how a refusal becomes a polite apology.
+
+Picking is two small calls, not one big one: the first is shown only the connected service *names*
+(a couple of hundred tokens, and it answers "none" nearly every time), the second — only once he
+really is asking for something to be done — is shown that one service's actions. Neither is ever
+allowed to name something outside his own catalog.
+
 ## Triggers
 Events from a connected service that start a flow. Real counts from the API: GitHub 46, Linear 12, Slack 9, Notion 8, Google Calendar 7, Drive 7, Gmail 2 — and **zero for Sentry and Vercel**, so the UI must handle a connected service that has no triggers at all. Enumerate per service; never assume. Realtime push for Slack/GitHub/Notion; ~15-minute polling for Gmail/Calendar. 50,000 events/month free. This is the missing **live** half of Flows Stage 3, which today only has the schedule half.
 

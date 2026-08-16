@@ -23,12 +23,13 @@
     {
       "id": "BEA-1348",
       "title": "Gates",
-      "status": "in_progress"
+      "status": "shipped",
+      "sha": "7d0557b"
     },
     {
       "id": "BEA-1349",
       "title": "Chat can act",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1350",

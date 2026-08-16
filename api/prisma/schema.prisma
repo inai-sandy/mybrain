@@ -630,6 +630,10 @@ model ChatMessage {
   content   String
   sources   String? // JSON array of {title, url?, itemId?}
   followups String? // JSON array of suggested next questions
+  /// Outside services this reply actually used (BEA-1349) — JSON array of chips: service, action, ok, result, link.
+  tools     String?
+  /// An action that cannot be undone, waiting for the owner's tap (BEA-1349) — JSON of the pending gate + his answer.
+  gate      String?
   starred   Boolean  @default(false)
   createdAt DateTime @default(now())
 

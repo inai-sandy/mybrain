@@ -93,7 +93,13 @@ export class ChatController {
     res.setHeader('X-Accel-Buffering', 'no');
     (res as any).flushHeaders?.();
     try {
-      const r = await this.chat.streamMessage(id, body.text, (tok) => res.write(`data: ${JSON.stringify({ token: tok })}\n\n`));
+      const r = await this.chat.streamMessage(
+        id,
+        body.text,
+        (tok) => res.write(`data: ${JSON.stringify({ token: tok })}\n\n`),
+        // "Using GitHub: Create an issue…" while the call is in flight (BEA-1349).
+        (note) => res.write(`data: ${JSON.stringify({ note })}\n\n`),
+      );
       if (!r) res.write(`data: ${JSON.stringify({ error: 'Chat not found' })}\n\n`);
       else res.write(`data: ${JSON.stringify({ done: true, userMessage: r.userMessage, message: r.message })}\n\n`);
     } catch (e: any) {
@@ -105,6 +111,20 @@ export class ChatController {
   @Post('sessions/:id/pin')
   async pin(@Param('id') id: string, @Body() body: { pinned?: boolean }) {
     return this.chat.setPinned(id, body?.pinned ?? true);
+  }
+
+  /**
+   * The inline confirm on a gated action (BEA-1349) — "Yes, run it" or "No, stop".
+   *
+   * Anything that is not plainly a yes is read as a no by the gate itself, so this endpoint passes
+   * his answer straight through rather than interpreting it here.
+   */
+  @Post('messages/:mid/gate')
+  async gate(@Param('mid') mid: string, @Body() body: { answer?: string }) {
+    const r = await this.chat.answerGate(mid, body?.answer || 'no');
+    if (!r) throw new BadRequestException('Message not found');
+    if (r.error) throw new BadRequestException(r.error);
+    return r;
   }
 
   @Post('messages/:mid/star')
