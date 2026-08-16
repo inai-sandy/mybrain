@@ -1735,6 +1735,8 @@ function ModelsSection() {
         desc="Writes example inputs to test a job on when you tap ✨ on the Checks tab. A small job — Haiku (the default) is fine." />
       <EngineModelCard title="Learn-after model" icon={Bot} base="/api/llm-config/helper/agent-learn"
         desc="Reads a finished run and proposes a few durable facts worth keeping, which you confirm. Tiny job — Haiku (the default) is fine." />
+      <EngineModelCard title="Service details model" icon={Bot} base="/api/llm-config/helper/service-args"
+        desc="Fills in the details of a call to a connected service — the issue title, who to message — from that action's own form. The only AI step when a job uses one of your Tools, and what it writes goes straight into a real call, so Sonnet 5 (the default) is worth it." />
     </div>
   );
 }

@@ -73,6 +73,18 @@ own app or key (the common case — it gets a real form, with the fields split i
 vendor reads), and **32** need no sign-in at all and must NOT be offered a Connect button, because
 Composio answers HTTP 400 for those. Shapes in `specs/COMPOSIO-API.md`.
 
+**Running one is direct, and written down (BEA-1347).** A flow step whose id starts with `svc:`
+goes through `ServiceActionsService` (`api/src/tools/service-actions.service.ts`) — never an engine
+turn, because deciding what to do next earns one (~118,000 tokens) and calling an API does not. The
+action is already named by the splitter, its schema is fetched exactly (`GET /tools/<SLUG>`; the
+list endpoint's `search` is not semantic and would run the wrong action), and the only model call is
+the small capped `service-args` helper that fills the arguments. **Every road but a real success
+throws** — an `svc:` id is not in `AGENT_TOOLS`, so a returned string would fall through to
+`askModel()` and invent a result. Every attempt writes a `ToolCall` row (arguments with secrets
+masked, result, ok, ms), including the ones that never left the building; that table is also the
+trigger echo guard's source of truth. Two connected accounts and no choice = a failed step naming
+both **labels**, never the raw ids.
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).

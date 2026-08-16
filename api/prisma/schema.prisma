@@ -1528,3 +1528,42 @@ model ServiceConnection {
 
   @@index([service])
 }
+
+/// Every attempt to run an outside-service action — the flight recorder (BEA-1347).
+///
+/// Written on EVERY attempt, before the answer is known to be good and whether it succeeded or not,
+/// including the ones that never left the building (nothing connected, two accounts and no choice).
+/// Two jobs: the owner can see what a run really did, and the trigger echo guard has a source of
+/// truth for "did we cause this event?" — without which an agent posting to Slack would trip its own
+/// trigger and post again, forever.
+model ToolCall {
+  id        String   @id @default(uuid())
+  /// The flow run or agent run that asked for it. Null for a call made outside a run.
+  runId     String?
+  /// 'flow' | 'agent' | 'chat' — which kind of run `runId` points at.
+  runKind   String?
+  agentId   String?
+  /// The step inside the flow graph, so a call can be traced back to the node that made it.
+  nodeId    String?
+  /// Service slug, e.g. "github" — never a vendor-specific name.
+  service   String
+  /// OUR id for the action: `svc:github.create_issue`. Never the vendor's slug.
+  action    String
+  /// Which connected account it ran on, when the service has more than one.
+  accountId String?
+  /// The arguments we sent, as JSON, with anything that looks like a secret masked.
+  arguments String?
+  /// A short, readable account of what came back — never the whole payload.
+  result    String?
+  ok        Boolean  @default(false)
+  /// The provider's real reason, in plain English, when it failed.
+  error     String?
+  ms        Int?
+  /// Whether this call had to stop and ask first (the gate is BEA-1348; this column is its record).
+  gated     Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([service, createdAt])
+  @@index([runId])
+  @@index([createdAt])
+}

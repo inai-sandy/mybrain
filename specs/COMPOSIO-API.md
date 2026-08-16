@@ -60,6 +60,15 @@ owner must supply their own OAuth credentials. Handle it; don't offer a Connect 
 action for a user's sentence. Use Composio's session tool-search (`COMPOSIO_SEARCH_TOOLS`) for
 intent → action, and use this endpoint only for listing and for the catalog.
 
+## One tool, exactly (verified live 2026-08-16, BEA-1347)
+`GET /tools/<TOOL_SLUG>` → the single action, with `input_parameters` — the JSON schema its
+arguments are filled from — plus `output_parameters`, `description` and `tags`.
+
+**This is how an action is looked up, never the list endpoint's `search`.** Asked for
+`GITHUB_GET_THE_AUTHENTICATED_USER`, `GET /tools?toolkit_slug=github&search=…` answers with
+`GITHUB_CREATE_OR_UPDATE_A_SECRET_FOR_THE_AUTHENTICATED_USER` first. A step that found its own
+action by searching would quietly run a different one and report it as done.
+
 ## Create an auth config (Composio-managed OAuth)
 `POST /auth_configs`
 ```json
@@ -133,3 +142,9 @@ repositories. **Check `successful` and surface `error`** — a failed action sti
 so a naive `res.ok` check would report success on a failure.
 
 Pass `connected_account_id` as well when a toolkit has more than one connected account.
+
+Proven again end to end on 2026-08-16 (BEA-1347) through a real flow step:
+`GITHUB_GET_THE_AUTHENTICATED_USER` (no arguments) and `GITHUB_LIST_REPOSITORY_ISSUES` (arguments
+filled from its schema) both returned real data, and a bad repo name came back as
+`successful:false` with GitHub's own `{"message":"Not Found",…}` body inside `error` — HTTP 200
+throughout, which is why the verdict is only ever read from `successful`.

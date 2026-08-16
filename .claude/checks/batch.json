@@ -11,12 +11,13 @@
     {
       "id": "BEA-1346",
       "title": "/tools page",
-      "status": "in_progress"
+      "status": "shipped",
+      "sha": "a634e07"
     },
     {
       "id": "BEA-1347",
       "title": "Run a service action + call log",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1348",
