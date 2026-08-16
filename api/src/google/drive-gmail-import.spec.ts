@@ -17,6 +17,8 @@ function fakeLibrary() {
   return {
     saved,
     collections,
+    findImported: jest.fn(async () => null), // nothing imported before, in these tests
+    replaceContent: jest.fn(async (id: string) => ({ id, title: 'refreshed' })),
     ensureCollection: jest.fn(async (name: string) => {
       collections.push(name);
       return `col-${name.toLowerCase().replace(/\s+/g, '-')}`;
@@ -147,7 +149,9 @@ describe('gmailImport', () => {
         { mimeType: 'text/plain', body: { data: Buffer.from('Here is our price.').toString('base64url') } },
         { mimeType: DOCX, filename: 'quote.docx', body: { attachmentId: 'att-1' } },
         // an inline signature logo — must NOT become a document
-        { mimeType: 'image/png', filename: 'logo.png', headers: [{ name: 'Content-ID', value: '<logo>' }], body: { attachmentId: 'att-2' } },
+        { mimeType: 'image/png', filename: 'logo.png', headers: [{ name: 'Content-Disposition', value: 'inline; filename="logo.png"' }], body: { attachmentId: 'att-2' } },
+        // Outlook puts a Content-ID on REAL attachments too — this one must still be saved
+        { mimeType: 'application/pdf', filename: 'terms.pdf', headers: [{ name: 'Content-ID', value: '<terms>' }, { name: 'Content-Disposition', value: 'attachment; filename="terms.pdf"' }], body: { attachmentId: 'att-3' } },
       ],
     },
   };
@@ -155,6 +159,7 @@ describe('gmailImport', () => {
   function wire(svc: GoogleService) {
     svc.run = jest.fn(async (argv: string[]) => {
       if (argv.includes('attachments')) return { data: Buffer.from('PK attachment bytes').toString('base64url') };
+      if (argv.includes('threads')) return { messages: [{ ...message, id: 'msg-1' }] };
       return message;
     }) as any;
   }
@@ -165,10 +170,11 @@ describe('gmailImport', () => {
 
     const res = await svc.gmailImport('msg-1');
 
-    expect(res.attachments).toBe(1);
-    expect(lib.saved).toHaveLength(2);
-    expect(lib.saved[1].file.originalname).toBe('quote.docx');
-    expect(lib.saved.map((s) => s.file.originalname)).not.toContain('logo.png');
+    expect(res.attachments).toBe(2);
+    const names = lib.saved.map((s) => s.file.originalname);
+    expect(names).toContain('quote.docx');
+    expect(names).toContain('terms.pdf'); // a Content-ID does NOT mean inline
+    expect(names).not.toContain('logo.png');
   });
 
   it('puts everything from Gmail in the Email folder', async () => {
@@ -204,6 +210,18 @@ describe('gmailImport', () => {
 
     expect(res.attachments).toBe(0);
     expect(lib.saved).toHaveLength(1); // the email itself survived
+  });
+
+  it('refreshes the same conversation instead of leaving a second copy', async () => {
+    const { svc, lib } = build();
+    wire(svc);
+    lib.findImported = jest.fn(async (_url: string, filename: string) =>
+      filename.endsWith('.md') ? { id: 'doc-existing', title: 'Quote for 25 boards' } : null) as any;
+
+    await svc.gmailThreadImport('thread-9');
+
+    expect(lib.replaceContent).toHaveBeenCalledWith('doc-existing', expect.stringContaining('# Quote for 25 boards'));
+    expect(lib.saved.map((s) => s.file.originalname)).not.toContain('Quote for 25 boards.md');
   });
 
   it('makes a safe filename from a subject with slashes', async () => {

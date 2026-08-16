@@ -300,6 +300,24 @@ export class DocumentsService {
   }
 
   /**
+   * A document already brought in from this exact place. Lets an importer refresh what it saved
+   * before instead of leaving a second copy behind every time. (BEA-1341)
+   */
+  async findImported(sourceUrl: string, filename: string): Promise<{ id: string; title: string } | null> {
+    if (!sourceUrl || !filename) return null;
+    const row = await this.prisma.document
+      .findFirst({ where: { sourceUrl: sourceUrl.slice(0, 500), filename } })
+      .catch(() => null);
+    return row ? { id: row.id, title: row.title } : null;
+  }
+
+  /** Replace a document's text in place — used when re-importing an email that has new replies. */
+  async replaceContent(id: string, contentText: string): Promise<{ id: string; title: string }> {
+    const row = await this.prisma.document.update({ where: { id }, data: { contentText } });
+    return { id: row.id, title: row.title };
+  }
+
+  /**
    * Find a folder by name, or make it. Used by the Google importers so everything from Gmail lands
    * in one folder and everything from Drive/Docs in another, without the owner setting them up
    * first. Matching is case-insensitive so "email" and "Email" never become two folders. (BEA-1341)
@@ -349,6 +367,7 @@ export class DocumentsService {
       bytes: Buffer.byteLength(content, 'utf8'),
       tags,
       noIndex: !!input.noIndex,
+      collectionId: input.collectionId ?? null,
     });
   }
 
@@ -410,7 +429,7 @@ export class DocumentsService {
     const name = this.fixFilename(file.originalname || 'upload');
     const ext = extname(name).toLowerCase();
     if (ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed') {
-      return this.createFromZip(file);
+      return this.createFromZip(file, opts);
     }
     const kind = this.kindOf(name, file.mimetype);
     const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Untitled';
@@ -479,7 +498,7 @@ export class DocumentsService {
   }
 
   /** Unzip a multi-file site into its own folder; keep the original zip for download. (BEA-587) */
-  async createFromZip(file: UploadFile) {
+  async createFromZip(file: UploadFile, opts?: { collectionId?: string | null; sourceUrl?: string | null }) {
     const name = this.fixFilename(file.originalname || 'site.zip');
     const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Site';
     const id = randomUUID();
@@ -535,6 +554,8 @@ export class DocumentsService {
         bytes: file.size ?? file.buffer.length,
         siteEntry: entry,
         tags: JSON.stringify([]),
+        collectionId: opts?.collectionId ?? null,
+        sourceUrl: opts?.sourceUrl ? opts.sourceUrl.slice(0, 500) : null,
       },
     });
     return this.full(row);
