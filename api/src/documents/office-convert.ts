@@ -13,6 +13,19 @@ import { toMarkdownBytes, formatFromBytes, formatFromExtension } from '@firecraw
  * only to answer "is there any text in here at all?" — see `pdfHasNoTextToRead`.
  */
 
+/**
+ * Formats people will try that anydoc genuinely cannot read, mapped to advice worth giving.
+ * `.xls`/`.xlsb` are the trap: `formatFromExtension('xls')` answers 'xlsx', so a real 97-2003 file
+ * is handed to the modern parser and dies with a vague error. (BEA-1344)
+ */
+export const UNREADABLE_EXTS: Record<string, string> = {
+  xls: 'Old Excel files (.xls) can’t be read. Open it and save it as .xlsx, then try again.',
+  xlsb: 'Binary Excel files (.xlsb) can’t be read. Save it as .xlsx, then try again.',
+  pages: 'Apple Pages files can’t be read. Export it as Word or PDF, then try again.',
+  numbers: 'Apple Numbers files can’t be read. Export it as Excel or PDF, then try again.',
+  key: 'Apple Keynote files can’t be read. Export it as PowerPoint or PDF, then try again.',
+};
+
 /** Upload cap for an office file, matching the 80 MB unzipped cap on the ZIP/site path. */
 const MAX_INPUT_BYTES = 40 * 1024 * 1024;
 
@@ -23,7 +36,7 @@ const MAX_MARKDOWN_CHARS = 5 * 1024 * 1024;
 export const OFFICE_EXTS = [
   'doc', 'docx', 'docm',
   'ppt', 'pps', 'pot', 'pptx', 'pptm', 'ppsx', 'ppsm',
-  'xls', 'xlsx', 'xlsm', 'xlsb',
+  'xlsx', 'xlsm',
   'odt', 'ods', 'odp',
   'rtf', 'epub', 'csv',
 ];
@@ -53,19 +66,38 @@ export function kindFromBytes(buffer: Buffer): 'doc' | 'pdf' | null {
 }
 
 /**
- * Does this look like text a person could read? Used as the last gate before storing a file's bytes
- * as a document's words. A NUL byte or invalid UTF-8 in the first few KB means binary — storing it
- * would fill the library with mojibake and, worse, index that mojibake into the brain. (BEA-1343)
+ * Read a file's bytes as text, or return null if it simply isn't text. (BEA-1343, fixed BEA-1344)
+ *
+ * The first version of this only asked "is it valid UTF-8?" and refused everything else — which
+ * threw out real files people upload every day: anything Notepad saved as UTF-16, and any older
+ * latin1 / Windows-1252 note with an accent or a smart quote in it. Being unreadable and being
+ * differently-encoded are not the same thing, so decode properly instead of refusing:
+ *
+ *   1. a UTF-16 byte-order mark → decode UTF-16 (its NUL bytes are structure, not binary)
+ *   2. valid UTF-8 (with or without a BOM) → decode UTF-8
+ *   3. no NUL anywhere → a legacy single-byte encoding, decode latin1
+ *   4. otherwise → genuinely binary, refuse
+ *
+ * The NUL scan covers the WHOLE buffer, not a sample: a file can open with clean prose and turn to
+ * binary later, and it is the whole buffer we are about to store.
  */
-export function looksLikeText(buffer: Buffer): boolean {
-  if (!buffer?.length) return true; // an empty file is handled elsewhere
-  if (buffer.subarray(0, 8192).includes(0)) return false;
-  try {
-    new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, 4096));
-    return true;
-  } catch {
-    return false;
+export function readAsText(buffer: Buffer): string | null {
+  if (!buffer?.length) return '';
+
+  if (buffer.length >= 2) {
+    const [a, b] = [buffer[0], buffer[1]];
+    if (a === 0xff && b === 0xfe) return new TextDecoder('utf-16le').decode(buffer.subarray(2));
+    if (a === 0xfe && b === 0xff) return new TextDecoder('utf-16be').decode(buffer.subarray(2));
   }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer).replace(/^\ufeff/, '');
+  } catch {
+    // not UTF-8 — fall through
+  }
+
+  if (buffer.includes(0)) return null; // NUL anywhere means binary, not a text encoding
+  return buffer.toString('latin1');
 }
 
 /**
@@ -76,6 +108,8 @@ export function looksLikeText(buffer: Buffer): boolean {
  * without it every CSV upload fails with "unrecognized file content".
  */
 export async function officeToMarkdown(buffer: Buffer, filename: string): Promise<string> {
+  const advice = UNREADABLE_EXTS[extOf(filename)];
+  if (advice) throw new Error(advice);
   // docx/xlsx/pptx/odt/ods/odp are zip containers, so a small upload can decompress into a huge
   // document. We never extract them — anydoc converts in memory — but the conversion still holds the
   // result, so cap both ends the way createFromZip caps the site path. (BEA-1339)

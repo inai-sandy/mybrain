@@ -1,5 +1,5 @@
 import AdmZip from 'adm-zip';
-import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, kindFromBytes, looksLikeText, OFFICE_EXTS } from './office-convert';
+import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, kindFromBytes, readAsText, OFFICE_EXTS } from './office-convert';
 
 /**
  * Locks the office-file → markdown path added in BEA-1339.
@@ -167,21 +167,48 @@ describe('kindFromBytes — the name is a claim, the bytes are the fact (BEA-134
   });
 });
 
-describe('looksLikeText', () => {
-  it('accepts real text, including accents and emoji', () => {
-    expect(looksLikeText(Buffer.from('# Héllo — wörld 🌍\n\nSome body text.'))).toBe(true);
-    expect(looksLikeText(Buffer.from(''))).toBe(true);
+describe('readAsText — different encoding is not the same as binary (BEA-1344)', () => {
+  const utf16le = (t: string) => Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(t, 'utf16le')]);
+
+  it('reads plain UTF-8, accents and emoji', () => {
+    expect(readAsText(Buffer.from('# Héllo — wörld 🌍'))).toBe('# Héllo — wörld 🌍');
+    expect(readAsText(Buffer.from(''))).toBe('');
   });
 
-  it('rejects a file with NUL bytes', () => {
-    expect(looksLikeText(Buffer.from([0x48, 0x00, 0x49]))).toBe(false);
+  it('reads a UTF-16 file, whose NUL bytes are structure and not binary', () => {
+    // Notepad's "Unicode" save and PowerShell redirects both produce this; it used to be refused.
+    expect(readAsText(utf16le('# Hello world'))).toBe('# Hello world');
   });
 
-  it('rejects invalid UTF-8', () => {
-    expect(looksLikeText(Buffer.from([0xff, 0xfe, 0xfd, 0xfc]))).toBe(false);
+  it('reads a legacy latin1 / Windows-1252 note instead of refusing it', () => {
+    expect(readAsText(Buffer.from('Caf\xe9 notes', 'latin1'))).toBe('Café notes');
   });
 
-  it('rejects a real Word file being passed off as text', () => {
-    expect(looksLikeText(docx(para('hi')))).toBe(false);
+  it('strips a UTF-8 byte-order mark', () => {
+    expect(readAsText(Buffer.from('\ufeff# Title'))).toBe('# Title');
+  });
+
+  it('refuses genuinely binary content', () => {
+    expect(readAsText(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]))).toBeNull();
+    expect(readAsText(docx(para('hi')))).toBeNull();
+  });
+
+  it('looks at the WHOLE file, not just the opening', () => {
+    // Clean prose first, binary later — the old 8KB sample passed this and stored the junk.
+    const sneaky = Buffer.concat([Buffer.from('a'.repeat(9000)), Buffer.from([0x00, 0xff, 0xfe])]);
+    expect(readAsText(sneaky)).toBeNull();
+  });
+});
+
+describe('formats we cannot read (BEA-1344)', () => {
+  it('tells the owner what to do about a legacy .xls instead of a vague failure', async () => {
+    await expect(officeToMarkdown(Buffer.from('anything'), 'book.xls')).rejects.toThrow(/save it as \.xlsx/i);
+  });
+
+  it('no longer advertises formats anydoc cannot read', () => {
+    expect(OFFICE_EXTS).not.toContain('xls');
+    expect(OFFICE_EXTS).not.toContain('xlsb');
+    expect(OFFICE_EXTS).toContain('xlsx');
+    expect(OFFICE_EXTS).toContain('docx');
   });
 });

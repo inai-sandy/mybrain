@@ -121,7 +121,8 @@ const server = http.createServer(async (req, res) => {
       }
       // This endpoint owns the output flag. A caller-supplied -o would write the bytes somewhere we
       // never read, and the request would fail with a confusing "download failed".
-      if (argv.some((a) => a === '-o' || a === '--output')) {
+      // Match attached forms too (-oFILE, --output=FILE), not just the bare tokens.
+      if (argv.some((a) => /^-o./.test(a) || a === '-o' || /^--output(=|$)/.test(a))) {
         res.statusCode = 400;
         return res.end(JSON.stringify({ ok: false, error: 'argv must not set --output' }));
       }

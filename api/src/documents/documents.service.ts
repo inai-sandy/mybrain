@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID, randomBytes, timingSafeEqual } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import AdmZip from 'adm-zip';
@@ -9,7 +9,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
-import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, kindFromBytes, looksLikeText } from './office-convert';
+import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, kindFromBytes, readAsText, UNREADABLE_EXTS } from './office-convert';
 import TurndownService from 'turndown';
 
 // Shared HTML→Markdown converter for the raw share link (BEA-970). ATX headings + fenced code.
@@ -56,6 +56,10 @@ const SUMMARY_MODEL: LlmConfig = { provider: 'openrouter', model: 'anthropic/cla
 /** The Documents library (BEA-532): the user's own md/html files to share & re-use — NOT in memory. */
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+  /** One in-flight folder lookup per name — see ensureCollection. */
+  private static readonly collectionLocks = new Map<string, Promise<string | null>>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly llm: LlmService,
@@ -319,11 +323,13 @@ export class DocumentsService {
    * A document already brought in from this exact place. Lets an importer refresh what it saved
    * before instead of leaving a second copy behind every time. (BEA-1341)
    */
-  async findImported(sourceUrl: string, filename: string): Promise<{ id: string; title: string } | null> {
-    if (!sourceUrl || !filename) return null;
-    const row = await this.prisma.document
-      .findFirst({ where: { sourceUrl: sourceUrl.slice(0, 500), filename } })
-      .catch(() => null);
+  async findImported(sourceUrl: string, filename?: string): Promise<{ id: string; title: string } | null> {
+    if (!sourceUrl) return null;
+    // filename is optional on purpose: a Drive file keeps its link when it is RENAMED, so matching
+    // on the link alone is what stops a rename from creating a second copy. (BEA-1344)
+    const where: any = { sourceUrl: sourceUrl.slice(0, 500) };
+    if (filename) where.filename = filename;
+    const row = await this.prisma.document.findFirst({ where }).catch(() => null);
     return row ? { id: row.id, title: row.title } : null;
   }
 
@@ -351,14 +357,21 @@ export class DocumentsService {
   async ensureCollection(name: string, icon?: string): Promise<string | null> {
     const n = (name || '').trim().slice(0, 80);
     if (!n) return null;
-    const all = await this.prisma.documentCollection.findMany({ select: { id: true, name: true } });
-    const hit = all.find((c) => c.name.trim().toLowerCase() === n.toLowerCase());
-    if (hit) return hit.id;
-    const made = await this.createCollection(n, undefined, icon);
-    if (made?.id) return made.id;
-    // Lost a race with another import creating the same folder — take whichever one won. (BEA-1343)
-    const again = await this.prisma.documentCollection.findMany({ select: { id: true, name: true } });
-    return again.find((c) => c.name.trim().toLowerCase() === n.toLowerCase())?.id || null;
+    const key = n.toLowerCase();
+    // DocumentCollection.name has no unique index, so two imports racing would BOTH create a folder
+    // and quietly split the owner's documents across two identical "Email" folders. Queue callers
+    // per name instead — this is a single-process app, so one in-flight promise is enough. (BEA-1344)
+    const inFlight = DocumentsService.collectionLocks.get(key);
+    if (inFlight) return inFlight;
+    const work = (async () => {
+      const all = await this.prisma.documentCollection.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } });
+      const hit = all.find((c) => c.name.trim().toLowerCase() === key);
+      if (hit) return hit.id;
+      const made = await this.createCollection(n, undefined, icon);
+      return made?.id || null;
+    })().finally(() => DocumentsService.collectionLocks.delete(key));
+    DocumentsService.collectionLocks.set(key, work);
+    return work;
   }
 
   renameCollection(id: string, name: string, color?: string, icon?: string) {
@@ -457,7 +470,16 @@ export class DocumentsService {
   /** multer/busboy decode multipart filenames as latin1, so a name like "Report — Final.md" arrives
    *  mojibaked ("Report â€" Final"). Re-decode as UTF-8 to recover it (ASCII names are unchanged). (BEA-801) */
   private fixFilename(name: string): string {
-    try { return Buffer.from(name, 'latin1').toString('utf8'); } catch { return name; }
+    // Only multipart names arrive mojibaked. Gmail and Drive hand us correct UTF-8 already, and
+    // re-decoding those turned "café.docx" into "caf�.docx" — which then never matched on the
+    // way back out, so every re-import made a duplicate. (BEA-1344)
+    if (!/[\u0080-\u00ff]/.test(name)) return name; // pure ASCII: nothing to repair
+    try {
+      const decoded = Buffer.from(name, 'latin1').toString('utf8');
+      return decoded.includes('\ufffd') ? name : decoded; // garbled result means it was fine already
+    } catch {
+      return name;
+    }
   }
 
   /** Create a document from an uploaded file (md/html/pdf/image/office). (BEA-534, BEA-1339) */
@@ -472,11 +494,13 @@ export class DocumentsService {
 
     if (kind === 'md' || kind === 'html') {
       // Anything that reaches here is about to be stored as the document's words, so it has to
-      // actually be words. (BEA-1343)
-      if (!looksLikeText(file.buffer)) {
+      // actually be words. (BEA-1343, BEA-1344)
+      const advice = UNREADABLE_EXTS[extname(name).toLowerCase().replace('.', '')];
+      if (advice) throw new Error(advice);
+      const content = readAsText(file.buffer);
+      if (content === null) {
         throw new Error(`“${name}” isn’t a text file we can read. Try uploading it with its real file type.`);
       }
-      const content = file.buffer.toString('utf8');
       const made = await this.create({ title, contentText: content, kind, collectionId: opts?.collectionId ?? null, filename: name });
       return this.stampSource(made, opts);
     }
@@ -533,8 +557,8 @@ export class DocumentsService {
       bytes: file.size ?? file.buffer.length,
       collectionId: opts?.collectionId ?? null,
     });
-    await this.stampSource(doc, opts);
-    return notice ? { ...(doc as any), notice } : doc;
+    const stamped: any = await this.stampSource(doc, opts);
+    return notice ? { ...stamped, notice } : stamped;
   }
 
   /**
@@ -551,11 +575,18 @@ export class DocumentsService {
     let text = '';
     if (kind === 'doc') text = await officeToMarkdown(file.buffer, name);
     else if (kind === 'pdf') text = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
-    else if (kind === 'md' || kind === 'html') text = looksLikeText(file.buffer) ? file.buffer.toString('utf8') : '';
+    else if (kind === 'md' || kind === 'html') text = readAsText(file.buffer) ?? '';
 
     // Only touch the stored file once the new content is in hand, so a failed convert can't leave
-    // the document holding a file that no longer matches its text.
-    if (row.filePath) await fs.writeFile(row.filePath, file.buffer).catch(() => undefined);
+    // the document holding a file that no longer matches its text. A write that fails must NOT be
+    // swallowed: the row would then describe bytes that are not on disk. (BEA-1344)
+    if (row.filePath) {
+      try {
+        await fs.writeFile(row.filePath, file.buffer);
+      } catch (e) {
+        throw new Error(`Could not update the stored copy of “${row.title}”. Nothing was changed.`);
+      }
+    }
 
     const ai = text.trim() ? await this.summarize(text).catch(() => ({ description: '', tags: [] as string[] })) : { description: '', tags: [] as string[] };
     const updated = await this.prisma.document.update({
@@ -563,6 +594,11 @@ export class DocumentsService {
       data: {
         contentText: text.trim() ? text : null,
         bytes: file.size ?? file.buffer.length,
+        // The re-imported file can be a different type than last time (someone replaced the Drive
+        // file). Carry the new kind/mime/name across or the document keeps describing the old one.
+        kind,
+        mime: file.mimetype || row.mime,
+        filename: name,
         ...(ai.description ? { description: ai.description.slice(0, 200) } : {}),
       },
     });
@@ -578,7 +614,10 @@ export class DocumentsService {
   private async stampSource<T extends { id: string }>(doc: T, opts?: { sourceUrl?: string | null }): Promise<T> {
     if (!opts?.sourceUrl) return doc;
     const sourceUrl = opts.sourceUrl.slice(0, 500);
-    await this.prisma.document.update({ where: { id: doc.id }, data: { sourceUrl } }).catch(() => undefined);
+    await this.prisma.document.update({ where: { id: doc.id }, data: { sourceUrl } }).catch((e) => {
+      // Silently losing this reopens the duplicate bug, so at least leave a trail.
+      this.logger.warn(`could not record where "${(doc as any).title || doc.id}" came from: ${String(e?.message || e)}`);
+    });
     return { ...(doc as any), sourceUrl };
   }
 
@@ -613,8 +652,25 @@ export class DocumentsService {
       if (/\.html?$/i.test(rel)) htmlFiles.push(rel);
     }
     if (htmlFiles.length === 0) {
+      // Not a website — keep it as a plain downloadable file rather than refusing it, so a zipped
+      // email attachment or a bundle of PDFs still lands in the library instead of being lost.
+      // (BEA-1344)
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-      throw new Error('No HTML page found in that ZIP.');
+      await fs.mkdir(docsDir(), { recursive: true });
+      const filePath = join(docsDir(), `${id}.zip`);
+      await fs.writeFile(filePath, file.buffer);
+      const stored = await this.insert({
+        title,
+        description: `ZIP · ${entries.length} file${entries.length === 1 ? '' : 's'} · ${name}`,
+        kind: 'other',
+        tags: [],
+        filePath,
+        mime: 'application/zip',
+        filename: name,
+        bytes: file.size ?? file.buffer.length,
+        collectionId: opts?.collectionId ?? null,
+      });
+      return this.stampSource(stored, opts);
     }
     // Entry = root index.html if present, else the shallowest .html, else the first.
     const entry =

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ItemsService } from '../items/items.service';
+import { createHash } from 'crypto';
 import { DocumentsService } from '../documents/documents.service';
 
 const BASE = process.env.GWS_RUNNER_URL || 'http://172.18.0.1:8766';
@@ -423,7 +424,11 @@ export class GoogleService {
         try {
           // Key on the attachment's own id, not its name: two different files in one thread can
           // both be called "invoice.pdf", and the revised one must not be mistaken for the first.
-          const attLink = `${link}#att=${att.attachmentId}`;
+          // Real Gmail attachment ids run 380-400+ characters, which put this key within a few
+          // characters of the 500-char store limit — and two ids sharing a long prefix would then
+          // truncate to the same string and silently drop the second file. A short hash is stable
+          // and bounded. (BEA-1344)
+          const attLink = `${link}#att=${createHash('sha1').update(att.attachmentId).digest('hex').slice(0, 16)}`;
           if (await this.library.findImported(attLink, att.filename)) continue; // already brought in
           const got = await this.run([
             'gmail', 'users', 'messages', 'attachments', 'get',
@@ -478,8 +483,9 @@ export class GoogleService {
     const name = String(meta?.name || 'Drive file');
     const mt = String(meta?.mimeType || '');
     const link = meta?.webViewLink || undefined;
-    // Refuse early. The cap used to be applied only after the bridge had downloaded the whole file
-    // to the host, so a huge file cost the full download before being rejected. (BEA-1343)
+    // Refuse early where we can. Drive only reports `size` for files with real stored bytes, so
+    // this covers downloads but NOT Google-native exports (a Doc/Sheet/Slide has no size). Those
+    // are still caught by the bridge's own 40 MB cap after export. (BEA-1343, BEA-1344)
     const declared = Number(meta?.size || 0);
     if (declared > 40 * 1024 * 1024) throw new Error(`“${name}” is too big to bring in (max 40 MB).`);
 
@@ -515,7 +521,9 @@ export class GoogleService {
 
     // Importing the same Drive file twice refreshes it, rather than leaving a second copy —
     // matching what saving the same email conversation twice does. (BEA-1343)
-    const already = link ? await this.library.findImported(link, filename) : null;
+    // Match on the link alone: Drive keeps webViewLink across a rename, so requiring the filename
+    // to match too meant renaming a file in Drive silently created a second copy. (BEA-1344)
+    const already = link ? await this.library.findImported(link) : null;
     const doc: any = already
       ? await this.library.refreshFromUpload(already.id, upload)
       : await this.library.createFromUpload(upload, { collectionId, sourceUrl: link });

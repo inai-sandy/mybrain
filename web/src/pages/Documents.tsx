@@ -432,7 +432,7 @@ export function Documents() {
           <p className="text-sm text-zinc-500">Your own files to write, share and re-use — kept out of memory unless you convert one to Capture.</p>
         </div>
         {/* Office extensions must stay in step with OFFICE_EXTS in api/src/documents/office-convert.ts (BEA-1339). */}
-        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.zip,image/*,application/zip,.doc,.docx,.docm,.ppt,.pps,.pot,.pptx,.pptm,.ppsx,.ppsm,.xls,.xlsx,.xlsm,.xlsb,.odt,.ods,.odp,.rtf,.epub,.csv" className="hidden" onChange={(e) => upload(e.target.files)} />
+        <input ref={fileInput} type="file" multiple accept=".md,.markdown,.txt,.html,.htm,.pdf,.zip,image/*,application/zip,.doc,.docx,.docm,.ppt,.pps,.pot,.pptx,.pptm,.ppsx,.ppsm,.xlsx,.xlsm,.odt,.ods,.odp,.rtf,.epub,.csv" className="hidden" onChange={(e) => upload(e.target.files)} />
         <div className="hidden sm:flex shrink-0 items-center gap-2 ml-auto">
           <button onClick={() => setImporting(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"><Link2 size={16} /> Import URL</button>
           <button onClick={() => fileInput.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"><Upload size={16} /> {uploading ? 'Uploading…' : 'Upload'}</button>

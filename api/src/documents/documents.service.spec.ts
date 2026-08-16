@@ -286,7 +286,9 @@ describe('DocumentsService', () => {
     expect(await svc.siteFile(doc.id, 'nope.css')).toBeNull();
   });
 
-  it('rejects a ZIP with no HTML page (BEA-587)', async () => {
+  // Behaviour changed in BEA-1344: a zip that isn't a website is no longer thrown away — a zipped
+  // email attachment (invoices.zip) has to survive — but it must NOT become a browsable site.
+  it('keeps a ZIP that is not a website as a plain file (BEA-587, BEA-1344)', async () => {
     const os = require('os');
     const fsx = require('fs');
     const path = require('path');
@@ -296,7 +298,10 @@ describe('DocumentsService', () => {
     zip.addFile('readme.txt', Buffer.from('no html here'));
     const buf = zip.toBuffer();
     const svc = new DocumentsService(fakePrisma() as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
-    await expect(svc.createFromUpload({ originalname: 'x.zip', mimetype: 'application/zip', buffer: buf, size: buf.length })).rejects.toThrow(/No HTML/i);
+    const doc: any = await svc.createFromUpload({ originalname: 'x.zip', mimetype: 'application/zip', buffer: buf, size: buf.length });
+    expect(doc.kind).toBe('other');       // not 'site' — there is nothing to browse
+    expect(doc.siteEntry).toBeNull();
+    expect(doc.description).toMatch(/ZIP/);
   });
 
   it('only allows public download when the owner opts in (BEA-597)', async () => {
