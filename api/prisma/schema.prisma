@@ -314,7 +314,7 @@ model Document {
   siteEntry     String? // for kind 'site': entry html path inside the extracted folder (BEA-587)
   title         String
   description   String? // <=200 char summary (manual now; AI-filled later)
-  kind          String    @default("md") // md | html | pdf | image | other
+  kind          String    @default("md") // md | html | pdf | image | doc | site | other
   mime          String?
   filename      String?
   contentText   String? // md/html text content (binary files use filePath later)

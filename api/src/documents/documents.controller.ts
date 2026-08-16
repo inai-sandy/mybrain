@@ -104,7 +104,7 @@ export class DocumentsController {
     return this.docs.summarize(body?.contentText || '');
   }
 
-  /** Upload a file (md/html/pdf/image) into the library. (BEA-534) */
+  /** Upload a file (md/html/pdf/image/office) into the library. (BEA-534, BEA-1339) */
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))
   async upload(@UploadedFile() file: any) {

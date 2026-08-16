@@ -1,7 +1,7 @@
 import { createContext, ReactNode, useCallback, useContext, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-type Kind = 'success' | 'error';
+type Kind = 'success' | 'error' | 'info';
 type Toast = { id: number; kind: Kind; msg: string };
 
 const Ctx = createContext<{ toast: (kind: Kind, msg: string) => void }>({ toast: () => undefined });
@@ -13,7 +13,9 @@ const Ctx = createContext<{ toast: (kind: Kind, msg: string) => void }>({ toast:
  * toast can be tapped away early.
  */
 export function toastMs(kind: Kind, msg: string): number {
-  if (kind !== 'error') return 3500;
+  // 'info' carries an explanation too (e.g. "this PDF is a scan, so it isn't searchable"), so it
+  // gets reading time like an error rather than a 3.5s glance. (BEA-1339)
+  if (kind === 'success') return 3500;
   return Math.min(15000, Math.max(6000, msg.length * 55));
 }
 
@@ -43,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
               transition={{ type: 'spring', stiffness: 420, damping: 30 }}
-              className={'pointer-events-auto cursor-pointer px-4 py-2.5 rounded-xl text-sm text-white shadow-lg max-w-[90vw] md:max-w-md text-left ' + (t.kind === 'success' ? 'bg-emerald-600' : 'bg-red-600')}
+              className={'pointer-events-auto cursor-pointer px-4 py-2.5 rounded-xl text-sm text-white shadow-lg max-w-[90vw] md:max-w-md text-left ' + (t.kind === 'success' ? 'bg-emerald-600' : t.kind === 'info' ? 'bg-zinc-800 dark:bg-zinc-700' : 'bg-red-600')}
             >
               {t.msg}
             </motion.div>
