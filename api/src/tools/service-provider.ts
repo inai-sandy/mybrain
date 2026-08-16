@@ -127,6 +127,15 @@ export interface ServiceProvider {
   getService(slug: string): Promise<ServiceInfo | null>;
   /** The actions of one service, with their argument schemas. */
   listActions(service: string, opts?: { important?: boolean; limit?: number; search?: string }): Promise<ServiceAction[]>;
+  /**
+   * ONE action by our id, with the JSON schema its arguments are filled from. Null if unknown.
+   *
+   * An exact fetch on purpose (BEA-1347). The list endpoint's `search` is not semantic — asked for
+   * `GITHUB_GET_THE_AUTHENTICATED_USER` it answers with `..._CREATE_OR_UPDATE_A_SECRET_...` first —
+   * so a step must never find its own action by searching for it. Optional so a stub provider in a
+   * spec need not implement it.
+   */
+  getAction?(actionId: string): Promise<ServiceAction | null>;
   /** Start a login. Returns somewhere to send the owner, or what is missing. */
   connect(service: string, opts?: { label?: string; callbackUrl?: string; credentials?: Record<string, any> }): Promise<ConnectResult>;
   /** Drop one connected account. */

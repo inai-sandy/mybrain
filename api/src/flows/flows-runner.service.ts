@@ -18,6 +18,7 @@ import { PostboxService } from '../contacts/postbox.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { NewsPipelineService } from '../news/news-pipeline.service';
 import { isServiceToolId, parseServiceToolId } from '../tools/service-provider';
+import { ServiceActionsService } from '../tools/service-actions.service';
 import { randomBytes } from 'crypto';
 import { Grade, GRADE_MAX_TOKENS, GradeResult, parseGrade } from '../hermes/grade';
 
@@ -65,6 +66,7 @@ export class FlowRunnerService implements OnModuleInit {
     private readonly budget?: TokenBudgetService, // the token ceiling (BEA-1204)
     // LAST, and optional: many spec harnesses build this service positionally with fewer args.
     private readonly news?: NewsPipelineService, // AI News Daily's own steps (BEA-1259)
+    private readonly serviceActions?: ServiceActionsService, // outside services, run directly (BEA-1347)
   ) {}
 
   private partSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -564,7 +566,7 @@ export class FlowRunnerService implements OnModuleInit {
           let output = '';
           let lastErr: any = null;
           for (let attempt = 0; attempt <= retries; attempt++) {
-            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }, (s) => addSpend(s), graph?.researchFrom, graph?.researchTo); lastErr = null; break; }
+            try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }, (s) => addSpend(s), graph?.researchFrom, graph?.researchTo, runId); lastErr = null; break; }
             catch (e: any) {
               if (e instanceof PauseSignal) throw e;
               lastErr = e;
@@ -802,6 +804,8 @@ export class FlowRunnerService implements OnModuleInit {
         if (kind === 'ask_user') { results[nid] = { status: 'skipped', output: input, kind, label }; return input; } // nobody to answer in a test — pass through
         try {
           // "Run to here" performs REAL side effects, so it obeys the toolbox exactly like a full run.
+          // No `runId`: this path never creates a FlowRun row, so an outside-service call made from
+          // here is still written to `ToolCall` — it just has no run to point back at (BEA-1347).
           const output = await this.runNode(node, input, live, allowed, flow?.agentId);
           const condFalse = kind === 'if' ? !this.evalCond(node.data?.cond, input) : undefined;
           results[nid] = { status: 'done', output, kind, label, ...(condFalse !== undefined ? { condFalse } : {}) };
@@ -1042,7 +1046,7 @@ export class FlowRunnerService implements OnModuleInit {
     return r && r.ids.length ? new Set(r.ids) : null;
   }
 
-  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void, onSpend?: (s: ResearchSpend) => void, researchFrom?: string, researchTo?: string): Promise<string> {
+  private async runNode(node: any, input: string, inputs: string[], allowed?: Set<string> | null, agentId?: string | null, onLine?: (t: string) => void, onSpend?: (s: ResearchSpend) => void, researchFrom?: string, researchTo?: string, runId?: string): Promise<string> {
     const kind = node.data?.kind;
     const label = node.data?.label || '';
     const refId = node.data?.refId;
@@ -1084,13 +1088,30 @@ export class FlowRunnerService implements OnModuleInit {
       case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal, onLine);
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
       case 'tool': {
-        // An outside service (BEA-1345). The catalog can OFFER these the moment a service is
-        // connected, but running one is BEA-1347's job — so until then a step that picks one FAILS
-        // out loud. Letting it fall through to askModel would hand back an invented answer, and for
-        // a delete/merge/refund action that reads as "it happened" when nothing did.
+        // An outside service (BEA-1345/1347) — run DIRECTLY, with no engine turn at all. Deciding
+        // what to do next earns an engine turn (~118,000 tokens); calling an API does not, so this
+        // never reaches `agentRun`. The only model call is the small capped one that fills the
+        // action's arguments, inside the service below.
+        //
+        // Every road out of here except a real success THROWS. An `svc:` id is not in AGENT_TOOLS,
+        // so anything that returned instead of throwing would fall through to askModel and hand
+        // back an invented answer — and for a delete/merge/refund action that reads as "it
+        // happened" when nothing did. That property is the reason BEA-1345 put a loud failure here
+        // in the first place, and it survives now that the step really runs.
         if (isServiceToolId(refId)) {
           const svc = parseServiceToolId(refId);
-          throw new Error(`Running ${svc?.service || 'outside service'} actions is not switched on yet — this step cannot be done.`);
+          if (!this.serviceActions?.run) throw new Error(`Running ${svc?.service || 'outside service'} actions is not available on this server.`);
+          return this.serviceActions.run(refId, input || node.data?.sub || '', {
+            runId,
+            runKind: 'flow',
+            agentId: agentId || undefined,
+            nodeId: node?.id,
+            label,
+            accountId: node.data?.accountId || node.data?.connectionId,
+            args: node.data?.args,
+            guidance: node.data?.guidance,
+            onLine,
+          });
         }
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
         // AI News Daily (BEA-1259) — direct, like the Web group. These must NEVER fall through to
@@ -1252,7 +1273,9 @@ export class FlowRunnerService implements OnModuleInit {
     if (kind === 'skill' || kind === 'ask_ai' || kind === 'merge') return true;
     if (kind !== 'tool' || !refId) return false;
     // Everything we do ourselves is free of tokens (BEA-1194, BEA-1203). Deep research and every
-    // engine tool are not.
+    // engine tool are not. An outside-service step is deliberately NOT in this free list: it costs
+    // no engine turn, but it does make one small capped call to fill its arguments (BEA-1347), and
+    // the charge is the honest size of that — a few hundred tokens, not 118,000.
     const free = new Set(['search_brain', 'search_rag', 'fetch_document', 'save_document', 'save_capture', 'create_task', 'remember', 'telegram', 'whatsapp', 'web_search', 'web_read', 'web_search_meaning', 'news_collect', 'news_write', 'news_flag']);
     return !free.has(refId);
   }

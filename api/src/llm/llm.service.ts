@@ -231,6 +231,12 @@ export class LlmService {
     // ~400-token job. 'flow-plan' follows the engine because it really does reason over the whole
     // tool catalog; this one does not.
     'flow-decompose': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
+    // Fills the arguments of ONE outside-service call from that action's own JSON schema
+    // (BEA-1347). The only model call in the whole execution path — the point of that path is that
+    // running a connected service costs no engine turn (~118,000 tokens) at all, so this one is
+    // small, capped and pinned to Sonnet 5 on the API: it must never queue behind engine quota, and
+    // its output is fed straight into a REAL call that creates, sends or changes something.
+    'service-args': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
     // Small extraction jobs: a few example inputs, a few durable facts. Haiku is plenty.
     'suggest-evals': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     'agent-learn': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },

@@ -151,6 +151,37 @@ export class ComposioProvider implements ServiceProvider {
   }
 
   /**
+   * ONE action, fetched exactly, with the schema an agent fills its arguments from (BEA-1347).
+   *
+   * Straight at `GET /tools/<SLUG>` — never through the list endpoint's `search`, which is not
+   * semantic: asked for `GITHUB_GET_THE_AUTHENTICATED_USER` it returns
+   * `GITHUB_CREATE_OR_UPDATE_A_SECRET_FOR_THE_AUTHENTICATED_USER` first (verified live 2026-08-16).
+   * A step that found its action by searching would run the wrong one and report it as done.
+   */
+  async getAction(actionId: string): Promise<ServiceAction | null> {
+    const parsed = parseServiceToolId(actionId);
+    const slug = vendorActionSlug(actionId);
+    if (!parsed || !slug || isBlockedService(parsed.service) || !(await this.apiKey())) return null;
+    const key = `action:${slug}`;
+    const hit = this.cache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+    try {
+      const t = await this.get(`/tools/${encodeURIComponent(slug)}`);
+      const action = t?.slug ? this.toAction(parsed.service, t) : null;
+      this.cache.set(key, { at: Date.now(), value: action });
+      this.prune();
+      return action;
+    } catch (e: any) {
+      // A 404 is an ANSWER — the action is gone, and worth remembering for a few minutes. A
+      // timeout or a rate-limit is not, and caching one would tell the owner for the next five
+      // minutes that an action he can see in the catalog no longer exists.
+      if (e?.status === 404) { this.cache.set(key, { at: Date.now(), value: null }); this.prune(); }
+      this.log.warn(`getAction(${actionId}) failed: ${this.plainError(e)}`);
+      return null;
+    }
+  }
+
+  /**
    * Start a login for a service. Three roads out of here, and which one is taken is decided by the
    * toolkit itself, never guessed:
    *

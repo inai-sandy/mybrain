@@ -6,6 +6,7 @@ import { ToolCatalogService } from './tool-catalog.service';
 import { WebResearchService } from './web-research.service';
 import { DeepResearchService } from './deep-research.service';
 import { ComposioProvider } from './composio.provider';
+import { ServiceActionsService } from './service-actions.service';
 import { ToolCatalogController } from './tool-catalog.controller';
 import { ServicesController } from './services.controller';
 
@@ -13,7 +14,7 @@ import { ServicesController } from './services.controller';
 @Module({
   imports: [ConnectorModule, SkillsModule, GoogleModule], // LlmModule and PrismaModule are @Global
   controllers: [ToolCatalogController, ServicesController],
-  providers: [ToolCatalogService, WebResearchService, DeepResearchService, ComposioProvider],
-  exports: [ToolCatalogService, WebResearchService, DeepResearchService, ComposioProvider],
+  providers: [ToolCatalogService, WebResearchService, DeepResearchService, ComposioProvider, ServiceActionsService],
+  exports: [ToolCatalogService, WebResearchService, DeepResearchService, ComposioProvider, ServiceActionsService],
 })
 export class ToolCatalogModule {}

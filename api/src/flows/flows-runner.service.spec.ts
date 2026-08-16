@@ -559,16 +559,18 @@ describe('the toolbox is enforced on a flow step (BEA-1168)', () => {
   });
 
   /**
-   * BEA-1345 — the catalog can offer an outside service before we can run one.
+   * BEA-1345/1347 — an outside-service step must NEVER come back with an invented answer.
    *
-   * An `svc:` id is not in AGENT_TOOLS, so without this it would reach askModel and come back with
-   * an invented answer. For `svc:github.delete_a_repository` that reads as "the repo was deleted"
-   * when nothing happened at all. Until BEA-1347 wires execution, the step must fail out loud.
+   * An `svc:` id is not in AGENT_TOOLS, so anything that RETURNS instead of throwing falls through
+   * to askModel, and for `svc:github.delete_a_repository` a fluent model answer reads as "the repo
+   * was deleted" when nothing happened at all. BEA-1345 kept that property with a loud failure
+   * because execution did not exist yet; BEA-1347 keeps the same property with execution wired —
+   * so this test moved from "not switched on yet" to "with no runner, still fails out loud".
    */
-  it('fails an outside-service step out loud instead of letting the model invent one', async () => {
+  it('fails an outside-service step out loud when there is no runner, instead of letting the model invent one', async () => {
     const svcId = 'svc:github.delete_a_repository';
     await expect((svc() as any).runNode(node('tool', svcId, 'GitHub: Delete repository'), 'go', [], new Set([svcId])))
-      .rejects.toThrow(/github.*not switched on yet/i);
+      .rejects.toThrow(/github.*not available on this server/i);
   });
 
   it('never blocks a plain building block, only tools and skills', async () => {
@@ -1069,5 +1071,55 @@ describe('FlowRunnerService — the flow\'s dates reach EVERY research step (BEA
     expect(seen.some((s) => s.from === '2020-01-01')).toBe(true);
     // Nothing may run with NO dates at all when the flow set them — that was the bug.
     expect(seen.every((s) => !!s.from)).toBe(true);
+  });
+});
+
+/**
+ * BEA-1347 — an outside-service step runs DIRECTLY. No engine run, ever.
+ *
+ * `flows-runner` established in BEA-1203 that deciding what to do next earns an engine turn and
+ * doing the thing does not. An engine turn averages 118,000 tokens; creating a GitHub issue is
+ * transformation, not a decision. So the `svc:` branch must reach the provider and never
+ * `agentRun()` — and when it cannot run, it must FAIL rather than fall through to a model that
+ * would describe the issue it did not create.
+ */
+describe('an outside-service step never starts an engine run (BEA-1347)', () => {
+  const ARGS = 19; // prisma … news, serviceActions
+  function svc(serviceActions: any, spy: { engine: number; model: number }) {
+    const agent: any = { createRun: async () => { spy.engine++; return { id: 'r1' }; }, getRun: async () => ({ status: 'done', resultText: 'INVENTED' }) };
+    const bridge: any = { execute: async () => { spy.engine++; } };
+    const llm: any = {
+      helperModel: async () => { spy.model++; return { provider: 'openrouter', model: 'x' }; },
+      completeWithModel: async () => { spy.model++; return { text: 'INVENTED ANSWER' }; },
+      completeDetailed: async () => { spy.model++; return { text: 'INVENTED ANSWER', error: null }; },
+      complete: async () => { spy.model++; return 'INVENTED ANSWER'; },
+    };
+    const args: any[] = new Array(ARGS).fill({});
+    args[1] = bridge; args[2] = agent; args[3] = llm; args[ARGS - 1] = serviceActions;
+    return new (FlowRunnerService as any)(...args);
+  }
+  const node = (refId: string) => ({ id: 'n1', data: { kind: 'tool', refId, label: 'GitHub: Create an issue', guidance: 'be brief' } });
+
+  it('routes a svc: step to the provider, with the step\'s context, and starts no agent run', async () => {
+    const spy = { engine: 0, model: 0 };
+    const seen: any[] = [];
+    const runner = svc({ run: async (id: string, input: string, ctx: any) => { seen.push({ id, input, ctx }); return 'Ran GitHub: Create an issue.'; } }, spy);
+    const out = await (runner as any).runNode(node('svc:github.create_an_issue'), 'file a bug', [], null, 'agent7', undefined, undefined, undefined, undefined, 'run9');
+
+    expect(out).toContain('Ran GitHub');
+    expect(spy.engine).toBe(0); // the whole point — no 118,000-token turn to call an API
+    expect(spy.model).toBe(0); // and no thinking call in the runner either
+    expect(seen[0].id).toBe('svc:github.create_an_issue');
+    expect(seen[0].input).toBe('file a bug');
+    expect(seen[0].ctx).toMatchObject({ runId: 'run9', runKind: 'flow', agentId: 'agent7', nodeId: 'n1', guidance: 'be brief' });
+  });
+
+  it('fails the step with the real reason instead of letting a model describe what it would have done', async () => {
+    const spy = { engine: 0, model: 0 };
+    const runner = svc({ run: async () => { throw new Error('GitHub could not do that: Not Found'); } }, spy);
+    await expect((runner as any).runNode(node('svc:github.create_an_issue'), 'file a bug', [], null))
+      .rejects.toThrow(/Not Found/);
+    expect(spy.engine).toBe(0);
+    expect(spy.model).toBe(0);
   });
 });

@@ -46,6 +46,19 @@ It is also the only path to SaaS. The gws bridge is a CLI on our VPS logged in a
 
 **Never load 1,209 toolkits into a prompt.** Sessions are scoped to the services actually connected (`toolkits: ["github","slack"]`) and discovery uses Composio's own search.
 
+**Built (BEA-1347), with one correction to the path above.** There is no discovery step at run time
+and no session search: the splitter picks a whole `svc:<service>.<action>` id straight out of the one
+catalog, so by the time a step runs the action is already named. Its schema is then fetched
+*exactly* (`GET /tools/<SLUG>`), because the list endpoint's `search` is not semantic — asked for
+`GITHUB_GET_THE_AUTHENTICATED_USER` it returns `GITHUB_CREATE_OR_UPDATE_A_SECRET_…` first, and a
+step that found its own action by searching would run the wrong one and call it done. That leaves
+exactly ONE model call in the path — `service-args`, capped, filling the arguments from that schema
+— and none at all when the action takes no arguments or the owner pinned them on the step.
+
+`api/src/tools/service-actions.service.ts` owns it, and **every road but a real success throws**: an
+`svc:` id is not in `AGENT_TOOLS`, so anything that returned instead would fall through to a plain
+model call and hand back an invented result.
+
 ## Gates
 Rules first, overrides second — 1,209 services cannot be hand-tagged. Gated when the action slug matches: `DELETE_ · REMOVE_ · MERGE_ · ARCHIVE_ · REVOKE_ · TRANSFER_ · REFUND_ · CANCEL_ · BLOCK_ · INVITE_ · *_COLLABORATOR · *_ROLE · *_PERMISSIONS`, plus a small hand-kept list. Everything else runs free.
 

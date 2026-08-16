@@ -632,6 +632,36 @@ const TEXT_FIELD: Record<string, { key: string; label: string; placeholder: stri
   ask_user: { key: 'sub', label: 'Question to ask you', placeholder: 'e.g. Approve this draft? / Which option?' },
 };
 
+/**
+ * Which connected account an outside-service step should use (BEA-1347).
+ *
+ * Hidden unless there really are two or more, because that is the only time the question exists —
+ * and when it does exist the step REFUSES to guess, so without this the owner has no way to answer
+ * it. The options are the names he gave the accounts on /tools, never the provider's raw ids.
+ */
+function ServiceAccountPicker({ service, value, onChange, inputCls, labelCls }: { service: string; value: string; onChange: (v: string) => void; inputCls: string; labelCls: string }) {
+  const [accounts, setAccounts] = useState<{ id: string; label: string }[] | null>(null);
+  useEffect(() => {
+    let dropped = false;
+    fetch(`/api/tools/services/${encodeURIComponent(service)}`)
+      .then((r) => r.json())
+      .then((j) => { if (!dropped) setAccounts((j?.service?.accounts || []).filter((a: any) => String(a.status || '').toUpperCase() === 'ACTIVE')); })
+      .catch(() => { if (!dropped) setAccounts([]); }); // a slow lookup must never break the panel
+    return () => { dropped = true; };
+  }, [service]);
+  if (!accounts || accounts.length < 2) return null;
+  return (
+    <div>
+      <label className={labelCls}>Which {service} account</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls}>
+        <option value="">Not chosen — this step will stop and ask</option>
+        {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+      </select>
+      <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">You have signed into {service} more than once. The step will not guess between them.</p>
+    </div>
+  );
+}
+
 function Inspector({ node, postMerge, onChange, onDelete, onClose, onTest, testing }: { node: Node; postMerge?: boolean; onChange: (id: string, patch: Record<string, any>) => void; onDelete: (id: string) => void; onClose: () => void; onTest?: (id: string) => void; testing?: boolean }) {
   const d: any = node.data;
   const kind: string = d.kind;
@@ -678,6 +708,12 @@ function Inspector({ node, postMerge, onChange, onDelete, onClose, onTest, testi
               <textarea value={d.guidance || ''} onChange={(e) => set({ guidance: e.target.value })} placeholder="e.g. keep it under 5 bullet points" rows={3} className={inputCls + ' resize-y leading-snug'} />
             </div>
           </>
+        )}
+        {/* An outside service the owner has signed into twice (two inboxes, work and personal) has
+            to be told WHICH one — the step refuses to guess, so this is where it is answered. It
+            draws nothing at all when there is only one account, which is the normal case. */}
+        {kind === 'tool' && String(d.refId || '').startsWith('svc:') && (
+          <ServiceAccountPicker service={String(d.refId).slice(4).split('.')[0]} value={d.accountId || ''} onChange={(v) => set({ accountId: v })} inputCls={inputCls} labelCls={labelCls} />
         )}
         {/* Deep research is the one step that spends money per run, so its limits are visible and
             editable right here rather than buried in a default (BEA-1196). */}
