@@ -1,13 +1,29 @@
 # My Brain — Tools (external services for agents) — what we're building (and why)
 
-**Composio becomes the default tool layer for anything outside My Brain.** 1,119 services (GitHub, Slack, Linear, Notion, Jira, Stripe, Google…) reachable by an agent, with logins the owner clicks once, action schemas the agent can discover, and events that can wake a flow. Our own code stays only where nobody else can reach.
+**Composio becomes the default tool layer for anything outside My Brain.** 1,209 services (GitHub, Slack, Linear, Notion, Jira, Stripe, Google…) reachable by an agent, with logins the owner clicks once, action schemas the agent can discover, and events that can wake a flow. Our own code stays only where nobody else can reach.
 
 ## Why
-Agents can't do a developer's work without the developer's tools. Today the catalog is **20 hand-written tool ids** plus 11 read-only Google entries. A single Composio toolkit carries **hundreds** — GitHub alone is in the 800s.
+Agents can't do a developer's work without the developer's tools. Today the catalog is **20 hand-written tool ids** plus 11 read-only Google entries. A single Composio toolkit carries hundreds.
 
-> **On the numbers.** Composio's own two sources disagree, so treat every per-toolkit count below as approximate: GitHub 846–893, Slack 145–167, Gmail 61–63, Linear 32–47. Triggers disagree more (GitHub 20 vs 46, Linear 3 vs 12). The **1,119 toolkits** total is solid — stated twice on their directory ("Showing 1–30 of 1119"). **Read real counts from `listActions()` at build time; never hard-code a number from a web page.**
+**Verified against the live API** (`GET /api/v3/toolkits/<slug>` with our key, 2026-08-16) — **1,209 toolkits total**:
 
-The gap isn't access — `google.service.ts` already has a generic `run(argv)` passthrough that reaches the whole Google API. The gap is **schemas**. Every capability we own cost a hand-written wrapper, and an agent can't call `run()` blind. Composio's product is 1,119 services an agent can find and call **without us writing a wrapper each time**.
+| Toolkit | Tools | Triggers | Composio-managed auth |
+|---|---:|---:|---|
+| GitHub | 871 | 46 | yes |
+| Stripe | 425 | 7 | yes |
+| Sentry | 209 | 0 | yes |
+| Slack | 158 | 9 | yes |
+| Vercel | 131 | 0 | **no — needs our own OAuth app** |
+| Jira | 97 | 3 | yes |
+| Google Drive | 77 | 7 | yes |
+| Gmail | 61 | 2 | yes |
+| Notion | 53 | 8 | yes |
+| Linear | 46 | 12 | yes |
+| Google Calendar | 45 | 7 | yes |
+
+> Composio's docs pages and marketing pages both disagree with the API and with each other (docs said GitHub 893/20, the site said 846/46; the API says **871/46**). **The API is the only source of truth — read counts from `listActions()` at run time and never hard-code one.** Note also that not every toolkit ships Composio-managed auth: Vercel needs our own OAuth credentials, so `connect()` must handle that case rather than assume a one-click flow.
+
+The gap isn't access — `google.service.ts` already has a generic `run(argv)` passthrough that reaches the whole Google API. The gap is **schemas**. Every capability we own cost a hand-written wrapper, and an agent can't call `run()` blind. Composio's product is 1,209 services an agent can find and call **without us writing a wrapper each time**.
 
 It is also the only path to SaaS. The gws bridge is a CLI on our VPS logged in as one account (sandy@kiot.io). It cannot read a customer's mail, and it cannot hold a second inbox. Composio can do both (`allowMultiple: true`, `connectedAccountId` per call).
 
@@ -28,15 +44,15 @@ It is also the only path to SaaS. The gws bridge is a CLI on our VPS logged in a
 
 **Execution path (no engine turn).** Sonnet 5 splitter picks the **service** for a branch → Composio session search finds the **action** → one small Sonnet 5 call fills the arguments from the action's JSON schema → `directTool()` runs it → Codex only writes up the result. Per BEA-1203: deciding what to do next earns an engine turn (~118,000 tokens); calling an API does not.
 
-**Never load 1,119 toolkits into a prompt.** Sessions are scoped to the services actually connected (`toolkits: ["github","slack"]`) and discovery uses Composio's own search.
+**Never load 1,209 toolkits into a prompt.** Sessions are scoped to the services actually connected (`toolkits: ["github","slack"]`) and discovery uses Composio's own search.
 
 ## Gates
-Rules first, overrides second — 1,119 services cannot be hand-tagged. Gated when the action slug matches: `DELETE_ · REMOVE_ · MERGE_ · ARCHIVE_ · REVOKE_ · TRANSFER_ · REFUND_ · CANCEL_ · BLOCK_ · INVITE_ · *_COLLABORATOR · *_ROLE · *_PERMISSIONS`, plus a small hand-kept list. Everything else runs free.
+Rules first, overrides second — 1,209 services cannot be hand-tagged. Gated when the action slug matches: `DELETE_ · REMOVE_ · MERGE_ · ARCHIVE_ · REVOKE_ · TRANSFER_ · REFUND_ · CANCEL_ · BLOCK_ · INVITE_ · *_COLLABORATOR · *_ROLE · *_PERMISSIONS`, plus a small hand-kept list. Everything else runs free.
 
 A gate uses the **durable Ask-me** already built for agent runs (BEA-795) — the run pauses and survives a restart rather than timing out. Chat confirms inline. Any gated action can be released permanently from `/tools`.
 
 ## Triggers
-Events from a connected service that start a flow. Every major service has them (GitHub, Slack, Linear, Notion, Gmail); the published counts are unreliable — see the note above — so enumerate them from the SDK. Realtime push for Slack/GitHub/Notion; ~15-minute polling for Gmail/Calendar. 50,000 events/month free. This is the missing **live** half of Flows Stage 3, which today only has the schedule half.
+Events from a connected service that start a flow. Real counts from the API: GitHub 46, Linear 12, Slack 9, Notion 8, Google Calendar 7, Drive 7, Gmail 2 — and **zero for Sentry and Vercel**, so the UI must handle a connected service that has no triggers at all. Enumerate per service; never assume. Realtime push for Slack/GitHub/Notion; ~15-minute polling for Gmail/Calendar. 50,000 events/month free. This is the missing **live** half of Flows Stage 3, which today only has the schedule half.
 
 Two guards, both required:
 - **Echo guard** — every inbound event is checked against the `ToolCall` log; if we caused it, it is dropped. Without this: agent posts to Slack → trigger fires → flow posts again → forever.
@@ -52,7 +68,7 @@ Two guards, both required:
 | `Agent.allowedTools` (exists) | `svc:*` ids drop straight in. No change. |
 
 ## UI
-**`/tools`**, next to Skills in the nav. No hand-curated shortlist — browse Composio's own categories (Developer Tools, Communication, Productivity, CRM…) with search across all 1,119 over the top, so the page is never blank on first visit. A card per service: connected accounts, action count, last used, gated actions, Connect / Disconnect / Manage. Add a second account of the same service from the same card.
+**`/tools`**, next to Skills in the nav. No hand-curated shortlist — browse Composio's own categories (Developer Tools, Communication, Productivity, CRM…) with search across all 1,209 over the top, so the page is never blank on first visit. A card per service: connected accounts, action count, last used, gated actions, Connect / Disconnect / Manage. Add a second account of the same service from the same card.
 
 They then appear with no extra work in the **agent Tools box** (`ToolPicker`), the **Flows canvas** (draggable nodes) and **Chat** (inline confirm + tool chips in the reply).
 
