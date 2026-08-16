@@ -299,6 +299,21 @@ export class DocumentsService {
     return this.prisma.documentCollection.create({ data: { name: n, color: color?.trim().slice(0, 20) || null, icon: icon?.trim().slice(0, 40) || null } });
   }
 
+  /**
+   * Find a folder by name, or make it. Used by the Google importers so everything from Gmail lands
+   * in one folder and everything from Drive/Docs in another, without the owner setting them up
+   * first. Matching is case-insensitive so "email" and "Email" never become two folders. (BEA-1341)
+   */
+  async ensureCollection(name: string, icon?: string): Promise<string | null> {
+    const n = (name || '').trim().slice(0, 80);
+    if (!n) return null;
+    const all = await this.prisma.documentCollection.findMany({ select: { id: true, name: true } });
+    const hit = all.find((c) => c.name.trim().toLowerCase() === n.toLowerCase());
+    if (hit) return hit.id;
+    const made = await this.createCollection(n, undefined, icon);
+    return made?.id || null;
+  }
+
   renameCollection(id: string, name: string, color?: string, icon?: string) {
     const data: Record<string, unknown> = {};
     if (typeof name === 'string' && name.trim()) data.name = name.trim().slice(0, 80);
@@ -351,7 +366,7 @@ export class DocumentsService {
   }
 
   /** Shared insert — text docs and uploaded files both land here. */
-  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null; siteEntry?: string | null; noIndex?: boolean }) {
+  private async insert(data: { title: string; description: string | null; kind: string; tags: string[]; contentText?: string | null; filePath?: string | null; mime?: string | null; filename?: string | null; bytes?: number | null; siteEntry?: string | null; noIndex?: boolean; collectionId?: string | null }) {
     const row = await this.prisma.document.create({
       data: {
         slug: this.slugify(data.title),
@@ -366,6 +381,7 @@ export class DocumentsService {
         siteEntry: data.siteEntry ?? null,
         tags: JSON.stringify(data.tags),
         noIndex: !!data.noIndex,
+        collectionId: data.collectionId ?? null,
       },
     });
     return this.full(row);
@@ -390,7 +406,7 @@ export class DocumentsService {
   }
 
   /** Create a document from an uploaded file (md/html/pdf/image/office). (BEA-534, BEA-1339) */
-  async createFromUpload(file: UploadFile) {
+  async createFromUpload(file: UploadFile, opts?: { collectionId?: string | null; sourceUrl?: string | null }) {
     const name = this.fixFilename(file.originalname || 'upload');
     const ext = extname(name).toLowerCase();
     if (ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed') {
@@ -401,7 +417,7 @@ export class DocumentsService {
 
     if (kind === 'md' || kind === 'html') {
       const content = file.buffer.toString('utf8');
-      return this.create({ title, contentText: content, kind });
+      return this.create({ title, contentText: content, kind, collectionId: opts?.collectionId ?? null });
     }
 
     // Office files convert BEFORE anything is written, so a file we cannot read leaves no orphan
@@ -454,7 +470,11 @@ export class DocumentsService {
       mime: file.mimetype || (kind === 'pdf' ? 'application/pdf' : 'application/octet-stream'),
       filename: name,
       bytes: file.size ?? file.buffer.length,
+      collectionId: opts?.collectionId ?? null,
     });
+    if (opts?.sourceUrl) {
+      await this.prisma.document.update({ where: { id: doc.id }, data: { sourceUrl: opts.sourceUrl.slice(0, 500) } }).catch(() => undefined);
+    }
     return notice ? { ...(doc as any), notice } : doc;
   }
 

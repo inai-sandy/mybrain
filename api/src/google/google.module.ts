@@ -7,9 +7,10 @@ import { GoogleController } from './google.controller';
 import { ItemsModule } from '../items/items.module';
 import { MemoryModule } from '../memory/memory.module';
 import { TasksModule } from '../tasks/tasks.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
-  imports: [ItemsModule, MemoryModule, TasksModule],
+  imports: [ItemsModule, MemoryModule, TasksModule, DocumentsModule],
   providers: [GoogleService, GmailBriefService, GmailRequestService, EmailMemoryService],
   controllers: [GoogleController],
   exports: [GoogleService, GmailBriefService],
