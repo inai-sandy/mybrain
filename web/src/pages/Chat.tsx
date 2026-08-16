@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MessageCircle, Plus, Send, X, ArrowLeft, ExternalLink, Sparkles, Trash2, Globe, Bookmark, Lightbulb, Activity as ActivityIcon, FileText, Wand2, Star, Search, Pin, PanelLeft, Copy, Check } from 'lucide-react';
+import { MessageCircle, Plus, Send, X, ArrowLeft, ExternalLink, Sparkles, Trash2, Globe, Bookmark, Lightbulb, Activity as ActivityIcon, FileText, Wand2, Star, Search, Pin, PanelLeft, Copy, Check, AlertTriangle, ShieldAlert } from 'lucide-react';
 import { Mic } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -11,7 +11,11 @@ import { GrowTextarea } from '../ui/GrowTextarea';
 import { mdComponents } from '../ui/markdown';
 
 export type Source = { title: string; url?: string; itemId?: string; link?: string; sourceType?: string };
-export type Msg = { id: string; role: 'user' | 'assistant'; content: string; sources: Source[]; followups: string[]; starred: boolean; createdAt: string };
+/** One outside-service call this reply really made (BEA-1349). */
+export type ToolChip = { actionId: string; service: string; serviceName: string; action: string; ok: boolean; result?: string; error?: string; link?: string; ms?: number };
+/** An action that cannot be undone, waiting for a tap right here in the thread (BEA-1349). */
+export type GateCardData = { actionId: string; serviceName: string; actionName: string; headline: string; detail?: string; options?: string[]; decision?: 'approved' | 'rejected' };
+export type Msg = { id: string; role: 'user' | 'assistant'; content: string; sources: Source[]; followups: string[]; tools?: ToolChip[]; gate?: GateCardData; starred: boolean; createdAt: string };
 type Session = { id: string; title: string; scope: string; pinned: boolean; lastMessageAt: string | null; createdAt: string; messages: Msg[] };
 type Starred = { id: string; messageId: string; sessionId: string | null; sessionTitle: string | null; scope: string; role: string; content: string; sources: Source[]; createdAt: string };
 
@@ -77,7 +81,95 @@ function SourceChip({ s }: { s: Source }) {
   return inner;
 }
 
-export function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => void; onFollow?: (q: string) => void }) {
+/**
+ * What one connected service actually did (BEA-1349).
+ *
+ * Shown whatever happened, and it names the service, the action and the real reason on a failure —
+ * the reply above it is written by a model, this card is not.
+ */
+function ToolCallCard({ t }: { t: ToolChip }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 px-3 py-2">
+      <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+        {t.ok
+          ? <Check size={12} className="shrink-0 text-emerald-500" />
+          : <AlertTriangle size={12} className="shrink-0 text-rose-500" />}
+        <span className="font-medium text-zinc-700 dark:text-zinc-200">{t.serviceName}</span>
+        <span className="text-zinc-300 dark:text-zinc-600">·</span>
+        <span className="min-w-0 break-words text-zinc-500 dark:text-zinc-400">{t.action}</span>
+        {t.link && (
+          <a href={t.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-emerald-600 hover:underline">
+            <ExternalLink size={10} /> Open
+          </a>
+        )}
+      </div>
+      {(t.error || t.result) && (
+        <p className={'mt-1 text-xs break-words ' + (t.ok ? 'text-zinc-600 dark:text-zinc-300' : 'text-rose-600 dark:text-rose-400')}>{t.error || t.result}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The inline confirm (BEA-1349).
+ *
+ * An agent run pauses durably because nobody is watching; here he is sitting in front of the thread,
+ * so the question is a card with two buttons and nothing has been sent yet. Nothing runs until he
+ * taps, and a tap on "No, stop" ends it — the thread then says so instead of going quiet.
+ */
+function GateCard({ m, onUpdate }: { m: Msg; onUpdate?: (m: Msg) => void }) {
+  const g = m.gate!;
+  const [busy, setBusy] = useState<'yes' | 'no' | null>(null);
+  const toast = useToast();
+
+  async function answer(a: 'yes' | 'no') {
+    if (busy) return;
+    setBusy(a);
+    try {
+      const r = await fetch(`/api/chat/messages/${m.id}/gate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: a }) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) { toast('error', j?.message || 'Could not send your answer'); return; }
+      if (j?.message) onUpdate?.(j.message);
+    } catch {
+      toast('error', 'Could not send your answer');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (g.decision) {
+    const yes = g.decision === 'approved';
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+        {yes ? <Check size={12} className="shrink-0 text-emerald-500" /> : <X size={12} className="shrink-0 text-zinc-400" />}
+        <span className="break-words">{yes ? 'You said run it.' : 'You said stop — nothing was done.'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3">
+      <div className="flex items-start gap-2">
+        <ShieldAlert size={15} className="mt-0.5 shrink-0 text-amber-500" />
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-500">This cannot be undone</div>
+          <div className="mt-0.5 text-sm font-semibold break-words text-zinc-800 dark:text-zinc-100">{g.headline}</div>
+          {g.detail && <p className="mt-1.5 text-xs whitespace-pre-wrap break-words text-zinc-600 dark:text-zinc-300">{g.detail}</p>}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button onClick={() => answer('yes')} disabled={!!busy} className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-xs disabled:opacity-40">
+          {busy === 'yes' ? 'Running…' : g.options?.[0] || 'Yes, run it'}
+        </button>
+        <button onClick={() => answer('no')} disabled={!!busy} className="rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-1.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-rose-500/50 hover:text-rose-600 disabled:opacity-40">
+          {busy === 'no' ? 'Stopping…' : g.options?.[1] || 'No, stop'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function Bubble({ m, onStar, onFollow, onUpdate }: { m: Msg; onStar?: (m: Msg) => void; onFollow?: (q: string) => void; onUpdate?: (m: Msg) => void }) {
   const user = m.role === 'user';
   const [copied, setCopied] = useState(false);
   async function copy() {
@@ -94,6 +186,8 @@ export function Bubble({ m, onStar, onFollow }: { m: Msg; onStar?: (m: Msg) => v
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{m.content || '…'}</ReactMarkdown>
           </div>
         )}
+        {!user && m.gate && <div className="mt-3"><GateCard m={m} onUpdate={onUpdate} /></div>}
+        {!user && m.tools && m.tools.length > 0 && <div className="mt-3 space-y-1.5">{m.tools.map((t, i) => <ToolCallCard key={i} t={t} />)}</div>}
         {!user && m.sources?.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{m.sources.map((s, i) => <SourceChip key={i} s={s} />)}</div>}
         {!user && m.followups?.length > 0 && onFollow && (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -118,6 +212,8 @@ export function Chat() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState<string | null>(null);
+  // "Using GitHub: Create an issue…" while a real service call is in flight (BEA-1349).
+  const [note, setNote] = useState<string | null>(null);
   // The session a reply is being streamed for — so a reply can never land in whichever chat
   // happens to be open when the user switches mid-stream. (BEA-783)
   const [streamFor, setStreamFor] = useState<string | null>(null);
@@ -203,7 +299,8 @@ export function Chat() {
           if (!line) continue;
           try {
             const j = JSON.parse(line.slice(5).trim());
-            if (j.token) { acc += j.token; setStreaming(acc.split('FOLLOWUPS:')[0]); }
+            if (j.token) { acc += j.token; setNote(null); setStreaming(acc.split('FOLLOWUPS:')[0]); }
+            else if (j.note) setNote(String(j.note));
             else if (j.done) { finalMsg = j.message; finalUser = j.userMessage; }
             else if (j.error) toast('error', j.error);
           } catch { /* ignore */ }
@@ -223,7 +320,13 @@ export function Chat() {
       setSending(false);
       setStreaming(null);
       setStreamFor(null);
+      setNote(null);
     }
+  }
+
+  /** A reply changed under us — the inline confirm was answered (BEA-1349). */
+  function replaceMsg(nm: Msg) {
+    setActive((a) => (a ? { ...a, messages: a.messages.map((x) => (x.id === nm.id ? nm : x)) } : a));
   }
 
   async function remove(s: Session) {
@@ -325,9 +428,16 @@ export function Chat() {
               </div>
             </div>
           )}
-          {active.messages.map((m) => <Bubble key={m.id} m={m} onStar={toggleStar} onFollow={send} />)}
+          {active.messages.map((m) => <Bubble key={m.id} m={m} onStar={toggleStar} onFollow={send} onUpdate={replaceMsg} />)}
           {streaming !== null && streamFor === active.id && (
-            <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />
+            <>
+              {note && (
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                  <Sparkles size={12} className="shrink-0 text-emerald-500 animate-pulse" /> <span className="break-words">{note}</span>
+                </div>
+              )}
+              <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />
+            </>
           )}
           <div ref={endRef} />
         </div>

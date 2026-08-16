@@ -125,6 +125,19 @@ export class ToolCatalogService {
     return { groups, tools };
   }
 
+  /**
+   * Just the outside-service entries, live ones only (BEA-1349).
+   *
+   * The SAME builder the whole catalog uses — not a second list — because Chat has to answer "is
+   * anything connected?" on every single message, and paying for skills, Google and an engine ping
+   * to find that out would slow down the one screen the owner is on all day. When nothing is
+   * connected this is an empty array, and Chat must then behave exactly as it did before.
+   */
+  async connectedServiceTools(): Promise<CatalogTool[]> {
+    const { tools } = await this.serviceTools();
+    return tools.filter((t) => t.connected);
+  }
+
   /** One tool by id — used when a picked set is validated before a run. */
   async byId(id: string): Promise<CatalogTool | null> {
     const { tools } = await this.catalog();

@@ -18,6 +18,8 @@ export function ChatDoc() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState<string | null>(null);
+  // "Using GitHub: Create an issue…" while a real service call is in flight (BEA-1349).
+  const [note, setNote] = useState<string | null>(null);
   const toast = useToast();
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -60,7 +62,8 @@ export function ChatDoc() {
           if (!line) continue;
           try {
             const j = JSON.parse(line.slice(5).trim());
-            if (j.token) { acc += j.token; setStreaming(acc.split('FOLLOWUPS:')[0]); }
+            if (j.token) { acc += j.token; setNote(null); setStreaming(acc.split('FOLLOWUPS:')[0]); }
+            else if (j.note) setNote(String(j.note));
             else if (j.done) { finalMsg = j.message; finalUser = j.userMessage; }
           } catch { /* ignore */ }
         }
@@ -72,7 +75,13 @@ export function ChatDoc() {
     } finally {
       setSending(false);
       setStreaming(null);
+      setNote(null);
     }
+  }
+
+  /** A reply changed under us — the inline confirm was answered (BEA-1349). */
+  function replaceMsg(nm: Msg) {
+    setSession((s) => (s ? { ...s, messages: s.messages.map((x) => (x.id === nm.id ? nm : x)) } : s));
   }
 
   return (
@@ -101,8 +110,17 @@ export function ChatDoc() {
                 </div>
               </div>
             )}
-            {session?.messages.map((m) => <Bubble key={m.id} m={m} onFollow={send} />)}
-            {streaming !== null && <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />}
+            {session?.messages.map((m) => <Bubble key={m.id} m={m} onFollow={send} onUpdate={replaceMsg} />)}
+            {streaming !== null && (
+              <>
+                {note && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    <Sparkles size={12} className="shrink-0 text-emerald-500 animate-pulse" /> <span className="break-words">{note}</span>
+                  </div>
+                )}
+                <Bubble m={{ id: 'tmp-a', role: 'assistant', content: streaming || '', sources: [], followups: [], starred: false, createdAt: '' }} />
+              </>
+            )}
             <div ref={endRef} />
           </div>
         </div>

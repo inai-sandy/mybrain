@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
 export type PromptKey =
-  | 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief'
+  | 'tasks.dump' | 'tasks.dedupe' | 'meeting.summary' | 'daily.summary' | 'story.daily' | 'tasks.predict' | 'daily.personality' | 'ideas.organize' | 'bookmarks.summary' | 'skills.describe' | 'chat.answer' | 'chat.router' | 'chat.tools' | 'mentor.focus' | 'mentor.guidance' | 'mentor.weekly' | 'story.month' | 'story.year' | 'mentor.nudge' | 'people.extract' | 'voice.cleanup' | 'emo.ask' | 'delegation.brief'
   // Migrated inline prompts (BEA-1059)
   | 'daily.doneExtract' | 'daily.todoExtract' | 'daily.workedBreakdown' | 'daily.morningQuestions' | 'daily.storyMineWork' | 'daily.storyMineDay' | 'daily.insightsWritten'
   | 'tasks.autoNote'
@@ -221,6 +221,17 @@ const REGISTRY: PromptDef[] = [
       `You route a "chat with my memory" assistant. Decide if the NEW message needs a fresh search of the user's saved memory (a new topic or specific recall) ` +
       `or can be answered from the conversation already shown (a follow-up, clarification, "explain", or counter-question).\n` +
       `Respond with ONLY JSON: {"search": true|false, "query": "<a standalone search query if search is true, else empty>"}`,
+  },
+  {
+    key: 'chat.tools',
+    category: 'Meetings & Chat',
+    label: 'Chat — when to use a connected service',
+    description: 'Decides whether a chat message is asking for something to be DONE in one of your connected services (Tools), rather than answered. Used only when you have something connected.',
+    default:
+      `You decide when a message to a personal assistant is asking for something to be DONE in one of the user's connected outside services — created, sent, changed, or looked up there — rather than a question to answer from memory.\n\n` +
+      `Pick a service ONLY when he is plainly asking for that to happen now, or asking for something that only that service can tell him.\n` +
+      `Pick nothing when he is thinking out loud, asking about his own saved notes, asking you to draft or explain something, or only talking ABOUT a service.\n` +
+      `When in doubt, pick nothing — he can always ask again, and a wrong action is far worse than a missed one.`,
   },
   {
     key: 'mentor.focus',

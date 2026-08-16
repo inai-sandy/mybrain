@@ -95,6 +95,16 @@ gated; hand-kept must-gate and allow lists sit either side of the spec's rules).
 "waiting" pause (BEA-795), and a yes re-runs the step with the exact arguments the owner approved.
 Release one for good in `/tools` (per service, never per agent) — a `ServiceGate` row.
 
+**Chat can act, and it confirms inline (BEA-1349).** `api/src/chat/chat-tools.service.ts` joins the
+same runner and gate to Chat: two small picks (service names first, then that one service's actions —
+never an id outside the owner's own catalog), then `ServiceActionsService.run()` with
+`runKind: 'chat'`, `runId` = the session and `nodeId` = the **user message id**. A `GatePause` becomes
+a card in the thread with Run / Cancel — no durable waitpoint, no notification — and Run re-runs with
+the *approved* arguments (never re-filled). **When nothing is connected, Chat must behave exactly as
+it did before: `ChatToolsService.available()` returns early with no prompt built and no model call,
+and `chat-tools.spec.ts` locks that down.** A gate and a failure both skip the answer call, so a
+refusal reaches the owner in the service's own words instead of as a polite apology.
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).
