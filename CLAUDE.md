@@ -85,6 +85,16 @@ masked, result, ok, ms), including the ones that never left the building; that t
 trigger echo guard's source of truth. Two connected accounts and no choice = a failed step naming
 both **labels**, never the raw ids.
 
+**Only what cannot be undone stops and asks (BEA-1348).** Full access with gates: normal writes —
+create an issue, comment, send a message, change a field — run with no friction, and the owner should
+see a gate about once a week, so an implementation that gates too much has FAILED even with green
+tests. `isRiskyAction()` in `service-provider.ts` is the only place that decides (a read is never
+gated; hand-kept must-gate and allow lists sit either side of the spec's rules). The gate fires in
+`ServiceActionsService.run()` after the arguments are filled and before `execute()`, writes its
+`ToolCall` row first and then **throws** `GatePause`; `flows-runner` turns that into the durable
+"waiting" pause (BEA-795), and a yes re-runs the step with the exact arguments the owner approved.
+Release one for good in `/tools` (per service, never per agent) — a `ServiceGate` row.
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).

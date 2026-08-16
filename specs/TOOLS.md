@@ -64,6 +64,34 @@ Rules first, overrides second — 1,209 services cannot be hand-tagged. Gated wh
 
 A gate uses the **durable Ask-me** already built for agent runs (BEA-795) — the run pauses and survives a restart rather than timing out. Chat confirms inline. Any gated action can be released permanently from `/tools`.
 
+**Built (BEA-1348).** The failure that mattered was over-gating: the owner accepted full access on the
+understanding that he sees a gate "maybe once a week, so I'll actually read it". So `isRiskyAction()`
+in `service-provider.ts` — the ONE place that decides what is gated, extended rather than duplicated —
+now reads in five steps: a **read is never gated** (`GET/LIST/SEARCH/CHECK/VERIFY…`, which is what
+saves `LIST_REPOSITORY_COLLABORATORS`); then a hand-kept **must-gate** list for what the rules miss
+(`RESET_A_TOKEN`, `CONFIRM_PAYMENT`, `CAPTURE_PAYMENT`, `PAYOUT`); then a hand-kept **allow** list for
+detach-and-re-attach false positives (remove a *label*, *assignee*, *reviewer*, *reaction*, *star*);
+then the spec's prefixes, plus the same words anywhere in the name (`FORCE_CANCEL_…`,
+`SLACK_DELETES_A_MESSAGE…`); and last `COLLABORATOR · ROLE · PERMISSIONS` anywhere, but only when the
+action is not a read. Audited against the live API on 2026-08-16: **2 of the 36 GitHub actions the
+catalog actually offers** are gated (`ADD_A_REPOSITORY_COLLABORATOR`, `DELETE_A_REPOSITORY`) — 120 of
+all 823, Slack 17/133, Linear 1/21, Notion 2/28, Gmail 2/23, Stripe 4/33 — and every one of them reads
+as genuinely irreversible.
+
+The gate fires in `ServiceActionsService.run()` **after the arguments are filled and before
+`provider.execute()`** — the only point where the action, the account and the final arguments are all
+known at once. It writes its `ToolCall` row (`gated: true`) BEFORE pausing, so a run killed mid-pause
+still shows the attempt, and then **throws** `GatePause` — never returns, because a returned string
+falls through to `askModel()` and invents a result. `flows-runner` turns that throw into the same
+durable pause an "Ask me" block uses: the run row goes `waiting` with the question and two buttons
+(Yes, run it · No, stop), and the step's own result carries the exact arguments the owner was shown,
+so the pending gate survives a restart. Saying yes writes a one-time `ServiceGate` row and re-runs the
+step with **those** arguments — never a fresh model guess, or he would approve deleting one branch and
+watch another go. Saying no fails the step with a sentence that says why, and it can never be re-asked
+(`gateRejected`). Anything that is not plainly a yes is a no. A single-step "run to here" has no run
+row to pause on, so a gated action there stops and says where the question can be answered. Released
+permanently = a `ServiceGate` row with `scope: 'always'`, managed per service in `/tools`.
+
 ## Triggers
 Events from a connected service that start a flow. Real counts from the API: GitHub 46, Linear 12, Slack 9, Notion 8, Google Calendar 7, Drive 7, Gmail 2 — and **zero for Sentry and Vercel**, so the UI must handle a connected service that has no triggers at all. Enumerate per service; never assume. Realtime push for Slack/GitHub/Notion; ~15-minute polling for Gmail/Calendar. 50,000 events/month free. This is the missing **live** half of Flows Stage 3, which today only has the schedule half.
 
@@ -77,6 +105,7 @@ Two guards, both required:
 | `Connector` (exists) | `composio` → `{ apiKey }`, encrypted. No new table for the key. |
 | `ServiceConnection` (new) | service · connectedAccountId · label · status · connectedAt · lastUsedAt. Several rows per service = several accounts. |
 | `ToolCall` (new) | agent/run · service · action · arguments · result · ok/failed · ms · gated. The flight recorder — and the echo guard's source of truth. |
+| `ServiceGate` (new) | service · action · scope (`once`/`always`) · run/step · decision · the approved arguments · question. One row per gate answered, and one per action released for good. |
 | `TriggerBinding` (new) | service · triggerType · triggerInstanceId · flowId/agentId · enabled · rate cap · lastFiredAt · pausedReason |
 | `Agent.allowedTools` (exists) | `svc:*` ids drop straight in. No change. |
 

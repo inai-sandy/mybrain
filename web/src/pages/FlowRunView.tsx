@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Markdown } from '../ui/markdown';
-import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, MinusCircle, FileText, HelpCircle, Send, Terminal as TerminalIcon, Copy, Check, RotateCw } from 'lucide-react';
+import { ArrowLeft, Loader2, CheckCircle2, Circle, AlertCircle, AlertTriangle, MinusCircle, FileText, HelpCircle, Send, Terminal as TerminalIcon, Copy, Check, RotateCw } from 'lucide-react';
 
 const KIND_RANK: Record<string, number> = { question: 0, subquestion: 1, text: 1, skill: 2, tool: 2, ask_ai: 2, ask_user: 3, if: 3, filter: 3, wait: 3, note: 3, merge: 8, output: 9 };
 
@@ -88,7 +88,11 @@ export function FlowRunView() {
 
       {run.status === 'waiting' && run.waitQuestion && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400"><HelpCircle className="h-4 w-4" />Waiting for you</div>
+          {/* A gate (BEA-1348) is a yes-or-no on something that cannot be taken back, not a question
+              about the work — so the card says which of the two it is before he reads a word of it. */}
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+            {run.waitIsGate ? <><AlertTriangle className="h-4 w-4" />Needs your OK</> : <><HelpCircle className="h-4 w-4" />Waiting for you</>}
+          </div>
           <div className="mb-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-800 dark:text-zinc-100">{run.waitQuestion}</div>
           {run.waitKind === 'choice' && (run.waitOptions || []).length > 0 ? (
             <div className="flex flex-wrap gap-2">

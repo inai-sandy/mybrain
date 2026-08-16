@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, Res }
 import { Response } from 'express';
 import { gzipSync } from 'zlib';
 import { ComposioProvider } from './composio.provider';
+import { ServiceGatesService } from './service-gates.service';
 import { ServiceInfo } from './service-provider';
 
 /**
@@ -80,7 +81,11 @@ function send(res: Response, body: any) {
 export class ServicesController {
   private readonly log = new Logger('Services');
 
-  constructor(private readonly services: ComposioProvider) {}
+  constructor(
+    private readonly services: ComposioProvider,
+    // Optional + LAST — the spec builds this controller with the provider alone.
+    private readonly gates?: ServiceGatesService,
+  ) {}
 
   /**
    * Everything the browse page needs in one answer: whether the key works, every service, and the
@@ -142,6 +147,31 @@ export class ServicesController {
     // Never log the body — it can carry the owner's own client secret or API key.
     this.log.log(`connect ${slug}: ${r.ok ? (r.done ? 'done' : 'sent to sign in') : r.needsCredentials ? 'needs credentials' : 'refused'}`);
     return r;
+  }
+
+  /**
+   * The gated actions of one service, and which of them the owner has released (BEA-1348).
+   *
+   * Two segments, so it never collides with `GET /:slug` above.
+   */
+  @Get(':slug/gates')
+  async gatesFor(@Param('slug') slug: string) {
+    if (!this.gates) return { service: String(slug || ''), actions: [] };
+    return this.gates.listForService(String(slug || ''));
+  }
+
+  /**
+   * Turn one gate off for good, or put it back. Per service — never per agent, so there is one
+   * answer to "does this ask me?" wherever it runs from.
+   */
+  @Post(':slug/gates')
+  async setGate(@Param('slug') slug: string, @Body() body: { action?: string; released?: boolean }) {
+    const action = String(body?.action || '');
+    if (!this.gates) return { ok: false, message: 'Gates are not available on this server.' };
+    if (!action.toLowerCase().startsWith(`svc:${String(slug || '').toLowerCase()}.`)) {
+      return { ok: false, message: 'That action does not belong to this service.' };
+    }
+    return body?.released ? this.gates.release(action) : this.gates.restore(action);
   }
 
   /** Give one account a name the owner recognises ("work gmail"). */

@@ -19,10 +19,26 @@ import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm
 import { NewsPipelineService } from '../news/news-pipeline.service';
 import { isServiceToolId, parseServiceToolId } from '../tools/service-provider';
 import { ServiceActionsService } from '../tools/service-actions.service';
+import { GatePause, PendingGate } from '../tools/service-gates.service';
 import { randomBytes } from 'crypto';
 import { Grade, GRADE_MAX_TOKENS, GradeResult, parseGrade } from '../hermes/grade';
 
-type NodeResult = { status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting'; output: string; kind?: string; label?: string; condFalse?: boolean; cascaded?: boolean };
+type NodeResult = {
+  status: 'running' | 'done' | 'failed' | 'skipped' | 'waiting';
+  output: string;
+  kind?: string;
+  label?: string;
+  condFalse?: boolean;
+  cascaded?: boolean;
+  /**
+   * Set only on a step paused by a gate (BEA-1348): what it was about to do, and the exact
+   * arguments the owner is being shown. Persisted with the run, so the pending gate is still there
+   * — and still answerable — after a restart.
+   */
+  gate?: PendingGate;
+  /** The owner said no to this step's gate. It is settled, and the resumed walk must not re-ask. */
+  gateRejected?: boolean;
+};
 
 /** Thrown to abort the graph walk when a flow pauses on an "Ask me" block (Move B). */
 class PauseSignal { constructor(public nodeId: string) {} }
@@ -255,7 +271,20 @@ export class FlowRunnerService implements OnModuleInit {
 
   private parse(s?: string | null): any { try { return s ? JSON.parse(s) : {}; } catch { return {}; } }
   private parseArr(s?: string | null): any[] { try { const a = s ? JSON.parse(s) : []; return Array.isArray(a) ? a : []; } catch { return []; } }
-  private shape(r: any) { return { ...r, results: this.parse(r.results), documents: this.parseArr(r.documentIds), waitOptions: this.parseArr(r.waitOptions), terminal: this.parseArr(r.terminal) }; }
+  private shape(r: any) {
+    const results = this.parse(r.results);
+    return {
+      ...r,
+      results,
+      documents: this.parseArr(r.documentIds),
+      waitOptions: this.parseArr(r.waitOptions),
+      terminal: this.parseArr(r.terminal),
+      // Is the open question a GATE (BEA-1348) or a plain "Ask me"? Answered from the step's own
+      // stored gate, never by reading the question's words — the page shows a different heading for
+      // each, and a wording change must not be able to silently turn one into the other.
+      waitIsGate: !!(r.waitNodeId && results?.[r.waitNodeId]?.gate),
+    };
+  }
 
   /** A clean play-by-play line for the terminal, per node kind (workspace ②). */
   private termLine(node: any, output: string): string | null {
@@ -375,7 +404,10 @@ export class FlowRunnerService implements OnModuleInit {
     const memo = new Map<string, Promise<string>>();
     // Seed both 'done' and 'skipped' so a resumed run doesn't re-run branches that were skipped
     // (a per-run selection isn't re-applied on resume, which reloads the saved flow). (BEA-796)
-    for (const [nid, rr] of Object.entries(results)) { const st = (rr as NodeResult)?.status; if (st === 'done' || st === 'skipped') memo.set(nid, Promise.resolve((rr as NodeResult).output || '')); }
+    // A step the owner refused at its gate is settled too (BEA-1348) — it stays FAILED (so the rest
+    // of the run knows that part did not happen) but it must never be re-run, or answering "no"
+    // would immediately ask the same question again.
+    for (const [nid, rr] of Object.entries(results)) { const r = rr as NodeResult; if (r?.status === 'done' || r?.status === 'skipped' || r?.gateRejected) memo.set(nid, Promise.resolve(r.output || '')); }
     const persist = () => stale() || this.cancelled.has(runId) ? Promise.resolve(undefined) : this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), terminal: JSON.stringify(terminal.slice(-300)) } }).catch(() => undefined);
     const term = (text: string) => { terminal.push({ text, at: Date.now() }); };
 
@@ -568,7 +600,9 @@ export class FlowRunnerService implements OnModuleInit {
           for (let attempt = 0; attempt <= retries; attempt++) {
             try { output = await this.runNode(node, input, live, allowed, flow?.agentId, (t) => { term(t); void persist(); }, (s) => addSpend(s), graph?.researchFrom, graph?.researchTo, runId); lastErr = null; break; }
             catch (e: any) {
-              if (e instanceof PauseSignal) throw e;
+              // A gate is not a failure and must never be retried — retrying would ask the same
+              // question again (and write a second "held" row) instead of waiting for the answer.
+              if (e instanceof PauseSignal || e instanceof GatePause) throw e;
               lastErr = e;
               if (attempt < retries) term(`↻ ${label || kind} failed — retrying (${attempt + 1}/${retries})`);
             }
@@ -586,6 +620,22 @@ export class FlowRunnerService implements OnModuleInit {
           return output;
         } catch (e: any) {
           if (e instanceof PauseSignal) throw e;
+          /**
+           * A gate (BEA-1348): the step is about to do something that cannot be undone, so it
+           * stopped BEFORE the provider was called and is asking. Turned into the same durable
+           * pause an "Ask me" block uses — the run is written to the database as waiting and
+           * nothing is held in memory, so it survives a restart and can be answered days later.
+           */
+          if (e instanceof GatePause) {
+            // In eval mode nobody is there to answer. Held back rather than run, and said plainly.
+            if (opts.evalMode) {
+              results[nodeId] = { status: 'skipped', output: `Held back — ${e.gate.headline} cannot be undone and needs your approval.`, kind, label };
+              await persist();
+              return '';
+            }
+            await this.pauseForGate(runId, flow, node, e.gate, results, spendJson().spend);
+            throw new PauseSignal(nodeId);
+          }
           results[nodeId] = { status: 'failed', output: String(e?.message || e), kind, label };
           await persist();
           return '';
@@ -812,6 +862,12 @@ export class FlowRunnerService implements OnModuleInit {
           return output;
         } catch (e: any) {
           if (e instanceof PauseSignal) { results[nid] = { status: 'skipped', output: input, kind, label }; return input; }
+          // A gate (BEA-1348). "Run to here" makes no FlowRun row, so there is nowhere durable to
+          // ask — the step stops, and says where the question CAN be answered.
+          if (e instanceof GatePause) {
+            results[nid] = { status: 'failed', output: `${e.gate.headline} cannot be undone, so it needs your approval — and a single step run has nowhere to ask. Run the whole flow and answer the question it asks.`, kind, label };
+            return '';
+          }
           results[nid] = { status: 'failed', output: String(e?.message || e), kind, label };
           return '';
         }
@@ -870,6 +926,33 @@ export class FlowRunnerService implements OnModuleInit {
     void this.push?.send({ title: `${flow?.name || 'Your flow'} needs you`, body: question.slice(0, 160), url: `/agent?focus=${runId}`, tag: `flow-ask-${runId}`, isAsk: true }).catch(() => undefined);
   }
 
+  /**
+   * Persist a GATE pause (BEA-1348) — the same durable machinery as "Ask me", with two differences:
+   * the paused step is the tool step itself (not an Ask-me block), and what it is holding is
+   * carried on the step's own result, so the pending gate is still there after a restart.
+   */
+  private async pauseForGate(runId: string, flow: any, node: any, gate: PendingGate, results: Record<string, NodeResult>, spendSoFar?: string) {
+    const label = node.data?.label || gate.actionName;
+    results[node.id] = { status: 'waiting', output: '', kind: node.data?.kind || 'tool', label, gate };
+    await this.prisma.flowRun.update({
+      where: { id: runId },
+      data: {
+        status: 'waiting',
+        results: JSON.stringify(results),
+        waitNodeId: node.id,
+        waitQuestion: gate.question,
+        waitKind: 'choice',
+        waitOptions: JSON.stringify(['Yes, run it', 'No, stop']),
+        waitToken: randomBytes(16).toString('hex'),
+        ...(spendSoFar ? { spend: spendSoFar } : {}),
+      } as any,
+    });
+    // Guarded all the way down (`?.` on the method too): spec harnesses build this service with
+    // partial stubs, and a gate that threw here would leave the run waiting on nobody.
+    this.telegram?.notifyFlowWaiting?.({ flowName: flow?.name, question: gate.question })?.catch?.(() => undefined);
+    void this.push?.send?.({ title: `${flow?.name || 'Your flow'} needs your OK`, body: `${gate.headline} — this cannot be undone.`.slice(0, 160), url: `/agent?focus=${runId}`, tag: `flow-ask-${runId}`, isAsk: true })?.catch?.(() => undefined);
+  }
+
   /** Answer the open "Ask me" question and resume the run (Move B). */
   async answer(runId: string, answer: string) {
     const run = await this.prisma.flowRun.findUnique({ where: { id: runId } });
@@ -885,7 +968,24 @@ export class FlowRunnerService implements OnModuleInit {
     const flow = run.flowId ? await this.prisma.flow.findUnique({ where: { id: run.flowId } }) : null;
     const results: Record<string, NodeResult> = this.parse(run.results) || {};
     const nodeId = (run as any).waitNodeId as string;
-    results[nodeId] = { status: 'done', output: String(answer || ''), kind: 'ask_user', label: results[nodeId]?.label || 'Ask me' };
+    const gate = results[nodeId]?.gate;
+    if (gate) {
+      /**
+       * A gate, not an "Ask me" (BEA-1348). The answer is a permission, not an input:
+       *  • yes — the permission is written down (with the exact arguments the owner was shown) and
+       *    the step's result is CLEARED, so the walk runs it for real this time;
+       *  • no  — nothing runs, and the step fails with a sentence that says why, so the rest of the
+       *    run carries on knowing this part did not happen.
+       */
+      const decided = await this.serviceActions
+        ?.answerGate?.(gate, answer, { runId, runKind: 'flow', nodeId, label: results[nodeId]?.label })
+        .catch((e: any) => ({ approved: false, message: `That approval could not be saved: ${e?.message || e}` }));
+      const label = results[nodeId]?.label || gate.actionName;
+      if (decided?.approved) delete results[nodeId];
+      else results[nodeId] = { status: 'failed', output: decided?.message || `You said no, so nothing was done: ${gate.headline}.`, kind: 'tool', label, gateRejected: true };
+    } else {
+      results[nodeId] = { status: 'done', output: String(answer || ''), kind: 'ask_user', label: results[nodeId]?.label || 'Ask me' };
+    }
     await this.prisma.flowRun.update({ where: { id: runId }, data: { results: JSON.stringify(results), waitNodeId: null, waitQuestion: null, waitToken: null } });
     void this.execute(runId, flow).catch(async (e) => {
       this.log.error(`flow run ${runId} crashed on resume: ${e?.message || e}`);

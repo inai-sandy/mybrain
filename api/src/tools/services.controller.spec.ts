@@ -168,3 +168,52 @@ describe('ServicesController (BEA-1346)', () => {
     expect(over.refreshed).toBeUndefined();
   });
 });
+
+/**
+ * BEA-1348 — the two gate endpoints the `/tools` panel uses.
+ *
+ * The guard worth pinning is the cross-service one: the action id carries its own service, so a
+ * request to `/tools/services/slack/gates` must not be able to release a GitHub delete.
+ */
+describe('the gate endpoints (BEA-1348)', () => {
+  const gates = () => {
+    const released = new Set<string>();
+    return {
+      calls: [] as string[],
+      listForService: async (slug: string) => ({ service: slug, actions: [{ id: `svc:${slug}.delete_a_repository`, name: 'Delete a repository', description: '', released: released.has(`svc:${slug}.delete_a_repository`) }] }),
+      release: async (id: string) => { released.add(id); return { ok: true, message: 'It will run without asking from now on.' }; },
+      restore: async (id: string) => { released.delete(id); return { ok: true, message: 'It will stop and ask again.' }; },
+      isReleased: async (_s: string, id: string) => released.has(id),
+    };
+  };
+
+  it('lists what stops and asks, and releases and re-gates one', async () => {
+    const g = gates();
+    const c = new ServicesController({} as any, g as any);
+
+    expect((await c.gatesFor('github')).actions[0]).toMatchObject({ id: 'svc:github.delete_a_repository', released: false });
+
+    expect(await c.setGate('github', { action: 'svc:github.delete_a_repository', released: true })).toMatchObject({ ok: true });
+    expect((await c.gatesFor('github')).actions[0].released).toBe(true);
+
+    expect(await c.setGate('github', { action: 'svc:github.delete_a_repository', released: false })).toMatchObject({ ok: true });
+    expect((await c.gatesFor('github')).actions[0].released).toBe(false);
+  });
+
+  it('refuses to touch another service\'s action, whatever the body says', async () => {
+    const g = gates();
+    const c = new ServicesController({} as any, g as any);
+    const r = await c.setGate('slack', { action: 'svc:github.delete_a_repository', released: true });
+    expect(r.ok).toBe(false);
+    expect(await g.isReleased('github', 'svc:github.delete_a_repository')).toBe(false);
+    // …and nonsense is refused rather than half-applied.
+    expect((await c.setGate('github', { action: 'not-an-id', released: true })).ok).toBe(false);
+    expect((await c.setGate('github', {})).ok).toBe(false);
+  });
+
+  it('answers with an empty list rather than an error when gates are not available', async () => {
+    const c = new ServicesController({} as any);
+    expect(await c.gatesFor('github')).toEqual({ service: 'github', actions: [] });
+    expect((await c.setGate('github', { action: 'svc:github.delete_a_repository', released: true })).ok).toBe(false);
+  });
+});

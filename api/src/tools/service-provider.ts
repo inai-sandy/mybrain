@@ -213,13 +213,76 @@ export function isBlockedService(slug: string): boolean {
 }
 
 /**
- * Actions that cannot be undone, by rule (specs/TOOLS.md → Gates).
+ * Actions that cannot be undone, by rule (specs/TOOLS.md → Gates). The gate itself is BEA-1348;
+ * this function is the one place that decides WHAT is gated, and there is deliberately no second
+ * rule set anywhere else.
  *
- * 1,209 services cannot be hand-tagged, so the rules come first and a hand-kept list second. This
- * only FLAGS an action — the pause-and-ask gate itself is BEA-1348.
+ * 1,209 services cannot be hand-tagged, so: rules first, hand-kept lists second.
+ *
+ * **The failure that matters here is over-gating.** The owner chose full access with gates on the
+ * understanding that he sees one "maybe once a week, so I'll actually read it". A gate on every
+ * other step is a gate nobody reads, which is worse than no gate at all. So a read is NEVER gated,
+ * and things that can plainly be put back (a label taken off an issue, a reaction removed) are on
+ * the allow list even though the word REMOVE is in their name.
+ *
+ * Audited against the live Composio API on 2026-08-16 — the counts are in `specs/TOOLS.md`.
  */
+
+/** Verbs that only ever LOOK at something. A read is never gated, whatever else its name says. */
+const READ_VERBS = ['GET', 'LIST', 'SEARCH', 'FIND', 'FETCH', 'READ', 'CHECK', 'COUNT', 'VIEW', 'RETRIEVE', 'DESCRIBE', 'DOWNLOAD', 'EXPORT', 'COMPARE', 'VERIFY'];
+
+/** The rule from the spec: an action that STARTS with one of these cannot be taken back. */
 const RISKY_PREFIXES = ['DELETE_', 'REMOVE_', 'MERGE_', 'ARCHIVE_', 'REVOKE_', 'TRANSFER_', 'REFUND_', 'CANCEL_', 'BLOCK_', 'INVITE_'];
-const RISKY_SUFFIXES = ['_COLLABORATOR', '_COLLABORATORS', '_ROLE', '_ROLES', '_PERMISSIONS'];
+
+/**
+ * The same idea as a word anywhere in the name, for the toolkits that put the verb in the middle
+ * (`FORCE_CANCEL_A_WORKFLOW_RUN`, `..._PERMANENTLY_DELETE_...`). Only words whose meaning is
+ * "it is gone" — nothing that merely changes something.
+ */
+const RISKY_WORDS = ['DELETE', 'DESTROY', 'PURGE', 'ERASE', 'WIPE', 'REVOKE', 'REFUND', 'TERMINATE', 'CANCEL'];
+
+/** `SLACK_DELETES_A_MESSAGE_FROM_A_CHAT` is real, and deleting a message is still deleting it. */
+const isRiskyWord = (w: string) => RISKY_WORDS.includes(w) || (w.endsWith('S') && RISKY_WORDS.includes(w.slice(0, -1)));
+
+/**
+ * Who can do what. The spec's `*_COLLABORATOR · *_ROLE · *_PERMISSIONS` rule, widened from "ends
+ * with" to "contains", because the real slugs put the object in the middle
+ * (`ASSIGN_AN_ORGANIZATION_ROLE_TO_A_USER`, `ADD_OR_UPDATE_TEAM_REPOSITORY_PERMISSIONS`).
+ *
+ * These are the WEAK triggers: they gate only when the action is not a read. `LIST_COLLABORATORS`
+ * and `VERIFY_DEV_CONTAINER_PERMISSIONS_ACCEPTED` are reads with an access word in the name, and
+ * gating those is exactly the over-gating that would train the owner to tap through.
+ */
+const ACCESS_WORDS = ['COLLABORATOR', 'COLLABORATORS', 'ROLE', 'ROLES', 'PERMISSION', 'PERMISSIONS'];
+
+/**
+ * Hand-kept: things that cannot be taken back and that no rule above catches. Matched as a phrase
+ * inside the action's name. Kept SHORT on purpose — every entry needs a real reason.
+ *
+ *  • `RESET_A_TOKEN` — GitHub. The old token stops working the moment it runs; everything using it
+ *    breaks, and there is no putting it back.
+ *  • `CONFIRM_PAYMENT` / `CAPTURE_PAYMENT` / `PAYOUT` — Stripe. Real money leaves, and the only
+ *    "undo" is a separate refund.
+ *
+ * Deliberately NOT here: `GMAIL_MOVE_TO_TRASH` (untrash puts it back), `LOCK_AN_ISSUE` (unlock),
+ * `SLACK_CLOSE_DM` (re-open). They read as scary and are all reversible.
+ */
+const MUST_GATE = ['RESET_A_TOKEN', 'CONFIRM_PAYMENT', 'CAPTURE_PAYMENT', 'PAYOUT'];
+
+/**
+ * Hand-kept the other way: names that trip a rule but put back in one click. All of these are
+ * "detach X from Y", where re-attaching is the same call with a different verb.
+ *
+ * Each entry is [a verb it must start with, a word it must contain]; an access word anywhere in
+ * the name cancels the allowance, so `REMOVE_A_REPOSITORY_COLLABORATOR` still gates.
+ */
+const ALLOWED: [string, string][] = [
+  ['REMOVE', 'LABEL'], ['REMOVE', 'LABELS'],           // taking a label off an issue, a runner, a mail
+  ['REMOVE', 'ASSIGNEE'], ['REMOVE', 'ASSIGNEES'],     // un-assigning someone
+  ['REMOVE', 'REVIEWER'], ['REMOVE', 'REVIEWERS'],     // un-requesting a review
+  ['REMOVE', 'REACTION'], ['DELETE', 'REACTION'],      // a thumbs-up
+  ['REMOVE', 'STAR'], ['DELETE', 'STAR'],              // un-starring
+];
 
 /**
  * Takes the action, with or without its service prefix — `GITHUB_DELETE_A_REPOSITORY`,
@@ -234,6 +297,28 @@ export function isRiskyAction(action: string, service?: string): boolean {
   const svc = (asId?.service || service || '').toUpperCase();
   let body = (asId?.action || String(action || '')).toUpperCase();
   if (svc && body.startsWith(`${svc}_`)) body = body.slice(svc.length + 1);
+  const words = body.split('_').filter(Boolean);
+  if (!words.length) return false;
+
+  /**
+   * 1. A read is never gated, and nothing below can overturn it.
+   *
+   * Only the FIRST word counts, and that is deliberate: every action slug in this catalog is
+   * `<VERB>_<the rest>` (checked across 1,061 live slugs on 2026-08-16 — GitHub, Slack, Stripe,
+   * Linear, Notion, Gmail), so the first token IS the verb and a read cannot be hiding a delete
+   * behind it. Matching a read verb ANYWHERE would be the dangerous version: `DELETE_A_LIST` would
+   * stop being gated. If a provider ever ships `GET_AND_DELETE_X`, this line is where it slips
+   * through — the test below is the tripwire.
+   */
+  if (READ_VERBS.includes(words[0])) return false;
+  // 2. Hand-kept: the ones the rules miss.
+  if (MUST_GATE.some((p) => body.includes(p))) return true;
+  // 3. Hand-kept: the ones the rules get wrong.
+  const hasAccessWord = words.some((w) => ACCESS_WORDS.includes(w));
+  if (!hasAccessWord && ALLOWED.some(([verb, thing]) => words[0] === verb && words.includes(thing))) return false;
+  // 4. The rules from the spec.
   if (RISKY_PREFIXES.some((p) => body.startsWith(p))) return true;
-  return RISKY_SUFFIXES.some((s) => body.endsWith(s));
+  if (words.some(isRiskyWord)) return true;
+  // 5. Who-can-do-what, but only when the action is not looking something up.
+  return hasAccessWord && !words.some((w) => READ_VERBS.includes(w));
 }
