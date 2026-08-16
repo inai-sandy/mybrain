@@ -19,6 +19,7 @@ function fakeLibrary() {
     collections,
     findImported: jest.fn(async () => null), // nothing imported before, in these tests
     replaceContent: jest.fn(async (id: string) => ({ id, title: 'refreshed' })),
+    refreshFromUpload: jest.fn(async (id: string) => ({ id, title: 'refreshed' })),
     ensureCollection: jest.fn(async (name: string) => {
       collections.push(name);
       return `col-${name.toLowerCase().replace(/\s+/g, '-')}`;
@@ -117,6 +118,42 @@ describe('driveImport', () => {
     expect(lib.saved[0].opts?.sourceUrl).toBe('https://drive/x');
   });
 
+  // The refresh branch had no coverage at all, which is how the rename bug survived. (BEA-1344)
+  it('refreshes a Drive file that was already imported, instead of making a second copy', async () => {
+    const { svc, lib } = build();
+    svc.run = jest.fn(async () => ({ name: 'Quote', mimeType: 'application/vnd.google-apps.document', webViewLink: 'https://drive/x' })) as any;
+    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
+    lib.findImported = jest.fn(async () => ({ id: 'doc-existing', title: 'Quote' })) as any;
+
+    const res = await svc.driveImport('file-1');
+
+    expect(lib.refreshFromUpload).toHaveBeenCalledWith('doc-existing', expect.objectContaining({ originalname: 'Quote.docx' }));
+    expect(lib.createFromUpload).not.toHaveBeenCalled();
+    expect(res.id).toBe('doc-existing');
+  });
+
+  it('still finds a Drive file that was RENAMED, by matching on its link alone', async () => {
+    const { svc, lib } = build();
+    svc.run = jest.fn(async () => ({ name: 'Quote v2', mimeType: 'application/vnd.google-apps.document', webViewLink: 'https://drive/x' })) as any;
+    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
+    lib.findImported = jest.fn(async () => ({ id: 'doc-existing', title: 'Quote' })) as any;
+
+    await svc.driveImport('file-1');
+
+    // Looked up by link only — passing the (now different) filename would miss and duplicate.
+    expect(lib.findImported).toHaveBeenCalledWith('https://drive/x');
+    expect(lib.refreshFromUpload).toHaveBeenCalled();
+  });
+
+  it('refuses a Drive file that declares itself too big, before downloading it', async () => {
+    const { svc } = build();
+    svc.run = jest.fn(async () => ({ name: 'huge.bin', mimeType: 'application/octet-stream', size: String(60 * 1024 * 1024) })) as any;
+    svc.runBinary = jest.fn() as any;
+
+    await expect(svc.driveImport('file-1')).rejects.toThrow(/too big/i);
+    expect(svc.runBinary).not.toHaveBeenCalled(); // never downloaded
+  });
+
   it('says plainly when a Google file has no document form (a Form, a Drawing)', async () => {
     const { svc } = build();
     svc.run = jest.fn(async () => ({ name: 'Survey', mimeType: 'application/vnd.google-apps.form' })) as any;
@@ -175,6 +212,30 @@ describe('gmailImport', () => {
     expect(names).toContain('quote.docx');
     expect(names).toContain('terms.pdf'); // a Content-ID does NOT mean inline
     expect(names).not.toContain('logo.png');
+  });
+
+  it('keys each attachment on its own id, with a key short enough to store (BEA-1344)', async () => {
+    const { svc, lib } = build();
+    const longId = 'A'.repeat(400); // real Gmail attachment ids run this long
+    svc.run = jest.fn(async (argv: string[]) => {
+      if (argv.includes('attachments')) return { data: Buffer.from('bytes').toString('base64url') };
+      if (argv.includes('threads')) {
+        return { messages: [{ ...message, id: 'msg-1', payload: { ...message.payload, parts: [
+          { mimeType: DOCX, filename: 'invoice.pdf', body: { attachmentId: longId + '1' } },
+          { mimeType: DOCX, filename: 'invoice.pdf', body: { attachmentId: longId + '2' } },
+        ] } } ] };
+      }
+      return message;
+    }) as any;
+
+    const res = await svc.gmailThreadImport('thread-9');
+
+    // Two different files that happen to share a name must BOTH be saved...
+    expect(res.attachments).toBe(2);
+    // ...and every key must be well inside the 500-char store limit, or they'd truncate into one.
+    for (const call of (lib.findImported as jest.Mock).mock.calls) {
+      expect(String(call[0]).length).toBeLessThan(200);
+    }
   });
 
   it('puts everything from Gmail in the Email folder', async () => {
