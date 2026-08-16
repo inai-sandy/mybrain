@@ -1,6 +1,22 @@
 import { HomeService } from './home.service';
 
-function makeSvc() {
+/** What a paused flow run looks like in the database: a gate, or an ordinary "Ask me". */
+function waitingFlow(kind: 'gate' | 'ask') {
+  const results = kind === 'gate'
+    ? { n1: { status: 'waiting', kind: 'tool', label: 'Tidy up', gate: { headline: 'Delete a repository on GitHub — inai-sandy/old', args: {} } } }
+    : { n1: { status: 'waiting', kind: 'ask_user', label: 'Ask me' } };
+  return {
+    id: 'fr1',
+    waitNodeId: 'n1',
+    waitQuestion: kind === 'gate'
+      ? 'Delete a repository on GitHub — inai-sandy/old? This cannot be undone.\n\nIt will run with: owner = inai-sandy'
+      : 'Which angle should I take?',
+    results: JSON.stringify(results),
+    startedAt: new Date(),
+  };
+}
+
+function makeSvc(over: { flowWaiting?: any[] } = {}) {
   const delta = (w: any) => !!w?.createdAt; // a "today-new" count query
   const prisma: any = {
     item: { count: async ({ where }: any) => (delta(where) ? 2 : where?.source === 'raindrop' ? 93 : 35), findMany: async () => [{ id: 'i1', title: 'Recent doc', source: 'app', createdAt: new Date() }] },
@@ -17,7 +33,7 @@ function makeSvc() {
       count: async ({ where }: any) => (where?.status === 'running' ? 1 : 0),
       findMany: async ({ where }: any) => (where?.status === 'awaiting_input' ? [{ id: 'a1', title: 'Research agent' }] : []),
     },
-    flowRun: { count: async () => 0, findMany: async () => [] },
+    flowRun: { count: async () => 0, findMany: async () => over.flowWaiting || [] },
     reminder: { findMany: async () => [{ contact: { name: 'Srikar' }, subject: 'the BOM' }] },
     reminderSend: { count: async () => 2 },
     task: { findMany: async () => [] },
@@ -69,5 +85,28 @@ describe('HomeService — command center (BEA-897)', () => {
     expect(d.countsNew.emoCards).toBe(3);
     expect(d.countsNew.skills).toBe(1);
     expect(d.insights.guidance).toContain('Saturdays');
+  });
+});
+
+/**
+ * BEA-1348 — a paused flow reaches the Home card at all (its rows are `waiting`, and this query
+ * used to ask for `running`), and a gate says it is a gate.
+ */
+describe('HomeService — a flow waiting on you (BEA-1348)', () => {
+  it('shows a gate as something to say yes or no to', async () => {
+    const d = await makeSvc({ flowWaiting: [waitingFlow('gate')] }).summary();
+    const flow = d.needsYou.find((n) => n.kind === 'flow')!;
+    expect(flow).toBeTruthy();
+    expect(flow.title).toBe('A flow needs your OK');
+    expect(flow.action).toBe('Answer');
+    expect(flow.sub).toContain('This cannot be undone');
+    expect(flow.href).toBe('/flows/runs/fr1');
+  });
+
+  it('shows an ordinary question as a question', async () => {
+    const d = await makeSvc({ flowWaiting: [waitingFlow('ask')] }).summary();
+    const flow = d.needsYou.find((n) => n.kind === 'flow')!;
+    expect(flow.title).toBe('A flow needs your input');
+    expect(flow.action).toBe('Reply');
   });
 });

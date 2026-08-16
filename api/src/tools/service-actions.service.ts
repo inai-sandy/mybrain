@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
 import { ExecuteResult, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
+import { GatePause, PendingGate, ServiceGatesService } from './service-gates.service';
 
 /**
  * Running one outside-service action — with **no engine turn** (BEA-1347). Design: `specs/TOOLS.md`.
@@ -62,12 +63,23 @@ export type ServiceCallContext = {
 export class ServiceActionsService {
   private readonly log = new Logger('ServiceActions');
 
+  /**
+   * The gate (BEA-1348). Never optional in effect: when nothing is injected we build one here, so
+   * an action that cannot be undone can never slip through because a harness left an argument off.
+   * Without a database it finds no permanent release and no approval, and therefore stops — the
+   * safe direction.
+   */
+  private readonly gates: ServiceGatesService;
+
   constructor(
     private readonly provider: ComposioProvider,
     private readonly llm: LlmService,
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly prisma?: PrismaService,
-  ) {}
+    gates?: ServiceGatesService,
+  ) {
+    this.gates = gates || new ServiceGatesService(prisma, provider);
+  }
 
   /**
    * Run `svc:<service>.<action>` and return what came back, as text for the next step.
@@ -81,7 +93,7 @@ export class ServiceActionsService {
     const { service } = parsed;
     const say = ctx.onLine || (() => undefined);
 
-    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number } = {}): Promise<never> => {
+    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean } = {}): Promise<never> => {
       await this.record({ actionId, service, ok: false, error: message, ...extra }, ctx);
       throw new Error(message);
     };
@@ -135,13 +147,47 @@ export class ServiceActionsService {
       return fail(`We could not load "${parsed.action}" from ${name} — it may have been withdrawn, or ${name} could not be reached just now. Try again, and pick the tool afresh on the step if it keeps failing.`, { accountId: chosen?.id });
     }
 
+    // ---- the gate: is this one of the ones that cannot be taken back? (BEA-1348) ------------
+    // Asked here, before any arguments exist, only to find out whether an answer is already on
+    // record. `action.risky` comes from the provider; the rule is re-run on our side too, so a
+    // provider that forgot to flag something cannot walk a delete straight past the gate.
+    const mustAsk = await this.gates.mustAsk(actionId, service, action.risky).catch(() => true);
+    const approval = mustAsk ? await this.gates.approvalFor(actionId, ctx).catch(() => null) : null;
+
     // ---- the arguments ---------------------------------------------------------------------
     let args: Record<string, any> = {};
     try {
-      args = await this.fillArgs(action, input, ctx);
+      // An approved gate carries the EXACT arguments the owner was shown. Re-filling them would
+      // mean he approved deleting one branch and a fresh model call chose another.
+      const approved = approval?.arguments ? this.parseJson(String(approval.arguments)) : null;
+      args = await this.fillArgs(action, input, approved ? { ...ctx, args: approved } : ctx);
     } catch (e: any) {
-      return fail(String(e?.message || e), { accountId: chosen?.id });
+      return fail(String(e?.message || e), { accountId: chosen?.id, gated: mustAsk });
     }
+
+    // ---- stop and ask ----------------------------------------------------------------------
+    if (mustAsk && !approval) {
+      const gate: PendingGate = this.gates.build({
+        action,
+        actionId,
+        service,
+        serviceName: name,
+        args,
+        accountId: chosen?.id,
+        accountLabel: chosen ? this.who(chosen) : undefined,
+        label: ctx.label,
+        guidance: ctx.guidance,
+        stepInput: input,
+      });
+      // Written BEFORE the pause, on purpose: a run killed mid-pause still shows that this was
+      // tried and what it was going to do. The flight recorder must not need a happy ending.
+      await this.record({ actionId, service, ok: false, args, accountId: chosen?.id, gated: true, error: 'Held for your approval — nothing was sent.' }, ctx);
+      say(`   ⏸ ${name}: ${action.name} — waiting for your approval (this cannot be undone)`);
+      // THROWN, never returned: a returned string would fall through to a plain model call and
+      // describe a deletion that never happened.
+      throw new GatePause(gate);
+    }
+    if (approval?.id) await this.gates.markUsed(approval.id).catch(() => undefined);
 
     // ---- run it ----------------------------------------------------------------------------
     say(`   🔌 ${name}: ${action.name}${chosen ? ` (${this.who(chosen)})` : ''}`);
@@ -157,13 +203,33 @@ export class ServiceActionsService {
       // The provider already reads the verdict from the answer's own `successful` field rather than
       // the HTTP status — a failed action still comes back HTTP 200. Its reason is the truth here.
       const why = this.plainReason(res?.error);
-      return fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms });
+      return fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk });
     }
 
     const summary = this.summarise(res.data);
-    await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary }, ctx);
+    // `gated` on a real success means "this one had to be approved, and it was" (BEA-1348).
+    await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk }, ctx);
     say(`   ✅ ${name}: ${action.name} — done in ${(ms / 1000).toFixed(1)}s`);
     return `Ran ${name}: ${action.name}${chosen ? ` on ${this.who(chosen)}` : ''}.\n\nWhat came back:\n${summary.slice(0, OUTPUT_CHARS)}`;
+  }
+
+  /**
+   * The owner has answered a gate (BEA-1348). One door for both answers, so the flight recorder is
+   * written in the same place as every other attempt.
+   *
+   * A yes only writes down the permission — the step itself is then re-run for real, with the exact
+   * arguments that were approved. A no runs nothing and says so; there is no ToolCall for a call
+   * that never happened beyond the "held" row already written when it paused.
+   */
+  async answerGate(gate: PendingGate, answer: string, ctx: ServiceCallContext = {}): Promise<{ approved: boolean; message: string }> {
+    const decision = this.gates.readDecision(answer);
+    await this.gates.record(gate, decision, ctx);
+    if (decision === 'approved') {
+      return { approved: true, message: `You said yes — running it now: ${gate.headline}.` };
+    }
+    const message = `You said no, so nothing was done: ${gate.headline}.`;
+    await this.record({ actionId: gate.actionId, service: gate.service, ok: false, args: gate.args, accountId: gate.accountId, gated: true, error: message }, ctx);
+    return { approved: false, message };
   }
 
   // ---- arguments ---------------------------------------------------------------------------

@@ -17,12 +17,13 @@
     {
       "id": "BEA-1347",
       "title": "Run a service action + call log",
-      "status": "in_progress"
+      "status": "shipped",
+      "sha": "b3522b2"
     },
     {
       "id": "BEA-1348",
       "title": "Gates",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1349",

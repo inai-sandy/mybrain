@@ -111,7 +111,9 @@ export class HomeService {
     const [emoNeeds, agentWaiting, flowWaiting, remindersNeed, overdue, guidanceRow, claimsWaiting] = await Promise.all([
       this.prisma.emoCard.findMany({ where: { status: 'needs_you' }, orderBy: { createdAt: 'desc' }, take: 6 }),
       this.prisma.agentRun.findMany({ where: { status: 'awaiting_input' }, orderBy: { startedAt: 'desc' }, take: 4 }),
-      this.prisma.flowRun.findMany({ where: { status: 'running', waitQuestion: { not: null } }, orderBy: { startedAt: 'desc' }, take: 4 }),
+      // 'waiting' — the status a paused flow really has. Asking for 'running' with a question could
+      // never match, so a flow's question (and now a gate, BEA-1348) never reached this card.
+      this.prisma.flowRun.findMany({ where: { status: 'waiting', waitQuestion: { not: null } }, orderBy: { startedAt: 'desc' }, take: 4 }),
       this.prisma.reminder.findMany({ where: { needsOwner: true, status: 'active' }, include: { contact: true }, take: 5 }),
       this.prisma.task.findMany({ where: { status: 'open', dueDate: { lt: todayStart } }, orderBy: { dueDate: 'asc' }, take: 3 }),
       this.prisma.mentorDay.findFirst({ orderBy: { day: 'desc' } }),
@@ -127,7 +129,26 @@ export class HomeService {
     const needsYou: NeedItem[] = [];
     for (const c of emoNeeds) needsYou.push({ kind: 'emo', icon: LANE_ICON[c.lane] || '🎙', title: (c.summary || 'Emo card').slice(0, 90), sub: (c.needsQuestion || 'Needs your answer').slice(0, 120), href: '/emo', action: 'Answer' });
     for (const r of agentWaiting) needsYou.push({ kind: 'agent', icon: '🤖', title: (r.title || 'Agent run').slice(0, 90), sub: 'Waiting on your input', href: `/agent/runs/${r.id}`, action: 'Reply' });
-    for (const f of flowWaiting) needsYou.push({ kind: 'flow', icon: '🌊', title: 'A flow needs your input', sub: (f.waitQuestion || '').slice(0, 120), href: `/flows/runs/${f.id}`, action: 'Reply' });
+    /**
+     * A gate (BEA-1348) is not "your input" — it is a yes or no on something that cannot be undone,
+     * and the card has to say which of the two it is before he taps.
+     *
+     * Read from the paused step's own stored gate, never from the question's wording: the same
+     * question is written by one function today, and a reworded sentence must not be able to turn a
+     * gate into an ordinary question on this card.
+     */
+    const isGateWait = (f: any): boolean => {
+      try {
+        const results = f?.results ? JSON.parse(String(f.results)) : null;
+        return !!(f?.waitNodeId && results?.[f.waitNodeId]?.gate);
+      } catch {
+        return false;
+      }
+    };
+    for (const f of flowWaiting) {
+      const isGate = isGateWait(f);
+      needsYou.push({ kind: 'flow', icon: isGate ? '⚠️' : '🌊', title: isGate ? 'A flow needs your OK' : 'A flow needs your input', sub: (f.waitQuestion || '').split('\n')[0].slice(0, 120), href: `/flows/runs/${f.id}`, action: isGate ? 'Answer' : 'Reply' });
+    }
     for (const r of remindersNeed as any[]) needsYou.push({ kind: 'reminder', icon: '⏰', title: `${r.contact?.name || 'A contact'} needs a reply`, sub: (r.subject ? `about ${r.subject}` : 'Their WhatsApp reply is waiting'), href: '/contacts', action: 'Read' });
     for (const t of overdue as any[]) needsYou.push({ kind: 'task', icon: '⚠️', title: (t.title || 'Task').slice(0, 90), sub: 'Overdue', href: '/tasks', action: 'Do' });
     for (const c of claimsWaiting as any[]) needsYou.push({ kind: 'claim', icon: '✋', title: `${c.contact?.name || 'Someone'} says it's done`, sub: (c.task?.title || '').slice(0, 120), href: '/tasks?tab=review', action: 'Review' });

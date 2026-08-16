@@ -43,6 +43,8 @@ type Service = {
   needsCount: number;
 };
 type CredField = { name: string; label: string; description?: string; required?: boolean; secret?: boolean };
+/** One action that cannot be undone, and whether the owner has let it run without asking (BEA-1348). */
+type Gate = { id: string; name: string; description?: string; released: boolean };
 type FullService = Service & { needs?: CredField[]; needsAuthConfig?: CredField[]; needsAccount?: CredField[]; authMode?: string };
 type Status = { configured: boolean; reachable: boolean; message?: string; serviceCount?: number };
 type Payload = { status: Status; services: Service[]; categories: { id: string; label: string; count: number }[]; connectedCount: number };
@@ -316,6 +318,94 @@ export function Tools() {
       {/* Keyed by the slug so a jump straight from one service to another (a hand-edited `?service=`)
           starts the panel fresh, instead of carrying the last one's half-filled form into it. */}
       {open && <ServiceSheet key={open} slug={open} onClose={() => setOpen('')} onChanged={changed} />}
+    </div>
+  );
+}
+
+/**
+ * The gates (BEA-1348) — the actions of this service that stop and ask before they run.
+ *
+ * Shown only once a service is connected, because it is only then that anything can run. The list
+ * is short by design: normal writes never appear here, only the handful that cannot be taken back.
+ * Releasing one is per SERVICE, not per agent — there is one answer to "does this ask me?".
+ */
+function Gates({ slug, name }: { slug: string; name: string }) {
+  const [gates, setGates] = useState<Gate[] | null>(null);
+  const [busy, setBusy] = useState('');
+  const [q, setQ] = useState('');
+  const toast = useToast();
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/tools/services/${encodeURIComponent(slug)}/gates`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setGates(Array.isArray(d?.actions) ? d.actions : []); })
+      .catch(() => { if (alive) setGates([]); });
+    return () => { alive = false; };
+  }, [slug]);
+
+  async function set(g: Gate, released: boolean) {
+    setBusy(g.id);
+    try {
+      const r = await fetch(`/api/tools/services/${encodeURIComponent(slug)}/gates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: g.id, released }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!d?.ok) { toast('error', d?.message || 'That did not work. Try again in a moment.'); return; }
+      setGates((list) => (list || []).map((x) => (x.id === g.id ? { ...x, released } : x)));
+      toast('success', released ? `“${g.name}” will now run without asking.` : `“${g.name}” will stop and ask again.`);
+    } catch {
+      toast('error', 'We could not reach the server. Try again in a moment.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  if (gates === null) return <div className="mb-4"><Skeleton className="h-4 w-48" /></div>;
+  if (!gates.length) return null;
+  const shown = q.trim() ? gates.filter((g) => g.name.toLowerCase().includes(q.trim().toLowerCase())) : gates;
+
+  return (
+    <div className="mb-4">
+      <h4 className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <AlertTriangle size={12} /> Stops and asks first · {gates.length}
+      </h4>
+      <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
+        These {name} actions cannot be undone, so a run pauses and asks you before doing one. Everything else — new issues,
+        comments, messages, edits — just runs. Release one and it will never ask about it again.
+      </p>
+      {gates.length > 8 && (
+        <div className="relative mb-2">
+          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search these actions"
+            aria-label="Search the actions that stop and ask"
+            className="w-full rounded-lg border border-zinc-300 bg-zinc-100 py-1.5 pl-8 pr-3 text-sm outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+          />
+        </div>
+      )}
+      <ul className="max-h-64 space-y-1.5 overflow-y-auto">
+        {shown.map((g) => (
+          <li key={g.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{g.name}</p>
+              <p className="truncate text-[11px] text-zinc-400">{g.released ? 'Runs without asking' : 'Asks you first'}</p>
+            </div>
+            <button
+              onClick={() => set(g, !g.released)}
+              disabled={busy === g.id}
+              className={'shrink-0 rounded-md px-2 py-1 text-xs font-medium disabled:opacity-50 ' + (g.released ? 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800' : 'text-amber-600 hover:bg-amber-500/10')}
+            >
+              {busy === g.id ? <Loader2 size={13} className="animate-spin" /> : g.released ? 'Ask me again' : 'Release'}
+            </button>
+          </li>
+        ))}
+        {!shown.length && <li className="px-1 py-2 text-xs text-zinc-400">Nothing matches “{q}”.</li>}
+      </ul>
     </div>
   );
 }
@@ -639,6 +729,9 @@ function ServiceSheet({ slug, onClose, onChanged }: { slug: string; onClose: () 
                   </ul>
                 </div>
               )}
+
+              {/* What stops and asks first (BEA-1348) — only worth showing once it can actually run. */}
+              {!loading && svc && (accounts.length > 0 || svc.noAuth) && <Gates slug={slug} name={svc.name} />}
 
               {/* Waiting on the provider's own sign-in page, in the other tab. */}
               {waiting && (

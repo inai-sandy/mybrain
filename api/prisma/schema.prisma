@@ -1567,3 +1567,34 @@ model ToolCall {
   @@index([runId])
   @@index([createdAt])
 }
+
+/// A gate decision on an outside-service action that cannot be undone (BEA-1348).
+///
+/// Two shapes in one table, told apart by `scope`:
+///  - `once`   — the owner said yes to ONE paused step. It carries the exact arguments he was
+///               shown, so the resumed step runs THOSE and not a freshly-guessed set.
+///  - `always` — "release permanently" from /tools: this action on this service never asks again.
+model ServiceGate {
+  id        String    @id @default(uuid())
+  /// Service slug, e.g. "github" — never a vendor-specific name.
+  service   String
+  /// OUR id for the action: `svc:github.delete_a_repository`. Never the vendor's slug.
+  action    String
+  /// 'once' | 'always'
+  scope     String    @default("once")
+  /// The run and step a one-time answer belongs to. Null on a permanent release.
+  runId     String?
+  nodeId    String?
+  /// 'approved' | 'rejected' — a permanent release is always 'approved'.
+  decision  String    @default("approved")
+  /// The exact arguments the owner approved, as JSON. Null on a permanent release.
+  arguments String?
+  /// What he was actually shown, kept so the log can be read back honestly.
+  question  String?
+  /// When the approved step really ran, so a one-time yes can never be spent twice.
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([service, action])
+  @@index([runId, nodeId])
+}
