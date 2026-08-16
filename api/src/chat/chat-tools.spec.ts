@@ -111,7 +111,7 @@ function harness(over: { connected?: any[]; service?: string | null; action?: st
   const actions = new ServiceActionsService(provider, llm, d.prisma, gatesSvc);
   const tools = new ChatToolsService(llm, prompts, catalog, actions, gatesSvc);
   const chat = new ChatService(d.prisma, memory, llm, prompts, tools);
-  return { ...d, chat, tools, provider, llm, catalog, prompts };
+  return { ...d, chat, tools, provider, llm, catalog, prompts, memory };
 }
 
 const promptFor = (llm: any, label: string) => (llm.completeWith.mock.calls.find((c: any[]) => c[3] === label) || [])[1] || '';
@@ -135,7 +135,7 @@ describe('Chat can use connected services (BEA-1349)', () => {
   });
 
   it('runs the action rather than describing it, and writes a ToolCall row like any agent run', async () => {
-    const { chat, provider, toolCalls, llm, messages } = harness();
+    const { chat, provider, toolCalls, llm, messages, memory } = harness();
     const r = await chat.sendMessage('s1', 'File a bug in inai-sandy/mybrain about the login button');
 
     expect(provider.execute).toHaveBeenCalledWith(CREATE.id, { owner: 'inai-sandy', repo: 'mybrain', title: 'A bug' }, { connectionId: 'ca_1' });
@@ -147,7 +147,10 @@ describe('Chat can use connected services (BEA-1349)', () => {
     // The reply names the service and the action, with what came back and a link.
     expect(r!.message.tools).toHaveLength(1);
     expect(r!.message.tools[0]).toMatchObject({ serviceName: 'GitHub', action: 'Create an issue', ok: true, link: 'https://github.com/inai-sandy/mybrain/issues/7' });
-    expect(r!.message.tools[0].result).toContain('7');
+    expect(r!.message.tools[0].result).toBe('number: 7');
+    // A turn a service answered does not also go rummaging in his notes for source chips.
+    expect(memory.searchScoped).not.toHaveBeenCalled();
+    expect(r!.message.sources).toEqual([]);
     // And the written reply is grounded in what really happened, not left to guess.
     expect(promptFor(llm, 'chat')).toContain('https://github.com/inai-sandy/mybrain/issues/7');
   });
