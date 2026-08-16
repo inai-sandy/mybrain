@@ -104,6 +104,12 @@ export class DocumentsController {
     return this.docs.summarize(body?.contentText || '');
   }
 
+  /** The markdown behind a document, for the owner's Markdown view. (BEA-1342) */
+  @Get(':id/markdown')
+  async markdown(@Param('id') id: string) {
+    return { markdown: await this.docs.markdownOf(id) };
+  }
+
   /** Upload a file (md/html/pdf/image/office) into the library. (BEA-534, BEA-1339) */
   @Post('upload')
   @UseInterceptors(FileInterceptor('file'))

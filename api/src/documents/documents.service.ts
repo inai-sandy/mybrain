@@ -300,6 +300,21 @@ export class DocumentsService {
   }
 
   /**
+   * The markdown behind a document, for the owner's "Markdown" view. (BEA-1342)
+   *
+   * An HTML document's stored text is HTML, so it is converted here — the same turndown pass the
+   * public `.md` share link uses — otherwise the button would show HTML and call it markdown.
+   * Returns null for kinds that have no markdown form (pdf, image, multi-file site).
+   */
+  async markdownOf(id: string): Promise<string | null> {
+    const row = await this.prisma.document.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Document not found');
+    if (['pdf', 'image', 'site'].includes(row.kind)) return null;
+    const src = row.contentText || '';
+    return row.kind === 'html' ? htmlToMarkdown(src) : src;
+  }
+
+  /**
    * A document already brought in from this exact place. Lets an importer refresh what it saved
    * before instead of leaving a second copy behind every time. (BEA-1341)
    */
