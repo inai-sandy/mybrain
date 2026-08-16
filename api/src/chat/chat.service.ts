@@ -283,7 +283,9 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     if (session.docId) {
       hits = await this.docHits(session.docId);
       sources = hits.length ? [{ title: session.title || 'Document', itemId: session.docId }] : [];
-    } else {
+    } else if (!acted?.note) {
+      // Skipped when a service just answered this turn: "here are your repositories" is not a
+      // question about his saved notes, and four unrelated source chips under it are noise.
       const route = await this.route(session, recent, clean);
       didSearch = route.search;
       if (route.search) {
@@ -291,6 +293,8 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         hits = await this.memory.searchScoped(route.query || clean, f.include, 5, f.exclude);
       }
       sources = await this.toSources(hits);
+    } else {
+      didSearch = false;
     }
 
     // grounded answer + suggested follow-ups
@@ -464,7 +468,9 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
     if (session.docId) {
       hits = await this.docHits(session.docId);
       sources = hits.length ? [{ title: session.title || 'Document', itemId: session.docId }] : [];
-    } else {
+    } else if (!acted?.note) {
+      // Skipped when a service just answered this turn: "here are your repositories" is not a
+      // question about his saved notes, and four unrelated source chips under it are noise.
       const route = await this.route(session, recent, clean);
       didSearch = route.search;
       if (route.search) {
@@ -472,6 +478,8 @@ export class ChatService implements OnModuleInit, OnModuleDestroy {
         hits = await this.memory.searchScoped(route.query || clean, f.include, 5, f.exclude);
       }
       sources = await this.toSources(hits);
+    } else {
+      didSearch = false;
     }
 
     const prompt = await this.buildAnswerPrompt(session, recent, clean, hits, didSearch, acted?.note);

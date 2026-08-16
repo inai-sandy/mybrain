@@ -99,7 +99,14 @@ const MAX_ACTIONS = 60;
 /** How much of an action's result is kept on the chip. */
 const RESULT_CHARS = 300;
 /** Keys worth putting on the chip's line, in the order a person would read them. */
-const RESULT_KEYS = ['html_url', 'url', 'title', 'name', 'full_name', 'login', 'identifier', 'key', 'number', 'id', 'state', 'status', 'text', 'message'];
+const RESULT_KEYS = ['title', 'name', 'full_name', 'login', 'identifier', 'key', 'number', 'id', 'state', 'status', 'text', 'message'];
+/**
+ * Where a link may come from — the TOP of the payload only.
+ *
+ * A link dug out of the middle of a list is a link to the first thing in it, which is not what
+ * "Open" means. And an `api.` address is the machine's copy of the page, not the page.
+ */
+const LINK_KEYS = ['html_url', 'permalink', 'web_url', 'link', 'url'];
 
 @Injectable()
 export class ChatToolsService {
@@ -335,8 +342,7 @@ export class ChatToolsService {
    * text, which is still the truth and still short.
    */
   private resultLine(note: string): string {
-    const body = String(note || '').split('What came back:').pop() || '';
-    const data = this.parseJson(body);
+    const data = this.payload(note);
     if (data) {
       const bits: string[] = [];
       for (const k of RESULT_KEYS) {
@@ -345,16 +351,36 @@ export class ChatToolsService {
         bits.push(`${k.replace(/_/g, ' ')}: ${String(v).slice(0, 120)}`);
         if (bits.length === 3) break;
       }
+      // A lookup answers with a list, and "repositories: 30" is the useful half of it — far better
+      // than the first 300 characters of a JSON blob.
+      if (bits.length < 3) {
+        for (const [k, v] of Object.entries(data)) {
+          if (!Array.isArray(v)) continue;
+          bits.push(`${k.replace(/_/g, ' ')}: ${v.length}`);
+          if (bits.length === 3) break;
+        }
+      }
       if (bits.length) return bits.join(' · ').slice(0, RESULT_CHARS);
     }
-    const flat = body.replace(/\s+/g, ' ').trim();
+    const flat = String(note || '').split('What came back:').pop()?.replace(/\s+/g, ' ').trim();
     return (flat || 'Done.').slice(0, RESULT_CHARS);
   }
 
-  /** A link, only when the service really gave one. */
+  /** A link, only when the service gave one for the thing it just did. */
   private linkIn(note: string): string | undefined {
-    const m = String(note || '').match(/https?:\/\/[^\s"'\\)]+/);
-    return m?.[0]?.replace(/[.,)]+$/, '') || undefined;
+    const data = this.payload(note);
+    for (const k of LINK_KEYS) {
+      const v = data?.[k];
+      if (typeof v !== 'string' || !/^https?:\/\//i.test(v)) continue;
+      if (/\/\/api\./i.test(v) || /\.git$/i.test(v)) continue;
+      return v;
+    }
+    return undefined;
+  }
+
+  /** What the action returned, as an object, when it returned one. */
+  private payload(note: string): Record<string, any> | null {
+    return this.parseJson(String(note || '').split('What came back:').pop() || '');
   }
 
   private parseJson(text: string): Record<string, any> | null {
