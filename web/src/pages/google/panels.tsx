@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox, X } from 'lucide-react';
+import { Search, Download, Check, Loader2, RefreshCw, ExternalLink, FileText, Clock, Circle, Video, Copy, FilePlus2, Phone, Mail, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Sparkles, Inbox, X, FileDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useToast } from '../../ui/Toast';
@@ -56,6 +56,25 @@ function fmtFullDate(d: string): string {
 function EmailThreadViewer({ threadId, onClose }: { threadId: string; onClose: () => void }) {
   const [data, setData] = useState<{ subject: string; messages: ThreadMsg[] } | null>(null);
   const [err, setErr] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedDoc, setSavedDoc] = useState<string | null>(null);
+  const toast = useToast();
+
+  /** Save the conversation + every attachment into Documents → Email. (BEA-1341) */
+  async function saveToDocuments() {
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/google/gmail/thread/${encodeURIComponent(threadId)}/import`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.message || 'Could not save this email.');
+      setSavedDoc(d.id || null);
+      toast('success', d.attachments ? `Saved to Documents → Email, with ${d.attachments} attachment${d.attachments > 1 ? 's' : ''}` : 'Saved to Documents → Email');
+    } catch (e: any) {
+      toast('error', e.message || 'Could not save this email.');
+    } finally {
+      setSaving(false);
+    }
+  }
   useEffect(() => {
     let live = true;
     fetch(`/api/google/gmail/thread/${encodeURIComponent(threadId)}`)
@@ -82,6 +101,20 @@ function EmailThreadViewer({ threadId, onClose }: { threadId: string; onClose: (
               <h2 className="font-bold text-lg leading-snug mt-0.5 line-clamp-2">{data?.subject || (err ? 'Couldn’t load this email' : 'Loading…')}</h2>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
+              {savedDoc ? (
+                <a href={`/documents/${savedDoc}`} className="inline-flex items-center gap-1 rounded-lg border border-emerald-500 px-2 py-1 text-xs text-emerald-600">
+                  <Check size={12} /> Saved
+                </a>
+              ) : (
+                <button
+                  onClick={saveToDocuments}
+                  disabled={saving || !data}
+                  title="Save this email and its attachments to Documents"
+                  className="inline-flex items-center gap-1 rounded-lg border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs text-zinc-500 hover:border-emerald-500 hover:text-emerald-600 disabled:opacity-50"
+                >
+                  <FileDown size={12} /> {saving ? 'Saving…' : 'Save'}
+                </button>
+              )}
               <a
                 href={`https://mail.google.com/mail/u/0/#all/${threadId}`}
                 target="_blank"
@@ -421,7 +454,7 @@ export function DrivePanel() {
       const r = await fetch(`/api/google/drive/${id}/import`, { method: 'POST' });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Could not import');
       setImported((p) => ({ ...p, [id]: true }));
-      toast('success', 'Imported to Capture');
+      toast('success', 'Saved to Documents → Google Drive');
     } catch (e: any) {
       toast('error', e.message || 'Could not import');
     } finally {

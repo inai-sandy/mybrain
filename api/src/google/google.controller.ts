@@ -230,6 +230,16 @@ export class GoogleController {
     }
   }
 
+  /** Save a whole conversation + its attachments into Documents → Email. (BEA-1341) */
+  @Post('gmail/thread/:threadId/import')
+  async gmailThreadImport(@Param('threadId') threadId: string) {
+    try {
+      return await this.google.gmailThreadImport(threadId);
+    } catch (e) {
+      mapErr(e);
+    }
+  }
+
   // ---- Drive / Docs / Sheets ----
   @Get('drive')
   async drive(@Query('q') q?: string) {

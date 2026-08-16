@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ItemsService } from '../items/items.service';
+import { DocumentsService } from '../documents/documents.service';
 
 const BASE = process.env.GWS_RUNNER_URL || 'http://172.18.0.1:8766';
 
@@ -83,13 +84,45 @@ function extractBody(payload: any): string {
   return '';
 }
 
+/** A filename that is safe on disk and still recognisable — used for the email's own document. */
+function safeFilename(name: string): string {
+  return (name || 'email')
+    .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120) || 'email';
+}
+
+/**
+ * Every real attachment in a Gmail payload tree. Inline images (a signature logo, a tracking pixel)
+ * carry a Content-ID and would otherwise flood the library, so they are left out. (BEA-1341)
+ */
+function collectAttachments(payload: any, out: { filename: string; mimeType: string; attachmentId: string }[] = []) {
+  if (!payload) return out;
+  const filename = String(payload.filename || '').trim();
+  const attachmentId = payload.body?.attachmentId;
+  const inline = (payload.headers || []).some((x: any) => String(x?.name).toLowerCase() === 'content-id');
+  if (filename && attachmentId && !inline) {
+    out.push({ filename, mimeType: String(payload.mimeType || 'application/octet-stream'), attachmentId });
+  }
+  for (const part of payload.parts || []) collectAttachments(part, out);
+  return out;
+}
+
 /** Talks to the host `gws-runner` bridge, which drives the Google Workspace CLI (`gws`).
  *  The CLI holds the user's Google login; the app never sees OAuth tokens directly. */
 @Injectable()
 export class GoogleService {
   private readonly logger = new Logger(GoogleService.name);
 
-  constructor(private readonly items: ItemsService) {}
+  // Optional deps go LAST — spec files build this service positionally with fewer args.
+  constructor(private readonly items: ItemsService, private readonly docs?: DocumentsService) {}
+
+  /** The Documents library. Optional in the constructor for the spec harnesses, so guard the use. */
+  private get library(): DocumentsService {
+    if (!this.docs) throw new Error('The documents library isn’t available right now.');
+    return this.docs;
+  }
 
   /** Connection state — offline-safe (bridge down / not authed → connected:false, never throws). */
   async status(): Promise<{ connected: boolean; email: string | null; gws: boolean; bridge: boolean }> {
@@ -158,6 +191,41 @@ export class GoogleService {
     return d.json ?? d.text;
   }
 
+  /**
+   * Run a gws command that returns BINARY (a Drive export or download) and get the real bytes.
+   *
+   * `run()` above cannot do this. `gws drive files export` never prints the document — it saves a
+   * file and prints a receipt (`{bytes, mimeType, saved_file, status}`), and `run()` hands that
+   * receipt back. `String(receipt)` is `"[object Object]"`, which is exactly what every Google Doc
+   * import used to store. The bridge's `/gws-file` endpoint runs the command with `-o` and returns
+   * the bytes base64-encoded instead. (BEA-1341)
+   */
+  async runBinary(argv: string[]): Promise<Buffer> {
+    let d: any;
+    try {
+      const r = await fetch(`${BASE}/gws-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ argv }),
+        signal: AbortSignal.timeout(120000),
+      });
+      d = await r.json();
+    } catch (e) {
+      this.logger.warn(`gws bridge unreachable: ${String((e as Error)?.message || e)}`);
+      throw new Error('bridge-down');
+    }
+    if (d?.tooBig) throw new Error('That file is too big to bring in.');
+    if (!d?.ok || !d?.base64) {
+      if (d?.code === 2) throw new Error('not-connected');
+      const stderrLine = String(d?.stderr || '')
+        .split('\n')
+        .map((s: string) => s.replace(/^error\[[^\]]*\]:\s*/, '').trim())
+        .filter((s: string) => s && !/^Using keyring backend/i.test(s))[0];
+      throw new Error(stderrLine || 'Could not download that file from Google.');
+    }
+    return Buffer.from(d.base64, 'base64');
+  }
+
   // ---- Gmail ----
 
   /** Recent (optionally searched) messages with From/Subject/Date/snippet. */
@@ -213,16 +281,61 @@ export class GoogleService {
     return metas.filter(Boolean) as any[];
   }
 
-  /** Import one email into Capture (searchable + chat-able). */
-  async gmailImport(id: string): Promise<{ id: string; title: string }> {
+  /**
+   * Import one email into the Documents library, in the "Email" folder — the message itself plus
+   * every readable attachment as its own document. (BEA-1341)
+   *
+   * Attachments used to be dropped on the floor: this only ever took the message body, so a quote
+   * sent as a .docx never reached My Brain at all. Gmail returns attachment bytes base64-encoded
+   * inside ordinary JSON, so they come through the existing bridge — no binary channel needed.
+   */
+  async gmailImport(id: string): Promise<{ id: string; title: string; attachments: number }> {
     const p = JSON.stringify({ userId: 'me', id, format: 'full' });
     const m = await this.run(['gmail', 'users', 'messages', 'get', '--params', p, '--format', 'json']);
     const h = headerMap(m?.payload);
     const subject = h.subject || '(no subject)';
     const body = extractBody(m?.payload) || m?.snippet || '';
-    const text = `From: ${h.from || ''}\nDate: ${h.date || ''}\nSubject: ${subject}\n\n${body}`.trim();
-    const { item } = await this.items.store(text, 'gmail', subject, undefined, ['email']);
-    return { id: item.id, title: item.title };
+    const link = m?.threadId ? `https://mail.google.com/mail/u/0/#inbox/${m.threadId}` : undefined;
+    const md = [
+      `# ${subject}`,
+      '',
+      `**From:** ${h.from || 'unknown'}  `,
+      h.to ? `**To:** ${h.to}  ` : '',
+      `**Date:** ${h.date || ''}`,
+      '',
+      body,
+    ].filter((l) => l !== '').join('\n').trim();
+
+    const collectionId = await this.library.ensureCollection('Email', 'Mail');
+    const doc: any = await this.library.createFromUpload(
+      { originalname: `${safeFilename(subject)}.md`, mimetype: 'text/markdown', buffer: Buffer.from(md, 'utf8') },
+      { collectionId, sourceUrl: link },
+    );
+
+    // Each attachment becomes its own document in the same folder, so it is readable and searchable.
+    let saved = 0;
+    for (const att of collectAttachments(m?.payload)) {
+      try {
+        const got = await this.run([
+          'gmail', 'users', 'messages', 'attachments', 'get',
+          '--params', JSON.stringify({ userId: 'me', messageId: id, id: att.attachmentId }),
+          '--format', 'json',
+        ]);
+        const raw = got?.data;
+        if (!raw) continue;
+        const buffer = Buffer.from(String(raw).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+        if (!buffer.length) continue;
+        await this.library.createFromUpload(
+          { originalname: att.filename, mimetype: att.mimeType, buffer, size: buffer.length },
+          { collectionId, sourceUrl: link },
+        );
+        saved++;
+      } catch (e) {
+        // One unreadable attachment must not lose the email itself.
+        this.logger.warn(`gmail attachment "${att.filename}" skipped: ${String((e as Error)?.message || e)}`);
+      }
+    }
+    return { id: doc.id, title: doc.title, attachments: saved };
   }
 
   /** Search Gmail and return up to `max` distinct matching threads (newest message per thread). */
@@ -263,6 +376,60 @@ export class GoogleService {
     return { subject, copy, messages };
   }
 
+  /**
+   * Save a whole email conversation into Documents, in the "Email" folder: one document for the
+   * thread, plus every attachment found on any message in it. (BEA-1341)
+   *
+   * Thread-level rather than per-message because an attachment can hang off any reply, and saving
+   * one document per message would clutter the library for a long back-and-forth.
+   */
+  async gmailThreadImport(threadId: string): Promise<{ id: string; title: string; attachments: number }> {
+    const p = JSON.stringify({ userId: 'me', id: threadId, format: 'full' });
+    const t = await this.run(['gmail', 'users', 'threads', 'get', '--params', p, '--format', 'json']);
+    const messages: any[] = (t?.messages as any[]) || [];
+    if (!messages.length) throw new Error('That email could not be read.');
+
+    const subject = messages.map((m) => headerMap(m?.payload).subject).find(Boolean) || '(no subject)';
+    const parts = messages.map((m, i) => {
+      const h = headerMap(m?.payload);
+      const body = stripQuoted(extractBody(m?.payload) || m?.snippet || '');
+      const head = messages.length > 1 ? `## Message ${i + 1} of ${messages.length}\n\n` : '';
+      return `${head}**From:** ${h.from || 'unknown'}  \n**Date:** ${h.date || ''}\n\n${body}`;
+    });
+    const md = `# ${subject}\n\n${parts.join('\n\n---\n\n')}`.trim();
+
+    const collectionId = await this.library.ensureCollection('Email', 'Mail');
+    const link = `https://mail.google.com/mail/u/0/#all/${threadId}`;
+    const doc: any = await this.library.createFromUpload(
+      { originalname: `${safeFilename(subject)}.md`, mimetype: 'text/markdown', buffer: Buffer.from(md, 'utf8') },
+      { collectionId, sourceUrl: link },
+    );
+
+    let saved = 0;
+    for (const m of messages) {
+      for (const att of collectAttachments(m?.payload)) {
+        try {
+          const got = await this.run([
+            'gmail', 'users', 'messages', 'attachments', 'get',
+            '--params', JSON.stringify({ userId: 'me', messageId: m.id, id: att.attachmentId }),
+            '--format', 'json',
+          ]);
+          if (!got?.data) continue;
+          const buffer = Buffer.from(String(got.data).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+          if (!buffer.length) continue;
+          await this.library.createFromUpload(
+            { originalname: att.filename, mimetype: att.mimeType, buffer, size: buffer.length },
+            { collectionId, sourceUrl: link },
+          );
+          saved++;
+        } catch (e) {
+          this.logger.warn(`gmail attachment "${att.filename}" skipped: ${String((e as Error)?.message || e)}`);
+        }
+      }
+    }
+    return { id: doc.id, title: doc.title, attachments: saved };
+  }
+
   /** Full plain-text body of ONE message (de-quoted, capped). For storing important emails in memory. (BEA-439) */
   async gmailMessageFull(id: string): Promise<string> {
     const p = JSON.stringify({ userId: 'me', id, format: 'full' });
@@ -281,26 +448,52 @@ export class GoogleService {
   }
 
   /** Import a Drive file's text into Capture. Google Docs/Sheets/Slides are exported; text files downloaded. */
+  /**
+   * Bring a Drive file into the Documents library, in the "Google Drive" folder. (BEA-1341)
+   *
+   * Google's own formats are exported as the matching Office format and converted, so headings and
+   * tables survive and a spreadsheet brings EVERY sheet — the old `text/plain` / `text/csv` exports
+   * flattened Docs and gave only the first sheet of a Sheet. Real files stored in Drive (a .docx
+   * someone uploaded, a PDF) are downloaded as-is and handled by the normal upload path, which used
+   * to refuse them outright.
+   */
   async driveImport(id: string): Promise<{ id: string; title: string }> {
     const meta = await this.run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, fields: 'id,name,mimeType,webViewLink' }), '--format', 'json']);
-    const name = meta?.name || 'Drive file';
+    const name = String(meta?.name || 'Drive file');
     const mt = String(meta?.mimeType || '');
-    const exportMap: Record<string, string> = {
-      'application/vnd.google-apps.document': 'text/plain',
-      'application/vnd.google-apps.spreadsheet': 'text/csv',
-      'application/vnd.google-apps.presentation': 'text/plain',
+    const link = meta?.webViewLink || undefined;
+
+    // Google-native → the Office format that keeps the most structure, plus the extension anydoc needs.
+    const exportAs: Record<string, { mime: string; ext: string }> = {
+      'application/vnd.google-apps.document': { mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ext: '.docx' },
+      'application/vnd.google-apps.spreadsheet': { mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: '.xlsx' },
+      'application/vnd.google-apps.presentation': { mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ext: '.pptx' },
     };
-    let content = '';
-    if (exportMap[mt]) {
-      content = String((await this.run(['drive', 'files', 'export', '--params', JSON.stringify({ fileId: id, mimeType: exportMap[mt] })])) || '');
-    } else if (mt.startsWith('text/')) {
-      content = String((await this.run(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, alt: 'media' })])) || '');
+
+    let buffer: Buffer;
+    let filename: string;
+    let mime: string;
+    const want = exportAs[mt];
+    if (want) {
+      buffer = await this.runBinary(['drive', 'files', 'export', '--params', JSON.stringify({ fileId: id, mimeType: want.mime })]);
+      filename = /\.[a-z0-9]{2,5}$/i.test(name) ? name : `${name}${want.ext}`;
+      mime = want.mime;
+    } else if (mt.startsWith('application/vnd.google-apps.')) {
+      // Forms, Drawings, Sites and friends have no document form we can read.
+      throw new Error(`“${name}” is a Google ${mt.split('.').pop()} — there’s no document to bring in.`);
     } else {
-      throw new Error(`Can’t import a “${mt || 'file of this type'}” yet — only Google Docs/Sheets/Slides and text files.`);
+      buffer = await this.runBinary(['drive', 'files', 'get', '--params', JSON.stringify({ fileId: id, alt: 'media' })]);
+      filename = name;
+      mime = mt || 'application/octet-stream';
     }
-    if (!content.trim()) throw new Error('That file appears to be empty.');
-    const { item } = await this.items.store(content, 'gdrive', name, meta?.webViewLink || undefined, ['drive']);
-    return { id: item.id, title: item.title };
+    if (!buffer?.length) throw new Error('That file appears to be empty.');
+
+    const collectionId = await this.library.ensureCollection('Google Drive', 'Folder');
+    const doc: any = await this.library.createFromUpload(
+      { originalname: filename, mimetype: mime, buffer, size: buffer.length },
+      { collectionId, sourceUrl: link },
+    );
+    return { id: doc.id, title: doc.title };
   }
 
   /** Create a NEW Google Doc with the given text (safe write — never edits existing files). */
