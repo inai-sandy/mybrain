@@ -25,11 +25,17 @@ export type ServiceAccount = {
   lastUsedAt?: string;
 };
 
+/** One thing the owner has to type in before a service can be connected. */
+export type CredentialField = { name: string; label: string; description?: string; required?: boolean; secret?: boolean };
+
 /** One service (Composio calls it a toolkit). Counts are always read live — never hard-coded. */
 export type ServiceInfo = {
   slug: string;
   name: string;
+  /** The first category, for display. */
   category: string;
+  /** EVERY category the service is filed under — a service is usually in two or three. */
+  categories?: { id: string; name: string }[];
   connected: boolean;
   accounts: ServiceAccount[];
   description?: string;
@@ -43,11 +49,29 @@ export type ServiceInfo = {
    * than offer a one-click flow that cannot work.
    */
   managedAuth?: boolean;
-  /** No login needed at all (a few services are open). */
+  /**
+   * No login needed at all (32 of the 1,209 are open — Hacker News, the weather, a PDF writer).
+   *
+   * Verified live: the vendor REFUSES to create a login config for one of these ("works without an
+   * auth config … use its tools directly"), so the UI must say "ready to use" rather than offer a
+   * Connect button that can only ever produce an error.
+   */
   noAuth?: boolean;
   authSchemes?: string[];
-  /** What the owner must supply when `managedAuth` is false. */
-  needs?: { name: string; label: string; description?: string; required?: boolean }[];
+  /** OAUTH2 · API_KEY · BEARER_TOKEN … — how this service is signed into. */
+  authMode?: string;
+  /** Everything the owner must supply when `managedAuth` is false — both halves, in one list. */
+  needs?: CredentialField[];
+  /**
+   * The same fields, split the way the vendor actually wants them, because the two halves go to
+   * two different calls and sending one to the other's endpoint silently does nothing:
+   *  - `needsAuthConfig` — an OAuth app's client id/secret, given when the login config is made.
+   *  - `needsAccount` — an API key or bearer token, given when the account itself is created.
+   * Verified live 2026-08-16: Vercel's only field (`bearer_token`) is in the SECOND half, and
+   * Twitter's three (`client_id`, `client_secret`, `generic_id`) are all in the first.
+   */
+  needsAuthConfig?: CredentialField[];
+  needsAccount?: CredentialField[];
 };
 
 /** One callable action, with the JSON schema an agent needs to fill its arguments. */
@@ -73,9 +97,11 @@ export type ConnectResult = {
   /** True when the service has no vendor-managed auth: the owner must add their own credentials. */
   needsCredentials?: boolean;
   /** Which credentials, in that case. */
-  fields?: { name: string; label: string; description?: string; required?: boolean }[];
+  fields?: CredentialField[];
   /** Plain English, safe to show. */
   message?: string;
+  /** True when the connection finished right here and there is nowhere to send the owner. */
+  done?: boolean;
 };
 
 export type ProviderStatus = {
@@ -97,12 +123,18 @@ export type ExecuteResult = {
 export interface ServiceProvider {
   /** Every service, or just the connected ones. Blocked services are never returned. */
   listServices(opts?: { connectedOnly?: boolean; search?: string; category?: string; limit?: number }): Promise<ServiceInfo[]>;
+  /** One service by its slug, in full — including what it wants signing in with. Null if unknown. */
+  getService(slug: string): Promise<ServiceInfo | null>;
   /** The actions of one service, with their argument schemas. */
   listActions(service: string, opts?: { important?: boolean; limit?: number; search?: string }): Promise<ServiceAction[]>;
   /** Start a login. Returns somewhere to send the owner, or what is missing. */
   connect(service: string, opts?: { label?: string; callbackUrl?: string; credentials?: Record<string, any> }): Promise<ConnectResult>;
   /** Drop one connected account. */
   disconnect(connectionId: string): Promise<{ ok: boolean; message?: string }>;
+  /** Give one connected account a name the owner recognises ("work gmail"). Our own bookkeeping. */
+  renameConnection(connectionId: string, label: string): Promise<{ ok: boolean; message?: string }>;
+  /** Throw away what was read a moment ago, so the next read asks the provider again. */
+  refresh?(): void;
   /** Run one action. `actionId` is our `svc:` id, never the vendor's. */
   execute(actionId: string, args?: Record<string, any>, opts?: { connectionId?: string }): Promise<ExecuteResult>;
   /** Is a key set, and does it work? Never throws. */

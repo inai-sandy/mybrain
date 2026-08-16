@@ -12,6 +12,7 @@ import { Ideas } from './pages/Ideas';
 import { IdeaDetail } from './pages/IdeaDetail';
 import { Skills } from './pages/Skills';
 import { SkillDetail } from './pages/SkillDetail';
+import { Tools } from './pages/Tools';
 import { Tasks } from './pages/Tasks';
 import { TaskDetail } from './pages/TaskDetail';
 import { TaskShare } from './pages/TaskShare';
@@ -168,6 +169,8 @@ function AuthedApp() {
         <Route path="ideas/:id" element={<IdeaDetail />} />
         <Route path="skills" element={<Skills />} />
         <Route path="skills/:id" element={<SkillDetail />} />
+        {/* The provider hands out `connectPath: '/tools'` — this route is what makes that land somewhere (BEA-1346). */}
+        <Route path="tools" element={<Tools />} />
         <Route path="doc/:id" element={<DocDetail />} />
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="today" element={<Today />} />
