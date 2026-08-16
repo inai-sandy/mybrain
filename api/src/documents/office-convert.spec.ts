@@ -1,5 +1,5 @@
 import AdmZip from 'adm-zip';
-import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, OFFICE_EXTS } from './office-convert';
+import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, kindFromBytes, looksLikeText, OFFICE_EXTS } from './office-convert';
 
 /**
  * Locks the office-file → markdown path added in BEA-1339.
@@ -149,5 +149,39 @@ describe('pdfHasNoTextToRead', () => {
 
   it('is false for a corrupt file — that is a broken upload, not a missing-OCR problem', async () => {
     expect(await pdfHasNoTextToRead(Buffer.from('%PDF-1.4 and then garbage'))).toBe(false);
+  });
+});
+
+describe('kindFromBytes — the name is a claim, the bytes are the fact (BEA-1343)', () => {
+  it('sees a Word file however it is named', () => {
+    expect(kindFromBytes(docx(para('hi')))).toBe('doc');
+  });
+
+  it('sees a PDF however it is named', () => {
+    expect(kindFromBytes(textPdf())).toBe('pdf');
+  });
+
+  it('says nothing about genuine text, which has no marker to read', () => {
+    expect(kindFromBytes(Buffer.from('# Just a markdown note\n'))).toBeNull();
+    expect(kindFromBytes(Buffer.from('name,qty\nboard,10\n'))).toBeNull();
+  });
+});
+
+describe('looksLikeText', () => {
+  it('accepts real text, including accents and emoji', () => {
+    expect(looksLikeText(Buffer.from('# Héllo — wörld 🌍\n\nSome body text.'))).toBe(true);
+    expect(looksLikeText(Buffer.from(''))).toBe(true);
+  });
+
+  it('rejects a file with NUL bytes', () => {
+    expect(looksLikeText(Buffer.from([0x48, 0x00, 0x49]))).toBe(false);
+  });
+
+  it('rejects invalid UTF-8', () => {
+    expect(looksLikeText(Buffer.from([0xff, 0xfe, 0xfd, 0xfc]))).toBe(false);
+  });
+
+  it('rejects a real Word file being passed off as text', () => {
+    expect(looksLikeText(docx(para('hi')))).toBe(false);
   });
 });

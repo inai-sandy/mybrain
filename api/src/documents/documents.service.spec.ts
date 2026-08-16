@@ -22,8 +22,11 @@ function fakePrisma() {
       findMany: async () => [...rows].reverse(),
       findUnique: async ({ where }: any) =>
         rows.find((r) => (where.id ? r.id === where.id : where.shortCode ? r.shortCode === where.shortCode : r.slug === where.slug)) || null,
-      findFirst: async ({ where }: any) =>
-        rows.find((r) => r.slug === where.slug && (!where.NOT || r.id !== where.NOT.id)) || null,
+      findFirst: async ({ where }: any) => {
+        // findImported() looks up by sourceUrl + filename; slug lookups keep working as before.
+        if (where.sourceUrl !== undefined) return rows.find((r) => r.sourceUrl === where.sourceUrl && r.filename === where.filename) || null;
+        return rows.find((r) => r.slug === where.slug && (!where.NOT || r.id !== where.NOT.id)) || null;
+      },
       update: async ({ where, data }: any) => {
         const r = rows.find((x) => x.id === where.id);
         if (!r) throw new Error('not found');
@@ -128,6 +131,43 @@ describe('DocumentsService', () => {
       const { svc } = build();
       await expect(svc.markdownOf('nope')).rejects.toThrow(/not found/i);
     });
+  });
+
+  // The markdown branch returned early and never stamped sourceUrl, so every saved email had a null
+  // link — and findImported looks documents up BY sourceUrl, so re-saving made a duplicate. (BEA-1343)
+  it('records where an uploaded markdown file came from', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
+    await svc.createFromUpload(
+      { originalname: 'Quote.md', mimetype: 'text/markdown', buffer: Buffer.from('# Quote', 'utf8') },
+      { collectionId: 'col-email', sourceUrl: 'https://mail.google.com/thread/9' },
+    );
+    expect(prisma._rows[0].sourceUrl).toBe('https://mail.google.com/thread/9');
+    expect(prisma._rows[0].collectionId).toBe('col-email');
+  });
+
+  it('finds a document again by where it came from, so a re-import is not a duplicate', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
+    const link = 'https://mail.google.com/thread/9';
+    await svc.createFromUpload(
+      { originalname: 'Quote.md', mimetype: 'text/markdown', buffer: Buffer.from('# Quote', 'utf8') },
+      { sourceUrl: link },
+    );
+    expect(await svc.findImported(link, 'Quote.md')).toBeTruthy();
+    expect(await svc.findImported(link, 'Other.md')).toBeNull();
+  });
+
+  // A Word file called "report.docx.txt", or a PDF renamed ".md", used to be stored as its own raw
+  // bytes turned into text — pages of PK\x03\x04 junk, indexed into the brain. (BEA-1343)
+  it('refuses to store a binary file as if it were words', async () => {
+    const prisma = fakePrisma();
+    const svc = new DocumentsService(prisma as any, fakeLlm() as any, fakeItems() as any, { get: async () => '' } as any);
+    const binary = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a, 0xff, 0xfe]);
+    await expect(
+      svc.createFromUpload({ originalname: 'picture.md', mimetype: 'text/markdown', buffer: binary }),
+    ).rejects.toThrow(/isn’t a text file|not a text file/i);
+    expect(prisma._rows).toHaveLength(0); // nothing saved
   });
 
   it('recovers a UTF-8 filename that multer decoded as latin1 (em-dash) (BEA-801)', async () => {

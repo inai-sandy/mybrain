@@ -9,7 +9,7 @@ import { LlmService, LlmConfig } from '../llm/llm.service';
 import { ItemsService } from '../items/items.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { buildTitleCardSvg, svgToPng, extractOwnOgImage } from './documents-og';
-import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead } from './office-convert';
+import { isOfficeFile, officeToMarkdown, pdfHasNoTextToRead, kindFromBytes, looksLikeText } from './office-convert';
 import TurndownService from 'turndown';
 
 // Shared HTML→Markdown converter for the raw share link (BEA-970). ATX headings + fenced code.
@@ -46,6 +46,7 @@ export type DocInput = {
   kind?: string;
   tags?: string[];
   collectionId?: string | null;
+  filename?: string | null; // an uploaded text file keeps its name so re-imports can find it (BEA-1343)
   noIndex?: boolean; // agent/flow outputs stay OUT of the brain until "Add to my Brain" (BEA-1101)
 };
 
@@ -328,7 +329,17 @@ export class DocumentsService {
 
   /** Replace a document's text in place — used when re-importing an email that has new replies. */
   async replaceContent(id: string, contentText: string): Promise<{ id: string; title: string }> {
-    const row = await this.prisma.document.update({ where: { id }, data: { contentText } });
+    // Refresh the summary and size too — updating only the text left the card describing the old
+    // content, which is what the owner reads in lists and search. (BEA-1343)
+    const ai = await this.summarize(contentText).catch(() => ({ description: '', tags: [] as string[] }));
+    const row = await this.prisma.document.update({
+      where: { id },
+      data: {
+        contentText,
+        bytes: Buffer.byteLength(contentText, 'utf8'),
+        ...(ai.description ? { description: ai.description.slice(0, 200) } : {}),
+      },
+    });
     return { id: row.id, title: row.title };
   }
 
@@ -344,7 +355,10 @@ export class DocumentsService {
     const hit = all.find((c) => c.name.trim().toLowerCase() === n.toLowerCase());
     if (hit) return hit.id;
     const made = await this.createCollection(n, undefined, icon);
-    return made?.id || null;
+    if (made?.id) return made.id;
+    // Lost a race with another import creating the same folder — take whichever one won. (BEA-1343)
+    const again = await this.prisma.documentCollection.findMany({ select: { id: true, name: true } });
+    return again.find((c) => c.name.trim().toLowerCase() === n.toLowerCase())?.id || null;
   }
 
   renameCollection(id: string, name: string, color?: string, icon?: string) {
@@ -383,6 +397,7 @@ export class DocumentsService {
       tags,
       noIndex: !!input.noIndex,
       collectionId: input.collectionId ?? null,
+      filename: input.filename ?? null,
     });
   }
 
@@ -422,9 +437,15 @@ export class DocumentsService {
   }
 
   /** Detect the document kind from a filename/mime. */
-  private kindOf(name: string, mime?: string): 'md' | 'html' | 'pdf' | 'image' | 'doc' {
+  private kindOf(name: string, mime?: string, buffer?: Buffer): 'md' | 'html' | 'pdf' | 'image' | 'doc' {
     const ext = extname(name || '').toLowerCase().replace('.', '');
     if ((mime || '').startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'].includes(ext)) return 'image';
+    // The bytes beat the name: "report.docx.txt" is still a Word file, and a PDF renamed ".md" is
+    // still a PDF. Without this they fell through to 'md' and were stored as binary junk. (BEA-1343)
+    if (buffer) {
+      const sniffed = kindFromBytes(buffer);
+      if (sniffed) return sniffed;
+    }
     if (mime === 'application/pdf' || ext === 'pdf') return 'pdf';
     if (mime === 'text/html' || ['html', 'htm'].includes(ext)) return 'html';
     // Word/Excel/PowerPoint/OpenDocument/RTF/EPUB/CSV — converted to markdown on upload. Checked
@@ -446,12 +467,18 @@ export class DocumentsService {
     if (ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed') {
       return this.createFromZip(file, opts);
     }
-    const kind = this.kindOf(name, file.mimetype);
+    const kind = this.kindOf(name, file.mimetype, file.buffer);
     const title = name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 200) || 'Untitled';
 
     if (kind === 'md' || kind === 'html') {
+      // Anything that reaches here is about to be stored as the document's words, so it has to
+      // actually be words. (BEA-1343)
+      if (!looksLikeText(file.buffer)) {
+        throw new Error(`“${name}” isn’t a text file we can read. Try uploading it with its real file type.`);
+      }
       const content = file.buffer.toString('utf8');
-      return this.create({ title, contentText: content, kind, collectionId: opts?.collectionId ?? null });
+      const made = await this.create({ title, contentText: content, kind, collectionId: opts?.collectionId ?? null, filename: name });
+      return this.stampSource(made, opts);
     }
 
     // Office files convert BEFORE anything is written, so a file we cannot read leaves no orphan
@@ -506,10 +533,53 @@ export class DocumentsService {
       bytes: file.size ?? file.buffer.length,
       collectionId: opts?.collectionId ?? null,
     });
-    if (opts?.sourceUrl) {
-      await this.prisma.document.update({ where: { id: doc.id }, data: { sourceUrl: opts.sourceUrl.slice(0, 500) } }).catch(() => undefined);
-    }
+    await this.stampSource(doc, opts);
     return notice ? { ...(doc as any), notice } : doc;
+  }
+
+  /**
+   * Re-import over an existing document: rewrite its stored file, re-convert its text and refresh
+   * its summary. Used when the same Drive file is imported twice, so a second import updates the
+   * document instead of leaving a duplicate in the library. (BEA-1343)
+   */
+  async refreshFromUpload(id: string, file: UploadFile): Promise<{ id: string; title: string }> {
+    const row = await this.prisma.document.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Document not found');
+    const name = this.fixFilename(file.originalname || row.filename || 'file');
+    const kind = this.kindOf(name, file.mimetype, file.buffer);
+
+    let text = '';
+    if (kind === 'doc') text = await officeToMarkdown(file.buffer, name);
+    else if (kind === 'pdf') text = await pdfParse(file.buffer).then((r) => r.text || '').catch(() => '');
+    else if (kind === 'md' || kind === 'html') text = looksLikeText(file.buffer) ? file.buffer.toString('utf8') : '';
+
+    // Only touch the stored file once the new content is in hand, so a failed convert can't leave
+    // the document holding a file that no longer matches its text.
+    if (row.filePath) await fs.writeFile(row.filePath, file.buffer).catch(() => undefined);
+
+    const ai = text.trim() ? await this.summarize(text).catch(() => ({ description: '', tags: [] as string[] })) : { description: '', tags: [] as string[] };
+    const updated = await this.prisma.document.update({
+      where: { id },
+      data: {
+        contentText: text.trim() ? text : null,
+        bytes: file.size ?? file.buffer.length,
+        ...(ai.description ? { description: ai.description.slice(0, 200) } : {}),
+      },
+    });
+    return { id: updated.id, title: updated.title };
+  }
+
+  /**
+   * Record where an imported document came from. Both upload branches must call this: the markdown
+   * branch returns early, so when only the binary branch stamped it, every saved email had a null
+   * sourceUrl — and `findImported` looks documents up BY sourceUrl, so the duplicate check never
+   * matched and each re-save made another copy. (BEA-1343)
+   */
+  private async stampSource<T extends { id: string }>(doc: T, opts?: { sourceUrl?: string | null }): Promise<T> {
+    if (!opts?.sourceUrl) return doc;
+    const sourceUrl = opts.sourceUrl.slice(0, 500);
+    await this.prisma.document.update({ where: { id: doc.id }, data: { sourceUrl } }).catch(() => undefined);
+    return { ...(doc as any), sourceUrl };
   }
 
   /** Unzip a multi-file site into its own folder; keep the original zip for download. (BEA-587) */
