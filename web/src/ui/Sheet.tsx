@@ -74,6 +74,10 @@ export function Sheet({
             onDragEnd={(_e, info) => {
               if (info.offset.y > 110 || info.velocity.y > 700) dismissByGesture();
             }}
+            // Announced as a modal, like ConfirmDialog already is — a screen reader had no way to
+            // know the page behind this panel was inert.
+            role="dialog"
+            aria-modal="true"
             className={'relative w-full rounded-t-2xl sm:rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl max-h-[calc(var(--vvh,100vh)-1.25rem)] overflow-y-auto ' + (size === 'sm' ? 'sm:max-w-sm' : size === 'full' ? 'sm:max-w-3xl' : 'sm:max-w-lg')}
           >
             {/* grab handle (mobile) — drag this to dismiss */}

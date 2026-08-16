@@ -19,7 +19,25 @@ constant so a future multi-tenant instance changes it in one place.
 
 ## List toolkits
 `GET /toolkits?limit=N` → `{ items[], total_items: 1209, total_pages, next_cursor, current_page }`
-Paginate with `next_cursor`.
+Paginate with `next_cursor`. **`limit=500` is honoured** — all 1,209 in three round trips (~2.3s)
+instead of thirteen (~10s). Each item carries the same `meta` as the single-toolkit call, including
+`meta.categories: [{id,name}]` (a toolkit is usually in two or three), so one walk gives you the
+whole browse list AND the category counts.
+
+### How the 1,209 actually split (counted live, 2026-08-16)
+| | count | what it means for the UI |
+|---|---:|---|
+| Composio-managed auth | **121** | one-click Connect works |
+| Bring your own app/key | **1,056** | the COMMON case, not Vercel's oddity — needs a real form |
+| No auth at all | **32** | must NOT be offered a Connect button (see below) |
+
+Biggest categories: developer-tools 341 · marketing-automation 110 · analytics 110 ·
+artificial-intelligence 89 · crm 74. 88 distinct categories in all.
+
+⚠️ **`GET /toolkits/categories` is unusable** — it answers with duplicate ids and names that no
+toolkit is filed under. Build a category list by counting `meta.categories` across the toolkits.
+
+⚠️ **70 of the logo URLs 404.** Always render a fallback tile.
 
 ## One toolkit
 `GET /toolkits/<slug>` →
@@ -63,6 +81,41 @@ Use:
 ```
 **`redirect_url` expires in ~12 minutes.** Mint it fresh on demand; never cache or persist it.
 For a second account of the same toolkit, the SDK equivalent needs `allowMultiple: true`.
+
+## Bring-your-own auth — the two halves (verified live 2026-08-16, BEA-1346)
+
+`auth_config_details[0].fields` has **two** halves and the required fields sit in one or the other
+depending on the auth mode. Sending one half to the other's endpoint silently does nothing.
+
+| mode | example | required fields live in | where they go |
+|---|---|---|---|
+| `OAUTH2` | twitter: `client_id`, `client_secret`, `generic_id` | `auth_config_creation` | the auth config's `credentials`, then the normal `/link` redirect |
+| `API_KEY` | vercel: `bearer_token` · openai: `generic_api_key` | `connected_account_initiation` | the **account**, not the auth config — and there is no browser step at all |
+
+Custom auth config (either mode) — `credentials: {}` is accepted and correct for `API_KEY`:
+```json
+POST /auth_configs
+{"toolkit":{"slug":"vercel"},
+ "auth_config":{"type":"use_custom_auth","name":"mybrain-vercel","authScheme":"API_KEY","credentials":{}}}
+```
+Then, for `API_KEY` only, create the account directly — **`POST /connected_accounts` is only
+deprecated for Composio-MANAGED OAuth, and it is the one endpoint that takes a key**:
+```json
+POST /connected_accounts
+{"auth_config":{"id":"ac_…"},
+ "connection":{"user_id":"mybrain-owner",
+   "state":{"authScheme":"API_KEY","val":{"status":"ACTIVE","bearer_token":"…"}}}}
+```
+→ `201 {"id":"ca_…","status":"ACTIVE","redirect_url":null}`. Both the account and the auth config
+delete cleanly (`DELETE /connected_accounts/<id>`, `DELETE /auth_configs/<id>` → `{"success":true}`).
+
+## No-auth toolkits cannot be connected — and must not be asked
+`POST /auth_configs` for a `no_auth: true` toolkit answers **HTTP 400**:
+> Cannot create an auth config for toolkit "hackernews" because it does not require authentication.
+> …works without an auth config. You can use its tools directly without creating a connected account.
+
+Both `use_custom_auth` and `use_composio_managed_auth` are refused. So a Connect button on one of
+these 32 can only ever produce an error — say "ready to use" instead.
 
 ## List connections
 `GET /connected_accounts?limit=N` → `{ total_items, items:[{ id, user_id, status,

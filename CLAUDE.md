@@ -64,7 +64,15 @@ The machine backs these rules: tests block on red, files auto-format, dangerous 
 **AI Radar (BEA-1311→1313)**
 The Radar tab on `/news?view=radar` mirrors an external collector — the fork `inai-sandy/ai-news-radar`, which fetches/dedupes/scores AI news hourly on GitHub Actions and publishes JSON to GitHub Pages (`RADAR_BASE_URL`, default `https://inai-sandy.github.io/ai-news-radar/data`). `RadarFeedService` syncs it hourly into `RadarItem` with counted results and translates any Chinese title at sync (free Google endpoint, `radar-translate` helper fallback) — an item is NEVER listed untranslated (`pendingTranslation` hides it). `RadarWriteService` writes the picks' one-line notes in batched `radar-why` engine calls — an hourly check that only calls the engine when a pick lacks its line (honest-runs: failures leave picks pending). The upstream feed list lives in the fork's `FOLLOW_OPML_B64` repo secret, not in this repo.
 
-**Outside services (BEA-1345)**
+**Outside services (BEA-1345 · BEA-1346)**
+The owner manages them at **`/tools`** (next to Skills) — browse all 1,209, connect, several
+accounts per service, rename, disconnect. It talks only to `/api/tools/services*`
+(`tools/services.controller.ts`), which talks only to the seam. Three connect roads, all decided by
+the toolkit and never guessed: **121** services have a one-click login, **1,056** need the owner's
+own app or key (the common case — it gets a real form, with the fields split into the two halves the
+vendor reads), and **32** need no sign-in at all and must NOT be offered a Connect button, because
+Composio answers HTTP 400 for those. Shapes in `specs/COMPOSIO-API.md`.
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).

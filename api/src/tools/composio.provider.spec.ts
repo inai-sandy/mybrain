@@ -30,6 +30,18 @@ const TOOLKITS: Record<string, any> = {
     auth_config_details: [{ mode: 'API_KEY', fields: { auth_config_creation: { required: [] }, connected_account_initiation: { required: [{ name: 'bearer_token', displayName: 'Bearer token' }] } } }],
   },
   tavily: { slug: 'tavily', name: 'Tavily', composio_managed_auth_schemes: ['API_KEY'], meta: { tools_count: 3, triggers_count: 0, categories: [] } },
+  // Twitter's real shape: an OAuth service with no managed login, so the owner supplies their own
+  // APP's details — and those go to the login config, not to the account.
+  twitter: {
+    slug: 'twitter',
+    name: 'Twitter',
+    composio_managed_auth_schemes: [],
+    no_auth: false,
+    meta: { tools_count: 40, triggers_count: 0, categories: [{ id: 'social', name: 'social' }] },
+    auth_config_details: [{ mode: 'OAUTH2', fields: { auth_config_creation: { required: [{ name: 'client_id', displayName: 'Client id' }, { name: 'client_secret', displayName: 'Client secret' }] }, connected_account_initiation: { required: [] } } }],
+  },
+  // Verified live: Composio REFUSES to make a login config for one of these, so we must not try.
+  hackernews: { slug: 'hackernews', name: 'Hacker News', composio_managed_auth_schemes: [], no_auth: true, meta: { tools_count: 5, triggers_count: 0, categories: [] } },
 };
 
 const TOOLS: Record<string, any[]> = {
@@ -41,7 +53,7 @@ const TOOLS: Record<string, any[]> = {
 };
 
 /** A stand-in for Composio's REST API — every route answers with a recorded shape. */
-function fakeApi(opts: { accounts?: any[]; fail?: boolean; execFails?: boolean } = {}) {
+function fakeApi(opts: { accounts?: any[]; fail?: boolean; execFails?: boolean; noAuthConfigs?: boolean } = {}) {
   const calls: { method: string; url: string; body?: any }[] = [];
   const fetchMock = async (url: string, init: any = {}) => {
     const method = init.method || 'GET';
@@ -64,12 +76,13 @@ function fakeApi(opts: { accounts?: any[]; fail?: boolean; execFails?: boolean }
       return json({ items: TOOLS[u.searchParams.get('toolkit_slug') || ''] || [], next_cursor: null });
     }
     if (u.pathname.endsWith('/connected_accounts')) {
+      if (method === 'POST') return json({ id: 'ca_direct', status: 'ACTIVE', connectionData: { authScheme: body?.connection?.state?.authScheme, val: body?.connection?.state?.val } });
       const mine = (opts.accounts || []).filter((a) => a.user_id === u.searchParams.get('user_ids'));
       return json({ items: mine, total_items: mine.length, next_cursor: null });
     }
     if (u.pathname.endsWith('/auth_configs')) {
       if (method === 'POST') return json({ toolkit: { slug: 'github' }, auth_config: { id: 'ac_new', auth_scheme: 'OAUTH2', is_composio_managed: true } });
-      return json({ items: [{ id: 'ac_existing' }], next_cursor: null });
+      return json({ items: opts.noAuthConfigs ? [] : [{ id: 'ac_existing' }], next_cursor: null });
     }
     if (u.pathname.endsWith('/connected_accounts/link')) {
       return json({ link_token: 'lk_1', redirect_url: 'https://connect.composio.dev/link/lk_1', connected_account_id: 'ca_new' });
@@ -233,6 +246,90 @@ describe('ComposioProvider', () => {
     const p = new ComposioProvider(connectors('k'), prisma());
     expect((await p.execute('GITHUB_CREATE_ISSUE', {})).ok).toBe(false);
     expect((await p.execute('search_brain', {})).ok).toBe(false);
+  });
+
+  /**
+   * The three roads out of `connect()` (BEA-1346). Which one is taken is decided by the toolkit,
+   * and each was checked against the live API on 2026-08-16 before it was written here.
+   */
+  it('sends a key-based service its key on the ACCOUNT, never on the login config', async () => {
+    const { fetchMock, calls } = fakeApi({ noAuthConfigs: true });
+    global.fetch = fetchMock as any;
+    const db = prisma();
+    const p = new ComposioProvider(connectors('k'), db);
+    const r = await p.connect('vercel', { credentials: { bearer_token: 'tok_live' }, label: 'my vercel' });
+
+    expect(r.ok).toBe(true);
+    expect(r.done).toBe(true); // an API key needs no trip to a browser
+    expect(r.redirectUrl).toBeUndefined();
+    expect(r.connectionId).toBe('ca_direct');
+
+    // The login config is ours (custom), and carries NOTHING — Vercel's field belongs to the account.
+    const cfg = calls.find((c) => c.method === 'POST' && c.url.includes('/auth_configs'))!;
+    expect(cfg.body.auth_config).toMatchObject({ type: 'use_custom_auth', authScheme: 'API_KEY', credentials: {} });
+    // And the key itself went where the vendor actually reads it.
+    const acct = calls.find((c) => c.method === 'POST' && /\/connected_accounts$/.test(new URL(c.url).pathname))!;
+    expect(acct.body.connection.state).toEqual({ authScheme: 'API_KEY', val: { status: 'ACTIVE', bearer_token: 'tok_live' } });
+    expect(calls.some((c) => c.url.includes('/connected_accounts/link'))).toBe(false);
+    expect(db.rows[0]).toMatchObject({ service: 'vercel', connectedAccountId: 'ca_direct', label: 'my vercel' });
+  });
+
+  it('sends an own-app OAuth service its client details on the login config, then the redirect', async () => {
+    const { fetchMock, calls } = fakeApi({ noAuthConfigs: true });
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const r = await p.connect('twitter', { credentials: { client_id: 'cid', client_secret: 'shh' } });
+
+    expect(r.ok).toBe(true);
+    expect(r.redirectUrl).toBe('https://connect.composio.dev/link/lk_1'); // OAuth still needs the browser
+    const cfg = calls.find((c) => c.method === 'POST' && c.url.includes('/auth_configs'))!;
+    expect(cfg.body.auth_config).toMatchObject({ type: 'use_custom_auth', authScheme: 'OAUTH2', credentials: { client_id: 'cid', client_secret: 'shh' } });
+    // Nothing was posted straight at an account — that road is for keys only.
+    expect(calls.some((c) => c.method === 'POST' && /\/connected_accounts$/.test(new URL(c.url).pathname))).toBe(false);
+  });
+
+  it('never tries to sign in to a service that has no sign-in', async () => {
+    const { fetchMock, calls } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const [hn] = (await p.listServices()).filter((s) => s.slug === 'hackernews');
+    expect(hn.noAuth).toBe(true);
+
+    const r = await p.connect('hackernews');
+    expect(r.ok).toBe(true);
+    expect(r.done).toBe(true);
+    expect(r.message).toMatch(/no sign-in/i);
+    // Composio answers HTTP 400 for these ("works without an auth config") — asking would only
+    // turn a usable service into an error message.
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('splits what the owner must supply into the two halves the vendor reads', async () => {
+    const { fetchMock } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const vercel = await p.getService('vercel');
+    expect(vercel!.needsAuthConfig).toEqual([]);
+    expect(vercel!.needsAccount!.map((f) => f.name)).toEqual(['bearer_token']);
+    expect(vercel!.needsAccount![0].secret).toBe(true); // shown as a password box, not in the clear
+    expect(vercel!.authMode).toBe('API_KEY');
+
+    const twitter = await p.getService('twitter');
+    expect(twitter!.needsAuthConfig!.map((f) => f.name)).toEqual(['client_id', 'client_secret']);
+    expect(twitter!.needsAccount).toEqual([]);
+    expect(twitter!.categories).toEqual([{ id: 'social', name: 'social' }]);
+  });
+
+  it('remembers the owner’s own name for an account, and forgets what it read a moment ago', async () => {
+    const { fetchMock } = fakeApi({ accounts: [ACTIVE_GITHUB] });
+    global.fetch = fetchMock as any;
+    const db = prisma();
+    db.serviceConnection.updateMany = async () => ({ count: 1 });
+    const p = new ComposioProvider(connectors('k'), db);
+    expect(await p.renameConnection('ca_1', 'work github')).toEqual({ ok: true });
+    expect((await p.renameConnection('ca_1', '  ')).ok).toBe(false); // a blank name is not a name
+    expect((await p.renameConnection('', 'x')).ok).toBe(false);
+    expect(typeof p.refresh).toBe('function');
   });
 
   it('works without a database — the table is our own bookkeeping, not the source of truth', async () => {

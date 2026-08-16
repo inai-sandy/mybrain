@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   BLOCKED_SERVICES,
   ConnectResult,
+  CredentialField,
   ExecuteResult,
   isBlockedService,
   isRiskyAction,
@@ -47,7 +48,11 @@ const CACHE_MS = 5 * 60 * 1000;
 
 /** A stop on pagination, so one enormous toolkit can never walk 18 pages on a catalog request. */
 const MAX_PAGES = 20;
-const PAGE_SIZE = 100;
+/**
+ * 500, not 100. Verified live: the toolkits endpoint honours it, which turns a walk of all 1,209
+ * services from thirteen round trips (~10s, and the owner watching a skeleton) into three (~3s).
+ */
+const PAGE_SIZE = 500;
 
 /** A ceiling on the in-memory cache, so browsing all 1,209 services cannot pin them all in RAM. */
 const MAX_CACHE_ENTRIES = 300;
@@ -107,6 +112,24 @@ export class ComposioProvider implements ServiceProvider {
   }
 
   /**
+   * One service, in full — one request, straight at the toolkit, no search involved.
+   *
+   * The list endpoint's `search` is not semantic (verified: "authenticated user" returns
+   * `ACCEPT_A_REPOSITORY_INVITATION` first), so looking a known slug up through it would be both
+   * slower and capable of missing the very service asked for.
+   */
+  async getService(slug: string): Promise<ServiceInfo | null> {
+    const s = String(slug || '').toLowerCase();
+    if (!s || isBlockedService(s) || !(await this.apiKey())) return null;
+    try {
+      return await this.serviceInfo(s, await this.accountsByService());
+    } catch (e: any) {
+      this.log.warn(`getService(${s}) failed: ${this.plainError(e)}`);
+      return null;
+    }
+  }
+
+  /**
    * One service's actions, with the JSON schema an agent fills its arguments from.
    *
    * `important: true` asks Composio for its own shortlist (GitHub 36 of 871, Gmail 13 of 61) — the
@@ -128,11 +151,16 @@ export class ComposioProvider implements ServiceProvider {
   }
 
   /**
-   * Start a login for a service.
+   * Start a login for a service. Three roads out of here, and which one is taken is decided by the
+   * toolkit itself, never guessed:
    *
-   * Not every toolkit ships Composio-managed auth — Vercel returns an empty
-   * `composio_managed_auth_schemes`, which means the owner has to register their own OAuth app and
-   * paste its client id/secret. We say so instead of handing back a one-click URL that cannot work.
+   *  1. **No sign-in at all** (32 toolkits — Hacker News, the weather). Verified live: Composio
+   *     REFUSES to make a login config for one of these ("works without an auth config … use its
+   *     tools directly"), so we say it is already usable instead of manufacturing an error.
+   *  2. **A ready-made login** (121 toolkits, GitHub among them) — mint a redirect and send the
+   *     owner to the provider.
+   *  3. **Bring your own app** (the other 1,056, Vercel among them) — ask for the credentials, then
+   *     put each one where the vendor actually reads it (see `credentialSplit`).
    */
   async connect(service: string, opts: { label?: string; callbackUrl?: string; credentials?: Record<string, any> } = {}): Promise<ConnectResult> {
     const slug = String(service || '').toLowerCase();
@@ -143,23 +171,48 @@ export class ComposioProvider implements ServiceProvider {
     try {
       const toolkit = await this.toolkit(slug);
       if (!toolkit) return { ok: false, message: `We could not find a service called "${slug}".` };
+      const name = toolkit.name || slug;
       const managed = (toolkit.composio_managed_auth_schemes || []).length > 0;
-      const needs = this.credentialFields(toolkit);
+      const split = this.credentialSplit(toolkit);
+      const needs = [...split.authConfig, ...split.account];
 
-      if (!managed && !toolkit.no_auth && !opts.credentials) {
+      // 1. Nothing to sign into.
+      if (toolkit.no_auth) return { ok: true, done: true, status: 'ACTIVE', message: `${name} needs no sign-in — it is ready to use.` };
+
+      // 3a. Bring your own app, and we have not been given the details yet.
+      if (!managed && !opts.credentials) {
         return {
           ok: false,
           needsCredentials: true,
           fields: needs,
-          message: `${toolkit.name || slug} has no ready-made login — you need to register your own app with them and paste its details here.`,
+          message: `${name} has no ready-made login — you need your own ${split.account.length && !split.authConfig.length ? 'key from them' : 'app registered with them'} first.`,
         };
       }
 
-      const authConfigId = await this.ensureAuthConfig(slug, managed, opts.credentials, toolkit);
+      const creds = opts.credentials || {};
+      const authConfigCreds = this.pick(creds, split.authConfig);
+      const accountCreds = this.pick(creds, split.account);
+      const mode = this.authMode(toolkit);
+      const authConfigId = await this.ensureAuthConfig(slug, managed, Object.keys(authConfigCreds).length ? authConfigCreds : undefined, toolkit);
 
-      // `/connected_accounts` (POST) is gone for Composio-managed OAuth — it answers HTTP 400 and
-      // points at `/connected_accounts/link`. The link it returns EXPIRES in about 12 minutes, so
-      // it is minted on demand here and never cached or stored.
+      // 3b. A key or token: the account carries the secret, and there is no browser step at all.
+      // Verified live — `POST /connected_accounts` is only deprecated for MANAGED OAuth, and it is
+      // the one endpoint that takes an API key.
+      if (Object.keys(accountCreds).length) {
+        const made = await this.post('/connected_accounts', {
+          auth_config: { id: authConfigId },
+          connection: { user_id: USER_ID, state: { authScheme: mode, val: { status: 'ACTIVE', ...accountCreds } } },
+        });
+        const id = made?.id || made?.connected_account_id;
+        const st = String(made?.status || made?.connectionData?.val?.status || 'ACTIVE').toUpperCase();
+        await this.rememberConnection(slug, id, opts.label || name, st);
+        this.cache.clear();
+        return { ok: true, done: true, connectionId: id, status: st, message: `${name} is connected.` };
+      }
+
+      // 2. The redirect road. `POST /connected_accounts` is gone for Composio-managed OAuth — it
+      // answers HTTP 400 and points at `/connected_accounts/link`. The link it returns EXPIRES in
+      // about 12 minutes, so it is minted on demand here and never cached or stored.
       const created = await this.post('/connected_accounts/link', {
         auth_config_id: authConfigId,
         user_id: USER_ID,
@@ -169,12 +222,44 @@ export class ComposioProvider implements ServiceProvider {
       const connectionId = created?.connected_account_id || created?.id || created?.connectionData?.id;
       const redirectUrl = created?.redirect_url || created?.redirect_uri || created?.connectionData?.val?.redirectUrl;
       const status = String(created?.connectionData?.val?.status || created?.status || 'INITIALIZING').toUpperCase();
-      await this.rememberConnection(slug, connectionId, opts.label || toolkit.name || slug, status);
+      await this.rememberConnection(slug, connectionId, opts.label || name, status);
       this.cache.clear();
       return { ok: true, connectionId, redirectUrl, status };
     } catch (e: any) {
+      // With the owner's own key in the request, the vendor's error body can quote the value it
+      // rejected — so a failed credentials attempt gets a plain sentence, never an echoed secret.
+      if (opts.credentials) return { ok: false, message: 'Those details were not accepted. Check them and try again.' };
       return { ok: false, message: this.plainError(e) };
     }
+  }
+
+  /** Rename one account. The label is ours, not the vendor's — it only lives in our own table. */
+  async renameConnection(connectionId: string, label: string): Promise<{ ok: boolean; message?: string }> {
+    const name = String(label || '').trim().slice(0, 80);
+    if (!connectionId) return { ok: false, message: 'No connection given.' };
+    if (!name) return { ok: false, message: 'Give the account a name.' };
+    try {
+      const updated = await this.prisma?.serviceConnection?.updateMany?.({ where: { connectedAccountId: connectionId }, data: { label: name } });
+      // A connection made before this row existed (or straight in Composio's own console) has
+      // nothing to update — write the row rather than silently dropping the owner's name for it.
+      if (!updated?.count) {
+        const service = await this.serviceOfConnection(connectionId);
+        await this.prisma?.serviceConnection?.upsert?.({
+          where: { connectedAccountId: connectionId },
+          create: { service: service || 'unknown', connectedAccountId: connectionId, label: name, status: 'ACTIVE' },
+          update: { label: name },
+        });
+      }
+      this.cache.clear();
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, message: this.plainError(e) };
+    }
+  }
+
+  /** Forget what was read a moment ago — used right after a connect, so the page sees the truth. */
+  refresh() {
+    this.cache.clear();
   }
 
   async disconnect(connectionId: string): Promise<{ ok: boolean; message?: string }> {
@@ -225,10 +310,12 @@ export class ComposioProvider implements ServiceProvider {
   private toServiceInfo(t: any, accounts: ServiceAccount[]): ServiceInfo {
     const meta = t?.meta || {};
     const cats: any[] = meta.categories || t?.categories || [];
+    const split = this.credentialSplit(t);
     return {
       slug: String(t?.slug || '').toLowerCase(),
       name: t?.name || t?.slug || 'Service',
       category: cats[0]?.name || cats[0]?.slug || cats[0]?.id || 'Other',
+      categories: cats.map((c) => ({ id: String(c?.id || c?.slug || c?.name || '').toLowerCase(), name: c?.name || c?.id || '' })).filter((c) => c.id),
       connected: accounts.length > 0,
       accounts,
       description: meta.description || undefined,
@@ -238,7 +325,10 @@ export class ComposioProvider implements ServiceProvider {
       managedAuth: (t?.composio_managed_auth_schemes || []).length > 0,
       noAuth: !!t?.no_auth,
       authSchemes: t?.auth_schemes || t?.composio_managed_auth_schemes || [],
-      needs: this.credentialFields(t),
+      authMode: this.authMode(t),
+      needs: [...split.authConfig, ...split.account],
+      needsAuthConfig: split.authConfig,
+      needsAccount: split.account,
     };
   }
 
@@ -256,25 +346,62 @@ export class ComposioProvider implements ServiceProvider {
   }
 
   /**
-   * What the owner must supply when there is no managed login for a service.
+   * What the owner must supply when there is no managed login — kept in the two halves the vendor
+   * actually reads, because they go to two different calls.
    *
-   * Both halves matter, and which one is filled depends on the auth style: an OAuth service asks
-   * for its app's client id/secret under `auth_config_creation` (GitHub), while a key-based one
-   * asks for the key itself under `connected_account_initiation` — Vercel's only required field is
-   * `bearer_token`, and reading just the first half would have told the owner "nothing needed".
+   * Which half is filled depends on the auth style, and both were read off the live API on
+   * 2026-08-16: an OAuth service wants its app's client id/secret at **login-config** time
+   * (Twitter: `client_id`, `client_secret`, `generic_id`), while a key-based one wants the key at
+   * **account** time (Vercel's only required field is `bearer_token`, under
+   * `connected_account_initiation`). Pouring both into one bag and posting it to the auth config
+   * would leave a key-based service asking for nothing and connecting to nothing.
    */
-  private credentialFields(toolkit: any): { name: string; label: string; description?: string; required?: boolean }[] {
+  private credentialSplit(toolkit: any): { authConfig: CredentialField[]; account: CredentialField[] } {
     const details: any[] = toolkit?.auth_config_details || [];
     const fields = details[0]?.fields || {};
-    const raw: any[] = [...(fields?.auth_config_creation?.required || []), ...(fields?.connected_account_initiation?.required || [])];
-    const seen = new Set<string>();
-    const out: { name: string; label: string; description?: string; required?: boolean }[] = [];
-    for (const f of raw) {
-      if (!f?.name || seen.has(f.name)) continue;
-      seen.add(f.name);
-      out.push({ name: f.name, label: f.displayName || f.name, description: f.description || undefined, required: f.required !== false });
+    const half = (raw: any[]): CredentialField[] => {
+      const seen = new Set<string>();
+      const out: CredentialField[] = [];
+      for (const f of raw || []) {
+        if (!f?.name || seen.has(f.name)) continue;
+        seen.add(f.name);
+        out.push({
+          name: f.name,
+          label: f.displayName || f.name,
+          description: f.description || undefined,
+          required: f.required !== false,
+          // Anything that is plainly a secret gets a password box, not a plain one over the owner's shoulder.
+          secret: /secret|token|key|password/i.test(String(f.name)),
+        });
+      }
+      return out;
+    };
+    const authConfig = half(fields?.auth_config_creation?.required);
+    const names = new Set(authConfig.map((f) => f.name));
+    return { authConfig, account: half(fields?.connected_account_initiation?.required).filter((f) => !names.has(f.name)) };
+  }
+
+  /** OAUTH2 · API_KEY · BEARER_TOKEN … — the vendor's own word for how this service is signed into. */
+  private authMode(toolkit: any): string {
+    return toolkit?.auth_config_details?.[0]?.mode || (toolkit?.no_auth ? 'NO_AUTH' : toolkit?.auth_schemes?.[0] || 'OAUTH2');
+  }
+
+  private pick(values: Record<string, any>, fields: CredentialField[]): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const f of fields) {
+      const v = values?.[f.name];
+      if (v !== undefined && v !== null && String(v).trim() !== '') out[f.name] = v;
     }
     return out;
+  }
+
+  private async serviceOfConnection(connectionId: string): Promise<string | null> {
+    try {
+      const a = await this.get(`/connected_accounts/${encodeURIComponent(connectionId)}`);
+      return String(a?.toolkit?.slug || '').toLowerCase() || null;
+    } catch {
+      return null;
+    }
   }
 
   // ---- Composio reads --------------------------------------------------------------------
@@ -362,19 +489,31 @@ export class ComposioProvider implements ServiceProvider {
 
   // ---- auth configs ----------------------------------------------------------------------
 
-  /** Reuse the service's auth config if one exists, else make one. */
+  /**
+   * Reuse the service's login config if one exists, else make one.
+   *
+   * `credentials` here means **the login config's own** credentials (an OAuth app's client id and
+   * secret) — never an API key, which belongs to the account and is passed by `connect()` instead.
+   * When the owner supplies fresh app credentials we always make a new config, because the old one
+   * holds the old secret; otherwise reusing is right, and stops a second account of the same
+   * service leaving a trail of near-identical configs behind it.
+   */
   private async ensureAuthConfig(slug: string, managed: boolean, credentials: Record<string, any> | undefined, toolkit: any): Promise<string> {
     if (!credentials) {
       const existing = await this.get('/auth_configs', { toolkit_slug: slug, limit: '1' }).catch(() => null);
       const found = existing?.items?.[0]?.id;
       if (found) return found;
     }
-    const authScheme = toolkit?.auth_config_details?.[0]?.mode || (toolkit?.no_auth ? 'NO_AUTH' : 'OAUTH2');
+    const authScheme = this.authMode(toolkit);
     const name = `mybrain-${slug}`;
-    const body = credentials
-      ? { toolkit: { slug }, auth_config: { type: 'use_custom_auth', name, authScheme, credentials } }
+    // Without a ready-made login every config is one of ours — even a key-based service, whose
+    // config carries no secret at all (verified live: `credentials: {}` is accepted).
+    const custom = !managed || !!credentials;
+    const wanted = this.credentialSplit(toolkit).authConfig;
+    if (custom && wanted.length && !credentials) throw new Error(`${toolkit?.name || slug} needs your own app details first.`);
+    const body = custom
+      ? { toolkit: { slug }, auth_config: { type: 'use_custom_auth', name, authScheme, credentials: credentials || {} } }
       : { toolkit: { slug }, auth_config: { type: 'use_composio_managed_auth', name } };
-    if (!managed && !credentials && !toolkit?.no_auth) throw new Error(`${slug} needs your own app credentials.`);
     const created = await this.post('/auth_configs', body);
     const id = created?.auth_config?.id;
     if (!id) throw new Error('Composio did not return a login config.');
