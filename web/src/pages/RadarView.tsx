@@ -428,23 +428,69 @@ export function RadarView({ publicMode = false }: { publicMode?: boolean } = {})
   );
 }
 
+/** How many names the folded preview line spells out before "and N more feeds". */
+const SOURCES_PREVIEW = 5;
+
 /**
- * The Sources footer, variant A of the approved mockup — owner's final choice (BEA-1329):
- * every feed as a small pill in the house chip style, always visible.
+ * The Sources footer: the BEA-1329 pill cloud, folded by default (BEA-1333) — one preview
+ * line and a "Show all" that unfolds smoothly (0fr grid, the house pattern) into the
+ * pills. A short list skips the fold — a "Show all" hiding nothing would be a button
+ * that lies.
  */
 function SourcesFooter({ names }: { names: string[] }) {
+  const [open, setOpen] = useState(false);
+  const folds = names.length > SOURCES_PREVIEW;
+  const preview = names.slice(0, SOURCES_PREVIEW);
+
+  const pills = (
+    <div className="flex flex-wrap gap-1.5 pt-2.5">
+      {names.map((n) => (
+        <span key={n} className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-[3px] text-[10.5px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+
   return (
     <footer className="mt-10 border-t border-zinc-200 pb-2 pt-4 dark:border-zinc-800">
-      <h2 className="mb-2.5 px-0.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-        Sources · <span className="text-indigo-500 dark:text-indigo-400">{names.length}</span>
-      </h2>
-      <div className="flex flex-wrap gap-1.5">
-        {names.map((n) => (
-          <span key={n} className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-[3px] text-[10.5px] text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400">
-            {n}
-          </span>
-        ))}
+      <div className="flex items-center justify-between px-0.5">
+        <h2 className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-zinc-500">
+          Sources · <span className="text-indigo-500 dark:text-indigo-400">{names.length}</span>
+        </h2>
+        {folds && (
+          <button
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
+            className="text-[11px] font-semibold text-indigo-500 hover:text-indigo-400 dark:text-indigo-400"
+          >
+            {open ? '⌃ Close' : '⌄ Show all'}
+          </button>
+        )}
       </div>
+
+      {folds ? (
+        <>
+          {!open && (
+            <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+              {preview.map((n, i) => (
+                <span key={n}>
+                  <b className="font-semibold text-zinc-500 dark:text-zinc-400">{n}</b>
+                  {i < preview.length - 1 ? ', ' : ' '}
+                </span>
+              ))}
+              and {names.length - preview.length} more {names.length - preview.length === 1 ? 'feed' : 'feeds'}.
+            </p>
+          )}
+          <div className={'grid transition-[grid-template-rows] duration-200 ' + (open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
+            <div className="min-h-0 overflow-hidden" aria-hidden={!open}>
+              {pills}
+            </div>
+          </div>
+        </>
+      ) : (
+        pills
+      )}
     </footer>
   );
 }

@@ -161,7 +161,7 @@ describe('the Sources footer (BEA-1328)', () => {
     ]);
   });
 
-  it('renders every source as a pill under the count — always visible (BEA-1329, variant A)', async () => {
+  it('a short list shows the pills straight away — no "Show all" that hides nothing (BEA-1333)', async () => {
     vi.stubGlobal('fetch', mockFetch());
     render(<RadarView />);
     await screen.findByText('Today, hour by hour');
@@ -169,6 +169,28 @@ describe('the Sources footer (BEA-1328)', () => {
     // The name also lives inside a card's collapsed reports list, so assert the PILL exists.
     expect(screen.getAllByText('hackernews').some((el) => el.className.includes('rounded-full'))).toBe(true);
     expect(screen.queryByText('⌄ Show all')).toBeNull();
+  });
+
+  it('a long list folds to a preview line and unfolds into the pill cloud (BEA-1333)', async () => {
+    const many = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf'];
+    vi.stubGlobal('fetch', mockFetch({ status: { ...STATUS, sources: many } }));
+    render(<RadarView />);
+    await screen.findByText('Today, hour by hour');
+    expect(screen.getByText(/and 2 more feeds\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '⌄ Show all' }));
+    expect(screen.getByText('⌃ Close')).toBeTruthy();
+    expect(screen.getByText('Golf')).toBeTruthy();
+    expect(screen.queryByText(/and 2 more feeds\./)).toBeNull();
+    fireEvent.click(screen.getByText('⌃ Close'));
+    expect(screen.getByText(/and 2 more feeds\./)).toBeTruthy();
+  });
+
+  it('exactly one hidden source reads "1 more feed", not "feeds" (review fix)', async () => {
+    const six = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot'];
+    vi.stubGlobal('fetch', mockFetch({ status: { ...STATUS, sources: six } }));
+    render(<RadarView />);
+    await screen.findByText('Today, hour by hour');
+    expect(screen.getByText(/and 1 more feed\./)).toBeTruthy();
   });
 });
 
