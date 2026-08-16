@@ -55,9 +55,15 @@ export async function officeToMarkdown(buffer: Buffer, filename: string): Promis
   try {
     md = await toMarkdownBytes(buffer, fmt);
   } catch (e: any) {
-    throw new Error(`Could not read that ${extOf(filename) || 'file'} — ${e?.message || 'it may be corrupt or password-protected.'}`);
+    // The library's own message is developer-speak ("invalid Zip archive: Could not find EOCD"),
+    // so it is logged, not shown. The user gets the two things they can act on. (BEA-1339)
+    console.warn(`[documents] ${filename}: ${e?.message || e}`);
+    throw new Error(`Could not read “${filename}”. The file may be damaged, or protected with a password.`);
   }
-  md = (md || '').replace(/\n{3,}/g, '\n\n').trim();
+  // anydoc emits <br> for a line break inside a table cell (a merged or multi-line cell). Our
+  // markdown renderer doesn't allow raw HTML, so that tag showed up as literal "<br>" text on the
+  // page. A space is the only safe join — a real newline would break the GFM table. (BEA-1339)
+  md = (md || '').replace(/<br\s*\/?>/gi, ' ').replace(/\n{3,}/g, '\n\n').trim();
   if (!md) throw new Error(`That ${extOf(filename) || 'file'} had no readable content.`);
   if (md.length > MAX_MARKDOWN_CHARS) {
     throw new Error(`That ${extOf(filename) || 'file'} is too long to store (it turned into over ${Math.round(MAX_MARKDOWN_CHARS / 1024 / 1024)} MB of text).`);

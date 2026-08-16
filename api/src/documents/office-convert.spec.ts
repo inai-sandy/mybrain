@@ -106,6 +106,15 @@ describe('officeToMarkdown', () => {
     expect(md).toContain('| ESP32-S3 | 25 |');
   });
 
+  it('never leaves a raw <br> tag in a table cell, which the renderer would show as text', async () => {
+    // A merged / multi-line Word cell comes out of anydoc as "line one<br>line two". The markdown
+    // renderer escapes raw HTML, so that used to appear on the page literally as "<br>".
+    const buf = docx(`<w:tbl>${trow('Part', 'Qty')}<w:tr><w:tc>${para('AMOLED')}${para('spare')}</w:tc>${cell('25')}</w:tr></w:tbl>`);
+    const md = await officeToMarkdown(buf, 'merged.docx');
+    expect(md).not.toMatch(/<br\s*\/?>/i);
+    expect(md).toContain('AMOLED spare');
+  });
+
   it('converts a CSV, which has no content marker to sniff', async () => {
     // The regression this guards: anydoc's formatFromBytes returns null for CSV, so without the
     // extension fallback every CSV upload failed with "unrecognized file content".
