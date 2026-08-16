@@ -1509,3 +1509,22 @@ model RadarSync {
   counts     String    @default("{}")
   updatedAt  DateTime  @updatedAt
 }
+
+/// One account the owner has logged into on an outside service (BEA-1345).
+///
+/// The provider (Composio today) is the source of truth for whether a connection still works; this
+/// row is OUR side of it — the label the owner recognises and when it was last used. Several rows
+/// per service are allowed on purpose: two Gmail inboxes are two connections, not a conflict.
+model ServiceConnection {
+  id                 String    @id @default(uuid())
+  /// Service slug, e.g. "github" — never a vendor-specific name.
+  service            String
+  /// The provider's id for this connection.
+  connectedAccountId String    @unique
+  label              String?
+  status             String    @default("ACTIVE")
+  connectedAt        DateTime  @default(now())
+  lastUsedAt         DateTime?
+
+  @@index([service])
+}

@@ -3,6 +3,8 @@ import { ConnectorService } from '../connectors/connector.service';
 import { SkillsService } from '../skills/skills.service';
 import { GoogleService } from '../google/google.service';
 import { LlmService } from '../llm/llm.service';
+import { ComposioProvider } from './composio.provider';
+import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo } from './service-provider';
 
 /**
  * The ONE tool catalog (BEA-1167).
@@ -16,7 +18,7 @@ import { LlmService } from '../llm/llm.service';
  * degrades to a plain reasoning step); renaming one silently breaks saved flows.
  */
 
-export type ToolGroup = 'Brain' | 'Web' | 'Google' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
+export type ToolGroup = 'Brain' | 'Web' | 'Google' | 'Services' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
 
 export type CatalogTool = {
   id: string;
@@ -29,6 +31,10 @@ export type CatalogTool = {
   connectHint?: string;
   /** Where the user goes to fix it. */
   connectPath?: string;
+  /** Set on Services entries only — which outside service this action belongs to (BEA-1345). */
+  service?: string;
+  /** Set on Services entries only — true when the action cannot be undone (the gate reads this). */
+  risky?: boolean;
 };
 
 /** Shorten to a whole word — a description cut mid-word ("deployed so t") reads like a bug. */
@@ -41,7 +47,19 @@ export function clip(s: string | null | undefined, max: number): string {
 }
 
 /** The order groups are shown in — most reached-for first. */
-export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Google', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
+export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Google', 'Services', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
+
+/**
+ * How many of a service's actions go into the catalog (BEA-1345).
+ *
+ * GitHub alone has 871. A picker cannot show that and a prompt must never carry it, so the catalog
+ * takes the provider's own shortlist of important actions (GitHub 36, Gmail 13) and stops there.
+ * The full set is always one `listActions()` call away for execution and search.
+ */
+const MAX_SERVICE_ACTIONS = 60;
+
+/** How long the catalog will wait on outside services before answering with what it already had. */
+const SERVICE_LOOKUP_BUDGET_MS = 8000;
 
 /** Tools that are simply part of the app — nothing to connect. */
 const BUILT_IN: CatalogTool[] = [
@@ -72,16 +90,21 @@ export class ToolCatalogService {
     private readonly skills: SkillsService,
     private readonly google?: GoogleService, // optional + LAST — spec files construct positionally
     private readonly llm?: LlmService, // to know which engine is chosen (BEA-1224)
+    private readonly services?: ComposioProvider, // outside services, behind the seam (BEA-1345)
   ) {}
+
+  /** The last service list that came back cleanly — what we fall back to when Composio is slow. */
+  private lastServices: { tools: CatalogTool[]; available: boolean } | null = null;
 
   /** The whole catalog, grouped, with a truthful connected flag on every entry. */
   async catalog(): Promise<{ groups: { group: ToolGroup; tools: CatalogTool[] }[]; tools: CatalogTool[] }> {
-    const [connectors, skills, googleOn, engineOn, engine] = await Promise.all([
+    const [connectors, skills, googleOn, engineOn, engine, services] = await Promise.all([
       this.connectors.listStatus().catch(() => [] as { name: string; configured: boolean }[]),
       this.skills.list().catch(() => [] as any[]),
       this.googleConnected(),
       this.engineReachable(),
       this.llm?.engineChoice?.().then((c: any) => c?.provider || 'codex').catch(() => 'codex') ?? Promise.resolve('codex'),
+      this.serviceTools(),
     ]);
     const has = (n: string) => connectors.some((c) => c.name === n && c.configured);
 
@@ -89,12 +112,16 @@ export class ToolCatalogService {
       ...BUILT_IN,
       ...this.webTools(has('tavily'), has('exa'), has('brave')),
       ...this.googleTools(googleOn),
+      ...services.tools,
       ...this.messagingTools(has('telegram')),
       ...this.skillTools(skills, engine),
       ...this.mcpTools(engineOn),
     ];
 
-    const groups = GROUP_ORDER.map((group) => ({ group, tools: tools.filter((t) => t.group === group) })).filter((g) => g.tools.length > 0);
+    const groups = GROUP_ORDER.map((group) => ({ group, tools: tools.filter((t) => t.group === group) }))
+      // Services is the one group allowed to be empty: when a working key is set but nothing is
+      // connected yet, its presence is what tells the UI to offer connecting something.
+      .filter((g) => g.tools.length > 0 || (g.group === 'Services' && services.available));
     return { groups, tools };
   }
 
@@ -162,6 +189,76 @@ export class ToolCatalogService {
       connectHint: on ? undefined : 'Connect your Google account first',
       connectPath: on ? undefined : '/google',
     }));
+  }
+
+  /**
+   * The outside services the owner has connected, as catalog entries (BEA-1345).
+   *
+   * Everything here comes through the `ServiceProvider` seam, so the catalog never learns which
+   * vendor supplies them — every id is `svc:<service>.<action>` and nothing else. Blocked services
+   * (`exa · firecrawl · tavily · perplexity · telegram · whatsapp`) are dropped inside the provider,
+   * because we already do those better or they are ours.
+   *
+   * `available` is separate from the entries on purpose: a working key with nothing connected yet
+   * must still show a Services group, or the UI has nowhere to put "connect something".
+   */
+  private async serviceTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    if (!this.services) return { tools: [], available: false };
+    // The catalog is read on nearly every page. An outside service is allowed to be slow, but it is
+    // never allowed to hold the catalog up — past the budget we answer with the last good list.
+    const budget = new Promise<{ tools: CatalogTool[]; available: boolean } | null>((r) => setTimeout(() => r(null), SERVICE_LOOKUP_BUDGET_MS).unref?.());
+    const fresh = await Promise.race([this.loadServiceTools(), budget]);
+    if (fresh) {
+      if (fresh.available) this.lastServices = fresh;
+      return fresh;
+    }
+    return this.lastServices || { tools: [], available: false };
+  }
+
+  private async loadServiceTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    try {
+      const status = await this.services!.status();
+      if (!status.configured || !status.reachable) return { tools: [], available: false };
+
+      // Belt and braces: the provider already drops blocked services, but the promise "these never
+      // appear in the catalog" is made HERE, so it is kept here too.
+      const services: ServiceInfo[] = (await this.services!.listServices({ connectedOnly: true })).filter((s) => !isBlockedService(s.slug));
+      const perService = await Promise.all(
+        services.map(async (s) => {
+          const actions: ServiceAction[] = await this.services!
+            .listActions(s.slug, { important: true, limit: MAX_SERVICE_ACTIONS })
+            .catch(() => [] as ServiceAction[]);
+          return { service: s, actions: actions.slice(0, MAX_SERVICE_ACTIONS) };
+        }),
+      );
+
+      const tools: CatalogTool[] = [];
+      for (const { service, actions } of perService) {
+        const live = service.accounts.some((a) => a.status === 'ACTIVE');
+        for (const a of actions) {
+          if (a.deprecated) continue;
+          // The catalog's promise is that every service id has exactly one shape. Anything else a
+          // provider hands back is dropped rather than let loose among the load-bearing ids.
+          if (!isServiceToolId(a.id)) continue;
+          tools.push({
+            id: a.id,
+            name: `${service.name}: ${a.name}`,
+            group: 'Services',
+            kind: 'tool',
+            connected: live,
+            description: clip(a.description, 160) || `${a.name} on ${service.name}`,
+            service: service.slug,
+            risky: a.risky,
+            connectHint: live ? undefined : `Your ${service.name} login needs finishing`,
+            connectPath: live ? undefined : '/tools',
+          });
+        }
+      }
+      return { tools, available: true };
+    } catch {
+      // A wrong key, a slow network or an outage must never cost us the built-in tools.
+      return { tools: [], available: false };
+    }
   }
 
   private messagingTools(telegram: boolean): CatalogTool[] {

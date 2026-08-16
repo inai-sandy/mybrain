@@ -2,9 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
-export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'brave' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify';
+export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'brave' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify' | 'composio';
 
-export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'brave', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify'];
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'brave', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify', 'composio'];
 
 export function isKnownConnector(n: string): n is ConnectorName {
   return (KNOWN_CONNECTORS as string[]).includes(n);
@@ -30,6 +30,7 @@ export class ConnectorService implements OnModuleInit {
     if (process.env.TAVILY_API_KEY) await this.setIfAbsent('tavily', { apiKey: process.env.TAVILY_API_KEY });
     if (process.env.ANTHROPIC_API_KEY) await this.setIfAbsent('anthropic', { apiKey: process.env.ANTHROPIC_API_KEY });
     if (process.env.OPENROUTER_API_KEY) await this.setIfAbsent('openrouter', { apiKey: process.env.OPENROUTER_API_KEY });
+    if (process.env.COMPOSIO_API_KEY) await this.setIfAbsent('composio', { apiKey: process.env.COMPOSIO_API_KEY });
   }
 
   /** Store/replace a connector's secrets (encrypted at rest). */
@@ -118,6 +119,20 @@ export class ConnectorService implements OnModuleInit {
         // Exa's free plan throttles rather than refusing outright — a 429 still proves the key is real.
         if (r.status === 429) return { ok: true, message: 'Exa key works, but it is rate-limited right now (free plan).' };
         return { ok: false, message: `Exa returned an error (HTTP ${r.status}).` };
+      }
+      if (name === 'composio') {
+        // One toolkit is enough to prove the key, and the reply carries the real service count —
+        // which is the only number worth quoting, since Composio's own pages disagree with it.
+        const r = await fetch('https://backend.composio.dev/api/v3/toolkits?limit=1', {
+          headers: { 'x-api-key': secrets.apiKey },
+        });
+        if (r.ok) {
+          const d: any = await r.json().catch(() => ({}));
+          const n = Number(d?.total_items) || 0;
+          return { ok: true, message: n ? `Composio key works — ${n.toLocaleString('en-US')} services available.` : 'Composio key works.' };
+        }
+        if (r.status === 401 || r.status === 403) return { ok: false, message: 'Composio rejected that key. Double-check it.' };
+        return { ok: false, message: `Composio returned an error (HTTP ${r.status}).` };
       }
       return { ok: false, message: 'No live test available for this connector.' };
     } catch {

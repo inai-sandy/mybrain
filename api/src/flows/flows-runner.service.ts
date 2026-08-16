@@ -17,6 +17,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { PostboxService } from '../contacts/postbox.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { NewsPipelineService } from '../news/news-pipeline.service';
+import { isServiceToolId, parseServiceToolId } from '../tools/service-provider';
 import { randomBytes } from 'crypto';
 import { Grade, GRADE_MAX_TOKENS, GradeResult, parseGrade } from '../hermes/grade';
 
@@ -1083,6 +1084,14 @@ export class FlowRunnerService implements OnModuleInit {
       case 'merge': return this.merge(node.data?.mode || 'ai', inputs, node.data?.goal, onLine);
       // search_brain is a fast direct lookup — never a slow agent turn (was timing out).
       case 'tool': {
+        // An outside service (BEA-1345). The catalog can OFFER these the moment a service is
+        // connected, but running one is BEA-1347's job — so until then a step that picks one FAILS
+        // out loud. Letting it fall through to askModel would hand back an invented answer, and for
+        // a delete/merge/refund action that reads as "it happened" when nothing did.
+        if (isServiceToolId(refId)) {
+          const svc = parseServiceToolId(refId);
+          throw new Error(`Running ${svc?.service || 'outside service'} actions is not switched on yet — this step cannot be done.`);
+        }
         if (refId === 'search_brain') return this.searchBrain(input || node.data?.sub || '');
         // AI News Daily (BEA-1259) — direct, like the Web group. These must NEVER fall through to
         // a plain model call: an unregistered tool id reaches askModel, which would cheerfully
