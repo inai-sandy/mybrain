@@ -205,7 +205,9 @@ export function DocumentShareDialog({
                 <button
                   key={t}
                   role="tab"
+                  id={`share-tab-${t}`}
                   aria-selected={tab === t}
+                  aria-controls={`share-panel-${t}`}
                   onClick={() => setTab(t)}
                   className={'px-3 py-1.5 rounded-md capitalize transition-colors ' + (tab === t ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}
                 >
@@ -215,7 +217,7 @@ export function DocumentShareDialog({
             </div>
 
             {tab === 'link' ? (
-            <div className="space-y-4">
+            <div className="space-y-4" role="tabpanel" id="share-panel-link" aria-labelledby="share-tab-link">
             {/* Link-card preview — what recipients see. A small row, not a full-width image. (BEA-901, BEA-1340) */}
             <div className="flex items-center gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-2">
               <img src={`/api/documents/public/${slug}/og.png`} alt="Link preview" className="h-12 w-20 shrink-0 rounded-lg object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
@@ -270,7 +272,7 @@ export function DocumentShareDialog({
 
             </div>
             ) : (
-            <div className="space-y-4">
+            <div className="space-y-4" role="tabpanel" id="share-panel-settings" aria-labelledby="share-tab-settings">
             <div className="flex items-center gap-4">
               {qr ? (
                 <img src={qr} alt="QR code" className="h-24 w-24 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white p-1" />
