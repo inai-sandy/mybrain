@@ -55,6 +55,8 @@ export function DocumentShareDialog({
   const [allowDownload, setAllowDownload] = useState(!!initialAllowDownload);
   const [savingProt, setSavingProt] = useState(false);
   const [qr, setQr] = useState('');
+  // Two tabs so the window stays short: copying a link is the every-time job, the rest is rare. (BEA-1340)
+  const [tab, setTab] = useState<'link' | 'settings'>('link');
   const toast = useToast();
 
   const prettyUrl = `${location.origin}/d/${slug}`;
@@ -187,7 +189,8 @@ export function DocumentShareDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" onClick={onClose}>
-      <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      {/* Capped height with internal scroll: the window used to run off the bottom of a short screen. (BEA-1340) */}
+      <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-xl bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="font-bold flex items-center gap-2">{shared ? <Globe size={18} className="text-emerald-600" /> : <Lock size={18} />} Share</h3>
           <button onClick={onClose} aria-label="Close" className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><X size={18} /></button>
@@ -196,10 +199,27 @@ export function DocumentShareDialog({
 
         {shared ? (
           <div className="space-y-4">
-            {/* Link-card preview — exactly what recipients see when they get the link (BEA-901) */}
-            <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
-              <img src={`/api/documents/public/${slug}/og.png`} alt="Link preview" className="w-full aspect-[1200/630] object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
-              <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50">
+            {/* Same segmented control as the card/list toggle on the Documents page — one style, not a new one. */}
+            <div className="inline-flex rounded-lg border border-zinc-300 dark:border-zinc-700 p-0.5 text-xs" role="tablist">
+              {(['link', 'settings'] as const).map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => setTab(t)}
+                  className={'px-3 py-1.5 rounded-md capitalize transition-colors ' + (tab === t ? 'bg-emerald-600 text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100')}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            {tab === 'link' ? (
+            <div className="space-y-4">
+            {/* Link-card preview — what recipients see. A small row, not a full-width image. (BEA-901, BEA-1340) */}
+            <div className="flex items-center gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-2">
+              <img src={`/api/documents/public/${slug}/og.png`} alt="Link preview" className="h-12 w-20 shrink-0 rounded-lg object-cover bg-zinc-100 dark:bg-zinc-800" loading="lazy" />
+              <div className="min-w-0">
                 <p className="text-xs font-medium truncate">{title}</p>
                 <p className="text-[11px] text-zinc-400">mybrain.1site.ai</p>
               </div>
@@ -248,7 +268,10 @@ export function DocumentShareDialog({
               </div>
             )}
 
-            <div className="flex items-center gap-4 border-t border-zinc-100 dark:border-zinc-800 pt-3">
+            </div>
+            ) : (
+            <div className="space-y-4">
+            <div className="flex items-center gap-4">
               {qr ? (
                 <img src={qr} alt="QR code" className="h-24 w-24 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white p-1" />
               ) : (
@@ -260,7 +283,7 @@ export function DocumentShareDialog({
               </div>
             </div>
 
-            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-3 space-y-3">
+            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-3">
               <div>
                 <p className="text-xs font-medium text-zinc-500 mb-1 flex items-center gap-1.5"><KeyRound size={13} /> Password</p>
                 {hasPassword ? (
@@ -303,6 +326,8 @@ export function DocumentShareDialog({
             <div className="flex items-center justify-end pt-1">
               <button onClick={() => setSharedState(false)} disabled={busy} className="text-sm text-red-500 hover:underline disabled:opacity-50 inline-flex items-center gap-1.5"><Lock size={14} /> Make private</button>
             </div>
+            </div>
+            )}
           </div>
         ) : (
           <button onClick={() => setSharedState(true)} disabled={busy} className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 text-sm disabled:opacity-60">{busy ? 'Creating link…' : 'Create public link'}</button>
