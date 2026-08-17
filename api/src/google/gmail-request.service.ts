@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { GoogleService } from './google.service';
+import { GoogleWorkspaceService, googleSource } from './google-workspace.service';
 import { ItemsService } from '../items/items.service';
 import { MemoryService } from '../memory/memory.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -35,7 +36,13 @@ export class GmailRequestService {
     private readonly memory: MemoryService,
     private readonly tasks: TasksService,
     private readonly prompts: PromptsService,
+    private readonly workspace?: GoogleWorkspaceService, // optional + LAST — spec files construct positionally
   ) {}
+
+  /** The road Google reads take — the bridge until the seam is proven, then the seam. (BEA-1351) */
+  private get g() {
+    return googleSource() === 'seam' && this.workspace ? this.workspace : this.google;
+  }
 
   /** Turn a natural-language ask into a tight Gmail query (keywords + safe operators). */
   private async buildGmailQuery(nl: string): Promise<string> {
@@ -53,7 +60,7 @@ export class GmailRequestService {
     const q = (query || '').trim();
     if (!q) return { threads: [], gmailQuery: '' };
     const gmailQuery = await this.buildGmailQuery(q);
-    return { threads: await this.google.gmailSearchThreads(gmailQuery || q, 5), gmailQuery };
+    return { threads: await this.g.gmailSearchThreads(gmailQuery || q, 5), gmailQuery };
   }
 
   private shape(r: any) {
@@ -105,7 +112,7 @@ export class GmailRequestService {
   }
 
   async create(query: string, threadId: string, title?: string) {
-    const thread = await this.google.gmailThread(threadId);
+    const thread = await this.g.gmailThread(threadId);
     const summary = await this.summarize(query, thread, thread.messages.length);
     const row = await this.prisma.gmailRequest.create({
       data: {
@@ -128,11 +135,11 @@ export class GmailRequestService {
     let threadId = r.threadId;
     if (!threadId) {
       const gq = await this.buildGmailQuery(r.query);
-      const hits = await this.google.gmailSearchThreads(gq || r.query, 1);
+      const hits = await this.g.gmailSearchThreads(gq || r.query, 1);
       threadId = hits[0]?.threadId || null;
     }
     if (!threadId) return this.shape(r);
-    const thread = await this.google.gmailThread(threadId);
+    const thread = await this.g.gmailThread(threadId);
     const summary = await this.summarize(r.query, thread, thread.messages.length);
     const row = await this.prisma.gmailRequest.update({
       where: { id },

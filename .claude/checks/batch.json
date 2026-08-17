@@ -38,8 +38,13 @@
       "status": "shipped",
       "sha": "2bce51f",
       "note": "LIVE + verified. Linear still shows In Progress \u2014 MCP was down at close time, needs setting to Done."
+    },
+    {
+      "id": "BEA-1351",
+      "title": "Retire the gws Google bridge (full migration)",
+      "status": "in_progress",
+      "startedAt": "2026-08-17T14:05:00Z"
     }
   ],
-  "completedAt": "2026-08-16T22:00:00Z",
-  "result": "6/6 shipped and live. BEA-1351 untouched (blocked, by design)."
+  "result": "Batch 1 (1345-1350) done. Batch 2 = BEA-1351 running."
 }
