@@ -85,6 +85,18 @@ export type ServiceAction = {
   risky: boolean;
   service: string;
   deprecated?: boolean;
+  /**
+   * Extras a spec-generated provider can carry (BEA-1355) — all optional, so a provider that does
+   * not know them (Composio) is unchanged. `tags` is the vendor's own grouping of the action
+   * ("Instagram", "Facebook Ad Library"), `costHint` the vendor's own sentence about what it costs
+   * when the spec states one — a HINT, never the charge itself, which is read off every response.
+   */
+  method?: string;
+  path?: string;
+  tags?: string[];
+  costHint?: string;
+  /** What one answer looks like, when the vendor's spec shows one. */
+  responseExample?: any;
 };
 
 /**
@@ -159,9 +171,18 @@ export type ExecuteResult = {
   data?: any;
   error?: string;
   ms?: number;
+  /**
+   * What the call cost in the provider's own credits, read off ITS answer (BEA-1355) — never
+   * assumed. Undefined when the provider does not meter calls (Composio). A cache hit at the
+   * provider is an honest 0, and 0 is recorded as 0.
+   */
+  credits?: number;
 };
 
-/** The seam itself. One implementation today (`ComposioProvider`); the catalog knows only this. */
+/**
+ * The seam itself. Two implementations today (`ComposioProvider`, `ScrapeCreatorsProvider`); the
+ * catalog and the run path know only this.
+ */
 export interface ServiceProvider {
   /** Every service, or just the connected ones. Blocked services are never returned. */
   listServices(opts?: { connectedOnly?: boolean; search?: string; category?: string; limit?: number }): Promise<ServiceInfo[]>;
@@ -212,6 +233,13 @@ export interface ServiceProvider {
   ensureEventDelivery?(url: string): Promise<EventDelivery>;
   /** Is a key set, and does it work? Never throws. */
   status(): Promise<ProviderStatus>;
+  /**
+   * TRUE when EVERY action this provider has is a read (BEA-1355 — ScrapeCreators only scrapes).
+   * The gate then does not re-run the name rule on its ids, because that rule was tuned for
+   * Composio's `<VERB>_<NOUN>` slugs and a path-derived read called `…/block/…` must never be
+   * held for approval. Absent (Composio) means "decide per action, and re-check the rule".
+   */
+  readOnly?: boolean;
 }
 
 // ---- ids -----------------------------------------------------------------------------------

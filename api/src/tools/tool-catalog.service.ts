@@ -3,6 +3,7 @@ import { ConnectorService } from '../connectors/connector.service';
 import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
+import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo } from './service-provider';
 
 /**
@@ -17,7 +18,7 @@ import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo } from '.
  * degrades to a plain reasoning step); renaming one silently breaks saved flows.
  */
 
-export type ToolGroup = 'Brain' | 'Web' | 'Services' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
+export type ToolGroup = 'Brain' | 'Web' | 'Services' | 'Social' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
 
 export type CatalogTool = {
   id: string;
@@ -46,7 +47,7 @@ export function clip(s: string | null | undefined, max: number): string {
 }
 
 /** The order groups are shown in — most reached-for first. */
-export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Services', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
+export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Services', 'Social', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
 
 /**
  * How many of a service's actions go into the catalog (BEA-1345).
@@ -90,19 +91,23 @@ export class ToolCatalogService {
     // Optional + LAST — spec files construct positionally with fewer args.
     private readonly llm?: LlmService, // to know which engine is chosen (BEA-1224)
     private readonly services?: ComposioProvider, // outside services, behind the seam (BEA-1345)
+    private readonly social?: ScrapeCreatorsProvider, // social platforms, behind the same seam (BEA-1355)
   ) {}
 
   /** The last service list that came back cleanly — what we fall back to when Composio is slow. */
   private lastServices: { tools: CatalogTool[]; available: boolean } | null = null;
+  /** The same, for the Social group. */
+  private lastSocial: { tools: CatalogTool[]; available: boolean } | null = null;
 
   /** The whole catalog, grouped, with a truthful connected flag on every entry. */
   async catalog(): Promise<{ groups: { group: ToolGroup; tools: CatalogTool[] }[]; tools: CatalogTool[] }> {
-    const [connectors, skills, engineOn, engine, services] = await Promise.all([
+    const [connectors, skills, engineOn, engine, services, social] = await Promise.all([
       this.connectors.listStatus().catch(() => [] as { name: string; configured: boolean }[]),
       this.skills.list().catch(() => [] as any[]),
       this.engineReachable(),
       this.llm?.engineChoice?.().then((c: any) => c?.provider || 'codex').catch(() => 'codex') ?? Promise.resolve('codex'),
       this.serviceTools(),
+      this.socialTools(),
     ]);
     const has = (n: string) => connectors.some((c) => c.name === n && c.configured);
 
@@ -112,6 +117,8 @@ export class ToolCatalogService {
       // Google (Gmail, Calendar, Drive…) is NOT a group of its own any more (BEA-1351): it comes
       // through the seam below like every other outside service, so it appears exactly once.
       ...services.tools,
+      // Social platforms (BEA-1355) — the second provider on the same seam, one line beside the first.
+      ...social.tools,
       ...this.messagingTools(has('telegram')),
       ...this.skillTools(skills, engine),
       ...this.mcpTools(engineOn),
@@ -133,8 +140,8 @@ export class ToolCatalogService {
    * connected this is an empty array, and Chat must then behave exactly as it did before.
    */
   async connectedServiceTools(): Promise<CatalogTool[]> {
-    const { tools } = await this.serviceTools();
-    return tools.filter((t) => t.connected);
+    const [services, social] = await Promise.all([this.serviceTools(), this.socialTools()]);
+    return [...services.tools, ...social.tools].filter((t) => t.connected);
   }
 
   /** One tool by id — used when a picked set is validated before a run. */
@@ -247,6 +254,58 @@ export class ToolCatalogService {
       return { tools, available: true };
     } catch {
       // A wrong key, a slow network or an outage must never cost us the built-in tools.
+      return { tools: [], available: false };
+    }
+  }
+
+  /**
+   * The Social group (BEA-1355): every platform's every endpoint, generated from the provider's
+   * spec — the whole list, no cap, because a test asserts action count == the spec's op count.
+   *
+   * Present ONLY when the key is set: without one the catalog is exactly what it was before. The
+   * provider itself never blocks (it answers from its last good list when the spec host is down),
+   * and the same budget as Services applies on top, so the catalog's answer time does not move.
+   */
+  private async socialTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    if (!this.social) return { tools: [], available: false };
+    const budget = new Promise<{ tools: CatalogTool[]; available: boolean } | null>((r) => setTimeout(() => r(null), SERVICE_LOOKUP_BUDGET_MS).unref?.());
+    const fresh = await Promise.race([this.loadSocialTools(), budget]);
+    if (fresh) {
+      if (fresh.available) this.lastSocial = fresh;
+      return fresh;
+    }
+    return this.lastSocial || { tools: [], available: false };
+  }
+
+  private async loadSocialTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    try {
+      const status = await this.social!.status();
+      // Configured is the whole test. Reachable is not: their API being down for a minute must not
+      // empty the group, and the spec (last good copy) is what the list is built from anyway.
+      if (!status.configured) return { tools: [], available: false };
+      const services: ServiceInfo[] = await this.social!.listServices({ connectedOnly: true });
+      const perService = await Promise.all(
+        services.map(async (s) => ({ service: s, actions: await this.social!.listActions(s.slug).catch(() => [] as ServiceAction[]) })),
+      );
+      const tools: CatalogTool[] = [];
+      for (const { service, actions } of perService) {
+        for (const a of actions) {
+          if (a.deprecated) continue;
+          if (!isServiceToolId(a.id)) continue;
+          tools.push({
+            id: a.id,
+            name: `${service.name}: ${a.name}`,
+            group: 'Social',
+            kind: 'tool',
+            connected: service.connected,
+            description: clip(a.description, 160) || `${a.name} on ${service.name}`,
+            service: service.slug,
+            risky: false,
+          });
+        }
+      }
+      return { tools, available: tools.length > 0 };
+    } catch {
       return { tools: [], available: false };
     }
   }

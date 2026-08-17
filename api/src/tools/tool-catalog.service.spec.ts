@@ -35,9 +35,9 @@ describe('ToolCatalogService', () => {
     const svc = new ToolCatalogService(connectors(['tavily', 'telegram']), skills([]));
     const { groups } = await svc.catalog();
     const names = groups.map((g) => g.group);
-    // Skills is absent when there are none, and Services when no Composio key is set (BEA-1345);
-    // every other group must be present.
-    expect(names).toEqual(GROUP_ORDER.filter((g) => g !== 'Skills' && g !== 'Services'));
+    // Skills is absent when there are none, Services when no Composio key is set (BEA-1345) and
+    // Social when no Scrape Creators key is set (BEA-1355); every other group must be present.
+    expect(names).toEqual(GROUP_ORDER.filter((g) => g !== 'Skills' && g !== 'Services' && g !== 'Social'));
     expect(groups.every((g) => g.tools.length > 0)).toBe(true);
   });
 

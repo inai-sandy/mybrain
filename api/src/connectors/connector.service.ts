@@ -2,9 +2,9 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt, decrypt } from './crypto.util';
 
-export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'brave' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify' | 'composio';
+export type ConnectorName = 'supermemory' | 'rag' | 'notion' | 'telegram' | 'raindrop' | 'tavily' | 'exa' | 'brave' | 'anthropic' | 'openrouter' | 'openai' | 'openai_admin' | 'elevenlabs' | 'deepgram' | 'apify' | 'composio' | 'scrapecreators';
 
-export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'brave', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify', 'composio'];
+export const KNOWN_CONNECTORS: ConnectorName[] = ['supermemory', 'rag', 'notion', 'telegram', 'raindrop', 'tavily', 'exa', 'brave', 'anthropic', 'openrouter', 'openai', 'openai_admin', 'elevenlabs', 'deepgram', 'apify', 'composio', 'scrapecreators'];
 
 export function isKnownConnector(n: string): n is ConnectorName {
   return (KNOWN_CONNECTORS as string[]).includes(n);
@@ -31,6 +31,7 @@ export class ConnectorService implements OnModuleInit {
     if (process.env.ANTHROPIC_API_KEY) await this.setIfAbsent('anthropic', { apiKey: process.env.ANTHROPIC_API_KEY });
     if (process.env.OPENROUTER_API_KEY) await this.setIfAbsent('openrouter', { apiKey: process.env.OPENROUTER_API_KEY });
     if (process.env.COMPOSIO_API_KEY) await this.setIfAbsent('composio', { apiKey: process.env.COMPOSIO_API_KEY });
+    if (process.env.SCRAPECREATORS_API_KEY) await this.setIfAbsent('scrapecreators', { apiKey: process.env.SCRAPECREATORS_API_KEY });
   }
 
   /** Store/replace a connector's secrets (encrypted at rest). */
@@ -133,6 +134,19 @@ export class ConnectorService implements OnModuleInit {
         }
         if (r.status === 401 || r.status === 403) return { ok: false, message: 'Composio rejected that key. Double-check it.' };
         return { ok: false, message: `Composio returned an error (HTTP ${r.status}).` };
+      }
+      if (name === 'scrapecreators') {
+        // The balance call is free and proves the key; the number is the one thing worth quoting.
+        const r = await fetch('https://api.scrapecreators.com/v1/account/credit-balance', {
+          headers: { 'x-api-key': secrets.apiKey },
+        });
+        if (r.ok) {
+          const d: any = await r.json().catch(() => ({}));
+          const n = Number(d?.creditCount);
+          return { ok: true, message: Number.isFinite(n) ? `Scrape Creators key works — ${n.toLocaleString('en-US')} credits left.` : 'Scrape Creators key works.' };
+        }
+        if (r.status === 401 || r.status === 403) return { ok: false, message: 'Scrape Creators rejected that key. Double-check it.' };
+        return { ok: false, message: `Scrape Creators returned an error (HTTP ${r.status}).` };
       }
       return { ok: false, message: 'No live test available for this connector.' };
     } catch {
