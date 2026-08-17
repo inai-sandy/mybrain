@@ -48,7 +48,7 @@ export class SocialBudgetService {
     const spent = await this.social.spentToday(slugs);
     const estimate = await this.estimate(actionId);
     if (ceiling === null || spent + estimate <= ceiling) return { ok: true, spent, ceiling, estimate };
-    const reason = `Paused itself — the daily Social credit ceiling is ${ceiling.toLocaleString('en-US')} and ${spent.toLocaleString('en-US')} ${spent === 1 ? 'credit is' : 'credits are'} already spent today; this call (about ${estimate.toLocaleString('en-US')} ${estimate === 1 ? 'credit' : 'credits'}) would pass it. No call was made. Raise the ceiling in Settings → Agents & Engines, or switch the job back on tomorrow.`;
+    const reason = `The daily Social credit ceiling is ${ceiling.toLocaleString('en-US')} and ${spent.toLocaleString('en-US')} ${spent === 1 ? 'credit is' : 'credits are'} already spent today; this call (about ${estimate.toLocaleString('en-US')} ${estimate === 1 ? 'credit' : 'credits'}) would pass it, so the job paused itself and no call was made. Raise the ceiling in Settings → Agents & Engines, or switch the job back on tomorrow.`;
     return { ok: false, spent, ceiling, estimate, reason };
   }
 
@@ -70,16 +70,16 @@ export class SocialBudgetService {
   async pauseAgent(agent: { id: string; name?: string }, reason: string, runId?: string): Promise<void> {
     await this.prisma?.agent?.update?.({ where: { id: agent.id }, data: { enabled: false, pausedReason: reason.slice(0, 400) } }).catch((e: any) => this.log.warn(`could not pause ${agent.id}: ${e?.message || e}`));
     this.log.warn(`agent ${agent.id} paused itself: ${reason}`);
-    await this.telegram?.notifyJobPaused?.({ what: agent.name || 'A Social job', reason, url: runId ? `https://mybrain.1site.ai/agent/runs/${runId}` : `https://mybrain.1site.ai/agent/agents/${agent.id}` })?.catch?.(() => undefined);
+    const r: any = await this.telegram?.notifyJobPaused?.({ what: agent.name || 'A Social job', reason, url: runId ? `https://mybrain.1site.ai/agent/runs/${runId}` : `https://mybrain.1site.ai/agent/agents/${agent.id}` })?.catch?.((e: any) => ({ sent: false, why: String(e?.message || e) }));
+    if (!r?.sent) this.log.warn(`paused-itself message not delivered on Telegram: ${r?.why || 'Telegram is not available on this server'}`);
   }
 
   /** An Alert's condition came true — one Telegram message with the diff and the run link. */
   async pushAlert(agent: { id: string; name?: string }, text: string, runId: string): Promise<{ sent: boolean; why?: string }> {
     if (!this.telegram?.notifySocialAlert) return { sent: false, why: 'Telegram is not available on this server' };
     try {
-      if (this.telegram.ownerChatId && !(await this.telegram.ownerChatId())) return { sent: false, why: 'no Telegram chat is linked in Settings' };
-      await this.telegram.notifySocialAlert({ what: agent.name || 'Alert', text, url: `https://mybrain.1site.ai/agent/runs/${runId}` });
-      return { sent: true };
+      const r = await this.telegram.notifySocialAlert({ what: agent.name || 'Alert', text, url: `https://mybrain.1site.ai/agent/runs/${runId}` });
+      return r && typeof r === 'object' ? { sent: !!r.sent, why: r.why } : { sent: false, why: 'Telegram did not answer' };
     } catch (e: any) {
       return { sent: false, why: String(e?.message || e) };
     }

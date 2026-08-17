@@ -1,4 +1,4 @@
-import { cleanForCompare, diffResults, itemKey, pickNumber, shapeOf, stableHash, storable, whatChanged } from './diff';
+import { cleanForCompare, diffResults, isVolatileUrl, itemKey, pickNumber, shapeOf, stableHash, storable, whatChanged } from './diff';
 
 /**
  * BEA-1358 — the diff routine, all three shapes: lists keyed on a stable id (never position),
@@ -25,6 +25,16 @@ describe('shape detection and the stable key', () => {
     expect(itemKey({ aweme_id: '77' })).toEqual({ field: 'aweme_id', key: '77' });
     expect(itemKey({ node: { id: 'nested' } })).toEqual({ field: 'id', key: 'nested' }); // one level down
     expect(itemKey({ caption: 'no id at all' })).toBeNull();
+  });
+  it('a link shim / signed link that changes every fetch is not a change (Instagram external_lynx_url, seen live)', () => {
+    const shim = (t: string) => `https://l.instagram.com/?u=https%3A%2F%2Fbit.ly%2FSPD_Legrand&e=${t}`;
+    expect(isVolatileUrl(shim('AUBBRBoqcjCULcPQEML7L2mruh'))).toBe(true);
+    expect(isVolatileUrl('https://scontent.cdninstagram.com/v/t51.jpg?_nc_ht=x&oh=abc&oe=123')).toBe(true);
+    expect(isVolatileUrl('https://instagram.com/p/C1abc/')).toBe(false);
+    expect(isVolatileUrl('https://youtube.com/watch?v=dQw4w9WgXcQ')).toBe(false);
+    expect(isVolatileUrl('https://bit.ly/SPD_Legrand')).toBe(false);
+    const d = diffResults(JSON.parse(storable(profile(100, { external_lynx_url: shim('AUBBRBoqcjCULcPQEML7L2mruh-Lji3l') }))), profile(100, { external_lynx_url: shim('AUDgFT2RUnSwTZSPXBf8j3U6smq02NCn') }));
+    expect(d.changed).toBe(false);
   });
   it('the envelope and expiring links do not count as change', () => {
     const a = profile(100);

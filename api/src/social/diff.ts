@@ -56,7 +56,18 @@ export const MAX_STORED_CHARS = 200_000;
 export const MAX_STORED_ITEMS = 500;
 
 const isObj = (v: any) => v && typeof v === 'object' && !Array.isArray(v);
-const isVolatileUrl = (v: any) => typeof v === 'string' && /^https?:\/\//i.test(v) && /[?&](oh|oe|_nc_ht|_nc_ohc|x-expires|expires|sig|signature|token|Expires|X-Amz-)/i.test(v);
+/**
+ * A link that changes on every fetch without meaning anything changed: a signed CDN picture
+ * (`?oh=…&oe=…`, `X-Amz-…`), Instagram's link shim (`l.instagram.com/?u=…&e=<token>`), or any URL
+ * carrying a long opaque token in its query. A post URL (`/p/ABC/`) or `?v=dQw4w9WgXcQ` is not.
+ */
+export const isVolatileUrl = (v: any): boolean => {
+  if (typeof v !== 'string' || !/^https?:\/\//i.test(v)) return false;
+  const q = v.indexOf('?');
+  if (q === -1) return false;
+  if (/[?&](oh|oe|_nc_ht|_nc_ohc|_nc_cat|x-expires|expires|sig|signature|token|Expires|X-Amz-[A-Za-z]+|e|efg|ccb|edm|ig_cache_key)=/i.test(v)) return true;
+  return v.slice(q + 1).split('&').some((kv) => { const val = kv.slice(kv.indexOf('=') + 1); return kv.includes('=') && val.length >= 24 && /^[A-Za-z0-9_\-%.~]+$/.test(val); });
+};
 
 /**
  * The provider's answer with everything that changes on its own taken out: envelope keys anywhere,

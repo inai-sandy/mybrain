@@ -62,7 +62,7 @@ function harness(opts: { answers?: any[]; fetchOk?: boolean; alertReply?: string
   const telegramSends: any[] = [];
   const telegram = opts.telegram === false ? undefined : {
     ownerChatId: async () => (opts.telegram === 'unlinked' ? null : '123'),
-    notifySocialAlert: jest.fn(async (a: any) => { telegramSends.push({ kind: 'alert', ...a }); }),
+    notifySocialAlert: jest.fn(async (a: any) => { if (opts.telegram === 'unlinked') return { sent: false, why: 'no Telegram chat is linked in Settings' }; telegramSends.push({ kind: 'alert', ...a }); return { sent: true }; }),
     notifyJobPaused: jest.fn(async (a: any) => { telegramSends.push({ kind: 'paused', ...a }); }),
   };
   const socialSvc = { spentToday: async () => opts.budget?.spent ?? 0, ceiling: async () => (opts.budget ? opts.budget.ceiling : 500) };
@@ -233,7 +233,7 @@ describe('the daily credit ceiling', () => {
     expect(h.finish[0].status).toBe('failed');
     expect(h.finish[0].error).toMatch(/daily Social credit ceiling is 500/);
     expect(h.prisma.agents[0]).toMatchObject({ id: 'ag1', enabled: false });
-    expect(h.prisma.agents[0].pausedReason).toMatch(/Paused itself/);
+    expect(h.prisma.agents[0].pausedReason).toMatch(/paused itself and no call was made/);
     expect(h.telegramSends[0]).toMatchObject({ kind: 'paused', what: 'Legrand watch' });
     expect(h.telegramSends[0].reason).toMatch(/would pass it/);
     // and no watch row was written
