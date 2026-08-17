@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { GoogleService } from './google.service';
-import { GoogleWorkspaceService, googleSource } from './google-workspace.service';
+import { GoogleWorkspaceService } from './google-workspace.service';
 import { MemoryService } from '../memory/memory.service';
 import { isBlockedSender, senderAddress } from './email-senders';
 
@@ -26,15 +25,9 @@ export class EmailMemoryService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly google: GoogleService,
+    private readonly google: GoogleWorkspaceService,
     private readonly memory: MemoryService,
-    private readonly workspace?: GoogleWorkspaceService, // optional + LAST — spec files construct positionally
   ) {}
-
-  /** The road Google reads take — the bridge until the seam is proven, then the seam. (BEA-1351) */
-  private get g() {
-    return googleSource() === 'seam' && this.workspace ? this.workspace : this.google;
-  }
 
   onModuleInit() {
     // One-time backfill of recent important emails when the store is empty. Delayed + guarded + bounded
@@ -50,7 +43,7 @@ export class EmailMemoryService implements OnModuleInit {
     if (isBlockedSender(m.from, await this.blockedSenders())) return false;
     try {
       const existing = await this.prisma.emailMemory.findUnique({ where: { id: m.id } });
-      const body = await this.g.gmailMessageFull(m.id).catch(() => existing?.body || m.snippet || '');
+      const body = await this.google.gmailMessageFull(m.id).catch(() => existing?.body || m.snippet || '');
       const row = await this.prisma.emailMemory.upsert({
         where: { id: m.id },
         create: { id: m.id, threadId: m.threadId || m.id, fromAddr: m.from || '', subject: m.subject || '(no subject)', day, sentAt: parseDate(m.date), snippet: m.snippet || '', body },
@@ -67,7 +60,7 @@ export class EmailMemoryService implements OnModuleInit {
   /** Sync every important email for a day (uses the provided metas, or fetches them). */
   async syncDay(day: string, metas?: Meta[]): Promise<number> {
     if (!this.memory.sourceEnabled('email')) return 0;
-    const list = metas ?? (await this.g.gmailImportantForDay(day, 40).catch(() => [] as Meta[]));
+    const list = metas ?? (await this.google.gmailImportantForDay(day, 40).catch(() => [] as Meta[]));
     let n = 0;
     const CONC = 4; // limited concurrency — don't hammer Google
     for (let i = 0; i < list.length; i += CONC) {
@@ -100,7 +93,7 @@ export class EmailMemoryService implements OnModuleInit {
   private async maybeBackfill(): Promise<void> {
     if ((await this.prisma.emailMemory.count()) > 0) return; // already populated — nightly keeps it current
     if (!this.memory.sourceEnabled('email')) return;
-    const st = await this.g.status().catch(() => ({ connected: false }) as any);
+    const st = await this.google.status().catch(() => ({ connected: false }) as any);
     if (!st?.connected) {
       this.log.log('email backfill skipped: Google not connected');
       return;

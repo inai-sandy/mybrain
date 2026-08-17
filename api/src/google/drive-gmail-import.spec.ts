@@ -1,180 +1,137 @@
-import { GoogleService } from './google.service';
+import { build, calls, DOCX, PPTX, serveBytes, XLSX } from './google-workspace.testing';
 
 /**
- * Locks the Drive + Gmail import fixes from BEA-1341.
- *
- * The headline regression: `gws drive files export` returns a RECEIPT, not the document, so the old
- * code stored the string "[object Object]" for every Google Doc. These tests assert we go through
- * the binary path instead, and that the receipt shape can never be mistaken for content again.
+ * Locks the Drive + Gmail import fixes from BEA-1341 / 1343 / 1344 — now through the ServiceProvider
+ * seam (BEA-1351). Same intent and the same fixtures as when these ran against the gws bridge; only
+ * the transport is asserted differently. The bridge's headline regression was `gws drive files
+ * export` returning a RECEIPT, not the document, so every Google Doc import stored the string
+ * "[object Object]" — the seam has its own version of that trap: binary content is not in the answer
+ * at all, but behind a short-lived download link, so the first test still asks "did the real bytes
+ * get stored?".
  */
 
-type Upload = { originalname: string; mimetype?: string; buffer: Buffer };
-type Opts = { collectionId?: string | null; sourceUrl?: string | null };
+// ---- Drive ---------------------------------------------------------------------------------
 
-function fakeLibrary() {
-  const saved: { file: Upload; opts?: Opts }[] = [];
-  const collections: string[] = [];
-  return {
-    saved,
-    collections,
-    findImported: jest.fn(async () => null), // nothing imported before, in these tests
-    replaceContent: jest.fn(async (id: string) => ({ id, title: 'refreshed' })),
-    refreshFromUpload: jest.fn(async (id: string) => ({ id, title: 'refreshed' })),
-    ensureCollection: jest.fn(async (name: string) => {
-      collections.push(name);
-      return `col-${name.toLowerCase().replace(/\s+/g, '-')}`;
-    }),
-    createFromUpload: jest.fn(async (file: Upload, opts?: Opts) => {
-      saved.push({ file, opts });
-      return { id: `doc-${saved.length}`, title: file.originalname.replace(/\.[^.]+$/, '') };
-    }),
+describe('driveImport (through the seam)', () => {
+  let restore: () => void;
+  beforeEach(() => { restore = serveBytes({ 'stage/export': Buffer.from('PK real docx bytes'), 'stage/plain': Buffer.from('x') }); });
+  afterEach(() => restore());
+
+  const drive = (meta: any, link?: string) => (id: string, args: any) => {
+    if (id === 'svc:googledrive.get_file_metadata') return meta;
+    if (id === 'svc:googledrive.find_file') return { files: [{ id: 'file-1', ...meta, webViewLink: link }] };
+    if (id === 'svc:googledrive.download_file') return { downloaded_file_content: { name: meta.name, mimetype: args.mime_type || meta.mimeType, s3url: args.mime_type ? 'https://x/stage/export' : 'https://x/stage/plain' } };
+    return {};
   };
-}
 
-function build() {
-  const lib = fakeLibrary();
-  const items = { store: jest.fn() } as any;
-  const svc = new GoogleService(items, lib as any);
-  return { svc, lib, items };
-}
-
-const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-
-/** What the CLI actually prints for an export — the thing that used to be stored as content. */
-const EXPORT_RECEIPT = { bytes: 71877, mimeType: 'text/plain', saved_file: 'download.txt', status: 'success' };
-
-describe('driveImport', () => {
-  it('never stores the export receipt as content — the [object Object] bug', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Trading products', mimeType: 'application/vnd.google-apps.document', webViewLink: 'https://drive/x' })) as any;
-    // If anything ever routes an export through run() again, it gets this receipt back.
-    svc.runBinary = jest.fn(async () => Buffer.from('PK real docx bytes')) as any;
-
+  it('stores the real exported bytes, never a receipt or a link (the [object Object] bug)', async () => {
+    const { svc, lib } = build(drive({ name: 'Trading products', mimeType: 'application/vnd.google-apps.document' }, 'https://drive/x'));
     await svc.driveImport('file-1');
-
     const body = lib.saved[0].file.buffer.toString('utf8');
-    expect(body).not.toContain('[object Object]');
-    expect(body).not.toContain(String(EXPORT_RECEIPT.saved_file));
     expect(body).toBe('PK real docx bytes');
-    expect(svc.runBinary).toHaveBeenCalledTimes(1);
+    expect(body).not.toContain('[object Object]');
+    expect(body).not.toContain('https://');
   });
 
   it('exports a Google Doc as .docx so headings and tables survive', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Quote', mimeType: 'application/vnd.google-apps.document' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
-
+    const { svc, lib, provider } = build(drive({ name: 'Quote', mimeType: 'application/vnd.google-apps.document' }));
     await svc.driveImport('file-1');
-
-    expect(JSON.stringify((svc.runBinary as jest.Mock).mock.calls[0][0])).toContain(DOCX);
+    const dl = calls(provider).find((c) => c.id === 'svc:googledrive.download_file');
+    expect(dl.args).toEqual({ file_id: 'file-1', mime_type: DOCX });
     expect(lib.saved[0].file.originalname).toBe('Quote.docx');
   });
 
   it('exports a Google Sheet as .xlsx, so every sheet comes through — not just the first', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Prices', mimeType: 'application/vnd.google-apps.spreadsheet' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
-
+    const { svc, lib, provider } = build(drive({ name: 'Prices', mimeType: 'application/vnd.google-apps.spreadsheet' }));
     await svc.driveImport('file-1');
-
-    const argv = JSON.stringify((svc.runBinary as jest.Mock).mock.calls[0][0]);
-    expect(argv).toContain(XLSX);
-    expect(argv).not.toContain('text/csv'); // csv is first-sheet-only
+    const dl = calls(provider).find((c) => c.id === 'svc:googledrive.download_file');
+    expect(dl.args.mime_type).toBe(XLSX);
+    expect(dl.args.mime_type).not.toContain('csv'); // csv is first-sheet-only
     expect(lib.saved[0].file.originalname).toBe('Prices.xlsx');
   });
 
   it('exports Google Slides as .pptx', async () => {
-    const { svc } = build();
-    svc.run = jest.fn(async () => ({ name: 'Deck', mimeType: 'application/vnd.google-apps.presentation' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
-
+    const { svc, provider } = build(drive({ name: 'Deck', mimeType: 'application/vnd.google-apps.presentation' }));
     await svc.driveImport('file-1');
-
-    expect(JSON.stringify((svc.runBinary as jest.Mock).mock.calls[0][0])).toContain(PPTX);
+    expect(calls(provider).find((c) => c.id === 'svc:googledrive.download_file').args.mime_type).toBe(PPTX);
   });
 
-  it('downloads a real Office file stored in Drive instead of refusing it', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Vendor Quote.docx', mimeType: DOCX })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
-
+  it('downloads a real Office file stored in Drive as-is, with no export and no double extension', async () => {
+    const { svc, lib, provider } = build(drive({ name: 'Vendor Quote.docx', mimeType: DOCX }));
     await expect(svc.driveImport('file-1')).resolves.toBeTruthy();
-
-    expect(JSON.stringify((svc.runBinary as jest.Mock).mock.calls[0][0])).toContain('alt');
-    expect(lib.saved[0].file.originalname).toBe('Vendor Quote.docx'); // no double extension
+    const dl = calls(provider).find((c) => c.id === 'svc:googledrive.download_file');
+    expect(dl.args).toEqual({ file_id: 'file-1' }); // native format — no mime_type
+    expect(lib.saved[0].file.originalname).toBe('Vendor Quote.docx');
   });
 
-  it('files everything from Drive into the Google Drive folder, with a link back', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Quote', mimeType: 'application/vnd.google-apps.document', webViewLink: 'https://drive/x' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
-
+  it('gives a binary call the long timeout — a Drive export takes longer than an API call', async () => {
+    const { svc, provider } = build(drive({ name: 'Deck', mimeType: 'application/vnd.google-apps.presentation' }));
     await svc.driveImport('file-1');
+    const dl = calls(provider).find((c) => c.id === 'svc:googledrive.download_file');
+    expect(dl.opts.timeoutMs).toBeGreaterThan(20_000);
+    expect(dl.opts.connectionId).toBe('ca_googledrive');
+  });
 
+  it('files everything from Drive into the Google Drive folder, with the link back as the dedupe key', async () => {
+    const { svc, lib } = build(drive({ name: 'Quote', mimeType: 'application/vnd.google-apps.document' }, 'https://drive/x'));
+    await svc.driveImport('file-1');
     expect(lib.ensureCollection).toHaveBeenCalledWith('Google Drive', expect.anything());
     expect(lib.saved[0].opts?.collectionId).toBe('col-google-drive');
     expect(lib.saved[0].opts?.sourceUrl).toBe('https://drive/x');
   });
 
-  // The refresh branch had no coverage at all, which is how the rename bug survived. (BEA-1344)
-  it('refreshes a Drive file that was already imported, instead of making a second copy', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Quote', mimeType: 'application/vnd.google-apps.document', webViewLink: 'https://drive/x' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
+  it('finds the link by a second by-name search, because the metadata action does not return it', async () => {
+    const { svc, provider } = build(drive({ name: "Sandy's Quote", mimeType: 'application/vnd.google-apps.document' }, 'https://drive/x'));
+    await svc.driveImport('file-1');
+    const find = calls(provider).find((c) => c.id === 'svc:googledrive.find_file');
+    expect(find.args.q).toBe("name = 'Sandy\\'s Quote'"); // escaped for Drive's query language
+  });
+
+  it('refreshes a Drive file that was already imported, instead of making a second copy (BEA-1344)', async () => {
+    const { svc, lib } = build(drive({ name: 'Quote', mimeType: 'application/vnd.google-apps.document' }, 'https://drive/x'));
     lib.findImported = jest.fn(async () => ({ id: 'doc-existing', title: 'Quote' })) as any;
-
     const res = await svc.driveImport('file-1');
-
+    expect(lib.findImported).toHaveBeenCalledWith('https://drive/x'); // link alone — survives a rename
     expect(lib.refreshFromUpload).toHaveBeenCalledWith('doc-existing', expect.objectContaining({ originalname: 'Quote.docx' }));
     expect(lib.createFromUpload).not.toHaveBeenCalled();
     expect(res.id).toBe('doc-existing');
   });
 
-  it('still finds a Drive file that was RENAMED, by matching on its link alone', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ name: 'Quote v2', mimeType: 'application/vnd.google-apps.document', webViewLink: 'https://drive/x' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.from('x')) as any;
-    lib.findImported = jest.fn(async () => ({ id: 'doc-existing', title: 'Quote' })) as any;
-
-    await svc.driveImport('file-1');
-
-    // Looked up by link only — passing the (now different) filename would miss and duplicate.
-    expect(lib.findImported).toHaveBeenCalledWith('https://drive/x');
-    expect(lib.refreshFromUpload).toHaveBeenCalled();
-  });
-
   it('refuses a Drive file that declares itself too big, before downloading it', async () => {
-    const { svc } = build();
-    svc.run = jest.fn(async () => ({ name: 'huge.bin', mimeType: 'application/octet-stream', size: String(60 * 1024 * 1024) })) as any;
-    svc.runBinary = jest.fn() as any;
-
+    const answer = (id: string) => (id === 'svc:googledrive.get_file_metadata' ? { name: 'huge.bin', mimeType: 'application/octet-stream' } : id === 'svc:googledrive.find_file' ? { files: [{ id: 'file-1', name: 'huge.bin', size: String(60 * 1024 * 1024) }] } : {});
+    const { svc, provider } = build(answer);
     await expect(svc.driveImport('file-1')).rejects.toThrow(/too big/i);
-    expect(svc.runBinary).not.toHaveBeenCalled(); // never downloaded
+    expect(calls(provider).some((c) => c.id === 'svc:googledrive.download_file')).toBe(false);
   });
 
   it('says plainly when a Google file has no document form (a Form, a Drawing)', async () => {
-    const { svc } = build();
-    svc.run = jest.fn(async () => ({ name: 'Survey', mimeType: 'application/vnd.google-apps.form' })) as any;
-    svc.runBinary = jest.fn() as any;
-
+    const { svc, provider } = build(drive({ name: 'Survey', mimeType: 'application/vnd.google-apps.form' }));
     await expect(svc.driveImport('file-1')).rejects.toThrow(/no document to bring in/i);
-    expect(svc.runBinary).not.toHaveBeenCalled();
+    expect(calls(provider).some((c) => c.id === 'svc:googledrive.download_file')).toBe(false);
   });
 
   it('refuses an empty download rather than saving a blank document', async () => {
-    const { svc } = build();
-    svc.run = jest.fn(async () => ({ name: 'Quote', mimeType: 'application/vnd.google-apps.document' })) as any;
-    svc.runBinary = jest.fn(async () => Buffer.alloc(0)) as any;
-
+    restore();
+    restore = serveBytes({ 'stage/export': Buffer.alloc(0) });
+    const { svc } = build(drive({ name: 'Quote', mimeType: 'application/vnd.google-apps.document' }));
     await expect(svc.driveImport('file-1')).rejects.toThrow(/empty/i);
+  });
+
+  it('lists Drive with the same query the bridge used, and reads files from the answer', async () => {
+    const { svc, provider } = build((id) => (id === 'svc:googledrive.find_file' ? { files: [{ id: 'f', name: 'A', mimeType: 'application/pdf', modifiedTime: 't', webViewLink: 'l' }] } : {}));
+    const out = await svc.driveList('quote');
+    expect(out).toEqual([{ id: 'f', name: 'A', mimeType: 'application/pdf', modified: 't', link: 'l' }]);
+    expect(calls(provider)[0].args.q).toBe("name contains 'quote' and trashed=false");
   });
 });
 
-describe('gmailImport', () => {
+// ---- Gmail ---------------------------------------------------------------------------------
+
+describe('gmailImport (through the seam)', () => {
   const message = {
+    messageId: 'msg-1',
     threadId: 'thread-9',
+    preview: { body: 'Here is our price.' },
     payload: {
       headers: [
         { name: 'From', value: 'vendor@example.com' },
@@ -192,68 +149,55 @@ describe('gmailImport', () => {
       ],
     },
   };
+  let restore: () => void;
+  beforeEach(() => { restore = serveBytes({ 'stage/att': Buffer.from('PK attachment bytes') }); });
+  afterEach(() => restore());
 
-  function wire(svc: GoogleService) {
-    svc.run = jest.fn(async (argv: string[]) => {
-      if (argv.includes('attachments')) return { data: Buffer.from('PK attachment bytes').toString('base64url') };
-      if (argv.includes('threads')) return { messages: [{ ...message, id: 'msg-1' }] };
-      return message;
-    }) as any;
-  }
+  const gmail = (extra: (id: string, args: any) => any = () => undefined) => (id: string, args: any) => {
+    const x = extra(id, args);
+    if (x !== undefined) return x;
+    if (id === 'svc:gmail.get_attachment') return { file: { name: args.file_name, mimetype: 'application/octet-stream', s3url: `https://x/stage/att/${args.attachment_id}` } };
+    if (id === 'svc:gmail.fetch_message_by_thread_id') return { messages: [message] };
+    if (id === 'svc:gmail.fetch_message_by_message_id') return message;
+    return {};
+  };
 
   it('saves the email and its real attachment, and skips the inline logo', async () => {
-    const { svc, lib } = build();
-    wire(svc);
-
+    const { svc, lib, provider } = build(gmail());
     const res = await svc.gmailImport('msg-1');
-
     expect(res.attachments).toBe(2);
     const names = lib.saved.map((s) => s.file.originalname);
     expect(names).toContain('quote.docx');
     expect(names).toContain('terms.pdf'); // a Content-ID does NOT mean inline
     expect(names).not.toContain('logo.png');
+    // The attachment call carries the message, the attachment and the name the provider insists on.
+    const att = calls(provider).find((c) => c.id === 'svc:gmail.get_attachment');
+    expect(att.args).toEqual({ message_id: 'msg-1', attachment_id: 'att-1', file_name: 'quote.docx' });
+    expect(lib.saved[1].file.buffer.toString('utf8')).toBe('PK attachment bytes');
   });
 
   it('keys each attachment on its own id, with a key short enough to store (BEA-1344)', async () => {
-    const { svc, lib } = build();
     const longId = 'A'.repeat(400); // real Gmail attachment ids run this long
-    svc.run = jest.fn(async (argv: string[]) => {
-      if (argv.includes('attachments')) return { data: Buffer.from('bytes').toString('base64url') };
-      if (argv.includes('threads')) {
-        return { messages: [{ ...message, id: 'msg-1', payload: { ...message.payload, parts: [
-          { mimeType: DOCX, filename: 'invoice.pdf', body: { attachmentId: longId + '1' } },
-          { mimeType: DOCX, filename: 'invoice.pdf', body: { attachmentId: longId + '2' } },
-        ] } } ] };
-      }
-      return message;
-    }) as any;
-
+    const twoFiles = { ...message, payload: { ...message.payload, parts: [
+      { mimeType: DOCX, filename: 'invoice.pdf', body: { attachmentId: longId + '1' } },
+      { mimeType: DOCX, filename: 'invoice.pdf', body: { attachmentId: longId + '2' } },
+    ] } };
+    const { svc, lib } = build(gmail((id) => (id === 'svc:gmail.fetch_message_by_thread_id' ? { messages: [twoFiles] } : undefined)));
     const res = await svc.gmailThreadImport('thread-9');
-
-    // Two different files that happen to share a name must BOTH be saved...
-    expect(res.attachments).toBe(2);
-    // ...and every key must be well inside the 500-char store limit, or they'd truncate into one.
-    for (const call of (lib.findImported as jest.Mock).mock.calls) {
-      expect(String(call[0]).length).toBeLessThan(200);
-    }
+    expect(res.attachments).toBe(2); // two different files sharing a name are BOTH saved
+    for (const call of (lib.findImported as jest.Mock).mock.calls) expect(String(call[0]).length).toBeLessThan(200);
   });
 
   it('puts everything from Gmail in the Email folder', async () => {
-    const { svc, lib } = build();
-    wire(svc);
-
+    const { svc, lib } = build(gmail());
     await svc.gmailImport('msg-1');
-
     expect(lib.ensureCollection).toHaveBeenCalledWith('Email', expect.anything());
     for (const s of lib.saved) expect(s.opts?.collectionId).toBe('col-email');
   });
 
   it('keeps who it is from, and the body, in the saved email', async () => {
-    const { svc, lib } = build();
-    wire(svc);
-
+    const { svc, lib } = build(gmail());
     await svc.gmailImport('msg-1');
-
     const md = lib.saved[0].file.buffer.toString('utf8');
     expect(md).toContain('# Quote for 25 boards');
     expect(md).toContain('vendor@example.com');
@@ -261,36 +205,41 @@ describe('gmailImport', () => {
   });
 
   it('still saves the email when an attachment cannot be fetched', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async (argv: string[]) => {
-      if (argv.includes('attachments')) throw new Error('attachment gone');
-      return message;
-    }) as any;
-
+    const { svc, lib } = build(gmail((id) => (id === 'svc:gmail.get_attachment' ? { __error: 'attachment gone' } : undefined)));
     const res = await svc.gmailImport('msg-1');
-
     expect(res.attachments).toBe(0);
     expect(lib.saved).toHaveLength(1); // the email itself survived
   });
 
   it('refreshes the same conversation instead of leaving a second copy', async () => {
-    const { svc, lib } = build();
-    wire(svc);
-    lib.findImported = jest.fn(async (_url: string, filename: string) =>
-      filename.endsWith('.md') ? { id: 'doc-existing', title: 'Quote for 25 boards' } : null) as any;
-
+    const { svc, lib } = build(gmail());
+    lib.findImported = jest.fn(async (_url: string, filename: string) => (filename.endsWith('.md') ? { id: 'doc-existing', title: 'Quote for 25 boards' } : null)) as any;
     await svc.gmailThreadImport('thread-9');
-
     expect(lib.replaceContent).toHaveBeenCalledWith('doc-existing', expect.stringContaining('# Quote for 25 boards'));
     expect(lib.saved.map((s) => s.file.originalname)).not.toContain('Quote for 25 boards.md');
   });
 
   it('makes a safe filename from a subject with slashes', async () => {
-    const { svc, lib } = build();
-    svc.run = jest.fn(async () => ({ ...message, payload: { ...message.payload, headers: [{ name: 'Subject', value: 'RFQ 12/08 <urgent>' }], parts: [] } })) as any;
-
+    const odd = { ...message, payload: { ...message.payload, headers: [{ name: 'Subject', value: 'RFQ 12/08 <urgent>' }], parts: [] } };
+    const { svc, lib } = build(gmail((id) => (id === 'svc:gmail.fetch_message_by_message_id' ? odd : undefined)));
     await svc.gmailImport('msg-1');
-
     expect(lib.saved[0].file.originalname).not.toMatch(/[\\/<>]/);
+  });
+
+  it('reads a thread as text with quoted history stripped, oldest first — the Requests input', async () => {
+    const reply = { ...message, messageId: 'msg-2', payload: { ...message.payload, headers: [{ name: 'From', value: 'me@example.com' }, { name: 'Date', value: 'Sun, 17 Aug 2026 09:00:00 +0530' }, { name: 'Subject', value: 'Re: Quote for 25 boards' }], parts: [{ mimeType: 'text/plain', body: { data: Buffer.from('Thanks, agreed — please go ahead and ship the twenty-five boards next week.\n\nOn Sat, vendor wrote:\n> Here is our price.').toString('base64url') } }] } };
+    const { svc } = build(gmail((id) => (id === 'svc:gmail.fetch_message_by_thread_id' ? { messages: [message, reply] } : undefined)));
+    const t = await svc.gmailThread('thread-9');
+    expect(t.subject).toBe('Quote for 25 boards');
+    expect(t.messages).toHaveLength(2);
+    expect(t.copy).toContain('--- Message 1 of 2 ---');
+    expect(t.copy).toContain('Here is our price.');
+    expect(t.copy).toContain('Thanks, agreed');
+    expect(t.copy).not.toContain('> Here is our price.'); // quoted history removed
+  });
+
+  it('gmailMessageFull is the de-quoted body — what email memory stores', async () => {
+    const { svc } = build(gmail());
+    expect(await svc.gmailMessageFull('msg-1')).toBe('Here is our price.');
   });
 });

@@ -87,17 +87,6 @@ const EXPORT_AS: Record<string, { mime: string; ext: string }> = {
 
 export type GmailMeta = { id: string; threadId: string; from: string; subject: string; date: string; snippet: string };
 
-/**
- * Which road Google reads take while both exist: `bridge` (the gws CLI on the host, via
- * `google.service.ts`) or `seam` (this service, through the ServiceProvider). Set `GOOGLE_SOURCE=seam`
- * to switch. The default stays on the bridge until the seam has been proven on the same inbox —
- * a migration that ships half-proven is worse than one that ships behind a flag.
- */
-export function googleSource(): 'bridge' | 'seam' {
-  const v = String(process.env.GOOGLE_SOURCE || '').trim().toLowerCase();
-  return v === 'seam' || v === 'composio' ? 'seam' : 'bridge';
-}
-
 @Injectable()
 export class GoogleWorkspaceService {
   private readonly logger = new Logger(GoogleWorkspaceService.name);

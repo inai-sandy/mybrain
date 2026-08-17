@@ -2992,7 +2992,7 @@ function SuperMemorySyncCard() {
   );
 }
 
-type GServices = { connected: boolean; email: string | null; project: string | null; services: { key: string; label: string; access: string; enabled: boolean; unsupported: boolean }[] };
+type GServices = { connected: boolean; email: string | null; project: string | null; services: { key: string; label: string; access: string; enabled: boolean; unsupported: boolean; connect?: string | null }[] };
 
 /** The dedicated Google tab — every Workspace service and its access level. */
 function GoogleServicesSection() {
@@ -3025,20 +3025,23 @@ function GoogleServicesSection() {
           <p className="mt-3 text-sm text-zinc-400">Loading…</p>
         ) : !d.connected ? (
           <div className="mt-3 text-sm rounded-lg bg-amber-500/10 border border-amber-300/30 dark:border-amber-500/20 px-3 py-2 text-amber-700 dark:text-amber-300">
-            Not connected yet. Go to <b>Settings → Integrations → Google</b> to connect.
+            Gmail is not connected yet. Open <Link to="/tools" className="font-medium underline">Tools</Link>, find <b>Gmail</b> and tap Connect.
           </div>
         ) : (
           <>
-            <p className="mt-1 mb-3 text-sm text-zinc-500">Connected as <b className="text-zinc-700 dark:text-zinc-200">{d.email || 'your Google account'}</b>{d.project ? <> · project <code className="text-zinc-400">{d.project}</code></> : ''}.</p>
+            <p className="mt-1 mb-3 text-sm text-zinc-500">Connected as <b className="text-zinc-700 dark:text-zinc-200">{d.email || 'your Google account'}</b> — each service is its own login in <Link to="/tools" className="text-blue-500 hover:underline">Tools</Link>.</p>
             <div className="rounded-lg border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
               {d.services.map((s) => (
                 <div key={s.key} className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm">
                   <span className={s.enabled ? 'font-medium' : 'text-zinc-400'}>{s.label}</span>
-                  {badge(s)}
+                  <span className="flex items-center gap-2 shrink-0">
+                    {!s.enabled && !s.unsupported && <Link to="/tools" className="text-[11px] text-blue-500 hover:underline">Connect in Tools</Link>}
+                    {badge(s)}
+                  </span>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-zinc-400">“Read &amp; write” = the app can read your data and create new items, but never sends, edits, or deletes your existing Google content. <b>Keep</b> isn’t available through a personal Google sign-in (Google restricts it to enterprise service accounts).</p>
+            <p className="mt-3 text-xs text-zinc-400">“Read &amp; write” = the login allows both; My Brain itself only reads, and creates new items where you ask it to (a new Doc, a new Meet link). Forms are read through Drive and Contacts through Gmail, so they need no login of their own. <b>Keep</b> isn’t available through a personal Google sign-in (Google restricts it to enterprise service accounts).</p>
           </>
         )}
       </section>
@@ -3046,12 +3049,11 @@ function GoogleServicesSection() {
   );
 }
 
-type GoogleStatus = { connected: boolean; email: string | null; gws?: boolean; bridge?: boolean; gmail?: boolean; drive?: boolean; calendar?: boolean };
+type GoogleStatus = { connected: boolean; email: string | null; gmail: boolean; drive: boolean; calendar: boolean };
 
 /**
  * Google Workspace setup. Gmail, Drive and Calendar are connected at /tools (BEA-1351) — one login
- * each, the same road every other outside service takes. The older host-CLI bridge shape is still
- * rendered while it exists behind the switch.
+ * each, the same road every other outside service takes. The old host-CLI bridge is gone.
  */
 function GoogleCard() {
   const [s, setS] = useState<GoogleStatus | null>(null);
@@ -3072,24 +3074,18 @@ function GoogleCard() {
       <span className={ok ? 'text-zinc-700 dark:text-zinc-200' : 'text-zinc-500'}>{children}</span>
     </li>
   );
-  const code = 'rounded bg-zinc-200 dark:bg-zinc-800 px-1.5 py-0.5 text-emerald-600 dark:text-emerald-400';
-  const viaTools = !!s && s.gmail !== undefined;
   return (
     <div className="rounded-xl border border-blue-300/40 dark:border-blue-500/30 bg-gradient-to-br from-blue-500/5 to-transparent p-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <h3 className="font-bold flex items-center gap-2">🟦 Google Workspace <span className="text-[10px] uppercase tracking-wide rounded-full bg-blue-500/15 text-blue-500 px-2 py-0.5">setup</span></h3>
-          {viaTools ? (
-            <p className="text-xs text-zinc-500 mt-1">Your <b>Gmail, Drive &amp; Calendar</b> are connected in <Link to="/tools" className="text-blue-500 hover:underline">Tools</Link>, like every other outside service — one login each. The Daily Brief, Requests, email memory and Drive import all read through them.</p>
-          ) : (
-            <p className="text-xs text-zinc-500 mt-1">Pull your <b>Gmail, Drive, Docs &amp; Sheets</b> into your brain via the Google Workspace CLI (<code className="text-zinc-500">gws</code>) on your server — read &amp; safe-write. Google sign-in is handled by the CLI.</p>
-          )}
+          <p className="text-xs text-zinc-500 mt-1">Your <b>Gmail, Drive &amp; Calendar</b> are connected in <Link to="/tools" className="text-blue-500 hover:underline">Tools</Link>, like every other outside service — one Google sign-in each. The Daily Brief, Requests, email memory and Drive import all read through them.</p>
         </div>
         <button onClick={load} disabled={busy} className="text-xs text-zinc-400 hover:text-blue-500 shrink-0">{busy ? '…' : 'refresh'}</button>
       </div>
       {!s ? (
         <p className="mt-3 text-sm text-zinc-400">Checking…</p>
-      ) : viaTools ? (
+      ) : (
         <>
           <ul className="mt-3 space-y-1.5">
             <Step ok={!!s.gmail}>Gmail connected{s.email ? ` (${s.email})` : ''}</Step>
@@ -3100,22 +3096,6 @@ function GoogleCard() {
             <div className="mt-3 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2.5 space-y-1.5">
               <p className="text-zinc-600 dark:text-zinc-300 font-medium">Something is not connected yet.</p>
               <p className="text-zinc-500">Open <Link to="/tools" className="text-blue-500 hover:underline">Tools</Link>, find <b>Gmail</b>, <b>Google Drive</b> or <b>Google Calendar</b> and tap Connect — it is a normal Google sign-in. Then tap “refresh” here.</p>
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <ul className="mt-3 space-y-1.5">
-            <Step ok={!!s.bridge}>Server bridge reachable</Step>
-            <Step ok={!!s.gws}>Google Workspace CLI installed on your server</Step>
-            <Step ok={s.connected}>Connected to your Google account{s.email ? ` (${s.email})` : ''}</Step>
-          </ul>
-          {!s.connected && (
-            <div className="mt-3 text-xs rounded-lg bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 px-3 py-2.5 space-y-1.5">
-              <p className="text-zinc-600 dark:text-zinc-300 font-medium">One step only you can do — connect your Google account on the server:</p>
-              <p className="text-zinc-500">Easiest (uses gcloud to auto-create the Google app + sign in): run <code className={code}>gws auth setup</code></p>
-              <p className="text-zinc-500">Or, if you’ve placed a client_secret.json in <code className={code}>~/.config/gws/</code>: run <code className={code}>gws auth login</code></p>
-              <p className="text-zinc-500">It’ll ask for Gmail, Drive, Docs &amp; Sheets access. On a headless server use the printed URL/device-code flow. Then tap “refresh”.</p>
             </div>
           )}
         </>

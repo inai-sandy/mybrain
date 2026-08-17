@@ -1153,6 +1153,9 @@ export class FlowRunnerService implements OnModuleInit {
     //  • save_document / save_capture / create_task / remember / telegram / whatsapp / search_rag /
     //    fetch_document (BEA-1203) — filing a document is not a decision. These were engine turns
     //    whose only job was to call our own API back.
+    // The bare Google ids below are no longer offered by the catalog (BEA-1351 — Google comes
+    // through the seam as svc:gmail.* etc.), but flows saved before that still carry them, and an
+    // id dropped from this set would fall through to a plain model call that invents the answer.
     'gmail', 'calendar', 'drive', 'http',
     'docs', 'sheets', 'slides', 'tasks', 'forms', 'meet', 'chat', 'contacts',
     'cli',

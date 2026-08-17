@@ -175,6 +175,17 @@ They then appear with no extra work in the **agent Tools box** (`ToolPicker`), t
 6. **Triggers** — webhook endpoint, per-service instances, wake-a-flow bindings, echo guard + rate cap
 7. **Retire gws** (follow-up, only once 1–6 are live and proven) — move the Daily Brief, Requests, email memory and Drive import onto Composio, then switch the bridge off
 
+**Built (BEA-1351).** `GoogleWorkspaceService` (`api/src/google/google-workspace.service.ts`) reads Gmail,
+Drive and Calendar through `provider.execute()` on the accounts connected at `/tools`; `google.service.ts`
+and the host `gws-runner` are gone from the code, and the catalog's own Google group with them (Google now
+appears exactly once, as `svc:gmail.*` etc.). Proven side by side on the same inbox before the flip
+(2026-08-17): four days of Daily Brief inputs identical (unread counts, the important-mail sets in the
+same order, and the exact model prompt byte-identical), 20/20 email bodies identical and 16/16 equal to
+what the bridge had stored, the saved Request's thread copy byte-identical (17,680 chars) with all 8
+attachments matching by sha1, Drive PDF/docx bytes identical and Doc/Sheet/Slides exports identical in
+content, calendar 12/12 events. Two things Google itself does not keep stable across two exports: zip
+entry timestamps and, for Slides, media numbering and the embedded font build — content compared instead.
+
 ## Standards (always)
 List standards on `/tools` (search · filter · sort · count · loading · empty state). Responsive at 1180 and 390 · dark mode · confirm before disconnect · friendly errors when a connection expires · the Composio API key never in code, logs or git · every tool call logged.
 

@@ -38,13 +38,13 @@ export function GoogleHome() {
             <CheckCircle2 size={13} /> Connected{status?.email ? ` · ${status.email}` : ''}
           </span>
         ) : status ? (
-          <Link to="/settings" className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 text-amber-600 px-3 py-1 text-xs font-medium hover:bg-amber-500/20">Not connected — set up</Link>
+          <Link to="/tools" className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 text-amber-600 px-3 py-1 text-xs font-medium hover:bg-amber-500/20">Not connected — connect Gmail</Link>
         ) : null}
       </div>
 
       {status && !connected && (
         <div className="rounded-xl border border-amber-300/50 dark:border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-300">
-          Google isn’t connected yet. <Link to="/settings" className="font-medium underline hover:text-amber-600">Open Settings → Integrations → Google</Link> to finish the one-time setup, then come back.
+          Gmail isn’t connected yet. <Link to="/tools" className="font-medium underline hover:text-amber-600">Open Tools</Link>, find Gmail (and Google Drive, Google Calendar) and tap Connect — a normal Google sign-in — then come back.
         </div>
       )}
 
