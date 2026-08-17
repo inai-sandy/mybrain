@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
+import { sendJson } from '../common/send-json';
 import { FlowsService } from './flows.service';
 import { FlowRunnerService } from './flows-runner.service';
 
@@ -15,9 +17,10 @@ export class FlowsController {
   }
 
   // static routes before :id
+  /** Gzipped on the wire — the palette carries the whole catalog (BEA-1354, ~360KB plain). */
   @Get('palette')
-  palette() {
-    return this.flows.palette();
+  async palette(@Res() res: Response) {
+    sendJson(res, await this.flows.palette());
   }
 
   @Post('decompose')
