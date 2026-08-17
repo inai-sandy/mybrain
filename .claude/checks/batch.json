@@ -42,9 +42,11 @@
     {
       "id": "BEA-1351",
       "title": "Retire the gws Google bridge (full migration)",
-      "status": "in_progress",
-      "startedAt": "2026-08-17T14:05:00Z"
+      "status": "shipped",
+      "startedAt": "2026-08-17T14:05:00Z",
+      "sha": "8584b3e"
     }
   ],
-  "result": "Batch 1 (1345-1350) done. Batch 2 = BEA-1351 running."
+  "result": "ALL 7 shipped and live: BEA-1345\u21921351. Tools track complete.",
+  "completedAt": "2026-08-17T14:55:00Z"
 }
