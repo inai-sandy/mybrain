@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { gzipSync } from 'zlib';
+import { sendJson } from '../common/send-json';
 import { ComposioProvider } from './composio.provider';
 import { ServiceGatesService } from './service-gates.service';
 import { ServiceInfo } from './service-provider';
@@ -55,28 +55,6 @@ function tidy(name: string): string {
     .join(' ');
 }
 
-/**
- * Send one answer, gzipped when it is worth it and the browser said it could.
- *
- * The browse list is ~520KB of JSON, and nothing else in front of this app compresses (no
- * `compression` middleware, and Caddy is not encoding either — checked on the live site). Half a
- * megabyte on a phone for the first paint of a page whose whole point is browsing 1,209 things is
- * not "fast", so this one endpoint compresses itself: ~90KB, and no new dependency or global
- * middleware that could interfere with the app's streaming endpoints.
- */
-function send(res: Response, body: any) {
-  const json = JSON.stringify(body);
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Vary', 'Accept-Encoding');
-  const wanted = /\bgzip\b/i.test(String((res.req as any)?.headers?.['accept-encoding'] || ''));
-  // Below a few KB the compressing costs more than the bytes it saves.
-  if (!wanted || json.length < 8192) { res.send(json); return; }
-  const zipped = gzipSync(Buffer.from(json, 'utf8'), { level: 6 });
-  res.setHeader('Content-Encoding', 'gzip');
-  res.setHeader('Content-Length', String(zipped.length));
-  res.end(zipped);
-}
-
 @Controller('tools/services')
 export class ServicesController {
   private readonly log = new Logger('Services');
@@ -97,7 +75,7 @@ export class ServicesController {
    */
   @Get()
   async listRoute(@Res() res: Response, @Query('refresh') refresh?: string) {
-    send(res, await this.list(refresh));
+    sendJson(res, await this.list(refresh));
   }
 
   /** The answer itself, with no HTTP in it — the route above only decides how to put it on the wire. */

@@ -1093,7 +1093,7 @@ function ServiceSheet({ slug, onClose, onChanged }: { slug: string; onClose: () 
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-lg font-bold">{svc?.name || slug}</h3>
                   <p className="mt-0.5 truncate text-xs text-zinc-400">
-                    {svc ? `${svc.category} · ${plural(num(svc.availableActionCount ?? svc.actionCount), 'action')}${svc.availableActionCount ? ' available' : ''}${num(svc.triggerCount) ? ` · ${plural(num(svc.triggerCount), 'event')}` : ''}` : 'Loading…'}
+                    {svc ? `${svc.category} · ${plural(num(svc.availableActionCount ?? svc.actionCount), 'action')}${num(svc.triggerCount) ? ` · ${plural(num(svc.triggerCount), 'event')}` : ''}` : 'Loading…'}
                   </p>
                 </div>
                 <button onClick={close} aria-label="Close" className="shrink-0 rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200">

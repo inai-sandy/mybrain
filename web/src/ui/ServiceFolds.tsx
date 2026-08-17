@@ -8,7 +8,7 @@ import { ChevronDown, Search } from 'lucide-react';
  * the same list is drawn in the agent's tool picker and on the Flows canvas. Both need the same
  * three things, so they live here once:
  *  - one fold per service, closed by default, with its count and how many are already picked;
- *  - a search box INSIDE each open fold ("Search GitHub's 781 actions") on top of the page's own;
+ *  - a search box INSIDE each open fold ("Search 781 actions") on top of the page's own;
  *  - a page of `pageSize` rows at a time and a "Show more" button — never hundreds of buttons on a
  *    phone at once.
  * A page-level query opens the folds that match and hides the rest, so a global search still works
@@ -123,7 +123,7 @@ function ServiceFold<T extends FoldItem>({
               <input
                 value={q}
                 onChange={(e) => { setQ(e.target.value); setShown(pageSize); }}
-                placeholder={`Search ${title}'s ${items.length.toLocaleString()} actions`}
+                placeholder={`Search ${items.length.toLocaleString()} actions`}
                 aria-label={`Search ${title}'s actions`}
                 className="min-w-0 flex-1 bg-transparent py-0.5 text-base outline-none placeholder:text-zinc-400 sm:text-xs"
               />
