@@ -40,7 +40,10 @@ const ORIGIN: Record<string, { label: string; title: string; cls: string }> = {
   chat: { label: '💬 chat', title: 'Built in the chat', cls: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' },
   voice: { label: '🎙 voice', title: 'Came in by voice', cls: 'bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300' },
   import: { label: '⤵ imported', title: 'Imported from GitHub', cls: 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-300' },
+  social: { label: '📣 social', title: 'Made from a Social result', cls: 'bg-pink-50 text-pink-700 dark:bg-pink-500/10 dark:text-pink-300' },
 };
+/** An origin the map does not know yet must never crash the row (BEA-1357). */
+const originOf = (o?: string) => ORIGIN[o || 'chat'] || ORIGIN.chat;
 
 function toolBadge(t: { kind: string; group?: string }) {
   if (t.group && TOOL_GROUP[t.group]) return { label: t.group === 'MCP servers' ? 'MCP' : t.group, cls: TOOL_GROUP[t.group] };
@@ -267,7 +270,7 @@ export function AgentAreaPage() {
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
                   <span className="min-w-0 truncate text-sm font-semibold">{j.name}</span>
-                  <span title={ORIGIN[j.origin || 'chat'].title} className={'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' + ORIGIN[j.origin || 'chat'].cls}>{ORIGIN[j.origin || 'chat'].label}</span>
+                  <span title={originOf(j.origin).title} className={'shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ' + originOf(j.origin).cls}>{originOf(j.origin).label}</span>
                 </span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
                   {j.lastRun ? (

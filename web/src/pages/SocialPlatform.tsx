@@ -441,10 +441,10 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
     }
   }
 
-  /** The builder-side handoff (pre-filling from these) is BEA-1357; here we only navigate. */
+  /** Hand the tool, the exact arguments just used and a label to the agent builder (BEA-1357). */
   function makeAgent() {
     const args = last?.args || {};
-    navigate(`/agent?builder=1&tool=${encodeURIComponent(e.id)}&args=${encodeURIComponent(JSON.stringify(args))}`);
+    navigate(`/agent?builder=1&tool=${encodeURIComponent(e.id)}&args=${encodeURIComponent(JSON.stringify(args))}&label=${encodeURIComponent(`${platform.name} · ${e.name}`)}`);
   }
 
   return (

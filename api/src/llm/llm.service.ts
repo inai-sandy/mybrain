@@ -237,6 +237,11 @@ export class LlmService {
     // small, capped and pinned to Sonnet 5 on the API: it must never queue behind engine quota, and
     // its output is fed straight into a REAL call that creates, sends or changes something.
     'service-args': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
+    // Turns a Social agent's fetched items into the named columns the owner asked for, and keeps
+    // only the ones that fit a filter like "in India" — no social search has a country filter, so
+    // relevance is ours (BEA-1357). It reads real captions and decides what to keep, so a Sonnet-
+    // class model on the API; never the engine (a CLI turn's ~25,000-token tax on every batch).
+    'social-shape': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
     // Small extraction jobs: a few example inputs, a few durable facts. Haiku is plenty.
     'suggest-evals': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     'agent-learn': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },

@@ -18,6 +18,7 @@ import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { SkillsService } from '../skills/skills.service';
+import { SocialAgentRunService } from '../social/social-agent-run.service';
 import { GRADE_MAX_CHECKS, GRADE_MAX_TOKENS, Grade, GradeResult, parseGrade } from './grade';
 
 const HUMAN_WAIT_MS = 20 * 60 * 1000; // how long a mid-run question stays open before the default is applied
@@ -76,6 +77,7 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     private readonly skillsSvc?: SkillsService,
     private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167/1168)
     private readonly budget?: TokenBudgetService, // the token ceiling (BEA-1204)
+    private readonly socialRuns?: SocialAgentRunService, // direct fetch jobs — no engine turn (BEA-1357)
   ) {}
 
   onModuleInit() {
@@ -766,6 +768,16 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     const depth = input.depth ?? (input.quick ? 'quick' : 'standard');
     const quick = depth === 'quick';
     await this.agent.appendStep(runId, { label: quick ? 'Starting up (quick answer)' : 'Starting up', status: 'done' });
+    // A Social agent (BEA-1357) fetches DIRECTLY — its tools are `svc:` ids with pinned arguments,
+    // and calling an API is not a decision, so no engine turn is started for it. Same run row, same
+    // steps, same output destinations; only the engine is skipped.
+    if (input.agentId && this.socialRuns?.handles) {
+      const job: any = await this.agent.getAgent(input.agentId).catch(() => null);
+      if (job && this.socialRuns.handles(job)) {
+        await this.socialRuns.run(runId, job, { title: input.title || job.name });
+        return;
+      }
+    }
     const cfg = await this.agent.engineSettings();
     // Research FIRST, brain SECOND (BEA-692). We no longer pre-inject a RAG recall as the opening
     // context (that made the agent "start with the brain"). Instead it researches the topic, then
@@ -856,7 +868,11 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         if (input.agentId) {
           const job: any = await this.agent.getAgent(input.agentId).catch(() => null);
           if (job?.notifyWhatsApp) {
-            await (this.alerts as any)?.runFinished?.(job.name || input.title || 'Your agent', detail || 'The result is ready.', `/agent/runs/${runId}`).catch(() => undefined);
+            const r = await (this.alerts as any)?.runFinished?.(job.name || input.title || 'Your agent', detail || 'The result is ready.', `/agent/runs/${runId}`).catch(() => null);
+            // Said on the run, never silent (BEA-1357): a toggle that is on and a message that never
+            // arrives must explain itself where the owner will look.
+            if (r && !r.sent && r.why === 'no number') await this.agent.appendStep(runId, { label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' }).catch(() => undefined);
+            else if (r && !r.sent && r.why && r.why !== 'off') await this.agent.appendStep(runId, { label: `⚠️ Not sent to WhatsApp — ${r.why}`, status: 'info' }).catch(() => undefined);
           }
         }
       }
@@ -868,7 +884,8 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
 
     let result;
     // Per-job engine override (BEA-1106): a job with its own codex model runs on it.
-    const jobEngine: any = input.agentId ? ((await this.agent.getAgent(input.agentId).catch(() => null)) as any)?.engine : null;
+    const jobRow: any = input.agentId ? await this.agent.getAgent(input.agentId).catch(() => null) : null;
+    const jobEngine: any = jobRow?.engine ?? null;
     const jobModel: string | undefined = jobEngine?.provider === 'codex' && jobEngine.model && jobEngine.model !== 'codex' ? jobEngine.model : undefined;
     try {
       result = await this.runViaCodex(prompt, handlers, { title: input.title, model: jobModel || cfg.model || undefined, sessionId, skill: input.skill });
@@ -960,6 +977,27 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
     }
     // Learn-after runs on the FINAL (possibly revised) text. Quick skips it.
     if (!quick && text && cfg.learn) await this.proposeLearnings(runId, text);
+    // Where the result goes (BEA-1357): a job set to a Google Sheet gets its answer shaped into rows
+    // and written through the seam — on THIS road too, so the setting is never a dead switch. Any
+    // failure fails the run with its reason; it never falls back to a Document as if nothing was asked.
+    if (jobRow?.outputDest === 'sheet' && text) {
+      if (!this.socialRuns?.deliverTextToSheet) {
+        await this.agent.finishRun(runId, { status: 'failed', error: 'Google Sheet output is not available on this server.', resultText: text, grade: gradeJson });
+        await notifyEnd('failed', 'Google Sheet output is not available on this server.');
+        return;
+      }
+      try {
+        const sh = await this.socialRuns.deliverTextToSheet(runId, jobRow, input.title || jobRow.name || 'Agent result', text);
+        await this.agent.finishRun(runId, { status: 'done', resultText: text, outputUrl: sh.url, grade: gradeJson });
+        await notifyEnd('done', `${sh.rows} row${sh.rows === 1 ? '' : 's'} → ${sh.url}`);
+      } catch (e: any) {
+        const why = String(e?.message || e || 'the sheet could not be written');
+        await this.agent.appendStep(runId, { label: why, status: 'failed' }).catch(() => undefined);
+        await this.agent.finishRun(runId, { status: 'failed', error: why, resultText: text, grade: gradeJson });
+        await notifyEnd('failed', why);
+      }
+      return;
+    }
     if (!quick && input.save !== false && text) {
       try {
         const doc = await this.documents.create({

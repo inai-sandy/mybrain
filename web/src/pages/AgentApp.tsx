@@ -12,6 +12,7 @@ import { FlowPanel, EvalsPanel, RunsPanel } from './AgentJobPanels';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { SchedulePicker, schedText } from '../ui/SchedulePicker';
 import { StatusBadge, timeAgo } from './Agents';
+import { OutputDestPicker, ToolArgsEditor } from '../ui/agentJobFields';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
@@ -434,8 +435,33 @@ export function AgentApp() {
             <SchedulePicker value={a?.schedule || null} onChange={async (s) => { setA((p: any) => ({ ...p, schedule: s, scheduleText: schedText(s) })); const d = await patch({ schedule: s, scheduleText: schedText(s) }); if (d) toast('success', schedText(s) ? `Saved — ${schedText(s)}` : 'Saved — manual only'); }} />
           </section>
 
+          {/* A Social job's fetch (BEA-1357): the tool + the exact arguments it runs with. No engine turn. */}
+          {a.toolArgs && typeof a.toolArgs === 'object' && Object.keys(a.toolArgs).length > 0 && (
+            <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+              <h2 className="text-sm font-semibold">What it fetches</h2>
+              {Object.entries(a.toolArgs as Record<string, any>).map(([tool, args]) => (
+                <ToolArgsEditor key={tool} tool={tool} args={args || {}} toolName={toolNames[tool]} onChange={(next) => setA((p: any) => ({ ...p, toolArgs: { ...p.toolArgs, [tool]: next } }))} />
+              ))}
+              <button onClick={async () => { const d = await patch({ toolArgs: a.toolArgs }); if (d) toast('success', 'Saved — the next run uses these values'); }} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"><Save className="h-4 w-4" />Save</button>
+              <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.</p>
+            </section>
+          )}
+
           {/* History retention + move (BEA-1099) */}
           <section className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            {/* Where the result goes (BEA-1357): Document, or a Google Sheet through the seam. */}
+            <OutputDestPicker
+              dest={a.outputDest || 'document'}
+              sheetId={a.sheetId || ''}
+              onChange={async (v) => {
+                const changedDest = v.outputDest !== (a.outputDest || 'document');
+                setA((p: any) => ({ ...p, outputDest: v.outputDest, sheetId: v.sheetId }));
+                // The select saves at once; the sheet id saves when the owner leaves the field.
+                if (changedDest) { const d = await patch({ outputDest: v.outputDest }); if (d) toast('success', v.outputDest === 'sheet' ? 'Results go to a Google Sheet' : 'Results go to Documents'); }
+              }}
+              onCommitSheetId={async (id) => { const d = await patch({ sheetId: id || null }); if (d) toast('success', id ? 'Every run appends to that sheet' : 'A new sheet every run'); }}
+            />
+            <div className="border-t border-zinc-100 pt-3 dark:border-zinc-800" />
             {/* Per-job WhatsApp delivery (BEA-1102) */}
             <label className="flex cursor-pointer items-center justify-between gap-3">
               <span>

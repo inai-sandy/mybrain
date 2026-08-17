@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SocialModule } from '../social/social.module';
 import { HermesBridgeService } from './hermes-bridge.service';
 import { AgentScheduler } from './agent-scheduler.service';
 import { EngineWatchdog } from './engine-watchdog.service';
@@ -19,7 +20,7 @@ import { SkillsModule } from '../skills/skills.module';
  * our AgentRun + Documents. (Was the Hermes WS bridge; Hermes removed BEA-663/667.)
  */
 @Module({
-  imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule, PushModule, PromptsModule, SkillsModule, ToolCatalogModule],
+  imports: [AgentModule, DocumentsModule, TelegramModule, MemoryModule, LlmModule, PushModule, PromptsModule, SkillsModule, ToolCatalogModule, SocialModule],
   controllers: [HermesController],
   providers: [HermesBridgeService, AgentScheduler, EngineWatchdog, AgentEvents],
   exports: [HermesBridgeService],
