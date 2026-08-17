@@ -230,6 +230,61 @@ describe('the provider behind the seam', () => {
     expect((await provider().execute('svc:instagram.search_hashtag', { hashtag: 'x' })).error).toContain('API key');
   });
 
+  // ---- BEA-1364: the first call after a deploy failed "fetch failed" — name the cause, retry once ----
+
+  const transportError = (code: string, message: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), { code }) });
+
+  it('retries ONCE when fetch() itself rejects with a transport error, and the second answer wins', async () => {
+    const p = provider('sk-test');
+    let n = 0;
+    global.fetch = jest.fn(async () => {
+      n += 1;
+      if (n === 1) throw transportError('ECONNRESET', 'socket hang up');
+      return jsonResponse(200, { success: true, credits_charged: 1, data: { username: 'legrand_in' } });
+    }) as any;
+    const r = await p.execute('svc:instagram.profile', { handle: 'legrand_in' });
+    expect(r.ok).toBe(true);
+    expect(r.credits).toBe(1);
+    expect(n).toBe(2);
+  });
+
+  it('two transport failures in a row fail with the CAUSE named — never bare "fetch failed"', async () => {
+    const p = provider('sk-test');
+    global.fetch = jest.fn(async () => { throw transportError('ECONNRESET', 'socket hang up'); }) as any;
+    const r = await p.execute('svc:instagram.profile', { handle: 'legrand_in' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('fetch failed (ECONNRESET: socket hang up)');
+    expect(r.error).not.toContain('sk-test');
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2); // once, not for ever
+    // a DNS hiccup reads the same way
+    global.fetch = jest.fn(async () => { throw transportError('EAI_AGAIN', 'getaddrinfo EAI_AGAIN api.scrapecreators.com'); }) as any;
+    expect((await p.execute('svc:instagram.profile', { handle: 'x' })).error).toContain('EAI_AGAIN');
+  });
+
+  it('never retries a call that reached them: 402 / 404 / 429 / success:false / timeout = exactly one request', async () => {
+    const p = provider('sk-test');
+    for (const [status, body] of [[402, { success: false, message: 'Out of credits' }], [404, { success: false, message: 'No posts found' }], [429, { success: false, message: 'slow down' }], [200, { success: false, message: 'refused' }]] as [number, any][]) {
+      global.fetch = jest.fn(async () => jsonResponse(status, body)) as any;
+      const r = await p.execute('svc:instagram.profile', { handle: 'x' });
+      expect(r.ok).toBe(false);
+      expect((global.fetch as jest.Mock).mock.calls).toHaveLength(1);
+    }
+    // a timeout is an answer too (they may have started the work): one request, the old plain sentence
+    global.fetch = jest.fn(async () => { throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }); }) as any;
+    const t = await p.execute('svc:instagram.profile', { handle: 'x' });
+    expect(t.ok).toBe(false);
+    expect(t.error).toBe('Scrape Creators did not answer in time.');
+    expect((global.fetch as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  it('a transport failure while checking the balance is named the same way', async () => {
+    const p = provider('sk-test');
+    global.fetch = jest.fn(async () => { throw transportError('ECONNREFUSED', 'connect ECONNREFUSED 1.2.3.4:443'); }) as any;
+    const s = await p.status();
+    expect(s.reachable).toBe(false);
+    expect(s.message).toContain('ECONNREFUSED');
+  });
+
   it('when their spec cannot be read, the last good generated list is served', async () => {
     const p = provider('k');
     global.fetch = jest.fn(async () => { throw new Error('ECONNREFUSED'); }) as any;
