@@ -390,6 +390,9 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(a.outputDest).toBe('sheet');
     expect(a.sheetId).toBe('ABC123'); // a pasted link is cleaned to its id
     expect(a.notifyWhatsApp).toBe(true);
+    // a ready run screen can be handed over at creation (no engine turn to design one)
+    const b: any = await svc.createAgent({ name: 'B', prompt: 'x', ui: { headline: 'Run B', inputs: [], view: 'report', runLabel: 'Go' } });
+    expect(b.ui).toEqual({ headline: 'Run B', inputs: [], view: 'report', runLabel: 'Go' });
     // it lists like any other agent
     expect((await svc.listAgents()).map((x: any) => x.id)).toContain(a.id);
   });

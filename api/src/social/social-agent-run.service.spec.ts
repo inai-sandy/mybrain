@@ -186,7 +186,7 @@ describe('WhatsApp — the link goes through AlertsService.runFinished, and sile
     expect(name).toBe('Instagram · Search · smarthomeindia');
     expect(headline).toContain('https://docs.google.com/spreadsheets/d/SHEET_NEW');
     expect(path).toBe('/agent/runs/run1');
-    expect(h.steps.some((s) => /Sent the link to your WhatsApp/.test(s.label))).toBe(true);
+    expect(h.steps.some((s) => /Sent the link to WhatsApp/.test(s.label))).toBe(true);
   });
   it('no number in Settings → the run shows "no WhatsApp number in Settings"', async () => {
     const h = harness({ whatsapp: { sent: false, why: 'no number' } });

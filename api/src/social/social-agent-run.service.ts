@@ -165,7 +165,7 @@ export class SocialAgentRunService {
       if (agent.notifyWhatsApp) {
         const r = await this.alerts?.runFinished?.(title, headline, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
         if (!r) await step({ label: '⚠️ Not sent to WhatsApp — WhatsApp is not available on this server', status: 'info' });
-        else if (r.sent) await step({ label: 'Sent the link to your WhatsApp', status: 'done' });
+        else if (r.sent) await step({ label: 'Sent the link to WhatsApp — accepted for delivery', status: 'done' });
         else if (r.why === 'no number') await step({ label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' });
         else if (r.why === 'off') await step({ label: '⚠️ Not sent to WhatsApp — the WhatsApp outputs switch is off in Settings', status: 'info' });
         else await step({ label: `⚠️ Not sent to WhatsApp — ${r.why || 'the message could not be delivered'}`, status: 'info' });
