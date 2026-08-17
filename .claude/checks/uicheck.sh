@@ -57,6 +57,12 @@ AXE=""
 AUTH_MARKER=""
 [ -f .claude/checks/ui-auth-marker ] && AUTH_MARKER="$(head -1 .claude/checks/ui-auth-marker)"
 
+# The saved login. `agent-browser close` (below) drops the live session, so without this every
+# gate run after the first hits the login wall. Loaded before the first page; re-saved after a
+# clean pass because the app's session cookie is a sliding token and a stale file expires.
+STATE=".claude/checks/ui-state.json"
+[ -f "$STATE" ] && agent-browser state load "$STATE" >/dev/null 2>&1 || true
+
 echo "== UI CHECK: ${BASE} =="
 echo "   ${#ROUTES[@]} route(s) x widths: ${WIDTHS}"
 
@@ -233,6 +239,10 @@ print("\n".join(out))
   done
 done
 
+# Keep the login fresh for the next run — only when this run really was signed in.
+if [ ${#FAILURES[@]} -eq 0 ] && [ -f "$STATE" ]; then
+  agent-browser state save "$STATE" >/dev/null 2>&1 || true
+fi
 agent-browser close >/dev/null 2>&1 || true
 
 printf '\n'
