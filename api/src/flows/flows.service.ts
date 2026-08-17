@@ -4,6 +4,7 @@ import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
+import { shortlistForPrompt } from '../tools/tool-shortlist';
 import { AgentService } from '../agent/agent.service';
 
 /** Generic building blocks (n8n-style utility nodes). `kind` drives the node's look/behaviour. */
@@ -322,7 +323,7 @@ export class FlowsService {
     }
     const tools = cat.tools
       .filter((t) => t.kind === 'tool')
-      .map((t) => ({ type: 'tool', id: t.id, name: t.name, group: t.group, description: t.description, connected: t.connected, connectHint: t.connectHint, connectPath: t.connectPath }));
+      .map((t) => ({ type: 'tool', id: t.id, name: t.name, group: t.group, description: t.description, connected: t.connected, connectHint: t.connectHint, connectPath: t.connectPath, ...(t.service ? { service: t.service } : {}) }));
     const skills = cat.tools
       .filter((t) => t.kind === 'skill')
       .map((t) => ({ type: 'skill', id: t.id, name: t.name, description: t.description, connected: t.connected }));
@@ -364,6 +365,11 @@ export class FlowsService {
       const allow = new Set(allowedToolIds);
       const narrowed = usable.filter((t: any) => allow.has(t.id));
       if (narrowed.length) usable = narrowed;
+    } else {
+      // No toolbox = the whole catalog, which since BEA-1354 holds every action of every connected
+      // service (GitHub ~800). The planner is shown each service's best keyword matches for the
+      // question, not the lot — a picked toolbox above is always offered in full.
+      usable = shortlistForPrompt(usable, q);
     }
     const toolById = new Map<string, string>(usable.map((t) => [t.id, t.name] as [string, string]));
     // The Web tools only — the skill→tool collision remap is scoped to these (BEA-1250), because

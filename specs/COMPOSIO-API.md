@@ -53,7 +53,23 @@ time; never hard-code.
 owner must supply their own OAuth credentials. Handle it; don't offer a Connect button that cannot work.
 
 ## List / search tools in a toolkit
-`GET /tools?toolkit_slug=github&search=<text>&limit=N` → `{ items:[{ slug, name, … }] }`
+`GET /tools?toolkit_slug=github&search=<text>&limit=N` → `{ items:[{ slug, name, … }], total_items, total_pages, current_page, next_cursor }`
+
+**The whole list, verified live 2026-08-17 (BEA-1354).** Cursor pagination like `/toolkits`:
+`limit=100` → 9 pages (`next_cursor` = an opaque offset token, `Mi0xMDA=`), `limit=500` → 2 pages
+(~1s + ~1.2s), **`limit=1000` is honoured** → all of GitHub in ONE page (~1.4s, 2.2MB with
+`input_parameters`/`output_parameters`). `limit=2000` behaves the same (823 back, one page).
+`total_items` is the API's own count of the list — **823 for GitHub**, of which **42 carry
+`is_deprecated: true`** (no replacement named). The toolkit's `meta.tools_count` says **871** for the
+same GitHub at the same moment — the two numbers disagree, so the count the catalog shows is the
+list's (823 − deprecated = 781 offered), never the toolkit's headline. Other connected toolkits on
+that day: googledrive 51 (1 deprecated) · googlesheets 36 · notion 28 (1) · googlecalendar 28 ·
+gmail 23 — each in one ~0.5s page.
+
+**`important=true` is a filter, not a different list.** It returns the vendor's shortlist (GitHub
+36) — and each of those tools also carries `"important"` in its `tags`, so the mark can be read off
+the full list with no second request. The catalog no longer asks for the shortlist at all; the
+tag rides on each action as a hint for prompts (`ServiceAction.important`).
 
 ⚠️ **`search` is weak — it is not semantic.** Searching "authenticated user" returned
 `GITHUB_ACCEPT_A_REPOSITORY_INVITATION` first. Do **not** rely on this endpoint to pick the right

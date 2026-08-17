@@ -162,6 +162,21 @@ hit) and `ToolCall.credits` records it — never assume 1, costs run 1→26. The
 and the owner's example agent are BEA-1356→1359. Trap: their Google-indexed searches (hashtag,
 reels) can answer 404 "No posts found" for everything for a while — recorded as a failed call, 0 credits.
 
+**Every action of every connected service is in the catalog — no shortlist, no cap (BEA-1354).**
+The owner's rule: "do not skip any action from providers." `ComposioProvider.listActions()` walks the
+whole cursor-paged list (`limit=1000` is honoured — GitHub's 823 in one ~1.4s page; the toolkit's
+`meta.tools_count` says 871 and the list is what counts; 42 are `is_deprecated` and dropped), cached 5
+min; the vendor's "important" mark rides on each action from its `tags` as a HINT only. The catalog
+serves its last good copy at once and re-reads BEHIND the answer when old (`serviceTools()`,
+generation-aware so a connect/disconnect is seen at once, warmed at boot); the 8s budget + last-good
+fallback stay. **A prompt is never shown the whole list**: Chat's second pick, the flow planner, the
+job builder and EMO's tool pick all go through `tool-shortlist.ts` (keyword rank → important → order,
+40 per service by default) — a picked toolbox is always offered in full. Pickers (`ToolPicker`, the
+Flows palette) fold Services/Social per service — closed with a count, search-within-service, 40 a page
+(`web/src/ui/ServiceFolds.tsx`). Gates (`listForService`) are computed over the full set; the `/tools`
+sheet shows `availableActionCount` for a connected service. Trap: `MAX_ACTIONS` in `chat-tools` is a
+prompt cap, not a catalog cap — putting `important`/`limit` back on any `listActions()` call reopens this.
+
 **The Social section is where that data gets USED (BEA-1356).** Sidebar entry **Social** under Automation
 → `/social` (platform grid: every platform from `provider.listServices()`, mark by slug with an initial-tile
 fallback, endpoint count, header with credit balance · today's spend · daily ceiling) and `/social/:platform`

@@ -220,6 +220,55 @@ describe('ComposioProvider', () => {
     expect(actions[0].schema.properties.title.type).toBe('string');
   });
 
+  /**
+   * EVERY action, not the vendor's shortlist (BEA-1354). The catalog used to ask for `important=true`
+   * and stop at 60; now the whole cursor-paged list is walked, and "important" is only a mark on
+   * each action, read off its tags — never a filter and never a second request.
+   */
+  it('walks every page of a service’s actions with no important filter and no cap (BEA-1354)', async () => {
+    const big = Array.from({ length: 2300 }, (_, i) => ({
+      slug: `GITHUB_ACTION_${i}`, name: `Action ${i}`, description: '', input_parameters: {},
+      tags: i % 100 === 0 ? ['openWorldHint', 'important'] : ['openWorldHint'],
+    }));
+    const calls: URL[] = [];
+    global.fetch = (async (url: string) => {
+      const u = new URL(String(url));
+      calls.push(u);
+      const json = (v: any) => ({ ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) } as any);
+      if (u.pathname.endsWith('/tools')) {
+        // Cursor pagination exactly like the live API: `limit` honoured, `next_cursor` = the offset.
+        const limit = Number(u.searchParams.get('limit'));
+        const start = Number(u.searchParams.get('cursor') || 0);
+        const items = big.slice(start, start + limit);
+        const end = start + items.length;
+        return json({ items, total_items: big.length, next_cursor: end < big.length ? String(end) : null });
+      }
+      return json({ items: [], next_cursor: null });
+    }) as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const actions = await p.listActions('github');
+    expect(actions.length).toBe(2300); // all of them — no 60, no 1000
+    const toolCalls = calls.filter((u) => u.pathname.endsWith('/tools'));
+    expect(toolCalls.length).toBe(3); // 1000-a-page walk, every page taken
+    for (const u of toolCalls) expect(u.searchParams.get('important')).toBeNull(); // the shortlist is never asked for
+    expect(actions.filter((a) => a.important).length).toBe(23); // the vendor's mark, from the tags
+    expect(actions.find((a) => a.id === 'svc:github.action_1')!.important).toBeUndefined();
+    // Asked a second time inside the cache window it does not walk again.
+    await p.listActions('github');
+    expect(calls.filter((u) => u.pathname.endsWith('/tools')).length).toBe(3);
+  });
+
+  it('bumps its generation whenever it forgets what it read, so the catalog knows its copy is stale', async () => {
+    const { fetchMock } = fakeApi();
+    global.fetch = fetchMock as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const g0 = p.generation();
+    p.refresh();
+    expect(p.generation()).toBe(g0 + 1);
+    await p.listActions('github');
+    expect(p.generation()).toBe(g0 + 1); // a plain read changes nothing
+  });
+
   it('says what is missing when a service has no ready-made login', async () => {
     const { fetchMock } = fakeApi();
     global.fetch = fetchMock as any;

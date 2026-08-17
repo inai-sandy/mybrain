@@ -257,6 +257,24 @@ describe('Chat can use connected services (BEA-1349)', () => {
     expect(r!.message.tools).toEqual([]);
   });
 
+  /**
+   * The catalog holds EVERY action of a service now (BEA-1354, GitHub ~800). The second pick prompt
+   * must not paste them all: it carries the best keyword matches for his words, capped at 60 — and
+   * the one he is asking for is on it even when it sits at the far end of the list.
+   */
+  it('shows the second pick a keyword-ranked slice of a huge service, never all of it', async () => {
+    const filler = Array.from({ length: 800 }, (_, i) => ({
+      id: `svc:github.thing_${i}`, name: `GitHub: Thing ${i}`, group: 'Services', kind: 'tool', connected: true, description: `Does thing number ${i}.`, service: 'github', risky: false,
+    }));
+    const { chat, llm } = harness({ connected: [...filler, ...CATALOG] });
+    await chat.sendMessage('s1', 'Create an issue in inai-sandy/mybrain called "A bug"');
+    const prompt = promptFor(llm, 'chat-tools-action');
+    const lines = prompt.split('\n').filter((l: string) => l.startsWith('- svc:github.'));
+    expect(lines.length).toBeLessThanOrEqual(60);
+    expect(lines[0]).toContain(CREATE.id); // the best match for his words is first, not 800th
+    expect(prompt).not.toContain('svc:github.thing_799');
+  });
+
   it('leaves an ordinary message alone even with a service connected', async () => {
     const { chat, provider, llm, toolCalls } = harness({ service: null });
     const r = await chat.sendMessage('s1', 'What did I save about pricing last week?');

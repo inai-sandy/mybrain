@@ -4,6 +4,7 @@ import { AgentService } from './agent.service';
 import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
+import { shortlistForPrompt } from '../tools/tool-shortlist';
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
@@ -86,8 +87,9 @@ export class AgentAreasService {
         (area.jobs || []).length ? `Jobs it already has: ${(area.jobs || []).map((j: any) => j.name).join(', ')}` : '',
       ].filter(Boolean).join('\n');
       const cat = await this.catalog?.catalog().catch(() => null);
-      const toolList = (cat?.tools || [])
-        .filter((t: any) => t.connected)
+      // Every connected tool — but a service's actions cut to the ones that match the conversation
+      // (BEA-1354: the catalog holds all ~800 of GitHub's; the builder prompt cannot carry them).
+      const toolList = shortlistForPrompt((cat?.tools || []).filter((t: any) => t.connected), convo)
         .map((t: any) => `- ${t.id} (${t.group}) — ${t.name}: ${t.description}`)
         .join('\n') || '(none available)';
       const jobNote = st.job ? `\n\nThe job you last proposed (refine it, don't start over):\n${JSON.stringify(st.job)}` : '';
