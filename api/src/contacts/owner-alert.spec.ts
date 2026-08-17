@@ -1,4 +1,4 @@
-import { buttonSuffix, flat, NOT_APPROVED_NOTE, OWNER_TEMPLATE, ownerFirstName, sendOwnerAlert, templateUnusable, whatsappStepLabel } from './owner-alert';
+import { buttonSuffix, flat, NOT_APPROVED_NOTE, OWNER_TEMPLATE, ownerFirstName, sendOwnerAlert, templateUnusable, whatsappStepLabel, withoutLinks } from './owner-alert';
 
 /** BEA-1362 — the one road to the owner's phone: template first, free text never alone. */
 function box(opts: { template?: { status: string; error?: string; wamid?: string }; text?: { status: string; error?: string }; configured?: boolean } = {}) {
@@ -51,12 +51,30 @@ describe('templateUnusable()', () => {
   });
 });
 
+describe('withoutLinks()', () => {
+  it('drops URLs and the arrow/colon in front of them, and says whether there was one', () => {
+    expect(withoutLinks('42 rows → https://docs.google.com/spreadsheets/d/abc')).toEqual({ text: '42 rows', hadLink: true });
+    expect(withoutLinks('Sheet: https://x.y/z and more')).toEqual({ text: 'Sheet and more', hadLink: true });
+    expect(withoutLinks('no link here')).toEqual({ text: 'no link here', hadLink: false });
+  });
+});
+
 describe('sendOwnerAlert()', () => {
   it('sends the approved template first with the three variables and the button suffix — no text', async () => {
     const b = box();
-    const r = await sendOwnerAlert(b.postbox, '919999', { firstName: 'Sandy', headline: 'Agent finished', detail: '42 rows → https://sheet', path: '/agent/runs/r1' });
+    const r = await sendOwnerAlert(b.postbox, '919999', { firstName: 'Sandy', headline: 'Agent finished', detail: '42 rows appended', path: '/agent/runs/r1' });
     expect(r).toEqual({ sent: true, via: 'template', wamid: 'wamid.T' });
-    expect(b.calls).toEqual([{ kind: 'template', to: '919999', name: OWNER_TEMPLATE, variables: ['Sandy', 'Agent finished', '42 rows → https://sheet'], buttonUrl: 'agent/runs/r1' }]);
+    expect(b.calls).toEqual([{ kind: 'template', to: '919999', name: OWNER_TEMPLATE, variables: ['Sandy', 'Agent finished', '42 rows appended'], buttonUrl: 'agent/runs/r1' }]);
+  });
+
+  it('keeps links OUT of the variables — Meta refused the one live send that carried a sheet URL', async () => {
+    const b = box();
+    await sendOwnerAlert(b.postbox, '9', { headline: 'Agent finished', detail: '1 row → https://docs.google.com/spreadsheets/d/1Q_abc', path: '/agent/runs/r1' });
+    const [, headline, detail] = b.calls[0].variables;
+    expect(headline).not.toMatch(/https?:/);
+    expect(detail).not.toMatch(/https?:/);
+    expect(detail).toBe('1 row · The link is behind the button below.');
+    expect(b.calls[0].buttonUrl).toBe('agent/runs/r1'); // the run page has the sheet link
   });
 
   it('fills the blanks so Meta never sees an empty variable', async () => {

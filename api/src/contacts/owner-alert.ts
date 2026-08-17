@@ -88,6 +88,23 @@ export function flat(s: unknown, max: number): string {
   return t.length > max ? `${t.slice(0, Math.max(0, max - 1)).trimEnd()}…` : t;
 }
 
+/**
+ * Links stay OUT of the template variables. The first live send with a Google-Sheet URL inside
+ * {{3}} was refused by Meta five seconds after Postbox accepted it ("This message was not delivered
+ * to maintain healthy ecosystem engagement" — Meta reads a bare link in a UTILITY template as
+ * marketing-like), while the same template without a link was delivered. The button already opens
+ * the run/page in the app, and the app has the link — so the variables say so instead.
+ */
+export function withoutLinks(s: unknown): { text: string; hadLink: boolean } {
+  const raw = String(s ?? '');
+  const hadLink = /https?:\/\/\S+/i.test(raw);
+  const text = raw
+    .replace(/\s*(?:→|->|:|—|-)?\s*https?:\/\/\S+/gi, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+  return { text, hadLink };
+}
+
 /** The URL-button suffix: the app path without its leading slash. */
 export function buttonSuffix(path?: string): string {
   const p = String(path || '').trim().replace(/^https?:\/\/[^/]+/i, '').replace(/^\/+/, '');
@@ -113,8 +130,11 @@ export function ownerAlertText(msg: OwnerAlertMessage): string {
 export async function sendOwnerAlert(postbox: OwnerAlertSender, to: string, msg: OwnerAlertMessage): Promise<OwnerAlertResult> {
   if (postbox.isConfigured && !postbox.isConfigured()) return { sent: false, error: 'Postbox not configured.' };
   const firstName = flat(msg.firstName || OWNER_DEFAULT_NAME, 40) || OWNER_DEFAULT_NAME;
-  const headline = flat(msg.headline, HEADLINE_MAX) || 'An update is ready.';
-  const detail = flat(msg.detail, DETAIL_MAX) || 'Open My Brain for the details.';
+  const h = withoutLinks(msg.headline);
+  const d = withoutLinks(msg.detail);
+  const headline = flat(h.text, HEADLINE_MAX) || 'An update is ready.';
+  const linkNote = h.hadLink || d.hadLink ? 'The link is behind the button below.' : '';
+  const detail = flat([d.text, linkNote].filter(Boolean).join(' · '), DETAIL_MAX) || 'Open My Brain for the details.';
   const suffix = buttonSuffix(msg.path);
   const t = await postbox.sendTemplate(to, OWNER_TEMPLATE, [firstName, headline, detail], { language: OWNER_TEMPLATE_LANG, ...(suffix ? { buttonUrl: suffix } : {}) }).catch((e: any) => ({ status: 'failed', error: String(e?.message || e) }) as SendVerdict);
 
