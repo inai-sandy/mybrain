@@ -144,20 +144,25 @@ export class TelegramService implements OnModuleInit {
    * so it stopped BEFORE the call. Pushed for the same reason a paused trigger is: a scheduled job
    * that quietly stopped looks exactly like a quiet week.
    */
-  async notifyJobPaused(args: { what: string; reason: string; url?: string }): Promise<void> {
+  async notifyJobPaused(args: { what: string; reason: string; url?: string }): Promise<{ sent: boolean; why?: string }> {
     const owner = await this.ownerChatId();
-    if (!owner) return;
-    await this.send(
+    if (!owner) return { sent: false, why: 'no Telegram chat is linked in Settings' };
+    const r = await this.send(
       owner,
       `⏸️ <b>${this.esc(args.what)} paused itself</b>\n\n${this.esc(String(args.reason).slice(0, 400))}\n\n${args.url ? `Open ${this.esc(args.url)} to look at it and switch it back on.` : 'Open Agents in My Brain to look at it and switch it back on.'}`,
     );
+    return r?.ok ? { sent: true } : { sent: false, why: r?.description || 'Telegram did not accept the message' };
   }
 
-  /** An Alert job's condition came true (BEA-1358) — the diff, in one message, with the run link. */
-  async notifySocialAlert(args: { what: string; text: string; url?: string }): Promise<void> {
+  /**
+   * An Alert job's condition came true (BEA-1358) — the diff, in one message, with the run link.
+   * Answers whether Telegram accepted it, so the run can say "sent" only when it was.
+   */
+  async notifySocialAlert(args: { what: string; text: string; url?: string }): Promise<{ sent: boolean; why?: string }> {
     const owner = await this.ownerChatId();
-    if (!owner) return;
-    await this.send(owner, `🔔 <b>${this.esc(args.what)}</b>\n\n${this.esc(String(args.text).slice(0, 900))}${args.url ? `\n\n${this.esc(args.url)}` : ''}`);
+    if (!owner) return { sent: false, why: 'no Telegram chat is linked in Settings' };
+    const r = await this.send(owner, `🔔 <b>${this.esc(args.what)}</b>\n\n${this.esc(String(args.text).slice(0, 900))}${args.url ? `\n\n${this.esc(args.url)}` : ''}`);
+    return r?.ok ? { sent: true } : { sent: false, why: r?.description || 'Telegram did not accept the message' };
   }
 
   private agentBtnLabel(o: any): string {
