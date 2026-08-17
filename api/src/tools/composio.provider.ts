@@ -319,7 +319,7 @@ export class ComposioProvider implements ServiceProvider {
    * Deliberately thin: argument filling, the flight recorder and the pause-and-ask gate are later
    * issues (BEA-1347/1348). This is the call they will sit on top of.
    */
-  async execute(actionId: string, args: Record<string, any> = {}, opts: { connectionId?: string } = {}): Promise<ExecuteResult> {
+  async execute(actionId: string, args: Record<string, any> = {}, opts: { connectionId?: string; timeoutMs?: number } = {}): Promise<ExecuteResult> {
     const started = Date.now();
     const parsed = parseServiceToolId(actionId);
     const slug = vendorActionSlug(actionId);
@@ -330,7 +330,7 @@ export class ComposioProvider implements ServiceProvider {
     try {
       const body: Record<string, any> = { arguments: args || {}, user_id: USER_ID };
       if (opts.connectionId) body.connected_account_id = opts.connectionId;
-      const r = await this.post(`/tools/execute/${encodeURIComponent(slug)}`, body);
+      const r = await this.request('POST', `/tools/execute/${encodeURIComponent(slug)}`, { body, timeoutMs: opts.timeoutMs });
       const ms = Date.now() - started;
       // A FAILED action still comes back HTTP 200 — the verdict is in `successful`, and the reason
       // in `error`. Trusting the status code would report every failure as a success.
@@ -702,7 +702,7 @@ export class ComposioProvider implements ServiceProvider {
     }
   }
 
-  private async request(method: string, path: string, opts: { params?: Record<string, string>; body?: any } = {}): Promise<any> {
+  private async request(method: string, path: string, opts: { params?: Record<string, string>; body?: any; timeoutMs?: number } = {}): Promise<any> {
     const key = await this.apiKey();
     if (!key) throw new Error('No Composio API key saved.');
     const url = new URL(`${API_BASE}${path}`);
@@ -711,7 +711,7 @@ export class ComposioProvider implements ServiceProvider {
       method,
       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 20_000),
     });
     if (!r.ok) {
       const text = await r.text().catch(() => '');

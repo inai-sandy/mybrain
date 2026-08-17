@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ItemsService } from '../items/items.service';
 import { createHash } from 'crypto';
 import { DocumentsService } from '../documents/documents.service';
+import { collectAttachments, dayAdd, extractBody, headerMap, safeFilename, stripQuoted } from './gmail-parse';
 
 const BASE = process.env.GWS_RUNNER_URL || 'http://172.18.0.1:8766';
 
@@ -20,100 +21,6 @@ const SERVICE_MAP: { key: string; label: string; match: string[]; unsupported?: 
   { key: 'contacts', label: 'Contacts', match: ['contacts', 'directory'] },
   { key: 'keep', label: 'Keep', match: ['keep'], unsupported: true },
 ];
-
-/** Add n days to a YYYY-MM-DD key (n can be negative). */
-function dayAdd(day: string, n: number): string {
-  const d = new Date(day + 'T12:00:00Z');
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function headerMap(payload: any): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const h of payload?.headers || []) if (h?.name) out[String(h.name).toLowerCase()] = h.value;
-  return out;
-}
-
-/** Decode a base64url Gmail body part. */
-function b64url(data?: string): string {
-  if (!data) return '';
-  try {
-    return Buffer.from(data.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-  } catch {
-    return '';
-  }
-}
-
-/** Remove quoted reply history so each message keeps only its NEW content (Gmail + Outlook styles). */
-function stripQuoted(body: string): string {
-  if (!body) return '';
-  const norm = body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const lines = norm.split('\n');
-  const isCut = (raw: string) => {
-    const t = raw.trim();
-    return (
-      /^On\b.{0,200}\bwrote:?$/i.test(t) || // Gmail "On <date>, <name> wrote:"
-      /^_{5,}$/.test(t) || // Outlook "________________"
-      /^-{2,}\s*Original Message\s*-{2,}/i.test(t) ||
-      /^-{2,}\s*Forwarded message\s*-{2,}/i.test(t) ||
-      /^From:\s.+\S+@\S+/i.test(t) || // Outlook quote header "From: name <email>"
-      /^>{1,}/.test(t) // ">"-quoted line
-    );
-  };
-  const out: string[] = [];
-  for (const ln of lines) {
-    if (isCut(ln)) break;
-    out.push(ln);
-  }
-  let res = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  // Top-posted reply where everything got cut? fall back to a trimmed original so we never lose content.
-  if (res.length < 30) res = norm.replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
-  return res;
-}
-
-/** Walk a Gmail payload tree for the best text body (prefer text/plain, fall back to stripped html). */
-function extractBody(payload: any): string {
-  if (!payload) return '';
-  if (payload.mimeType === 'text/plain' && payload.body?.data) return b64url(payload.body.data);
-  for (const part of payload.parts || []) {
-    const t = extractBody(part);
-    if (t) return t;
-  }
-  if (payload.mimeType === 'text/html' && payload.body?.data) {
-    return b64url(payload.body.data).replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').trim();
-  }
-  return '';
-}
-
-/** A filename that is safe on disk and still recognisable — used for the email's own document. */
-function safeFilename(name: string): string {
-  return (name || 'email')
-    .replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120) || 'email';
-}
-
-/**
- * Every real attachment in a Gmail payload tree. Inline images (a signature logo, a tracking pixel)
- * would otherwise flood the library, so they are left out. (BEA-1341)
- *
- * "Inline" is decided by Content-Disposition, NOT by the presence of a Content-ID: Outlook puts a
- * Content-ID on genuinely attached files too, so treating that as inline silently dropped real
- * attachments — the worst kind of failure here, because the count looks right and nothing errors.
- */
-function collectAttachments(payload: any, out: { filename: string; mimeType: string; attachmentId: string }[] = []) {
-  if (!payload) return out;
-  const filename = String(payload.filename || '').trim();
-  const attachmentId = payload.body?.attachmentId;
-  const disposition = (payload.headers || []).find((x: any) => String(x?.name).toLowerCase() === 'content-disposition')?.value;
-  const inline = /^\s*inline\b/i.test(String(disposition || ''));
-  if (filename && attachmentId && !inline) {
-    out.push({ filename, mimeType: String(payload.mimeType || 'application/octet-stream'), attachmentId });
-  }
-  for (const part of payload.parts || []) collectAttachments(part, out);
-  return out;
-}
 
 /** Talks to the host `gws-runner` bridge, which drives the Google Workspace CLI (`gws`).
  *  The CLI holds the user's Google login; the app never sees OAuth tokens directly. */

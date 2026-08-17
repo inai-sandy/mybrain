@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, LlmConfig } from '../llm/llm.service';
 import { GoogleService } from './google.service';
+import { GoogleWorkspaceService, googleSource } from './google-workspace.service';
 import { MemoryService } from '../memory/memory.service';
 import { EmailMemoryService } from './email-memory.service';
 import { PromptsService } from '../prompts/prompts.service';
@@ -28,7 +29,13 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
     private readonly memory: MemoryService,
     private readonly emailMemory: EmailMemoryService,
     private readonly prompts: PromptsService,
+    private readonly workspace?: GoogleWorkspaceService, // optional + LAST — spec files construct positionally
   ) {}
+
+  /** The road Google reads take — the bridge until the seam is proven, then the seam. (BEA-1351) */
+  private get g() {
+    return googleSource() === 'seam' && this.workspace ? this.workspace : this.google;
+  }
 
   /** Index the day's brief into Explore (mandatory section). (BEA-336) */
   private indexBrief(row: any): void {
@@ -112,7 +119,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
   /** Once past 11:58 PM local, write today's brief if it isn't done. If that window was missed
    *  (restart), backfill yesterday's the next day so the history has no gaps. */
   async briefTick(): Promise<void> {
-    const st = await this.google.status();
+    const st = await this.g.status();
     if (!st.connected) return;
     const tz = await this.tz();
     const today = this.dayKey(tz);
@@ -170,7 +177,7 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
   async getForDay(day: string): Promise<Brief> {
     const row = await this.prisma.gmailBrief.findUnique({ where: { day } });
     if (row) return this.shape(row);
-    const unread = await this.google.gmailDayUnread(day).catch(() => null);
+    const unread = await this.g.gmailDayUnread(day).catch(() => null);
     return { day, unread, overview: '', summary: null, sections: [], items: [], generated: false, generatedAt: null };
   }
 
@@ -182,8 +189,8 @@ export class GmailBriefService implements OnModuleInit, OnModuleDestroy {
       if (existing) return this.shape(existing);
     }
     const [unread, emails] = await Promise.all([
-      this.google.gmailDayUnread(day).catch(() => null),
-      this.google.gmailImportantForDay(day, 25).catch(() => [] as { id: string; threadId: string; from: string; subject: string; date: string; snippet: string }[]),
+      this.g.gmailDayUnread(day).catch(() => null),
+      this.g.gmailImportantForDay(day, 25).catch(() => [] as { id: string; threadId: string; from: string; subject: string; date: string; snippet: string }[]),
     ]);
 
     const items: BriefItem[] = emails.map((e) => ({ from: cleanFrom(e.from), subject: e.subject, time: e.date, threadId: e.threadId }));

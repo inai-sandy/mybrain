@@ -186,8 +186,14 @@ export interface ServiceProvider {
   renameConnection(connectionId: string, label: string): Promise<{ ok: boolean; message?: string }>;
   /** Throw away what was read a moment ago, so the next read asks the provider again. */
   refresh?(): void;
-  /** Run one action. `actionId` is our `svc:` id, never the vendor's. */
-  execute(actionId: string, args?: Record<string, any>, opts?: { connectionId?: string }): Promise<ExecuteResult>;
+  /**
+   * Run one action. `actionId` is our `svc:` id, never the vendor's.
+   *
+   * `timeoutMs` is for the few calls that legitimately take longer than an API call should — a
+   * Drive export the provider has to build before it can hand it over. Everything else uses the
+   * provider's own default.
+   */
+  execute(actionId: string, args?: Record<string, any>, opts?: { connectionId?: string; timeoutMs?: number }): Promise<ExecuteResult>;
 
   // ---- events (BEA-1350) — optional, so a stub provider in a spec need not implement them -------
 
