@@ -10,10 +10,10 @@ import { STARTERS, type Starter } from '../ui/agentStarters';
 import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
 import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
 import { AgentBuilder } from './AgentBuilder';
-import { KEEP_AS_FETCHED, OutputDestPicker, ToolArgsEditor } from '../ui/agentJobFields';
+import { EMPTY_THRESHOLD, KEEP_AS_FETCHED, OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdOfDraft } from '../ui/agentJobFields';
 
 /** What a Social result hands the builder (BEA-1357): the tool, the exact arguments just used, a label. */
-export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string };
+export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string; mode?: string };
 
 /** "Instagram · Search · smarthomeindia" — the label plus the argument values, in the owner's words. */
 export function socialAgentName(p: SocialPrefill): string {
@@ -28,7 +28,8 @@ export function readSocialPrefill(params: URLSearchParams): SocialPrefill | null
   if (params.get('builder') !== '1' || !/^svc:[a-z0-9_]+\.[a-z0-9_]+$/.test(tool)) return null;
   let args: Record<string, any> = {};
   try { const a = JSON.parse(params.get('args') || '{}'); if (a && typeof a === 'object' && !Array.isArray(a)) args = a; } catch { args = {}; }
-  return { tool, args, label: params.get('label') || undefined };
+  const mode = params.get('mode') || '';
+  return { tool, args, label: params.get('label') || undefined, ...(mode === 'watch' || mode === 'alert' ? { mode } : {}) };
 }
 
 export type Run = { id: string; title?: string; status: string; startedAt: string; endedAt?: string | null; outputDocId?: string | null };
@@ -374,6 +375,10 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
   const [sheetId, setSheetId] = useState('');
   const [notifyWhatsApp, setNotifyWhatsApp] = useState(false);
   const [toolArgs, setToolArgs] = useState<Record<string, any>>(social?.args || {});
+  // Watch / Alert (BEA-1358): fetch every time · watch for changes · alert when… (+ condition / threshold)
+  const [mode, setMode] = useState<string>(social?.mode || 'run');
+  const [alertCondition, setAlertCondition] = useState('');
+  const [threshold, setThreshold] = useState<ThresholdDraft>(EMPTY_THRESHOLD);
 
   function pickStarter(s: Starter) {
     setName(s.name); setTask(s.task); setRubric(s.rubric); setDefaultDepth(s.depth);
@@ -435,7 +440,9 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
           outputDest, sheetId: sheetId.trim() || null, notifyWhatsApp, // BEA-1357
           // A Social job (BEA-1357): the tool id + its exact arguments, run directly, no engine turn.
           // A ready run screen too — no inputs to design, so the job page never spends an engine turn on one.
-          ...(social ? { tools: [social.tool], toolArgs: { [social.tool]: toolArgs }, origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: 'Fetch now →' } } : {}),
+          ...(social ? { tools: [social.tool], toolArgs: { [social.tool]: toolArgs }, origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: mode === 'run' ? 'Fetch now →' : 'Check now →' } } : {}),
+          // Watch / Alert (BEA-1358)
+          ...(social ? { mode, alertCondition: mode === 'alert' ? alertCondition.trim() || null : null, threshold: mode === 'alert' ? thresholdOfDraft(threshold) : null } : {}),
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -490,12 +497,17 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
       </div>
       {/* A Social job (BEA-1357): the fetch is the tool + these exact arguments — no engine turn. */}
       {social && <ToolArgsEditor tool={social.tool} args={toolArgs} onChange={setToolArgs} toolName={social.label} />}
+      {/* Watch / Alert (BEA-1358): remember last time, say only what changed, push when the condition is true. */}
+      {social && <WatchModePicker mode={mode} condition={alertCondition} threshold={threshold} onChange={(v) => { setMode(v.mode); setAlertCondition(v.condition); setThreshold(v.threshold); }} />}
+      {/* A Watch/Alert writes only what changed — the shaping task does not apply, so it is not shown. */}
+      {(!social || mode === 'run') && (
       <label className="block text-xs text-zinc-500">{social ? 'What to do with the rows — name the columns you want, or a filter like “only posts about India”. Leave it as is to keep every result.' : 'Task'}
         <div className="relative mt-1">
           <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} placeholder="What should it do each time it runs?" className={inp + ' resize-none pr-11'} />
           <DictateButton onText={(t) => setTask((p) => (p ? p + ' ' : '') + t)} className="absolute right-2 top-2" />
         </div>
       </label>
+      )}
       <OutputDestPicker dest={outputDest} sheetId={sheetId} onChange={(v) => { setOutputDest(v.outputDest); setSheetId(v.sheetId); }} />
       <label className="flex cursor-pointer items-center justify-between gap-3 py-1">
         <span className="text-xs text-zinc-500">Send me the link on WhatsApp when it finishes <span className="text-zinc-400">(needs your number in Settings → Agent Engine)</span></span>

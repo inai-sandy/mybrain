@@ -46,8 +46,9 @@ Execution runs through the **same** `ServiceActionsService.run()` — direct, no
 |---|---|
 | `Connector` (exists) | `scrapecreators` → `{ apiKey }` |
 | `ToolCall` (exists) | + `credits Int?` — the honest cost per call |
-| `SocialWatch` (new) | agentId · actionId · args · lastHash · lastResult · lastAt |
-| `Setting` (exists) | `social.dailyCreditCeiling`, `social.spentToday` |
+| `SocialWatch` (new) | agentId · actionId · args (+ argsHash, the unique key) · lastHash · lastResult · lastAt · alertState · lastAlertedAt (BEA-1358) |
+| `Agent` (exists) | + `mode` run/watch/alert · `alertCondition` · `threshold` JSON · `pausedReason` (BEA-1358) |
+| `Setting` (exists) | `social.dailyCreditCeiling` (default 500, 0 = no limit). "Spent today" is NOT a Setting — it is the sum of `ToolCall.credits` since local midnight, one truth for the header and the ceiling check |
 | `Agent.outputDest` (exists) | + `'sheet'` |
 
 ## The acceptance test for the whole batch — the owner's example, end to end

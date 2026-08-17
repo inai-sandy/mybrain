@@ -139,6 +139,27 @@ export class TelegramService implements OnModuleInit {
     );
   }
 
+  /**
+   * A job switched itself off (BEA-1358) — the daily Social credit ceiling would have been passed,
+   * so it stopped BEFORE the call. Pushed for the same reason a paused trigger is: a scheduled job
+   * that quietly stopped looks exactly like a quiet week.
+   */
+  async notifyJobPaused(args: { what: string; reason: string; url?: string }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    await this.send(
+      owner,
+      `⏸️ <b>${this.esc(args.what)} paused itself</b>\n\n${this.esc(String(args.reason).slice(0, 400))}\n\n${args.url ? `Open ${this.esc(args.url)} to look at it and switch it back on.` : 'Open Agents in My Brain to look at it and switch it back on.'}`,
+    );
+  }
+
+  /** An Alert job's condition came true (BEA-1358) — the diff, in one message, with the run link. */
+  async notifySocialAlert(args: { what: string; text: string; url?: string }): Promise<void> {
+    const owner = await this.ownerChatId();
+    if (!owner) return;
+    await this.send(owner, `🔔 <b>${this.esc(args.what)}</b>\n\n${this.esc(String(args.text).slice(0, 900))}${args.url ? `\n\n${this.esc(args.url)}` : ''}`);
+  }
+
   private agentBtnLabel(o: any): string {
     const s = typeof o === 'string' ? o : o?.label || o?.text || o?.value || JSON.stringify(o);
     return String(s).slice(0, 60);

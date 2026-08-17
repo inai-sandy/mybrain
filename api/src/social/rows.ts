@@ -14,7 +14,7 @@
  */
 
 /** Envelope keys that are never the data. */
-const ENVELOPE = new Set(['success', 'credits_remaining', 'credits_charged', 'cursor', 'next_cursor', 'has_more', 'hasMore', 'message', 'status', 'error', 'total', 'count', 'page', 'next_page', 'nextPageToken', 'next_max_id', 'more_available', 'endCursor', 'end_cursor', 'nextCursor']);
+export const ENVELOPE = new Set(['success', 'credits_remaining', 'credits_charged', 'cursor', 'next_cursor', 'has_more', 'hasMore', 'message', 'status', 'error', 'total', 'count', 'page', 'next_page', 'nextPageToken', 'next_max_id', 'more_available', 'endCursor', 'end_cursor', 'nextCursor']);
 
 /** Fields a list usually hides under, tried first. Anything else array-of-objects works too. */
 const LIST_KEYS = ['posts', 'items', 'results', 'videos', 'reels', 'comments', 'users', 'tweets', 'ads', 'data', 'stories', 'threads', 'listings', 'products', 'reviews', 'repositories', 'pins', 'boards', 'episodes', 'tracks', 'songs', 'channels', 'clips', 'events', 'followers', 'following', 'replies', 'hashtags', 'creators', 'search_results', 'edges', 'ideas', 'aweme_list', 'user_list', 'itemList', 'nodes'];

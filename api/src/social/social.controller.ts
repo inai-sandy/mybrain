@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { SocialWatchStore } from './social-watch.store';
 import { SocialService } from './social.service';
 
 /**
@@ -8,7 +9,10 @@ import { SocialService } from './social.service';
  */
 @Controller('social')
 export class SocialController {
-  constructor(private readonly social: SocialService) {}
+  constructor(
+    private readonly social: SocialService,
+    private readonly watches: SocialWatchStore,
+  ) {}
 
   /** The grid page in one answer: key state, balance, today's spend, the ceiling, every platform. */
   @Get()
@@ -28,6 +32,18 @@ export class SocialController {
     const r = await this.social.platform(String(slug || ''));
     if (!r) return { platform: null, actions: [], message: `We do not know a platform called "${slug}".` };
     return r;
+  }
+
+  /** What a Watch/Alert job saw last time (BEA-1358) — for the job's Settings ("watching since …"). */
+  @Get('watch/:agentId')
+  async watch(@Param('agentId') agentId: string) {
+    return { rows: await this.watches.listForAgent(String(agentId || '')) };
+  }
+
+  /** Forget what a Watch/Alert job saw — its next run is a baseline again (BEA-1358). */
+  @Delete('watch/:agentId')
+  async resetWatch(@Param('agentId') agentId: string) {
+    return { ok: true, removed: await this.watches.reset(String(agentId || '')) };
   }
 
   /** Run one endpoint with the form's values. Answers a shape, never throws a raw error at the page. */

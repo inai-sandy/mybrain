@@ -134,8 +134,8 @@ export function PlatformLogo({ p, size = 40 }: { p: Pick<Platform, 'slug' | 'nam
 // ---- the credits strip -----------------------------------------------------------------------
 
 /**
- * Balance · today's spend · the daily ceiling. The ceiling is read-only here (BEA-1358 adds the
- * setting); until it is set the tile says so in words rather than showing a dash.
+ * Balance · today's spend · the daily ceiling. The ceiling is read-only here — it is set in
+ * Settings → Agents & Engines (BEA-1358); "no limit" (0) is said in words rather than a dash.
  */
 export function CreditStrip({ balance, spentToday, ceiling, status, compact = false, loading = false }: { balance: number | null; spentToday: number; ceiling: number | null; status?: SocialStatus; compact?: boolean; loading?: boolean }) {
   if (loading) {
@@ -169,6 +169,7 @@ export function CreditStrip({ balance, spentToday, ceiling, status, compact = fa
         <div className={big + ' mt-0.5 font-bold tabular-nums truncate'} data-testid="credit-ceiling">
           {ceiling === null ? <span className="text-sm font-medium text-zinc-400">No limit set</span> : ceiling.toLocaleString()}
         </div>
+        {!compact && <Link to="/settings/agents#sa-social" className="mt-0.5 block text-[11px] leading-tight text-emerald-600 hover:underline">Set in Settings</Link>}
       </div>
     </div>
   );

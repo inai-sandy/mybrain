@@ -12,7 +12,7 @@ import { FlowPanel, EvalsPanel, RunsPanel } from './AgentJobPanels';
 import { GrowTextarea } from '../ui/GrowTextarea';
 import { SchedulePicker, schedText } from '../ui/SchedulePicker';
 import { StatusBadge, timeAgo } from './Agents';
-import { OutputDestPicker, ToolArgsEditor } from '../ui/agentJobFields';
+import { OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdDraftOf, thresholdOfDraft } from '../ui/agentJobFields';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
@@ -123,6 +123,25 @@ export function AgentApp() {
   const [task, setTask] = useState('');
   const [rubric, setRubric] = useState('');
   const [savingCfg, setSavingCfg] = useState(false);
+  // Watch / Alert (BEA-1358): the job's mode + condition + threshold, edited here like on the builder.
+  const [modeDraft, setModeDraft] = useState<{ mode: string; condition: string; threshold: ThresholdDraft } | null>(null);
+  const [watchRows, setWatchRows] = useState<{ actionId: string; args: any; lastAt: string; alertState: string | null; lastAlertedAt: string | null }[] | null>(null);
+  useEffect(() => {
+    if (!a) return;
+    setModeDraft({ mode: a.mode || 'run', condition: a.alertCondition || '', threshold: thresholdDraftOf(a.threshold) });
+    if (a.mode === 'watch' || a.mode === 'alert') fetch(`/api/social/watch/${id}`).then((r) => r.json()).then((d) => setWatchRows(Array.isArray(d?.rows) ? d.rows : [])).catch(() => setWatchRows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a?.id, a?.mode, a?.alertCondition, JSON.stringify(a?.threshold || null)]);
+  async function saveMode() {
+    if (!modeDraft) return;
+    const d = await patch({ mode: modeDraft.mode, alertCondition: modeDraft.mode === 'alert' ? modeDraft.condition.trim() || null : null, threshold: modeDraft.mode === 'alert' ? thresholdOfDraft(modeDraft.threshold) : null });
+    if (d) toast('success', modeDraft.mode === 'run' ? 'Saved — every run fetches everything' : modeDraft.mode === 'watch' ? 'Saved — runs now say only what changed' : 'Saved — you will be alerted when it comes true');
+  }
+  async function forgetWatch() {
+    if (!confirm('Forget what this job saw? The next run stores a fresh baseline and reports nothing as new.')) return;
+    const r = await fetch(`/api/social/watch/${id}`, { method: 'DELETE' });
+    if (r.ok) { setWatchRows([]); toast('success', 'Forgotten — the next run starts watching from then'); } else toast('error', 'Could not do that');
+  }
   async function patch(body: any) {
     const r = await fetch(`/api/agent/agents/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r.ok) { const d = await r.json(); setA(d); return d; }
@@ -202,6 +221,17 @@ export function AgentApp() {
         </div>
         <button onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings" className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><GearIcon className="h-5 w-5" /></button>
       </header>
+
+      {/* The job switched itself off (BEA-1358: the daily Social credit ceiling) — say why, offer the way back. */}
+      {!a.enabled && a.pausedReason && (
+        <div role="alert" data-testid="paused-banner" className="flex flex-col gap-2 rounded-2xl border border-amber-300/60 bg-amber-50/70 p-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 text-amber-800 dark:text-amber-200"><b>Paused itself.</b> {a.pausedReason}</div>
+          <div className="flex shrink-0 gap-2">
+            <button onClick={() => nav('/settings/agents#sa-social')} className="rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-500/40 dark:text-amber-200 dark:hover:bg-amber-500/10">Change the ceiling</button>
+            <button onClick={async () => { const d = await patch({ enabled: true }); if (d) toast('success', 'Switched back on'); }} className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-500">Switch back on</button>
+          </div>
+        </div>
+      )}
 
       {/* labelled mode switch — no naked icons, nothing hidden */}
       <div className="flex gap-1 rounded-xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-900/60">
@@ -444,6 +474,23 @@ export function AgentApp() {
               ))}
               <button onClick={async () => { const d = await patch({ toolArgs: a.toolArgs }); if (d) toast('success', 'Saved — the next run uses these values'); }} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"><Save className="h-4 w-4" />Save</button>
               <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.</p>
+              {/* Watch / Alert (BEA-1358): the same picker as the builder, so the two can never disagree. */}
+              {modeDraft && (
+                <div className="space-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                  <WatchModePicker mode={modeDraft.mode} condition={modeDraft.condition} threshold={modeDraft.threshold} onChange={setModeDraft} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={saveMode} className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900"><Save className="h-4 w-4" />Save</button>
+                    {(a.mode === 'watch' || a.mode === 'alert') && watchRows && watchRows.length > 0 && (
+                      <button onClick={forgetWatch} className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300">Forget what it saw</button>
+                    )}
+                  </div>
+                  {(a.mode === 'watch' || a.mode === 'alert') && (
+                    <p className="text-[11px] text-zinc-400" data-testid="watch-since">
+                      {watchRows === null ? 'Checking what it last saw…' : watchRows.length === 0 ? 'No baseline yet — the first run stores one and reports nothing as new.' : `Watching since ${new Date(watchRows[watchRows.length - 1].lastAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · last checked ${new Date(watchRows[0].lastAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}${watchRows[0].lastAlertedAt ? ` · last alert ${new Date(watchRows[0].lastAlertedAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}`}
+                    </p>
+                  )}
+                </div>
+              )}
             </section>
           )}
 

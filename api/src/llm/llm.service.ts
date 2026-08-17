@@ -242,6 +242,10 @@ export class LlmService {
     // relevance is ours (BEA-1357). It reads real captions and decides what to keep, so a Sonnet-
     // class model on the API; never the engine (a CLI turn's ~25,000-token tax on every batch).
     'social-shape': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
+    // An Alert job's plain-English condition, judged ONCE over the diff (BEA-1358): "a new post
+    // mentions a price", "followers dropped". Reads real captions, answers yes/no — Sonnet-class,
+    // and never the engine (a CLI turn for a yes/no is the ~25,000-token tax again).
+    'social-alert': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
     // Small extraction jobs: a few example inputs, a few durable facts. Haiku is plenty.
     'suggest-evals': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     'agent-learn': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },

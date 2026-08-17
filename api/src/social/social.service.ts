@@ -16,12 +16,14 @@ import { ServiceAction, ServiceInfo } from '../tools/service-provider';
  * deliberately no second place that calls `execute()`.
  *
  * "Today's spend" is the sum of `ToolCall.credits` since the owner's local midnight, over the
- * social platforms only. The daily ceiling (`social.dailyCreditCeiling`) is READ here and shown;
- * it is set and enforced in BEA-1358 — until then the page says "no limit set".
+ * social platforms only. The daily ceiling (`social.dailyCreditCeiling`, default 500) is READ here
+ * and shown; it is set in Settings and enforced before every job's call by `SocialBudgetService`.
  */
 
-/** The Setting key the ceiling will live under (BEA-1358). Read-only here. */
+/** The Setting key the daily ceiling lives under (BEA-1358) — set in Settings, enforced by `SocialBudgetService`. */
 export const CEILING_KEY = 'social.dailyCreditCeiling';
+/** The ceiling when the owner has never set one. 0 (or blank) = no limit. */
+export const CEILING_DEFAULT = 500;
 
 /** Where to top up. Shown when the provider answers 402 — never a raw error. */
 export const TOP_UP_URL = 'https://scrapecreators.com';
@@ -195,14 +197,17 @@ export class SocialService {
     }
   }
 
-  /** The daily ceiling, when one is set (BEA-1358 sets it). Null = "no limit set". */
-  private async ceiling(): Promise<number | null> {
+  /** The daily ceiling in force (BEA-1358): the Setting, else the default. Null = no limit (the owner set 0). */
+  async ceiling(): Promise<number | null> {
     try {
       const row = await this.prisma?.setting?.findUnique?.({ where: { key: CEILING_KEY } });
-      const n = Number(row?.value);
-      return Number.isFinite(n) && n > 0 ? n : null;
+      const raw = row?.value;
+      if (raw === undefined || raw === null || String(raw).trim() === '') return CEILING_DEFAULT;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return CEILING_DEFAULT;
+      return n <= 0 ? null : Math.floor(n);
     } catch {
-      return null;
+      return CEILING_DEFAULT;
     }
   }
 

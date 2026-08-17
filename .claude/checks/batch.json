@@ -1,6 +1,6 @@
 {
   "startedAt": "2026-08-17T19:20:00Z",
-  "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358.",
+  "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358. BEA-1362 added 21:20Z: owner WhatsApp alerts all failing at Meta (24h window); template mybrain_update_v1 submitted, PENDING.",
   "issues": [
     {
       "id": "BEA-1355",
@@ -17,11 +17,17 @@
     {
       "id": "BEA-1357",
       "title": "Make it an agent + outputDest:sheet",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "7c814d8"
     },
     {
       "id": "BEA-1358",
       "title": "Watch + Alert + daily ceiling",
+      "status": "in_progress"
+    },
+    {
+      "id": "BEA-1362",
+      "title": "WhatsApp owner alerts: template-first (found in 1357; needed for 1359's WhatsApp leg)",
       "status": "pending"
     },
     {

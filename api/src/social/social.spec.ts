@@ -12,7 +12,7 @@ import { CEILING_KEY, SocialService, TOP_UP_URL } from './social.service';
  * endpoint — from the spec, never a hand list); a run goes through the one run path and writes a
  * `ToolCall` row with `credits`; a 402 becomes a plain sentence with a top-up link; today's spend
  * is the sum of credits since the owner's local midnight over social platforms only; and the
- * ceiling reads "no limit" until BEA-1358 sets one. Nothing here reaches the network.
+ * ceiling reads the default (500) until the owner sets one (BEA-1358). Nothing here reaches the network.
  */
 const SPEC = JSON.parse(readFileSync(join(__dirname, '..', 'tools', 'fixtures', 'scrapecreators-openapi.trimmed.json'), 'utf8'));
 
@@ -62,7 +62,7 @@ describe('the platform grid — every platform, counted by the provider (BEA-135
     expect(o.status.configured).toBe(true);
     expect(o.balance).toBe(25100);
     expect(o.spentToday).toBe(3);
-    expect(o.ceiling).toBeNull(); // "no limit set" until BEA-1358
+    expect(o.ceiling).toBe(500); // the default ceiling until the owner sets one (BEA-1358)
     expect(o.spec.opCount).toBe(178);
     expect(o.topUpUrl).toBe(TOP_UP_URL);
   });
@@ -91,10 +91,9 @@ describe('the platform grid — every platform, counted by the provider (BEA-135
     expect(provider.specState().opCount).toBe(178);
   });
 
-  it('shows the ceiling when the Setting is set', async () => {
-    const { svc } = harness({ ceiling: '500' });
-    const o = await svc.overview();
-    expect(o.ceiling).toBe(500);
+  it('shows the ceiling the owner set, and "no limit" when it is 0', async () => {
+    expect((await harness({ ceiling: '120' }).svc.overview()).ceiling).toBe(120);
+    expect((await harness({ ceiling: '0' }).svc.overview()).ceiling).toBeNull();
   });
 });
 
