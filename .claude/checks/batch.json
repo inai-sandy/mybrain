@@ -2,11 +2,36 @@
   "startedAt": "2026-08-17T19:20:00Z",
   "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358.",
   "issues": [
-    { "id": "BEA-1355", "title": "ScrapeCreators provider from spec (178, no cap)", "status": "in_progress" },
-    { "id": "BEA-1356", "title": "Social section: grid + platform page + run-it-now", "status": "pending" },
-    { "id": "BEA-1357", "title": "Make it an agent + outputDest:sheet", "status": "pending" },
-    { "id": "BEA-1358", "title": "Watch + Alert + daily ceiling", "status": "pending" },
-    { "id": "BEA-1359", "title": "Owner's example live (acceptance)", "status": "pending" },
-    { "id": "BEA-1354", "title": "Lift Composio 60-cap", "status": "pending" }
+    {
+      "id": "BEA-1355",
+      "title": "ScrapeCreators provider from spec (178, no cap)",
+      "status": "done",
+      "sha": "a06f253"
+    },
+    {
+      "id": "BEA-1356",
+      "title": "Social section: grid + platform page + run-it-now",
+      "status": "in_progress"
+    },
+    {
+      "id": "BEA-1357",
+      "title": "Make it an agent + outputDest:sheet",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1358",
+      "title": "Watch + Alert + daily ceiling",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1359",
+      "title": "Owner's example live (acceptance)",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1354",
+      "title": "Lift Composio 60-cap",
+      "status": "pending"
+    }
   ]
 }

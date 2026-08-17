@@ -59,6 +59,9 @@ const News = lazy(() => import('./pages/News'));
 const NewsDaily = lazy(() => import('./pages/NewsDaily'));
 const PaperPublic = lazy(() => import('./pages/PaperPublic'));
 const RadarPublic = lazy(() => import('./pages/RadarPublic'));
+// Social (BEA-1356) — lazy, like the other sections that are not on the first screen.
+const Social = lazy(() => import('./pages/Social'));
+const SocialPlatform = lazy(() => import('./pages/SocialPlatform'));
 import { VaultProvider } from './vault/VaultContext';
 import { UpdatePrompt } from './ui/UpdatePrompt';
 
@@ -171,6 +174,9 @@ function AuthedApp() {
         <Route path="skills/:id" element={<SkillDetail />} />
         {/* The provider hands out `connectPath: '/tools'` — this route is what makes that land somewhere (BEA-1346). */}
         <Route path="tools" element={<Tools />} />
+        {/* Social (BEA-1356): the platform grid, then one platform with every endpoint runnable in place. */}
+        <Route path="social" element={<Suspense fallback={<RouteSkeleton />}><Social /></Suspense>} />
+        <Route path="social/:platform" element={<Suspense fallback={<RouteSkeleton />}><SocialPlatform /></Suspense>} />
         <Route path="doc/:id" element={<DocDetail />} />
         <Route path="chat/:id" element={<ChatDoc />} />
         <Route path="today" element={<Today />} />

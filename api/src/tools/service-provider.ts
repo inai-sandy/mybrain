@@ -177,6 +177,12 @@ export type ExecuteResult = {
    * provider is an honest 0, and 0 is recorded as 0.
    */
   credits?: number;
+  /**
+   * The HTTP status the provider answered with, when it failed and there was one (BEA-1356). Only
+   * so a screen can tell "out of credits" (402) from "the far end refused" and say the right thing;
+   * the sentence in `error` is still the message to show.
+   */
+  status?: number;
 };
 
 /**

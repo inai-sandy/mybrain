@@ -270,6 +270,8 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
   private loading: Promise<any> | null = null;
   private timer: NodeJS.Timeout | null = null;
   private balance: { at: number; value: ProviderStatus } | null = null;
+  /** Why the last live read failed, when it did — so the Social page can say "showing the last good list". */
+  private specError: string | null = null;
 
   constructor(private readonly connectors: ConnectorService) {}
 
@@ -302,11 +304,13 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
       if (!gen.opCount) throw new Error('the spec had no operations in it');
       this.gen = gen;
       this.source = 'live';
+      this.specError = null;
       this.saveToDisk(spec);
       this.log.log(`spec read: ${gen.opCount} endpoints across ${gen.platforms.length} platforms`);
       return { ok: true, opCount: gen.opCount, source: 'live' };
     } catch (e: any) {
       const why = String(e?.message || e).slice(0, 160);
+      this.specError = why;
       this.log.warn(`could not read the ScrapeCreators spec (${why}) — serving the last good list (${this.gen?.opCount || 0} endpoints, ${this.source})`);
       return { ok: false, opCount: this.gen?.opCount || 0, source: this.source, message: why };
     }
@@ -328,6 +332,21 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
   /** Where the list came from: none · disk · live · given. */
   specSource(): string {
     return this.source;
+  }
+
+  /**
+   * How the list stands right now, for the Social header (BEA-1356): where it came from, when it
+   * was generated, how many endpoints, and — when the last live read failed — why, so the page can
+   * say "showing the last good list" instead of quietly looking current.
+   */
+  specState(): { source: string; generatedAt?: string; opCount: number; platformCount: number; lastError?: string } {
+    return {
+      source: this.source,
+      generatedAt: this.gen?.generatedAt,
+      opCount: this.gen?.opCount || 0,
+      platformCount: this.gen?.platforms.length || 0,
+      lastError: this.specError || undefined,
+    };
   }
 
   private loadFromDisk() {
@@ -496,6 +515,18 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
   }
 
   /**
+   * The same, but WAITED for (bounded) — the Social page's "check again" wants the answer after the
+   * re-read, not the list from before it (BEA-1356). Never throws; the last good list stays on failure.
+   */
+  async reload(maxWaitMs = 10_000): Promise<{ ok: boolean; opCount: number; source: string; message?: string }> {
+    this.balance = null;
+    const p = this.loadSpec().catch((e: any) => ({ ok: false, opCount: this.gen?.opCount || 0, source: this.source, message: String(e?.message || e) }));
+    this.loading = p;
+    const timeout = new Promise<{ ok: boolean; opCount: number; source: string; message?: string }>((r) => setTimeout(() => r({ ok: false, opCount: this.gen?.opCount || 0, source: this.source, message: 'still reading' }), maxWaitMs).unref?.());
+    return Promise.race([p, timeout]);
+  }
+
+  /**
    * Run one endpoint: ONE HTTPS call to `https://api.scrapecreators.com<path>` with `x-api-key`.
    * Query arguments go on the URL, path arguments into the path, and for a POST the rest go in the
    * JSON body — exactly as the spec declared them. `credits` is `credits_charged` from the answer.
@@ -526,7 +557,7 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
       const charged = Number(r.body?.credits_charged);
       const credits = Number.isFinite(charged) ? charged : undefined;
       // A refusal can come back HTTP 200 with `success:false`; the status code alone is not the verdict.
-      if (!r.ok) return { ok: false, error: r.error || 'The service refused that call.', data: r.body, ms, credits };
+      if (!r.ok) return { ok: false, error: r.error || 'The service refused that call.', data: r.body, ms, credits, status: r.status };
       return { ok: true, data: r.body, ms, credits };
     } catch (e: any) {
       return { ok: false, error: this.plainError(e), ms: Date.now() - started };

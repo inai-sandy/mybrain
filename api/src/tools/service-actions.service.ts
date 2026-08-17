@@ -53,11 +53,37 @@ export type ServiceCallContext = {
   accountId?: string;
   /** Arguments the owner pinned on the node. Given these, no model call happens at all. */
   args?: Record<string, any>;
+  /**
+   * The caller filled the form itself (the Social page, BEA-1356): use `args` exactly as given —
+   * even when they are empty — and NEVER call the model to fill anything in. Without this, an
+   * endpoint whose fields the owner left blank would still earn a model call.
+   */
+  argsPinned?: boolean;
   /** Extra instructions the owner typed on the step. */
   guidance?: string;
   /** The step's own name, for the live log line. */
   label?: string;
   onLine?: (t: string) => void;
+};
+
+/**
+ * What one run came to, in a shape a screen can draw (BEA-1356). Optional fields on ONE type — this
+ * repo compiles with `strict: false`, so a union would not narrow. `ok:false` carries `error`;
+ * `ok:true` carries `data` (the provider's whole answer) and `text` (the same, as the engine path
+ * has always read it). `credits` is what the provider charged, when it meters; `outOfCredits` says
+ * the provider answered 402, so a screen can point at a top-up instead of showing a refusal.
+ */
+export type ServiceRunResult = {
+  ok: boolean;
+  text?: string;
+  data?: any;
+  error?: string;
+  credits?: number;
+  ms?: number;
+  status?: number;
+  outOfCredits?: boolean;
+  actionName?: string;
+  serviceName?: string;
 };
 
 @Injectable()
@@ -106,14 +132,29 @@ export class ServiceActionsService {
    * what it would have done.
    */
   async run(actionId: string, input: string, ctx: ServiceCallContext = {}): Promise<string> {
+    const r = await this.runDetailed(actionId, input, ctx);
+    // THROWN, never returned: a returned string on failure would fall through to a plain model
+    // call upstream and describe a deletion that never happened.
+    if (!r.ok) throw new Error(r.error || 'The step failed.');
+    return r.text || '';
+  }
+
+  /**
+   * The same run, answered as a shape instead of a sentence (BEA-1356) — for a screen that wants
+   * the provider's whole answer, the cost and a plain reason it can draw. ONE code path: `run()`
+   * above is this plus a throw, so there is still exactly one place that calls `execute()` and
+   * writes the `ToolCall` row. A gate still THROWS `GatePause` here — a pause is not a result.
+   */
+  async runDetailed(actionId: string, input: string, ctx: ServiceCallContext = {}): Promise<ServiceRunResult> {
     const parsed = parseServiceToolId(actionId);
-    if (!parsed) throw new Error(`"${actionId}" is not an outside-service step.`);
+    if (!parsed) return { ok: false, error: `"${actionId}" is not an outside-service step.` };
     const { service } = parsed;
     const say = ctx.onLine || (() => undefined);
 
-    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean; credits?: number } = {}): Promise<never> => {
-      await this.record({ actionId, service, ok: false, error: message, ...extra }, ctx);
-      throw new Error(message);
+    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean; credits?: number; status?: number } = {}): Promise<ServiceRunResult> => {
+      const { status, ...rec } = extra;
+      await this.record({ actionId, service, ok: false, error: message, ...rec }, ctx);
+      return { ok: false, error: message, ms: extra.ms, credits: extra.credits, status, outOfCredits: status === 402 || undefined };
     };
 
     const p: ServiceProvider = await this.providerFor(actionId);
@@ -228,14 +269,24 @@ export class ServiceActionsService {
       // The provider already reads the verdict from the answer's own `successful` field rather than
       // the HTTP status — a failed action still comes back HTTP 200. Its reason is the truth here.
       const why = this.plainReason(res?.error);
-      return fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk, credits });
+      const status = Number.isFinite(res?.status) ? Number(res.status) : undefined;
+      const r = await fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk, credits, status });
+      return { ...r, actionName: action.name, serviceName: name };
     }
 
     const summary = this.summarise(res.data);
     // `gated` on a real success means "this one had to be approved, and it was" (BEA-1348).
     await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk, credits }, ctx);
     say(`   ✅ ${name}: ${action.name} — done in ${(ms / 1000).toFixed(1)}s`);
-    return `Ran ${name}: ${action.name}${chosen ? ` on ${this.who(chosen)}` : ''}.\n\nWhat came back:\n${summary.slice(0, OUTPUT_CHARS)}`;
+    return {
+      ok: true,
+      text: `Ran ${name}: ${action.name}${chosen ? ` on ${this.who(chosen)}` : ''}.\n\nWhat came back:\n${summary.slice(0, OUTPUT_CHARS)}`,
+      data: res.data,
+      credits,
+      ms,
+      actionName: action.name,
+      serviceName: name,
+    };
   }
 
   /**
@@ -279,6 +330,8 @@ export class ServiceActionsService {
 
     const pinned = ctx.args && typeof ctx.args === 'object' && Object.keys(ctx.args).length ? ctx.args : null;
     if (pinned) return this.keepKnown(pinned, names);
+    // The caller filled the form itself and left everything blank: that IS the answer. No model.
+    if (ctx.argsPinned) return {};
     if (!names.length) return {};
 
     const fields = names.slice(0, MAX_SCHEMA_FIELDS).map((k) => {
