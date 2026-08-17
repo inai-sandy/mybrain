@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { SkillsService } from '../skills/skills.service';
-import { GoogleService } from '../google/google.service';
 import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
 import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo } from './service-provider';
@@ -18,7 +17,7 @@ import { isBlockedService, isServiceToolId, ServiceAction, ServiceInfo } from '.
  * degrades to a plain reasoning step); renaming one silently breaks saved flows.
  */
 
-export type ToolGroup = 'Brain' | 'Web' | 'Google' | 'Services' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
+export type ToolGroup = 'Brain' | 'Web' | 'Services' | 'Messaging' | 'Output' | 'AI' | 'News' | 'Skills' | 'MCP servers' | 'Advanced';
 
 export type CatalogTool = {
   id: string;
@@ -47,7 +46,7 @@ export function clip(s: string | null | undefined, max: number): string {
 }
 
 /** The order groups are shown in — most reached-for first. */
-export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Google', 'Services', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
+export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Services', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
 
 /**
  * How many of a service's actions go into the catalog (BEA-1345).
@@ -88,7 +87,7 @@ export class ToolCatalogService {
   constructor(
     private readonly connectors: ConnectorService,
     private readonly skills: SkillsService,
-    private readonly google?: GoogleService, // optional + LAST — spec files construct positionally
+    // Optional + LAST — spec files construct positionally with fewer args.
     private readonly llm?: LlmService, // to know which engine is chosen (BEA-1224)
     private readonly services?: ComposioProvider, // outside services, behind the seam (BEA-1345)
   ) {}
@@ -98,10 +97,9 @@ export class ToolCatalogService {
 
   /** The whole catalog, grouped, with a truthful connected flag on every entry. */
   async catalog(): Promise<{ groups: { group: ToolGroup; tools: CatalogTool[] }[]; tools: CatalogTool[] }> {
-    const [connectors, skills, googleOn, engineOn, engine, services] = await Promise.all([
+    const [connectors, skills, engineOn, engine, services] = await Promise.all([
       this.connectors.listStatus().catch(() => [] as { name: string; configured: boolean }[]),
       this.skills.list().catch(() => [] as any[]),
-      this.googleConnected(),
       this.engineReachable(),
       this.llm?.engineChoice?.().then((c: any) => c?.provider || 'codex').catch(() => 'codex') ?? Promise.resolve('codex'),
       this.serviceTools(),
@@ -111,7 +109,8 @@ export class ToolCatalogService {
     const tools: CatalogTool[] = [
       ...BUILT_IN,
       ...this.webTools(has('tavily'), has('exa'), has('brave')),
-      ...this.googleTools(googleOn),
+      // Google (Gmail, Calendar, Drive…) is NOT a group of its own any more (BEA-1351): it comes
+      // through the seam below like every other outside service, so it appears exactly once.
       ...services.tools,
       ...this.messagingTools(has('telegram')),
       ...this.skillTools(skills, engine),
@@ -180,28 +179,6 @@ export class ToolCatalogService {
         connectPath: tavily || exa || brave ? undefined : path,
       },
     ];
-  }
-
-  /** Every Workspace service we support. Keep is deliberately absent — Google gives no API for it. */
-  private googleTools(on: boolean): CatalogTool[] {
-    const svc: [string, string, string][] = [
-      ['gmail', 'Gmail', 'Read and search your email'],
-      ['calendar', 'Calendar', 'Look at what is in your diary'],
-      ['drive', 'Drive', 'Find and read your files'],
-      ['docs', 'Docs', 'Read a Google Doc'],
-      ['sheets', 'Sheets', 'Read a spreadsheet'],
-      ['slides', 'Slides', 'Read a slide deck'],
-      ['tasks', 'Google Tasks', 'Read your Google task lists'],
-      ['forms', 'Forms', 'Read a form and its answers'],
-      ['meet', 'Meet', 'Look up meetings'],
-      ['chat', 'Google Chat', 'Read your Chat messages'],
-      ['contacts', 'Google Contacts', 'Look someone up in your contacts'],
-    ];
-    return svc.map(([id, name, description]) => ({
-      id, name, description, group: 'Google' as const, kind: 'tool' as const, connected: on,
-      connectHint: on ? undefined : 'Connect your Google account first',
-      connectPath: on ? undefined : '/google',
-    }));
   }
 
   /**
@@ -336,11 +313,6 @@ export class ToolCatalogService {
   }
 
   // ---- probes ---------------------------------------------------------------------------------
-
-  private async googleConnected(): Promise<boolean> {
-    if (!this.google) return false;
-    try { return !!(await this.google.status()).connected; } catch { return false; }
-  }
 
   private async engineReachable(): Promise<boolean> {
     const runner = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';

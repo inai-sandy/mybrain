@@ -1,33 +1,25 @@
-import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query, ServiceUnavailableException } from '@nestjs/common';
-import { GoogleService } from './google.service';
-import { GoogleWorkspaceService, googleSource } from './google-workspace.service';
+import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { GoogleWorkspaceService } from './google-workspace.service';
 import { GmailBriefService } from './gmail-brief.service';
 import { GmailRequestService } from './gmail-request.service';
 import { EmailMemoryService } from './email-memory.service';
 import { Public } from '../auth/public.decorator';
 
-/** Map internal gws errors to friendly HTTP errors. */
+/** Map the Google service's errors to friendly HTTP errors. */
 function mapErr(e: any): never {
   const m = String(e?.message || e);
-  if (m === 'not-connected') throw new BadRequestException('Google isn’t connected yet — run `gws auth` on your server (Settings → Integrations → Google).');
-  if (m === 'bridge-down') throw new ServiceUnavailableException('The Google CLI bridge on your server isn’t reachable right now.');
+  if (m === 'not-connected') throw new BadRequestException('That Google service isn’t connected yet — open Tools (/tools), connect Gmail, Google Drive or Google Calendar, then try again.');
   throw new BadRequestException(m);
 }
 
 @Controller('google')
 export class GoogleController {
   constructor(
-    private readonly google: GoogleService,
+    private readonly google: GoogleWorkspaceService,
     private readonly brief: GmailBriefService,
     private readonly requests: GmailRequestService,
     private readonly emailMemory: EmailMemoryService,
-    private readonly workspace?: GoogleWorkspaceService, // optional + LAST
   ) {}
-
-  /** The road Google reads take — the bridge until the seam is proven, then the seam. (BEA-1351) */
-  private get g() {
-    return googleSource() === 'seam' && this.workspace ? this.workspace : this.google;
-  }
 
   /**
    * Email senders in the brain, with counts — the owner's decision surface. Gmail's "important"
@@ -158,24 +150,24 @@ export class GoogleController {
 
   @Get('status')
   async status() {
-    return this.g.status();
+    return this.google.status();
   }
 
   @Get('services')
   async services() {
-    return this.g.services();
+    return this.google.services();
   }
 
   @Get('hints')
   async hints() {
-    return this.g.hints();
+    return this.google.hints();
   }
 
   // ---- Gmail ----
   @Get('gmail')
   async gmail(@Query('q') q?: string) {
     try {
-      return { messages: await this.g.gmailList(q) };
+      return { messages: await this.google.gmailList(q) };
     } catch (e) {
       mapErr(e);
     }
@@ -185,7 +177,7 @@ export class GoogleController {
   @Get('gmail/thread/:threadId')
   async gmailThread(@Param('threadId') threadId: string) {
     try {
-      return await this.g.gmailThread(threadId);
+      return await this.google.gmailThread(threadId);
     } catch (e) {
       mapErr(e);
     }
@@ -231,7 +223,7 @@ export class GoogleController {
   @Post('gmail/:id/import')
   async gmailImport(@Param('id') id: string) {
     try {
-      return await this.g.gmailImport(id);
+      return await this.google.gmailImport(id);
     } catch (e) {
       mapErr(e);
     }
@@ -241,7 +233,7 @@ export class GoogleController {
   @Post('gmail/thread/:threadId/import')
   async gmailThreadImport(@Param('threadId') threadId: string) {
     try {
-      return await this.g.gmailThreadImport(threadId);
+      return await this.google.gmailThreadImport(threadId);
     } catch (e) {
       mapErr(e);
     }
@@ -251,7 +243,7 @@ export class GoogleController {
   @Get('drive')
   async drive(@Query('q') q?: string) {
     try {
-      return { files: await this.g.driveList(q) };
+      return { files: await this.google.driveList(q) };
     } catch (e) {
       mapErr(e);
     }
@@ -260,7 +252,7 @@ export class GoogleController {
   @Post('drive/:id/import')
   async driveImport(@Param('id') id: string) {
     try {
-      return await this.g.driveImport(id);
+      return await this.google.driveImport(id);
     } catch (e) {
       mapErr(e);
     }
@@ -269,7 +261,7 @@ export class GoogleController {
   @Post('docs/create')
   async docCreate(@Body() body: { title?: string; content?: string }) {
     try {
-      return await this.g.docCreate(body?.title || 'Untitled', body?.content || '');
+      return await this.google.docCreate(body?.title || 'Untitled', body?.content || '');
     } catch (e) {
       mapErr(e);
     }
@@ -279,7 +271,7 @@ export class GoogleController {
   @Get('calendar')
   async calendar() {
     try {
-      return { events: await this.g.calendar() };
+      return { events: await this.google.calendar() };
     } catch (e) {
       mapErr(e);
     }
@@ -288,7 +280,7 @@ export class GoogleController {
   @Get('tasks')
   async tasks() {
     try {
-      return { lists: await this.g.tasks() };
+      return { lists: await this.google.tasks() };
     } catch (e) {
       mapErr(e);
     }
@@ -297,7 +289,7 @@ export class GoogleController {
   @Post('tasks/:list/:task/complete')
   async taskComplete(@Param('list') list: string, @Param('task') task: string) {
     try {
-      return await this.g.taskComplete(list, task);
+      return await this.google.taskComplete(list, task);
     } catch (e) {
       mapErr(e);
     }
@@ -307,7 +299,7 @@ export class GoogleController {
   @Post('meet/create')
   async meetCreate() {
     try {
-      return await this.g.meetCreate();
+      return await this.google.meetCreate();
     } catch (e) {
       mapErr(e);
     }
@@ -316,7 +308,7 @@ export class GoogleController {
   @Post('sheets/create')
   async sheetCreate(@Body() body: { title?: string }) {
     try {
-      return await this.g.sheetCreate(body?.title || 'Untitled');
+      return await this.google.sheetCreate(body?.title || 'Untitled');
     } catch (e) {
       mapErr(e);
     }
@@ -325,7 +317,7 @@ export class GoogleController {
   @Post('slides/create')
   async slidesCreate(@Body() body: { title?: string }) {
     try {
-      return await this.g.slidesCreate(body?.title || 'Untitled');
+      return await this.google.slidesCreate(body?.title || 'Untitled');
     } catch (e) {
       mapErr(e);
     }
@@ -335,7 +327,7 @@ export class GoogleController {
   @Get('forms')
   async forms() {
     try {
-      return { forms: await this.g.forms() };
+      return { forms: await this.google.forms() };
     } catch (e) {
       mapErr(e);
     }
@@ -344,7 +336,7 @@ export class GoogleController {
   @Get('chat')
   async chat() {
     try {
-      return await this.g.chatSpaces();
+      return await this.google.chatSpaces();
     } catch (e) {
       mapErr(e);
     }
@@ -353,7 +345,7 @@ export class GoogleController {
   @Get('contacts')
   async contacts() {
     try {
-      return { contacts: await this.g.contacts() };
+      return { contacts: await this.google.contacts() };
     } catch (e) {
       mapErr(e);
     }

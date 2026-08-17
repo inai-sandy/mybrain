@@ -25,7 +25,6 @@ const connectors = (configured: string[]) => ({
 }) as any;
 
 const skills = (rows: any[] = []) => ({ list: async () => rows }) as any;
-const google = (connected: boolean) => ({ status: async () => ({ connected, email: null, gws: connected, bridge: connected }) }) as any;
 
 describe('ToolCatalogService', () => {
   const origFetch = global.fetch;
@@ -33,7 +32,7 @@ describe('ToolCatalogService', () => {
   afterEach(() => { global.fetch = origFetch; });
 
   it('returns every group, in a stable order, with no empty groups', async () => {
-    const svc = new ToolCatalogService(connectors(['tavily', 'telegram']), skills([]), google(true));
+    const svc = new ToolCatalogService(connectors(['tavily', 'telegram']), skills([]));
     const { groups } = await svc.catalog();
     const names = groups.map((g) => g.group);
     // Skills is absent when there are none, and Services when no Composio key is set (BEA-1345);
@@ -43,33 +42,37 @@ describe('ToolCatalogService', () => {
   });
 
   it('keeps the tool ids the flow executor dispatches on', async () => {
-    const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true));
+    const svc = new ToolCatalogService(connectors(['tavily']), skills([]));
     const { tools } = await svc.catalog();
     const ids = tools.map((t) => t.id);
     // Renaming any of these silently breaks every saved flow.
-    for (const id of ['search_brain', 'web_search', 'web_read', 'gmail', 'calendar', 'drive', 'ask_ai', 'http', 'save_document', 'telegram']) {
+    // gmail / calendar / drive are gone on purpose (BEA-1351): Google now comes through the seam as
+    // svc:gmail.* / svc:googlecalendar.* / svc:googledrive.*, so it appears exactly once.
+    for (const id of ['search_brain', 'web_search', 'web_read', 'ask_ai', 'http', 'save_document', 'telegram']) {
       expect(ids).toContain(id);
     }
   });
 
   it('marks a tool as needing connection when its credentials are missing, with somewhere to go', async () => {
-    const svc = new ToolCatalogService(connectors([]), skills([]), google(false));
+    const svc = new ToolCatalogService(connectors([]), skills([]));
     const { tools } = await svc.catalog();
     const web = tools.find((t) => t.id === 'web_search')!;
     expect(web.connected).toBe(false);
     expect(web.connectHint).toBeTruthy();
     expect(web.connectPath).toBeTruthy();
+  });
 
-    const gmail = tools.find((t) => t.id === 'gmail')!;
-    expect(gmail.connected).toBe(false);
-    expect(gmail.connectPath).toBe('/google');
+  it('carries no Google group of its own — Gmail, Calendar and Drive come through the seam only (BEA-1351)', async () => {
+    const svc = new ToolCatalogService(connectors([]), skills([]));
+    const { tools, groups } = await svc.catalog();
+    expect(tools.some((t) => ['gmail', 'calendar', 'drive', 'docs', 'sheets', 'contacts'].includes(t.id))).toBe(false);
+    expect(groups.some((g) => (g.group as string) === 'Google')).toBe(false);
   });
 
   it('marks a tool connected once its credentials are there', async () => {
-    const svc = new ToolCatalogService(connectors(['tavily', 'telegram']), skills([]), google(true));
+    const svc = new ToolCatalogService(connectors(['tavily', 'telegram']), skills([]));
     const { tools } = await svc.catalog();
     expect(tools.find((t) => t.id === 'web_search')!.connected).toBe(true);
-    expect(tools.find((t) => t.id === 'gmail')!.connected).toBe(true);
     expect(tools.find((t) => t.id === 'telegram')!.connected).toBe(true);
   });
 
@@ -86,7 +89,6 @@ describe('ToolCatalogService', () => {
         { id: 'sk1', title: 'Deep research', description: 'digs properly', installedOn: ['sandy'] },
         { id: 'sk2', title: 'Not installed', description: '', installedOn: [] },
       ]),
-      google(false),
     );
     const { tools } = await svc.catalog();
     expect(tools.find((t) => t.id === 'sk1')!.connected).toBe(true);
@@ -99,7 +101,6 @@ describe('ToolCatalogService', () => {
     const svc = new ToolCatalogService(
       connectors([]),
       skills([{ id: 'sk9', title: 'Only on beakn', description: '', installedOn: ['beakn'] }]),
-      google(false),
     );
     const t = (await svc.catalog()).tools.find((x) => x.id === 'sk9')!;
     expect(t.connected).toBe(false);
@@ -110,7 +111,6 @@ describe('ToolCatalogService', () => {
     const svc = new ToolCatalogService(
       connectors([]),
       skills([{ id: 'sk1', title: 'Installed everywhere', description: '', installedOn: ['sandy'] }]),
-      google(false),
       { engineChoice: async () => ({ provider: 'gemini', model: 'g' }) } as any,
     );
     const t = (await svc.catalog()).tools.find((x) => x.id === 'sk1')!;
@@ -120,7 +120,7 @@ describe('ToolCatalogService', () => {
   });
 
   it('lists the My Brain MCP server', async () => {
-    const svc = new ToolCatalogService(connectors([]), skills([]), google(false));
+    const svc = new ToolCatalogService(connectors([]), skills([]));
     const { tools } = await svc.catalog();
     const mcp = tools.find((t) => t.kind === 'mcp')!;
     expect(mcp.id).toBe('mcp:mybrain');
@@ -128,7 +128,7 @@ describe('ToolCatalogService', () => {
   });
 
   it('validate() separates real ids, unknown ids and unconnected ones', async () => {
-    const svc = new ToolCatalogService(connectors([]), skills([]), google(false));
+    const svc = new ToolCatalogService(connectors([]), skills([]));
     const r = await svc.validate(['search_brain', 'web_search', 'not_a_tool']);
     expect(r.ok.map((t) => t.id)).toEqual(['search_brain', 'web_search']);
     expect(r.unknown).toEqual(['not_a_tool']);
@@ -143,7 +143,7 @@ describe('ToolCatalogService', () => {
    */
   describe('outside services', () => {
     const baseline = async () => {
-      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true));
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]));
       return svc.catalog();
     };
     const provider = (over: any = {}) => ({
@@ -161,7 +161,7 @@ describe('ToolCatalogService', () => {
 
     it('with no key, returns exactly what it returns today — no Services group, no error', async () => {
       const before = await baseline();
-      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true), undefined, {
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), undefined, {
         status: async () => ({ configured: false, reachable: false }),
         listServices: async () => { throw new Error('must not be asked'); },
         listActions: async () => { throw new Error('must not be asked'); },
@@ -172,7 +172,7 @@ describe('ToolCatalogService', () => {
     });
 
     it('with a working key, adds a Services group whose ids all have the one shape', async () => {
-      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true), undefined, provider());
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), undefined, provider());
       const { groups, tools } = await svc.catalog();
       const services = groups.find((g) => g.group === 'Services')!;
       expect(services).toBeTruthy();
@@ -188,7 +188,7 @@ describe('ToolCatalogService', () => {
     });
 
     it('keeps the group when the key works but nothing is connected yet', async () => {
-      const svc = new ToolCatalogService(connectors([]), skills([]), google(false), undefined, provider({ listServices: async () => [] }));
+      const svc = new ToolCatalogService(connectors([]), skills([]), undefined, provider({ listServices: async () => [] }));
       const { groups } = await svc.catalog();
       const services = groups.find((g) => g.group === 'Services')!;
       expect(services).toBeTruthy();
@@ -196,7 +196,7 @@ describe('ToolCatalogService', () => {
     });
 
     it('never lists a blocked service, even if the provider hands one back', async () => {
-      const svc = new ToolCatalogService(connectors([]), skills([]), google(false), undefined, provider({
+      const svc = new ToolCatalogService(connectors([]), skills([]), undefined, provider({
         listServices: async () => [{ slug: 'tavily', name: 'Tavily', category: 'Search', connected: true, accounts: [{ id: 'x', label: 'x', status: 'ACTIVE' }] }],
         listActions: async () => [{ id: 'svc:tavily.search', name: 'Search', description: '', schema: {}, risky: false, service: 'tavily' }],
       }));
@@ -212,7 +212,7 @@ describe('ToolCatalogService', () => {
         { listServices: async () => { throw new Error('boom'); } },
         { listActions: async () => { throw new Error('boom'); } },
       ]) {
-        const svc = new ToolCatalogService(connectors(['tavily']), skills([]), google(true), undefined, provider(broken));
+        const svc = new ToolCatalogService(connectors(['tavily']), skills([]), undefined, provider(broken));
         const { tools } = await svc.catalog();
         for (const id of before.tools.map((t) => t.id)) expect(tools.map((t) => t.id)).toContain(id);
       }

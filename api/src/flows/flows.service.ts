@@ -22,8 +22,8 @@ const GENERIC_PALETTE = [
  * to keep its own hard-coded list, which drifted from the agent's toolbox. Ids are unchanged, so
  * saved flows keep working.
  *
- * This is the safety net for when the catalog can't be reached (its probes call out to Google and
- * the engine host): the canvas and the planner keep the core tools rather than silently offering
+ * This is the safety net for when the catalog can't be reached (its probes call out to the outside
+ * services and the engine host): the canvas and the planner keep the core tools rather than silently offering
  * none, which would quietly plan toolless flows.
  */
 const FALLBACK_TOOLS = [
@@ -31,9 +31,6 @@ const FALLBACK_TOOLS = [
   { id: 'web_search', name: 'Web search', group: 'Web', description: 'Search the live web' },
   { id: 'web_read', name: 'Read a page', group: 'Web', description: 'Open a link and read it' },
   { id: 'deep_research', name: 'Deep research', group: 'Web', description: 'Many searches, then a cited report' },
-  { id: 'gmail', name: 'Gmail', group: 'Google', description: 'Read / search email' },
-  { id: 'calendar', name: 'Calendar', group: 'Google', description: 'Read your calendar' },
-  { id: 'drive', name: 'Drive', group: 'Google', description: 'Find / read files' },
   { id: 'ask_ai', name: 'Ask AI', group: 'AI', description: 'A plain reasoning step' },
   { id: 'http', name: 'HTTP request', group: 'Advanced', description: 'Call any external API' },
   { id: 'news_collect', name: 'Collect the AI news', group: 'News', description: 'Fetch, split and file every story' },

@@ -123,6 +123,21 @@ the trigger instance at the provider** — an orphan keeps billing events for a 
 is gone. A trigger-started run has nobody watching it, so it uses the durable pause, never Chat's
 inline card, and `FlowRunnerService.start(flowId, { input })` carries the payload in on the run row.
 
+**Google is an outside service too, since BEA-1351.** The gws CLI bridge on the host (`google.service.ts`,
+`GWS_RUNNER_URL`, `/gws`, `/gws-file`) is GONE; the four daily Gmail/Drive features (Daily Brief,
+Requests, email memory, Drive→Gmail import) and the whole `/google` page read through
+`GoogleWorkspaceService` (`api/src/google/google-workspace.service.ts`) → `provider.execute()` with
+`svc:gmail.* / svc:googledrive.* / svc:googlecalendar.*` ids on the accounts connected at `/tools`, and
+every read is a `ToolCall` row (`runKind: 'google'`). Google's own message payload arrives identically on
+this road (proven side by side on the same inbox before the switch — commit a6abf7b holds the comparison
+script), so the parsing lives once in `gmail-parse.ts`. Traps: a Gmail list comes back in ARRIVAL order
+(re-sorted by `messageTimestamp`); binary content is a short-lived staged URL, fetched and capped in
+`bytesFrom()`; `GOOGLECALENDAR_EVENTS_LIST` has a stale default `timeMax` — always pass it;
+`GOOGLEDRIVE_GET_FILE_METADATA` returns only id/name/mimeType, so the link and size come from a
+by-name search. Docs/Sheets/Slides/Tasks/Meet/Chat are their own toolkits (`googledocs`…) and say
+"connect it in /tools" until they are. The catalog has NO Google group of its own any more — the bare
+`gmail`/`calendar`/`drive` ids stay in `AGENT_TOOLS` only so flows saved before this keep dispatching.
+
 Anything the app does not own reaches the catalog through the `ServiceProvider` seam in
 `api/src/tools/service-provider.ts`, implemented today by `ComposioProvider` over Composio's v3 REST
 API (`specs/TOOLS.md` for the design, `specs/COMPOSIO-API.md` for shapes that were verified live).
