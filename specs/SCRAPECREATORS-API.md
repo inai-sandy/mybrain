@@ -61,3 +61,11 @@ the write target for spreadsheet outputs.
 
 ## Full endpoint list (generated from the spec, 178)
 See `specs/SCRAPECREATORS-ENDPOINTS.md`. Regenerate from `openapi.json`; never hand-edit.
+
+## ⚠️ Trap found during pre-build verification (2026-08-17)
+`GOOGLEDRIVE_FIND_FILE` with `{"query":"name = 'x'"}` returned **100 unrelated files** — it did NOT
+filter by name. Any code that "finds then deletes/updates" by name must verify the returned name
+matches before acting, or use the file id it already holds. A blind find→delete loop would have
+deleted the owner's real files. **Never script destructive Drive actions from a name search.**
+Two harmless probe sheets named `preflight-probe-delete-me` / `Smart Home India — Instagram (proof…)`
+are left in the owner's Drive on purpose.
