@@ -186,6 +186,11 @@ attachments matching by sha1, Drive PDF/docx bytes identical and Doc/Sheet/Slide
 content, calendar 12/12 events. Two things Google itself does not keep stable across two exports: zip
 entry timestamps and, for Slides, media numbering and the embedded font build — content compared instead.
 
+## Second provider: ScrapeCreators (2026-08-17 — see specs/SOCIAL.md)
+The seam's first real test. `ScrapeCreatorsProvider` — **178 read-only endpoints across 29 social platforms, generated from their OpenAPI spec, nothing skipped** — sits beside `ComposioProvider`. One API key per instance, no OAuth, no gates (everything is a read), credits recorded per call. It powers the new **Social** sidebar section. Verified shapes: `specs/SCRAPECREATORS-API.md`; the full generated endpoint list: `specs/SCRAPECREATORS-ENDPOINTS.md`.
+
+**"No action skipped" is now the standard for every provider.** BEA-1354 lifts the 60-per-service cap BEA-1345 put on Composio (GitHub showed 36 of 871).
+
 ## Standards (always)
 List standards on `/tools` (search · filter · sort · count · loading · empty state). Responsive at 1180 and 390 · dark mode · confirm before disconnect · friendly errors when a connection expires · the Composio API key never in code, logs or git · every tool call logged.
 
