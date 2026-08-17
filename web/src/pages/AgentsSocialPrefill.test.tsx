@@ -75,6 +75,7 @@ describe('NewAgentForm with a Social prefill', () => {
       outputDest: 'sheet',
       sheetId: 'SHEET1', // a pasted link is cleaned to its id
       notifyWhatsApp: true,
+      ui: { headline: 'Instagram · Search · smarthomeindia · 1', inputs: [], view: 'report', runLabel: 'Fetch now →' }, // no engine turn to design a screen
     });
   });
 

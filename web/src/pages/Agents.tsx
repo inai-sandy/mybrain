@@ -434,7 +434,8 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
           ...(draftTools.length ? { tools: draftTools } : {}), // inferred toolbox → the area's Tools section (BEA-1100)
           outputDest, sheetId: sheetId.trim() || null, notifyWhatsApp, // BEA-1357
           // A Social job (BEA-1357): the tool id + its exact arguments, run directly, no engine turn.
-          ...(social ? { tools: [social.tool], toolArgs: { [social.tool]: toolArgs }, origin: 'social' } : {}),
+          // A ready run screen too — no inputs to design, so the job page never spends an engine turn on one.
+          ...(social ? { tools: [social.tool], toolArgs: { [social.tool]: toolArgs }, origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: 'Fetch now →' } } : {}),
         }),
       });
       const d = await r.json().catch(() => ({}));

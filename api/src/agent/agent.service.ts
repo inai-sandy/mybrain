@@ -253,7 +253,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
@@ -280,6 +280,9 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         sheetId: this.cleanSheetId(input.sheetId),
         ...(input.toolArgs && typeof input.toolArgs === 'object' ? { toolArgs: JSON.stringify(input.toolArgs) } : {}),
         ...(input.notifyWhatsApp !== undefined ? { notifyWhatsApp: !!input.notifyWhatsApp } : {}),
+        // A ready mini-interface (BEA-1357): a direct-fetch job has no inputs to design, so the builder
+        // hands one over and the job page never spends an engine turn designing a screen for it.
+        ...(input.ui && typeof input.ui === 'object' ? { ui: JSON.stringify(input.ui) } : {}),
         ...((input as any).areaId ? { areaId: (input as any).areaId } : {}),
       },
     });
