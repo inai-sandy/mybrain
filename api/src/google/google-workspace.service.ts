@@ -53,6 +53,19 @@ const TOOLKIT: Record<string, string> = {
   contacts: 'gmail',
 };
 
+/** What the owner sees a toolkit called at /tools — for the "connect X first" sentence. */
+export const TOOLKIT_LABEL: Record<string, string> = {
+  gmail: 'Gmail',
+  googledrive: 'Google Drive',
+  googlecalendar: 'Google Calendar',
+  googledocs: 'Google Docs',
+  googlesheets: 'Google Sheets',
+  googleslides: 'Google Slides',
+  googletasks: 'Google Tasks',
+  googlemeet: 'Google Meet',
+  google_chat: 'Google Chat',
+};
+
 /** All Workspace services we surface. `unsupported` = Google gives no API for it at all. */
 const SERVICE_MAP: { key: string; label: string; unsupported?: boolean }[] = [
   { key: 'gmail', label: 'Gmail' },
@@ -578,8 +591,8 @@ export class GoogleWorkspaceService {
   /**
    * Run one action for one of our Workspace services and hand back its `data`.
    *
-   * Throws `Error('not-connected')` when that service has no working account at `/tools` — the
-   * controller turns it into a sentence that says which one to connect. Every other failure throws
+   * Throws `Error('not-connected:<toolkit>')` when that service has no working account at `/tools`
+   * — the controller turns it into a sentence that says which one to connect. Every other failure throws
    * the provider's own reason. Every attempt is written to `ToolCall`, success or not, including
    * the ones that never reach the provider (`quiet` probes excepted).
    */
@@ -590,7 +603,7 @@ export class GoogleWorkspaceService {
     if (!account) {
       // Written down like every other attempt, including the ones that never leave the building.
       if (!opts.quiet) await this.record({ actionId, service: toolkit, args, ok: false, ms: 0, error: 'not-connected' });
-      throw new Error('not-connected');
+      throw new Error(`not-connected:${toolkit}`);
     }
     const started = Date.now();
     const p: ServiceProvider = this.provider as any;
