@@ -18,7 +18,13 @@ function setup(voice: string, opts: { contact?: any; reminders?: any[]; messages
     task: { findUnique: async () => null, findMany: async () => opts.work ?? [] },
     briefing: { findMany: async () => opts.briefings ?? [] },
   };
-  const postbox: any = { isConfigured: () => true, sendText: async (to: string, body: string) => { state.texts.push({ to, body }); state.sent++; return { wamid: 'w1' }; } };
+  const postbox: any = {
+    isConfigured: () => true,
+    sendText: async (to: string, body: string) => { state.texts.push({ to, body }); state.sent++; return { wamid: 'w1' }; },
+    // The owner's alert goes out as the approved template first (BEA-1362) — recorded like a text so
+    // the assertions below can read what he was told.
+    sendTemplate: async (to: string, _name: string, vars: string[]) => { state.texts.push({ to, body: vars.join(' · '), template: true }); state.sent++; return { wamid: 't1', status: 'sent' }; },
+  };
   const remindersSvc: any = { voiceComplete: async () => voice };
   return { svc: new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async () => null } as any), state };
 }
@@ -108,7 +114,7 @@ describe('ReminderAgentService.onContactReply (BEA-742 / C2)', () => {
       briefing: { findMany: async () => [] },
       setting: { findUnique: async () => ({ value: '919885698665' }) },
     };
-    const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
+    const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }), sendTemplate: async () => ({ wamid: 't', status: 'sent' }) };
     // the LLM turn tracks how many run at once
     const remindersSvc: any = { voiceComplete: async () => { active++; maxActive = Math.max(maxActive, active); await new Promise((r) => setTimeout(r, 20)); active--; return '{"send":true,"reply":"ok","items":[]}'; } };
     const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null, isPending: async () => false } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async () => null } as any);
@@ -139,7 +145,7 @@ describe('the agent reads the whole picture (BEA-1023)', () => {
       task: { findUnique: async () => null, findMany: async () => opts.work || [] },
       briefing: { findMany: async () => opts.briefings || [] },
     };
-    const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }) };
+    const postbox: any = { isConfigured: () => true, sendText: async () => ({ wamid: 'w' }), sendTemplate: async () => ({ wamid: 't', status: 'sent' }) };
     const remindersSvc: any = { voiceComplete: async (p: string) => { seen = p; return '{"send":true,"reply":"ok","needsSandeep":false,"done":[]}'; } };
     const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async () => null } as any);
     return svc.onContactReply('c1').then(() => seen);
@@ -205,11 +211,16 @@ describe('the owner is told BEFORE anything is promised for him (BEA-1026)', () 
       isConfigured: () => true,
       sendText: async (to: string, body: string) => {
         texts.push({ to, body });
-        if (to === '9198') { order.push('told-owner'); return opts.ownerReachable ? { wamid: 'w' } : { error: 'window closed' }; }
         order.push('sent-to-contact');
         return { wamid: 'w' };
       },
-      sendReminderTemplate: async () => (opts.ownerReachable ? { wamid: 't' } : { error: 'failed' }),
+      // The owner is told with the approved template FIRST (BEA-1362) — its synchronous verdict is
+      // the truth: reachable = sent, unreachable = Meta refused it.
+      sendTemplate: async (to: string, _name: string, vars: string[]) => {
+        texts.push({ to, body: vars.join(' · ') });
+        order.push('told-owner');
+        return opts.ownerReachable ? { wamid: 't', status: 'sent' } : { wamid: null, status: 'failed', error: 'WhatsApp refused it' };
+      },
     };
     const remindersSvc: any = { voiceComplete: async () => '{"send":true,"reply":"I\'ll pass this to Sandeep and he\'ll get back to you.","needsSandeep":true,"done":[]}' };
     const svc = new ReminderAgentService(prisma, postbox, remindersSvc, { claim: async () => null } as any, { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false } as any, { recordPromise: async () => ({ ok: true }) } as any, { get: async () => '' } as any, { record: async () => null } as any);
@@ -269,7 +280,7 @@ function dailySetup(voice: string, lastIn?: string) {
     },
     briefing: { findMany: async () => [] },
   };
-  const postbox: any = { isConfigured: () => true, sendText: async (_to: string, body: string) => { state.texts.push(body); state.sent++; return { wamid: 'w1' }; } };
+  const postbox: any = { isConfigured: () => true, sendText: async (_to: string, body: string) => { state.texts.push(body); state.sent++; return { wamid: 'w1' }; }, sendTemplate: async (_to: string, _n: string, vars: string[]) => { state.texts.push(vars.join(' · ')); state.sent++; return { wamid: 't1', status: 'sent' }; } };
   const remindersSvc: any = { voiceComplete: async () => voice };
   const claims: any = { claim: async (i: any) => { state.claims.push(i); return { id: 'k1' }; }, isPending: async () => false };
   const recurring: any = {
@@ -382,7 +393,7 @@ describe('a progress report never becomes a claim (BEA-1122)', () => {
       task: { findUnique: async () => ({ title: 'Upload all BOMs', kind: 'assignment', status: 'open' }), findMany: async () => [] },
       briefing: { findMany: async () => [] },
     };
-    const postbox: any = { isConfigured: () => true, sendText: async () => { state.sent++; return { wamid: 'w1' }; } };
+    const postbox: any = { isConfigured: () => true, sendText: async () => { state.sent++; return { wamid: 'w1' }; }, sendTemplate: async () => { state.sent++; return { wamid: 't1', status: 'sent' }; } };
     const remindersSvc: any = { voiceComplete: async () => '{"send":true,"reply":"Thanks Madhuri.","needsSandeep":false,"done":[1]}' };
     const claims: any = { claim: async (i: any) => { state.claims.push(i); return { id: 'k1' }; }, isPending: async () => false };
     const recurring: any = { today: () => '2026-07-27', markReceived: async () => undefined, isReceived: async () => false };

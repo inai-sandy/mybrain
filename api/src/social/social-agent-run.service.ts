@@ -3,6 +3,7 @@ import { AgentService } from '../agent/agent.service';
 import { DocumentsService } from '../documents/documents.service';
 import { LlmService } from '../llm/llm.service';
 import { AlertsService } from '../push/alerts.service';
+import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { isServiceToolId } from '../tools/service-provider';
@@ -198,11 +199,7 @@ export class SocialAgentRunService {
       // ---- 4. WhatsApp — the link, through the one path; silence is never an option ------------
       if (agent.notifyWhatsApp) {
         const r = await this.alerts?.runFinished?.(title, headline, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
-        if (!r) await step({ label: '⚠️ Not sent to WhatsApp — WhatsApp is not available on this server', status: 'info' });
-        else if (r.sent) await step({ label: 'Sent the link to WhatsApp — accepted for delivery', status: 'done' });
-        else if (r.why === 'no number') await step({ label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' });
-        else if (r.why === 'off') await step({ label: '⚠️ Not sent to WhatsApp — the WhatsApp outputs switch is off in Settings', status: 'info' });
-        else await step({ label: `⚠️ Not sent to WhatsApp — ${r.why || 'the message could not be delivered'}`, status: 'info' });
+        await step(whatsappStepLabel(r)); // "WhatsApp sent (template)" / "WhatsApp failed: <reason>" (BEA-1362)
       }
     } catch (e: any) {
       this.log.error(`social run ${runId} crashed: ${e?.message || e}`);
@@ -318,11 +315,11 @@ export class SocialAgentRunService {
     if (fired) {
       const text = `${summary}${why ? `\n${why}` : ''}${detail ? `\n\n${detail.replace(/[*`>#|]/g, '').slice(0, 600)}` : ''}`;
       const tg = await this.budget?.pushAlert?.(agent, text, runId).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
-      const wa = await this.alerts?.runFinished?.(`🔔 ${title}`, `${summary}${why ? ` — ${why}` : ''}`, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+      const wa = await this.alerts?.runFinished?.(`🔔 ${title}`, `${summary}${why ? ` — ${why}` : ''}`, `/agent/runs/${runId}`, { kind: 'alert' }).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
       const tgSent = !!tg?.sent;
       const waSent = !!wa?.sent;
       await step({ label: tgSent ? 'Alert sent on Telegram' : `⚠️ Not sent on Telegram — ${tg?.why || 'Telegram is not set up'}`, status: tgSent ? 'done' : 'info' });
-      await step({ label: waSent ? 'Alert sent on WhatsApp — accepted for delivery' : `⚠️ Not sent on WhatsApp — ${wa?.why === 'no number' ? 'no WhatsApp number in Settings' : wa?.why === 'off' ? 'the WhatsApp outputs switch is off in Settings' : wa?.why || 'not available'}`, status: waSent ? 'done' : 'info' });
+      await step(whatsappStepLabel(wa)); // template first; the label is the template's own verdict (BEA-1362)
       // An alert nobody received is not a finished alert. Nothing is stored, so it fires again next run.
       if (!tgSent && !waSent) return fail(`The alert fired (${summary}) but could not reach you — Telegram: ${tg?.why || 'not set up'}; WhatsApp: ${wa?.why || 'not set up'}. Link Telegram or add your WhatsApp number in Settings, then run it again.`);
     } else if (alertNote) {
@@ -384,11 +381,7 @@ export class SocialAgentRunService {
     // A Watch that found something goes out on WhatsApp like any finished job, when the job asks.
     if (mode === 'watch' && changedDiffs.length && agent.notifyWhatsApp) {
       const r = await this.alerts?.runFinished?.(title, summary, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
-      if (!r) await step({ label: '⚠️ Not sent to WhatsApp — WhatsApp is not available on this server', status: 'info' });
-      else if (r.sent) await step({ label: 'Sent the link to WhatsApp — accepted for delivery', status: 'done' });
-      else if (r.why === 'no number') await step({ label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' });
-      else if (r.why === 'off') await step({ label: '⚠️ Not sent to WhatsApp — the WhatsApp outputs switch is off in Settings', status: 'info' });
-      else await step({ label: `⚠️ Not sent to WhatsApp — ${r.why || 'the message could not be delivered'}`, status: 'info' });
+      await step(whatsappStepLabel(r));
     }
   }
 

@@ -7,6 +7,7 @@ import { DocumentsService } from '../documents/documents.service';
 import { MemoryService } from '../memory/memory.service';
 import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
+import { OwnerAlertResult, ownerFirstName, sendOwnerAlert } from '../contacts/owner-alert';
 import { SkillsService } from '../skills/skills.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { FlowsService } from './flows.service';
@@ -1295,7 +1296,7 @@ export class FlowRunnerService implements OnModuleInit {
         // model. Each was spawning a 118,000-token engine turn whose only job was to call our own
         // API back. One engine turn costs as much as eight branches of real research.
         {
-          const done = await this.directTool(refId, node, input, onLine);
+          const done = await this.directTool(refId, node, input, onLine, runId);
           if (done !== null) return done;
         }
         if (FlowRunnerService.AGENT_TOOLS.has(refId)) {
@@ -1436,7 +1437,7 @@ export class FlowRunnerService implements OnModuleInit {
    * The line is agency versus transformation. Deciding what to do next earns an engine turn. Filing
    * a document does not.
    */
-  private async directTool(refId: string, node: any, input: string, onLine?: (t: string) => void): Promise<string | null> {
+  private async directTool(refId: string, node: any, input: string, onLine?: (t: string) => void, runId?: string): Promise<string | null> {
     const text = (input || node?.data?.sub || '').trim();
     const say = onLine || (() => undefined);
 
@@ -1502,15 +1503,26 @@ export class FlowRunnerService implements OnModuleInit {
 
       case 'whatsapp': {
         if (!text) return 'There was nothing to send — the step received no text.';
-        if (!this.postbox?.sendText) return 'WhatsApp is not set up on this server.';
+        if (!this.postbox?.sendTemplate || !this.postbox?.sendText) return 'WhatsApp is not set up on this server.';
         const to = (await this.prisma.setting?.findUnique?.({ where: { key: 'alerts.whatsappNumber' } }).catch(() => null))?.value;
         if (!to) return 'No WhatsApp number is saved, so nothing was sent. Add one in Settings.';
+        // Owner-bound → the approved template first, the full text as a second message when it is
+        // longer than a template line (BEA-1362). Free text alone fails outside the 24-hour window,
+        // and Postbox says "sent" before Meta fails it — so the template's verdict is the honest one.
         const body = text.slice(0, 3900);
-        const r: any = await this.postbox.sendText(to, body).catch(() => ({ status: 'failed' }));
-        if (r?.status === 'failed') return `WhatsApp would not accept the message${r?.error ? ` (${r.error})` : ''}. This usually means the 24-hour window has closed.`;
+        const r = await sendOwnerAlert(this.postbox, to, {
+          firstName: await ownerFirstName(this.prisma),
+          headline: this.titleFor(node, text, 'A message from your flow'),
+          detail: text,
+          path: runId ? `/flows/runs/${runId}` : '/flows',
+          longBody: body,
+        }).catch((e: any): OwnerAlertResult => ({ sent: false, error: String(e?.message || e) }));
+        if (!r?.sent) return `WhatsApp failed: ${r?.error || 'the message could not be delivered'}${r?.note ? ` (${r.note})` : ''}. Nothing was sent.`;
         say('   📲 sent on WhatsApp');
+        const how = r.via === 'text' ? `free text — ${r.note}` : 'template';
         const cut = body.length < text.length ? ` Only the first ${body.length} characters fitted — the rest is below but was not sent.` : '';
-        return `Sent to you on WhatsApp.${cut}\n\n${text}`;
+        const follow = r.followUp === 'failed' ? ' The longer follow-up text did not go through.' : '';
+        return `Sent to you on WhatsApp (${how}).${cut}${follow}\n\n${text}`;
       }
 
       case 'search_rag': {

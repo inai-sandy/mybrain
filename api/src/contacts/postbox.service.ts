@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+/** What every send here answers: Postbox's synchronous verdict. */
+export type SendResult = { wamid: string | null; status: string; error: string | null };
+
 /**
  * My Brain's thin client to the shared Postbox WhatsApp gateway (postbox.1site.ai).
  * Postbox holds the Pinnacle key; we just ask it to send. (BEA-729)
@@ -67,18 +70,30 @@ export class PostboxService {
    * is not approved yet — the caller handles that.
    */
   async sendTaskListTemplate(to: string, firstName: string, count: number, list: string, slug: string) {
+    return this.sendTemplate(to, process.env.POSTBOX_TASKLIST_TEMPLATE || 'task_list_v1', [firstName, String(count), list], { buttonUrl: slug });
+  }
+
+  /**
+   * Send ANY approved template by name (BEA-1362). Postbox's `POST /v1/messages/template` takes
+   * `{to, template, language, variables, buttonUrl}` — `buttonUrl` is the per-send suffix of a
+   * dynamic URL button (the template holds the base). Answers `{wamid, status, error}` from
+   * Postbox's own synchronous result: a template send is refused or accepted right here — unlike
+   * free text, which Postbox accepts and Meta then fails a few seconds later, out of our sight.
+   */
+  async sendTemplate(to: string, name: string, variables: string[], opts: { language?: string; buttonUrl?: string } = {}): Promise<SendResult> {
     if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured (missing POSTBOX_API_KEY).' };
     try {
       const r = await this.post('/v1/messages/template', {
         to,
-        template: process.env.POSTBOX_TASKLIST_TEMPLATE || 'task_list_v1',
-        language: this.lang,
-        variables: [firstName, String(count), list],
-        buttonUrl: slug,
+        template: name,
+        language: opts.language || this.lang,
+        variables: variables.map((v) => String(v ?? '')),
+        ...(opts.buttonUrl ? { buttonUrl: opts.buttonUrl } : {}),
       });
+      // Postbox returns { id, status, wamid, error }
       return { wamid: r?.wamid || null, status: r?.status || 'sent', error: r?.error || null };
     } catch (e: any) {
-      this.log.warn(`sendTaskListTemplate -> ${e?.message}`);
+      this.log.warn(`sendTemplate(${name}) -> ${e?.message}`);
       return { wamid: null, status: 'failed', error: e?.message || 'send failed' };
     }
   }
@@ -115,24 +130,18 @@ export class PostboxService {
   }
 
   async sendReminderTemplate(to: string, firstName: string, subject: string) {
-    if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured (missing POSTBOX_API_KEY).' };
-    try {
-      const r = await this.post('/v1/messages/template', {
-        to,
-        template: this.template,
-        language: this.lang,
-        variables: [firstName, subject],
-      });
-      // Postbox returns { id, status, wamid, error }
-      return { wamid: r?.wamid || null, status: r?.status || 'sent', error: r?.error || null };
-    } catch (e: any) {
-      this.log.warn(`sendReminderTemplate -> ${e?.message}`);
-      return { wamid: null, status: 'failed', error: e?.message || 'send failed' };
-    }
+    return this.sendTemplate(to, this.template, [firstName, subject]);
   }
 
-  /** Free-text reply inside the 24h window (used by the two-way agent, C2). */
-  async sendText(to: string, body: string) {
+  /**
+   * Free-text reply inside the 24h window (used by the two-way agent, C2).
+   *
+   * Careful: Postbox answers `sent` as soon as it has handed the text to Meta; outside the 24-hour
+   * window Meta fails it a few seconds LATER ("Re-engagement message"), and that never comes back
+   * here. Anything bound for the OWNER must go through `sendOwnerAlert()` (owner-alert.ts), which
+   * sends the approved template first. (BEA-1362)
+   */
+  async sendText(to: string, body: string): Promise<SendResult> {
     if (!this.isConfigured()) return { wamid: null, status: 'failed', error: 'Postbox not configured.' };
     try {
       const r = await this.post('/v1/messages/text', { to, body });

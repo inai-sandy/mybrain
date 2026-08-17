@@ -16,6 +16,7 @@ import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { TokenBudgetService, TokenBudgetError, ENGINE_TURN_TOKENS } from '../llm/token-budget.service';
 import { PushService } from '../push/push.service';
 import { AlertsService } from '../push/alerts.service';
+import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PromptsService } from '../prompts/prompts.service';
 import { SkillsService } from '../skills/skills.service';
 import { SocialAgentRunService } from '../social/social-agent-run.service';
@@ -868,11 +869,11 @@ export class HermesBridgeService implements OnModuleInit, OnModuleDestroy {
         if (input.agentId) {
           const job: any = await this.agent.getAgent(input.agentId).catch(() => null);
           if (job?.notifyWhatsApp) {
-            const r = await (this.alerts as any)?.runFinished?.(job.name || input.title || 'Your agent', detail || 'The result is ready.', `/agent/runs/${runId}`).catch(() => null);
-            // Said on the run, never silent (BEA-1357): a toggle that is on and a message that never
-            // arrives must explain itself where the owner will look.
-            if (r && !r.sent && r.why === 'no number') await this.agent.appendStep(runId, { label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' }).catch(() => undefined);
-            else if (r && !r.sent && r.why && r.why !== 'off') await this.agent.appendStep(runId, { label: `⚠️ Not sent to WhatsApp — ${r.why}`, status: 'info' }).catch(() => undefined);
+            const r = await (this.alerts as any)?.runFinished?.(job.name || input.title || 'Your agent', detail || 'The result is ready.', `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+            // Said on the run, never silent (BEA-1357): the template's own verdict — "WhatsApp sent
+            // (template)" or "WhatsApp failed: <Meta's reason>" — where the owner will look (BEA-1362).
+            // Only the master switch being off stays quiet: the owner turned it off on purpose.
+            if (r && r.why !== 'off') await this.agent.appendStep(runId, whatsappStepLabel(r)).catch(() => undefined);
           }
         }
       }

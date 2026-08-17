@@ -1,17 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PostboxService } from '../contacts/postbox.service';
+import { OwnerAlertResult, ownerFirstName, sendOwnerAlert } from '../contacts/owner-alert';
 
 const clean = (s: unknown) => String(s || '').trim();
 
 /**
- * Failure alerts (BEA-1071) — "tell me on WhatsApp when an automation breaks". One plain message
- * per failure: name + one-line reason + link. Per-name cooldown so a storm can't spam the owner.
+ * What every alert here answers. `sent` + `why` are what the callers always read; `via`, `wamid`,
+ * `error` and `note` carry the honest detail for the run step (see `whatsappStepLabel`).
+ *  - why: 'off' | 'no number' | 'postbox not configured' | 'cooldown' | 'nothing missed' | <Meta's reason>
+ */
+export type AlertResult = { sent: boolean; why?: string } & Partial<OwnerAlertResult>;
+
+/**
+ * Every WhatsApp message My Brain sends its OWNER (BEA-1071 · BEA-1102 · BEA-1121 · BEA-1144).
+ *
+ * All of them go through {@link ownerAlert}: the approved `mybrain_update_v1` template FIRST, free
+ * text only as an optional second message (BEA-1362). Before that, each sent free text and fell
+ * back to a template "if it failed" — which never fired, because Postbox says `sent` before Meta
+ * fails a text outside the 24-hour window. 93 owner messages in a row failed that way.
  */
 @Injectable()
 export class AlertsService {
   private readonly log = new Logger('Alerts');
-  /** name → last alert epoch-ms; one alert per automation per 30 min. */
+  /** name → last alert epoch-ms; one failure alert per automation per 30 min. */
   private readonly lastByName = new Map<string, number>();
 
   constructor(
@@ -25,22 +37,36 @@ export class AlertsService {
   }
 
   /**
-   * A job finished (BEA-1102) — one WhatsApp per job with the name, the headline and a private
-   * app link. Gated by the master switch + the per-job toggle (checked by the caller).
+   * THE one road to the owner's phone. Checks the switch (when one applies) and the number, then
+   * hands the message to `sendOwnerAlert()` — template first. `why` on a refusal is Meta's reason.
    */
-  async runFinished(name: string, headline: string, path: string): Promise<{ sent: boolean; why?: string }> {
-    const [enabled, to] = await Promise.all([this.setting('whatsapp.outputs'), this.setting('alerts.whatsappNumber')]);
-    if (enabled === 'false') return { sent: false, why: 'off' };
+  private async ownerAlert(
+    msg: { headline: string; detail?: string; path: string; longBody?: string },
+    opts: { gate?: 'whatsapp.outputs' | 'alerts.onFailure'; log: string } ,
+  ): Promise<AlertResult> {
+    const [enabled, to] = await Promise.all([opts.gate ? this.setting(opts.gate) : Promise.resolve(null), this.setting('alerts.whatsappNumber')]);
+    if (opts.gate && enabled === 'false') return { sent: false, why: 'off' };
     if (!to) return { sent: false, why: 'no number' };
     if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
-    const body = `🤖 ${(name || 'Your agent').slice(0, 60)}\n${(headline || 'The result is ready.').slice(0, 200)}\n\nOpen: https://mybrain.1site.ai${path}`;
-    let r = await this.postbox.sendText(to, body);
-    if (r.status === 'failed') {
-      // Outside the 24h session window a plain text can't deliver — the approved template can.
-      r = await this.postbox.sendReminderTemplate(to, 'Sandy', `${(name || 'your agent').slice(0, 70)} finished — open My Brain`);
-    }
-    if (r.status === 'failed') this.log.warn(`finished alert not delivered: ${r.error}`);
-    return { sent: r.status !== 'failed' };
+    const r = await sendOwnerAlert(this.postbox, to, { ...msg, firstName: await ownerFirstName(this.prisma) });
+    if (!r.sent) this.log.warn(`${opts.log} not delivered: ${r.error || 'unknown reason'}`);
+    else if (r.note) this.log.warn(`${opts.log}: ${r.note}`);
+    return r.sent ? { ...r, sent: true } : { ...r, sent: false, why: r.error || 'the message could not be delivered' };
+  }
+
+  /**
+   * A job finished (BEA-1102) — one WhatsApp per job with the name, the headline and a private
+   * app link behind the button. Gated by the master switch + the per-job toggle (checked by the
+   * caller). `kind: 'alert'` is a Watch/Alert that fired (BEA-1358), worded as one.
+   */
+  async runFinished(name: string, headline: string, path: string, opts: { kind?: 'finished' | 'alert'; detail?: string } = {}): Promise<AlertResult> {
+    const who = clean(name).slice(0, 120) || 'Your agent';
+    const line = opts.kind === 'alert' ? `${who} — alert` : `${who} finished`;
+    const what = clean(headline).slice(0, 600) || 'The result is ready.';
+    return this.ownerAlert(
+      { headline: line, detail: opts.detail ? `${what} · ${clean(opts.detail)}` : what, path },
+      { gate: 'whatsapp.outputs', log: 'finished alert' },
+    );
   }
 
   /**
@@ -48,59 +74,46 @@ export class AlertsService {
    * single message listing everything, not one per item: on a bad day that would be three pings.
    * A miss is the signal worth the owner's attention — arrivals need no message at all.
    */
-  async dailyMissDigest(day: string, missed: { title: string; contact: string | null }[]): Promise<{ sent: boolean; why?: string }> {
+  async dailyMissDigest(day: string, missed: { title: string; contact: string | null }[]): Promise<AlertResult> {
     if (!missed.length) return { sent: false, why: 'nothing missed' };
-    const to = await this.setting('alerts.whatsappNumber');
-    if (!to) return { sent: false, why: 'no number' };
-    if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
-    const lines = missed.slice(0, 10).map((m) => `• ${m.title}${m.contact ? ` — ${m.contact}` : ''}`).join('\n');
-    const more = missed.length > 10 ? `\n…and ${missed.length - 10} more` : '';
-    const body = `📋 ${day}: ${missed.length} daily update${missed.length === 1 ? '' : 's'} did not come in\n${lines}${more}\n\nOpen: https://mybrain.1site.ai/tasks?tab=review&rtab=daily`;
-    let r = await this.postbox.sendText(to, body);
-    if (r.status === 'failed') {
-      // Outside the 24h session window only the approved template can be delivered. (BEA-1112)
-      r = await this.postbox.sendReminderTemplate(to, 'Sandy', `${missed.length} daily update${missed.length === 1 ? '' : 's'} missing for ${day}`);
-    }
-    if (r.status === 'failed') this.log.warn(`miss digest not delivered: ${r.error}`);
-    return { sent: r.status !== 'failed' };
+    const lines = missed.slice(0, 10).map((m) => `• ${m.title}${m.contact ? ` — ${m.contact}` : ''}`);
+    const more = missed.length > 10 ? `…and ${missed.length - 10} more` : '';
+    const headline = `📋 ${day}: ${missed.length} daily update${missed.length === 1 ? '' : 's'} did not come in`;
+    const detail = [...lines, more].filter(Boolean).join('\n');
+    return this.ownerAlert(
+      { headline, detail, path: '/tasks?tab=review&rtab=daily', longBody: `${headline}\n${detail}` },
+      { log: 'miss digest' },
+    );
   }
 
   /**
    * The Lab's one line a week (BEA-1144). Sent only when something crossed the bar — the caller
-   * decides that; this just delivers. Same template fallback as everything else here, so it still
-   * lands when the 24-hour window is shut. (BEA-1112)
+   * decides that; this just delivers. The body rides in the template's detail; when it is longer
+   * than a template line can hold, the full text follows as a second message.
    */
-  async labWeekly(body: string, subject: string): Promise<{ sent: boolean; why?: string }> {
+  async labWeekly(body: string, subject: string): Promise<AlertResult> {
     if (!clean(body)) return { sent: false, why: 'nothing to say' };
-    const [enabled, to] = await Promise.all([this.setting('whatsapp.outputs'), this.setting('alerts.whatsappNumber')]);
-    if (enabled === 'false') return { sent: false, why: 'off' };
-    if (!to) return { sent: false, why: 'no number' };
-    if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
-    let r = await this.postbox.sendText(to, body);
-    if (r.status === 'failed') {
-      r = await this.postbox.sendReminderTemplate(to, 'Sandy', subject.slice(0, 80));
-    }
-    if (r.status === 'failed') this.log.warn(`weekly Lab line not delivered: ${r.error}`);
-    return { sent: r.status !== 'failed' };
+    return this.ownerAlert(
+      { headline: clean(subject) || 'What the Lab noticed this week', detail: body, path: '/lab', longBody: body },
+      { gate: 'whatsapp.outputs', log: 'weekly Lab line' },
+    );
   }
 
   /** An automation failed — WhatsApp the owner (if configured), quietly rate-limited. */
-  async runFailed(name: string, reason: string, path: string): Promise<{ sent: boolean; why?: string }> {
+  async runFailed(name: string, reason: string, path: string): Promise<AlertResult> {
+    const key = name || 'run';
+    const last = this.lastByName.get(key) || 0;
+    // The switch and number are checked first, so an alert that could not go out anyway does not
+    // start a cooldown; the cooldown is set only when a message is really about to leave.
     const [enabled, to] = await Promise.all([this.setting('alerts.onFailure'), this.setting('alerts.whatsappNumber')]);
     if (enabled === 'false') return { sent: false, why: 'off' };
     if (!to) return { sent: false, why: 'no number' };
     if (!this.postbox.isConfigured()) return { sent: false, why: 'postbox not configured' };
-    const key = name || 'run';
-    const last = this.lastByName.get(key) || 0;
     if (Date.now() - last < 30 * 60_000) return { sent: false, why: 'cooldown' };
     this.lastByName.set(key, Date.now());
-    const body = `⚠️ ${name || 'An automation'} failed\n${(reason || 'It hit a problem.').slice(0, 200)}\n\nOpen: https://mybrain.1site.ai${path}`;
-    let r = await this.postbox.sendText(to, body);
-    if (r.status === 'failed') {
-      // Outside the 24h WhatsApp session window a plain text can't deliver — the approved template can.
-      r = await this.postbox.sendReminderTemplate(to, 'Sandy', `${(name || 'an automation').slice(0, 80)} failed — open My Brain`);
-    }
-    if (r.status === 'failed') this.log.warn(`failure alert not delivered: ${r.error}`);
-    return { sent: r.status !== 'failed' };
+    return this.ownerAlert(
+      { headline: `⚠️ ${clean(name).slice(0, 120) || 'An automation'} failed`, detail: clean(reason).slice(0, 400) || 'It hit a problem.', path },
+      { gate: 'alerts.onFailure', log: 'failure alert' },
+    );
   }
 }

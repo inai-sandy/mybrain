@@ -23,12 +23,13 @@
     {
       "id": "BEA-1358",
       "title": "Watch + Alert + daily ceiling",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "3531500"
     },
     {
       "id": "BEA-1362",
       "title": "WhatsApp owner alerts: template-first (found in 1357; needed for 1359's WhatsApp leg)",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1359",
@@ -38,6 +39,11 @@
     {
       "id": "BEA-1354",
       "title": "Lift Composio 60-cap",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1363",
+      "title": "History previews strip markdown (polish, found in 1358)",
       "status": "pending"
     }
   ]

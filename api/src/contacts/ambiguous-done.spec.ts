@@ -81,7 +81,11 @@ function agent(voice: string, over: { work?: any[]; reminders?: any[]; slug?: st
     task: { findUnique: async () => null, findMany: async ({ where }: any) => (where?.kind === 'recurring' ? [] : tasks) },
     briefing: { findMany: async () => [] },
   };
-  const postbox: any = { isConfigured: () => true, sendText: async (to: string, body: string) => { state.texts.push({ to, body }); return { wamid: 'w1' }; } };
+  const postbox: any = {
+    isConfigured: () => true,
+    sendText: async (to: string, body: string) => { state.texts.push({ to, body }); return { wamid: 'w1' }; },
+    sendTemplate: async (to: string, _name: string, vars: string[]) => { state.texts.push({ to, body: vars.join(' · '), template: true }); return { wamid: 't1', status: 'sent' }; }, // owner alert = template first (BEA-1362)
+  };
   const remindersSvc: any = {
     voiceComplete: async () => voice,
     shareLinkFor: async () => (over.slug === null ? null : `https://mybrain.1site.ai/t/${over.slug || 'deepthi-a6r8'}`),

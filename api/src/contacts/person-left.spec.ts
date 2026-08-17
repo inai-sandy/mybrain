@@ -169,7 +169,11 @@ describe('they are out of the working system, not out of the record (BEA-1307)',
       task: { findUnique: async () => null, findMany: async () => [] },
       briefing: { findMany: async () => [] },
     };
-    const postbox: any = { isConfigured: () => true, sendText: async (to: string, body: string) => { sent.push({ to, body }); return { wamid: 'w' }; }, sendReminderTemplate: async () => ({}) };
+    const postbox: any = {
+      isConfigured: () => true,
+      sendText: async (to: string, body: string) => { sent.push({ to, body }); return { wamid: 'w' }; },
+      sendTemplate: async (to: string, _name: string, vars: string[]) => { sent.push({ to, body: vars.join(' · '), template: true }); return { wamid: 't', status: 'sent' }; }, // owner alert = template first (BEA-1362)
+    };
     const llm = { voiceComplete: async () => { throw new Error('the model must not be asked'); } };
     const agent: any = new ReminderAgentService(
       prisma, postbox, llm as any,

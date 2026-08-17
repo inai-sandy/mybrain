@@ -7,7 +7,7 @@ import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunS
 
 const POSTS = { success: true, credits_charged: 1, posts: [{ url: 'u1', caption: 'Smart home India', like_count: 3, owner: { username: 'a' } }, { url: 'u2', caption: 'Elsewhere', like_count: 5, owner: { username: 'b' } }] };
 
-function harness(opts: { fetchOk?: boolean; sheets?: 'ok' | 'not-connected'; existing?: { count: number; header: string[] } | null; whatsapp?: { sent: boolean; why?: string } | null; shapeReply?: string | null; docs?: boolean } = {}) {
+function harness(opts: { fetchOk?: boolean; sheets?: 'ok' | 'not-connected'; existing?: { count: number; header: string[] } | null; whatsapp?: { sent: boolean; why?: string; via?: 'template' | 'text'; error?: string; note?: string } | null; shapeReply?: string | null; docs?: boolean } = {}) {
   const steps: any[] = [];
   const finish: any[] = [];
   const calls: { id: string; ctx: any }[] = [];
@@ -179,14 +179,22 @@ describe('the shaping step (columns · a filter like "in India")', () => {
 
 describe('WhatsApp — the link goes through AlertsService.runFinished, and silence is said', () => {
   it('sends the sheet link when the job asks and a number is set', async () => {
-    const h = harness({ whatsapp: { sent: true } });
+    const h = harness({ whatsapp: { sent: true, via: 'template' } });
     await h.svc.run('run1', job({ notifyWhatsApp: true }));
     expect(h.alerts.runFinished).toHaveBeenCalledTimes(1);
     const [name, headline, path] = (h.alerts.runFinished as jest.Mock).mock.calls[0];
     expect(name).toBe('Instagram · Search · smarthomeindia');
     expect(headline).toContain('https://docs.google.com/spreadsheets/d/SHEET_NEW');
     expect(path).toBe('/agent/runs/run1');
-    expect(h.steps.some((s) => /Sent the link to WhatsApp/.test(s.label))).toBe(true);
+    // The step is the template's own verdict — never "accepted for delivery" (BEA-1362).
+    expect(h.steps.some((s) => s.label === 'WhatsApp sent (template)')).toBe(true);
+    expect(h.steps.some((s) => /accepted for delivery/.test(s.label))).toBe(false);
+  });
+  it("Meta refused the template → the step says 'WhatsApp failed' with Meta's reason (BEA-1362)", async () => {
+    const h = harness({ whatsapp: { sent: false, via: 'template', error: "That message template isn't approved yet", why: "That message template isn't approved yet" } });
+    await h.svc.run('run1', job({ notifyWhatsApp: true }));
+    expect(h.steps.some((s) => /WhatsApp failed: That message template isn't approved yet/.test(s.label))).toBe(true);
+    expect(h.finish[0].status).toBe('done');
   });
   it('no number in Settings → the run shows "no WhatsApp number in Settings"', async () => {
     const h = harness({ whatsapp: { sent: false, why: 'no number' } });

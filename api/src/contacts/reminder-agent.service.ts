@@ -4,6 +4,7 @@ import { promisesLater } from './promise-later';
 import { readUpdate, looksLikePartialProgress } from './update-read';
 import { TeamUpdatesService } from './team-updates.service';
 import { PostboxService } from './postbox.service';
+import { ownerFirstName, sendOwnerAlert } from './owner-alert';
 import { ClaimsService } from '../tasks/claims.service';
 import { DelegationService } from '../tasks/delegation.service';
 import { replyWithClaimConfirmation, ambiguousDoneReply, withSystemLine, dailyReceivedLine } from './claim-reply';
@@ -899,18 +900,31 @@ export class ReminderAgentService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
-  /** WhatsApp Sandeep when the agent is stuck: nice free-text in-window, template fallback cold. (BEA-767) */
+  /**
+   * WhatsApp the owner when the agent is stuck (BEA-767) — through the one owner road: the approved
+   * template first, never free text alone (BEA-1362). Free text only delivers inside the 24-hour
+   * window after the owner last wrote to the number, and Postbox cannot tell us when it does not.
+   */
   private async notifyOwner(contactName: string, lastMsg: string, about?: string | null): Promise<boolean> {
-    const owner = ((await this.prisma.setting.findUnique({ where: { key: 'owner.whatsapp' } }))?.value || '').replace(/[^\d]/g, '');
+    // `owner.whatsapp` is the number this road always read; the Settings page saves the same
+    // number as `alerts.whatsappNumber`, so that is the fallback when the older key is not set.
+    const owner = (
+      (await this.prisma.setting.findUnique({ where: { key: 'owner.whatsapp' } }))?.value ||
+      (await this.prisma.setting.findUnique({ where: { key: 'alerts.whatsappNumber' } }))?.value ||
+      ''
+    ).replace(/[^\d]/g, '');
     if (!owner || !this.postbox.isConfigured()) return false;
-    const snippet = lastMsg ? `: "${lastMsg.replace(/\s+/g, ' ').trim().slice(0, 200)}"` : '';
+    const snippet = lastMsg ? `"${lastMsg.replace(/\s+/g, ' ').trim().slice(0, 200)}"` : '';
     // Name the work when we know it — the app now does, and "needs you about the Elleys PCBs" is
     // answerable from a phone in a way that "needs you" is not. (review finding)
     const topic = about ? ` about ${about}` : '';
-    const res = await this.postbox.sendText(owner, `⚠ ${contactName} messaged and needs you${topic}${snippet}. Open My Brain to reply.`);
-    if (!res.error) return true;
-    // Outside the 24h free-text window → fall back to the approved template so it still lands.
-    const fb = await this.postbox.sendReminderTemplate(owner, 'Sandeep', `${contactName}, who needs your reply in My Brain`).catch(() => ({ error: 'failed' }) as any);
-    return !fb?.error;
+    const r = await sendOwnerAlert(this.postbox, owner, {
+      firstName: await ownerFirstName(this.prisma),
+      headline: `⚠ ${contactName} messaged and needs you${topic}`,
+      detail: `${snippet ? `${snippet} · ` : ''}Open My Brain to reply.`,
+      path: '/reminders',
+    }).catch(() => ({ sent: false, error: 'failed' }) as any);
+    if (!r?.sent) this.log.warn(`owner not told about ${contactName}: ${r?.error || 'unknown reason'}`);
+    return !!r?.sent;
   }
 }
