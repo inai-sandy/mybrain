@@ -180,6 +180,36 @@ beside them ("cached · 0"); a vendor 402 comes back as `outOfCredits` + a top-u
 `ToolCall.credits` since the owner's local midnight over social platforms; the ceiling Setting
 `social.dailyCreditCeiling` is only READ here ("no limit set" until BEA-1358 adds it).
 
+**A Social agent is an ordinary Agent, and it never starts an engine turn (BEA-1357).** "Make it an
+agent" on a Social result opens the normal builder form (`NewAgentForm` in `Agents.tsx`, via
+`/agent?builder=1&tool=<svc id>&args=<json>&label=…` — `readSocialPrefill()`) pre-filled: name in the
+owner's words, the tool + its EXACT arguments (editable, `ToolArgsEditor`), task = `KEEP_AS_FETCHED`,
+output destination (Google Sheet by default), WhatsApp toggle, schedule. Saving is a plain
+`POST /api/agent/agents` with `origin:'social'`, `category:'Social'`, `tools:['svc:…']` and the new
+`Agent.toolArgs` (JSON `{[svc id]: args}`). At run time `HermesBridgeService.execute()` forks BEFORE the
+toolbox/prompt/Codex to `SocialAgentRunService.run()` (`api/src/social/social-agent-run.service.ts`)
+whenever every tool is a `svc:` id with pinned args (`handles()`): each fetch is
+`ServiceActionsService.runDetailed()` with `runKind:'agent'`, `argsPinned:true` (ToolCall rows with
+`credits`, no `service-args` call), rows come from `rows.ts` (`tableOf`: list → rows, profile → ONE row,
+nested one level flattened), and the ONLY model call is the `social-shape` helper (Sonnet 5, Settings
+"Social rows model") — and only when the task says more than "as fetched" (named columns · a filter like
+"in India" — recall over precision). **`outputDest:'sheet'`** is a first-class destination beside
+document (`OutputDestPicker`, on the builder and the job's Settings): create `svc:googlesheets.
+create_google_sheet1` → write `svc:googlesheets.batch_update` at `A1` (header + rows), or with
+`Agent.sheetId` set: `batch_get` `Sheet1!A:A` + `Sheet1!1:1` first (count + header, and the header is
+handed to the shaping step) → append from `A<n+1>` under the sheet's OWN columns (`remap`). Create
+returns NO url — `sheetUrl(id)` builds it; it lands on `AgentRun.outputUrl` (run screen "Open the
+sheet", History "sheet ↗"). Sheets not connected → the run FAILS with "Connect Google Sheets first —
+open /tools…" (the run screen adds an Open Tools button), never a silent skip; a shaping model that
+answers nothing fails the run too. The ENGINE road honours it as well: `driveTurn()` calls
+`SocialAgentRunService.deliverTextToSheet()` for an ordinary job set to `sheet` (answer → rows via
+`social-shape` → the same writer), and any failure fails the run — never a quiet fallback to Documents. `notifyWhatsApp` sends the sheet link through
+`AlertsService.runFinished()`; a "no number" answer is SAID on the run as a step ("no WhatsApp number in
+Settings"), on both the direct and the engine road. `telegram`/`task` destinations are still only names
+in the schema — nothing dispatches on them yet. Traps: `ORIGIN[j.origin]` in `AgentAreaPage` crashes on
+an unknown origin (now `originOf()`); a pasted sheet URL is cleaned to its id on both sides
+(`cleanSheetId` / `sheetIdFrom`); never find-and-delete a Drive file by name (`specs/SCRAPECREATORS-API.md`).
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

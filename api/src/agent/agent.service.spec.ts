@@ -380,6 +380,38 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect((await svc.getAgent(a.id)).lastFiredKey).toBeNull(); // reset so the new slot can fire
   });
 
+  // ---- BEA-1357: a Social agent is an ordinary Agent — origin, sheet output, pinned arguments ----
+  it('creates a Social agent: origin social, outputDest sheet, the exact tool args pinned, WhatsApp on', async () => {
+    const a: any = await svc.createAgent({ name: 'Instagram · Search · smarthomeindia', prompt: 'Keep every result as fetched.', origin: 'social', category: 'Social', tools: ['svc:instagram.search'], toolArgs: { 'svc:instagram.search': { query: 'smarthomeindia' } }, outputDest: 'sheet', notifyWhatsApp: true, sheetId: 'https://docs.google.com/spreadsheets/d/ABC123/edit#gid=0' });
+    expect(a.origin).toBe('social');
+    expect(a.category).toBe('Social');
+    expect(a.tools).toEqual(['svc:instagram.search']);
+    expect(a.toolArgs).toEqual({ 'svc:instagram.search': { query: 'smarthomeindia' } }); // round-trips through JSON
+    expect(a.outputDest).toBe('sheet');
+    expect(a.sheetId).toBe('ABC123'); // a pasted link is cleaned to its id
+    expect(a.notifyWhatsApp).toBe(true);
+    // it lists like any other agent
+    expect((await svc.listAgents()).map((x: any) => x.id)).toContain(a.id);
+  });
+
+  it('an unknown outputDest falls back to document; a patch can change dest, sheet and args', async () => {
+    const a: any = await svc.createAgent({ name: 'A', prompt: 'x', outputDest: 'moon' as any });
+    expect(a.outputDest).toBe('document');
+    const up: any = await svc.updateAgent(a.id, { outputDest: 'sheet', sheetId: 'S1', toolArgs: { 'svc:x.y': { q: 1 } } } as any);
+    expect(up.outputDest).toBe('sheet');
+    expect(up.sheetId).toBe('S1');
+    expect(up.toolArgs).toEqual({ 'svc:x.y': { q: 1 } });
+    const back: any = await svc.updateAgent(a.id, { sheetId: '', toolArgs: null } as any);
+    expect(back.sheetId).toBeNull();
+    expect(back.toolArgs).toBeNull();
+  });
+
+  it('finishRun keeps the outside link a run produced (the sheet it wrote)', async () => {
+    const run = await svc.createRun({ input: 'topic' });
+    const done: any = await svc.finishRun(run.id, { status: 'done', outputUrl: 'https://docs.google.com/spreadsheets/d/S1', resultText: 'rows' });
+    expect(done.outputUrl).toBe('https://docs.google.com/spreadsheets/d/S1');
+  });
+
   it('deletes an agent', async () => {
     const a = await svc.createAgent({ name: 'Temp', prompt: 'x' });
     await svc.deleteAgent(a.id);

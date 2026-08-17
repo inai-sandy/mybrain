@@ -22,6 +22,7 @@ type Run = {
   waitpoints?: Waitpoint[];
   learnings?: { text: string; status: string }[];
   outputDocId?: string | null;
+  outputUrl?: string | null; // the Google Sheet the run wrote (BEA-1357)
   resultText?: string | null;
   grade?: Grade | null;
   error?: string | null;
@@ -275,12 +276,24 @@ export function AgentRunView() {
               <button onClick={() => nav(`/documents/${run.outputDocId}`)} className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500">Open</button>
             </div>
           )}
-          {run.status === 'done' && !run.outputDocId && !run.resultText && (
+          {/* The outside link a run produced — the Google Sheet it wrote (BEA-1357). */}
+          {run.status === 'done' && run.outputUrl && (
+            <div className="flex items-center gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10" data-testid="run-output-url">
+              <span className="text-xl leading-none" aria-hidden>📊</span>
+              <div className="min-w-0 flex-1 text-sm font-medium text-emerald-800 dark:text-emerald-200">Written to a Google Sheet.<span className="block truncate text-xs font-normal text-emerald-700/70 dark:text-emerald-300/60">{run.outputUrl}</span></div>
+              <a href={run.outputUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500">Open the sheet</a>
+            </div>
+          )}
+          {run.status === 'done' && !run.outputDocId && !run.outputUrl && !run.resultText && (
             <div className="rounded-2xl border border-zinc-200 p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">The agent finished.</div>
           )}
           {run.status === 'failed' && (
             <div className="rounded-2xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
               {run.error || 'The run failed.'}
+              {/* "Connect X first — open /tools" gets the door, not just the sentence (BEA-1357). */}
+              {/\/tools\b/.test(run.error || '') && (
+                <button onClick={() => nav('/tools')} className="mt-2 block rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500">Open Tools to connect it</button>
+              )}
             </div>
           )}
 

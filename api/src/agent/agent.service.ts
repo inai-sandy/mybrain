@@ -253,7 +253,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[] }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
@@ -272,9 +272,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         defaultDepth: this.normDepth(input.defaultDepth),
         collectionId: input.collectionId ?? null,
         enabled: input.enabled ?? true,
-        // Where it came from (BEA-1175/1176) — chat, voice, or an import.
-        origin: ['chat', 'voice', 'import'].includes(String(input.origin)) ? String(input.origin) : 'chat',
+        // Where it came from (BEA-1175/1176) — chat, voice, an import, or a Social result (BEA-1357).
+        origin: ['chat', 'voice', 'import', 'social'].includes(String(input.origin)) ? String(input.origin) : 'chat',
         ...(Array.isArray(input.tools) && input.tools.length ? { tools: JSON.stringify(input.tools.filter((t) => typeof t === 'string').slice(0, 60)) } : {}),
+        // Where the result goes (BEA-1357): document (default) | telegram | task | sheet.
+        outputDest: this.normOutputDest(input.outputDest),
+        sheetId: this.cleanSheetId(input.sheetId),
+        ...(input.toolArgs && typeof input.toolArgs === 'object' ? { toolArgs: JSON.stringify(input.toolArgs) } : {}),
+        ...(input.notifyWhatsApp !== undefined ? { notifyWhatsApp: !!input.notifyWhatsApp } : {}),
         ...((input as any).areaId ? { areaId: (input as any).areaId } : {}),
       },
     });
@@ -307,6 +312,23 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   /** Clamp a depth value to the allowed set (default 'standard'). */
   private normDepth(d?: string): string {
     return d && ['quick', 'standard', 'deep'].includes(d) ? d : 'standard';
+  }
+
+  /** The output destinations a job can have (BEA-1357). Anything else falls back to a Document. */
+  static readonly OUTPUT_DESTS = ['document', 'telegram', 'task', 'sheet'];
+  private normOutputDest(d?: string): string {
+    return d && AgentService.OUTPUT_DESTS.includes(d) ? d : 'document';
+  }
+
+  /**
+   * A Google Sheet id, from the id itself or a pasted sheet URL — the owner copies the address bar,
+   * not the id (BEA-1357). Empty → null (a new sheet per run).
+   */
+  private cleanSheetId(v?: string | null): string | null {
+    const s = String(v || '').trim();
+    if (!s) return null;
+    const m = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/.exec(s);
+    return (m ? m[1] : s).slice(0, 120);
   }
 
   async listAgents() {
@@ -406,6 +428,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (p.keepDays !== undefined) data.keepDays = p.keepDays == null ? null : Math.max(1, Math.min(3650, Number(p.keepDays) || 0)) || null;
     if (p.engine !== undefined) data.engine = p.engine && typeof p.engine === 'object' ? JSON.stringify(p.engine) : null;
     if (p.indexToBrain !== undefined) data.indexToBrain = !!p.indexToBrain;
+    // Where the result goes + the pinned fetch arguments (BEA-1357).
+    if (p.outputDest !== undefined) data.outputDest = this.normOutputDest(p.outputDest);
+    if (p.sheetId !== undefined) data.sheetId = this.cleanSheetId(p.sheetId);
+    if (p.toolArgs !== undefined) data.toolArgs = p.toolArgs && typeof p.toolArgs === 'object' ? JSON.stringify(p.toolArgs) : null;
     const updated = await this.prisma.agent.update({ where: { id }, data });
     return this.shapeAgent(updated);
   }
@@ -468,6 +494,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       engine: a.engine ? this.parse(a.engine, null) : null, // this job's own model (BEA-1106)
       chatLog: this.parse(a.chatLog, [] as unknown), // persisted change-by-chatting history (BEA-1097)
       tools: this.parse(a.tools, [] as unknown), // catalog tool ids this job may use (BEA-1168)
+      toolArgs: a.toolArgs ? this.parse(a.toolArgs, null) : null, // pinned per-tool arguments of a direct-fetch job (BEA-1357)
     };
   }
 
@@ -481,7 +508,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     return this.shapeRun(updated);
   }
 
-  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; error?: string; resultText?: string; grade?: string } = {}) {
+  async finishRun(id: string, patch: { status?: 'done' | 'failed' | 'cancelled'; outputDocId?: string; outputUrl?: string; error?: string; resultText?: string; grade?: string } = {}) {
     const run = await this.prisma.agentRun.findUnique({ where: { id } });
     if (!run) throw new NotFoundException('Run not found');
     // A run that already reached a terminal state must NOT be revived — otherwise a Codex turn that
@@ -494,6 +521,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       data: {
         status: patch.status ?? 'done',
         outputDocId: patch.outputDocId ?? run.outputDocId,
+        outputUrl: patch.outputUrl ?? (run as any).outputUrl,
         resultText: patch.resultText ?? run.resultText,
         grade: patch.grade ?? run.grade,
         error: patch.error ?? null,
@@ -603,6 +631,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         depth: r.depth || null,
         grade: r.grade ? this.parse(r.grade, null) : null,
         outputDocId: r.outputDocId || null,
+        outputUrl: r.outputUrl || null, // the sheet it wrote (BEA-1357)
         error: r.error || null,
         startedAt: r.startedAt,
         endedAt: r.endedAt,
@@ -617,6 +646,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         depth: null,
         grade: null,
         outputDocId: null,
+        outputUrl: null,
         error: f.error || null,
         startedAt: f.startedAt,
         endedAt: f.endedAt,

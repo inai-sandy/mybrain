@@ -696,7 +696,9 @@ model Agent {
   schedule     String? // JSON { every: day|weekday|week|hour, at?: "HH:MM", dow?: 0-6 }; null = manual only
   scheduleText String? // human sentence ("every weekday 7am")
   lastFiredKey String? // "<dayKey>:<HH:MM>" of the last scheduled fire — dedup so a schedule fires once
-  outputDest   String     @default("document") // document | telegram | task
+  outputDest   String     @default("document") // document | telegram | task | sheet — sheet = a Google Sheet through the seam (BEA-1357)
+  sheetId      String? // outputDest 'sheet': append every run to THIS spreadsheet; null = a new sheet per run (BEA-1357)
+  toolArgs     String? // JSON { "<svc id>": {args} } — the exact arguments a direct-fetch job (Social) runs each tool with; no engine turn (BEA-1357)
   defaultDepth String     @default("standard") // quick | standard | deep — default run depth (BEA-695)
   collectionId String? // Documents collection for saved outputs
   category     String? // shelf group on the Agents home (Daily | Research | People | Brain care | Imported | Other) — null = auto-guessed (BEA-1087)
@@ -728,6 +730,7 @@ model AgentRun {
   stepLog     String      @default("[]") // JSON array of step records (mirror of Hermes events)
   learnings   String      @default("[]") // JSON [{text,status:proposed|kept|forgotten,memId?}] — what the run learned (BEA-624)
   outputDocId String? // saved Document id
+  outputUrl   String? // an outside link the run produced — the Google Sheet it wrote (BEA-1357)
   resultText  String? // the agent's final answer text, shown inline on the run (BEA-630)
   grade       String? // JSON grade vs the agent's Outcome rubric {verdict,score,criteria,notes} (BEA-641)
   error       String?

@@ -11,12 +11,13 @@
     {
       "id": "BEA-1356",
       "title": "Social section: grid + platform page + run-it-now",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "b618951"
     },
     {
       "id": "BEA-1357",
       "title": "Make it an agent + outputDest:sheet",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1358",

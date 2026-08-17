@@ -68,7 +68,7 @@ export function AgentHistory() {
     { key: 'grade', label: 'Outcome', render: (r) => (r.grade ? <GradeBadge grade={r.grade} /> : <span className="text-xs text-zinc-400">—</span>) },
     { key: 'durationSec', label: 'Took', sortable: true, render: (r) => <span className="text-xs text-zinc-500">{fmtDuration(r.durationSec) || (live(r.status) ? '…' : '—')}</span> },
     { key: 'startedAt', label: 'When', sortable: true, render: (r) => <span className="text-zinc-500">{timeAgo(r.startedAt)}</span> },
-    { key: 'outputDocId', label: 'Output', render: (r) => (r.outputDocId ? <span className="text-xs text-emerald-600 dark:text-emerald-400">document ↗</span> : <span className="text-xs text-zinc-400">—</span>) },
+    { key: 'outputDocId', label: 'Output', render: (r) => (r.outputDocId ? <span className="text-xs text-emerald-600 dark:text-emerald-400">document ↗</span> : r.outputUrl ? <span className="text-xs text-emerald-600 dark:text-emerald-400">sheet ↗</span> : <span className="text-xs text-zinc-400">—</span>) },
     { key: '_act', label: '', render: (r) => (live(r.status) ? null : (
       <span className="flex items-center gap-0.5">
         <button onClick={(e) => { e.stopPropagation(); replay(r); }} disabled={!!replaying} title="Replay on the same input" className="rounded-lg p-1.5 text-zinc-300 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40 dark:text-zinc-600 dark:hover:bg-emerald-500/10"><RotateCcw className="h-4 w-4" /></button>

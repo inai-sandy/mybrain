@@ -25,7 +25,8 @@ const SRC = join(__dirname, '..');
  */
 function inScope(): string[] {
   const out: string[] = [];
-  for (const dir of ['flows', 'agent', 'hermes']) {
+  // `social` joined in BEA-1357: a Social agent's run is agent work too (its shaping step).
+  for (const dir of ['flows', 'agent', 'hermes', 'social']) {
     for (const f of readdirSync(join(SRC, dir))) {
       const rel = `${dir}/${f}`;
       if (f.endsWith('.ts') && !f.endsWith('.spec.ts') && statSync(join(SRC, rel)).isFile()) out.push(rel);
@@ -91,7 +92,7 @@ describe('no agent or flow call reaches the general model (BEA-1248)', () => {
     // The point of registering a key is that the owner can point it somewhere. A key with no card
     // is only half a fix — this issue exists because grading had no card at all.
     const settings = readFileSync(join(SRC, '../../web/src/pages/Settings.tsx'), 'utf8');
-    const missing = ['agent-grade', 'flow-eval-grade', 'flow-decompose', 'suggest-evals', 'agent-learn', 'news-categorise']
+    const missing = ['agent-grade', 'flow-eval-grade', 'flow-decompose', 'suggest-evals', 'agent-learn', 'news-categorise', 'social-shape']
       .filter((k) => !settings.includes(`/api/llm-config/helper/${k}`));
     expect(missing).toEqual([]);
   });

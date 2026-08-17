@@ -10,6 +10,26 @@ import { STARTERS, type Starter } from '../ui/agentStarters';
 import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
 import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
 import { AgentBuilder } from './AgentBuilder';
+import { KEEP_AS_FETCHED, OutputDestPicker, ToolArgsEditor } from '../ui/agentJobFields';
+
+/** What a Social result hands the builder (BEA-1357): the tool, the exact arguments just used, a label. */
+export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string };
+
+/** "Instagram · Search · smarthomeindia" — the label plus the argument values, in the owner's words. */
+export function socialAgentName(p: SocialPrefill): string {
+  const vals = Object.values(p.args || {}).filter((v) => v !== '' && v !== null && v !== undefined).map((v) => String(v)).slice(0, 3);
+  const base = p.label || p.tool.replace(/^svc:/, '').replace('.', ' · ');
+  return [base, ...vals].join(' · ').slice(0, 120);
+}
+
+/** Read `?builder=1&tool=&args=&label=` off the Agents URL. Null when it is not a Social handoff. */
+export function readSocialPrefill(params: URLSearchParams): SocialPrefill | null {
+  const tool = params.get('tool') || '';
+  if (params.get('builder') !== '1' || !/^svc:[a-z0-9_]+\.[a-z0-9_]+$/.test(tool)) return null;
+  let args: Record<string, any> = {};
+  try { const a = JSON.parse(params.get('args') || '{}'); if (a && typeof a === 'object' && !Array.isArray(a)) args = a; } catch { args = {}; }
+  return { tool, args, label: params.get('label') || undefined };
+}
 
 export type Run = { id: string; title?: string; status: string; startedAt: string; endedAt?: string | null; outputDocId?: string | null };
 
@@ -329,9 +349,10 @@ function ImportGithubModal({ onDone, onClose }: { onDone: (url?: string) => void
   );
 }
 
-export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial?: Starter | null; areaId?: string; onCreated: () => void; onCancel: () => void }) {
+export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: { initial?: Starter | null; areaId?: string; social?: SocialPrefill | null; onCreated: (id?: string) => void; onCancel: () => void }) {
   const toast = useToast();
-  const [step, setStep] = useState<'describe' | 'form'>('describe');
+  // A Social handoff (BEA-1357) skips the "describe it" step: the tool and its arguments ARE the job.
+  const [step, setStep] = useState<'describe' | 'form'>(social ? 'form' : 'describe');
   const [idea, setIdea] = useState('');
   const [drafting, setDrafting] = useState(false);
   const [name, setName] = useState('');
@@ -348,6 +369,11 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
   const [description, setDescription] = useState('');
   const [autonomy, setAutonomy] = useState('cautious');
   const [draftTools, setDraftTools] = useState<any[]>([]); // toolbox inferred from the idea (BEA-1100)
+  // Where the result goes + WhatsApp (BEA-1357) — first-class on every job, pre-set for a Social one.
+  const [outputDest, setOutputDest] = useState<string>(social ? 'sheet' : 'document');
+  const [sheetId, setSheetId] = useState('');
+  const [notifyWhatsApp, setNotifyWhatsApp] = useState(false);
+  const [toolArgs, setToolArgs] = useState<Record<string, any>>(social?.args || {});
 
   function pickStarter(s: Starter) {
     setName(s.name); setTask(s.task); setRubric(s.rubric); setDefaultDepth(s.depth);
@@ -360,6 +386,14 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
     setStep('form');
   }
   useEffect(() => { if (initial) pickStarter(initial); /* eslint-disable-next-line */ }, []);
+  // The pre-fill (BEA-1357): a name in the owner's words, the Social shelf, and a task that means
+  // "rows as fetched" until the owner asks for columns or a filter.
+  useEffect(() => {
+    if (!social) return;
+    setName(socialAgentName(social)); setTask(KEEP_AS_FETCHED); setIcon('📣'); setColor('#ec4899'); setCategory('Social');
+    setDescription(`${social.label || 'Social'} — fetched directly, on a schedule`);
+    setStep('form'); /* eslint-disable-next-line */
+  }, []);
   const [saving, setSaving] = useState(false);
   const inp = 'w-full rounded-lg border border-zinc-200 bg-transparent px-3 py-1.5 text-sm outline-none focus:border-emerald-400 dark:border-zinc-700';
 
@@ -398,10 +432,14 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
           icon, color: color || undefined, category: category || undefined, description: description.trim() || undefined, autonomy,
           ...(areaId ? { areaId } : {}), // creating a job inside an existing agent (BEA-1098)
           ...(draftTools.length ? { tools: draftTools } : {}), // inferred toolbox → the area's Tools section (BEA-1100)
+          outputDest, sheetId: sheetId.trim() || null, notifyWhatsApp, // BEA-1357
+          // A Social job (BEA-1357): the tool id + its exact arguments, run directly, no engine turn.
+          ...(social ? { tools: [social.tool], toolArgs: { [social.tool]: toolArgs }, origin: 'social' } : {}),
         }),
       });
-      if (!r.ok) throw new Error('Could not save');
-      onCreated();
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d?.message || 'Could not save');
+      onCreated(d?.id);
     } catch (e: any) { toast('error', e?.message || 'Could not save'); } finally { setSaving(false); }
   }
 
@@ -439,20 +477,30 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
       <div className="flex flex-wrap gap-2">
         <select value={category} onChange={(e) => setCategory(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
           <option value="">Category: auto</option>
-          {['Daily', 'Research', 'People', 'Brain care', 'Other'].map((c) => <option key={c} value={c}>{c}</option>)}
+          {['Daily', 'Research', 'People', 'Brain care', 'Social', 'Other'].map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
+        {!social && (
         <select value={autonomy} onChange={(e) => setAutonomy(e.target.value)} className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900">
           <option value="cautious">Cautious — checks before acting</option>
           <option value="balanced">Balanced — asks only on big ones</option>
           <option value="autopilot">Autopilot — never asks</option>
         </select>
+        )}
       </div>
-      <label className="block text-xs text-zinc-500">Task
+      {/* A Social job (BEA-1357): the fetch is the tool + these exact arguments — no engine turn. */}
+      {social && <ToolArgsEditor tool={social.tool} args={toolArgs} onChange={setToolArgs} toolName={social.label} />}
+      <label className="block text-xs text-zinc-500">{social ? 'What to do with the rows — name the columns you want, or a filter like “only posts about India”. Leave it as is to keep every result.' : 'Task'}
         <div className="relative mt-1">
           <textarea value={task} onChange={(e) => setTask(e.target.value)} rows={3} placeholder="What should it do each time it runs?" className={inp + ' resize-none pr-11'} />
           <DictateButton onText={(t) => setTask((p) => (p ? p + ' ' : '') + t)} className="absolute right-2 top-2" />
         </div>
       </label>
+      <OutputDestPicker dest={outputDest} sheetId={sheetId} onChange={(v) => { setOutputDest(v.outputDest); setSheetId(v.sheetId); }} />
+      <label className="flex cursor-pointer items-center justify-between gap-3 py-1">
+        <span className="text-xs text-zinc-500">Send me the link on WhatsApp when it finishes <span className="text-zinc-400">(needs your number in Settings → Agent Engine)</span></span>
+        <input type="checkbox" checked={notifyWhatsApp} onChange={(e) => setNotifyWhatsApp(e.target.checked)} className="h-5 w-9 shrink-0 accent-emerald-600" aria-label="Send to WhatsApp when it finishes" />
+      </label>
+      {!social && (<>
       <label className="block text-xs text-zinc-500">Outcome — what does a good result look like? (graded each run)
         <div className="relative mt-1">
           <textarea value={rubric} onChange={(e) => setRubric(e.target.value)} rows={3} placeholder="e.g. Has 3 bullets. Each is one short sentence. Flags anything urgent." className={inp + ' resize-none pr-11'} />
@@ -463,6 +511,8 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
         <div className="mb-1 text-xs text-zinc-500">How deep should each run go?</div>
         <DepthDial value={defaultDepth} onChange={setDefaultDepth} />
       </div>
+      </>)}
+      {!social && (
       <div className="space-y-1.5">
         <div className="text-xs text-zinc-500">Eval cases — example inputs to test it (optional)</div>
         {evals.map((e, i) => (
@@ -476,6 +526,7 @@ export function NewAgentForm({ initial, areaId, onCreated, onCancel }: { initial
           <button onClick={() => { if (newEval.trim()) { setEvals((p) => [...p, newEval.trim()]); setNewEval(''); } }} className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm hover:border-emerald-500 hover:text-emerald-600 dark:border-zinc-700"><Plus className="h-4 w-4" /></button>
         </div>
       </div>
+      )}
       {draftTools.length > 0 && (
         <div>
           <div className="text-xs font-medium text-zinc-500">Tools it will need <span className="font-normal text-zinc-400">· lands on the agent's Tools section</span></div>
@@ -530,8 +581,12 @@ function StarterCard({ s, onPick }: { s: Starter; onPick: (s: Starter) => void }
 export function Agents() {
   const nav = useNavigate();
   const toast = useToast();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const focusId = params.get('focus'); // push-notification deep link (BEA-1088 groundwork)
+  // The Social handoff (BEA-1357): `/agent?builder=1&tool=<svc id>&args=<json>&label=…` opens the
+  // builder form pre-filled. Read once; the params are cleared when the form closes.
+  const [socialPrefill] = useState<SocialPrefill | null>(() => readSocialPrefill(params));
+  const clearBuilderParams = () => { if (params.get('builder')) { const p = new URLSearchParams(params); ['builder', 'tool', 'args', 'label'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); } };
   const [engine, setEngine] = useState<{ ok?: boolean; version?: string } | null>(null);
   const [home, setHome] = useState<HomeData | null>(null);
   const [prompt, setPrompt] = useState('');
@@ -540,7 +595,7 @@ export function Agents() {
   const [runningId, setRunningId] = useState<string | null>(null); // guard a saved-agent Run against double-tap (BEA-819)
   const [saveResult, setSaveResult] = useState(true);
   const [depth, setDepth] = useState<Depth>('standard');
-  const [showNew, setShowNew] = useState(false);
+  const [showNew, setShowNew] = useState(!!readSocialPrefill(params));
   const [starterPick, setStarterPick] = useState<Starter | null>(null);
   const [showAsk, setShowAsk] = useState(false);
   // Run popup: after planning a deep research, pick which sub-questions to run. (BEA-773)
@@ -551,7 +606,7 @@ export function Agents() {
   const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
   const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
-  const [showBuilder, setShowBuilder] = useState(false); // chat builder (BEA-1104)
+  const [showBuilder, setShowBuilder] = useState(params.get('builder') === '1' && !readSocialPrefill(params)); // chat builder (BEA-1104); `?builder=1` alone opens it
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // big shelf groups expanded (BEA-1083)
   // Slim one-tap push opt-in (BEA-1088) — shown while this device could get notifications but isn't
   // subscribed yet (covers both "never asked" and "allowed but not registered").
@@ -768,8 +823,8 @@ export function Agents() {
           </div>
         </div>
         {showImport && <ImportGithubModal onDone={(url) => { setShowImport(false); loadHome(); loadAreas(); if (url) nav(url); }} onClose={() => setShowImport(false)} />}
-        {showBuilder && <AgentBuilder onCreated={(url) => { setShowBuilder(false); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); setShowNew(true); }} onClose={() => setShowBuilder(false)} />}
-        {showNew && <NewAgentForm initial={starterPick} onCreated={() => { setShowNew(false); setStarterPick(null); loadHome(); loadAreas(); }} onCancel={() => { setShowNew(false); setStarterPick(null); }} />}
+        {showBuilder && <AgentBuilder onCreated={(url) => { setShowBuilder(false); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); setShowNew(true); }} onClose={() => { setShowBuilder(false); clearBuilderParams(); }} />}
+        {showNew && <NewAgentForm initial={starterPick} social={socialPrefill} onCreated={(id) => { setShowNew(false); setStarterPick(null); clearBuilderParams(); loadHome(); loadAreas(); if (id && socialPrefill) nav(`/agent/a/${id}`); }} onCancel={() => { setShowNew(false); setStarterPick(null); clearBuilderParams(); }} />}
         {areasList === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>
         ) : areasList.length === 0 ? (
