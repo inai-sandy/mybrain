@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { describeTransportError, fetchWithRetry, isTransportError } from './transport';
 import {
   BLOCKED_SERVICES,
   ConnectResult,
@@ -707,12 +708,14 @@ export class ComposioProvider implements ServiceProvider {
     if (!key) throw new Error('No Composio API key saved.');
     const url = new URL(`${API_BASE}${path}`);
     for (const [k, v] of Object.entries(opts.params || {})) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
-    const r = await fetch(url.toString(), {
+    // A pure transport failure (the fetch() promise itself rejects) is retried once; an HTTP
+    // status of any kind, a timeout and a 200-with-`successful:false` are the vendor's answer and
+    // are never retried (BEA-1364).
+    const r = await fetchWithRetry(url.toString(), {
       method,
       headers: { 'x-api-key': key, 'Content-Type': 'application/json' },
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      signal: AbortSignal.timeout(opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 20_000),
-    });
+    }, { timeoutMs: opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : 20_000 });
     if (!r.ok) {
       const text = await r.text().catch(() => '');
       throw Object.assign(new Error(`HTTP ${r.status}${text ? `: ${text.slice(0, 200)}` : ''}`), { status: r.status });
@@ -773,6 +776,8 @@ export class ComposioProvider implements ServiceProvider {
     if (status === 404) return 'Composio does not know that service or action.';
     if (status === 429) return 'Composio is rate-limiting us right now — try again in a minute.';
     if (e?.name === 'TimeoutError' || e?.name === 'AbortError') return 'Composio did not answer in time.';
+    // A transport failure names its cause — `fetch failed (ECONNRESET: socket hang up)` (BEA-1364).
+    if (isTransportError(e) && e?.message) return describeTransportError(e).slice(0, 200);
     return String(e?.message || 'Could not reach Composio.').slice(0, 200);
   }
 

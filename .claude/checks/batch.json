@@ -1,6 +1,6 @@
 {
   "startedAt": "2026-08-17T19:20:00Z",
-  "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358. BEA-1362 added 21:20Z: owner WhatsApp alerts all failing at Meta (24h window); template mybrain_update_v1 submitted, PENDING.",
+  "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358. BEA-1362 added 21:20Z: owner WhatsApp alerts all failing at Meta (24h window); template mybrain_update_v1 submitted, PENDING. 22:55Z: vendor hashtag/reels search still down (404 No posts found, their doc example too) \u2192 BEA-1359 moved LAST; if still down, build+schedule fully, run honestly, park as blocked-on-vendor.",
   "issues": [
     {
       "id": "BEA-1355",
@@ -29,12 +29,13 @@
     {
       "id": "BEA-1362",
       "title": "WhatsApp owner alerts: template-first (found in 1357; needed for 1359's WhatsApp leg)",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "9cdb70e"
     },
     {
-      "id": "BEA-1359",
-      "title": "Owner's example live (acceptance)",
-      "status": "pending"
+      "id": "BEA-1364",
+      "title": "First Social call after deploy fails 'fetch failed' \u2014 cause + one retry (found in 1357/1358/1362)",
+      "status": "in_progress"
     },
     {
       "id": "BEA-1354",
@@ -44,6 +45,11 @@
     {
       "id": "BEA-1363",
       "title": "History previews strip markdown (polish, found in 1358)",
+      "status": "pending"
+    },
+    {
+      "id": "BEA-1359",
+      "title": "Owner's example live (acceptance)",
       "status": "pending"
     }
   ]

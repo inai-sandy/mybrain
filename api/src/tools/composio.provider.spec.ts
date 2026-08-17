@@ -271,6 +271,54 @@ describe('ComposioProvider', () => {
     expect(failed.error).toBe('Not Found');
   });
 
+  // ---- BEA-1364: a pure transport failure names its cause and is retried once ----
+
+  const transportError = (code: string, message: string) => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error(message), { code }) });
+
+  it('retries ONCE when fetch() itself rejects, and the second answer is the result', async () => {
+    const real = fakeApi();
+    let n = 0;
+    global.fetch = (async (url: string, init: any) => {
+      n += 1;
+      if (n === 1) throw transportError('ECONNRESET', 'socket hang up');
+      return real.fetchMock(url, init);
+    }) as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const r = await p.execute('svc:github.create_issue', { title: 'hi' }, { connectionId: 'ca_1' });
+    expect(r.ok).toBe(true);
+    expect(n).toBe(2);
+    expect(real.calls.filter((c) => c.url.includes('/tools/execute/'))).toHaveLength(1);
+  });
+
+  it('two transport failures name the cause; a vendor answer (HTTP error or successful:false) is never retried', async () => {
+    let n = 0;
+    global.fetch = (async () => { n += 1; throw transportError('EAI_AGAIN', 'getaddrinfo EAI_AGAIN backend.composio.dev'); }) as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const r = await p.execute('svc:github.create_issue', { title: 'hi' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('fetch failed (EAI_AGAIN: getaddrinfo EAI_AGAIN backend.composio.dev)');
+    expect(n).toBe(2);
+    // 200 + successful:false — the vendor's verdict, exactly one request
+    const bad = fakeApi({ execFails: true });
+    global.fetch = bad.fetchMock as any;
+    const p2 = new ComposioProvider(connectors('k'), prisma());
+    expect((await p2.execute('svc:github.create_issue', {})).ok).toBe(false);
+    expect(bad.calls.filter((c) => c.url.includes('/tools/execute/'))).toHaveLength(1);
+    // an HTTP 429 — also one request, and the old plain sentence
+    let m = 0;
+    global.fetch = (async () => { m += 1; return { ok: false, status: 429, text: async () => 'slow down' } as any; }) as any;
+    const p3 = new ComposioProvider(connectors('k'), prisma());
+    const limited = await p3.execute('svc:github.create_issue', {});
+    expect(limited.error).toMatch(/rate-limiting/);
+    expect(m).toBe(1);
+    // a timeout — one request, never retried
+    let t = 0;
+    global.fetch = (async () => { t += 1; throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }); }) as any;
+    const p4 = new ComposioProvider(connectors('k'), prisma());
+    expect((await p4.execute('svc:github.create_issue', {})).error).toBe('Composio did not answer in time.');
+    expect(t).toBe(1);
+  });
+
   it('refuses an id that is not ours', async () => {
     const { fetchMock } = fakeApi();
     global.fetch = fetchMock as any;

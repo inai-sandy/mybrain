@@ -14,6 +14,7 @@ import {
   ServiceProvider,
   serviceToolId,
 } from './service-provider';
+import { describeTransportError, fetchWithRetry, isTransportError } from './transport';
 
 /**
  * ScrapeCreators, behind the ServiceProvider seam — the SECOND provider (BEA-1355).
@@ -600,16 +601,20 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
     }
   }
 
-  /** One call, with the verdict read from the body as well as the status. Throws only on transport. */
+  /**
+   * One call, with the verdict read from the body as well as the status. Throws only on transport —
+   * and a pure transport failure (the `fetch()` promise itself rejects: `ECONNRESET`, `EAI_AGAIN`…)
+   * is retried ONCE before it does (BEA-1364). A timeout, any HTTP status and a `success:false`
+   * body all mean the call reached them and may have been charged, so those are never retried.
+   */
   private async call(key: string, method: string, path: string, query: Record<string, any>, body: any, timeoutMs: number): Promise<{ ok: boolean; status: number; body: any; error?: string }> {
     const url = new URL(`${API_BASE}${path}`);
     for (const [k, v] of Object.entries(query || {})) url.searchParams.set(k, Array.isArray(v) ? v.join(',') : String(v));
-    const r = await fetch(url.toString(), {
+    const r = await fetchWithRetry(url.toString(), {
       method,
       headers: { 'x-api-key': key, accept: 'application/json', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    }, { timeoutMs });
     const text = await r.text().catch(() => '');
     let parsed: any = undefined;
     try { parsed = text ? JSON.parse(text) : undefined; } catch { parsed = text ? { raw: text.slice(0, 2000) } : undefined; }
@@ -628,11 +633,15 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
     return why.slice(0, 300);
   }
 
-  /** Never leak the key or a stack into anything the owner reads. */
+  /**
+   * Never leak the key or a stack into anything the owner reads. A transport failure names its
+   * cause — `fetch failed (ECONNRESET: socket hang up)` — never bare "fetch failed" (BEA-1364).
+   */
   private plainError(e: any): string {
     const status = e?.status;
     if (status === 401 || status === 403) return 'Scrape Creators rejected that API key.';
     if (e?.name === 'TimeoutError' || e?.name === 'AbortError') return 'Scrape Creators did not answer in time.';
+    if (isTransportError(e) && e?.message) return describeTransportError(e).slice(0, 200);
     return String(e?.message || 'Could not reach Scrape Creators.').slice(0, 200);
   }
 }
