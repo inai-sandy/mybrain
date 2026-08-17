@@ -38,7 +38,9 @@ function agent(voice: string, over: { reminders?: any[]; lastIn?: string; flagge
   const postbox: any = {
     isConfigured: () => true,
     sendText: async (to: string, body: string) => { state.texts.push({ to, body }); return { wamid: 'w1' }; },
-    sendReminderTemplate: async () => ({}),
+    // The owner's alert is the approved template first (BEA-1362); recorded like a text so the
+    // "names the work" assertion reads what he was told.
+    sendTemplate: async (to: string, _name: string, vars: string[]) => { state.texts.push({ to, body: vars.join(' · '), template: true }); return { wamid: 't1', status: 'sent' }; },
   };
   const { ReminderAgentService } = require('./reminder-agent.service');
   const svc = new ReminderAgentService(

@@ -430,15 +430,29 @@ describe('work we can just do never reaches the engine (BEA-1203)', () => {
   });
 
   it('says when WhatsApp only took part of the message', async () => {
-    const s = runner({ postbox: { sendText: async () => ({ status: 'sent' }) } });
+    const s = runner({ postbox: { sendTemplate: async () => ({ status: 'sent', wamid: 't' }), sendText: async () => ({ status: 'sent' }) } });
     const out = await s.runNode(node('whatsapp'), 'y'.repeat(9000), []);
     expect(out).toMatch(/Only the first 3900 characters fitted/);
   });
 
-  it('reports honestly when WhatsApp refuses the message', async () => {
-    const s = runner({ postbox: { sendText: async () => ({ status: 'failed', error: 'outside the window' }) } });
+  it('sends the owner the approved template FIRST, and the long text only after it (BEA-1362)', async () => {
+    const calls: string[] = [];
+    const s = runner({ postbox: {
+      sendTemplate: async (_to: string, name: string, vars: string[], opts: any) => { calls.push(`template:${name}:${vars.length}:${opts?.buttonUrl}`); return { status: 'sent', wamid: 't' }; },
+      sendText: async () => { calls.push('text'); return { status: 'sent' }; },
+    } });
+    const out = await s.runNode(node('whatsapp'), 'Daily numbers\n' + 'line of detail\n'.repeat(80), []);
+    expect(calls[0]).toMatch(/^template:mybrain_update_v1:3:flows/);
+    expect(calls[1]).toBe('text'); // the long body follows; it is never the only message
+    expect(out).toMatch(/Sent to you on WhatsApp \(template\)/);
+  });
+
+  it('reports honestly when WhatsApp refuses the message — the template verdict, never "accepted"', async () => {
+    let texted = false;
+    const s = runner({ postbox: { sendTemplate: async () => ({ status: 'failed', error: 'outside the window' }), sendText: async () => { texted = true; return { status: 'sent' }; } } });
     const out = await s.runNode(node('whatsapp'), 'the update', []);
-    expect(out).toMatch(/outside the window/);
+    expect(out).toMatch(/WhatsApp failed: outside the window/);
+    expect(texted).toBe(false); // free text is not tried when Meta refused THIS send
   });
 
   it('still sends anything genuinely agentic to the engine', async () => {
