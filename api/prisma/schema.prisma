@@ -699,6 +699,12 @@ model Agent {
   outputDest   String     @default("document") // document | telegram | task | sheet — sheet = a Google Sheet through the seam (BEA-1357)
   sheetId      String? // outputDest 'sheet': append every run to THIS spreadsheet; null = a new sheet per run (BEA-1357)
   toolArgs     String? // JSON { "<svc id>": {args} } — the exact arguments a direct-fetch job (Social) runs each tool with; no engine turn (BEA-1357)
+  // Watch / Alert (BEA-1358): how a direct-fetch job treats its result. run = fetch every time |
+  // watch = diff against last time, output ONLY what changed | alert = watch + a condition → push.
+  mode           String  @default("run")
+  alertCondition String? // plain-English condition an Alert judges over the diff ("a new post mentions a price")
+  threshold      String? // JSON { field?: string, dir: "above"|"below", value: number } — a number to cross, judged without a model
+  pausedReason   String? // why the job switched itself off (the daily credit ceiling) — cleared when it is switched back on
   defaultDepth String     @default("standard") // quick | standard | deep — default run depth (BEA-695)
   collectionId String? // Documents collection for saved outputs
   category     String? // shelf group on the Agents home (Daily | Research | People | Brain care | Imported | Other) — null = auto-guessed (BEA-1087)
@@ -715,6 +721,28 @@ model Agent {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   runs         AgentRun[]
+}
+
+/// What a Watch/Alert job saw last time (BEA-1358) — one row per (job, action, arguments), so the next
+/// run can say ONLY what changed. `lastResult` is the provider's cleaned answer, capped; `lastHash` is
+/// its stable hash (envelope keys and volatile CDN links left out). A failed fetch never touches the row.
+model SocialWatch {
+  id            String    @id @default(uuid())
+  agentId       String
+  actionId      String
+  args          String    @default("{}") // JSON — the exact arguments this baseline belongs to
+  argsHash      String // stable hash of `args` (the unique key; SQLite cannot key on JSON)
+  lastHash      String
+  lastResult    String // JSON, capped
+  lastAt        DateTime  @default(now())
+  /// Once-only alerts: "met" | "unmet" for a numeric threshold, so a number that STAYS above pushes once.
+  alertState    String?
+  lastAlertedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([agentId, actionId, argsHash])
+  @@index([agentId])
 }
 
 /// One execution of an agent. Mirrors a Hermes session and carries our durable HITL state.

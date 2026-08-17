@@ -210,6 +210,34 @@ in the schema — nothing dispatches on them yet. Traps: `ORIGIN[j.origin]` in `
 an unknown origin (now `originOf()`); a pasted sheet URL is cleaned to its id on both sides
 (`cleanSheetId` / `sheetIdFrom`); never find-and-delete a Drive file by name (`specs/SCRAPECREATORS-API.md`).
 
+**Watch and Alert remember last time (BEA-1358).** `Agent.mode` = `run` (fetch every time) | `watch` |
+`alert`, chosen on the Social builder form and the job's Settings (`WatchModePicker` in
+`agentJobFields.tsx`, one drawing for both). Inside `SocialAgentRunService.run()` the fetch is the same;
+then `watch()` diffs each tool's answer against its `SocialWatch` row (one per agent × action × args
+hash — `social-watch.store.ts`) with the pure `social/diff.ts`: **lists** → new items by a stable id
+(`KEY_FIELDS`: id, pk, shortcode, url, aweme_id…, NEVER position; an item that drops off the page is not
+a change), **numbers** → previous → current for every number that moved (+ a `Threshold {field?, dir,
+value}` judged here, no model), **text** → changed/unchanged with a "what changed" line. The envelope
+(`credits_charged`…) and signed CDN links (`?oh=…&oe=…` on every profile picture) are stripped before
+hashing, or nothing would ever be "unchanged". First run = baseline ("watching from now", nothing is
+new); nothing changed = the run says so, writes NO document, sends nothing, refreshes `lastAt`; changed →
+only the diff goes to the output (document, or `diffTable()` rows to the sheet). An Alert judges a
+numeric threshold once per crossing (`crossed` = met now AND not met in the stored last — a number
+that stays above pushes once) and/or a plain-English condition with ONE `completeHelper('social-alert')`
+call over the diff (a null answer FAILS the run); when true → Telegram (`TelegramService.notifySocialAlert`)
++ WhatsApp (`AlertsService.runFinished`); reaching nobody fails the run. **The store is written only after
+every step succeeded** — a failed fetch, write, judge or push never overwrites the last good result.
+**Daily credit ceiling:** `Setting social.dailyCreditCeiling` (default 500, 0 = no limit; Settings →
+Agents & Engines → Social credits, `socialDailyCreditCeiling` on `/api/agent/settings`; the Social
+header reads it) is checked by `SocialBudgetService.check()` BEFORE every Social call in a job (spend =
+the same `ToolCall.credits` sum the header shows; next-call cost = last cost of that action, else 1);
+over → the job pauses itself (`enabled:false`, `Agent.pausedReason`, `notifyJobPaused` on Telegram, run
+failed with the reason) and the call is NOT made; switching a job back on clears `pausedReason`
+(`AgentApp` banner + "Switch back on"). `SocialModule` imports `TelegramModule` (Telegram → Daily →
+Mentor → Push, never back — `PushModule` cannot import Telegram, which is why the alert's Telegram leg
+is not inside `AlertsService`). Traps: `SocialWatch` has no FK — `deleteAgent` deletes its rows by
+hand; `GET/DELETE /api/social/watch/:agentId` ("watching since", "Forget what it saw").
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

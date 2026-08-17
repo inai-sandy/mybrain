@@ -7,7 +7,7 @@ import { KEEP_AS_FETCHED, coerce } from '../ui/agentJobFields';
 /**
  * BEA-1357 — "Make it an agent": the builder opens PRE-FILLED with the tool and the exact arguments
  * the Social page just ran, and saving creates an ordinary Agent (origin social, svc: tool, pinned
- * args, an output destination).
+ * args, an output destination). BEA-1358 adds the mode choice (fetch · watch · alert + condition).
  */
 vi.mock('../ui/Toast', () => ({ useToast: () => vi.fn() }));
 vi.mock('../ui/DictateButton', () => ({ DictateButton: () => null }));
@@ -77,6 +77,43 @@ describe('NewAgentForm with a Social prefill', () => {
       notifyWhatsApp: true,
       ui: { headline: 'Instagram · Search · smarthomeindia · 1', inputs: [], view: 'report', runLabel: 'Fetch now →' }, // no engine turn to design a screen
     });
+  });
+
+  it('Watch / Alert (BEA-1358): the mode choice is on the form; "Alert when…" shows the condition + threshold and they are POSTed', async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ id: 'ag-alert' }) });
+    const onCreated = vi.fn();
+    render(<MemoryRouter><NewAgentForm social={social} onCreated={onCreated} onCancel={() => undefined} /></MemoryRouter>);
+    const modeSel = screen.getByLabelText('Each run') as HTMLSelectElement;
+    expect(modeSel.value).toBe('run'); // fetch every time, by default
+    expect(screen.queryByTestId('alert-fields')).toBeNull();
+    fireEvent.change(modeSel, { target: { value: 'alert' } });
+    expect(screen.getByTestId('alert-fields')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Alert condition'), { target: { value: 'a new post mentions a price' } });
+    fireEvent.change(screen.getByLabelText('Threshold field'), { target: { value: 'follower_count' } });
+    fireEvent.change(screen.getByLabelText('Threshold direction'), { target: { value: 'below' } });
+    fireEvent.change(screen.getByLabelText('Threshold value'), { target: { value: '10,000' } });
+    fireEvent.click(screen.getByText('Save agent'));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('ag-alert'));
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      mode: 'alert',
+      alertCondition: 'a new post mentions a price',
+      threshold: { field: 'follower_count', dir: 'below', value: 10000 },
+      ui: { runLabel: 'Check now →' },
+    });
+  });
+
+  it('a Watch has no condition fields, and the URL can pre-pick the mode (?mode=watch)', async () => {
+    expect(readSocialPrefill(params('builder=1&tool=svc:instagram.profile&mode=watch'))).toMatchObject({ mode: 'watch' });
+    expect(readSocialPrefill(params('builder=1&tool=svc:instagram.profile&mode=bogus'))!.mode).toBeUndefined();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ id: 'ag-w' }) });
+    render(<MemoryRouter><NewAgentForm social={{ ...social, mode: 'watch' }} onCreated={() => undefined} onCancel={() => undefined} /></MemoryRouter>);
+    expect((screen.getByLabelText('Each run') as HTMLSelectElement).value).toBe('watch');
+    expect(screen.queryByTestId('alert-fields')).toBeNull();
+    fireEvent.click(screen.getByText('Save agent'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({ mode: 'watch', alertCondition: null, threshold: null });
   });
 
   it('without a prefill the ordinary form still starts on "describe it" and defaults to a Document', () => {

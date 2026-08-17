@@ -81,3 +81,72 @@ export function coerce(prev: any, v: string): any {
   if (Array.isArray(prev)) return v.split(',').map((x) => x.trim()).filter(Boolean).map((x) => (prev.length && typeof prev[0] === 'number' && Number.isFinite(Number(x)) ? Number(x) : x));
   return v;
 }
+
+// ---- Watch / Alert (BEA-1358) ------------------------------------------------------------------
+
+/** How a direct-fetch job treats its result: fetch every time · watch for changes · alert when… */
+export const JOB_MODES: { value: string; label: string; hint: string }[] = [
+  { value: 'run', label: 'Fetch every time', hint: 'Every run writes the whole result — rows to a sheet or a document.' },
+  { value: 'watch', label: 'Watch for changes', hint: 'The first run stores a baseline. After that, every run says ONLY what changed — new posts by id, followers before → after, a bio that changed. Nothing changed = nothing written, nothing sent.' },
+  { value: 'alert', label: 'Alert when…', hint: 'Watch, plus a condition. When it comes true you get a message (Telegram, and WhatsApp when your number is set). A number threshold pushes once — not again while it stays over the line.' },
+];
+
+export type ThresholdDraft = { field: string; dir: 'above' | 'below'; value: string };
+
+export const EMPTY_THRESHOLD: ThresholdDraft = { field: '', dir: 'above', value: '' };
+
+/** The server's `{field?, dir, value}` → the form's draft. */
+export function thresholdDraftOf(t: any): ThresholdDraft {
+  if (!t || typeof t !== 'object') return EMPTY_THRESHOLD;
+  return { field: String(t.field || ''), dir: t.dir === 'below' ? 'below' : 'above', value: t.value === undefined || t.value === null ? '' : String(t.value) };
+}
+
+/** The form's draft → what the server stores, or null when there is no number. */
+export function thresholdOfDraft(d: ThresholdDraft): { field?: string; dir: 'above' | 'below'; value: number } | null {
+  const n = Number(String(d.value).replace(/[,\s]/g, ''));
+  if (String(d.value).trim() === '' || !Number.isFinite(n)) return null;
+  return { ...(d.field.trim() ? { field: d.field.trim() } : {}), dir: d.dir, value: n };
+}
+
+export function WatchModePicker({ mode, condition, threshold, onChange, compact }: {
+  mode: string;
+  condition: string;
+  threshold: ThresholdDraft;
+  onChange: (v: { mode: string; condition: string; threshold: ThresholdDraft }) => void;
+  compact?: boolean;
+}) {
+  const cur = JOB_MODES.find((m) => m.value === mode) || JOB_MODES[0];
+  const set = (patch: Partial<{ mode: string; condition: string; threshold: ThresholdDraft }>) => onChange({ mode, condition, threshold, ...patch });
+  return (
+    <div className="space-y-1.5" data-testid="job-mode">
+      <label className="block text-xs font-medium text-zinc-500">Each run
+        <select value={cur.value} onChange={(e) => set({ mode: e.target.value })} aria-label="Each run" className={inp + ' mt-1'}>
+          {JOB_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </label>
+      {!compact && <p className="text-[11px] text-zinc-400">{cur.hint}</p>}
+      {cur.value === 'alert' && (
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3 dark:border-amber-500/30 dark:bg-amber-500/5" data-testid="alert-fields">
+          <label className="block text-xs text-zinc-500">Alert me when… <span className="text-zinc-400">(plain English — judged over what changed)</span>
+            <input value={condition} onChange={(e) => set({ condition: e.target.value })} placeholder="e.g. a new post mentions a price · followers dropped · any post is a paid partnership" aria-label="Alert condition" className={inp + ' mt-1'} />
+          </label>
+          <div className="grid grid-cols-2 items-end gap-2 sm:grid-cols-[1.4fr_auto_1fr]">
+            <label className="col-span-2 block min-w-0 text-xs text-zinc-500 sm:col-span-1">…or a number <span className="text-zinc-400">(field · blank = the main one)</span>
+              <input value={threshold.field} onChange={(e) => set({ threshold: { ...threshold, field: e.target.value } })} placeholder="follower_count" aria-label="Threshold field" className={inp + ' mt-1'} />
+            </label>
+            <label className="block text-xs text-zinc-500">goes
+              <select value={threshold.dir} onChange={(e) => set({ threshold: { ...threshold, dir: e.target.value === 'below' ? 'below' : 'above' } })} aria-label="Threshold direction" className={inp + ' mt-1'}>
+                <option value="above">above</option>
+                <option value="below">below</option>
+              </select>
+            </label>
+            <label className="block min-w-0 text-xs text-zinc-500">this value
+              <input value={threshold.value} onChange={(e) => set({ threshold: { ...threshold, value: e.target.value } })} inputMode="numeric" placeholder="10000" aria-label="Threshold value" className={inp + ' mt-1'} />
+            </label>
+          </div>
+          <p className="text-[11px] text-zinc-400">Either one fires the alert. A number is judged without any AI and pushes once per crossing; the sentence is judged by one small AI call over the change. Leave both blank to be told about any change.</p>
+        </div>
+      )}
+    </div>
+  );
+}

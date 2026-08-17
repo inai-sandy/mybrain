@@ -189,7 +189,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   /** The user-configurable agent engine knobs (with sane defaults). */
   async engineSettings() {
-    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber, flowPartDays, whatsappOutputs] = await Promise.all([
+    const [model, autonomy, askTimeoutMin, askTtlHours, recall, learn, outputCollectionId, alertsOnFailure, alertsWhatsappNumber, flowPartDays, whatsappOutputs, socialCeiling] = await Promise.all([
       this.getSetting('agent.model'),
       this.getSetting('agent.autonomy'),
       this.getSetting('agent.askTimeoutMin'),
@@ -201,6 +201,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       this.getSetting('alerts.whatsappNumber'),
       this.getSetting('docs.flowPartDays'),
       this.getSetting('whatsapp.outputs'),
+      this.getSetting('social.dailyCreditCeiling'),
     ]);
     return {
       model: model || '', // '' = use the engine's default model
@@ -218,6 +219,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       flowPartDays: flowPartDays == null || flowPartDays === '' ? 30 : Math.max(0, Number(flowPartDays) || 0),
       // Master switch for "WhatsApp me every finished job" (BEA-1102) — per-job toggles sit under it.
       whatsappOutputs: whatsappOutputs == null ? true : whatsappOutputs === 'true',
+      // The daily Social credit ceiling (BEA-1358): default 500; 0 = no limit. Enforced before every job's call.
+      socialDailyCreditCeiling: socialCeiling == null || socialCeiling === '' ? 500 : Math.max(0, Math.floor(Number(socialCeiling) || 0)),
     };
   }
 
@@ -234,9 +237,15 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       alertsWhatsappNumber: 'alerts.whatsappNumber',
       flowPartDays: 'docs.flowPartDays',
       whatsappOutputs: 'whatsapp.outputs',
+      socialDailyCreditCeiling: 'social.dailyCreditCeiling',
     };
     for (const [k, key] of Object.entries(map)) {
-      if (patch[k] !== undefined) await this.setSetting(key, patch[k] == null ? '' : String(patch[k]));
+      if (patch[k] === undefined) continue;
+      let v = patch[k] == null ? '' : String(patch[k]);
+      // The Social credit ceiling is a whole number ≥ 0 (0 = no limit); a negative or nonsense value
+      // must not silently switch the guard off (BEA-1358).
+      if (k === 'socialDailyCreditCeiling' && v !== '') { const n = Math.floor(Number(v)); v = Number.isFinite(n) ? String(Math.max(0, n)) : ''; }
+      await this.setSetting(key, v);
     }
     return this.engineSettings();
   }
@@ -253,7 +262,7 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
 
   // ---------- saved agents (BEA-623) ----------
 
-  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown }) {
+  async createAgent(input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown }) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
     const a = await this.prisma.agent.create({
       data: {
@@ -280,6 +289,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         sheetId: this.cleanSheetId(input.sheetId),
         ...(input.toolArgs && typeof input.toolArgs === 'object' ? { toolArgs: JSON.stringify(input.toolArgs) } : {}),
         ...(input.notifyWhatsApp !== undefined ? { notifyWhatsApp: !!input.notifyWhatsApp } : {}),
+        // Watch / Alert (BEA-1358): how a direct-fetch job treats its result, and what an Alert judges.
+        mode: this.normMode(input.mode),
+        alertCondition: this.cleanCondition(input.alertCondition),
+        threshold: this.cleanThreshold(input.threshold),
         // A ready mini-interface (BEA-1357): a direct-fetch job has no inputs to design, so the builder
         // hands one over and the job page never spends an engine turn designing a screen for it.
         ...(input.ui && typeof input.ui === 'object' ? { ui: JSON.stringify(input.ui) } : {}),
@@ -422,7 +435,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (patch.schedule !== undefined) { data.schedule = patch.schedule ? JSON.stringify(patch.schedule) : null; data.lastFiredKey = null; }
     if (patch.scheduleText !== undefined) data.scheduleText = patch.scheduleText || null;
     if (patch.collectionId !== undefined) data.collectionId = patch.collectionId ?? null;
-    if (patch.enabled !== undefined) data.enabled = patch.enabled;
+    // Switching a job back on clears why it paused itself (BEA-1358) — the same rule as a trigger binding.
+    if (patch.enabled !== undefined) { data.enabled = patch.enabled; if (patch.enabled) data.pausedReason = null; }
     if (patch.defaultDepth !== undefined) data.defaultDepth = this.normDepth(patch.defaultDepth);
     // Per-job settings (BEA-1095) — each job is fully independent.
     const p: any = patch;
@@ -435,6 +449,10 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (p.outputDest !== undefined) data.outputDest = this.normOutputDest(p.outputDest);
     if (p.sheetId !== undefined) data.sheetId = this.cleanSheetId(p.sheetId);
     if (p.toolArgs !== undefined) data.toolArgs = p.toolArgs && typeof p.toolArgs === 'object' ? JSON.stringify(p.toolArgs) : null;
+    // Watch / Alert (BEA-1358).
+    if (p.mode !== undefined) data.mode = this.normMode(p.mode);
+    if (p.alertCondition !== undefined) data.alertCondition = this.cleanCondition(p.alertCondition);
+    if (p.threshold !== undefined) data.threshold = this.cleanThreshold(p.threshold);
     const updated = await this.prisma.agent.update({ where: { id }, data });
     return this.shapeAgent(updated);
   }
@@ -462,6 +480,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // and its flows + flow runs (BEA-1113): with no Flows sidebar, an orphaned flow is unreachable.
     // Waitpoints cascade with their runs; saved Documents are never touched.
     await this.prisma.agentRun.deleteMany({ where: { agentId: id } }).catch(() => undefined);
+    // …and what a Watch/Alert job saw last time (BEA-1358) — no FK, so by hand.
+    await (this.prisma as any).socialWatch?.deleteMany?.({ where: { agentId: id } }).catch(() => undefined);
     try {
       const flows = await this.prisma.flow.findMany({ where: { agentId: id }, select: { id: true } });
       for (const f of flows) await this.prisma.flowRun.deleteMany({ where: { flowId: f.id } }).catch(() => undefined);
@@ -498,7 +518,27 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       chatLog: this.parse(a.chatLog, [] as unknown), // persisted change-by-chatting history (BEA-1097)
       tools: this.parse(a.tools, [] as unknown), // catalog tool ids this job may use (BEA-1168)
       toolArgs: a.toolArgs ? this.parse(a.toolArgs, null) : null, // pinned per-tool arguments of a direct-fetch job (BEA-1357)
+      threshold: a.threshold ? this.parse(a.threshold, null) : null, // an Alert's number to cross (BEA-1358)
     };
+  }
+
+  /** run (fetch every time) | watch (only what changed) | alert (watch + a condition → push). BEA-1358. */
+  private normMode(v: unknown): string {
+    return ['run', 'watch', 'alert'].includes(String(v)) ? String(v) : 'run';
+  }
+  private cleanCondition(v: unknown): string | null {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s ? s.slice(0, 500) : null;
+  }
+  /** `{ field?, dir: above|below, value }` as JSON, or null when there is no usable number. */
+  private cleanThreshold(v: unknown): string | null {
+    let t: any = v;
+    if (typeof v === 'string') { try { t = JSON.parse(v); } catch { t = null; } }
+    if (!t || typeof t !== 'object') return null;
+    const value = Number(t.value);
+    if (!Number.isFinite(value)) return null;
+    const field = typeof t.field === 'string' && t.field.trim() ? t.field.trim().slice(0, 80) : undefined;
+    return JSON.stringify({ ...(field ? { field } : {}), dir: t.dir === 'below' ? 'below' : 'above', value });
   }
 
   /** Append a step to the run's plain-English step log (mirror of Hermes events). */

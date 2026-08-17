@@ -115,6 +115,7 @@ const CATS: Cat[] = [
     { label: 'Recall brain before a run', keywords: 'recall brain context before search agent', anchor: 'set-recall' },
     { label: 'Learn after runs', keywords: 'learn learnings remember after run agent', anchor: 'set-learn' },
     { label: 'Phone notifications', keywords: 'push notifications phone quiet hours' },
+    { label: 'Social credits — daily ceiling', keywords: 'social credits ceiling limit scrape instagram tiktok spend daily pause', anchor: 'sa-social' },
     { label: 'All AI models (which model does what)', keywords: 'models story lab meeting voice haiku sonnet gemini per feature wall', anchor: 'sa-advanced' },
   ] },
   { id: 'memory', label: 'Memory & Index', icon: Database, desc: "What's in your brain", group: 'AI & voice', search: [
@@ -1622,11 +1623,13 @@ function AgentsSettingsPage() {
       <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
         <button className={pill} onClick={() => jump('sa-usage')}>Tokens</button>
         <button className={pill} onClick={() => jump('sa-engine')}>Engine & behaviour</button>
+        <button className={pill} onClick={() => jump('sa-social')}>Social credits</button>
         <button className={pill} onClick={() => jump('sa-quiet')}>Quiet hours</button>
         <button className={pill} onClick={() => { setAdvanced(true); setTimeout(() => jump('sa-advanced'), 50); }}>Advanced</button>
       </div>
       <section id="sa-usage" className="scroll-mt-20"><AgentTokensCard /></section>
       <section id="sa-engine" className="scroll-mt-20"><AgentEngineSection /></section>
+      <section id="sa-social" className="scroll-mt-20"><SocialCreditsCard /></section>
       <section id="sa-quiet" className="scroll-mt-20"><QuietHoursCard /></section>
       <section id="sa-advanced" className="scroll-mt-20 rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <button onClick={() => setAdvanced(!advanced)} className="flex w-full items-center justify-between gap-3 p-4 text-left">
@@ -1644,6 +1647,57 @@ function AgentsSettingsPage() {
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+/**
+ * The daily Social credit ceiling (BEA-1358). Every Social call is charged in the provider's credits
+ * (1→26 each); a Social job whose next call would pass today's ceiling pauses itself BEFORE the call
+ * and tells you. Shown read-only on the Social page; set here. 0 = no limit.
+ */
+function SocialCreditsCard() {
+  const toast = useToast();
+  const [cfg, setCfg] = useState<any>(null);
+  const [spend, setSpend] = useState<{ spentToday: number; balance: number | null } | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const load = () => {
+    fetch('/api/agent/settings').then((r) => r.json()).then((d) => { setCfg(d); setDraft(String(d?.socialDailyCreditCeiling ?? 500)); }).catch(() => setCfg({ ok: false }));
+    fetch('/api/social/spend').then((r) => r.json()).then((d) => setSpend({ spentToday: Number(d?.spentToday) || 0, balance: d?.balance ?? null })).catch(() => setSpend(null));
+  };
+  useEffect(load, []);
+  async function save() {
+    const n = Math.max(0, Math.floor(Number(draft)));
+    if (!Number.isFinite(n)) { toast('error', 'Type a whole number — 0 means no limit'); return; }
+    setSaving(true);
+    try {
+      const r = await fetch('/api/agent/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ socialDailyCreditCeiling: n }) });
+      if (!r.ok) throw new Error();
+      const d = await r.json(); setCfg(d); setDraft(String(d?.socialDailyCreditCeiling ?? n));
+      toast('success', n === 0 ? 'Saved — no daily limit on Social credits' : `Saved — Social jobs stop at ${n.toLocaleString()} credits a day`);
+    } catch { toast('error', 'Could not save'); } finally { setSaving(false); }
+  }
+  const ceiling = cfg ? Number(cfg.socialDailyCreditCeiling ?? 500) : null;
+  const spent = spend?.spentToday ?? 0;
+  const over = ceiling !== null && ceiling > 0 && spent >= ceiling;
+  return (
+    <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900" data-testid="social-credits-card">
+      <h2 className="text-sm font-semibold">Social credits — daily ceiling</h2>
+      <p className="mt-0.5 text-xs text-zinc-500">Every Social fetch (Instagram, TikTok, YouTube…) costs the provider's credits — 1 to 26 each, and a “comments on 50 posts” job is hundreds. When a Social job's next call would pass this ceiling, the job pauses itself <b>before</b> the call, says why on the run, and messages you on Telegram. Switch it back on from its page. 0 = no limit.</p>
+      {cfg === null ? <div className="mt-3 h-10 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" /> : (
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="block text-xs text-zinc-500">Credits per day
+            <input type="number" min={0} step={1} inputMode="numeric" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} aria-label="Daily Social credit ceiling" className="mt-1 block w-36 rounded-lg border border-zinc-300 bg-transparent px-3 py-1.5 text-base tabular-nums outline-none focus:border-emerald-400 dark:border-zinc-700 dark:bg-zinc-900 sm:text-sm" />
+          </label>
+          <button onClick={save} disabled={saving || String(ceiling) === draft.trim()} className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-40 dark:bg-white dark:text-zinc-900">{saving ? 'Saving…' : 'Save'}</button>
+          <div className={'text-xs ' + (over ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-500')} data-testid="social-credits-today">
+            Spent today: <b className="tabular-nums">{spend === null ? '—' : spent.toLocaleString()}</b>{ceiling ? <> of {ceiling.toLocaleString()}</> : <> · no limit</>}{spend?.balance != null ? <> · {spend.balance.toLocaleString()} credits left at the provider</> : null}
+            {over && <span className="ml-1 font-medium">— Social jobs will pause themselves until tomorrow</span>}
+          </div>
+        </div>
+      )}
+      <p className="mt-2 text-[11px] text-zinc-400">Counted from the owner's local midnight, from what the provider actually charged on each call — the same number the <Link to="/social" className="text-emerald-600 hover:underline">Social page</Link> header shows.</p>
     </div>
   );
 }
@@ -1740,6 +1794,8 @@ function ModelsSection() {
         desc="Fills in the details of a call to a connected service — the issue title, who to message — from that action's own form. The only AI step when a job uses one of your Tools, and what it writes goes straight into a real call, so Sonnet 5 (the default) is worth it." />
       <EngineModelCard title="Social rows model" icon={Bot} base="/api/llm-config/helper/social-shape"
         desc="Turns a Social agent's fetched posts into the columns you asked for, and keeps only the ones that fit a filter like “in India” (no social search has a country filter — this step is ours). It reads real captions and decides what to keep, so Sonnet 5 (the default). Only runs when a job's task asks for more than the rows as fetched." />
+      <EngineModelCard title="Social alert model" icon={Bot} base="/api/llm-config/helper/social-alert"
+        desc="Judges an Alert job's plain-English condition (“a new post mentions a price”, “followers dropped”) over what changed since the last check — one yes/no call per run that found a change, never over the whole result. It reads real captions, so Sonnet 5 (the default). A number threshold is judged without any model." />
     </div>
   );
 }

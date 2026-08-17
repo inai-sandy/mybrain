@@ -6,7 +6,10 @@ import { AlertsService } from '../push/alerts.service';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { isServiceToolId } from '../tools/service-provider';
-import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, MAX_ROWS } from './rows';
+import { Diff, Threshold, diffResults, label as fieldLabel } from './diff';
+import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
+import { BudgetCheck, SocialBudgetService } from './social-budget.service';
+import { SocialWatchStore } from './social-watch.store';
 
 /**
  * A Social agent's run (BEA-1357) — design: `specs/SOCIAL.md`.
@@ -24,6 +27,18 @@ import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, 
  * and the run links to it; anything else lands in Documents like every other run. Sheets not
  * connected → the run FAILS with "connect Google Sheets first" — never a silent skip. A run may
  * never say done if any step failed.
+ *
+ * **Watch and Alert (BEA-1358).** `Agent.mode` = `watch`: the same fetch, then a diff against what
+ * the job saw last time (`SocialWatch`, `diff.ts`), and the output is ONLY what changed — "3 new
+ * items since last time", "followers 37,570 → 38,102". Nothing changed → the run finishes "nothing
+ * changed", writes no document and sends nothing. The FIRST run stores a baseline ("watching from
+ * now") and never reports the whole list as new. `mode` = `alert`: Watch + a numeric threshold
+ * (judged here, once-only — a number that stays above pushes once) and/or a plain-English condition
+ * judged by ONE `social-alert` helper call over the diff → when true, a push (Telegram, and WhatsApp
+ * through `AlertsService`). The last good result is stored only after every step succeeded, so a
+ * failed fetch, write or push never overwrites it. **Before every Social call** the daily credit
+ * ceiling is checked (`SocialBudgetService`) — a call that would pass it is NOT made, and the job
+ * pauses itself with `pausedReason` and tells the owner.
  */
 
 /** The task text the builder pre-fills. Anything else means "shape the rows as I say". */
@@ -55,6 +70,8 @@ export class SocialAgentRunService {
     private readonly documents?: DocumentsService,
     private readonly alerts?: AlertsService,
     private readonly push?: PushService,
+    private readonly budget?: SocialBudgetService, // the daily credit ceiling (BEA-1358)
+    private readonly watches?: SocialWatchStore, // what a Watch/Alert saw last time (BEA-1358)
   ) {}
 
   /**
@@ -94,6 +111,19 @@ export class SocialAgentRunService {
       const fetched: { id: string; r: ServiceRunResult }[] = [];
       let credits = 0;
       for (const id of tools) {
+        // The daily credit ceiling (BEA-1358): would THIS call pass it? Then it is not made — the
+        // job pauses itself, says why on the run and on its row, and the owner is told.
+        let b: BudgetCheck | null = null;
+        if (this.budget?.check) {
+          try { b = await this.budget.check(id); } catch (e: any) {
+            // Fail CLOSED: a guard that cannot answer must not let the call through.
+            return fail(`Could not check the daily Social credit ceiling (${String(e?.message || e).slice(0, 120)}) — the call was not made. Try again in a minute.`);
+          }
+        }
+        if (b && !b.ok) {
+          await this.budget!.pauseAgent(agent, b.reason!, runId).catch(() => undefined);
+          return fail(b.reason!);
+        }
         const r = await this.actions.runDetailed(id, '', { runId, runKind: 'agent', agentId: agent.id, args: args[id], argsPinned: true, label: id });
         if (!r.ok) {
           const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
@@ -104,6 +134,10 @@ export class SocialAgentRunService {
         await step({ label: `Fetched ${r.serviceName || ''}${r.actionName ? ` · ${r.actionName}` : ''} — ${t.itemCount} item${t.itemCount === 1 ? '' : 's'} · ${Number(r.credits) || 0} credit${Number(r.credits) === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300) });
         fetched.push({ id, r });
       }
+
+      // A Watch / Alert (BEA-1358) says only what changed since last time, then stores the new result.
+      const mode = String(agent.mode || 'run');
+      if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail);
 
       // ---- 2. rows — as fetched, or shaped the way the owner asked ----------------------------
       const tables = fetched.map((f) => ({ id: f.id, table: tableOf(f.r.data) }));
@@ -199,6 +233,194 @@ export class SocialAgentRunService {
     if (!w.ok) throw new Error(w.error);
     await this.agent.appendStep(runId, { label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`, status: 'done', detail: w.url }).catch(() => undefined);
     return { url: w.url!, rows: table.rows.length, created: !!w.created };
+  }
+
+  // ---- watch / alert (BEA-1358) ----------------------------------------------------------------
+
+  /**
+   * The Watch/Alert road, after the fetch: diff each tool's answer against its `SocialWatch` row,
+   * say ONLY what changed, judge the alert, deliver, and only then store the fresh result as last.
+   * Every early return before `save` leaves the last good result untouched.
+   */
+  private async watch(
+    runId: string,
+    agent: any,
+    title: string,
+    mode: string,
+    fetched: { id: string; r: ServiceRunResult }[],
+    credits: number,
+    step: (s: { label: string; status?: string; detail?: string; kind?: string }) => Promise<any>,
+    fail: (error: string) => Promise<void>,
+  ): Promise<void> {
+    if (!this.watches) return fail('Watching is not available on this server (no watch store).');
+    const args: Record<string, any> = agent.toolArgs || {};
+    const threshold = thresholdOf(agent.threshold);
+    const condition = String(agent.alertCondition || '').trim();
+
+    // ---- diff every tool against last time ---------------------------------------------------
+    const parts: { id: string; r: ServiceRunResult; row: any; diff: Diff | null }[] = [];
+    for (const f of fetched) {
+      const row = await this.watches.get(agent.id, f.id, args[f.id]).catch(() => null);
+      parts.push({ id: f.id, r: f.r, row, diff: row ? diffResults(row.lastResult, f.r.data, { threshold }) : null });
+    }
+    const baselines = parts.filter((p) => !p.row);
+    const diffs = parts.filter((p) => p.diff) as { id: string; r: ServiceRunResult; row: any; diff: Diff }[];
+    const changedDiffs = diffs.filter((p) => p.diff.changed);
+    const since = diffs.length ? diffs.map((p) => p.row.lastAt as Date).sort((a, b) => a.getTime() - b.getTime())[0] : null;
+    const sinceText = since ? `since ${fmtWhen(since)}` : 'since last time';
+
+    for (const p of baselines) {
+      const t = tableOf(p.r.data);
+      await step({ label: `Watching from now — baseline stored for ${p.r.actionName || p.id} (${describeBaseline(p.r.data, t.itemCount)})`, status: 'done' });
+    }
+    for (const p of diffs) await step({ label: `${p.r.actionName || p.id}: ${p.diff.summary}`, status: 'done', kind: 'log' });
+
+    // ---- the alert: a threshold (once-only, no model) and/or a plain-English condition ---------
+    let fired = false;
+    let why = '';
+    let alertNote = '';
+    if (mode === 'alert' && changedDiffs.length) {
+      const crossed = changedDiffs.map((p) => p.diff.threshold).find((t) => t?.crossed);
+      if (crossed) {
+        fired = true;
+        why = `${fieldLabel(crossed.field)} ${crossed.dir === 'above' ? 'went above' : 'fell below'} ${crossed.value.toLocaleString('en-US')} (${crossed.prev === null ? '—' : crossed.prev.toLocaleString('en-US')} → ${crossed.cur!.toLocaleString('en-US')})`;
+      }
+      if (!fired && condition) {
+        await step({ label: `Judging your condition: “${condition.slice(0, 120)}”`, status: 'running', kind: 'log' });
+        const j = await this.judge(condition, changedDiffs.map((p) => p.diff));
+        if (!j.ok) return fail(`Could not judge the alert condition: ${j.error}`);
+        fired = !!j.fires;
+        why = j.why || '';
+        alertNote = fired ? '' : `Alert not fired — ${why || 'the condition is not met by this change'}`;
+      } else if (!fired && !condition && threshold) {
+        const t = changedDiffs.map((p) => p.diff.threshold).find(Boolean);
+        alertNote = t?.met ? `Alert not fired — ${fieldLabel(t.field)} is still ${t.dir} ${t.value.toLocaleString('en-US')} (you were told when it crossed)` : `Alert not fired — the threshold was not crossed`;
+      } else if (!fired && !condition && !threshold) {
+        // an Alert with nothing to judge fires on any change — that is what "alert me" with no
+        // condition can only mean
+        fired = true;
+        why = changedDiffs.map((p) => p.diff.summary).join(' · ');
+      }
+    }
+
+    // ---- what to say ----------------------------------------------------------------------------
+    const summary = changedDiffs.length
+      ? changedDiffs.map((p) => `${p.diff.summary} ${sinceText}`).join(' · ')
+      : baselines.length && !diffs.length
+        ? 'Watching from now — the first result is stored as the baseline; the next run says only what changed.'
+        : `Nothing changed ${sinceText}.`;
+    const detail = changedDiffs.map((p) => (changedDiffs.length > 1 ? `### ${p.r.actionName || p.id}\n\n` : '') + p.diff.detail).filter(Boolean).join('\n\n');
+    const creditsLine = `${credits} credit${credits === 1 ? '' : 's'}`;
+
+    // ---- the push (an Alert that fired) comes FIRST: Telegram, and WhatsApp through the one path.
+    // Nothing is written until the owner has been reached — an alert nobody received must not leave a
+    // Document behind on every retry.
+    if (fired) {
+      const text = `${summary}${why ? `\n${why}` : ''}${detail ? `\n\n${detail.replace(/[*`>#|]/g, '').slice(0, 600)}` : ''}`;
+      const tg = await this.budget?.pushAlert?.(agent, text, runId).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+      const wa = await this.alerts?.runFinished?.(`🔔 ${title}`, `${summary}${why ? ` — ${why}` : ''}`, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+      const tgSent = !!tg?.sent;
+      const waSent = !!wa?.sent;
+      await step({ label: tgSent ? 'Alert sent on Telegram' : `⚠️ Not sent on Telegram — ${tg?.why || 'Telegram is not set up'}`, status: tgSent ? 'done' : 'info' });
+      await step({ label: waSent ? 'Alert sent on WhatsApp — accepted for delivery' : `⚠️ Not sent on WhatsApp — ${wa?.why === 'no number' ? 'no WhatsApp number in Settings' : wa?.why === 'off' ? 'the WhatsApp outputs switch is off in Settings' : wa?.why || 'not available'}`, status: waSent ? 'done' : 'info' });
+      // An alert nobody received is not a finished alert. Nothing is stored, so it fires again next run.
+      if (!tgSent && !waSent) return fail(`The alert fired (${summary}) but could not reach you — Telegram: ${tg?.why || 'not set up'}; WhatsApp: ${wa?.why || 'not set up'}. Link Telegram or add your WhatsApp number in Settings, then run it again.`);
+    } else if (alertNote) {
+      await step({ label: alertNote, status: 'info' });
+    }
+
+    // ---- nothing changed / baseline: no document, no message, store, done ------------------------
+    const deliver = mode === 'watch' ? changedDiffs.length > 0 : fired;
+    let outputUrl: string | undefined;
+    let outputDocId: string | undefined;
+    if (deliver) {
+      const dest = String(agent.outputDest || 'document');
+      const table = diffTable(changedDiffs.map((p) => p.diff), fetched.length > 1 ? changedDiffs.map((p) => p.id) : undefined);
+      if (dest === 'sheet' && table.rows.length) {
+        let existing: { count: number; header: string[] } | null = null;
+        if (agent.sheetId) {
+          const read = await this.readSheet(runId, agent, agent.sheetId);
+          if (!read.ok) return fail(read.error!);
+          existing = { count: read.count!, header: read.header! };
+        }
+        const w = await this.writeSheet(runId, agent, title, table, existing);
+        if (!w.ok) return fail(w.error!);
+        outputUrl = w.url;
+        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'} — only what changed`, status: 'done', detail: w.url });
+      } else {
+        if (!this.documents) return fail('The documents library is not available on this server.');
+        const doc: any = await this.documents.create({
+          title: `${title} — ${summary.slice(0, 80)}`,
+          contentText: `# ${title}\n\n${fired ? '🔔 **Alert fired** — ' : ''}${summary}${why ? `\n\n_${why}_` : ''}\n\n${detail}\n\n_${creditsLine}_`,
+          kind: 'md',
+          tags: ['agent', 'social', mode],
+          noIndex: true, // outputs stay out of the brain until "Add to my Brain" (BEA-1101)
+        } as any);
+        outputDocId = doc?.id;
+        if (outputDocId) {
+          await this.agent.attachOutput(runId, outputDocId).catch(() => undefined);
+          await step({ label: 'Saved what changed to Documents', status: 'done', detail: title });
+        }
+      }
+    }
+
+    // ---- store the fresh result as "last" — only now, when every step above succeeded ------------
+    for (const p of parts) {
+      const t = p.diff?.threshold;
+      const state = t ? (t.met ? 'met' : 'unmet') : undefined;
+      await this.watches.save(agent.id, p.id, args[p.id], p.r.data, { state, alertedAt: fired ? new Date() : undefined });
+    }
+    if (baselines.length && !diffs.length) await step({ label: 'Baseline stored — nothing is "new" on a first run', status: 'done', kind: 'log' });
+
+    const resultText =
+      (fired ? `🔔 **Alert fired** — ` : mode === 'alert' && changedDiffs.length ? `**Alert not fired** — ` : '**') +
+      `${summary}${fired || (mode === 'alert' && changedDiffs.length) ? '' : '**'}` +
+      (why ? `\n\n_${why}_` : '') +
+      (outputUrl ? `\n\n[Open the Google Sheet](${outputUrl})` : '') +
+      (detail ? `\n\n${detail}` : '') +
+      `\n\n_${creditsLine}_`;
+    await this.agent.finishRun(runId, { status: 'done', resultText, outputUrl, outputDocId });
+
+    // A Watch that found something goes out on WhatsApp like any finished job, when the job asks.
+    if (mode === 'watch' && changedDiffs.length && agent.notifyWhatsApp) {
+      const r = await this.alerts?.runFinished?.(title, summary, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
+      if (!r) await step({ label: '⚠️ Not sent to WhatsApp — WhatsApp is not available on this server', status: 'info' });
+      else if (r.sent) await step({ label: 'Sent the link to WhatsApp — accepted for delivery', status: 'done' });
+      else if (r.why === 'no number') await step({ label: '⚠️ Not sent to WhatsApp — no WhatsApp number in Settings (Settings → Agent Engine)', status: 'info' });
+      else if (r.why === 'off') await step({ label: '⚠️ Not sent to WhatsApp — the WhatsApp outputs switch is off in Settings', status: 'info' });
+      else await step({ label: `⚠️ Not sent to WhatsApp — ${r.why || 'the message could not be delivered'}`, status: 'info' });
+    }
+  }
+
+  /**
+   * ONE `social-alert` helper call: is the owner's plain-English condition met by what changed?
+   * The model sees only the diff (never the whole answer) and answers JSON. No model chosen /
+   * nothing back / not JSON → `ok:false`, and the caller fails the run rather than guessing.
+   */
+  private async judge(condition: string, diffs: Diff[]): Promise<{ ok: boolean; fires?: boolean; why?: string; error?: string }> {
+    const items = diffs.flatMap((d) => (d.newItems || []).slice(0, 40).map((it) => flatten(it)));
+    let itemsJson = JSON.stringify(items);
+    if (itemsJson.length > 20_000) itemsJson = itemsJson.slice(0, 20_000) + '…]';
+    const p =
+      `You judge whether a plain-English alert condition is met by what changed in a social-media watch.\n\n` +
+      `The owner's condition:\n"${condition.slice(0, 500)}"\n\n` +
+      `What changed since the last check:\n${diffs.map((d) => `- ${d.summary}`).join('\n')}\n\n` +
+      (diffs.some((d) => d.detail) ? `Details:\n${diffs.map((d) => d.detail).join('\n\n').slice(0, 6000)}\n\n` : '') +
+      (items.length ? `The new items (JSON, flattened):\n${itemsJson}\n\n` : '') +
+      `Rules: answer true ONLY when the change above makes the condition true now; read captions and numbers as they are; never invent facts; when the condition talks about something the change does not mention, answer false.\n` +
+      `Reply with ONLY JSON: {"fires": true|false, "why": "one short plain sentence"}`;
+    let text: string | null;
+    try {
+      text = await this.llm.completeHelper('social-alert', p, 300, 'social-alert');
+    } catch (e: any) {
+      return { ok: false, error: `the alert model could not be reached — ${String(e?.message || e).slice(0, 120)}` };
+    }
+    if (!text) return { ok: false, error: 'the alert model returned nothing (is a model chosen for "Social alert model" in Settings?)' };
+    const m = text.match(/\{[\s\S]*\}/);
+    let parsed: any = null;
+    try { parsed = m ? JSON.parse(m[0]) : null; } catch { parsed = null; }
+    if (!parsed || typeof parsed.fires !== 'boolean') return { ok: false, error: 'the alert model did not answer yes or no (its reply was not the JSON asked for)' };
+    return { ok: true, fires: parsed.fires, why: String(parsed.why || '').slice(0, 300) };
   }
 
   // ---- the sheet -----------------------------------------------------------------------------
@@ -314,3 +536,45 @@ export function mergeTables(tables: { id: string; table: { columns: string[]; ro
   }
   return { columns, rows: rows.slice(0, MAX_ROWS), itemCount: tables.reduce((n, x) => n + x.table.itemCount, 0) };
 }
+
+/** `Agent.threshold` as stored (JSON text) or as shaped (object) → a Threshold, or null when there is none. */
+export function thresholdOf(raw: any): Threshold | null {
+  let t: any = raw;
+  if (typeof raw === 'string') { try { t = JSON.parse(raw); } catch { t = null; } }
+  if (!t || typeof t !== 'object') return null;
+  const value = Number(t.value);
+  if (!Number.isFinite(value)) return null;
+  return { field: t.field ? String(t.field).trim() || undefined : undefined, dir: t.dir === 'below' ? 'below' : 'above', value };
+}
+
+/** "12 items" · "followers 37,570" — what the baseline holds, in a few words. */
+export function describeBaseline(data: any, itemCount: number): string {
+  const t = tableOf(data);
+  if (t.listKey || itemCount > 1) return `${itemCount} item${itemCount === 1 ? '' : 's'}`;
+  const flat = flatten(t.rows.length ? Object.fromEntries(t.columns.map((c, i) => [c, t.rows[0][i]])) : {});
+  const main = ['follower_count', 'followers', 'followerCount', 'subscriber_count', 'like_count', 'view_count', 'media_count'].find((k) => typeof flat[k] === 'number');
+  if (main) return `${fieldLabel(main)} ${Number(flat[main]).toLocaleString('en-US')}`;
+  return itemCount === 1 ? '1 item' : 'the current text';
+}
+
+/** The changed parts as sheet rows: new items as rows; moved numbers as what/before/now/change; text as what/was/now. */
+export function diffTable(diffs: Diff[], sources?: string[]): { columns: string[]; rows: any[][]; itemCount: number } {
+  const at = new Date().toISOString();
+  const tables = diffs.map((d, i) => {
+    if (d.newItems?.length) return { id: sources?.[i] || 'new items', table: tableOf({ items: d.newItems }) };
+    const rows: any[][] = [];
+    for (const n of d.numbers || []) rows.push([at, fieldLabel(n.field), n.prev, n.cur, n.delta]);
+    for (const t of d.texts || []) rows.push([at, fieldLabel(t.field), t.prev.slice(0, 2000), t.cur.slice(0, 2000), '']);
+    if (d.threshold?.crossed) rows.push([at, `${fieldLabel(d.threshold.field)} ${d.threshold.dir} ${d.threshold.value}`, d.threshold.prev ?? '', d.threshold.cur ?? '', 'crossed']);
+    return { id: sources?.[i] || 'changes', table: { columns: ['checked_at', 'what', 'before', 'now', 'change'], rows, itemCount: rows.length } };
+  }).filter((t) => t.table.rows.length);
+  if (!tables.length) return { columns: [], rows: [], itemCount: 0 };
+  // One diff → its own table. Several (several tools, or new items AND moved numbers) → the union,
+  // with a `source` column saying which is which — nothing a tool found is dropped from the sheet.
+  if (tables.length === 1) return { columns: tables[0].table.columns, rows: tables[0].table.rows, itemCount: tables[0].table.itemCount };
+  return mergeTables(tables);
+}
+
+const fmtWhen = (d: Date) => {
+  try { return d.toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch { return d.toISOString(); }
+};
