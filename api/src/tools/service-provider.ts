@@ -86,6 +86,12 @@ export type ServiceAction = {
   service: string;
   deprecated?: boolean;
   /**
+   * The vendor's own "most used" mark, when it gives one (BEA-1354). It no longer decides what the
+   * catalog holds — every action is in it — but it is a fair tie-break when a PROMPT can only carry
+   * a shortlist and the owner's words match nothing.
+   */
+  important?: boolean;
+  /**
    * Extras a spec-generated provider can carry (BEA-1355) — all optional, so a provider that does
    * not know them (Composio) is unchanged. `tags` is the vendor's own grouping of the action
    * ("Instagram", "Facebook Ad Library"), `costHint` the vendor's own sentence about what it costs
@@ -194,8 +200,18 @@ export interface ServiceProvider {
   listServices(opts?: { connectedOnly?: boolean; search?: string; category?: string; limit?: number }): Promise<ServiceInfo[]>;
   /** One service by its slug, in full — including what it wants signing in with. Null if unknown. */
   getService(slug: string): Promise<ServiceInfo | null>;
-  /** The actions of one service, with their argument schemas. */
+  /**
+   * The actions of one service, with their argument schemas — ALL of them by default (BEA-1354:
+   * "do not skip any action from providers"). `important` narrows to the vendor's own shortlist and
+   * `limit` caps the walk; both are opt-in and nothing in the catalog uses them any more.
+   */
   listActions(service: string, opts?: { important?: boolean; limit?: number; search?: string }): Promise<ServiceAction[]>;
+  /**
+   * A number that changes whenever the provider forgets what it read (a connect, a disconnect, a
+   * refresh). The catalog keeps its own last-good copy and uses this to know that copy is stale
+   * for a reason, not just for age. Optional — a provider without it is treated as never stale.
+   */
+  generation?(): number;
   /**
    * ONE action by our id, with the JSON schema its arguments are filled from. Null if unknown.
    *

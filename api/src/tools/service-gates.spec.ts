@@ -308,4 +308,20 @@ describe('a gated action stops BEFORE the provider is called (BEA-1348)', () => 
     list = await gates.listForService('github');
     expect(list.actions.find((a) => a.id === 'svc:github.merge_a_pull_request')!.released).toBe(true);
   });
+
+  /** The gate list is computed over the FULL action set (BEA-1354) — never a shortlist, never a cap. */
+  it('computes the gates over every action of the service, not a shortlist of 60', async () => {
+    const { gates, provider } = harness();
+    const asked: any[] = [];
+    provider.listActions = async (_s: string, opts: any) => {
+      asked.push(opts);
+      return Array.from({ length: 800 }, (_, i) => ({
+        ...DELETE_ACTION, id: `svc:github.thing_${i}`, name: `Thing ${i}`, risky: i % 10 === 0,
+      }));
+    };
+    const list = await gates.listForService('github');
+    expect(asked[0]?.important).toBeUndefined();
+    expect(asked[0]?.limit).toBeUndefined();
+    expect(list.actions.length).toBe(80); // every risky one across all 800, well past the old 60 cap
+  });
 });

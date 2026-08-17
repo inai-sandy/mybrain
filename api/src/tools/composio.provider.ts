@@ -53,13 +53,22 @@ const USER_ID = process.env.COMPOSIO_USER_ID || 'mybrain-owner';
 /** How long a read is reused before we ask Composio again. The catalog is hit on every page. */
 const CACHE_MS = 5 * 60 * 1000;
 
-/** A stop on pagination, so one enormous toolkit can never walk 18 pages on a catalog request. */
+/** A stop on pagination, so one enormous toolkit can never walk 20 pages on a catalog request. */
 const MAX_PAGES = 20;
 /**
  * 500, not 100. Verified live: the toolkits endpoint honours it, which turns a walk of all 1,209
  * services from thirteen round trips (~10s, and the owner watching a skeleton) into three (~3s).
  */
 const PAGE_SIZE = 500;
+/**
+ * The tools endpoint honours 1,000 (verified live 2026-08-17: `?toolkit_slug=github&limit=1000`
+ * answers all 823 listed GitHub tools in ONE page, ~1.4s; two pages of 500 take ~2.2s). Every
+ * action of a service is one round trip for every toolkit that exists today, and the cursor walk
+ * below still runs for one that grows past it.
+ */
+const TOOLS_PAGE_SIZE = 1000;
+/** The most actions one service is ever walked for — far above the largest toolkit (GitHub, 823). */
+const MAX_ACTIONS_PER_SERVICE = 5000;
 
 /** A ceiling on the in-memory cache, so browsing all 1,209 services cannot pin them all in RAM. */
 const MAX_CACHE_ENTRIES = 300;
@@ -70,6 +79,7 @@ type Cached<T> = { at: number; value: T };
 export class ComposioProvider implements ServiceProvider {
   private readonly log = new Logger('Composio');
   private readonly cache = new Map<string, Cached<any>>();
+  private gen = 0;
 
   constructor(
     private readonly connectors: ConnectorService,
@@ -137,10 +147,14 @@ export class ComposioProvider implements ServiceProvider {
   }
 
   /**
-   * One service's actions, with the JSON schema an agent fills its arguments from.
+   * One service's actions — EVERY one of them — with the JSON schema an agent fills its arguments from.
    *
-   * `important: true` asks Composio for its own shortlist (GitHub 36 of 871, Gmail 13 of 61) — the
-   * set worth putting in a picker. The full list stays one call away for execution and search.
+   * Until BEA-1354 this asked for Composio's own `important` shortlist (GitHub 36 of 871, Gmail 13)
+   * and stopped at 60, which quietly hid ~95% of what a connected service can do. Now the whole
+   * cursor-paged list is walked (`total_items` is the API's own count — 823 for GitHub on
+   * 2026-08-17, of which 42 are marked deprecated) and cached for the usual five minutes. The
+   * vendor's "important" mark is kept on each action as a hint for prompts, never as a filter.
+   * `important` / `limit` remain as opt-ins for a caller that really wants the short list.
    */
   async listActions(service: string, opts: { important?: boolean; limit?: number; search?: string } = {}): Promise<ServiceAction[]> {
     const slug = String(service || '').toLowerCase();
@@ -149,7 +163,7 @@ export class ComposioProvider implements ServiceProvider {
       const params: Record<string, string> = { toolkit_slug: slug };
       if (opts.important) params.important = 'true';
       if (opts.search) params.search = opts.search;
-      const items = await this.paged('/tools', params, opts.limit || 1000);
+      const items = await this.paged('/tools', params, opts.limit || MAX_ACTIONS_PER_SERVICE, TOOLS_PAGE_SIZE);
       return items.map((t: any) => this.toAction(slug, t));
     } catch (e: any) {
       this.log.warn(`listActions(${slug}) failed: ${this.plainError(e)}`);
@@ -244,7 +258,7 @@ export class ComposioProvider implements ServiceProvider {
         const id = made?.id || made?.connected_account_id;
         const st = String(made?.status || made?.connectionData?.val?.status || 'ACTIVE').toUpperCase();
         await this.rememberConnection(slug, id, opts.label || name, st);
-        this.cache.clear();
+        this.forget();
         return { ok: true, done: true, connectionId: id, status: st, message: `${name} is connected.` };
       }
 
@@ -261,7 +275,7 @@ export class ComposioProvider implements ServiceProvider {
       const redirectUrl = created?.redirect_url || created?.redirect_uri || created?.connectionData?.val?.redirectUrl;
       const status = String(created?.connectionData?.val?.status || created?.status || 'INITIALIZING').toUpperCase();
       await this.rememberConnection(slug, connectionId, opts.label || name, status);
-      this.cache.clear();
+      this.forget();
       return { ok: true, connectionId, redirectUrl, status };
     } catch (e: any) {
       // With the owner's own key in the request, the vendor's error body can quote the value it
@@ -288,7 +302,7 @@ export class ComposioProvider implements ServiceProvider {
           update: { label: name },
         });
       }
-      this.cache.clear();
+      this.forget();
       return { ok: true };
     } catch (e: any) {
       return { ok: false, message: this.plainError(e) };
@@ -297,7 +311,21 @@ export class ComposioProvider implements ServiceProvider {
 
   /** Forget what was read a moment ago — used right after a connect, so the page sees the truth. */
   refresh() {
+    this.forget();
+  }
+
+  /**
+   * Which "forgetting" we are on (BEA-1354). The catalog keeps a last-good copy of every service's
+   * actions and serves it while it re-reads in the background; a connect or disconnect bumps this
+   * so that copy is known to be wrong right now, not merely old.
+   */
+  generation(): number {
+    return this.gen;
+  }
+
+  private forget() {
     this.cache.clear();
+    this.gen += 1;
   }
 
   async disconnect(connectionId: string): Promise<{ ok: boolean; message?: string }> {
@@ -306,7 +334,7 @@ export class ComposioProvider implements ServiceProvider {
     try {
       await this.request('DELETE', `/connected_accounts/${encodeURIComponent(connectionId)}`);
       await this.prisma?.serviceConnection?.deleteMany?.({ where: { connectedAccountId: connectionId } }).catch(() => undefined);
-      this.cache.clear();
+      this.forget();
       return { ok: true };
     } catch (e: any) {
       return { ok: false, message: this.plainError(e) };
@@ -504,6 +532,9 @@ export class ComposioProvider implements ServiceProvider {
 
   private toAction(service: string, t: any): ServiceAction {
     const slug = String(t?.slug || '');
+    // The vendor's shortlist mark rides on the tool's own tags (verified live: the 36 GitHub tools
+    // `important=true` returns are exactly the ones tagged "important"), so no second request.
+    const important = Array.isArray(t?.tags) && t.tags.includes('important');
     return {
       id: toolIdFromVendorSlug(service, slug),
       name: t?.name || slug,
@@ -512,6 +543,7 @@ export class ComposioProvider implements ServiceProvider {
       risky: isRiskyAction(slug, service),
       service,
       deprecated: !!t?.is_deprecated,
+      ...(important ? { important: true } : {}),
     };
   }
 
@@ -732,13 +764,13 @@ export class ComposioProvider implements ServiceProvider {
   }
 
   /** Walk Composio's cursor pagination, with a hard stop. */
-  private async paged(path: string, params: Record<string, string>, max: number): Promise<any[]> {
+  private async paged(path: string, params: Record<string, string>, max: number, pageSize = PAGE_SIZE): Promise<any[]> {
     const key = `${path}?${JSON.stringify(params)}|${max}`;
     return this.cached(key, async () => {
       const out: any[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < MAX_PAGES && out.length < max; page++) {
-        const r = await this.get(path, { ...params, limit: String(Math.min(PAGE_SIZE, max - out.length)), ...(cursor ? { cursor } : {}) });
+        const r = await this.get(path, { ...params, limit: String(Math.min(pageSize, max - out.length)), ...(cursor ? { cursor } : {}) });
         const items: any[] = r?.items || [];
         out.push(...items);
         cursor = r?.next_cursor || undefined;

@@ -35,12 +35,13 @@
     {
       "id": "BEA-1364",
       "title": "First Social call after deploy fails 'fetch failed' \u2014 cause + one retry (found in 1357/1358/1362)",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "f59ba50"
     },
     {
       "id": "BEA-1354",
       "title": "Lift Composio 60-cap",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1363",

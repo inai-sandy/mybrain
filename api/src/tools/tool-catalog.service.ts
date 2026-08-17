@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConnectorService } from '../connectors/connector.service';
 import { SkillsService } from '../skills/skills.service';
 import { LlmService } from '../llm/llm.service';
@@ -35,6 +35,11 @@ export type CatalogTool = {
   service?: string;
   /** Set on Services entries only — true when the action cannot be undone (the gate reads this). */
   risky?: boolean;
+  /**
+   * Set on Services entries only, and only when true — the vendor's own "most used" mark (BEA-1354).
+   * A hint for prompts and pickers; the catalog itself holds every action regardless.
+   */
+  important?: boolean;
 };
 
 /** Shorten to a whole word — a description cut mid-word ("deployed so t") reads like a bug. */
@@ -49,17 +54,23 @@ export function clip(s: string | null | undefined, max: number): string {
 /** The order groups are shown in — most reached-for first. */
 export const GROUP_ORDER: ToolGroup[] = ['Brain', 'Web', 'News', 'Services', 'Social', 'Messaging', 'Output', 'AI', 'Skills', 'MCP servers', 'Advanced'];
 
-/**
- * How many of a service's actions go into the catalog (BEA-1345).
- *
- * GitHub alone has 871. A picker cannot show that and a prompt must never carry it, so the catalog
- * takes the provider's own shortlist of important actions (GitHub 36, Gmail 13) and stops there.
- * The full set is always one `listActions()` call away for execution and search.
+/*
+ * EVERY action of a connected service goes into the catalog (BEA-1354). Until then it took the
+ * provider's own shortlist and stopped at 60 — GitHub showed 36 of 871 — which hid ~95% of what a
+ * service can do and contradicted the owner's standing instruction: "do not skip any action from
+ * providers." The picker searches within a service and pages; a prompt is shown a keyword-ranked
+ * slice (`tool-shortlist.ts`); nothing here cuts the list.
  */
-const MAX_SERVICE_ACTIONS = 60;
 
 /** How long the catalog will wait on outside services before answering with what it already had. */
 const SERVICE_LOOKUP_BUDGET_MS = 8000;
+/**
+ * How long a service list is served as-is before it is re-read — the same five minutes the provider
+ * keeps its own reads for. Past it the catalog still answers at once with what it has and re-reads
+ * BEHIND the answer, so a full walk of every action (~1.5–3s cold) is paid by nobody but the very
+ * first request after boot — and boot warms it too.
+ */
+const SERVICE_FRESH_MS = 5 * 60 * 1000;
 
 /** Tools that are simply part of the app — nothing to connect. */
 const BUILT_IN: CatalogTool[] = [
@@ -82,8 +93,10 @@ const BUILT_IN: CatalogTool[] = [
 ];
 
 @Injectable()
-export class ToolCatalogService {
+export class ToolCatalogService implements OnModuleInit {
   private readonly log = new Logger('ToolCatalog');
+  /** How long outside services may hold the catalog up. A field so a test can shrink it. */
+  serviceBudgetMs = SERVICE_LOOKUP_BUDGET_MS;
 
   constructor(
     private readonly connectors: ConnectorService,
@@ -94,10 +107,26 @@ export class ToolCatalogService {
     private readonly social?: ScrapeCreatorsProvider, // social platforms, behind the same seam (BEA-1355)
   ) {}
 
-  /** The last service list that came back cleanly — what we fall back to when Composio is slow. */
-  private lastServices: { tools: CatalogTool[]; available: boolean } | null = null;
+  /**
+   * The last service list that came back cleanly — what is served while a re-read runs behind, and
+   * what we fall back to when the provider is slow. `at` is when it was read; `gen` is the
+   * provider's generation at the time, so a connect/disconnect makes it stale at once.
+   */
+  private lastServices: { tools: CatalogTool[]; available: boolean; at: number; gen: number } | null = null;
+  /**
+   * The one re-read in flight, so a burst of stale requests starts one walk, not ten. Keyed by the
+   * provider generation it was started for: a connect/disconnect DURING a walk starts a fresh one
+   * rather than handing the newcomer a list read before the change.
+   */
+  private servicesRefresh: { gen: number; promise: Promise<{ tools: CatalogTool[]; available: boolean }> } | null = null;
   /** The same, for the Social group. */
   private lastSocial: { tools: CatalogTool[]; available: boolean } | null = null;
+
+  /** Warm the service list at boot, so the first picker of the day is not the one paying for it. */
+  onModuleInit() {
+    if (!this.services) return;
+    setTimeout(() => { this.serviceTools().catch(() => undefined); }, 2000).unref?.();
+  }
 
   /** The whole catalog, grouped, with a truthful connected flag on every entry. */
   async catalog(): Promise<{ groups: { group: ToolGroup; tools: CatalogTool[] }[]; tools: CatalogTool[] }> {
@@ -201,15 +230,39 @@ export class ToolCatalogService {
    */
   private async serviceTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
     if (!this.services) return { tools: [], available: false };
+    const gen = this.services.generation?.() ?? 0;
+    const last = this.lastServices;
+    // Still good: same connections, read less than five minutes ago.
+    if (last && last.gen === gen && Date.now() - last.at < SERVICE_FRESH_MS) return last;
+    // Merely old: answer with it NOW and re-read behind the answer (one walk at a time).
+    if (last && last.gen === gen) {
+      this.refreshServices(gen);
+      return last;
+    }
+    // Nothing yet, or the connections changed: this request waits — but never past the budget.
     // The catalog is read on nearly every page. An outside service is allowed to be slow, but it is
     // never allowed to hold the catalog up — past the budget we answer with the last good list.
-    const budget = new Promise<{ tools: CatalogTool[]; available: boolean } | null>((r) => setTimeout(() => r(null), SERVICE_LOOKUP_BUDGET_MS).unref?.());
-    const fresh = await Promise.race([this.loadServiceTools(), budget]);
-    if (fresh) {
-      if (fresh.available) this.lastServices = fresh;
-      return fresh;
-    }
+    const budget = new Promise<{ tools: CatalogTool[]; available: boolean } | null>((r) => setTimeout(() => r(null), this.serviceBudgetMs).unref?.());
+    const fresh = await Promise.race([this.refreshServices(gen), budget]);
+    if (fresh) return fresh;
     return this.lastServices || { tools: [], available: false };
+  }
+
+  /**
+   * One re-read at a time per generation; a clean answer becomes the new last-good list, a failed
+   * one changes nothing, and an older walk can never overwrite a newer generation's list.
+   */
+  private refreshServices(gen: number): Promise<{ tools: CatalogTool[]; available: boolean }> {
+    if (!this.servicesRefresh || this.servicesRefresh.gen !== gen) {
+      const promise = this.loadServiceTools()
+        .then((fresh) => {
+          if (fresh.available && gen >= (this.lastServices?.gen ?? -1)) this.lastServices = { ...fresh, at: Date.now(), gen };
+          return fresh;
+        })
+        .finally(() => { if (this.servicesRefresh?.promise === promise) this.servicesRefresh = null; });
+      this.servicesRefresh = { gen, promise };
+    }
+    return this.servicesRefresh.promise;
   }
 
   private async loadServiceTools(): Promise<{ tools: CatalogTool[]; available: boolean }> {
@@ -220,13 +273,14 @@ export class ToolCatalogService {
       // Belt and braces: the provider already drops blocked services, but the promise "these never
       // appear in the catalog" is made HERE, so it is kept here too.
       const services: ServiceInfo[] = (await this.services!.listServices({ connectedOnly: true })).filter((s) => !isBlockedService(s.slug));
+      // EVERY action, no shortlist, no cap (BEA-1354). The provider walks the whole paged list and
+      // caches it, and this whole build is served from memory for five minutes and re-read behind
+      // the answer after that — so "all of them" costs the catalog nothing per request.
       const perService = await Promise.all(
-        services.map(async (s) => {
-          const actions: ServiceAction[] = await this.services!
-            .listActions(s.slug, { important: true, limit: MAX_SERVICE_ACTIONS })
-            .catch(() => [] as ServiceAction[]);
-          return { service: s, actions: actions.slice(0, MAX_SERVICE_ACTIONS) };
-        }),
+        services.map(async (s) => ({
+          service: s,
+          actions: await this.services!.listActions(s.slug).catch(() => [] as ServiceAction[]),
+        })),
       );
 
       const tools: CatalogTool[] = [];
@@ -246,6 +300,7 @@ export class ToolCatalogService {
             description: clip(a.description, 160) || `${a.name} on ${service.name}`,
             service: service.slug,
             risky: a.risky,
+            ...(a.important ? { important: true } : {}),
             connectHint: live ? undefined : `Your ${service.name} login needs finishing`,
             connectPath: live ? undefined : '/tools',
           });

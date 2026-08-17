@@ -204,6 +204,131 @@ describe('ToolCatalogService', () => {
       expect(tools.filter((t) => t.id.startsWith('svc:tavily.'))).toEqual([]);
     });
 
+    /**
+     * EVERY action, no cap (BEA-1354). The catalog used to ask for the vendor's shortlist and stop
+     * at 60 — GitHub showed 36 of 871. Now whatever `listActions()` hands back is in, minus only
+     * the deprecated ones, and the provider is asked for the plain full list.
+     */
+    it('puts every action of a connected service in the catalog — no important filter, no cap', async () => {
+      const asked: any[] = [];
+      const many = Array.from({ length: 871 }, (_, i) => ({
+        id: `svc:github.action_${i}`, name: `Action ${i}`, description: `Does thing ${i}`, schema: {}, risky: i % 50 === 0, service: 'github',
+        ...(i % 100 === 0 ? { important: true } : {}),
+      }));
+      const svc = new ToolCatalogService(connectors([]), skills([]), undefined, provider({
+        listActions: async (_slug: string, opts: any) => { asked.push(opts); return many; },
+      }));
+      const { tools } = await svc.catalog();
+      const github = tools.filter((t) => t.id.startsWith('svc:github.'));
+      expect(github.length).toBe(871);
+      expect(asked[0]?.important).toBeUndefined(); // the vendor's shortlist is not what was asked for
+      expect(asked[0]?.limit).toBeUndefined(); // and nothing capped the walk
+      expect(github.filter((t) => t.risky).length).toBe(18); // gates are computed over the full set
+      expect(github.filter((t) => t.important).length).toBe(9); // the mark rides along as a hint
+      expect(github.find((t) => t.id === 'svc:github.action_1')!.important).toBeUndefined();
+    });
+
+    /**
+     * The 8s budget and the fall-back-to-last-good-list guard (BEA-1345) must still hold with the
+     * full list: a slow provider never stalls or throws `GET /api/tools/catalog`.
+     */
+    it('a slow provider never holds the catalog past its budget, and the last good list is what is served', async () => {
+      let hang = false;
+      let gen = 1;
+      const p = provider({
+        generation: () => gen,
+        listActions: async () => {
+          if (hang) await new Promise((r) => setTimeout(r, 400));
+          return [{ id: 'svc:github.create_issue', name: 'Create issue', description: '', schema: {}, risky: false, service: 'github' }];
+        },
+      });
+      const svc = new ToolCatalogService(connectors([]), skills([]), undefined, p);
+      svc.serviceBudgetMs = 50;
+
+      // First read: fast, and remembered.
+      expect((await svc.catalog()).tools.some((t) => t.id === 'svc:github.create_issue')).toBe(true);
+
+      // The connections change (generation bumps) and the provider turns slow: the catalog answers
+      // inside its budget, does not throw, and still carries the last good list.
+      hang = true;
+      gen += 1;
+      const started = Date.now();
+      const { tools, groups } = await svc.catalog();
+      expect(Date.now() - started).toBeLessThan(300);
+      expect(tools.some((t) => t.id === 'svc:github.create_issue')).toBe(true);
+      expect(groups.some((g) => g.group === 'Services')).toBe(true);
+      expect(tools.some((t) => t.id === 'search_brain')).toBe(true); // built-ins untouched
+    });
+
+    it('a slow provider on a fresh server answers with no Services rather than a stall or an error', async () => {
+      const p = provider({ listActions: () => new Promise(() => undefined) }); // never answers
+      const svc = new ToolCatalogService(connectors(['tavily']), skills([]), undefined, p);
+      svc.serviceBudgetMs = 50;
+      const started = Date.now();
+      const { tools } = await svc.catalog();
+      expect(Date.now() - started).toBeLessThan(300);
+      expect(tools.some((t) => t.id === 'search_brain')).toBe(true);
+      expect(tools.some((t) => t.id.startsWith('svc:'))).toBe(false);
+    });
+
+    it('serves the last list at once while a re-read runs behind, and never starts two walks', async () => {
+      let walks = 0;
+      let release: () => void = () => undefined;
+      const p = provider({
+        listActions: async () => {
+          walks += 1;
+          if (walks > 1) await new Promise<void>((r) => { release = r; });
+          return [{ id: `svc:github.v${walks}`, name: `V${walks}`, description: '', schema: {}, risky: false, service: 'github' }];
+        },
+      });
+      const svc = new ToolCatalogService(connectors([]), skills([]), undefined, p);
+      await svc.catalog();
+      expect(walks).toBe(1);
+      // Make the copy old, then ask three times at once: all three answer from the copy, one walk starts.
+      (svc as any).lastServices.at = Date.now() - 10 * 60 * 1000;
+      const three = await Promise.all([svc.catalog(), svc.catalog(), svc.catalog()]);
+      for (const c of three) expect(c.tools.some((t) => t.id === 'svc:github.v1')).toBe(true);
+      expect(walks).toBe(2);
+      release();
+      await new Promise((r) => setTimeout(r, 10));
+      // The next read has the fresh copy.
+      expect((await svc.catalog()).tools.some((t) => t.id === 'svc:github.v2')).toBe(true);
+      expect(walks).toBe(2);
+    });
+
+    it('a connect during a re-read starts a fresh walk — the newcomer never gets the pre-connect list', async () => {
+      let gen = 1;
+      let walks = 0;
+      const gates: (() => void)[] = [];
+      const p = provider({
+        generation: () => gen,
+        listActions: async () => {
+          const n = ++walks;
+          await new Promise<void>((r) => gates.push(r));
+          return [{ id: `svc:github.walk${n}`, name: `W${n}`, description: '', schema: {}, risky: false, service: 'github' }];
+        },
+      });
+      const svc = new ToolCatalogService(connectors([]), skills([]), undefined, p);
+      svc.serviceBudgetMs = 5000;
+      const first = svc.catalog(); // walk 1 (gen 1) starts and hangs
+      await new Promise((r) => setTimeout(r, 5));
+      gen = 2; // a connect happens while walk 1 is in flight
+      const second = svc.catalog(); // must start walk 2, not join walk 1
+      await new Promise((r) => setTimeout(r, 5));
+      expect(walks).toBe(2);
+      gates[0]!(); // walk 1 finishes first
+      const a = await first;
+      expect(a.tools.some((t) => t.id === 'svc:github.walk1')).toBe(true);
+      gates[1]!();
+      const b = await second;
+      expect(b.tools.some((t) => t.id === 'svc:github.walk2')).toBe(true);
+      expect(b.tools.some((t) => t.id === 'svc:github.walk1')).toBe(false);
+      // And the remembered copy is the newer generation's — served fresh from now on.
+      expect((svc as any).lastServices.gen).toBe(2);
+      expect((await svc.catalog()).tools.some((t) => t.id === 'svc:github.walk2')).toBe(true);
+      expect(walks).toBe(2);
+    });
+
     it('survives the service layer being down — every built-in tool is still there', async () => {
       const before = await baseline();
       for (const broken of [

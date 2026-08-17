@@ -8,6 +8,7 @@ import { PromptsService } from '../prompts/prompts.service';
 import { AgentAreasService } from '../agent/agent-areas.service';
 import { FlowRunnerService } from '../flows/flows-runner.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
+import { shortlistForPrompt } from '../tools/tool-shortlist';
 
 /**
  * EMO Research lanes — the research ladder's two upper tiers:
@@ -126,7 +127,9 @@ export class EmoResearchService {
     if (!connected.length) return [...EmoResearchService.DEFAULT_KIT];
     const wantsBrain = EmoResearchService.wantsBrain(text);
     // Offer brain tools to the picker ONLY when he asked for his own material (BEA-1184).
-    const offerable = connected.filter((t: any) => wantsBrain || !EmoResearchService.BRAIN_TOOLS.has(t.id));
+    // Service actions are cut to the ones matching what he said (BEA-1354: the catalog holds every
+    // action of every connected service, and a spoken topic must not carry ~800 GitHub lines).
+    const offerable = shortlistForPrompt(connected.filter((t: any) => wantsBrain || !EmoResearchService.BRAIN_TOOLS.has(t.id)), text);
     const ok = new Set(offerable.map((t: any) => t.id));
     const fallback = EmoResearchService.DEFAULT_KIT.filter((id) => ok.has(id));
     try {

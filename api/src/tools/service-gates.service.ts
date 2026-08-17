@@ -242,14 +242,15 @@ export class ServiceGatesService {
   /**
    * The gated actions of one service, and which of them the owner has released.
    *
-   * Read from the same shortlist the catalog itself is built from: those are the actions an agent
-   * can actually pick, so they are the ones that can actually pause. Any action released earlier is
-   * listed too, even if it has since dropped off that shortlist.
+   * Read from the FULL action list — the same one the catalog is built from since BEA-1354 — because
+   * every action an agent can pick is one that can pause, and a gate the owner cannot see is a gate
+   * he cannot release. Any action released earlier is listed too, even if it has since disappeared
+   * from the vendor's list.
    */
-  async listForService(slug: string, limit = 60): Promise<{ service: string; actions: { id: string; name: string; description?: string; released: boolean }[] }> {
+  async listForService(slug: string): Promise<{ service: string; actions: { id: string; name: string; description?: string; released: boolean }[] }> {
     const service = String(slug || '').toLowerCase();
     const p: ServiceProvider = this.provider as any;
-    const actions: ServiceAction[] = p?.listActions ? await p.listActions(service, { important: true, limit }).catch(() => [] as ServiceAction[]) : [];
+    const actions: ServiceAction[] = p?.listActions ? await p.listActions(service).catch(() => [] as ServiceAction[]) : [];
     const releasedRows = (await this.prisma?.serviceGate?.findMany?.({ where: { service, scope: 'always' } }).catch(() => [])) || [];
     const released = new Set<string>(releasedRows.map((r: any) => r.action));
 

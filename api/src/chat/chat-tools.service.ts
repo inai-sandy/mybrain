@@ -4,6 +4,7 @@ import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService, CatalogTool } from '../tools/tool-catalog.service';
 import { ServiceActionsService, ServiceCallContext } from '../tools/service-actions.service';
 import { GatePause, PendingGate, ServiceGatesService } from '../tools/service-gates.service';
+import { rankActions } from '../tools/tool-shortlist';
 
 /**
  * Chat can use the services the owner has connected (BEA-1349). Design: `specs/TOOLS.md`.
@@ -94,7 +95,11 @@ const LOOKUP_BUDGET_MS = 2500;
 const PICK_MAX_TOKENS = 120;
 /** How much of the conversation the picker is shown. */
 const CONVO_CHARS = 1200;
-/** How many actions of the chosen service go into the second prompt. The catalog caps at 60. */
+/**
+ * How many actions of the chosen service go into the second prompt. The catalog holds EVERY action
+ * now (BEA-1354 — GitHub ~800), so the ones shown are the best keyword matches for his message,
+ * ranked in `tool-shortlist.ts`, and the prompt stays the size it always was.
+ */
 const MAX_ACTIONS = 60;
 /** How much of an action's result is kept on the chip. */
 const RESULT_CHARS = 300;
@@ -261,10 +266,12 @@ export class ChatToolsService {
    * Which action, if any — in two small steps rather than one big one.
    *
    * A single prompt would have to carry every action of every connected service (GitHub alone puts
-   * 36 in the catalog), on every message the owner types, just to answer "no" nearly every time. So
-   * the first call is shown only the service NAMES and costs a couple of hundred tokens; the second,
-   * which only happens once he really is asking for something to be done, is shown one service's
-   * actions.
+   * ~800 in the catalog since BEA-1354), on every message the owner types, just to answer "no"
+   * nearly every time. So the first call is shown only the service NAMES and costs a couple of
+   * hundred tokens; the second, which only happens once he really is asking for something to be
+   * done, is shown one service's actions — the `MAX_ACTIONS` that best match his own words (a
+   * keyword rank, no model), so "star this repo" puts the star actions on the list even though the
+   * service has hundreds.
    */
   private async pick(text: string, recent: { role: string; content: string }[], entries: CatalogTool[], model: LlmConfig | null): Promise<string | null> {
     const services = new Map<string, string>();
@@ -289,7 +296,9 @@ export class ChatToolsService {
     // service the owner never connected.
     if (!slug || !services.has(slug)) return null;
 
-    const mine = entries.filter((t) => t.service === slug).slice(0, MAX_ACTIONS);
+    // Best matches for what he said first, then the vendor's own most-used mark — and never more
+    // than MAX_ACTIONS lines, however many the service has.
+    const mine = rankActions(entries.filter((t) => t.service === slug), `${text} ${recent.slice(-2).map((m) => m.content).join(' ')}`).slice(0, MAX_ACTIONS);
     if (!mine.length) return null;
 
     const actionId = await this.ask(model, [
