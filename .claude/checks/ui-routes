@@ -1,0 +1,8 @@
+# Screens the visual gate checks when an issue does not name its own (UI_ROUTES unset).
+/
+/tasks
+/chat
+/agents
+/flows
+/tools
+/settings/connections

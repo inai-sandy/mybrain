@@ -7,12 +7,19 @@
 #   3 COMMIT on the work branch      <- so the deployed build provably matches a commit
 #   4 deploy to the server
 #   5 confirm live
-#   6 merge into the default branch  <- only after it is proven live
-#   7 push to GitHub
-#   8 log it (issue, sha, url, time) + delete the merged work branch
-#   9 assert nothing is left behind (clean tree, nothing unpushed)
+#   6 UI GATE — real browser, laptop + phone widths   <- looks at the screen, not just HTTP 200
+#   7 merge into the default branch  <- only after it is proven live AND proven to look right
+#   8 push to GitHub
+#   9 log it (issue, sha, url, time) + delete the merged work branch
+#  10 assert nothing is left behind (clean tree, nothing unpushed)
 #
-# `ship.sh TEST` = deploy rehearsal only (steps 1,2,4,5) — used once at setup to prove deploy works.
+# `ship.sh TEST` = deploy rehearsal only (steps 1,2,4,5,6) — used once at setup to prove
+# deploy AND the UI gate both work before they ever guard real work.
+#
+# Which screens the UI gate checks:
+#   UI_ROUTES="/things /things/new" ship.sh ABC-12 "ABC-12: ..."   <- just this issue's screens
+#   (unset)                                                        <- every route in .claude/checks/ui-routes
+#   UI_ROUTES="-"                                                  <- skip (non-UI issue, e.g. a cron job)
 set -euo pipefail
 ISSUE="${1:-unknown}"
 MSG="${2:-${ISSUE}: ship}"
@@ -100,12 +107,37 @@ if [ -x ".claude/checks/healthcheck.sh" ]; then
   .claude/checks/healthcheck.sh
 fi
 
+# 6) UI gate — does it actually LOOK right? --------------------------------
+# A health check only proves the server answered. It cannot see a table cut off at phone
+# width, a page wider than the screen, a blank render, or a JS error. This can, and a
+# failure here means the work does NOT reach the default branch.
+UI_STATUS="skipped"
+if [ -x ".claude/checks/uicheck.sh" ] && [ "${UI_ROUTES:-}" != "-" ]; then
+  echo "-> ui gate (laptop + phone)"
+  # shellcheck disable=SC2086
+  if UI_LABEL="$ISSUE" .claude/checks/uicheck.sh ${UI_ROUTES:-}; then
+    UI_STATUS="passed"
+  else
+    UI_STATUS="failed"
+    echo "!! The UI gate failed — this issue is NOT done." >&2
+    if [ -x ".claude/checks/deploy.sh" ] && .claude/checks/deploy.sh --rollback 2>/dev/null; then
+      echo "!! Rolled back to the previous build, so the live site is not left looking broken." >&2
+    else
+      echo "!! NOTE: could not roll back automatically (deploy.sh has no --rollback)." >&2
+      echo "!! The site is live with this build. Fix it or roll back by hand." >&2
+    fi
+    echo "!! Screenshots: .claude/checks/ui-shots/${ISSUE}/" >&2
+    exit 1
+  fi
+fi
+
 if [ "$REHEARSAL" = "1" ]; then
-  echo "== REHEARSAL OK: deploy + health check work. (No commit/merge/push in TEST mode.) =="
+  echo "== REHEARSAL OK: deploy + health check + ui gate (${UI_STATUS}) all work."
+  echo "   (No commit/merge/push in TEST mode.) =="
   exit 0
 fi
 
-# 6) Merge into the default branch — only now that it is proven live --------
+# 7) Merge into the default branch — only now that it is proven live -------
 # A failed deploy or health check exits above, so the default branch never gets a broken build.
 if [ -n "$BRANCH" ] && [ "$BRANCH" != "$MAIN" ]; then
   echo "-> merge ${BRANCH} -> ${MAIN}"
@@ -115,7 +147,7 @@ else
   echo "-> already on ${MAIN}, no merge needed"
 fi
 
-# 7) Push to GitHub --------------------------------------------------------
+# 8) Push to GitHub -------------------------------------------------------
 if ! git remote get-url origin >/dev/null 2>&1; then
   echo "!! No 'origin' remote — the work is committed locally but NOT on GitHub." >&2
   echo "!! Create one once, then re-run:  gh repo create <name> --private --source=. --remote=origin --push" >&2
@@ -124,22 +156,22 @@ fi
 echo "-> push"
 git push -q origin "$MAIN"
 
-# 8) Record it, and clean up the work branch -------------------------------
+# 9) Record it, and clean up the work branch ------------------------------
 LIVE_URL="-"
 [ -f ".claude/checks/live-url" ] && LIVE_URL="$(cat .claude/checks/live-url)"
 if [ "$LIVE_URL" = "-" ] && [ -f ".claude/checks/healthcheck.sh" ]; then
   LIVE_URL="$(grep -oEm1 'https://[a-zA-Z0-9./_-]+' .claude/checks/healthcheck.sh || true)"
   [ -z "$LIVE_URL" ] && LIVE_URL="-"
 fi
-printf '%s\t%s\t%s\t%s\t%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ISSUE" "$(git rev-parse --short HEAD)" "${BRANCH:-$MAIN}" "$LIVE_URL" \
+printf '%s\t%s\t%s\t%s\t%s\tui:%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ISSUE" "$(git rev-parse --short HEAD)" "${BRANCH:-$MAIN}" "$LIVE_URL" "$UI_STATUS" \
   >> .claude/checks/ship-log.tsv
 
 if [ -n "$BRANCH" ] && [ "$BRANCH" != "$MAIN" ]; then
   git branch -q -d "$BRANCH" 2>/dev/null || echo "   (work branch ${BRANCH} kept — not fully merged)"
 fi
 
-# 9) Assert nothing was left behind ----------------------------------------
+# 10) Assert nothing was left behind -------------------------------------
 leftover="$(git status --porcelain)"
 if [ -n "$leftover" ]; then
   echo "!! Files are still uncommitted after shipping — this issue is NOT done:" >&2

@@ -15,3 +15,5 @@ secrets.env
 # local sqlite journals (never commit)
 *.db-journal
 .claude/checks/ship-log.tsv
+.claude/checks/ui-shots/
+.claude/checks/ui-state.json
