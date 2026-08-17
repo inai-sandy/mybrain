@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmService } from '../llm/llm.service';
 import { ComposioProvider } from './composio.provider';
+import { ScrapeCreatorsProvider } from './scrapecreators.provider';
 import { ExecuteResult, parseServiceToolId, ServiceAccount, ServiceAction, ServiceProvider } from './service-provider';
 import { GatePause, PendingGate, ServiceGatesService } from './service-gates.service';
 
@@ -77,8 +78,25 @@ export class ServiceActionsService {
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly prisma?: PrismaService,
     gates?: ServiceGatesService,
+    // The second provider (BEA-1355). An action is routed to it only when it says the id is one
+    // of its own — exact ids, never a guess — and everything else goes where it always went.
+    private readonly social?: ScrapeCreatorsProvider,
   ) {
     this.gates = gates || new ServiceGatesService(prisma, provider);
+  }
+
+  /**
+   * Which provider owns this id. Asked per ACTION, not per service, on purpose: both providers can
+   * know a service called `github` (Composio's GitHub, and the social provider's GitHub scraping),
+   * and only the exact id says which one a step means.
+   */
+  private async providerFor(actionId: string): Promise<ServiceProvider> {
+    try {
+      if (this.social?.owns && (await this.social.owns(actionId))) return this.social as any;
+    } catch {
+      /* an unreachable second provider must never take the first one down with it */
+    }
+    return this.provider as any;
   }
 
   /**
@@ -93,12 +111,12 @@ export class ServiceActionsService {
     const { service } = parsed;
     const say = ctx.onLine || (() => undefined);
 
-    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean } = {}): Promise<never> => {
+    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean; credits?: number } = {}): Promise<never> => {
       await this.record({ actionId, service, ok: false, error: message, ...extra }, ctx);
       throw new Error(message);
     };
 
-    const p: ServiceProvider = this.provider as any;
+    const p: ServiceProvider = await this.providerFor(actionId);
     if (!p?.execute) return fail('Outside services are not available on this server.');
 
     // ---- which account, if any -------------------------------------------------------------
@@ -151,7 +169,10 @@ export class ServiceActionsService {
     // Asked here, before any arguments exist, only to find out whether an answer is already on
     // record. `action.risky` comes from the provider; the rule is re-run on our side too, so a
     // provider that forgot to flag something cannot walk a delete straight past the gate.
-    const mustAsk = await this.gates.mustAsk(actionId, service, action.risky).catch(() => true);
+    // A provider that says every one of its actions is a read (`readOnly`) is taken at its word:
+    // the name rule was tuned for Composio's verb-first slugs, and a path-derived read must never
+    // be held. Everything else keeps the belt and braces.
+    const mustAsk = p.readOnly === true ? false : await this.gates.mustAsk(actionId, service, action.risky).catch(() => true);
     const approval = mustAsk ? await this.gates.approvalFor(actionId, ctx).catch(() => null) : null;
 
     // ---- the arguments ---------------------------------------------------------------------
@@ -199,16 +220,20 @@ export class ServiceActionsService {
       .catch((e: any): ExecuteResult => ({ ok: false, error: String(e?.message || e) }));
     const ms = (res as any)?.ms ?? Date.now() - started;
 
+    // The honest cost, when the provider meters calls (BEA-1355): read off ITS answer, never
+    // assumed — a cache hit is 0 and is written as 0. Undefined for a provider that does not meter.
+    const credits = Number.isFinite(res?.credits) ? Number(res.credits) : undefined;
+
     if (!res?.ok) {
       // The provider already reads the verdict from the answer's own `successful` field rather than
       // the HTTP status — a failed action still comes back HTTP 200. Its reason is the truth here.
       const why = this.plainReason(res?.error);
-      return fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk });
+      return fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk, credits });
     }
 
     const summary = this.summarise(res.data);
     // `gated` on a real success means "this one had to be approved, and it was" (BEA-1348).
-    await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk }, ctx);
+    await this.record({ actionId, service, ok: true, args, accountId: chosen?.id, ms, result: summary, gated: mustAsk, credits }, ctx);
     say(`   ✅ ${name}: ${action.name} — done in ${(ms / 1000).toFixed(1)}s`);
     return `Ran ${name}: ${action.name}${chosen ? ` on ${this.who(chosen)}` : ''}.\n\nWhat came back:\n${summary.slice(0, OUTPUT_CHARS)}`;
   }
@@ -330,7 +355,7 @@ export class ServiceActionsService {
    * could not be written.
    */
   private async record(
-    call: { actionId: string; service: string; ok: boolean; args?: any; accountId?: string; ms?: number; result?: string; error?: string; gated?: boolean },
+    call: { actionId: string; service: string; ok: boolean; args?: any; accountId?: string; ms?: number; result?: string; error?: string; gated?: boolean; credits?: number },
     ctx: ServiceCallContext,
   ): Promise<void> {
     try {
@@ -349,6 +374,8 @@ export class ServiceActionsService {
           error: call.error ? String(call.error).slice(0, 500) : null,
           ms: Number.isFinite(call.ms) ? Math.round(call.ms as number) : null,
           gated: !!call.gated,
+          // Null, not 0, when the provider does not meter — 0 means "they charged nothing".
+          credits: Number.isFinite(call.credits) ? Math.round(call.credits as number) : null,
         },
       });
     } catch (e: any) {

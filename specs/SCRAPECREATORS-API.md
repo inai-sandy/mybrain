@@ -62,6 +62,30 @@ the write target for spreadsheet outputs.
 ## Full endpoint list (generated from the spec, 178)
 See `specs/SCRAPECREATORS-ENDPOINTS.md`. Regenerate from `openapi.json`; never hand-edit.
 
+## Ids — the derivation rule (BEA-1355, `api/src/tools/scrapecreators.provider.ts`)
+`svc:<platform>.<endpoint>`, from the path alone, deterministic, and the vendor's name never in one:
+1. `/<version>/<platform>/<rest>` — a first segment that is not `v<digits>` is the platform at v1.
+2. Segments flatten to `[a-z0-9_]`: camelCase splits at the hump, then anything else becomes `_`
+   (`adLibrary` → `ad_library`, `apple-music` → `apple_music`).
+3. Endpoint = the rest joined with `_` (`search/hashtag` → `search_hashtag`); nothing after the
+   platform (`/v1/linktree`) → `get`.
+4. A non-GET method adds `_<method>`: `svc:reddit.post_comments` (GET) · `svc:reddit.post_comments_post`.
+5. Versions: the LOWEST version of the same platform+endpoint keeps the bare name, a higher one gets
+   `_v<N>` — lowest-wins so a new version can never rename an id already saved in a flow.
+   (`/v2/instagram/user/posts` is bare today: no v1 twin exists.)
+6. Any collision left after that gets `_2`, `_3`… (none today; a test asserts unique ids == ops).
+The vendor's response envelope is returned whole as `data` (`success · credits_remaining ·
+credits_charged · cursor · …`) and `credits_charged` is written to `ToolCall.credits` — 0 for a cache
+hit, null for a provider that does not meter (Composio).
+
+## Seen 2026-08-17 evening — the hashtag search returned nothing for every query
+`GET /v1/instagram/search/hashtag` answered **HTTP 404 `{"success":false,"credits_charged":0,
+"error":"not_found","message":"No posts found"}`** for `smarthomeindia` (which had returned 8 posts
+that morning), for `makeup` (their own doc example) and for `/v2/instagram/reels/search` — i.e. the
+Google-indexed searches were down on their side, and charged 0. `/v1/instagram/search` (Instagram-
+native) worked at the same moment (41 users, 1 credit). The provider records such a call honestly:
+`ok:false`, their message, `credits: 0`. Agents built on the hashtag search must expect an empty day.
+
 ## ⚠️ Trap found during pre-build verification (2026-08-17)
 `GOOGLEDRIVE_FIND_FILE` with `{"query":"name = 'x'"}` returned **100 unrelated files** — it did NOT
 filter by name. Any code that "finds then deletes/updates" by name must verify the returned name

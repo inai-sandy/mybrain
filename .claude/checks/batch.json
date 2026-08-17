@@ -1,52 +1,12 @@
 {
-  "startedAt": "2026-08-16T18:30:00Z",
-  "note": "Tools / Composio batch. Design: specs/TOOLS.md (4e9ea22). BEA-1351 is BLOCKED and must not run.",
+  "startedAt": "2026-08-17T19:20:00Z",
+  "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358.",
   "issues": [
-    {
-      "id": "BEA-1345",
-      "title": "ServiceProvider seam + Composio provider",
-      "status": "shipped",
-      "sha": "a869de9"
-    },
-    {
-      "id": "BEA-1346",
-      "title": "/tools page",
-      "status": "shipped",
-      "sha": "a634e07"
-    },
-    {
-      "id": "BEA-1347",
-      "title": "Run a service action + call log",
-      "status": "shipped",
-      "sha": "b3522b2"
-    },
-    {
-      "id": "BEA-1348",
-      "title": "Gates",
-      "status": "shipped",
-      "sha": "7d0557b"
-    },
-    {
-      "id": "BEA-1349",
-      "title": "Chat can act",
-      "status": "shipped",
-      "sha": "cf9bcbf"
-    },
-    {
-      "id": "BEA-1350",
-      "title": "Triggers",
-      "status": "shipped",
-      "sha": "2bce51f",
-      "note": "LIVE + verified. Linear still shows In Progress \u2014 MCP was down at close time, needs setting to Done."
-    },
-    {
-      "id": "BEA-1351",
-      "title": "Retire the gws Google bridge (full migration)",
-      "status": "shipped",
-      "startedAt": "2026-08-17T14:05:00Z",
-      "sha": "8584b3e"
-    }
-  ],
-  "result": "ALL 7 shipped and live: BEA-1345\u21921351. Tools track complete.",
-  "completedAt": "2026-08-17T14:55:00Z"
+    { "id": "BEA-1355", "title": "ScrapeCreators provider from spec (178, no cap)", "status": "in_progress" },
+    { "id": "BEA-1356", "title": "Social section: grid + platform page + run-it-now", "status": "pending" },
+    { "id": "BEA-1357", "title": "Make it an agent + outputDest:sheet", "status": "pending" },
+    { "id": "BEA-1358", "title": "Watch + Alert + daily ceiling", "status": "pending" },
+    { "id": "BEA-1359", "title": "Owner's example live (acceptance)", "status": "pending" },
+    { "id": "BEA-1354", "title": "Lift Composio 60-cap", "status": "pending" }
+  ]
 }

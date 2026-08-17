@@ -1569,6 +1569,9 @@ model ToolCall {
   ms        Int?
   /// Whether this call had to stop and ask first (the gate is BEA-1348; this column is its record).
   gated     Boolean  @default(false)
+  /// What the provider charged for THIS call, in its own credits, read off its answer (BEA-1355).
+  /// Null when the provider does not meter calls; 0 when it charged nothing (a cache hit).
+  credits   Int?
   createdAt DateTime @default(now())
 
   @@index([service, createdAt])

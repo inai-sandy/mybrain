@@ -148,6 +148,20 @@ marketing pages disagree with it and with each other. The key is the `composio` 
 Settings → Connections) and `COMPOSIO_API_KEY` in `deploy.sh`; `exa · firecrawl · tavily · perplexity
 · telegram · whatsapp` are blocked because we already do them better or they are ours.
 
+**Social platforms come through the same seam, from a second provider (BEA-1355).**
+`ScrapeCreatorsProvider` (`api/src/tools/scrapecreators.provider.ts`) sits beside `ComposioProvider`
+in `ToolCatalogService` (group **Social**) and in `ServiceActionsService`, which now picks the provider
+**per action id** (`social.owns(id)`, exact — both providers can know a service called `github`).
+Every action is GENERATED from their OpenAPI spec (`https://docs.scrapecreators.com/openapi.json`,
+178 ops / 29 platforms on 2026-08-17): read at boot, daily and on `refresh()`, last good copy kept
+on disk under `DATA_DIR`; **a test asserts action count == the spec's op count, no cap**. Ids are
+`svc:<platform>.<endpoint>` from the path (rule in `specs/SCRAPECREATORS-API.md`); nothing here is
+ever gated (all reads); one key per instance = the `scrapecreators` connector (`SCRAPECREATORS_API_KEY`
+in `deploy.sh`). `execute()` returns `credits` read off the answer's `credits_charged` (0 on a cache
+hit) and `ToolCall.credits` records it — never assume 1, costs run 1→26. The Social UI, Watch/Alert
+and the owner's example agent are BEA-1356→1359. Trap: their Google-indexed searches (hashtag,
+reels) can answer 404 "No posts found" for everything for a while — recorded as a failed call, 0 credits.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 
