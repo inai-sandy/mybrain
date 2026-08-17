@@ -95,8 +95,11 @@ fi
 if grep -qE '(^|[^a-z])docker ' .claude/checks/deploy.sh 2>/dev/null; then
   if ! command -v docker >/dev/null 2>&1; then
     block "deploy.sh uses docker, but docker isn't installed here."
-  elif grep -q 'sudo docker' .claude/checks/deploy.sh && ! sudo -n true 2>/dev/null; then
-    need "Password-free sudo (deploy.sh runs 'sudo docker' and would hang overnight waiting for a password)."
+  # Test the EXACT command deploy.sh runs. `sudo -n true` is the wrong probe: the sandy account has
+  # NOPASSWD scoped to /usr/bin/docker only (/etc/sudoers.d/sandy-docker), so generic sudo is denied
+  # while `sudo docker` works — and that mismatch falsely flagged every batch since 2026-08-16.
+  elif grep -q 'sudo docker' .claude/checks/deploy.sh && ! sudo -n docker version >/dev/null 2>&1; then
+    need "Password-free 'sudo docker' (deploy.sh runs it and would hang overnight waiting for a password)."
   fi
 fi
 avail="$(df -BG --output=avail . 2>/dev/null | tail -1 | tr -dc '0-9')"
