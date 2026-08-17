@@ -88,8 +88,13 @@ const MAX_BYTES = 40 * 1024 * 1024;
 const BINARY_TIMEOUT_MS = 120_000;
 /** How long the connected email address is remembered before it is asked for again. */
 const PROFILE_TTL_MS = 30 * 60 * 1000;
-/** What we keep of a result in the flight recorder. */
-const RECORDED_RESULT_CHARS = 400;
+/** Rough size of a response, for the log — a number, never the content. */
+function safeSize(data: any): string {
+  try {
+    const n = JSON.stringify(data).length;
+    return n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`;
+  } catch { return ''; }
+}
 
 /** Google-native → the Office format that keeps the most structure, plus the extension anydoc needs. */
 const EXPORT_AS: Record<string, { mime: string; ext: string }> = {
@@ -684,7 +689,14 @@ export class GoogleWorkspaceService {
     }
   }
 
-  /** A short account of what came back — counts, never the payload (a thread can be 300 KB). */
+  /**
+   * A short account of what came back — counts, never the payload (a thread can be 300 KB).
+   *
+   * BEA-1353: this must NEVER fall back to the raw response. A single-message fetch has no list key,
+   * and its top level is the subject, the sender and the body preview; an attachment or Drive
+   * download is a signed URL for the bytes. Both were being written into the log verbatim. When
+   * nothing countable is found, describe the SHAPE — which keys, roughly how big — and nothing else.
+   */
   private summarise(data: any): string {
     if (data === undefined || data === null) return 'Nothing was returned.';
     try {
@@ -694,9 +706,17 @@ export class GoogleWorkspaceService {
         if (Array.isArray(v)) counts.push(`${v.length} ${k}`);
       }
       if (counts.length) return counts.join(', ');
-      return JSON.stringify(data).slice(0, RECORDED_RESULT_CHARS);
+      if (Array.isArray(data)) return `${data.length} items`;
+      if (typeof data === 'object') {
+        // Only the KEY NAMES at the top level, never a value — a key like "s3url" is safe to name,
+        // the URL under it is not.
+        const keys = Object.keys(data).filter((k) => /^[a-z0-9_]+$/i.test(k)).slice(0, 8);
+        const size = safeSize(data);
+        return `ok · ${keys.length ? keys.join(', ') : 'object'}${size ? ` · ~${size}` : ''}`;
+      }
+      return `ok · ${typeof data}`;
     } catch {
-      return String(data).slice(0, RECORDED_RESULT_CHARS);
+      return 'ok';
     }
   }
 
