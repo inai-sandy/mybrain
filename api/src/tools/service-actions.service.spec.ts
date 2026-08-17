@@ -202,3 +202,40 @@ describe('the model that fills service arguments is a named, changeable one (BEA
     expect(src).toContain("completeHelper?.('service-args'");
   });
 });
+
+describe('runDetailed — the same run, answered as a shape (BEA-1356)', () => {
+  it('a success carries the provider\'s whole answer, the cost and the ms; the row is written once', async () => {
+    const { svc, rows, provider } = harness({ result: { ok: true, data: { success: true, credits_charged: 2, posts: [1, 2] }, ms: 80, credits: 2 } });
+    const r = await svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' }, argsPinned: true, runKind: 'social' });
+    expect(r.ok).toBe(true);
+    expect(r.data).toEqual({ success: true, credits_charged: 2, posts: [1, 2] });
+    expect(r.credits).toBe(2);
+    expect(r.ms).toBe(80);
+    expect(r.text).toContain('GitHub: Create an issue');
+    expect(provider.execute).toHaveBeenCalledTimes(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ ok: true, credits: 2, runKind: 'social' });
+  });
+
+  it('a failure is returned (not thrown), with the status so a screen can tell 402 apart; run() still throws', async () => {
+    const a = harness({ result: { ok: false, error: 'The account is out of credits.', ms: 30, credits: 0, status: 402 } });
+    const r = await a.svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' } });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(402);
+    expect(r.outOfCredits).toBe(true);
+    expect(r.error).toContain('out of credits');
+    expect(a.rows).toHaveLength(1);
+    expect(a.rows[0].ok).toBe(false);
+
+    const b = harness({ result: { ok: false, error: 'nope', status: 500 } });
+    await expect(b.svc.run('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' } })).rejects.toThrow(/nope/);
+  });
+
+  it('argsPinned with nothing filled in never calls the model', async () => {
+    const { svc, llm, provider } = harness({ action: { ...ACTION, schema: { type: 'object', properties: { q: { type: 'string' } } } } });
+    const r = await svc.runDetailed('svc:github.create_an_issue', 'x', { args: {}, argsPinned: true });
+    expect(r.ok).toBe(true);
+    expect(llm.completeHelper).not.toHaveBeenCalled();
+    expect(provider.execute).toHaveBeenCalledWith('svc:github.create_an_issue', {}, { connectionId: 'ca_1' });
+  });
+});

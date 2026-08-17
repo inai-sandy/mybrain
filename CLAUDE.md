@@ -162,6 +162,24 @@ hit) and `ToolCall.credits` records it — never assume 1, costs run 1→26. The
 and the owner's example agent are BEA-1356→1359. Trap: their Google-indexed searches (hashtag,
 reels) can answer 404 "No posts found" for everything for a while — recorded as a failed call, 0 credits.
 
+**The Social section is where that data gets USED (BEA-1356).** Sidebar entry **Social** under Automation
+→ `/social` (platform grid: every platform from `provider.listServices()`, mark by slug with an initial-tile
+fallback, endpoint count, header with credit balance · today's spend · daily ceiling) and `/social/:platform`
+(EVERY endpoint from `provider.listActions()`, grouped by the spec's own tags, a form generated from each
+action's JSON schema, and **Run** right there). It talks only to `/api/social*` (`api/src/social/`):
+`GET /api/social` · `GET /api/social/spend` · `GET /api/social/platforms/:slug` · `POST /api/social/run
+{actionId, args}`. The run goes through **`ServiceActionsService.runDetailed()`** — the same one code path
+`run()` wraps (`run()` = `runDetailed()` + throw), so there is still exactly ONE `execute()` call site and
+the `ToolCall` row (`runKind: 'social'`, `credits`) is written like an agent's; `argsPinned: true` means the
+form IS the arguments and the model is never asked. Answers are drawn by shape (`web/src/pages/social/
+resultShape.ts`: transcript → text, list → `DataTable`, profile → card, else JSON) with `credits_charged`
+beside them ("cached · 0"); a vendor 402 comes back as `outOfCredits` + a top-up link, never a raw error;
+"load more" follows `cursor`/`page` and stops at their 11-page cap. Result actions: Save as Document
+(`POST /api/documents`), Send to Capture (`POST /api/items/upload`), Make it an agent (navigates to
+`/agent?builder=1&tool=<id>&args=<json>` — the builder-side handoff is BEA-1357). Today's spend = sum of
+`ToolCall.credits` since the owner's local midnight over social platforms; the ceiling Setting
+`social.dailyCreditCeiling` is only READ here ("no limit set" until BEA-1358 adds it).
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 
