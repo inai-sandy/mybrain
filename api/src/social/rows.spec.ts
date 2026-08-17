@@ -28,9 +28,18 @@ describe('rows (BEA-1357)', () => {
 
   it('a profile (no list) → ONE row, so an "append every week" agent tracks a number over time', () => {
     const t = tableOf({ success: true, user: { username: 'legrand_in', follower_count: 900, is_verified: true } });
-    // no list under any key → the object itself is the row
+    // no list under any key → the object itself is the row, unwrapped out of its envelope
     expect(t.rows).toHaveLength(1);
-    expect(t.columns).toEqual(expect.arrayContaining(['user_username', 'user_follower_count', 'user_is_verified']));
+    expect(t.columns).toEqual(expect.arrayContaining(['username', 'follower_count', 'is_verified']));
+  });
+
+  it('the live Instagram profile shape — {success, credits, data:{user:{…}}} — is ONE row of the user, not zero rows', () => {
+    // Seen live 2026-08-17: the first acceptance run answered "no items" because the profile sat two
+    // envelopes deep and one-level flattening dropped it whole.
+    const t = tableOf({ success: true, credits_remaining: 25089, credits_charged: 1, data: { user: { pk: '2235598760', username: 'legrand_in', follower_count: 900, is_private: false, biography: 'Legrand India', hd_profile_pic_url_info: { url: 'https://x/y.jpg' } } } });
+    expect(t.rows).toHaveLength(1);
+    expect(t.columns).toEqual(expect.arrayContaining(['username', 'follower_count', 'biography', 'hd_profile_pic_url_info_url']));
+    expect(t.rows[0][t.columns.indexOf('username')]).toBe('legrand_in');
   });
 
   it('a transcript → one row with a text column; nothing → no rows', () => {

@@ -78,7 +78,7 @@ export type Table = { columns: string[]; rows: any[][]; itemCount: number; listK
  */
 export function tableOf(data: any): Table {
   const list = findList(data);
-  const items: any[] = list ? list.rows : data === undefined || data === null ? [] : [data];
+  const items: any[] = list ? list.rows : data === undefined || data === null ? [] : [unwrap(data)];
   const flat = items.slice(0, MAX_ROWS).map(flatten).filter((r) => Object.keys(r).length);
   const seen: string[] = [];
   for (const r of flat) for (const k of Object.keys(r)) if (!seen.includes(k)) seen.push(k);
@@ -90,6 +90,21 @@ export function tableOf(data: any): Table {
     .slice(0, MAX_COLUMNS);
   const rows = flat.map((r) => columns.map((c) => cell(r[c])));
   return { columns, rows, itemCount: items.length, listKey: list?.key };
+}
+
+/**
+ * A single answer's payload, out of its envelope: `{success, credits_charged, data:{user:{…}}}` is
+ * the profile under `data.user`, not three columns of nothing. Descends while there is exactly one
+ * non-envelope key and it holds an object (a few levels at most).
+ */
+export function unwrap(data: any): any {
+  let cur = data;
+  for (let i = 0; i < 4 && isObj(cur); i++) {
+    const keys = Object.keys(cur).filter((k) => !ENVELOPE.has(k) && cur[k] !== null && cur[k] !== undefined);
+    if (keys.length !== 1 || !isObj(cur[keys[0]])) break;
+    cur = cur[keys[0]];
+  }
+  return cur;
 }
 
 /** A value as a sheet cell: scalars as they are, everything else as short text. */
