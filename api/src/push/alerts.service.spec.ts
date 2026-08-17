@@ -57,7 +57,7 @@ describe('AlertsService.runFinished — template first (BEA-1102 · BEA-1362)', 
     const h = harness({ settings: NUM });
     await h.svc.runFinished('Watch\nlegrand', '42 rows\n→ https://sheet\n\nmore', '/agent/runs/r1');
     for (const v of h.sent[0].variables) expect(v).not.toMatch(/\n/);
-    expect(h.sent[0].variables[2]).toBe('42 rows · → https://sheet · more');
+    expect(h.sent[0].variables[2]).toBe('42 rows · more · The link is behind the button below.'); // links stay out of variables
   });
 
   it('a Watch/Alert that fired is worded as an alert', async () => {
