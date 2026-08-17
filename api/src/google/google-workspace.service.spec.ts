@@ -58,7 +58,7 @@ describe('the seam itself', () => {
 
   it('says not-connected when the service has no working account at /tools — never a vendor error — and writes it down', async () => {
     const { svc, provider, prisma } = build(() => ({}), { connected: 'none' });
-    await expect(svc.gmailImportantForDay('2026-08-13')).rejects.toThrow('not-connected');
+    await expect(svc.gmailImportantForDay('2026-08-13')).rejects.toThrow('not-connected:gmail');
     expect(provider.execute).not.toHaveBeenCalled();
     // The attempt that never left the building is still in the flight recorder.
     const row = (prisma.toolCall.create as jest.Mock).mock.calls[0][0].data;

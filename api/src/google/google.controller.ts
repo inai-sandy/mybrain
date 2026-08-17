@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Delete, Get, NotFoundException, Param, Patch, Post, Put, Query } from '@nestjs/common';
-import { GoogleWorkspaceService } from './google-workspace.service';
+import { GoogleWorkspaceService, TOOLKIT_LABEL } from './google-workspace.service';
 import { GmailBriefService } from './gmail-brief.service';
 import { GmailRequestService } from './gmail-request.service';
 import { EmailMemoryService } from './email-memory.service';
@@ -8,7 +8,11 @@ import { Public } from '../auth/public.decorator';
 /** Map the Google service's errors to friendly HTTP errors. */
 function mapErr(e: any): never {
   const m = String(e?.message || e);
-  if (m === 'not-connected') throw new BadRequestException('That Google service isn’t connected yet — open Tools (/tools), connect Gmail, Google Drive or Google Calendar, then try again.');
+  if (m.startsWith('not-connected')) {
+    const toolkit = m.split(':')[1] || '';
+    const name = TOOLKIT_LABEL[toolkit] || 'that Google service';
+    throw new BadRequestException(`${name} isn’t connected yet — open Tools (/tools), find ${name} and tap Connect, then try again.`);
+  }
   throw new BadRequestException(m);
 }
 
