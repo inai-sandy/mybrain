@@ -327,6 +327,14 @@ export class FlowsService {
     return this.shape(updated);
   }
 
+  /**
+   * The planner's reply ceiling. It was 2200 and the FIRST live draw-on-save (BEA-1366) was cut off
+   * at exactly 2200 on both attempts — the current planning model spends tokens thinking before the
+   * JSON — so every new job got the bare fallback. An unused ceiling costs nothing; a hit one costs
+   * the whole picture.
+   */
+  static readonly PLAN_MAX_TOKENS = 8000;
+
   /** Said on the flow when a re-draw could not plan and the last picture was kept (BEA-1366). */
   static readonly REDRAW_FAILED_NOTE = 'Could not re-draw the flow — the last picture is kept. Try again.';
 
@@ -432,7 +440,7 @@ export class FlowsService {
       const tpl = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
       if (!tpl) return this.buildGraph(q, null, skillById, toolById, webTools, true);
       const planPrompt = tpl.replaceAll('{{question}}', q.slice(0, FlowsService.QUESTION_MAX)).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
-      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, 2200, 'flow-plan') : await this.llm.complete(planPrompt, 2200, 'flow-plan');
+      const out = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', planPrompt, FlowsService.PLAN_MAX_TOKENS, 'flow-plan') : await this.llm.complete(planPrompt, FlowsService.PLAN_MAX_TOKENS, 'flow-plan');
       const m = (out || '').match(/\{[\s\S]*\}/);
       if (m) plan = JSON.parse(m[0]);
     } catch { plan = null; }
@@ -443,7 +451,7 @@ export class FlowsService {
         try {
           const tpl2 = (await this.promptsSvc?.get('flow.plan').catch(() => '')) || '';
           const p2 = tpl2.replaceAll('{{question}}', short).replaceAll('{{tools}}', toolList).replaceAll('{{skills}}', skillList || '(no skills)');
-          const out2 = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', p2, 2200, 'flow-plan') : await this.llm.complete(p2, 2200, 'flow-plan');
+          const out2 = (this.llm as any).completeHelper ? await (this.llm as any).completeHelper('flow-plan', p2, FlowsService.PLAN_MAX_TOKENS, 'flow-plan') : await this.llm.complete(p2, FlowsService.PLAN_MAX_TOKENS, 'flow-plan');
           const m2 = (out2 || '').match(/\{[\s\S]*\}/);
           if (m2) plan = JSON.parse(m2[0]);
         } catch { /* keep the fallback graph */ }

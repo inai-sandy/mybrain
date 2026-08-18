@@ -144,7 +144,7 @@ export function FlowPanel({ id, flow, onChanged, goChat, lastRun }: { id: string
       <div className="mb-2 flex items-center justify-between gap-2">
         {social ? (
           <span className="text-xs text-zinc-500">
-            {lastRun ? <>Last run {when(lastRun.startedAt)} · <span className={lastRun.status === 'failed' ? 'text-rose-600 dark:text-rose-400' : lastRun.status === 'done' ? 'text-emerald-600 dark:text-emerald-400' : ''}>{lastRun.status}</span> — each step shows what it did</> : 'Not run yet — after a run, each step shows what it did'}
+            {lastRun ? <>Last run {when(lastRun.startedAt)} · <span className={lastRun.status === 'failed' ? 'text-rose-600 dark:text-rose-400' : lastRun.status === 'done' ? 'text-emerald-600 dark:text-emerald-400' : ''}>{lastRun.status}</span>{runResults && Object.keys(runResults).length ? ' — each step shows what it did' : ''}</> : 'Not run yet — after a run, each step shows what it did'}
           </span>
         ) : (
           <button onClick={generate} disabled={gen || drawing} className="inline-flex items-center gap-1.5 rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50 dark:border-violet-500/40 dark:text-violet-300 dark:hover:bg-violet-500/10">
