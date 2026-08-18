@@ -104,6 +104,18 @@ export class LlmService {
     return this.logUsage(feature, model, usage, ceiling);
   }
 
+  /**
+   * The AI tokens one feature spent since an instant — so a run can SAY what its model step really
+   * cost, next to the plan's estimate (BEA-1373). Read from the same UsageLog the budget reads;
+   * 0 when nothing was logged (or the log is not available in a harness).
+   */
+  async tokensSince(feature: string, since: Date): Promise<number> {
+    try {
+      const rows: any[] = await this.prisma.usageLog?.findMany?.({ where: { feature, at: { gte: since } }, select: { promptTokens: true, completionTokens: true } }) || [];
+      return rows.reduce((n, r) => n + (Number(r.promptTokens) || 0) + (Number(r.completionTokens) || 0), 0);
+    } catch { return 0; }
+  }
+
   /** Record one AI request's cost (never blocks or fails the actual request). */
   /**
    * @param ceiling the `maxTokens` this call was given, so we can shout when the reply ran into it.
