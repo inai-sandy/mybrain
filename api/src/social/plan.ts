@@ -201,7 +201,7 @@ export function planActionIds(plan: AgentPlan): string[] {
 // ---- cost ------------------------------------------------------------------------------------
 
 /** What the estimate reads off a know-how card (BEA-1368) — only the two facts it needs. */
-export type CostKnowledge = { cost?: { credits?: { typical?: number } }; paging?: { pageSize?: number } };
+export type CostKnowledge = { cost?: { free?: boolean; credits?: { typical?: number } }; paging?: { pageSize?: number } };
 
 export type PlanCost = { credits: number; aiTokens: number; items: number; how: string };
 
@@ -223,7 +223,9 @@ export function estimatePlanCost(plan: AgentPlan, knowledge: Record<string, Cost
   let credits = 0;
   let items = 0;
   const parts: string[] = [];
-  const perCall = (id: string) => { const n = Number(knowledge[id]?.cost?.credits?.typical); return Number.isFinite(n) && n > 0 ? n : 1; };
+  // A card that says FREE (a Composio action on the owner's own account) costs 0 — the builder shows this number, so "≈ 1 credit"
+  // for a GitHub read would be a lie (BEA-1371); else the card's typical credits, else 1.
+  const perCall = (id: string) => { const k = knowledge[id]?.cost; if (k?.free) return 0; const n = Number(k?.credits?.typical); return Number.isFinite(n) && n > 0 ? n : 1; };
   const perPage = (id: string) => { const n = Number(knowledge[id]?.paging?.pageSize); return Number.isFinite(n) && n > 0 ? n : DEFAULT_PAGE_SIZE; };
   for (const s of plan.sources) {
     if (s.kind === 'source') {

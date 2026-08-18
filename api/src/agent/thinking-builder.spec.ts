@@ -311,6 +311,7 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
     expect(input.category).toBeUndefined();
     expect(planFromAgent(input)).toEqual(plan);
     expect(estimatePlanCost(plan!, CARDS).aiTokens).toBe(0); // no shaping on a watch
+    expect(estimatePlanCost(plan!, CARDS).credits).toBe(0); // the card says free — never "≈ 1 credit" for a GitHub read
   });
 
   it('rejects what the cards do not list, twice-used ids, and creators without a per-creator action', () => {
