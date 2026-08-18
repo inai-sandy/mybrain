@@ -1,4 +1,4 @@
-import { KEEP_AS_FETCHED, blockOf, clampPages, creatorField, dateFieldOf, dedupeKey, estimatePlanCost, isDirectFetchAgent, itemDate, nextCursorOf, pagingOf, planActionIds, planFromAgent, sourceHint, sourceLabel } from './plan';
+import { KEEP_AS_FETCHED, blockOf, clampPages, creatorField, dateFieldOf, dedupeKey, estimatePlanCost, isDirectFetchAgent, itemDate, nextCursorOf, pagingOf, planActionIds, planFromAgent, rupees, sourceHint, sourceLabel } from './plan';
 import { normaliseToolArgs } from './tool-args';
 
 /**
@@ -156,6 +156,12 @@ describe('estimatePlanCost', () => {
     expect(noCards.how).toMatch(/Instagram search popular: 5 pages × 1 credit = 5/);
     expect(noCards.how).toMatch(/≈ 7 credits per run/);
     expect(noCards.how).toMatch(/shaping ≈ 84 items × 300 tokens/);
+    // ≈ ₹ for the AI part (BEA-1372): a stated rate, in the how, 0 with no shaping
+    expect(noCards.aiRupees).toBe(rupees(84 * 300));
+    expect(noCards.how).toMatch(/≈ ₹\d+(\.\d)? \(at ₹0\.3 per 1k tokens, Sonnet\)/);
+    expect(rupees(0)).toBe(0);
+    expect(rupees(60_000)).toBe(18);
+    expect(rupees(500)).toBe(0.2);
     const cards = { 'svc:instagram.search_popular': { cost: { credits: { typical: 2 } }, paging: { pageSize: 10 } } };
     const withCards = estimatePlanCost(p, cards);
     expect(withCards.credits).toBe(1 + 1 + 10);
@@ -165,6 +171,8 @@ describe('estimatePlanCost', () => {
     const cc = estimatePlanCost(c);
     expect(cc.credits).toBe(6);
     expect(cc.aiTokens).toBe(0);
+    expect(cc.aiRupees).toBe(0);
+    expect(cc.how).toMatch(/no AI shaping — rows as fetched/);
     expect(cc.how).toMatch(/once \(1\) \+ 5 creators × 1 credit = 6/);
     // a watch never shapes
     expect(estimatePlanCost(planFromAgent({ ...digest(), mode: 'watch' })).aiTokens).toBe(0);

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Social } from './Social';
 import { SocialPlatform } from './SocialPlatform';
@@ -72,12 +72,13 @@ function mockFetch(m: Mock = {}) {
   return calls;
 }
 
+function AgentStub() { const loc = useLocation(); return <div data-testid="agent-page" data-search={loc.search}>agent builder</div>; }
 const drawGrid = () => render(<MemoryRouter initialEntries={['/social']}><Routes><Route path="/social" element={<Social />} /></Routes></MemoryRouter>);
 const drawPlatform = (slug = 'tiktok') => render(
   <MemoryRouter initialEntries={[`/social/${slug}`]}>
     <Routes>
       <Route path="/social/:platform" element={<SocialPlatform />} />
-      <Route path="/agent" element={<div data-testid="agent-page">agent builder</div>} />
+      <Route path="/agent" element={<AgentStub />} />
       <Route path="/doc/:id" element={<div data-testid="doc-page">doc</div>} />
     </Routes>
   </MemoryRouter>,
@@ -344,7 +345,7 @@ describe('the platform page (/social/:platform)', () => {
     await waitFor(() => expect(screen.getByTestId('doc-page')).toBeTruthy());
   });
 
-  it('Make it an agent hands the tool id + args over in the URL', async () => {
+  it('Make it an agent hands the tool id + args + a compact sample over in the URL — to the THINKING builder (builder=chat, BEA-1372)', async () => {
     mockFetch();
     drawPlatform();
     await waitFor(() => screen.getAllByTestId('endpoint-card'));
@@ -355,6 +356,11 @@ describe('the platform page (/social/:platform)', () => {
     await waitFor(() => expect(within(panel).getByTestId('run-result')).toBeTruthy());
     fireEvent.click(within(panel).getByRole('button', { name: /Make it an agent/ }));
     await waitFor(() => expect(screen.getByTestId('agent-page')).toBeTruthy());
+    const q = new URLSearchParams(screen.getByTestId('agent-page').getAttribute('data-search') || '');
+    expect(q.get('builder')).toBe('chat');
+    expect(q.get('tool')).toBe('svc:tiktok.profile');
+    expect(JSON.parse(q.get('args')!)).toEqual({ handle: 'legrand_in' });
+    expect(JSON.parse(q.get('sample')!)).toMatchObject({ credits: 1 });
   });
 
   it('no key: the Run button is off and says why, but the endpoints are all still listed', async () => {

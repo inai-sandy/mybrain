@@ -312,6 +312,19 @@ function nextCursorOf(data: any): any {
   return null;
 }
 
+/** The `/agent?builder=chat…` URL "Make it an agent" opens (BEA-1372) — the call + a compact view of what it answered. */
+export function makeAgentUrl(o: { actionId: string; args: Record<string, any>; label: string; data?: any; credits?: number; notFound?: boolean }): string {
+  const sample: Record<string, any> = { credits: num(o.credits) };
+  if (o.notFound) sample.notFound = true;
+  else if (o.data !== undefined && o.data !== null) {
+    const sh = shapeOf(o.data);
+    if (sh.shape === 'list') { sample.count = (sh.rows || []).length; sample.listKey = sh.listKey || 'items'; sample.fields = pickColumns((sh.rows || []) as any, 8); }
+    else sample.count = 1;
+  }
+  const q = new URLSearchParams({ builder: 'chat', tool: o.actionId, args: JSON.stringify(o.args || {}), label: o.label, sample: JSON.stringify(sample) });
+  return `/agent?${q.toString()}`;
+}
+
 function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platform: Platform; noKey: boolean; topUpUrl?: string; onRan: () => void }) {
   const toast = useToast();
   const navigate = useNavigate();
@@ -438,10 +451,15 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
     }
   }
 
-  /** Hand the tool, the exact arguments just used and a label to the agent builder (BEA-1357). */
+  /**
+   * Hand the tool, the exact arguments just used, a label AND a compact view of the answer to the THINKING
+   * builder (BEA-1372: `builder=chat`) — it opens with "You just ran X (args) and got N posts. Is this the
+   * kind of thing you want, and how much of it?" and keeps the pre-filled form (BEA-1357, `builder=1`) one
+   * tap away as "Repeat exactly this call".
+   */
   function makeAgent() {
     const args = last?.args || empty?.args || {};
-    navigate(`/agent?builder=1&tool=${encodeURIComponent(e.id)}&args=${encodeURIComponent(JSON.stringify(args))}&label=${encodeURIComponent(`${platform.name} · ${e.name}`)}`);
+    navigate(makeAgentUrl({ actionId: e.id, args, label: `${platform.name} · ${e.name}`, data: merged, credits: totalCredits, notFound: !!empty && !last }));
   }
 
   return (

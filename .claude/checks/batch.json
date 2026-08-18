@@ -29,12 +29,13 @@
     {
       "id": "BEA-1374",
       "title": "Several sources on the same action + keep-adding=append (found in 1371 check)",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "fc53ac8"
     },
     {
       "id": "BEA-1372",
       "title": "Screens: plan card, samples in chat, entry points",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1373",

@@ -57,6 +57,12 @@ export class AgentController {
     return this.areas.builderReset();
   }
 
+  /** "Make it an agent" on a Social result (BEA-1372): a fresh conversation seeded with the call just made — no model call. */
+  @Post('builder/seed')
+  builderSeed(@Body() body: { actionId?: string; args?: Record<string, any>; label?: string; sample?: any }) {
+    return this.areas.builderSeed({ actionId: String(body?.actionId || ''), args: body?.args || {}, label: body?.label, sample: body?.sample });
+  }
+
   /** "Look for yourself" — one capped, reads-only sample call charged to the top-level builder conversation (BEA-1370). */
   @Post('builder/sample')
   builderSample(@Body() body: { actionId?: string; args?: Record<string, any> }) {
