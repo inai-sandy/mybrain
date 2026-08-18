@@ -698,7 +698,8 @@ model Agent {
   lastFiredKey String? // "<dayKey>:<HH:MM>" of the last scheduled fire — dedup so a schedule fires once
   outputDest   String     @default("document") // document | telegram | task | sheet — sheet = a Google Sheet through the seam (BEA-1357)
   sheetId      String? // outputDest 'sheet': append every run to THIS spreadsheet; null = a new sheet per run (BEA-1357)
-  toolArgs     String? // JSON { "<svc id>": {args} } — the exact arguments a direct-fetch job (Social) runs each tool with; no engine turn (BEA-1357)
+  sheetAppend  Boolean    @default(false) // outputDest 'sheet' + no sheetId yet: "keep adding" — the first run creates ONE sheet and stores its id here as sheetId; every later run appends, de-duped on the sheet's key column (BEA-1374)
+  toolArgs     String? // JSON { "<source id>": { actionId, args, _pages? } | creators block } — the sources a direct-fetch job (Social) runs, keyed by SOURCE id so several may share one action (BEA-1374; the older { "<svc id>": args } shape is read transparently); no engine turn (BEA-1357)
   // Watch / Alert (BEA-1358): how a direct-fetch job treats its result. run = fetch every time |
   // watch = diff against last time, output ONLY what changed | alert = watch + a condition → push.
   mode           String  @default("run")

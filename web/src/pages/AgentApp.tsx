@@ -15,6 +15,7 @@ import { StatusBadge, timeAgo } from './Agents';
 import { OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdDraftOf, thresholdOfDraft } from '../ui/agentJobFields';
 import { plainPreview } from '../ui/plainPreview';
 import { AddSourcePanel } from './social/AddSourcePanel';
+import { entryOf, sourceIdFor, sourcesOf, toolArgsOf, toolsOf } from '../ui/toolArgs';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
@@ -486,12 +487,13 @@ export function AgentApp() {
           {a.toolArgs && typeof a.toolArgs === 'object' && Object.keys(a.toolArgs).length > 0 && (
             <section className="space-y-2 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
               <h2 className="text-sm font-semibold">What it fetches</h2>
-              {Object.entries(a.toolArgs as Record<string, any>).map(([tool, args]) => (
-                <ToolArgsEditor key={tool} tool={tool} args={args || {}} toolName={toolNames[tool]} onChange={(next) => setA((p: any) => ({ ...p, toolArgs: { ...p.toolArgs, [tool]: next } }))}
+              {/* Sources are keyed by their own id (BEA-1374): several may share one action, each with its own arguments and pages. */}
+              {sourcesOf(a.toolArgs).map((src) => (
+                <ToolArgsEditor key={src.id} tool={src.actionId} args={src.value} toolName={toolNames[src.actionId]} onChange={(next) => setA((p: any) => ({ ...p, toolArgs: { ...p.toolArgs, [src.id]: entryOf(src.actionId, next) } }))}
                   onRemove={Object.keys(a.toolArgs).length > 1 ? async () => {
-                    if (!window.confirm(`Remove ${toolNames[tool] || tool} from this job? The next run will not fetch it.`)) return;
-                    const toolArgs = Object.fromEntries(Object.entries(a.toolArgs).filter(([k]) => k !== tool));
-                    const d = await patch({ tools: Object.keys(toolArgs), toolArgs });
+                    if (!window.confirm(`Remove ${toolNames[src.actionId] || src.actionId} from this job? The next run will not fetch it.`)) return;
+                    const rest = sourcesOf(a.toolArgs).filter((x) => x.id !== src.id);
+                    const d = await patch({ tools: toolsOf(rest), toolArgs: toolArgsOf(rest) });
                     if (d) toast('success', 'Source removed');
                   } : undefined} />
               ))}
@@ -501,8 +503,8 @@ export function AgentApp() {
               </div>
               {/* Another source (BEA-1359): the same platform/endpoint/form as the Social page; saved at once with its arguments pinned. */}
               {addingSource && (
-                <AddSourcePanel defaultPlatform={String(Object.keys(a.toolArgs)[0] || '').replace(/^svc:/, '').split('.')[0]} taken={Object.keys(a.toolArgs)}
-                  onAdd={async (x) => { const toolArgs = { ...a.toolArgs, [x.tool]: x.args }; const d = await patch({ tools: Object.keys(toolArgs), toolArgs }); if (d) { toast('success', `Added ${x.label || x.tool}`); setAddingSource(false); } }}
+                <AddSourcePanel defaultPlatform={String(sourcesOf(a.toolArgs)[0]?.actionId || '').replace(/^svc:/, '').split('.')[0]} taken={sourcesOf(a.toolArgs).map((x) => x.actionId)}
+                  onAdd={async (x) => { const rows = [...sourcesOf(a.toolArgs), { id: sourceIdFor(x.tool, Object.keys(a.toolArgs)), actionId: x.tool, value: x.args }]; const d = await patch({ tools: toolsOf(rows), toolArgs: toolArgsOf(rows) }); if (d) { toast('success', `Added ${x.label || x.tool}`); setAddingSource(false); } }}
                   onCancel={() => setAddingSource(false)} />
               )}
               <p className="text-[11px] text-zinc-400">Fetched directly through your Tools — no engine turn, and every call is logged with its credits.{Object.keys(a.toolArgs).length > 1 ? ' Several sources are fetched one after the other and merged into one table.' : ''}{planCost ? ` ${planCost.how}` : ''}</p>
@@ -532,9 +534,11 @@ export function AgentApp() {
             <OutputDestPicker
               dest={a.outputDest || 'document'}
               sheetId={a.sheetId || ''}
+              sheetAppend={!!a.sheetAppend}
+              onCommitSheetAppend={async (on) => { const d = await patch({ sheetAppend: on }); if (d) toast('success', on ? 'One sheet — made on the first run, then every run adds to it' : 'A new sheet every run'); }}
               onChange={async (v) => {
                 const changedDest = v.outputDest !== (a.outputDest || 'document');
-                setA((p: any) => ({ ...p, outputDest: v.outputDest, sheetId: v.sheetId }));
+                setA((p: any) => ({ ...p, outputDest: v.outputDest, sheetId: v.sheetId, sheetAppend: v.sheetAppend }));
                 // The select saves at once; the sheet id saves when the owner leaves the field.
                 if (changedDest) { const d = await patch({ outputDest: v.outputDest }); if (d) toast('success', v.outputDest === 'sheet' ? 'Results go to a Google Sheet' : 'Results go to Documents'); }
               }}

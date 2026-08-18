@@ -1,4 +1,4 @@
-import { AgentPlan, KEEP_AS_FETCHED, PlanCreators, PlanSource, isDirectFetchAgent, planFromAgent, wantsShaping } from './plan';
+import { AgentPlan, KEEP_AS_FETCHED, PlanCreators, PlanSource, isDirectFetchAgent, planFromAgent, sourceKeyArg, sourceRepeated, wantsShaping } from './plan';
 
 /**
  * A Social agent's flow picture, drawn from its settings — no AI (BEA-1366).
@@ -73,9 +73,16 @@ function thresholdText(t: any): string {
   return `${field} ${th.dir === 'below' ? 'falls below' : 'goes above'} ${Number(th.value).toLocaleString('en-US')}`;
 }
 
-/** A plain source's node: "Instagram · Popular Search × 5 pages — query: … — about 5 credits per run". */
-function sourceNode(src: PlanSource, nm: { service: string; action: string }, lastCost?: number) {
+/**
+ * A plain source's node: "Instagram · Popular Search × 5 pages — query: … — about 5 credits per run".
+ * When several sources share one action (BEA-1374) the label carries the telling argument too —
+ * "Instagram · Search Hashtag Posts #smarthomeindia × 3 pages" — so five hashtags read as five nodes.
+ */
+function sourceNode(src: PlanSource, nm: { service: string; action: string }, lastCost?: number, repeated = false) {
   const line = argsLine(src.args);
+  const key = repeated ? sourceKeyArg(src) : '';
+  const hashtag = src.args && src.args.hashtag !== undefined && String(src.args.hashtag) === key && !key.startsWith('#');
+  const tag = key ? ` ${hashtag ? '#' : ''}${key}` : '';
   const pages = src.pages > 1 ? ` × ${src.pages} pages` : '';
   const per = lastCost !== undefined && lastCost !== null && Number.isFinite(Number(lastCost)) ? Number(lastCost) : null;
   const cost = per === null
@@ -83,7 +90,7 @@ function sourceNode(src: PlanSource, nm: { service: string; action: string }, la
     : src.pages > 1 ? `about ${per * src.pages} credit${per * src.pages === 1 ? '' : 's'} per run (${src.pages} pages × ${per})` : creditsHint(per);
   const paging = src.pages > 1 ? ` — follows the vendor's cursor for up to ${src.pages} pages, de-duped by id, stops early on an empty or repeated page` : '';
   return {
-    kind: 'tool', refId: src.actionId, label: `${nm.service} · ${nm.action}${pages}`,
+    kind: 'tool', refId: src.actionId, label: `${nm.service} · ${nm.action}${tag}${pages}`,
     sub: [line, cost].filter(Boolean).join(' — '),
     args: src.pages > 1 ? { ...src.args, _pages: src.pages } : src.args,
     say: `Fetch ${nm.service} · ${nm.action}${line ? ` (${line})` : ''} directly through your Tools${paging} — ${cost}, no engine turn.`,
@@ -143,7 +150,7 @@ export function buildPlanFlow(plan: AgentPlan, opts: SocialFlowOpts = {}): { nam
   const summary = [
     `${sources.length} ${platforms.join(' + ') || 'Social'} source${sources.length === 1 ? '' : 's'}`,
     mode === 'watch' ? 'only what changed' : mode === 'alert' ? 'alert when it happens' : shaping ? 'rows shaped your way' : 'rows as fetched',
-    sheet ? (append ? 'appended to your Google Sheet' : 'a new Google Sheet each run') : 'saved to Documents',
+    sheet ? (append ? (sheetId ? 'appended to your Google Sheet' : 'kept adding to one Google Sheet') : 'a new Google Sheet each run') : 'saved to Documents',
     whatsapp ? 'link on WhatsApp' : '',
   ].filter(Boolean).join(' → ');
   nodes.push({ id: 'question', type: 'box', position: { x: CX, y: 0 }, data: { kind: 'question', label: name, sub: summary, say: prompt || KEEP_AS_FETCHED } });
@@ -157,7 +164,7 @@ export function buildPlanFlow(plan: AgentPlan, opts: SocialFlowOpts = {}): { nam
     if (src.kind === 'creators') {
       nodes.push({ id: nid, type: 'box', position, data: creatorsNode(src, nameOf, opts.costs) });
     } else {
-      nodes.push({ id: nid, type: 'box', position, data: sourceNode(src, nameOf(src.actionId), opts.costs?.[src.actionId]) });
+      nodes.push({ id: nid, type: 'box', position, data: sourceNode(src, nameOf(src.actionId), opts.costs?.[src.actionId], sourceRepeated(src, sources)) });
     }
     edge('question', nid);
     srcIds.push(nid);
@@ -175,10 +182,11 @@ export function buildPlanFlow(plan: AgentPlan, opts: SocialFlowOpts = {}): { nam
   };
 
   // ---- merge when there is more than one source ------------------------------------------------
-  // The merge is a plain union (`mergeTables()`): every row from every source under a "source"
-  // column. It does NOT de-duplicate — only the shaping step does, and only when the task says so.
+  // The merge is a union (`mergeTables()`): every row from every source under a "source" column,
+  // de-duped on the item id when the rows carry one (BEA-1374 — five hashtag searches that found
+  // the same post give one row). Anything more (a filter, columns) is the shaping step's job.
   if (sources.length > 1) {
-    chain({ id: 'merge', data: { kind: 'merge', mode: 'raw', modeText: 'Union', label: 'Merge the sources', sub: `One table with a "source" column — every row from every source${shaping ? '; the shaping step below applies your task to it' : ' (a post found by two searches appears twice)'}`, say: `Merge the ${sources.length} sources into one table under a "source" column — every row from every source${shaping ? '' : ', as fetched'}.` } });
+    chain({ id: 'merge', data: { kind: 'merge', mode: 'raw', modeText: 'Union', label: 'Merge the sources', sub: `One table with a "source" column — every row from every source, a post found by two searches once (de-duped on its id)${shaping ? '; the shaping step below applies your task to it' : ''}`, say: `Merge the ${sources.length} sources into one table under a "source" column — every row from every source, de-duped on the item id${shaping ? '' : ', as fetched'}.` } });
   }
 
   // ---- shaping — only when the task says more than "as fetched" (mode run only) ------------------
@@ -197,8 +205,11 @@ export function buildPlanFlow(plan: AgentPlan, opts: SocialFlowOpts = {}): { nam
   }
 
   // ---- the writer ----------------------------------------------------------------------------------
-  if (sheet && append) {
-    chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.batch_update', label: 'Google Sheet — append to yours', sub: `Rows go under your sheet's own columns · ${sheetId.slice(0, 18)}…`, say: 'Read your Google Sheet’s columns and row count, then append the rows under its own columns.' } });
+  if (sheet && append && sheetId) {
+    chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.batch_update', label: 'Google Sheet — append to yours', sub: `Rows go under your sheet's own columns · ${sheetId.slice(0, 18)}… · rows already there (by id) are skipped`, say: 'Read your Google Sheet’s columns and row count, then append the rows under its own columns — a row whose id the sheet already has is not added again.' } });
+  } else if (sheet && append) {
+    // "Keep adding" (BEA-1374): ONE sheet, made on the first run and remembered on the job; every later run appends, de-duped on the sheet's key column.
+    chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.batch_update', label: 'Google Sheet — one sheet, kept adding to', sub: `Made on the first run (titled "${name}"), then every run appends · rows already there (by id) are skipped`, say: `Create one Google Sheet titled "${name}" on the first run and remember it on the job; every later run appends the rows under its columns, skipping any row whose id the sheet already has.` } });
   } else if (sheet) {
     chain({ id: 'write', data: { kind: 'tool', refId: 'svc:googlesheets.create_google_sheet1', label: 'Google Sheet — new each run', sub: `Titled "${name} — <date>", header + rows at A1`, say: `Create a new Google Sheet titled "${name} — <date>" and write the header and rows at A1.` } });
   } else {

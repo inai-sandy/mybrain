@@ -94,11 +94,11 @@ describe('buildSocialFlow (BEA-1366)', () => {
     expect(byId(any, 'notify').data.label).toBe('Telegram + WhatsApp');
   });
 
-  it('two sources as fetched: the merge is an honest union — no de-dupe claimed, no shaping node', () => {
+  it('two sources as fetched: the merge is a union de-duped on the item id (BEA-1374) — no shaping node', () => {
     const { graph } = buildSocialFlow({ ...twoSources, prompt: KEEP_AS_FETCHED });
     expect(ids(graph)).toEqual(['question', 'src:svc:instagram.search_hashtag', 'src:svc:instagram.reels_search', 'merge', 'write', 'notify', 'end']);
-    expect(byId(graph, 'merge').data.sub).toContain('appears twice');
-    expect(byId(graph, 'merge').data.say).not.toMatch(/duplicate/i);
+    expect(byId(graph, 'merge').data.sub).toContain('de-duped on its id');
+    expect(byId(graph, 'merge').data.say).toMatch(/de-duped on the item id/);
   });
 
   it('append mode names the owner’s sheet and the batch_update action', () => {
@@ -163,5 +163,42 @@ describe('the shared Social facts (moved here from the runner)', () => {
     expect(n.say).toContain('handle ← username');
     expect(n.say).toContain('a creator that fails is said and skipped');
     expect(byId(graph, 'question').data.sub).toBe('1 Instagram source → rows as fetched → saved to Documents');
+  });
+});
+
+/**
+ * BEA-1374 — sources keyed by source id: five hashtag sources on ONE action are five nodes, each
+ * labelled with its hashtag; "keep adding" draws the one-sheet writer.
+ */
+describe('several sources on one action + keep adding (BEA-1374)', () => {
+  const HASHTAGS = ['smarthomeindia', 'homeautomationindia', 'smarthome', 'homeautomation', 'smartlighting'];
+  const five = (over: any = {}) => {
+    const toolArgs: Record<string, any> = {};
+    HASHTAGS.forEach((h, i) => { toolArgs[i ? `svc:instagram.search_hashtag#${i + 1}` : 'svc:instagram.search_hashtag'] = { actionId: 'svc:instagram.search_hashtag', args: { hashtag: h }, _pages: 3 }; });
+    return { id: 'ag5', name: 'Five hashtags', tools: ['svc:instagram.search_hashtag'], toolArgs, prompt: KEEP_AS_FETCHED, outputDest: 'sheet', sheetId: null, ...over };
+  };
+  const names = { 'svc:instagram.search_hashtag': { service: 'Instagram', action: 'Search Hashtag Posts' } };
+
+  it('five nodes, one per source, each naming its hashtag and pages — the same node ids the runner badges', () => {
+    const { graph } = buildSocialFlow(five(), { names });
+    expect(ids(graph)).toEqual(['question', 'src:svc:instagram.search_hashtag', 'src:svc:instagram.search_hashtag#2', 'src:svc:instagram.search_hashtag#3', 'src:svc:instagram.search_hashtag#4', 'src:svc:instagram.search_hashtag#5', 'merge', 'write', 'end']);
+    expect(byId(graph, 'src:svc:instagram.search_hashtag').data.label).toBe('Instagram · Search Hashtag Posts #smarthomeindia × 3 pages');
+    expect(byId(graph, 'src:svc:instagram.search_hashtag#2').data.label).toBe('Instagram · Search Hashtag Posts #homeautomationindia × 3 pages');
+    expect(byId(graph, 'src:svc:instagram.search_hashtag#5').data.args).toEqual({ hashtag: 'smartlighting', _pages: 3 });
+    expect(byId(graph, 'question').data.sub).toBe('5 Instagram sources → rows as fetched → a new Google Sheet each run');
+    // a lone action keeps its plain label — exactly as before
+    const one = buildSocialFlow({ ...five(), toolArgs: { 'svc:instagram.search_hashtag': { hashtag: 'smarthome' } } }, { names });
+    expect(byId(one.graph, 'src:svc:instagram.search_hashtag').data.label).toBe('Instagram · Search Hashtag Posts');
+  });
+
+  it('"keep adding" (sheetAppend, no sheet yet) → the one-sheet writer; once the runner remembered the sheet → append to yours', () => {
+    const { graph } = buildSocialFlow(five({ sheetAppend: true }), { names });
+    expect(byId(graph, 'write').data.label).toBe('Google Sheet — one sheet, kept adding to');
+    expect(byId(graph, 'write').data.refId).toBe('svc:googlesheets.batch_update');
+    expect(byId(graph, 'write').data.sub).toMatch(/Made on the first run \(titled "Five hashtags"\)/);
+    expect(byId(graph, 'question').data.sub).toContain('kept adding to one Google Sheet');
+    const later = buildSocialFlow(five({ sheetAppend: true, sheetId: 'SHEET_ONE' }), { names });
+    expect(byId(later.graph, 'write').data.label).toBe('Google Sheet — append to yours');
+    expect(byId(later.graph, 'write').data.sub).toMatch(/rows already there \(by id\) are skipped/);
   });
 });

@@ -1,5 +1,6 @@
 import { isServiceToolId } from '../tools/service-provider';
 import { Threshold, itemKey, stableJson } from './diff';
+import { ToolArgsEntry, ToolArgsMap, actionIdsOf, entryActionId, isCreatorsEntry, legacyValueOf, normaliseToolArgs } from './tool-args';
 
 /**
  * The plan JSON (BEA-1369, `specs/THINKING-BUILDER.md` §C) — the ONE description of what a Social
@@ -11,12 +12,13 @@ import { Threshold, itemKey, stableJson } from './diff';
  *  - **source** — one action + pinned args + `pages` (1..11): the runner follows the vendor's
  *    cursor / page number, one `ToolCall` per page, de-dupes on the stable id, stops early on an
  *    empty or repeated page, and checks the credit ceiling before every page. Stored on the job as
- *    `toolArgs[svc id]._pages` — a plain number beside the args, no schema change.
+ *    `toolArgs[<source id>] = { actionId, args, _pages }` (BEA-1374 — several sources may share one
+ *    action; `tool-args.ts` reads the older `toolArgs[svc id] = args` shape too).
  *  - **creators** — "find the creators, then their posts": a finder action once (`find`), the first
  *    N found (`take`, ≤ 50), then the per-creator action (`then`) once per creator, with the
  *    creator's field (`argsFrom`, e.g. `{ handle: 'username' }`) filling the argument; items older
  *    than `keepDays` are dropped when the items carry a date. Stored on the job as
- *    `toolArgs[<finder svc id>] = { kind:'creators', find:{…}, then:{…} }`.
+ *    `toolArgs[<source id>] = { kind:'creators', find:{…}, then:{…} }`.
  *  - merge · shape · watch · output · notify · schedule · ceiling — the blocks that already run.
  */
 
@@ -26,14 +28,18 @@ export const KEEP_AS_FETCHED = 'Keep every result as fetched.';
 const norm = (s: string) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 /**
- * Is this job a direct fetch? Every tool is a `svc:` id AND each has pinned arguments. A job with
- * a bare `svc:` id and no arguments is not one — the engine cannot call it either, but that is
- * the toolbox's problem to say, not ours to guess at.
+ * Is this job a direct fetch? Every tool is a `svc:` id AND each has at least one source with pinned
+ * arguments (BEA-1374: sources are keyed by source id — `normaliseToolArgs` — and several may share
+ * one action). A job with a bare `svc:` id and no source is not one — the engine cannot call it
+ * either, but that is the toolbox's problem to say, not ours to guess at.
  */
 export function isDirectFetchAgent(agent: any): boolean {
   const tools: string[] = Array.isArray(agent?.tools) ? agent.tools : [];
-  const args = agent?.toolArgs && typeof agent.toolArgs === 'object' ? agent.toolArgs : null;
-  return tools.length > 0 && !!args && tools.every((t) => isServiceToolId(t) && args[t] && typeof args[t] === 'object');
+  const map = normaliseToolArgs(agent?.toolArgs);
+  if (!tools.length || !Object.keys(map).length) return false;
+  // Every action the sources call — a source's own action, a creators block's finder AND its per-creator action.
+  const covered = new Set<string>(actionIdsOf(map));
+  return tools.every((t) => isServiceToolId(t) && covered.has(t));
 }
 
 /** Does the task text ask for anything beyond the rows as fetched? */
@@ -48,7 +54,7 @@ export const DEFAULT_KEEP_DAYS = 30;
 
 export type PlanSource = {
   kind: 'source';
-  /** The `toolArgs` key — the `svc:` id. Also the node id's tail (`src:<id>`). */
+  /** The `toolArgs` key — the SOURCE id (the `svc:` id, or `<svc id>#2`… when several sources share one action, BEA-1374). Also the node id's tail (`src:<id>`). */
   id: string;
   actionId: string;
   /** The exact arguments sent — `_pages` taken out. */
@@ -58,7 +64,7 @@ export type PlanSource = {
 
 export type PlanCreators = {
   kind: 'creators';
-  /** The `toolArgs` key — the finder's `svc:` id. */
+  /** The `toolArgs` key — the SOURCE id (the finder's `svc:` id, or `<svc id>#2`…). */
   id: string;
   find: { actionId: string; args: Record<string, any>; take: number };
   then: {
@@ -129,8 +135,16 @@ export function plainArgs(args: any): Record<string, any> {
   return out;
 }
 
-/** One `toolArgs` entry → its plan block. Exported so the UI-facing code and the tests share it. */
+/**
+ * One `toolArgs` entry → its plan block. `raw` is the per-source VALUE in either shape: the old one
+ * (`args` with `_pages` beside them, or a creators block — then the action id is `id`), or the new
+ * `{ actionId, args, _pages }` (BEA-1374). Exported so the UI-facing code and the tests share it.
+ */
 export function blockOf(id: string, raw: any): PlanBlock {
+  if (!isCreatorsArgs(raw) && raw && typeof raw === 'object' && typeof raw.actionId === 'string' && isServiceToolId(raw.actionId) && (raw.args === undefined || (raw.args && typeof raw.args === 'object'))) {
+    const pages = raw._pages !== undefined ? raw._pages : raw.args?._pages;
+    return { kind: 'source', id, actionId: raw.actionId, args: plainArgs(raw.args), pages: clampPages(pages) };
+  }
   if (isCreatorsArgs(raw)) {
     const find = raw.find || {};
     const then = raw.then || {};
@@ -139,7 +153,7 @@ export function blockOf(id: string, raw: any): PlanBlock {
     const block: PlanCreators = {
       kind: 'creators',
       id,
-      find: { actionId: String(find.actionId || id), args: plainArgs(find.args), take: clampTake(find.take) },
+      find: { actionId: String(find.actionId || id.replace(/#\d+$/, '')), args: plainArgs(find.args), take: clampTake(find.take) },
       then: { actionId: String(then.actionId || ''), argsFrom },
     };
     const extra = plainArgs(then.args);
@@ -148,19 +162,33 @@ export function blockOf(id: string, raw: any): PlanBlock {
     if (days !== undefined) block.then.keepDays = days;
     return block;
   }
-  return { kind: 'source', id, actionId: id, args: plainArgs(raw), pages: clampPages(raw?._pages) };
+  return { kind: 'source', id, actionId: id.replace(/#\d+$/, ''), args: plainArgs(raw), pages: clampPages(raw?._pages) };
 }
 
 /**
- * The plan of a job as it is saved today. Pure: same agent → same plan. Order = `Agent.tools`
- * order (the order the sources are fetched and merged), a `toolArgs` key the tools list forgot is
- * still a source (the UI's remove/add keep both in step, but data wins over a stale list).
+ * The sources of a job, in the order they run: `Agent.tools` order by ACTION (the order the sources
+ * are fetched and merged — unchanged for every job saved before BEA-1374, where one action was one
+ * source), several sources on one action in the order they were stored, and a source whose action
+ * the tools list forgot still runs (data wins over a stale list). Reads either storage shape.
+ */
+export function sourcesOfAgent(agent: any): PlanBlock[] {
+  const tools: string[] = Array.isArray(agent?.tools) ? agent.tools.filter((t: any) => typeof t === 'string') : [];
+  const map: ToolArgsMap = normaliseToolArgs(agent?.toolArgs);
+  const entries = Object.entries(map).map(([id, e], i) => ({ id, e, i, at: tools.indexOf(entryActionId(e)) }));
+  entries.sort((a, b) => (a.at === -1 ? tools.length : a.at) - (b.at === -1 ? tools.length : b.at) || a.i - b.i);
+  return entries.map(({ id, e }) => blockOfEntry(id, e));
+}
+
+/** A new-shape entry → its block (the creators block is the same in both shapes). */
+export function blockOfEntry(id: string, e: ToolArgsEntry): PlanBlock {
+  return isCreatorsEntry(e) ? blockOf(id, e) : blockOf(id, legacyValueOf(e));
+}
+
+/**
+ * The plan of a job as it is saved today. Pure: same agent → same plan.
  */
 export function planFromAgent(agent: any): AgentPlan {
-  const tools: string[] = Array.isArray(agent?.tools) ? agent.tools.filter((t: any) => typeof t === 'string') : [];
-  const args: Record<string, any> = agent?.toolArgs && typeof agent.toolArgs === 'object' ? agent.toolArgs : {};
-  const ids = [...tools.filter((t) => t in args), ...Object.keys(args).filter((k) => !tools.includes(k))];
-  const sources = ids.map((id) => blockOf(id, args[id]));
+  const sources = sourcesOfAgent(agent);
   const mode: 'run' | 'watch' | 'alert' = agent?.mode === 'watch' ? 'watch' : agent?.mode === 'alert' ? 'alert' : 'run';
   const prompt = String(agent?.prompt || '').trim();
   const dest = String(agent?.outputDest || 'document') === 'sheet' ? 'sheet' : 'document';
@@ -169,7 +197,9 @@ export function planFromAgent(agent: any): AgentPlan {
     name: String(agent?.name || 'Social agent').trim(),
     sources,
     merge: sources.length > 1,
-    output: { kind: dest, sheetId, append: dest === 'sheet' && !!sheetId },
+    // Append (BEA-1374): to the sheet the owner named, or "keep adding" to ONE sheet the first run
+    // creates (`Agent.sheetAppend`) — the runner remembers its id on the job after that first run.
+    output: { kind: dest, sheetId, append: dest === 'sheet' && (!!sheetId || !!agent?.sheetAppend) },
     notify: { whatsapp: !!agent?.notifyWhatsApp, telegram: mode === 'alert' },
     schedule: agent?.schedule ? { schedule: agent.schedule, text: String(agent.scheduleText || '') } : null,
     ceilingNote: CEILING_NOTE,
@@ -186,6 +216,48 @@ export function planFromAgent(agent: any): AgentPlan {
     if (cond) plan.watch.condition = cond;
   }
   return plan;
+}
+
+/** The action a source block calls first — the action itself, or a creators block's finder. */
+export function sourceActionId(s: PlanBlock): string {
+  return s.kind === 'source' ? s.actionId : s.find.actionId;
+}
+
+/** Argument names that tell one source from another on the same action, most telling first. */
+const TELLING_ARGS = ['hashtag', 'query', 'q', 'keyword', 'keywords', 'search', 'term', 'handle', 'username', 'user_id', 'url', 'id', 'name'];
+
+/** The one argument value that says what THIS source is about ("smarthomeindia") — for labels; '' when it has none. */
+export function sourceKeyArg(s: PlanBlock): string {
+  const args = s.kind === 'source' ? s.args : s.find.args;
+  const pick = (k: string) => { const v = args?.[k]; return v === undefined || v === null || v === '' ? '' : Array.isArray(v) ? v.join(', ') : String(v); };
+  for (const k of TELLING_ARGS) { const v = pick(k); if (v) return v.slice(0, 60); }
+  for (const k of Object.keys(args || {})) { const v = pick(k); if (v && typeof args[k] !== 'object') return v.slice(0, 60); }
+  return '';
+}
+
+/** Do other sources in the plan call the same action as this one (BEA-1374)? */
+export function sourceRepeated(s: PlanBlock, all: PlanBlock[]): boolean {
+  const id = sourceActionId(s);
+  return (all || []).filter((x) => sourceActionId(x) === id).length > 1;
+}
+
+/**
+ * The name a source goes by in the merged table's `source` column: `instagram.search_hashtag`, and
+ * when several sources share the action, ` · <its telling argument>` — so five hashtags read as five
+ * sources. A job with one source per action reads exactly as it did before BEA-1374.
+ */
+export function sourceLabel(s: PlanBlock, all: PlanBlock[]): string {
+  const base = sourceActionId(s).replace(/^svc:/, '');
+  if (!sourceRepeated(s, all)) return base;
+  const key = sourceKeyArg(s);
+  return key ? `${base} · ${key}` : `${base} · ${s.id.replace(/^.*#/, '#')}`;
+}
+
+/** ` (smarthomeindia)` for a step label when the action repeats, else ''. */
+export function sourceHint(s: PlanBlock, all: PlanBlock[]): string {
+  if (!sourceRepeated(s, all)) return '';
+  const key = sourceKeyArg(s);
+  return key ? ` (${key})` : ` (${s.id.replace(/^.*#/, '#')})`;
 }
 
 /** Every `svc:` id a plan calls (sources, finders, per-creator actions) — for names, costs, cards. */

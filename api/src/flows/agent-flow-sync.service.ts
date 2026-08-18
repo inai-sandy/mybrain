@@ -34,7 +34,7 @@ export class AgentFlowSyncService implements OnModuleInit, AgentFlowSync {
   private readonly inflight = new Map<string, boolean>();
 
   /** Saves of a Social agent that change what runs — and so the picture. */
-  static readonly SOCIAL_KEYS = ['tools', 'toolArgs', 'outputDest', 'sheetId', 'notifyWhatsApp', 'mode', 'prompt', 'alertCondition', 'threshold', 'name'];
+  static readonly SOCIAL_KEYS = ['tools', 'toolArgs', 'outputDest', 'sheetId', 'sheetAppend', 'notifyWhatsApp', 'mode', 'prompt', 'alertCondition', 'threshold', 'name'];
   /** Saves of any other agent that re-plan the picture (a rename or a pause does not). */
   static readonly PLAN_KEYS = ['prompt'];
 

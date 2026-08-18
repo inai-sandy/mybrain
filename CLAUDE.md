@@ -289,7 +289,7 @@ import FlowsModule) and runs after every `createAgent`/`updateAgent` (`createAge
 opts out — the voice research job draws its own). **A Social agent (direct runner) is BUILT, never planned**:
 `buildSocialFlow()` in `api/src/social/social-flow.ts` is a pure function of the same facts `SocialAgentRunService.
 run()` reads — one `tool` node per source (`src:<svc id>`, args + last-known credits from `ToolCall`), `merge`
-(mode raw, an honest "Union" — `mergeTables()` never de-dupes; only the shaping step does what the task says) when >1, the `ask_ai` shaping node ONLY when `wantsShaping()` AND mode is
+(mode raw, a "Union" — since BEA-1374 `mergeTables()` de-dupes on the item id column across sources; anything more is the shaping step's job) when >1, the `ask_ai` shaping node ONLY when `wantsShaping()` AND mode is
 `run` (a Watch never shapes), `filter`/`if` for watch/alert, the writer (`svc:googlesheets.create_google_sheet1`
 | `batch_update` for append | `save_document`), `whatsapp`/`telegram`, then `output`. Existing kinds only, and
 every node carries `say` (its plain-English line, which `describeFlow`/`stepAction` prefer). Saved
@@ -335,14 +335,14 @@ recorder keeps 2000 chars of pretty JSON, so an observed page size exists only f
 `SocialAgentRunService.run()` is `runPlan(planFromAgent(agent))` and `buildSocialFlow()` is `buildPlanFlow(planFromAgent(agent))` — one plan,
 the runner executes it and the picture draws it, so they cannot disagree (`KEEP_AS_FETCHED`/`isDirectFetchAgent`/`wantsShaping` now live in
 `plan.ts`, re-exported from `social-flow.ts`). Two blocks are new, both stored INSIDE `Agent.toolArgs` as data (no schema change):
-**pages** — `toolArgs[svc id]._pages` (1..11, default 1; `plainArgs()` strips `_`-keys before the vendor sees them): `fetchSource()` sends
+**pages** — `_pages` beside a source's args in `toolArgs` (1..11, default 1; `plainArgs()` strips `_`-keys before the vendor sees them): `fetchSource()` sends
 page 1 as always, then the vendor's cursor (`nextCursorOf`: cursor · next_max_id · end_cursor…) or the next page number under the param the
 know-how card's `paging.field` names (else inferred from the answer's cursor key, else a `page` already in the args, else "does not page"),
 ONE `ToolCall` per page with its credits, items de-duped on `dedupeKey()` (`itemKey` id fields, never position), early stop on no cursor /
 an empty (not_found) or repeated page, and `SocialBudgetService.check()` before EVERY page; a later page that fails for any other reason
 FAILS the run (nothing written). One page = the raw answer as before (a profile stays a profile); several = `{[listKey]: items}`. Step:
 "Fetched Instagram · Popular Search — 96 items over 8 pages · 8 credits · stopped early: page 9 was empty". A Watch keys its baseline on
-the plain args, so more pages never forgets a baseline. **creators-first** — `toolArgs[<finder svc id>] = { kind:'creators', find:{actionId,
+the plain args, so more pages never forgets a baseline. **creators-first** — `toolArgs[<source id>] = { kind:'creators', find:{actionId,
 args, take≤50}, then:{actionId, argsFrom:{ handle:'username' }, args?, keepDays?} }`: `fetchCreators()` runs the finder once, takes the
 first N distinct creators (`creatorField()` reads flat · dotted · one level down), runs the per-creator action once each (`argsFrom` maps a
 creator field into the argument, `then.args` are fixed extras like `trim:true`), keeps items newer than `keepDays` when the items carry a
@@ -403,7 +403,7 @@ the prompt gets (a) the conversation, (b) the **facts section** — `shortlistFo
 most relevant first under `FACTS_CHAR_BUDGET`, then `indexSection()` — the other shortlisted ids as "id — name" so the model knows
 they exist and can sample one; a plan may use any id it was shown (card or index), never one it made up; non-service tools stay
 one-liners in `{{tools}}`, (c) `BLOCKS_TEXT` (the BEA-1369
-blocks + cost rules, incl. "ONE source per action id per agent"), (d) `SAMPLE_TEXT` — the model may answer `{sample:{actionId,args}}`
+blocks + cost rules, incl. "several sources may use the SAME action" since BEA-1374), (d) `SAMPLE_TEXT` — the model may answer `{sample:{actionId,args}}`
 and the server runs `BuilderSampleService.sample()` (③'s caps hold, the 🔎 line lands in the log because the sampler writes the same
 row — `think()` re-loads the row after each sample) and re-prompts with `sampleViewText()`; at most `SAMPLE_LOOPS_PER_MESSAGE` (3)
 rounds per owner message, then a forced answer, (e) `RULES_TEXT`, and the design budget line. **Budget:** `DESIGN_BUDGET` (12 turns / 400k ≈ tokens per
@@ -423,8 +423,37 @@ uses a source whose card says FAILING and the reply did not say so. Prompt defau
 override lacks, so an override never loses the facts. UI: `web/src/ui/PlanCard.tsx` (small plan-with-cost + Create in both chats until ⑤);
 NewJobChat must NOT plan a flow after a plan-create (the server drew it). Traps: `AgentAreasService`' constructor gained `sampler?`
 and `knowledge?` LAST; the recorded-answers test picks its fixture by `OWNER: …` in the conversation, not by words that also appear in
-`BLOCKS_TEXT`; several search terms on the SAME action are not possible (sources are keyed by action id) — the prompt says so and the
-builder must say so to the owner.
+`BLOCKS_TEXT`; several search terms on the SAME action ARE possible since BEA-1374 (sources are keyed by source id, see the next paragraph).
+
+**Sources are keyed by SOURCE id, so five hashtags on one action are five sources; "keep adding" means append to ONE sheet (BEA-1374).**
+`Agent.toolArgs` is `{ [sourceId]: { actionId, args, _pages? } | { kind:'creators', find, then } }` — the source id is the action id for the
+first source on that action, then `<action id>#2`, `#3`… (`sourceIdFor`; readable in the node id `src:svc:instagram.search_hashtag#2`).
+The OLD shape `{ [svc id]: args }` (every job saved before 2026-08-18) is read TRANSPARENTLY by the ONE pure reader `normaliseToolArgs()`
+in `api/src/social/tool-args.ts` (mirror: `web/src/ui/toolArgs.ts` — keep them in step): `planFromAgent`/`sourcesOfAgent`, `isDirectFetchAgent`,
+the runner, the flow drawer, the cost, `planToAgentInput`, `agent.service.ts` (create/update WRITE the new shape — `shapeAgent` returns it too,
+so the API always answers the new shape — and `tools` is recomputed with `toolsFor()` = the input's tools ∪ every action the sources call, a
+`#n` source id dropped), the builder form and the job Settings (`sourcesOf`/`toolArgsOf`/`toolsOf`). `Agent.tools` keeps meaning "the action ids
+this job may call" (deduped); the sources are the truth for what runs. Order: `tools` order by action, then storage order — identical for
+every pre-1374 job (a locking test replays the owner's live agent `83ff0b15…` before/after). In the runner the merged table's `source` column and
+the step labels carry the telling argument ONLY when the action repeats (`sourceLabel`/`sourceHint`: "instagram.search_hashtag · smarthomeindia",
+"Fetched Instagram · Search Hashtag Posts (smarthomeindia)"); a lone action reads exactly as before. A Watch baseline row stays keyed on the
+ACTION id (`SocialWatch.actionId` = `sourceActionId(s)`) + args, so no pre-1374 baseline is forgotten. `mergeTables()` now de-dupes across
+sources on the union's key column (`KEY_FIELDS` order: id, pk, shortcode… url) — the merge step says "N duplicates across sources dropped
+(matched on "shortcode")". The flow node label carries the hashtag/query when the action repeats ("Instagram · Search Hashtag Posts
+#smarthomeindia × 3 pages"). **Keep adding** = `Agent.sheetAppend` (new column, migration `agent_sheet_append`) → `plan.output.append:true`
+with no `sheetId` yet: the first run creates ONE sheet titled with the job name (no date), writes, and `updateAgent(id, { sheetId })` remembers it
+on the job (a failure to remember FAILS the run and says to paste the link — never a quiet second sheet); every later run reads the header +
+count as before AND, when the header has a key column, that column (`readSheet(..., { keys:true })`, one extra Sheets read, never a Social
+credit) and `dropSeenRows()` skips rows the sheet already has ("Appended 3 rows (3 already in the sheet — skipped, matched on "shortcode")";
+all already there → done "Nothing new", no write, WhatsApp skipped). The engine road's `deliverTextToSheet` and a Watch do not read keys (a Watch
+already writes only what is new). UI: `OutputDestPicker` has a "Keep adding to one sheet" switch (shown for sheet + no sheet id; the builder
+form POSTs `sheetAppend`, the job Settings PATCH it); `AddSourcePanel` no longer greys out an action already on the job — it says "adding it
+again with different arguments makes another source" (`data-testid=same-action-note`). The builder's `BLOCKS_TEXT` says several sources may
+use the SAME action; `RULES_TEXT` maps keep adding / accumulate / grow the list → `output.append:true` on ONE sheet; `validatePlan` accepts
+repeated action ids (unique source ids via `sourceIdFor`) and reads `output.append`; `planToAgentInput` emits `sheetAppend` and the new
+`toolArgs` shape. Traps: `new Set(iterable)` with an `Iterable<string>` parameter in `tool-args.ts` made tsc report `never` errors in three
+UNRELATED files (a TS inference-cache quirk) — the parameter is `string[]`; `AgentFlowSyncService.SOCIAL_KEYS` includes `sheetAppend`, so
+flipping it redraws the picture ("Google Sheet — one sheet, kept adding to" → "append to yours" once the runner remembered the sheet).
 
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.

@@ -12,6 +12,7 @@ import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
 import { AgentBuilder } from './AgentBuilder';
 import { EMPTY_THRESHOLD, KEEP_AS_FETCHED, OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdOfDraft } from '../ui/agentJobFields';
 import { AddSourcePanel, SocialSource } from './social/AddSourcePanel';
+import { sourceIdFor, toolArgsOf, toolsOf } from '../ui/toolArgs';
 
 /** What a Social result hands the builder (BEA-1357): the tool, the exact arguments just used, a label. */
 export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string; mode?: string };
@@ -374,10 +375,12 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
   // Where the result goes + WhatsApp (BEA-1357) — first-class on every job, pre-set for a Social one.
   const [outputDest, setOutputDest] = useState<string>(social ? 'sheet' : 'document');
   const [sheetId, setSheetId] = useState('');
+  const [sheetAppend, setSheetAppend] = useState(false); // "keep adding" to one sheet (BEA-1374)
   const [notifyWhatsApp, setNotifyWhatsApp] = useState(false);
   // The sources a Social job fetches (BEA-1359): the one it was made from, plus any added here.
-  // Each is a svc: id with its EXACT arguments pinned; the run fetches every one directly.
-  const [sources, setSources] = useState<SocialSource[]>(social ? [{ tool: social.tool, args: social.args || {}, label: social.label }] : []);
+  // Each is a svc: id with its EXACT arguments pinned; the run fetches every one directly. Sources
+  // are keyed by their own id (BEA-1374) — several may share one action (five hashtags = five sources).
+  const [sources, setSources] = useState<(SocialSource & { id: string })[]>(social ? [{ id: social.tool, tool: social.tool, args: social.args || {}, label: social.label }] : []);
   const [addingSource, setAddingSource] = useState(false);
   // Watch / Alert (BEA-1358): fetch every time · watch for changes · alert when… (+ condition / threshold)
   const [mode, setMode] = useState<string>(social?.mode || 'run');
@@ -441,10 +444,10 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
           icon, color: color || undefined, category: category || undefined, description: description.trim() || undefined, autonomy,
           ...(areaId ? { areaId } : {}), // creating a job inside an existing agent (BEA-1098)
           ...(draftTools.length ? { tools: draftTools } : {}), // inferred toolbox → the area's Tools section (BEA-1100)
-          outputDest, sheetId: sheetId.trim() || null, notifyWhatsApp, // BEA-1357
-          // A Social job (BEA-1357): the tool id + its exact arguments, run directly, no engine turn.
+          outputDest, sheetId: sheetId.trim() || null, sheetAppend: outputDest === 'sheet' && !sheetId.trim() && sheetAppend, notifyWhatsApp, // BEA-1357 · BEA-1374
+          // A Social job (BEA-1357): the sources — each its action id + exact arguments, keyed by source id (BEA-1374) — run directly, no engine turn.
           // A ready run screen too — no inputs to design, so the job page never spends an engine turn on one.
-          ...(social ? { tools: sources.map((x) => x.tool), toolArgs: Object.fromEntries(sources.map((x) => [x.tool, x.args])), origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: mode === 'run' ? 'Fetch now →' : 'Check now →' } } : {}),
+          ...(social ? { tools: toolsOf(sources.map((x) => ({ id: x.id, actionId: x.tool, value: x.args }))), toolArgs: toolArgsOf(sources.map((x) => ({ id: x.id, actionId: x.tool, value: x.args }))), origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: mode === 'run' ? 'Fetch now →' : 'Check now →' } } : {}),
           // Watch / Alert (BEA-1358)
           ...(social ? { mode, alertCondition: mode === 'alert' ? alertCondition.trim() || null : null, threshold: mode === 'alert' ? thresholdOfDraft(threshold) : null } : {}),
         }),
@@ -502,7 +505,7 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
       {/* A Social job (BEA-1357): the fetch is the tool + these exact arguments — no engine turn.
           Several sources (BEA-1359) are fetched one after the other and merged into one table. */}
       {social && sources.map((src, i) => (
-        <ToolArgsEditor key={src.tool} tool={src.tool} args={src.args} toolName={src.label}
+        <ToolArgsEditor key={src.id} tool={src.tool} args={src.args} toolName={src.label}
           onChange={(next) => setSources((p) => p.map((x, j) => (j === i ? { ...x, args: next } : x)))}
           onRemove={sources.length > 1 ? () => setSources((p) => p.filter((_, j) => j !== i)) : undefined} />
       ))}
@@ -510,7 +513,7 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
         <button type="button" onClick={() => setAddingSource(true)} className="inline-flex items-center gap-1 text-xs font-medium text-pink-700 hover:underline dark:text-pink-300"><Plus className="h-3.5 w-3.5" /> Add another source</button>
       )}
       {social && addingSource && (
-        <AddSourcePanel defaultPlatform={social.tool.replace(/^svc:/, '').split('.')[0]} taken={sources.map((x) => x.tool)} onAdd={(x) => { setSources((p) => [...p, x]); setAddingSource(false); }} onCancel={() => setAddingSource(false)} />
+        <AddSourcePanel defaultPlatform={social.tool.replace(/^svc:/, '').split('.')[0]} taken={sources.map((x) => x.tool)} onAdd={(x) => { setSources((p) => [...p, { ...x, id: sourceIdFor(x.tool, p.map((y) => y.id)) }]); setAddingSource(false); }} onCancel={() => setAddingSource(false)} />
       )}
       {/* Watch / Alert (BEA-1358): remember last time, say only what changed, push when the condition is true. */}
       {social && <WatchModePicker mode={mode} condition={alertCondition} threshold={threshold} onChange={(v) => { setMode(v.mode); setAlertCondition(v.condition); setThreshold(v.threshold); }} />}
@@ -523,7 +526,7 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
         </div>
       </label>
       )}
-      <OutputDestPicker dest={outputDest} sheetId={sheetId} onChange={(v) => { setOutputDest(v.outputDest); setSheetId(v.sheetId); }} />
+      <OutputDestPicker dest={outputDest} sheetId={sheetId} sheetAppend={sheetAppend} onChange={(v) => { setOutputDest(v.outputDest); setSheetId(v.sheetId); setSheetAppend(v.sheetAppend); }} />
       <label className="flex cursor-pointer items-center justify-between gap-3 py-1">
         <span className="text-xs text-zinc-500">Send me the link on WhatsApp when it finishes <span className="text-zinc-400">(needs your number in Settings → Agent Engine)</span></span>
         <input type="checkbox" checked={notifyWhatsApp} onChange={(e) => setNotifyWhatsApp(e.target.checked)} className="h-5 w-9 shrink-0 accent-emerald-600" aria-label="Send to WhatsApp when it finishes" />

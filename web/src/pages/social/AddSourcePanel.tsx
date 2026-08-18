@@ -17,7 +17,7 @@ import { Endpoint, FieldInput, GHOST_BTN, INPUT, PRIMARY_BTN, Platform, argsOf, 
  */
 export type SocialSource = { tool: string; args: Record<string, any>; label?: string };
 
-export function AddSourcePanel({ defaultPlatform, taken, onAdd, onCancel }: { defaultPlatform?: string; taken?: string[]; onAdd: (s: SocialSource) => void; onCancel: () => void }) {
+export function AddSourcePanel({ defaultPlatform, taken, onAdd, onCancel }: { defaultPlatform?: string; /** Action ids already on the job — only a NOTE now (BEA-1374): the same action may be added again with other arguments (five hashtags = five sources). */ taken?: string[]; onAdd: (s: SocialSource) => void; onCancel: () => void }) {
   const [platforms, setPlatforms] = useState<Platform[] | null>(null);
   const [slug, setSlug] = useState(defaultPlatform || '');
   const [actions, setActions] = useState<Endpoint[] | null>(null);
@@ -57,6 +57,7 @@ export function AddSourcePanel({ defaultPlatform, taken, onAdd, onCancel }: { de
   const action = actions?.find((a) => a.id === actionId) || null;
   const fields = useMemo(() => (action ? fieldsOf(action) : []), [action]);
   const missing = fields.filter((f) => f.required && !String(values[f.name] ?? '').trim()).map((f) => f.name);
+  // The same action again is fine since BEA-1374 (sources are keyed by their own id) — said, never blocked.
   const already = !!actionId && (taken || []).includes(actionId);
   const thenAction = actions?.find((a) => a.id === thenId) || null;
   const takeN = Math.min(MAX_TAKE, Math.max(1, Math.floor(Number(take)) || 0)) || 0;
@@ -70,7 +71,7 @@ export function AddSourcePanel({ defaultPlatform, taken, onAdd, onCancel }: { de
   }, [actions]);
 
   function add() {
-    if (!action || !platform || missing.length || already || !creatorsOk) return;
+    if (!action || !platform || missing.length || !creatorsOk) return;
     if (creators && thenAction) {
       const param = creatorParamOf(thenAction.schema);
       const days = Math.floor(Number(keepDays));
@@ -127,7 +128,7 @@ export function AddSourcePanel({ defaultPlatform, taken, onAdd, onCancel }: { de
               {fields.map((f) => <FieldInput key={f.name} f={f} value={values[f.name] ?? ''} onChange={(v) => setValues((s) => ({ ...s, [f.name]: v }))} />)}
             </div>
           )}
-          {already && <p className="text-xs text-amber-600">This endpoint is already a source on this job — change its arguments there instead.</p>}
+          {already && <p className="text-xs text-zinc-500" data-testid="same-action-note">This endpoint is already a source on this job — adding it again with different arguments makes another source (five hashtags = five sources, each with its own pages).</p>}
           {creators && (
             <div className="grid gap-2 rounded-lg border border-pink-200/70 bg-pink-50/40 p-2 dark:border-pink-500/20 dark:bg-pink-500/5 sm:grid-cols-3" data-testid="creators-fields">
               <label className="block min-w-0 text-xs text-zinc-500 sm:col-span-1">then, for each creator
@@ -150,7 +151,7 @@ export function AddSourcePanel({ defaultPlatform, taken, onAdd, onCancel }: { de
       )}
       <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
         <button type="button" onClick={onCancel} className={GHOST_BTN}>Cancel</button>
-        <button type="button" onClick={add} disabled={!action || missing.length > 0 || already || !creatorsOk} className={PRIMARY_BTN} title={missing.length ? `Fill in ${missing.join(', ')} first` : creators && !thenAction ? 'Pick the per-creator endpoint first' : undefined}><Plus size={15} /> Add source</button>
+        <button type="button" onClick={add} disabled={!action || missing.length > 0 || !creatorsOk} className={PRIMARY_BTN} title={missing.length ? `Fill in ${missing.join(', ')} first` : creators && !thenAction ? 'Pick the per-creator endpoint first' : undefined}><Plus size={15} /> Add source</button>
       </div>
     </div>
   );

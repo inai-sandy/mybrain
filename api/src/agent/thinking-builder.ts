@@ -2,8 +2,9 @@ import { isServiceToolId } from '../tools/service-provider';
 import type { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { keywords, matchScore } from '../tools/tool-shortlist';
 import {
-  AgentPlan, KEEP_AS_FETCHED, MAX_PAGES, MAX_TAKE, PlanBlock, clampPages, clampTake, keepDaysOf, planActionIds, planFromAgent, plainArgs, thresholdOf,
+  AgentPlan, KEEP_AS_FETCHED, MAX_PAGES, MAX_TAKE, PlanBlock, clampPages, clampTake, keepDaysOf, planActionIds, planFromAgent, plainArgs, sourceActionId, thresholdOf,
 } from '../social/plan';
+import { sourceIdFor } from '../social/tool-args';
 import type { SampleView } from './builder-sample.service';
 
 /**
@@ -189,11 +190,11 @@ export const BLOCKS_TEXT = `PLANNING BLOCKS you may use (each one already runs; 
 - source: ONE outside-service action + its exact arguments + "pages" (1..${MAX_PAGES}, default 1). The runner follows the vendor's cursor/page number, one call per page, de-dupes items on their id, stops early on an empty page. Cost = pages × the card's credits per call. Items ≈ pages × the card's per-page count (12 when unknown). An action whose card says "does not page" costs one call however many pages you ask.
 - creators: "find the creators, then their posts" — a finder action once (find: actionId, args, take ≤ ${MAX_TAKE} creators), then a per-creator action once per creator (then: actionId, argsFrom = { <its argument>: <a field on the found creator>, e.g. { "handle": "username" } }, optional fixed extra args, optional keepDays = keep only items newer than N days WHEN the items carry a date, else everything is kept and the run says so). Cost = 1 finder call + take × the per-creator call's credits.
 - Use a creators block beside the searches when the ask wants volume ("all", "everything") or a search is failing or thin today: a profile/creator search finds the accounts, their own posts are dated and always answer.
-- ONE source per action id per agent (sources are keyed by the action). To search several terms with the SAME action you cannot add it twice — choose the strongest term for it, use the other search actions for other terms, and let a creators block bring volume. Say this plainly when it matters.
+- Several sources may use the SAME action with different arguments — five hashtags = five "source" blocks on search_hashtag, five profile-search queries = five blocks on the same search action (each with its own pages). When the owner names several hashtags, terms or queries, plan one source per term on the action that fits, never a substitute action to get around it. Sources are keyed by their own id, not by the action.
 - merge: automatic when there is more than one source — a plain union under a "source" column (no de-dupe by itself).
 - shape: the "task" text. Exactly "${KEEP_AS_FETCHED}" = rows as fetched, no AI. Anything else = a Sonnet step reads every item and does what the task says (named columns, a keep rule like "only posts about smart home in India", de-dupe). Cost ≈ items × 300 AI tokens. Never on a watch/alert.
 - watch: mode "watch" — the runner remembers last time and reports only what is new/changed (lists by stable id, numbers by movement); first run is the baseline. Use it for "tell me when …". mode "alert" = a watch plus a judged condition ("alertCondition" in plain words and/or "threshold" { field?, dir: above|below, value }) → Telegram + WhatsApp when true.
-- output: { kind: "sheet" (a new Google Sheet per run, or "sheetId" to append to one) | "document" (the Documents library) }.
+- output: { kind: "sheet" | "document" (the Documents library), sheetId: null or the owner's own sheet, append: true|false }. append:true = ONE sheet: created on the first run (or the owner's sheetId), then every run appends under its columns and skips rows already there (de-duped on the sheet's key column — id, shortcode, url); append:false = a new sheet per run.
 - notify: { whatsapp: true|false } — the link/summary to the owner's WhatsApp when the run finishes. An alert also pushes Telegram.
 - schedule: null (only when the owner presses Run) or {"every":"day","at":"HH:MM"} / {"every":"weekday","at":"HH:MM"} / {"every":"week","dow":0-6,"at":"HH:MM"} / {"every":"hour","minute":0}, plus "scheduleText" in plain words.
 - The daily Social credit ceiling is checked before every call by the runner — you do not plan for it.`;
@@ -209,6 +210,7 @@ export const RULES_TEXT = `RULES:
 - When a fact would silently change what the owner gets — a source whose items carry NO date for a "last N days" ask, a filter that does not exist, a search that is empty today — do not decide it quietly: say it, and ask or state your choice with the default.
 - Never invent a field, a filter, an argument or an action the cards do not list. If the cards say something cannot be done (no location filter, no dates), say so plainly and offer the nearest real thing.
 - If a card's health says FAILING or "answered not_found for every call", you MUST say so in your reply, and say how the plan copes (keep it so it fills in when the vendor repairs it, and add another source — for example a creators block — for volume today).
+- When the owner says keep adding / add to the list / accumulate / grow the list / build up over time (or any wording that means one list that grows run after run), the output MUST be append:true on ONE sheet — never a new sheet per run. New profiles/posts land under the same columns; rows already in the sheet are skipped — so when the task names columns, keep an id, shortcode, link or username column, or nothing can be told apart from what is already there.
 - Plan the flow yourself from the blocks — do not ask the owner to design it.
 - Before the owner presses Create, your reply shows the plan in words: what it fetches (sources × pages, creators), what it keeps, columns, where it goes, when it runs, who is told, and ≈ credits + ≈ AI tokens per run (the server recomputes the cost from the cards; state your arithmetic).
 - Never say the agent was created — the owner presses Create. Plain, everyday English. Short sentences. Keep "reply" under 200 words — detail belongs in the plan JSON, not in prose.`;
@@ -223,7 +225,7 @@ export const PLAN_SHAPE_TEXT = `"plan": null while something important is still 
   ],
   "task": "<exactly '${KEEP_AS_FETCHED}' or what to keep and which columns, in plain words>",
   "mode": "run|watch|alert", "alertCondition": "<plain words, alert only>", "threshold": {"field":"<number field>","dir":"above|below","value":N},
-  "output": {"kind":"sheet|document","sheetId":null},
+  "output": {"kind":"sheet|document","sheetId":null,"append":true|false},
   "notify": {"whatsapp":true|false},
   "schedule": null or {...}, "scheduleText": "<plain sentence or null>"
  },
@@ -303,7 +305,10 @@ export function validatePlan(raw: any, allowedIds?: Set<string> | string[]): Pla
     if (typeof v !== 'object' || Array.isArray(v)) { errors.push(`${where} must be an object`); return {}; }
     return v;
   };
-  const seen = new Set<string>();
+  // Sources are keyed by SOURCE id (BEA-1374): the action id for the first source on an action, then
+  // `#2`, `#3`… — so five hashtags on one action are five sources, each with its own id.
+  const taken: string[] = [];
+  const idFor = (actionId: string) => { const id = sourceIdFor(actionId, taken); taken.push(id); return id; };
   const blocks: PlanBlock[] = [];
   sources.forEach((s, i) => {
     const where = `sources[${i}]`;
@@ -316,9 +321,7 @@ export function validatePlan(raw: any, allowedIds?: Set<string> | string[]): Pla
       for (const [k, v] of Object.entries(argsFrom)) if (typeof v === 'string' && v.trim()) from[k] = v.trim();
       if (!Object.keys(from).length) errors.push(`${where}.then.argsFrom must map one argument to a creator field, e.g. {"handle":"username"}`);
       if (!findId || !thenId) return;
-      if (seen.has(findId)) { errors.push(`${where}: "${findId}" is used twice — one source per action id`); return; }
-      seen.add(findId);
-      const block: any = { kind: 'creators', id: findId, find: { actionId: findId, args: plainArgs(objOr(s.find?.args, `${where}.find.args`)), take: clampTake(s.find?.take) }, then: { actionId: thenId, argsFrom: from } };
+      const block: any = { kind: 'creators', id: idFor(findId), find: { actionId: findId, args: plainArgs(objOr(s.find?.args, `${where}.find.args`)), take: clampTake(s.find?.take) }, then: { actionId: thenId, argsFrom: from } };
       const extra = plainArgs(objOr(s.then?.args, `${where}.then.args`));
       if (Object.keys(extra).length) block.then.args = extra;
       const days = keepDaysOf(s.then?.keepDays);
@@ -329,9 +332,7 @@ export function validatePlan(raw: any, allowedIds?: Set<string> | string[]): Pla
     if (s.kind !== undefined && s.kind !== 'source') errors.push(`${where}.kind must be "source" or "creators"`);
     const id = checkId(s.actionId, `${where}.actionId`);
     if (!id) return;
-    if (seen.has(id)) { errors.push(`${where}: "${id}" is used twice — one source per action id`); return; }
-    seen.add(id);
-    blocks.push({ kind: 'source', id, actionId: id, args: plainArgs(objOr(s.args, `${where}.args`)), pages: clampPages(s.pages) });
+    blocks.push({ kind: 'source', id: idFor(id), actionId: id, args: plainArgs(objOr(s.args, `${where}.args`)), pages: clampPages(s.pages) });
   });
   const mode = raw.mode === 'watch' ? 'watch' : raw.mode === 'alert' ? 'alert' : raw.mode === undefined || raw.mode === null || raw.mode === 'run' ? 'run' : null;
   if (!mode) errors.push('plan.mode must be run, watch or alert');
@@ -345,7 +346,8 @@ export function validatePlan(raw: any, allowedIds?: Set<string> | string[]): Pla
     name: name.slice(0, 120),
     sources: blocks,
     merge: blocks.length > 1,
-    output: { kind: dest as any, sheetId: raw.output?.sheetId ? String(raw.output.sheetId) : null, append: false },
+    // append (BEA-1374): the owner's sheet, or "keep adding" to one sheet the first run creates.
+    output: { kind: dest as any, sheetId: raw.output?.sheetId ? String(raw.output.sheetId) : null, append: dest === 'sheet' && (!!raw.output?.sheetId || !!raw.output?.append) },
     notify: { whatsapp: !!(raw.notify?.whatsapp ?? raw.notifyWhatsApp), telegram: mode === 'alert' },
     schedule: raw.schedule ? { schedule: raw.schedule, text: String(raw.scheduleText || raw.schedule?.text || '') } : null,
     ceilingNote: '',
@@ -365,7 +367,7 @@ export function validatePlan(raw: any, allowedIds?: Set<string> | string[]): Pla
 
 export type PlanAgentInput = {
   name: string; prompt: string; tools: string[]; toolArgs: Record<string, any>; mode: 'run' | 'watch' | 'alert';
-  outputDest: 'sheet' | 'document'; sheetId: string | null; notifyWhatsApp: boolean;
+  outputDest: 'sheet' | 'document'; sheetId: string | null; sheetAppend: boolean; notifyWhatsApp: boolean;
   schedule?: any; scheduleText?: string; alertCondition?: string | null; threshold?: any; category?: string; origin: 'social';
 };
 
@@ -375,10 +377,12 @@ export type PlanAgentInput = {
  */
 export function planToAgentInput(plan: AgentPlan, isSocial?: (id: string) => boolean): PlanAgentInput {
   const tools: string[] = [];
+  // The new storage shape (BEA-1374): keyed by SOURCE id, each entry naming its action.
   const toolArgs: Record<string, any> = {};
   for (const s of plan.sources) {
-    tools.push(s.id);
-    if (s.kind === 'source') toolArgs[s.id] = { ...plainArgs(s.args), ...(s.pages > 1 ? { _pages: s.pages } : {}) };
+    const actionId = sourceActionId(s);
+    if (!tools.includes(actionId)) tools.push(actionId);
+    if (s.kind === 'source') toolArgs[s.id] = { actionId: s.actionId, args: { ...plainArgs(s.args) }, ...(s.pages > 1 ? { _pages: s.pages } : {}) };
     else {
       const then: any = { actionId: s.then.actionId, argsFrom: { ...s.then.argsFrom } };
       if (s.then.args && Object.keys(s.then.args).length) then.args = { ...s.then.args };
@@ -394,6 +398,7 @@ export function planToAgentInput(plan: AgentPlan, isSocial?: (id: string) => boo
     mode: plan.mode,
     outputDest: plan.output.kind,
     sheetId: plan.output.kind === 'sheet' && plan.output.sheetId ? plan.output.sheetId : null,
+    sheetAppend: plan.output.kind === 'sheet' && !!plan.output.append && !plan.output.sheetId,
     notifyWhatsApp: !!plan.notify.whatsapp,
     origin: 'social',
   };

@@ -386,7 +386,8 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     expect(a.origin).toBe('social');
     expect(a.category).toBe('Social');
     expect(a.tools).toEqual(['svc:instagram.search']);
-    expect(a.toolArgs).toEqual({ 'svc:instagram.search': { query: 'smarthomeindia' } }); // round-trips through JSON
+    // stored and read back in the source-id shape (BEA-1374) — the old per-action input is migrated on write
+    expect(a.toolArgs).toEqual({ 'svc:instagram.search': { actionId: 'svc:instagram.search', args: { query: 'smarthomeindia' } } });
     expect(a.outputDest).toBe('sheet');
     expect(a.sheetId).toBe('ABC123'); // a pasted link is cleaned to its id
     expect(a.notifyWhatsApp).toBe(true);
@@ -403,10 +404,42 @@ describe('AgentService — durable human-in-the-loop engine (BEA-619)', () => {
     const up: any = await svc.updateAgent(a.id, { outputDest: 'sheet', sheetId: 'S1', toolArgs: { 'svc:x.y': { q: 1 } } } as any);
     expect(up.outputDest).toBe('sheet');
     expect(up.sheetId).toBe('S1');
-    expect(up.toolArgs).toEqual({ 'svc:x.y': { q: 1 } });
+    expect(up.toolArgs).toEqual({ 'svc:x.y': { actionId: 'svc:x.y', args: { q: 1 } } });
+    expect(up.tools).toEqual(['svc:x.y']); // every action the sources call is allowed
     const back: any = await svc.updateAgent(a.id, { sheetId: '', toolArgs: null } as any);
     expect(back.sheetId).toBeNull();
     expect(back.toolArgs).toBeNull();
+  });
+
+  // ---- BEA-1374: sources keyed by source id — five hashtags on one action; keep adding ----
+  it('five sources on ONE action save and read back with their own ids; tools lists the action once; a source id in tools is dropped', async () => {
+    const toolArgs: Record<string, any> = {};
+    ['a', 'b', 'c', 'd', 'e'].forEach((h, i) => { toolArgs[i ? `svc:instagram.search_hashtag#${i + 1}` : 'svc:instagram.search_hashtag'] = { actionId: 'svc:instagram.search_hashtag', args: { hashtag: h }, _pages: 2 }; });
+    const a: any = await svc.createAgent({ name: 'Five', prompt: 'x', origin: 'social', tools: ['svc:instagram.search_hashtag', 'svc:instagram.search_hashtag#2'], toolArgs, outputDest: 'sheet', sheetAppend: true });
+    expect(Object.keys(a.toolArgs)).toHaveLength(5);
+    expect(a.toolArgs['svc:instagram.search_hashtag#5']).toEqual({ actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'e' }, _pages: 2 });
+    expect(a.tools).toEqual(['svc:instagram.search_hashtag']);
+    expect(a.sheetAppend).toBe(true);
+    // a save from Settings that removes one source keeps the rest and the action
+    const { 'svc:instagram.search_hashtag#3': _gone, ...rest } = a.toolArgs;
+    const up: any = await svc.updateAgent(a.id, { tools: ['svc:instagram.search_hashtag'], toolArgs: rest } as any);
+    expect(Object.keys(up.toolArgs)).toEqual(['svc:instagram.search_hashtag', 'svc:instagram.search_hashtag#2', 'svc:instagram.search_hashtag#4', 'svc:instagram.search_hashtag#5']);
+    expect(up.tools).toEqual(['svc:instagram.search_hashtag']);
+    // keep adding switched off, then the runner remembers a sheet
+    expect(((await svc.updateAgent(a.id, { sheetAppend: false } as any)) as any).sheetAppend).toBe(false);
+    expect(((await svc.updateAgent(a.id, { sheetId: 'SHEET_ONE' } as any)) as any).sheetId).toBe('SHEET_ONE');
+  });
+
+  it('an agent stored in the OLD per-action shape reads back migrated, without any write', async () => {
+    const a: any = await svc.createAgent({ name: 'Old', prompt: 'x', origin: 'social', tools: ['svc:instagram.search_popular'] });
+    // write the old shape straight into the row, as every job before BEA-1374 was stored
+    await (svc as any).prisma.agent.update({ where: { id: a.id }, data: { toolArgs: JSON.stringify({ 'svc:instagram.search_popular': { query: 'homeautomation', _pages: 5 } }) } });
+    const g: any = await svc.getAgent(a.id);
+    expect(g.toolArgs).toEqual({ 'svc:instagram.search_popular': { actionId: 'svc:instagram.search_popular', args: { query: 'homeautomation' }, _pages: 5 } });
+    expect(g.tools).toEqual(['svc:instagram.search_popular']);
+    // the raw row is untouched until the next save
+    const raw = await (svc as any).prisma.agent.findUnique({ where: { id: a.id } });
+    expect(JSON.parse(raw.toolArgs)).toEqual({ 'svc:instagram.search_popular': { query: 'homeautomation', _pages: 5 } });
   });
 
   it('finishRun keeps the outside link a run produced (the sheet it wrote)', async () => {
