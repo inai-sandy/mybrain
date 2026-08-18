@@ -392,6 +392,34 @@ themselves are wired to it in ④ (BEA-1371). Trap: `runDetailed()`'s `keepKnown
 so a misspelt argument is silently dropped and the sample runs without it — the view's `args` are what was ASKED, the `ToolCall` row's
 `arguments` are what really went out.
 
+**The thinking builder — the two chat builders design from facts, not a script (BEA-1371, `specs/THINKING-BUILDER.md`).**
+`AgentAreasService.builderChat` / `jobBuilderChat` share ONE turn engine (`think()`), and every design turn runs on
+`completeHelper('agent-builder')` — Sonnet 5 via OpenRouter, Settings → Agents & Engines "Agent builder model" — never Codex
+(Codex only delivers) and never a cheaper model (the owner's rule). The pure parts live in `api/src/agent/thinking-builder.ts`:
+the prompt gets (a) the conversation, (b) the **facts section** — `shortlistForPrompt` → `pickCardIds` (≤40 most relevant `svc:` ids)
+→ `ToolKnowledgeService.lookup` → `cardText()` per card in FULL (params, fields with kinds, has-a-date, paging, cost, health, notes),
+most relevant first under `FACTS_CHAR_BUDGET`; non-service tools stay one-liners in `{{tools}}`, (c) `BLOCKS_TEXT` (the BEA-1369
+blocks + cost rules, incl. "ONE source per action id per agent"), (d) `SAMPLE_TEXT` — the model may answer `{sample:{actionId,args}}`
+and the server runs `BuilderSampleService.sample()` (③'s caps hold, the 🔎 line lands in the log because the sampler writes the same
+row — `think()` re-loads the row after each sample) and re-prompts with `sampleViewText()`; at most `SAMPLE_LOOPS_PER_MESSAGE` (3)
+rounds per owner message, then a forced answer, (e) `RULES_TEXT`, and the design budget line. **Budget:** `DESIGN_BUDGET` (12 turns /
+150k ≈ tokens per conversation, `design:{turns,tokens}` in the builders' Setting row, dropped by reset) — over it the prompt says
+"DESIGN BUDGET SPENT … give the plan now" and, if the model still asks, the last saved plan comes back as the reply. **Output** is
+`{reply, sample?, plan?, cost?, spec?|job?}`; a `plan` goes through `validatePlan(raw, allowedIds)` (ids outside the shown cards are
+"invented" and refused; one bad plan is sent back ONCE with the reasons, then reply-only) and is made canonical by
+`planFromAgent(planToAgentInput(draft))` — so the plan shown IS the plan created; `cost` = `estimatePlanCost(plan, cards)` server-side.
+One proposal at a time: a plan clears the ordinary `spec`/`job` and the other way round. **Create:** `builderCreate`/`jobBuilderCreate`
+with a plan → `createAgent(planToAgentInput(plan))` (tools + toolArgs incl. `_pages`/creators blocks, task, mode/threshold/condition,
+outputDest/sheetId, notifyWhatsApp, schedule, `origin:'social'`, `category:'Social'` when every action is the social provider's) — the
+flow picture then draws itself (BEA-1366); the ordinary spec/job path is untouched. `healthNote()` appends a plain note when the plan
+uses a source whose card says FAILING and the reply did not say so. Prompt defaults `agent.builder`/`agent.jobBuilder` carry the
+`{{facts}} {{tools}} {{blocks}} {{sample}} {{budget}} {{rules}}` slots; `fillTemplate()` APPENDS any slot an owner's older Settings
+override lacks, so an override never loses the facts. UI: `web/src/ui/PlanCard.tsx` (small plan-with-cost + Create in both chats until ⑤);
+NewJobChat must NOT plan a flow after a plan-create (the server drew it). Traps: `AgentAreasService`' constructor gained `sampler?`
+and `knowledge?` LAST; the recorded-answers test picks its fixture by `OWNER: …` in the conversation, not by words that also appear in
+`BLOCKS_TEXT`; several search terms on the SAME action are not possible (sources are keyed by action id) — the prompt says so and the
+builder must say so to the owner.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

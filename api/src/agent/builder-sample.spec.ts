@@ -66,7 +66,7 @@ function harness(over: { result?: any; execute?: (id: string, args: any) => any;
   const actions = new ServiceActionsService(services, llm, prisma, undefined, social);
   const svc = new BuilderSampleService(actions, services, social, prisma);
   if (over.budget) svc.setBudget(over.budget);
-  const areas = new AgentAreasService(prisma, undefined as any, { completeWithModel: async () => ({ text: '{"reply":"ok","job":null,"spec":null}' }) } as any, { get: async () => 'T {{conversation}} {{agent}} {{tools}}' } as any, { catalog: async () => ({ groups: [], tools: [] }) } as any);
+  const areas = new AgentAreasService(prisma, undefined as any, { completeHelper: async () => '{"reply":"ok","job":null,"spec":null}' } as any, { get: async () => 'T {{conversation}} {{agent}} {{tools}}' } as any, { catalog: async () => ({ groups: [], tools: [] }) } as any);
   return { svc, rows, settings, social, services, llm, areas };
 }
 

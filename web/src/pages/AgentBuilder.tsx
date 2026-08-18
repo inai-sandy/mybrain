@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Loader2, Sparkles, X, CalendarClock, Wrench, Check } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 import { ChatInput } from '../ui/ChatInput';
+import { PlanCard, PlanCost } from '../ui/PlanCard';
 
 /**
  * The chat builder (BEA-1104): "＋ New agent" opens a conversation, not a form. The designer
@@ -12,13 +13,16 @@ export function AgentBuilder({ onCreated, onUseForm, onClose }: { onCreated: (ur
   const toast = useToast();
   const [log, setLog] = useState<{ who: 'you' | 'ai'; text: string }[]>([]);
   const [spec, setSpec] = useState<any>(null);
+  // The direct-fetch plan with its cost (BEA-1371) — shown instead of the spec when the builder planned one.
+  const [plan, setPlan] = useState<any>(null);
+  const [cost, setCost] = useState<PlanCost | null>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch('/api/agent/builder').then((r) => r.json()).then((d) => { setLog(d.log || []); setSpec(d.spec || null); }).catch(() => undefined);
+    fetch('/api/agent/builder').then((r) => r.json()).then((d) => { setLog(d.log || []); setSpec(d.spec || null); setPlan(d.plan || null); setCost(d.cost || null); }).catch(() => undefined);
   }, []);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [log, spec]);
 
@@ -34,12 +38,14 @@ export function AgentBuilder({ onCreated, onUseForm, onClose }: { onCreated: (ur
       if (!r.ok) throw new Error(d.message || 'Could not reply');
       setLog((p) => [...p, { who: 'ai', text: d.reply }]);
       setSpec(d.spec || null);
+      setPlan(d.plan || null);
+      setCost(d.cost || null);
     } catch (e: any) { setLog((p) => [...p, { who: 'ai', text: e?.message || 'Something went wrong — try again.' }]); }
     setBusy(false);
   }
 
   async function create() {
-    if (!spec || creating) return;
+    if ((!spec && !plan) || creating) return;
     setCreating(true);
     try {
       const r = await fetch('/api/agent/builder/create', { method: 'POST' });
@@ -53,7 +59,7 @@ export function AgentBuilder({ onCreated, onUseForm, onClose }: { onCreated: (ur
 
   async function reset() {
     await fetch('/api/agent/builder', { method: 'DELETE' }).catch(() => undefined);
-    setLog([]); setSpec(null);
+    setLog([]); setSpec(null); setPlan(null); setCost(null);
   }
 
   return (
@@ -81,6 +87,9 @@ export function AgentBuilder({ onCreated, onUseForm, onClose }: { onCreated: (ur
             </div>
           ))}
           {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
+
+          {/* the plan-with-cost of a direct agent (BEA-1371) */}
+          {plan && !spec && <PlanCard plan={plan} cost={cost} creating={creating} onCreate={create} />}
 
           {/* the evolving proposal */}
           {spec && (

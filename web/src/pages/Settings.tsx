@@ -1792,6 +1792,8 @@ function ModelsSection() {
         desc="Reads a finished run and proposes a few durable facts worth keeping, which you confirm. Tiny job — Haiku (the default) is fine." />
       <EngineModelCard title="Service details model" icon={Bot} base="/api/llm-config/helper/service-args"
         desc="Fills in the details of a call to a connected service — the issue title, who to message — from that action's own form. The only AI step when a job uses one of your Tools, and what it writes goes straight into a real call, so Sonnet 5 (the default) is worth it." />
+      <EngineModelCard title="Agent builder model" icon={Bot} base="/api/llm-config/helper/agent-builder"
+        desc="The thinking builder — the chat that designs a new agent or job. It reads what each tool can really do (fields, dates, paging, cost, health today), asks only what your ask leaves open, may try a small sample call, and plans the flow itself with ≈ cost before Create. Design work decides everything downstream, so Sonnet 5 (the default) — never the engine, never a cheaper model." />
       <EngineModelCard title="Social rows model" icon={Bot} base="/api/llm-config/helper/social-shape"
         desc="Turns a Social agent's fetched posts into the columns you asked for, and keeps only the ones that fit a filter like “in India” (no social search has a country filter — this step is ours). It reads real captions and decides what to keep, so Sonnet 5 (the default). Only runs when a job's task asks for more than the rows as fetched." />
       <EngineModelCard title="Social alert model" icon={Bot} base="/api/llm-config/helper/social-alert"

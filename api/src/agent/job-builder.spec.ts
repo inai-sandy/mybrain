@@ -22,7 +22,7 @@ function build(opts: { job?: any; reply?: any } = {}) {
     createAgent: async (input: any) => { created.push(input); return { id: 'job1', name: input.name }; },
     updateAgent: async (id: string, patch: any) => { patched.push({ id, patch }); return {}; },
   };
-  const llm: any = { completeWithModel: async () => ({ text: JSON.stringify(opts.reply ?? { reply: 'What time of day?', job: null }) }) };
+  const llm: any = { completeHelper: async () => JSON.stringify(opts.reply ?? { reply: 'What time of day?', job: null }) };
   const prompts: any = { get: async () => 'TPL {{conversation}} {{agent}} {{tools}}' };
   const catalog: any = { catalog: async () => ({ groups: [], tools: [{ id: 'web_search', name: 'Web search', group: 'Web', description: 'web', connected: true, kind: 'tool' }] }) };
   const svc = new AgentAreasService(prisma, agentSvc, llm, prompts, catalog);

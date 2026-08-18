@@ -5,11 +5,37 @@ import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { shortlistForPrompt } from '../tools/tool-shortlist';
+import { ToolKnowledge, ToolKnowledgeService } from '../tools/tool-knowledge.service';
+import { AgentPlan, PlanCost, estimatePlanCost } from '../social/plan';
 import { TOP_BUILDER_SESSION, builderSettingKey } from './builder-session';
+import { BuilderSampleService } from './builder-sample.service';
+import {
+  BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
+  fillTemplate, healthNote, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
+} from './thinking-builder';
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
 export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; group?: string; name: string; note?: string; status?: 'installed' | 'needed' };
+
+/**
+ * What a builder conversation keeps in its Setting row (BEA-1370/1371): the log, the ordinary
+ * proposal (`spec` for the top-level builder, `job` for a job builder), the direct-fetch `plan` with
+ * its `cost`, the sample counter and the design-budget counter. A reset drops all of it.
+ */
+export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter };
+
+function packState(st: BuilderState): string {
+  return JSON.stringify({
+    log: (st.log || []).slice(-40),
+    ...(st.spec !== undefined ? { spec: st.spec } : {}),
+    ...(st.job !== undefined ? { job: st.job } : {}),
+    plan: st.plan || null,
+    cost: st.cost || null,
+    ...(st.samples ? { samples: st.samples } : {}),
+    ...(st.design ? { design: st.design } : {}),
+  });
+}
 
 /**
  * Agent AREAS (BEA-1095) — the container the owner thinks of as "an agent" (Research Agent,
@@ -24,6 +50,8 @@ export class AgentAreasService {
     private readonly llm?: LlmService,
     private readonly promptsSvc?: PromptsService,
     private readonly catalog?: ToolCatalogService, // the one tool catalog (BEA-1167)
+    private readonly sampler?: BuilderSampleService, // "look for yourself" (BEA-1370) — LAST, optional
+    private readonly knowledge?: ToolKnowledgeService, // the know-how cards the builder reads (BEA-1368/1371)
   ) {}
 
   /**
@@ -60,68 +88,61 @@ export class AgentAreasService {
   private jobKey(areaId: string) { return builderSettingKey(areaId); }
 
   // `samples` is the sample-call counter (BEA-1370, `BuilderSampleService`) — carried through untouched
-  // here so a chat turn never forgets what was already tried; a reset drops it on purpose.
-  private async jobLoad(areaId: string): Promise<{ log: any[]; job: any | null; samples?: any }> {
+  // here so a chat turn never forgets what was already tried; a reset drops it on purpose. `plan`,
+  // `cost` and `design` (the design-budget counter) are the thinking builder's (BEA-1371).
+  private async jobLoad(areaId: string): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.jobKey(areaId) } }).catch(() => null);
-    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, samples: v?.samples }; } catch { return { log: [], job: null }; }
+    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design }; } catch { return { log: [], job: null, plan: null, cost: null }; }
   }
-  private async jobSave(areaId: string, st: { log: any[]; job: any | null; samples?: any }) {
-    const value = JSON.stringify({ log: st.log.slice(-40), job: st.job, ...(st.samples ? { samples: st.samples } : {}) });
-    await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value }, update: { value } });
+  private async jobSave(areaId: string, st: BuilderState) {
+    await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value: packState(st) }, update: { value: packState(st) } });
   }
   async jobBuilderState(areaId: string) { return this.jobLoad(areaId); }
-  async jobBuilderReset(areaId: string) { await this.jobSave(areaId, { log: [], job: null }); return { ok: true }; }
+  async jobBuilderReset(areaId: string) { await this.jobSave(areaId, { log: [], job: null, plan: null, cost: null }); return { ok: true }; }
 
-  /** One turn of the new-job conversation. */
-  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null }> {
+  /** One turn of the new-job conversation — the thinking builder (BEA-1371). */
+  async jobBuilderChat(areaId: string, message: string): Promise<{ reply: string; job: any | null; plan: AgentPlan | null; cost: PlanCost | null }> {
     const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
     const area: any = await this.get(areaId);
-    const st = await this.jobLoad(areaId);
-    st.log.push({ who: 'you', text: msg, at: new Date().toISOString() });
-    const cantDo = "I couldn't work that out — try saying it another way.";
-    try {
-      const tpl = (await this.promptsSvc?.get('agent.jobBuilder').catch(() => '')) || '';
-      const convo = st.log.slice(-24).map((m: any) => `${m.who === 'you' ? 'OWNER' : 'YOU'}: ${m.text}`).join('\n');
-      const agentBlurb = [
-        `Name: ${area.name}`,
-        area.description ? `What it is for: ${area.description}` : '',
-        (area.tools || []).length ? `Its usual tools: ${(area.tools || []).map((t: any) => t.name).join(', ')}` : '',
-        (area.jobs || []).length ? `Jobs it already has: ${(area.jobs || []).map((j: any) => j.name).join(', ')}` : '',
-      ].filter(Boolean).join('\n');
-      const cat = await this.catalog?.catalog().catch(() => null);
-      // Every connected tool — but a service's actions cut to the ones that match the conversation
-      // (BEA-1354: the catalog holds all ~800 of GitHub's; the builder prompt cannot carry them).
-      const toolList = shortlistForPrompt((cat?.tools || []).filter((t: any) => t.connected), convo)
-        .map((t: any) => `- ${t.id} (${t.group}) — ${t.name}: ${t.description}`)
-        .join('\n') || '(none available)';
-      const jobNote = st.job ? `\n\nThe job you last proposed (refine it, don't start over):\n${JSON.stringify(st.job)}` : '';
-      const { text } = (await this.llm?.completeWithModel(
-        { provider: 'codex', model: 'codex' },
-        tpl.replaceAll('{{conversation}}', convo).replaceAll('{{agent}}', agentBlurb).replaceAll('{{tools}}', toolList) + jobNote,
-        1800,
-        'agent-job-builder',
-      )) || { text: null };
-      const m = (text || '').match(/\{[\s\S]*\}/);
-      const g = m ? JSON.parse(m[0]) : null;
-      const reply = String(g?.reply || cantDo).slice(0, 1200);
-      if (g?.job && typeof g.job === 'object' && g.job.name && g.job.task) st.job = g.job;
-      st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
-      await this.jobSave(areaId, st);
-      return { reply, job: st.job };
-    } catch {
-      st.log.push({ who: 'ai', text: cantDo, at: new Date().toISOString() });
-      await this.jobSave(areaId, st);
-      return { reply: cantDo, job: st.job };
-    }
+    const agentBlurb = [
+      `Name: ${area.name}`,
+      area.description ? `What it is for: ${area.description}` : '',
+      (area.tools || []).length ? `Its usual tools: ${(area.tools || []).map((t: any) => t.name).join(', ')}` : '',
+      (area.jobs || []).length ? `Jobs it already has: ${(area.jobs || []).map((j: any) => j.name).join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+    const st = await this.think({
+      sessionKey: areaId,
+      promptKey: 'agent.jobBuilder',
+      load: () => this.jobLoad(areaId),
+      save: (x) => this.jobSave(areaId, x),
+      message: msg,
+      vars: { agent: { label: 'The agent this job belongs to', text: agentBlurb } },
+      proposalKey: 'job',
+      keepProposal: (g) => (g && typeof g === 'object' && g.name && g.task ? g : null),
+      label: 'agent-job-builder',
+    });
+    return { reply: st.reply, job: st.state.job, plan: st.state.plan || null, cost: st.state.cost || null };
   }
 
   /** Build the job the owner just approved. `overrides` carries their tool ticks (BEA-1171). */
   async jobBuilderCreate(areaId: string, overrides?: { tools?: string[]; checks?: string[] }) {
     const st = await this.jobLoad(areaId);
+    if (!this.agentSvc) throw new BadRequestException('Agent service unavailable.');
+
+    // A DIRECT job (BEA-1371): the plan IS the job — the same fields `planFromAgent` reads back, so
+    // the runner and the flow picture see exactly what the builder showed.
+    if (st.plan) {
+      const input = planToAgentInput(st.plan, await this.socialTester(st.plan));
+      const created: any = await this.agentSvc.createAgent({ ...input, areaId } as any);
+      st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
+      st.job = null; st.plan = null; st.cost = null;
+      await this.jobSave(areaId, st);
+      return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
+    }
+
     const j = st.job;
     if (!j?.name || !j?.task) throw new BadRequestException('There is no job to create yet — keep chatting.');
-    if (!this.agentSvc) throw new BadRequestException('Agent service unavailable.');
 
     const proposedTools: string[] = Array.isArray(j.tools) ? j.tools.map((t: any) => (typeof t === 'string' ? t : t?.id)).filter(Boolean) : [];
     const tools = Array.isArray(overrides?.tools) ? overrides!.tools! : proposedTools;
@@ -149,63 +170,190 @@ export class AgentAreasService {
     } as any);
 
     st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
-    st.job = null;
+    st.job = null; st.plan = null; st.cost = null;
     await this.jobSave(areaId, st);
     return { ok: true as const, jobId: created.id, url: `/agent/a/${created.id}`, name: created.name };
+  }
+
+  // ---- The thinking builder's turn (BEA-1371) — shared by both chat builders ---------------------
+  //
+  // One owner message → (facts for the shortlisted tools) → the model → maybe a sample (≤ 3 rounds,
+  // ③'s caps hold, the 🔎 line lands in the log) → a reply, and maybe a validated plan with its cost.
+  // The design budget (turns + tokens per conversation) is counted here; over it, the model is told
+  // to propose the best plan it has instead of asking more.
+
+  private async think(o: {
+    sessionKey: string;
+    promptKey: 'agent.builder' | 'agent.jobBuilder';
+    load: () => Promise<BuilderState>;
+    save: (st: BuilderState) => Promise<void>;
+    message: string;
+    vars: Record<string, { label: string; text: string }>;
+    /** 'spec' (top-level: area + jobs) or 'job' — the ordinary, engine-run proposal beside the plan. */
+    proposalKey: 'spec' | 'job';
+    keepProposal: (g: any) => any | null;
+    label: string;
+  }): Promise<{ reply: string; state: BuilderState }> {
+    let st = await o.load();
+    st.log.push({ who: 'you', text: o.message, at: new Date().toISOString() });
+    await o.save(st); // the owner's line is down before any sample line can land after it
+    const cantDo = "I couldn't work that out — try saying it another way.";
+    const design: DesignCounter = readDesignCounter(st);
+    let spentTokens = 0;
+    try {
+      const tpl = (await this.promptsSvc?.get(o.promptKey).catch(() => '')) || '';
+      const convo = () => st.log.slice(-24).map((m: any) => `${m.who === 'you' ? 'OWNER' : 'YOU'}: ${m.text}`).join('\n');
+
+      // ---- the tools that fit, and their cards ---------------------------------------------------
+      const cat = await this.catalog?.catalog().catch(() => null);
+      const shortlist = shortlistForPrompt((cat?.tools || []).filter((t: any) => t.connected), convo());
+      const cardIds = pickCardIds(shortlist as any, convo());
+      const cards: ToolKnowledge[] = cardIds.length ? await this.knowledge?.lookup(cardIds).catch(() => []) || [] : [];
+      const cardsById: Record<string, ToolKnowledge> = Object.fromEntries(cards.map((c) => [c.actionId, c]));
+      const plainTools = shortlist.filter((t: any) => !String(t.id).startsWith('svc:')).map((t: any) => `- ${t.id} (${t.group}) — ${t.name}: ${t.description}`).join('\n') || '(none)';
+      // Only ids whose card the model was really SHOWN — a lookup that came back short must not widen it.
+      const allowedIds = new Set(cards.map((c) => c.actionId));
+
+      const previous = st.plan ? `\n\nThe plan you last proposed (refine it, don't start over):\n${JSON.stringify(st.plan)}` : st[o.proposalKey] ? `\n\nThe ${o.proposalKey} you last proposed (refine it, don't start over):\n${JSON.stringify(st[o.proposalKey])}` : '';
+      const buildPrompt = (extra: string) => fillTemplate(tpl, {
+        conversation: { label: 'The conversation so far', text: convo() },
+        ...o.vars,
+        facts: { label: 'WHAT THE TOOLS CAN REALLY DO (know-how cards)', text: factsSection(cards, convo()) },
+        tools: { label: 'Other tools (exact ids)', text: plainTools },
+        blocks: { label: 'Planning blocks', text: BLOCKS_TEXT },
+        sample: { label: 'Look for yourself', text: SAMPLE_TEXT },
+        budget: { label: 'Design budget', text: budgetLine(design) },
+        rules: { label: 'Rules', text: RULES_TEXT },
+      }) + previous + extra;
+
+      const ask = async (extra: string): Promise<any> => {
+        const prompt = buildPrompt(extra);
+        const text = await this.llm?.completeHelper('agent-builder', prompt, TURN_MAX_TOKENS, o.label, { timeoutMs: TURN_TIMEOUT_MS });
+        spentTokens += estimateTokens(prompt) + estimateTokens(text || '');
+        return parseBuilderJson(text);
+      };
+
+      // ---- the loop: sample rounds, then a plan check --------------------------------------------
+      let extra = '';
+      let g: any = null;
+      for (let round = 0; round <= SAMPLE_LOOPS_PER_MESSAGE; round++) {
+        g = await ask(extra);
+        const want = sampleRequestOf(g);
+        if (!want) break;
+        if (round === SAMPLE_LOOPS_PER_MESSAGE || overBudget(design) || !this.sampler) {
+          extra += `\n\nNo more samples for this message${!this.sampler ? ' (sampling is not available here)' : ''} — answer the owner now from what you know.`;
+          g = await ask(extra);
+          break;
+        }
+        const view = await this.sampler.sample(o.sessionKey, want.actionId, want.args);
+        // The sampler wrote its 🔎 line and counter into the SAME row — pick them up, keep our proposal.
+        const fresh = await o.load();
+        st = { ...st, log: fresh.log, samples: fresh.samples };
+        extra += `\n\n${sampleViewText(view)}\nNow continue: another sample only if it settles something the owner would otherwise be asked; else answer.`;
+      }
+
+      let reply = String(g?.reply || '').trim().slice(0, 2400);
+      let plan: AgentPlan | null = null;
+      let cost: PlanCost | null = null;
+      if (g?.plan && typeof g.plan === 'object') {
+        let check = validatePlan(g.plan, allowedIds);
+        if (!check.plan) {
+          // Once: tell the model what was wrong; a second miss falls back to the reply alone.
+          const fixed = await ask(`${extra}\n\nYour "plan" did not validate: ${check.errors.join('; ')}. Send the whole JSON again with the plan fixed (same reply is fine).`);
+          if (fixed?.plan && typeof fixed.plan === 'object') check = validatePlan(fixed.plan, allowedIds);
+          if (check.plan && fixed?.reply) reply = String(fixed.reply).trim().slice(0, 2400);
+        }
+        if (check.plan) {
+          plan = check.plan;
+          cost = estimatePlanCost(plan, cardsById as any);
+        }
+      }
+      // Budget spent and still no plan: keep the best plan so far rather than asking on.
+      if (!plan && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || estimatePlanCost(plan, cardsById as any); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
+      if (!reply) reply = cantDo;
+      // Honesty: a plan that leans on a failing source says so, even when the model forgot.
+      const note = healthNote(plan, cardsById, reply);
+      if (note) reply = `${reply}\n\n${note}`;
+
+      // One proposal at a time: a plan (direct agent) replaces an ordinary proposal and the other way
+      // round, so Create never has to guess which one the owner is looking at.
+      const proposal = o.keepProposal(g?.[o.proposalKey]);
+      if (plan) { st.plan = plan; st.cost = cost; (st as any)[o.proposalKey] = null; }
+      else if (proposal) { (st as any)[o.proposalKey] = proposal; st.plan = null; st.cost = null; }
+      st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
+      st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
+      await o.save(st);
+      return { reply, state: st };
+    } catch {
+      st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
+      st.log.push({ who: 'ai', text: cantDo, at: new Date().toISOString() });
+      await o.save(st);
+      return { reply: cantDo, state: st };
+    }
+  }
+
+  /** `id → is it a social-provider action?` for the plan's category, from the cards it was planned with. */
+  private async socialTester(plan: AgentPlan): Promise<((id: string) => boolean) | undefined> {
+    const ids = [...new Set(plan.sources.flatMap((s) => (s.kind === 'source' ? [s.actionId] : [s.find.actionId, s.then.actionId])))].filter(Boolean);
+    const cards = ids.length ? await this.knowledge?.lookup(ids).catch(() => []) || [] : [];
+    if (!cards.length) return undefined;
+    const social = new Set(cards.filter((c) => c.provider === 'social').map((c) => c.actionId));
+    const known = new Set(cards.map((c) => c.actionId));
+    return (id: string) => known.has(id) && social.has(id);
   }
 
   // ---- The in-app chat builder (BEA-1104): a persisted conversation that designs a new agent. ----
 
   private builderKey() { return builderSettingKey(TOP_BUILDER_SESSION); }
 
-  private async builderLoad(): Promise<{ log: any[]; spec: any | null; samples?: any }> {
+  private async builderLoad(): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.builderKey() } }).catch(() => null);
-    try { return row ? JSON.parse((row as any).value) : { log: [], spec: null }; } catch { return { log: [], spec: null }; }
+    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
   }
   // `samples` = the sample-call counter (BEA-1370); kept across turns, dropped by `builderReset()`.
-  private async builderSave(st: { log: any[]; spec: any | null; samples?: any }) {
-    const value = JSON.stringify({ log: st.log.slice(-40), spec: st.spec, ...(st.samples ? { samples: st.samples } : {}) });
-    await this.prisma.setting.upsert({ where: { key: this.builderKey() }, create: { key: this.builderKey(), value }, update: { value } });
+  private async builderSave(st: BuilderState) {
+    await this.prisma.setting.upsert({ where: { key: this.builderKey() }, create: { key: this.builderKey(), value: packState(st) }, update: { value: packState(st) } });
   }
 
   async builderState() { return this.builderLoad(); }
-  async builderReset() { await this.builderSave({ log: [], spec: null }); return { ok: true }; }
+  async builderReset() { await this.builderSave({ log: [], spec: null, plan: null, cost: null }); return { ok: true }; }
 
-  /** One builder turn: owner's message → the designer's reply (+ the evolving spec). Flat-rate
-   *  Codex first (the llm layer falls back to Sonnet automatically), so API calls stay minimal. */
-  async builderChat(message: string): Promise<{ reply: string; spec: any | null }> {
-    const msg = (message || '').trim().slice(0, 1000);
+  /** One builder turn: owner's message → the thinking builder's reply (+ the evolving spec or plan). */
+  async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null }> {
+    const msg = (message || '').trim().slice(0, 2000);
     if (!msg) throw new BadRequestException('Say something first.');
-    const st = await this.builderLoad();
-    const at = new Date().toISOString();
-    st.log.push({ who: 'you', text: msg, at });
-    const cantDo = "I couldn't work that out — try saying it another way.";
-    try {
-      const tpl = (await this.promptsSvc?.get('agent.builder').catch(() => '')) || '';
-      const convo = st.log.slice(-20).map((m: any) => `${m.who === 'you' ? 'OWNER' : 'YOU'}: ${m.text}`).join('\n');
-      const specNote = st.spec ? `\n\nThe spec you last proposed (refine it, don't start over):\n${JSON.stringify(st.spec)}` : '';
-      const { text } = (await this.llm?.completeWithModel({ provider: 'codex', model: 'codex' }, tpl.replaceAll('{{conversation}}', convo) + specNote, 1600, 'agent-builder')) || { text: null };
-      const m = (text || '').match(/\{[\s\S]*\}/);
-      const g = m ? JSON.parse(m[0]) : null;
-      const reply = String(g?.reply || cantDo).slice(0, 800);
-      if (g?.spec && typeof g.spec === 'object' && g.spec.area?.name) st.spec = g.spec;
-      st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
-      await this.builderSave(st);
-      return { reply, spec: st.spec };
-    } catch {
-      st.log.push({ who: 'ai', text: cantDo, at: new Date().toISOString() });
-      await this.builderSave(st);
-      return { reply: cantDo, spec: st.spec };
-    }
+    const st = await this.think({
+      sessionKey: TOP_BUILDER_SESSION,
+      promptKey: 'agent.builder',
+      load: () => this.builderLoad(),
+      save: (x) => this.builderSave(x),
+      message: msg,
+      vars: {},
+      proposalKey: 'spec',
+      keepProposal: (g) => (g && typeof g === 'object' && g.area?.name ? g : null),
+      label: 'agent-builder',
+    });
+    return { reply: st.reply, spec: st.state.spec, plan: st.state.plan || null, cost: st.state.cost || null };
   }
 
   /** Create the agent from the current proposal (the owner pressed Create). */
   async builderCreate() {
     const st = await this.builderLoad();
+    // A DIRECT agent (BEA-1371): one job from the plan, its own area, the flow picture drawn from the
+    // same fields — `createAgent` without an area gives the job an area of the same name.
+    if (st.plan) {
+      if (!this.agentSvc) throw new BadRequestException('Agent service unavailable.');
+      const input = planToAgentInput(st.plan, await this.socialTester(st.plan));
+      const created: any = await this.agentSvc.createAgent(input as any);
+      st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
+      st.plan = null; st.cost = null;
+      await this.builderSave(st);
+      return { ok: true as const, areaId: created.areaId, agentId: created.id, url: `/agent/a/${created.id}`, jobs: [{ id: created.id, name: created.name }] };
+    }
     if (!st.spec) throw new BadRequestException('There is no proposal to create yet — keep chatting.');
     const res = await this.createFromSpec(st.spec);
     st.log.push({ who: 'ai', text: `Created ✓ — "${st.spec.area.name}" with ${res.jobs.length} job(s).`, at: new Date().toISOString() });
-    st.spec = null;
+    st.spec = null; st.plan = null; st.cost = null;
     await this.builderSave(st);
     return res;
   }
