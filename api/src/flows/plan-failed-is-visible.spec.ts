@@ -134,3 +134,18 @@ describe('the warning actually reaches a human (BEA-1253)', () => {
     expect(FlowsService.PLAN_FAILED_NOTE).toMatch(/fallback/i);
   });
 });
+
+/** BEA-1366: the first live draw-on-save was cut off at the old 2200-token ceiling on both attempts. */
+describe('the planner is given room to answer', () => {
+  it('asks the flow-plan helper for at least 8000 tokens', async () => {
+    const seen: number[] = [];
+    const prisma: any = { flow: { findUnique: async () => null } };
+    const llm: any = { completeHelper: async (_k: string, _p: string, max: number) => { seen.push(max); return GOOD_PLAN; } };
+    const svc2 = new FlowsService(prisma, { list: async () => [] } as any, llm, { get: async () => 'P {{question}} {{tools}} {{skills}}' } as any, undefined);
+    await svc2.planFlow('do the thing');
+    expect(seen.length).toBeGreaterThan(0);
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(8000);
+    expect(FlowsService.PLAN_MAX_TOKENS).toBeGreaterThanOrEqual(8000);
+  });
+});
+
