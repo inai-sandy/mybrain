@@ -53,7 +53,11 @@
     {
       "id": "BEA-1359",
       "title": "Owner's example live (acceptance)",
-      "status": "in_progress"
+      "status": "parked",
+      "sha": "5bfcf47",
+      "note": "In Review \u2014 all code proven incl. scheduler firing + real sheet; blocked on vendor search outage (last-30-days rows) + Meta WhatsApp pacing"
     }
-  ]
+  ],
+  "status": "complete",
+  "finishedAt": "2026-08-18T00:58:00Z"
 }
