@@ -11,6 +11,7 @@ import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
 import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
 import { AgentBuilder } from './AgentBuilder';
 import { EMPTY_THRESHOLD, KEEP_AS_FETCHED, OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdOfDraft } from '../ui/agentJobFields';
+import { AddSourcePanel, SocialSource } from './social/AddSourcePanel';
 
 /** What a Social result hands the builder (BEA-1357): the tool, the exact arguments just used, a label. */
 export type SocialPrefill = { tool: string; args: Record<string, any>; label?: string; mode?: string };
@@ -374,7 +375,10 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
   const [outputDest, setOutputDest] = useState<string>(social ? 'sheet' : 'document');
   const [sheetId, setSheetId] = useState('');
   const [notifyWhatsApp, setNotifyWhatsApp] = useState(false);
-  const [toolArgs, setToolArgs] = useState<Record<string, any>>(social?.args || {});
+  // The sources a Social job fetches (BEA-1359): the one it was made from, plus any added here.
+  // Each is a svc: id with its EXACT arguments pinned; the run fetches every one directly.
+  const [sources, setSources] = useState<SocialSource[]>(social ? [{ tool: social.tool, args: social.args || {}, label: social.label }] : []);
+  const [addingSource, setAddingSource] = useState(false);
   // Watch / Alert (BEA-1358): fetch every time · watch for changes · alert when… (+ condition / threshold)
   const [mode, setMode] = useState<string>(social?.mode || 'run');
   const [alertCondition, setAlertCondition] = useState('');
@@ -440,7 +444,7 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
           outputDest, sheetId: sheetId.trim() || null, notifyWhatsApp, // BEA-1357
           // A Social job (BEA-1357): the tool id + its exact arguments, run directly, no engine turn.
           // A ready run screen too — no inputs to design, so the job page never spends an engine turn on one.
-          ...(social ? { tools: [social.tool], toolArgs: { [social.tool]: toolArgs }, origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: mode === 'run' ? 'Fetch now →' : 'Check now →' } } : {}),
+          ...(social ? { tools: sources.map((x) => x.tool), toolArgs: Object.fromEntries(sources.map((x) => [x.tool, x.args])), origin: 'social', ui: { headline: name.trim(), inputs: [], view: 'report', runLabel: mode === 'run' ? 'Fetch now →' : 'Check now →' } } : {}),
           // Watch / Alert (BEA-1358)
           ...(social ? { mode, alertCondition: mode === 'alert' ? alertCondition.trim() || null : null, threshold: mode === 'alert' ? thresholdOfDraft(threshold) : null } : {}),
         }),
@@ -495,8 +499,19 @@ export function NewAgentForm({ initial, areaId, social, onCreated, onCancel }: {
         </select>
         )}
       </div>
-      {/* A Social job (BEA-1357): the fetch is the tool + these exact arguments — no engine turn. */}
-      {social && <ToolArgsEditor tool={social.tool} args={toolArgs} onChange={setToolArgs} toolName={social.label} />}
+      {/* A Social job (BEA-1357): the fetch is the tool + these exact arguments — no engine turn.
+          Several sources (BEA-1359) are fetched one after the other and merged into one table. */}
+      {social && sources.map((src, i) => (
+        <ToolArgsEditor key={src.tool} tool={src.tool} args={src.args} toolName={src.label}
+          onChange={(next) => setSources((p) => p.map((x, j) => (j === i ? { ...x, args: next } : x)))}
+          onRemove={sources.length > 1 ? () => setSources((p) => p.filter((_, j) => j !== i)) : undefined} />
+      ))}
+      {social && !addingSource && (
+        <button type="button" onClick={() => setAddingSource(true)} className="inline-flex items-center gap-1 text-xs font-medium text-pink-700 hover:underline dark:text-pink-300"><Plus className="h-3.5 w-3.5" /> Add another source</button>
+      )}
+      {social && addingSource && (
+        <AddSourcePanel defaultPlatform={social.tool.replace(/^svc:/, '').split('.')[0]} taken={sources.map((x) => x.tool)} onAdd={(x) => { setSources((p) => [...p, x]); setAddingSource(false); }} onCancel={() => setAddingSource(false)} />
+      )}
       {/* Watch / Alert (BEA-1358): remember last time, say only what changed, push when the condition is true. */}
       {social && <WatchModePicker mode={mode} condition={alertCondition} threshold={threshold} onChange={(v) => { setMode(v.mode); setAlertCondition(v.condition); setThreshold(v.threshold); }} />}
       {/* A Watch/Alert writes only what changed — the shaping task does not apply, so it is not shown. */}

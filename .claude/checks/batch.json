@@ -47,12 +47,13 @@
     {
       "id": "BEA-1363",
       "title": "History previews strip markdown (polish, found in 1358)",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "c0ea01a"
     },
     {
       "id": "BEA-1359",
       "title": "Owner's example live (acceptance)",
-      "status": "pending"
+      "status": "in_progress"
     }
   ]
 }

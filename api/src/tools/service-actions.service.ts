@@ -82,6 +82,8 @@ export type ServiceRunResult = {
   ms?: number;
   status?: number;
   outOfCredits?: boolean;
+  /** The provider answered "nothing matches" (a search with no results) — see `ExecuteResult.notFound` (BEA-1359). */
+  notFound?: boolean;
   actionName?: string;
   serviceName?: string;
 };
@@ -151,10 +153,10 @@ export class ServiceActionsService {
     const { service } = parsed;
     const say = ctx.onLine || (() => undefined);
 
-    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean; credits?: number; status?: number } = {}): Promise<ServiceRunResult> => {
-      const { status, ...rec } = extra;
+    const fail = async (message: string, extra: { args?: any; accountId?: string; ms?: number; gated?: boolean; credits?: number; status?: number; notFound?: boolean } = {}): Promise<ServiceRunResult> => {
+      const { status, notFound, ...rec } = extra;
       await this.record({ actionId, service, ok: false, error: message, ...rec }, ctx);
-      return { ok: false, error: message, ms: extra.ms, credits: extra.credits, status, outOfCredits: status === 402 || undefined };
+      return { ok: false, error: message, ms: extra.ms, credits: extra.credits, status, outOfCredits: status === 402 || undefined, ...(notFound ? { notFound: true } : {}) };
     };
 
     const p: ServiceProvider = await this.providerFor(actionId);
@@ -270,7 +272,7 @@ export class ServiceActionsService {
       // the HTTP status — a failed action still comes back HTTP 200. Its reason is the truth here.
       const why = this.plainReason(res?.error);
       const status = Number.isFinite(res?.status) ? Number(res.status) : undefined;
-      const r = await fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk, credits, status });
+      const r = await fail(`${name} could not do that: ${why}`, { args, accountId: chosen?.id, ms, gated: mustAsk, credits, status, notFound: !!res?.notFound });
       return { ...r, actionName: action.name, serviceName: name };
     }
 

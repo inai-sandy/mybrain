@@ -53,6 +53,21 @@ describe('AgentScheduler (BEA-623)', () => {
     expect(marked[0].key).toContain(':07:00'); // fired the missed 07:00 slot, not 07:01
   });
 
+  it('BEA-1359: the owner\'s Monday 08:00 IST digest fires from the schedule alone — startRun with the job id, once, and not on Tuesday', async () => {
+    // `{every:'week', dow:1, at:'08:00'}` is what the SchedulePicker stores for "every Monday 08:00";
+    // 08:00 Asia/Kolkata = 02:30Z. The bridge's startRun → execute() forks to the direct Social runner
+    // on `agentId` (hermes-bridge.service.ts), so this IS the whole scheduled road minus the fetch.
+    const digest = mk({ id: 'social1', name: 'Smart Home India — Instagram digest', prompt: 'Keep India-relevant posts…', schedule: { every: 'week', dow: 1, at: '08:00' }, tools: ['svc:instagram.search_hashtag'], toolArgs: { 'svc:instagram.search_hashtag': { hashtag: 'smarthomeindia' } } });
+    const { sch, started, marked } = build([digest]);
+    expect(await sch.tick(new Date('2026-08-24T02:30:00Z'))).toBe(1); // Monday 24 Aug 2026, 08:00 IST
+    expect(started[0]).toMatchObject({ agentId: 'social1', title: 'Smart Home India — Instagram digest' });
+    expect(marked[0]).toEqual({ id: 'social1', key: '2026-08-24:08:00' });
+    expect(await sch.tick(new Date('2026-08-24T02:30:30Z'))).toBe(0); // the same slot again — once
+    const again = build([{ ...digest, lastFiredKey: '2026-08-24:08:00' }]);
+    expect(await again.sch.tick(new Date('2026-08-25T02:30:00Z'))).toBe(0); // Tuesday 08:00 — not a Monday
+    expect(await again.sch.tick(new Date('2026-08-31T02:30:00Z'))).toBe(1); // next Monday — fires again
+  });
+
   it('does not re-fire a slot already fired, even within the look-back (BEA-798)', async () => {
     const { sch, started } = build([mk({ lastFiredKey: '2026-06-28:07:00', schedule: { every: 'day', at: '07:00' } })]);
     expect(await sch.tick(new Date('2026-06-28T01:31:00.100Z'))).toBe(0); // 07:01 IST; 07:00 already done

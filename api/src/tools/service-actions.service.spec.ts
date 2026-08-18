@@ -231,6 +231,18 @@ describe('runDetailed — the same run, answered as a shape (BEA-1356)', () => {
     await expect(b.svc.run('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' } })).rejects.toThrow(/nope/);
   });
 
+  it('a provider\'s "nothing matches" (notFound) rides through as notFound, still a failed row with 0 credits (BEA-1359)', async () => {
+    const a = harness({ result: { ok: false, error: 'No posts found', ms: 30, credits: 0, status: 404, notFound: true } });
+    const r = await a.svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' }, argsPinned: true });
+    expect(r.ok).toBe(false);
+    expect(r.notFound).toBe(true);
+    expect(r.credits).toBe(0);
+    expect(a.rows).toHaveLength(1);
+    expect(a.rows[0]).toMatchObject({ ok: false, credits: 0 });
+    const b = harness({ result: { ok: false, error: 'rate limited', status: 429 } });
+    expect((await b.svc.runDetailed('svc:github.create_an_issue', 'x', { args: { owner: 'a', repo: 'b', title: 'c' }, argsPinned: true })).notFound).toBeUndefined();
+  });
+
   it('argsPinned with nothing filled in never calls the model', async () => {
     const { svc, llm, provider } = harness({ action: { ...ACTION, schema: { type: 'object', properties: { q: { type: 'string' } } } } });
     const r = await svc.runDetailed('svc:github.create_an_issue', 'x', { args: {}, argsPinned: true });

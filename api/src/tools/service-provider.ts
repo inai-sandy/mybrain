@@ -189,6 +189,13 @@ export type ExecuteResult = {
    * the sentence in `error` is still the message to show.
    */
   status?: number;
+  /**
+   * The provider said "nothing matches" — an empty answer, not a broken one (BEA-1359). Scrape
+   * Creators' Google-indexed searches answer `404 {success:false, error:"not_found"}` for a query
+   * with no posts (and, for stretches, for every query); a direct-fetch job treats such a SEARCH as
+   * an empty source (0 items, 0 credits) instead of a failed run. Any other refusal leaves it unset.
+   */
+  notFound?: boolean;
 };
 
 /**

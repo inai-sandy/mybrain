@@ -222,3 +222,71 @@ export function SpecNotice({ spec, onRetry }: { spec: Overview['spec']; onRetry?
     />
   );
 }
+
+// ---- an endpoint's form, generated from its JSON schema -----------------------------------------
+// Drawn on the platform page (`SocialPlatform.tsx`) and on the Social builder's "Add another source"
+// panel (BEA-1359) — one drawing, so the two can never disagree about what an endpoint takes.
+
+export type FieldDef = { name: string; schema: any; required: boolean };
+
+/** The fields, required first, then the rest in the schema's own order. */
+export function fieldsOf(e: Pick<Endpoint, 'schema'>): FieldDef[] {
+  const props = e.schema?.properties || {};
+  const required = e.schema?.required || [];
+  const all = Object.keys(props).map((name) => ({ name, schema: props[name] || {}, required: required.includes(name) }));
+  return [...all.filter((f) => f.required), ...all.filter((f) => !f.required)];
+}
+
+/** The form's values → the arguments sent: blanks are left out, everything else exactly as typed. */
+export function argsOf(fields: FieldDef[], values: Record<string, string>): Record<string, any> {
+  const args: Record<string, any> = {};
+  for (const f of fields) {
+    const v = values[f.name];
+    if (v !== undefined && v !== '') args[f.name] = v;
+  }
+  return args;
+}
+
+/** One input, generated from its JSON schema: enums are selects, booleans yes/no, numbers numeric. */
+export function FieldInput({ f, value, onChange }: { f: FieldDef; value: string; onChange: (v: string) => void }) {
+  const s = f.schema || {};
+  const type = String(s.type || 'string');
+  const label = (
+    <span className="mb-1 flex min-w-0 items-center gap-1 text-zinc-600 dark:text-zinc-400">
+      <span className="truncate font-medium">{f.name}</span>
+      {f.required && <span className="text-[10px] font-semibold uppercase text-emerald-600">required</span>}
+      {!f.required && <span className="text-[10px] text-zinc-400">optional</span>}
+    </span>
+  );
+  const help = s.description ? <span className="mt-1 block break-words text-[11px] leading-snug text-zinc-400">{String(s.description).slice(0, 220)}</span> : null;
+  const placeholder = s.example !== undefined ? `e.g. ${String(s.example)}` : s.default !== undefined ? `default ${String(s.default)}` : '';
+  return (
+    <label className="block min-w-0 text-sm">
+      {label}
+      {Array.isArray(s.enum) ? (
+        <select value={value} onChange={(e) => onChange(e.target.value)} className={INPUT} aria-label={f.name}>
+          <option value="">{f.required ? 'Pick one…' : 'Any'}</option>
+          {s.enum.map((o: any) => <option key={String(o)} value={String(o)}>{String(o)}</option>)}
+        </select>
+      ) : type === 'boolean' ? (
+        <select value={value} onChange={(e) => onChange(e.target.value)} className={INPUT} aria-label={f.name}>
+          <option value="">{s.default !== undefined ? `Default (${String(s.default)})` : 'Default'}</option>
+          <option value="true">Yes</option>
+          <option value="false">No</option>
+        </select>
+      ) : (
+        <input
+          type={type === 'integer' || type === 'number' ? 'number' : 'text'}
+          inputMode={type === 'integer' || type === 'number' ? 'numeric' : undefined}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={INPUT}
+          aria-label={f.name}
+        />
+      )}
+      {help}
+    </label>
+  );
+}
+

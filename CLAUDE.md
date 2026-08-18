@@ -160,7 +160,8 @@ ever gated (all reads); one key per instance = the `scrapecreators` connector (`
 in `deploy.sh`). `execute()` returns `credits` read off the answer's `credits_charged` (0 on a cache
 hit) and `ToolCall.credits` records it — never assume 1, costs run 1→26. The Social UI, Watch/Alert
 and the owner's example agent are BEA-1356→1359. Trap: their Google-indexed searches (hashtag,
-reels) can answer 404 "No posts found" for everything for a while — recorded as a failed call, 0 credits.
+reels) can answer `404 {error:"not_found"}` "No posts found" for everything for a while — recorded as a
+failed `ToolCall`, 0 credits, and `ExecuteResult.notFound` rides through `runDetailed()` (BEA-1359).
 
 **Every action of every connected service is in the catalog — no shortlist, no cap (BEA-1354).**
 The owner's rule: "do not skip any action from providers." `ComposioProvider.listActions()` walks the
@@ -224,6 +225,22 @@ Settings"), on both the direct and the engine road. `telegram`/`task` destinatio
 in the schema — nothing dispatches on them yet. Traps: `ORIGIN[j.origin]` in `AgentAreaPage` crashes on
 an unknown origin (now `originOf()`); a pasted sheet URL is cleaned to its id on both sides
 (`cleanSheetId` / `sheetIdFrom`); never find-and-delete a Drive file by name (`specs/SCRAPECREATORS-API.md`).
+
+**The owner's example is a two-source digest, and an empty search is not a failure (BEA-1359).**
+"Instagram posts about smart home in India, last 30 days → a Google Sheet → my WhatsApp, every
+Monday 08:00" is ONE Social agent with TWO sources (`Agent.tools` = `svc:instagram.search_hashtag` +
+`svc:instagram.reels_search`, each with pinned `toolArgs`), built through the Social UI: the builder
+form and the job's Settings both have **Add another source** (`AddSourcePanel` — the platform page's
+schema form, moved to `socialShared.tsx`, one drawing) and Remove; sources are fetched one after the
+other and `mergeTables()` unions them under a `source` column; the shaping task de-dupes and filters.
+The `SchedulePicker`'s weekly choice names its day (`dow`, "Every Monday at 08:00"; the scheduler
+fires in `tasks.tz`, default IST). Inside `SocialAgentRunService.run()` a fetch that comes back
+`notFound` on a SEARCH endpoint (`isEmptySearch()`: the vendor's `not_found` AND the endpoint has
+"search" in its name) is an EMPTY SOURCE — a done step "… — no posts found (vendor answered not_found)
+· 0 credits", not a failed run — so a digest whose second search has nothing still writes the sheet;
+a not_found on a profile/post lookup, a transport error, 401/402/429/5xx or any other `success:false`
+still FAILS the run. Every source empty → the run finishes done and honest ("0 posts found — nothing to
+write, no sheet made"), no sheet, no WhatsApp. The sheet is titled `<job name> — <YYYY-MM-DD>` per run.
 
 **Watch and Alert remember last time (BEA-1358).** `Agent.mode` = `run` (fetch every time) | `watch` |
 `alert`, chosen on the Social builder form and the job's Settings (`WatchModePicker` in
