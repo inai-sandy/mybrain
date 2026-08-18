@@ -260,6 +260,26 @@ export function generateFromSpec(spec: any): Generated {
 
 // ---- the provider ------------------------------------------------------------------------
 
+/**
+ * The vendor hands search words to the platform as typed. Two traps proven live on 2026-08-18:
+ * `/v1/instagram/search/popular?query=Home automation` → 404 "Instagram does not have a popular page
+ * for that query", while `home automation` → 12 posts (Instagram's popular pages live under lowercase
+ * keys); and a hashtag typed as `#SmartHome` is the same tag as `smarthome`. So: hashtags lose a
+ * leading `#` and are lowercased everywhere; the popular-search `query` is lowercased; every search
+ * word is trimmed and single-spaced. Nothing else is touched — a case-sensitive id must stay as typed.
+ */
+export function normaliseSearchArgs(path: string, args: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = { ...args };
+  const tidy = (v: any) => String(v).replace(/\s+/g, ' ').trim();
+  if (typeof out.hashtag === 'string') out.hashtag = tidy(out.hashtag).replace(/^#+/, '').toLowerCase();
+  if (typeof out.query === 'string') {
+    out.query = tidy(out.query);
+    if (/\/instagram\/search\/popular$/.test(path)) out.query = out.query.toLowerCase();
+  }
+  if (typeof out.keyword === 'string') out.keyword = tidy(out.keyword);
+  return out;
+}
+
 @Injectable()
 export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('ScrapeCreators');
@@ -546,7 +566,7 @@ export class ScrapeCreatorsProvider implements ServiceProvider, OnModuleInit, On
       let path = route.path;
       const query: Record<string, any> = {};
       const body: Record<string, any> = {};
-      for (const [k, v] of Object.entries(args || {})) {
+      for (const [k, v] of Object.entries(normaliseSearchArgs(route.path, args || {}))) {
         if (v === undefined || v === null || v === '') continue;
         if (route.pathParams.includes(k)) path = path.replace(`{${k}}`, encodeURIComponent(String(v)));
         else if (route.body.includes(k) || (route.method !== 'GET' && !route.query.includes(k))) body[k] = v;
