@@ -293,6 +293,9 @@ export function AgentApp() {
           )}
         </section>
 
+        {/* The picture of the steps — right under the run screen, so the flow is the first thing seen (BEA-1366). */}
+        <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} lastRun={runs?.[0]} />
+
         {latest && (
           <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
             <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
@@ -362,8 +365,6 @@ export function AgentApp() {
             </section>
           );
         })()}
-        {/* The picture of the steps — this is the map you approve, and where you edit it. */}
-        <FlowPanel id={id!} flow={flow} onChanged={loadFlow} goChat={() => setMode('chat')} lastRun={runs?.[0]} />
       </>)}
 
       {/* ===================== CHECKS ===================== */}
