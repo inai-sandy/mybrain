@@ -8,7 +8,7 @@ import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
 import { Diff, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
-import { findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
+import { LIST_KEYS, findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
 import { AgentPlan, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf, planFromAgent, thresholdOf } from './plan';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
@@ -409,40 +409,38 @@ export class SocialAgentRunService {
       return { credits, empty: true };
     }
 
-    // ---- 2. per creator
+    // ---- 2. per creator — fetch them all first, then decide the date field over EVERY item
     const card = await this.knowledge?.card?.(thenId).catch(() => null);
-    const items: any[] = [];
-    const seen = new Set<string>();
     const failures: string[] = [];
-    let okCount = 0;
-    let rawCount = 0;
-    let dateField: string | null | undefined; // undefined = not decided yet
+    const answers: { who: string; rows: any[] }[] = [];
     let thenName = '';
     let serviceName = f.serviceName || '';
-    const keepDays = src.then.keepDays;
-    const cutoff = keepDays ? Date.now() - keepDays * 24 * 60 * 60 * 1000 : null;
     for (const cr of creators) {
       const stop2 = await guard(thenId);
       if (stop2) return { credits, stop: stop2 };
       const r = await this.actions.runDetailed(thenId, '', ctx(thenId, cr.args));
       credits += Number(r.credits) || 0;
       if (!r.ok) { failures.push(`${cr.who}: ${(r.error || 'the fetch failed').slice(0, 120)}`); continue; }
-      okCount++;
       thenName = r.actionName || thenName;
       serviceName = r.serviceName || serviceName;
-      const list = findList(r.data);
-      // A list answer → its items; an answer whose list is EMPTY (`{items: []}`) → nothing, not
-      // one row of envelope; a plain object (a profile) → one row.
-      const rows = list ? list.rows : hasEmptyList(r.data) ? [] : r.data && typeof r.data === 'object' ? [r.data] : [];
-      rawCount += rows.length;
-      // Which field is the date — decided on the first creator that returned items (an empty first answer must not decide "no date" for everyone).
-      if (dateField === undefined && cutoff !== null && rows.length) dateField = dateFieldOf(rows, card?.fields);
-      for (const it of rows) {
+      answers.push({ who: cr.who, rows: itemsOf(r.data) });
+    }
+    const okCount = answers.length;
+    const rawCount = answers.reduce((n, a) => n + a.rows.length, 0);
+    const keepDays = src.then.keepDays;
+    const cutoff = keepDays ? Date.now() - keepDays * 24 * 60 * 60 * 1000 : null;
+    // Which field is the date — decided over every creator's items together (the card's date field
+    // inside the list, else the usual names); an early creator with nothing must not decide "no date".
+    const dateField = cutoff !== null ? dateFieldOf(answers.flatMap((a) => a.rows), card?.fields) : null;
+    const items: any[] = [];
+    const seen = new Set<string>();
+    for (const a of answers) {
+      for (const it of a.rows) {
         if (cutoff !== null && dateField) { const d = itemDate(it, dateField); if (d !== null && d < cutoff) continue; }
         const k = dedupeKey(it);
         if (seen.has(k)) continue;
         seen.add(k);
-        items.push({ creator: cr.who, ...it });
+        items.push({ creator: a.who, ...it });
       }
     }
     const kept = items.length;
@@ -827,10 +825,19 @@ export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
   return /search/.test(endpoint);
 }
 
-/** `{ items: [], next_max_id: null }` — an answer shaped like a list with nothing in it. */
-export function hasEmptyList(data: any): boolean {
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return Array.isArray(data) && data.length === 0;
-  return Object.values(data).some((v) => Array.isArray(v) && v.length === 0) && !Object.values(data).some((v) => Array.isArray(v) && v.length > 0);
+/**
+ * The items of one per-creator answer: a list → its items; an answer SHAPED like a list with nothing
+ * in it (`{items: []}`, `{items: null, user: {…}}`, a private account's `{user, more_available:false}`
+ * with a list key present) → nothing, never one row of envelope; a plain object with no list key at
+ * all (a profile lookup as the per-creator action) → that one object.
+ */
+export function itemsOf(data: any): any[] {
+  const list = findList(data);
+  if (list) return list.rows;
+  if (Array.isArray(data)) return [];
+  if (!data || typeof data !== 'object') return [];
+  const listShaped = Object.keys(data).some((k) => LIST_KEYS.includes(k)) || Object.values(data).some((v) => Array.isArray(v));
+  return listShaped ? [] : [data];
 }
 
 /** What a search finds, for the run's own words: posts · reels · videos · results. */

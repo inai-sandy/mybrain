@@ -175,11 +175,16 @@ describe('creators-first', () => {
     expect(s.detail).toMatch(/beta: .*user not found/);
   });
 
-  it('the date field is decided on the first creator WITH items — an empty first answer does not switch the days filter off', async () => {
+  it('the date field is decided over EVERY creator\'s items — an empty first answer (`{items:[]}`, or a private account\'s `{user, more_available:false}` with no list at all) is 0 items and does not switch the days filter off (found live)', async () => {
+    const { itemsOf } = await import('./social-agent-run.service');
+    expect(itemsOf({ items: [], user: { pk: '1' }, more_available: false })).toEqual([]);
+    expect(itemsOf({ items: null, user: { pk: '1' } })).toEqual([]);
+    expect(itemsOf({ user: { pk: '1', username: 'x' } })).toEqual([{ user: { pk: '1', username: 'x' } }]); // a profile lookup as the per-creator action
+    expect(itemsOf({ items: [{ id: 1 }] })).toEqual([{ id: 1 }]);
     const h = harness({
       answer: (id, args) => {
         if (id === 'svc:instagram.search_profiles') return finder;
-        if (args.handle === 'alpha') return { ok: true, credits: 1, actionName: 'Posts', data: { items: [] } };
+        if (args.handle === 'alpha') return { ok: true, credits: 1, actionName: 'Posts', data: { items: null, user: { pk: '1', username: 'alpha' }, more_available: false } };
         return { ok: true, credits: 1, actionName: 'Posts', data: { items: [{ id: `${args.handle}-old`, taken_at: Math.floor((now - 400 * day) / 1000) }, { id: `${args.handle}-new`, taken_at: Math.floor(now / 1000) }] } };
       },
     });
