@@ -35,12 +35,13 @@
     {
       "id": "BEA-1372",
       "title": "Screens: plan card, samples in chat, entry points",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "60cd250"
     },
     {
       "id": "BEA-1373",
       "title": "Acceptance: owner's example through the builder",
-      "status": "pending"
+      "status": "in_progress"
     }
   ]
 }

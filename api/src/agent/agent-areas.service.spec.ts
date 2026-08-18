@@ -171,6 +171,18 @@ describe('builder (BEA-1104)', () => {
     expect(st.log.length).toBe(2); // you + ai, persisted
   });
 
+  it("says WHY when the day's AI budget stops a turn — never 'try saying it another way' (BEA-1373)", async () => {
+    const { TokenBudgetError } = require('../llm/token-budget.service');
+    const { svc } = build(null);
+    (svc as any).llm.completeHelper = jest.fn(async () => { throw new TokenBudgetError("today's AI budget is used up (1,181,315 of 1,200,000 tokens). Nothing new will start until tomorrow, or until you raise it in Settings."); });
+    const r = await svc.builderChat('Instagram posts about smart home in India');
+    expect(r.reply).toMatch(/AI budget is used up/);
+    expect(r.reply).toMatch(/raise it in Settings/);
+    expect(r.reply).not.toMatch(/try saying it another way/);
+    const st = await svc.builderState();
+    expect(st.log.at(-1).text).toMatch(/AI budget is used up/); // persisted, so a reload still says it
+  });
+
   it('create requires a proposal, then clears it and keeps the log', async () => {
     const { svc } = build(JSON.stringify({ reply: 'ok', spec: { area: { name: 'X', icon: '🤖' }, jobs: [{ name: 'j', task: 't' }] } }));
     await expect(svc.builderCreate()).rejects.toThrow(/no proposal/);

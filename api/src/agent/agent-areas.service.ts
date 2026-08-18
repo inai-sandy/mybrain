@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentService } from './agent.service';
 import { LlmService } from '../llm/llm.service';
+import { TokenBudgetError } from '../llm/token-budget.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { shortlistForPrompt } from '../tools/tool-shortlist';
@@ -291,11 +292,14 @@ export class AgentAreasService {
       st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
       await o.save(st);
       return { reply, state: st };
-    } catch {
+    } catch (e: any) {
+      // A budget stop is a real answer, not a puzzle (BEA-1373): the owner read "try saying it another
+      // way" three times while the day's AI budget was simply used up — say the reason and the remedy.
+      const reply = e instanceof TokenBudgetError ? `I have stopped for now — ${e.message}` : cantDo;
       st.design = { turns: design.turns + 1, tokens: design.tokens + spentTokens };
-      st.log.push({ who: 'ai', text: cantDo, at: new Date().toISOString() });
+      st.log.push({ who: 'ai', text: reply, at: new Date().toISOString() });
       await o.save(st);
-      return { reply: cantDo, state: st };
+      return { reply, state: st };
     }
   }
 
