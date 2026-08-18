@@ -41,12 +41,13 @@
     {
       "id": "BEA-1354",
       "title": "Lift Composio 60-cap",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "16c53d0"
     },
     {
       "id": "BEA-1363",
       "title": "History previews strip markdown (polish, found in 1358)",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1359",
