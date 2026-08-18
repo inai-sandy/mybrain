@@ -313,6 +313,23 @@ read as skipped). Traps: `Flow.drawnBy/drawStatus/drawNote` are new columns (mig
 `jobBuilderCreate` now passes tools + notifyWhatsApp INTO `createAgent` so the first plan sees the toolbox;
 `FlowsService.update()`'s locked guard is untouched, so a hand edit of a social flow answers 400 by design.
 
+**Every action has a fact card — the know-how the thinking builder (BEA-1371) will read instead of one-line names; today a person opens it (BEA-1368).** `ToolKnowledgeService`
+(`api/src/tools/tool-knowledge.service.ts`) builds ONE `ToolKnowledge` card per `svc:` id from three parts, each said
+with its source: **spec** (ScrapeCreators from the parsed OpenAPI already in the provider — params, the 200 example's
+fields, cost prose; Composio from its exact `GET /tools/<SLUG>` through `provider.getAction()` — `input_parameters` +
+`output_parameters`, now carried as `ServiceAction.responseSchema` on the exact fetch ONLY, never on the list, or the
+catalog gets heavier), **observed** (`ToolCall` rows, last 30 days: fields seen in recorded answers — a capped walk, a
+recorder-truncated answer only teaches flat keys, secret-named keys never carry an example, signed links lose their
+query — items per page when a whole page was recorded, real `credits` typical/min/max, and **health** over 24 h: a
+`not_found` on a search endpoint is "empty answers", said as such, and still `ok:false` when it is every call; held-for-
+approval rows are neither a success nor a failure), and **notes** (`knowledge-notes.ts` — the hand-kept traps, keyed
+by exact id / `svc:x.y*` glob / bare service, and a note may pin paging or cost where the spec is silent: popular
+search 12/page; the spec wins where it speaks). Routes `GET /api/tools/knowledge/:actionId` (`?fresh=1`) and
+`POST /api/tools/knowledge/lookup {ids[]}` (≤ 50, six provider fetches at a time), cached 10 min in memory, never on the
+catalog's path. UI: `web/src/ui/ToolFacts.tsx` — the small "Facts" fold on the Social endpoint card and on the `/tools`
+sheet's action rows (the gate rows are the only per-action rows that sheet has); it fetches only when opened. Trap: the
+recorder keeps 2000 chars of pretty JSON, so an observed page size exists only for short answers — the note fills it.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

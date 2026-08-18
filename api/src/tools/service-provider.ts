@@ -109,6 +109,12 @@ export type ServiceAction = {
   costHint?: string;
   /** What one answer looks like, when the vendor's spec shows one. */
   responseExample?: any;
+  /**
+   * The JSON schema of one answer, when the vendor states one (Composio's `output_parameters`,
+   * an OpenAPI 200 schema). Read by the know-how cards (BEA-1368) for the response fields; never
+   * by the run path.
+   */
+  responseSchema?: any;
 };
 
 /**

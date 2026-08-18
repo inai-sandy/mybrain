@@ -264,6 +264,22 @@ describe('ComposioProvider', () => {
     expect(calls.filter((u) => u.pathname.endsWith('/tools')).length).toBe(3);
   });
 
+  it('carries the answer schema on the EXACT fetch only — the list stays light (BEA-1368)', async () => {
+    const OUT = { type: 'object', properties: { data: { type: 'object', properties: { number: { type: 'integer' } } } } };
+    global.fetch = (async (url: string) => {
+      const u = new URL(String(url));
+      const json = (v: any) => ({ ok: true, status: 200, json: async () => v, text: async () => JSON.stringify(v) } as any);
+      if (/\/tools\/GITHUB_CREATE_ISSUE$/.test(u.pathname)) return json({ slug: 'GITHUB_CREATE_ISSUE', name: 'Create issue', input_parameters: { type: 'object' }, output_parameters: OUT });
+      if (u.pathname.endsWith('/tools')) return json({ items: [{ slug: 'GITHUB_CREATE_ISSUE', name: 'Create issue', input_parameters: { type: 'object' }, output_parameters: OUT }], next_cursor: null });
+      return json({ items: [], next_cursor: null });
+    }) as any;
+    const p = new ComposioProvider(connectors('k'), prisma());
+    const exact = await p.getAction('svc:github.create_issue');
+    expect(exact!.responseSchema).toEqual(OUT);
+    const listed = await p.listActions('github');
+    expect(listed[0].responseSchema).toBeUndefined();
+  });
+
   it('bumps its generation whenever it forgets what it read, so the catalog knows its copy is stale', async () => {
     const { fetchMock } = fakeApi();
     global.fetch = fetchMock as any;
