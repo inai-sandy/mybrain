@@ -5,6 +5,7 @@ import { ArrowLeft, Trash2, FileText, Brain } from 'lucide-react';
 import { DataTable, Column } from '../ui/DataTable';
 import { useToast } from '../ui/Toast';
 import { timeAgo } from './Agents';
+import { plainPreview } from '../ui/plainPreview';
 
 /** "Saved by agents" (BEA-700) — see and undo everything agents wrote to your brain / Documents. */
 export function SavedByAgents() {
@@ -35,7 +36,7 @@ export function SavedByAgents() {
   }
 
   const columns: Column<any>[] = [
-    { key: 'title', label: 'Document', sortable: true, render: (r) => (<div><div className="font-medium">{r.title}</div>{r.snippet && <div className="line-clamp-1 text-xs text-zinc-500">{r.snippet}</div>}</div>) },
+    { key: 'title', label: 'Document', sortable: true, render: (r) => (<div><div className="font-medium">{r.title}</div>{r.snippet && <div className="line-clamp-1 text-xs text-zinc-500">{plainPreview(r.snippet)}</div>}</div>) },
     { key: 'when', label: 'When', sortable: true, render: (r) => <span className="text-zinc-500">{timeAgo(r.when)}</span> },
     { key: '_del', label: '', render: (r) => <button onClick={(e) => { e.stopPropagation(); if (window.confirm('Delete this document? This removes it from your library.')) delDoc(r.id); }} title="Delete" className="rounded-lg p-1.5 text-zinc-300 hover:bg-red-50 hover:text-red-600 dark:text-zinc-600 dark:hover:bg-red-500/10"><Trash2 className="h-4 w-4" /></button> },
   ];
