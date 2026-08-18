@@ -149,13 +149,13 @@ function PlainSourceEditor({ tool, args, onChange, toolName, onRemove }: { tool:
           ))}
           {canPage && (
             <label className="block min-w-0 text-xs text-zinc-500" data-testid="pages-field">
-              <span className="block truncate font-medium">pages <span className="font-normal text-zinc-400">· 1–{MAX_PAGES}, follows the vendor's cursor</span></span>
+              <span className="block truncate font-medium">pages <span className="font-normal text-zinc-400">· 1–{MAX_PAGES}</span></span>
               <input type="number" inputMode="numeric" min={1} max={MAX_PAGES} value={pages} onChange={(e) => { const n = clampPages(e.target.value); const next = { ...args }; if (n > 1) next._pages = n; else delete next._pages; onChange(next); }} aria-label="pages" className={inp + ' mt-0.5'} />
             </label>
           )}
         </div>
       )}
-      <p className="text-[11px] text-zinc-400">These exact values are sent every run — no AI fills them in.{canPage ? ` ${pagesCostHint(pages, per)}${pages > 1 ? '; items are de-duped by id and it stops early on an empty page.' : '.'}` : ''}</p>
+      <p className="text-[11px] text-zinc-400">These exact values are sent every run — no AI fills them in.{canPage ? ` ${pagesCostHint(pages, per)}${pages > 1 ? '; it follows the vendor\'s cursor page by page, de-dupes items by id and stops early on an empty page.' : '.'}` : ''}</p>
     </div>
   );
 }
@@ -213,8 +213,8 @@ export function CreatorsSourceEditor({ tool, args, onChange, toolName, onRemove 
   return (
     <div className="space-y-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-700" data-testid="creators-source">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="rounded-full bg-pink-50 px-2 py-0.5 font-semibold text-pink-700 dark:bg-pink-500/10 dark:text-pink-300">📣 {toolName || 'Find creators → their posts'}</span>
-        <code className="min-w-0 truncate text-[11px] text-zinc-400">{String(find.actionId || tool)} → {String(then.actionId || '?')}</code>
+        <span className="rounded-full bg-pink-50 px-2 py-0.5 font-semibold text-pink-700 dark:bg-pink-500/10 dark:text-pink-300">📣 Find creators → their posts</span>
+        <code className="min-w-0 truncate text-[11px] text-zinc-400" title={`${String(find.actionId || tool)} → ${String(then.actionId || '?')}`}>{String(find.actionId || tool)} → {String(then.actionId || '?')}</code>
         {onRemove && (
           <button type="button" onClick={onRemove} aria-label={`Remove source ${toolName || tool}`} title="Remove this source" className="ml-auto rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10">Remove</button>
         )}
@@ -227,7 +227,7 @@ export function CreatorsSourceEditor({ tool, args, onChange, toolName, onRemove 
           </label>
         ))}
         <label className="block min-w-0 text-xs text-zinc-500">
-          <span className="block truncate font-medium">how many creators <span className="font-normal text-zinc-400">· first N found, up to {MAX_TAKE}</span></span>
+          <span className="block truncate font-medium">how many creators <span className="font-normal text-zinc-400">· up to {MAX_TAKE}</span></span>
           <input type="number" inputMode="numeric" min={1} max={MAX_TAKE} value={take} onChange={(e) => setFind({ take: Math.min(MAX_TAKE, Math.max(1, Math.floor(Number(e.target.value)) || 1)) })} aria-label="how many creators" className={inp + ' mt-0.5'} />
         </label>
         <label className="block min-w-0 text-xs text-zinc-500">
@@ -237,23 +237,23 @@ export function CreatorsSourceEditor({ tool, args, onChange, toolName, onRemove 
             {(actions || []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </label>
-        <label className="block min-w-0 text-xs text-zinc-500">
-          <span className="block truncate font-medium">its argument <span className="font-normal text-zinc-400">← creator field</span></span>
-          <div className="mt-0.5 flex items-center gap-1">
+        <label className="block min-w-0 text-xs text-zinc-500 sm:col-span-2">
+          <span className="block truncate font-medium">its argument <span className="font-normal text-zinc-400">← the creator's field that fills it</span></span>
+          <div className="mt-0.5 grid grid-cols-[1fr_auto_1fr] items-center gap-1">
             {thenParams.length ? (
-              <select value={param} onChange={(e) => setThen({ argsFrom: { [e.target.value]: field || creatorFieldFor(e.target.value) } })} aria-label="per-creator argument" className={inp}>
+              <select value={param} onChange={(e) => setThen({ argsFrom: { [e.target.value]: field || creatorFieldFor(e.target.value) } })} aria-label="per-creator argument" className={inp + ' min-w-0'}>
                 {!thenParams.includes(param) && param && <option value={param}>{param}</option>}
                 {thenParams.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             ) : (
-              <input value={param} onChange={(e) => setThen({ argsFrom: { [e.target.value]: field } })} placeholder="handle" aria-label="per-creator argument" className={inp} />
+              <input value={param} onChange={(e) => setThen({ argsFrom: { [e.target.value]: field } })} placeholder="handle" aria-label="per-creator argument" className={inp + ' min-w-0'} />
             )}
             <span className="shrink-0 text-zinc-400">←</span>
-            <input value={field} onChange={(e) => setThen({ argsFrom: { [param || 'handle']: e.target.value } })} placeholder="username" aria-label="creator field" className={inp} />
+            <input value={field} onChange={(e) => setThen({ argsFrom: { [param || 'handle']: e.target.value } })} placeholder="username" aria-label="creator field" className={inp + ' min-w-0'} />
           </div>
         </label>
         <label className="block min-w-0 text-xs text-zinc-500">
-          <span className="block truncate font-medium">keep the last <span className="font-normal text-zinc-400">days · blank = keep all</span></span>
+          <span className="block truncate font-medium">keep the last N days <span className="font-normal text-zinc-400">· blank = keep all</span></span>
           <input type="number" inputMode="numeric" min={1} value={then.keepDays === undefined || then.keepDays === null ? '' : String(then.keepDays)} onChange={(e) => { const n = Math.floor(Number(e.target.value)); const next = { ...then }; if (e.target.value.trim() === '' || !Number.isFinite(n) || n < 1) delete next.keepDays; else next.keepDays = n; onChange({ ...args, then: next }); }} placeholder="30" aria-label="keep the last days" className={inp + ' mt-0.5'} />
         </label>
       </div>
