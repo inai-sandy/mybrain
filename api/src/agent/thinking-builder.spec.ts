@@ -4,7 +4,7 @@ import type { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { LlmService } from '../llm/llm.service';
 import {
-  DESIGN_BUDGET, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, factsSection, fillTemplate, healthNote, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
+  DESIGN_BUDGET, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, factsSection, fillTemplate, healthNote, indexSection, namedService, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
   sampleViewText, validatePlan,
 } from './thinking-builder';
 
@@ -179,6 +179,26 @@ describe('questions come from the facts, not a script (BEA-1371)', () => {
     expect(pickCardIds(tools, SOCIAL_ASK)[0]).toBe('svc:instagram.search_hashtag');
     expect(pickCardIds(tools, SOCIAL_ASK)).not.toContain('web_search');
     expect(pickCardIds(tools, SOCIAL_ASK, 1)).toHaveLength(1);
+  });
+
+  it('a NAMED service comes first, and no one service floods the cards (the live trap: Google Sheets pushed Instagram user posts out)', () => {
+    const tools = [
+      ...Array.from({ length: 36 }, (_, i) => ({ id: `svc:googlesheets.sheet_thing_${i}`, name: `Sheet thing ${i}` })),
+      { id: 'svc:instagram.user_posts', name: 'User Posts' },
+      { id: 'svc:instagram.search_hashtag', name: 'Search Hashtag Posts' },
+      { id: 'svc:instagram.profile', name: 'Profile' },
+      { id: 'svc:github.list_releases', name: 'List releases' },
+    ];
+    const ids = pickCardIds(tools, SOCIAL_ASK);
+    expect(ids.slice(0, 3).sort()).toEqual(['svc:instagram.profile', 'svc:instagram.search_hashtag', 'svc:instagram.user_posts'].sort());
+    expect(ids.filter((i) => i.startsWith('svc:googlesheets')).length).toBeLessThanOrEqual(20);
+    expect(namedService('svc:instagram.x', ['instagram'])).toBe(true);
+    expect(namedService('svc:googlesheets.x', ['google', 'sheet'])).toBe(false);
+    expect(namedService('svc:googlesheets.x', ['googlesheet'])).toBe(true);
+    // The rest are still LISTED (id — name) so the model knows they exist.
+    const index = indexSection(tools, SOCIAL_ASK, ids);
+    expect(index).toContain('- svc:googlesheets.sheet_thing_35 — Sheet thing 35');
+    expect(index).not.toContain('svc:instagram.user_posts');
   });
 
   it('a Settings override of the prompt without the new slots still gets the facts, blocks and rules appended', () => {

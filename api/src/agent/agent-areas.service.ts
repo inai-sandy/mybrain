@@ -11,8 +11,9 @@ import { TOP_BUILDER_SESSION, builderSettingKey } from './builder-session';
 import { BuilderSampleService } from './builder-sample.service';
 import {
   BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
-  fillTemplate, healthNote, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
+  fillTemplate, healthNote, indexSection, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
 } from './thinking-builder';
+import { isServiceToolId } from '../tools/service-provider';
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
@@ -211,14 +212,16 @@ export class AgentAreasService {
       const cards: ToolKnowledge[] = cardIds.length ? await this.knowledge?.lookup(cardIds).catch(() => []) || [] : [];
       const cardsById: Record<string, ToolKnowledge> = Object.fromEntries(cards.map((c) => [c.actionId, c]));
       const plainTools = shortlist.filter((t: any) => !String(t.id).startsWith('svc:')).map((t: any) => `- ${t.id} (${t.group}) — ${t.name}: ${t.description}`).join('\n') || '(none)';
-      // Only ids whose card the model was really SHOWN — a lookup that came back short must not widen it.
-      const allowedIds = new Set(cards.map((c) => c.actionId));
+      // The actions that got no card are still LISTED (id — name), so the model knows they exist and can
+      // sample one; the plan may use any id it was shown (card or index) — never one it made up.
+      const index = indexSection(shortlist as any, convo(), cards.map((c) => c.actionId));
+      const allowedIds = new Set([...cards.map((c) => c.actionId), ...shortlist.filter((t: any) => isServiceToolId(t.id)).map((t: any) => t.id)]);
 
       const previous = st.plan ? `\n\nThe plan you last proposed (refine it, don't start over):\n${JSON.stringify(st.plan)}` : st[o.proposalKey] ? `\n\nThe ${o.proposalKey} you last proposed (refine it, don't start over):\n${JSON.stringify(st[o.proposalKey])}` : '';
       const buildPrompt = (extra: string) => fillTemplate(tpl, {
         conversation: { label: 'The conversation so far', text: convo() },
         ...o.vars,
-        facts: { label: 'WHAT THE TOOLS CAN REALLY DO (know-how cards)', text: factsSection(cards, convo()) },
+        facts: { label: 'WHAT THE TOOLS CAN REALLY DO (know-how cards)', text: factsSection(cards, convo()) + (index ? `\n\nOTHER OUTSIDE-SERVICE ACTIONS you were not shown a card for (id — name). They exist; sample one before you plan on it:\n${index}` : '') },
         tools: { label: 'Other tools (exact ids)', text: plainTools },
         blocks: { label: 'Planning blocks', text: BLOCKS_TEXT },
         sample: { label: 'Look for yourself', text: SAMPLE_TEXT },
