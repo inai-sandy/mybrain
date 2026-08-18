@@ -184,7 +184,8 @@ export class BuilderSampleService {
     const now = readSampleCounter(after);
     const spent: SampleCounter = { used: Math.max(now.used, reserved.used), credits: now.credits + credits };
     view.budget = this.budgetView(spent);
-    const line = { who: 'ai', kind: 'sample', text: sampleLine(view), at: new Date().toISOString() };
+    // `actionId` on the line: the builder reads which finders this conversation has already looked at (BEA-1375).
+    const line = { who: 'ai', kind: 'sample', actionId: id, ok: !!view.ok, text: sampleLine(view), at: new Date().toISOString() };
     await this.save(key, { ...after, log: [...(Array.isArray(after.log) ? after.log : []), line], samples: spent });
     return view;
   }

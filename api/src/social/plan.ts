@@ -272,8 +272,49 @@ export function planActionIds(plan: AgentPlan): string[] {
 
 // ---- cost ------------------------------------------------------------------------------------
 
-/** What the estimate reads off a know-how card (BEA-1368) — only the two facts it needs. */
-export type CostKnowledge = { cost?: { free?: boolean; credits?: { typical?: number } }; paging?: { pageSize?: number } };
+/**
+ * What the estimate reads off a know-how card (BEA-1368): cost + paging for the arithmetic, and (BEA-1375)
+ * the card's health + name so the estimate can also say what the run costs TODAY, while a source is down.
+ */
+export type CostKnowledge = {
+  name?: string;
+  cost?: { free?: boolean; credits?: { typical?: number } };
+  paging?: { pageSize?: number };
+  health?: { known?: boolean; ok?: boolean; note?: string; lastError?: string };
+};
+
+/** A card that says FAILING right now: health known and not ok. Missing card / no verdict = it may well answer. */
+export function isFailing(k: CostKnowledge | undefined): boolean {
+  return !!(k && k.health && k.health.known && k.health.ok === false);
+}
+
+/** Every action a block calls (a creators block calls its finder and its per-creator action). */
+export function blockActionIds(b: PlanBlock): string[] {
+  return b.kind === 'source' ? [b.actionId] : [b.find.actionId, b.then.actionId].filter(Boolean);
+}
+
+/**
+ * Can this block produce rows TODAY? Only when none of the actions it calls is failing at the vendor
+ * (a creators block on a working finder but a failing per-creator action gives creators and no posts).
+ */
+export function blockCanProduceToday(b: PlanBlock, knowledge: Record<string, CostKnowledge> = {}): boolean {
+  return blockActionIds(b).every((id) => !isFailing(knowledge[id]));
+}
+
+/**
+ * Does the plan have at least one source that can produce rows today? A plan of only failing sources
+ * gives an empty sheet however many pages it asks for — the builder must not show one (BEA-1375).
+ */
+export function planHasHealthySource(plan: AgentPlan, knowledge: Record<string, CostKnowledge> = {}): boolean {
+  return plan.sources.some((s) => blockCanProduceToday(s, knowledge));
+}
+
+/** The plan's failing actions, one entry per action id, with the card's own note — for the card and the reply. */
+export function failingActions(plan: AgentPlan, knowledge: Record<string, CostKnowledge> = {}): { actionId: string; name: string; note: string }[] {
+  return planActionIds(plan)
+    .filter((id) => isFailing(knowledge[id]))
+    .map((id) => { const k = knowledge[id]!; return { actionId: id, name: k.name || shortName(id), note: oneLineNote(k.health?.note || k.health?.lastError || 'every recent call failed') }; });
+}
 
 export type PlanCost = {
   credits: number;
@@ -282,6 +323,11 @@ export type PlanCost = {
   how: string;
   /** ≈ ₹ the AI shaping costs per run — `aiTokens` × `RUPEES_PER_1K_AI_TOKENS`, 0 when nothing is shaped (BEA-1372). */
   aiRupees: number;
+  /**
+   * ≈ credits the run costs TODAY — the healthy sources only (BEA-1375). A source whose card says FAILING answers
+   * empty and is not counted; equal to `credits` when everything is working. The live trap: ≈19 shown, 11 charged.
+   */
+  nowCredits: number;
   /** Sources whose know-how card says FAILING right now — the plan card marks them "kept so it fills in later" (BEA-1372). */
   unhealthy?: { actionId: string; name: string; note: string }[];
 };
@@ -312,6 +358,7 @@ const plural = (n: number, w: string) => `${fmt(n)} ${w}${n === 1 ? '' : 's'}`;
  */
 export function estimatePlanCost(plan: AgentPlan, knowledge: Record<string, CostKnowledge> = {}): PlanCost {
   let credits = 0;
+  let nowCredits = 0;
   let items = 0;
   const parts: string[] = [];
   // A card that says FREE (a Composio action on the owner's own account) costs 0 — the builder shows this number, so "≈ 1 credit"
@@ -323,6 +370,8 @@ export function estimatePlanCost(plan: AgentPlan, knowledge: Record<string, Cost
       const c = perCall(s.actionId);
       const cost = s.pages * c;
       credits += cost;
+      // Today: a failing source answers empty (not_found is not charged) — nothing to count.
+      if (!isFailing(knowledge[s.actionId])) nowCredits += cost;
       items += s.pages * perPage(s.actionId);
       parts.push(`${shortName(s.actionId)}: ${plural(s.pages, 'page')} × ${plural(c, 'credit')} = ${fmt(cost)}`);
     } else {
@@ -330,19 +379,59 @@ export function estimatePlanCost(plan: AgentPlan, knowledge: Record<string, Cost
       const t = perCall(s.then.actionId);
       const cost = f + s.find.take * t;
       credits += cost;
+      // Today: a failing finder finds no one (no per-creator calls); a working finder + failing per-creator action = the finder only.
+      if (!isFailing(knowledge[s.find.actionId])) nowCredits += isFailing(knowledge[s.then.actionId]) ? f : cost;
       items += s.find.take * perPage(s.then.actionId);
       parts.push(`${shortName(s.find.actionId)} once (${fmt(f)}) + ${plural(s.find.take, 'creator')} × ${plural(t, 'credit')} = ${fmt(cost)}`);
     }
   }
   const aiTokens = plan.shape ? items * TOKENS_PER_ITEM : 0;
   const aiRupees = rupees(aiTokens);
+  const unhealthy = failingActions(plan, knowledge);
   let how = parts.length ? `${parts.join(' · ')} → ≈ ${plural(credits, 'credit')} per run` : 'No sources yet.';
+  if (unhealthy.length && nowCredits !== credits) how += ` (≈ ${plural(nowCredits, 'credit')} today while ${downText(unhealthy.map((u) => u.name))} — a failing call answers empty and is not charged)`;
   if (plan.shape) how += `; shaping ≈ ${plural(items, 'item')} × ${TOKENS_PER_ITEM} tokens ≈ ${fmt(aiTokens)} AI tokens ≈ ₹${aiRupees} (at ₹${RUPEES_PER_1K_AI_TOKENS} per 1k tokens, Sonnet)`;
   else if (plan.watch) how += '; no AI shaping on a Watch/Alert';
   else how += '; no AI shaping — rows as fetched';
   how += '. Sheet writes are not Social credits.';
-  return { credits, aiTokens, items, how, aiRupees };
+  const out: PlanCost = { credits, aiTokens, items, how, aiRupees, nowCredits };
+  if (unhealthy.length) out.unhealthy = unhealthy;
+  return out;
 }
+
+/** "Search Hashtag Posts is down" / "X and Y are down" — the clause the cost line and the card share. */
+export function downText(names: string[]): string {
+  const list = names.filter(Boolean);
+  if (!list.length) return '';
+  const who = list.length === 1 ? list[0] : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+  return `${who} ${list.length === 1 ? 'is' : 'are'} down`;
+}
+
+/**
+ * The credits part of a cost line: "≈ 19 credits" — or, while a source is down, "≈ 19 credits (≈ 11 while Search
+ * Hashtag Posts is down)" (BEA-1375). The web card's `creditsText` mirrors this — keep them in step.
+ */
+export function creditsText(cost: Pick<PlanCost, 'credits' | 'nowCredits' | 'unhealthy'>): string {
+  const base = `≈ ${plural(cost.credits, 'credit')}`;
+  const now = Number(cost.nowCredits);
+  const down = (cost.unhealthy || []).map((u) => u.name);
+  if (!down.length || !Number.isFinite(now) || now === cost.credits) return base;
+  return `${base} (≈ ${fmt(now)} while ${downText(down)})`;
+}
+
+/**
+ * The whole cost line, in the words the plan card uses: "≈ 19 credits (≈ 11 while X is down) · ≈ 65k AI tokens ≈ ₹19
+ * per run" or "≈ 5 credits per run · no AI cost". The builder writes it under its reply so the reply and the card can
+ * never disagree — the numbers are the server's, never the model's (BEA-1375).
+ */
+export function costLineText(cost: PlanCost): string {
+  const credits = creditsText(cost);
+  if (!(cost.aiTokens > 0)) return `${credits} per run · no AI cost`;
+  const k = cost.aiTokens >= 1000 ? `${Math.round(cost.aiTokens / 1000)}k` : String(cost.aiTokens);
+  return `${credits} · ≈ ${k} AI tokens ≈ ₹${cost.aiRupees} per run`;
+}
+
+const oneLineNote = (v: any) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t.length > 160 ? `${t.slice(0, 159)}…` : t; };
 
 /** `svc:instagram.search_popular` → "Instagram search popular" — for the cost sentence. */
 export function shortName(id: string): string {

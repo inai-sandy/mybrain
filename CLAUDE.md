@@ -487,6 +487,33 @@ repeated action ids (unique source ids via `sourceIdFor`) and reads `output.appe
 UNRELATED files (a TS inference-cache quirk) — the parameter is `string[]`; `AgentFlowSyncService.SOCIAL_KEYS` includes `sheetAppend`, so
 flipping it redraws the picture ("Google Sheet — one sheet, kept adding to" → "append to yours" once the runner remembered the sheet).
 
+**Lessons from the acceptance run: the builder plans on a HEALTHY source first, samples a finder before trusting it, settles when/where before
+the plan, and the cost line is the server's (BEA-1375).** The BEA-1373 run got there only because the owner pushed four times
+(`.claude/checks/ui-shots/BEA-1373/transcript.md`); each push is now a rule in `RULES_TEXT` (judgement rules from the facts, no fixed
+interview): a plan needs one source that can produce rows TODAY; sample the finder before a creators block and judge the accounts real
+(followers, posts — look-alike handles with 0–20 followers are not creators; try Popular Search owners / native user search and say what
+you tried); "when it runs" and "where the rows go" are open until said or accepted in so many words; cost numbers are the server's, never
+the model's. Where the server can check, it does — `think()`'s loop sends a plan back at most ONCE per reason, `MAX_ASKS_PER_MESSAGE` (7)
+model calls per owner message all in: (1) **no healthy source** (`planHasHealthySource` in `plan.ts`: a block is healthy when none of its
+actions is `isFailing` = health known + not ok; no verdict counts as healthy) → `noHealthySourceText`; still none → the plan is NOT shown
+(reply only) and `healthNote()` says "Nothing in this plan can produce rows today — every source in it is failing … I have not shown it as
+a plan yet" — NEVER "the other sources carry the run" when there are none (that sentence stays for a plan with a working source beside the
+failing one, and is skipped when the reply already says "down"); (2) **unsampled finder** — the sampler's log line now carries `actionId`
+(`sampledActionIds(state)` reads those lines + the Social hand-off seed; `unsampledFinders(plan, seen)`) → `sampleFinderText` nudge, only
+when the sample budget has room (`SAMPLE_CAPS`, `overBudget`), so the model answers `{sample}` and the SAME loop runs it; (3) an invalid
+plan, as before. **Cost:** `estimatePlanCost` returns `nowCredits` (healthy sources only — a failing source's pages are not counted, a
+failing finder finds no one, a failing per-creator action leaves the finder's credit) and fills `unhealthy` itself when the knowledge
+carries `name`+`health` (`CostKnowledge` grew those; `costWithHealth` is just the estimate now; `social.controller` passes them too, so the
+job page header says it); `how` gains "(≈ 11 credits today while Search Hashtag Posts is down — a failing call answers empty and is not
+charged)"; `creditsText(cost)` = "≈ 19 credits (≈ 11 while Search Hashtag Posts is down)" only when they differ (mirror in `PlanCard.tsx`
+`creditsText`/`downText` — keep in step; `AgentApp` header uses it); `costLineText(cost)` is the whole card line, and `think()` APPENDS
+"Cost: <costLineText>." under every reply that shows a plan (`costReplyLine`) — the reply and the card can never disagree again — and the
+next turn's prompt carries "Server cost of that plan (quote these, not your own)". The prompt defaults' reply slot no longer asks for
+"≈ credits and ≈ AI tokens" in prose (the JSON `cost` field keeps the model's arithmetic). Know-how notes completed: `search_profiles`
+"Matches names/handles, not topics — many look-alike/dead accounts … Sample before trusting", `search_popular` "Owners of popular posts are
+a good creators finder … argsFrom { handle: owner.username }". Traps: the five-hashtags recorded test now runs on a WORKING hashtag card
+(a plan of only failing sources is refused by design); a harness with no `sampler` never nudges for a finder (it cannot run one).
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

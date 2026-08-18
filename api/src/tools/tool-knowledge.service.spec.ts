@@ -338,6 +338,15 @@ describe('notes merge (BEA-1368)', () => {
     expect(card.notes).toEqual(['n']);
   });
 
+  it('the finder know-how the builder reads (BEA-1375): profile search matches names not topics — sample before trusting; Popular Search owners are a good creators finder', () => {
+    const profiles = notesFor('svc:instagram.search_profiles', 'instagram', KNOWLEDGE_NOTES).flatMap((n) => n.notes).join(' ');
+    expect(profiles).toMatch(/Matches names\/handles, not topics — many look-alike\/dead accounts/);
+    expect(profiles).toMatch(/Sample before trusting it as a finder/);
+    const popular = notesFor('svc:instagram.search_popular', 'instagram', KNOWLEDGE_NOTES).flatMap((n) => n.notes).join(' ');
+    expect(popular).toMatch(/Owners of popular posts are a good creators finder/);
+    expect(popular).toMatch(/argsFrom \{ "handle": "owner\.username" \}/);
+  });
+
   it('every shipped note is keyed to a real thing: an svc: id, a glob, or a bare service slug', () => {
     for (const n of KNOWLEDGE_NOTES) {
       expect(n.notes.length).toBeGreaterThan(0);

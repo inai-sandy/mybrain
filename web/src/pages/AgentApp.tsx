@@ -16,6 +16,7 @@ import { OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thre
 import { plainPreview } from '../ui/plainPreview';
 import { AddSourcePanel } from './social/AddSourcePanel';
 import { entryOf, sourceIdFor, sourcesOf, toolArgsOf, toolsOf } from '../ui/toolArgs';
+import { creditsText, type PlanCost } from '../ui/PlanCard';
 
 type UiInput = { key: string; label: string; type: 'topic' | 'text' | 'url' | 'contact' | 'date' | 'choice'; placeholder?: string; options?: string[] };
 type UiSpec = { headline: string; inputs: UiInput[]; view: 'report' | 'brief' | 'checklist' | 'plain'; runLabel: string };
@@ -49,7 +50,7 @@ export function AgentApp() {
   const [flow, setFlow] = useState<any>(null);
   const [pickingTools, setPickingTools] = useState(false); // this job's own toolbox (BEA-1168)
   const [addingSource, setAddingSource] = useState(false); // another Social source on a direct-fetch job (BEA-1359)
-  const [planCost, setPlanCost] = useState<{ credits: number; aiTokens: number; how: string } | null>(null); // ≈ what one run costs (BEA-1369)
+  const [planCost, setPlanCost] = useState<PlanCost | null>(null); // ≈ what one run costs (BEA-1369); today's figure while a source is down (BEA-1375)
   const catalog = useCatalog();
   const toolNames: Record<string, string> = Object.fromEntries((catalog?.tools || []).map((t: any) => [t.id, t.name]));
   const [allSkills, setAllSkills] = useState<any[] | null>(null);
@@ -236,7 +237,7 @@ export function AgentApp() {
           <h1 className="truncate text-xl font-bold">{a.name}</h1>
           <p className="truncate text-sm text-zinc-500">{a.description || a.scheduleText || 'Your agent'}</p>
           {planCost && (
-            <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>≈ {planCost.credits.toLocaleString()} credit{planCost.credits === 1 ? '' : 's'} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
+            <p className="truncate text-xs text-zinc-400" data-testid="plan-cost" title={planCost.how}>{creditsText(planCost)} per run{planCost.aiTokens > 0 ? ` · ≈ ${planCost.aiTokens >= 1000 ? `${Math.round(planCost.aiTokens / 1000)}k` : planCost.aiTokens} AI tokens for shaping` : ''}</p>
           )}
         </div>
         <button onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings" className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><GearIcon className="h-5 w-5" /></button>

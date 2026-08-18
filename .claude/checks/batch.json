@@ -41,6 +41,12 @@
     {
       "id": "BEA-1373",
       "title": "Acceptance: owner's example through the builder",
+      "status": "parked",
+      "note": "In Review \u2014 pipeline proven (82 dated rows, sheet, cost \u00b1); builder needed 4 pushes \u2192 BEA-1375; WhatsApp Meta-paced"
+    },
+    {
+      "id": "BEA-1375",
+      "title": "Builder lessons from the acceptance run (healthy source first, sample finder, settle when, cost while-down)",
       "status": "in_progress"
     }
   ]
