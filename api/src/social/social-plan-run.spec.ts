@@ -206,6 +206,60 @@ describe('creators-first', () => {
     expect(all.calls.some((c) => c.id === SHEET_CREATE)).toBe(false);
   });
 
+  it('BEA-1373: creators fetched but NOTHING kept from the window → an empty source with THAT reason; the summary names every empty source and its own why (the first live run said "all 4 sources answered not_found" over a 5-source plan)', async () => {
+    const HASHTAG = 'svc:instagram.search_hashtag';
+    const NOT_FOUND = { ok: false, error: 'Instagram could not do that: No posts found', credits: 0, status: 404, notFound: true, serviceName: 'Instagram', actionName: 'Search Hashtag Posts' };
+    const h = harness({
+      answer: (id, args) => {
+        if (id === HASHTAG) return NOT_FOUND;
+        if (id === 'svc:instagram.search_profiles') return finder;
+        return { ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Posts', data: { items: [{ id: `${args.handle}-old`, taken_at: Math.floor((now - 90 * day) / 1000), caption: 'stale' }] } };
+      },
+      card: { 'svc:instagram.user_posts': { fields: [{ path: 'items[].taken_at', kind: 'date' }] } },
+    });
+    await h.svc.run('run1', job({
+      [HASHTAG]: { actionId: HASHTAG, args: { hashtag: 'smarthomeindia', date_posted: 'last-month' } },
+      [`${HASHTAG}#2`]: { actionId: HASHTAG, args: { hashtag: 'homeautomationindia', date_posted: 'last-month' } },
+      'svc:instagram.search_profiles': { kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home india' }, take: 3 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'username' }, keepDays: 30 } },
+    }, { notifyWhatsApp: true }));
+    expect(h.finish[0].status).toBe('done');
+    const text: string = h.finish[0].resultText;
+    expect(text).toMatch(/0 posts found — nothing to write, no sheet made \(all 3 sources came back empty\)/);
+    expect(text).not.toMatch(/all 3 sources answered not_found/); // the creators block did NOT answer not_found
+    expect(text).not.toMatch(/no creator's fetch succeeded/); // every fetch succeeded — the posts were just old
+    expect(text).toMatch(/smarthomeindia — no posts found \(vendor answered not_found\)/);
+    expect(text).toMatch(/homeautomationindia — no posts found \(vendor answered not_found\)/);
+    expect(text).toMatch(/3 creators · 0 kept from the last 30 days \(of 3\)/);
+    expect(h.calls.some((c) => c.id === SHEET_CREATE)).toBe(false); // nothing written, nothing sent
+  });
+
+  it('BEA-1373: a Watch with a creators block that kept nothing still goes through the watch path (baseline, "watching from now"), not the run-mode "nothing to write" summary', async () => {
+    const h = harness({
+      answer: (id, args) => id === 'svc:instagram.search_profiles' ? finder : { ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Posts', data: { items: [{ id: `${args.handle}-old`, taken_at: Math.floor((now - 90 * day) / 1000), caption: 'stale' }] } },
+      card: { 'svc:instagram.user_posts': { fields: [{ path: 'items[].taken_at', kind: 'date' }] } },
+    });
+    const watches = { get: jest.fn(async () => null), save: jest.fn(async () => undefined) };
+    (h.svc as any).watches = watches;
+    await h.svc.run('run1', creatorsJob({ job: { mode: 'watch' } }));
+    expect(h.finish[0].status).toBe('done');
+    expect(h.finish[0].resultText).not.toMatch(/nothing to write, no sheet made/);
+    expect(watches.save).toHaveBeenCalled(); // the baseline is stored — the watch keeps its 0-item table
+    expect(h.steps.some((s) => /0 kept from the last 30 days \(of 3\)/.test(s.label))).toBe(true);
+  });
+
+  it('BEA-1373: the run SAYS the AI tokens its shaping step really spent, on the shape step and in the result — next to the credits', async () => {
+    const h = harness({ answer: () => ({ ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Popular Search', data: { posts: [post('a'), post('b')] } }) });
+    (h.svc as any).llm.tokensSince = jest.fn(async (feature: string) => (feature === 'social-shape' ? 38412 : 0));
+    await h.svc.run('run1', job({ 'svc:instagram.search_popular': { actionId: 'svc:instagram.search_popular', args: { query: 'smart home india' } } }, { prompt: 'Keep only India posts. Columns: link, caption.' }));
+    expect(h.finish[0].status).toBe('done');
+    expect(h.steps.some((s) => s.nodeId === 'shape' && /Shaped 1 row into 2 columns · 38k AI tokens/.test(s.label))).toBe(true);
+    expect(h.finish[0].resultText).toMatch(/\*\*1 row\*\* · 1 credit · 38k AI tokens/);
+    // no shaping (rows as fetched) → no AI tokens claimed
+    const plain = harness({ answer: () => ({ ok: true, credits: 1, serviceName: 'Instagram', actionName: 'Popular Search', data: { posts: [post('a')] } }) });
+    await plain.svc.run('run1', job({ 'svc:instagram.search_popular': { actionId: 'svc:instagram.search_popular', args: { query: 'x' } } }));
+    expect(plain.finish[0].resultText).not.toMatch(/AI tokens/);
+  });
+
   it('a creators-first source without a per-creator action fails the run plainly; a finder not_found is an empty source', async () => {
     const h = harness({ answer: () => finder });
     await h.svc.run('run1', creatorsJob({ then: { actionId: '' } }));

@@ -39,6 +39,7 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
       '12 posts per page; the opaque cursor from the answer pages further with the same query.',
       'Keys are lowercase on Instagram\'s side ("Home automation" → 404, "home automation" → posts). We lowercase the query before sending.',
       'A query with no popular page answers "Instagram does not have a popular page for that query" (0 credits) — an empty answer, not an outage.',
+      'Its posts carry the owner (posts[].owner.username) and those owners are real, active accounts on the topic — as the FINDER of a creators-first block ("smart home india" → mmlites, smartr.spaces, ahasmart, whitelion.in…) it gave dated posts while hashtag and reels search were down (seen live 2026-08-18).',
     ],
     paging: { how: 'cursor', pageSize: 12 },
     cost: { credits: 1 },
@@ -63,7 +64,10 @@ export const KNOWLEDGE_NOTES: KnowledgeNote[] = [
   },
   {
     match: 'svc:instagram.search_profiles',
-    notes: ['Google-indexed profile search — same 11-page ceiling and the same outage pattern as hashtag search.'],
+    notes: [
+      'Google-indexed profile search — same 11-page ceiling and the same outage pattern as hashtag search.',
+      'It matches the query against usernames and names, NOT what an account posts about: "smart home india" answered look-alike handles (smart.home_india, smart_home_india, smart.homes.india…) with 0–20 followers and no post in the last 30 days — 10 creators, 50 posts, 0 kept (seen live 2026-08-18). Sample it before planning on it as a finder; Popular Search\'s post owners are a better finder for a topic.',
+    ],
     paging: { how: 'cursor', cap: 11 },
   },
   {

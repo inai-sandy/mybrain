@@ -141,7 +141,8 @@ export class SocialAgentRunService {
       const fetched: { id: string; actionId: string; label: string; hint: string; r: ServiceRunResult }[] = [];
       // Searches the vendor answered "not_found" for (BEA-1359) — empty sources, said on the run,
       // never a failed run: a two-source digest still completes when one search has nothing.
-      const empties: string[] = [];
+      // Which sources came back empty and WHY — the run's summary must say it per source (BEA-1373).
+      const empties: { id: string; label: string; why: string }[] = [];
       let credits = 0;
       // The daily credit ceiling (BEA-1358): would THIS call pass it? Then it is not made — the
       // job pauses itself, says why on the run and on its row, and the owner is told. Checked
@@ -166,7 +167,10 @@ export class SocialAgentRunService {
         const out = src.kind === 'creators' ? await this.fetchCreators(src, guard, ctx, step) : await this.fetchSource(src, guard, ctx, step, sourceHint(src, plan.sources));
         if (out.stop) return fail(out.stop);
         credits += out.credits;
-        if (out.empty) { empties.push(src.id); continue; }
+        // Fetched fine but nothing kept (a creators block whose posts were all older than the window) is an
+        // EMPTY source on a run — said with that reason, never "the vendor answered not_found" (BEA-1373).
+        // A Watch/Alert keeps its 0-item table: it diffs against last time and refreshes its baseline.
+        if (out.empty || (out.why && plan.mode === 'run')) { empties.push({ id: src.id, label: sourceLabel(src, plan.sources), why: out.why || 'the vendor answered not_found' }); continue; }
         fetched.push({ id: src.id, actionId: sourceActionId(src), label: sourceLabel(src, plan.sources), hint: sourceHint(src, plan.sources), r: out.r! });
       }
 
@@ -174,9 +178,16 @@ export class SocialAgentRunService {
       // sheet made, nothing sent. Not a failure: the calls reached the vendor and it said "nothing".
       const nothingFound = async () => {
         const n = empties.length;
-        const label = `0 ${nounOf(tools[0])} found — nothing to write, no sheet made${n > 1 ? ` (all ${n} sources answered not_found)` : ''}`;
+        const allNotFound = empties.every((e) => /not_found/.test(e.why));
+        // Every source, with its own reason — a creators block that fetched 50 posts but kept none from
+        // the window is NOT "the vendor answered not_found" (the first live run said exactly that, BEA-1373).
+        const label = `0 ${nounOf(tools[0])} found — nothing to write, no sheet made${n > 1 ? (allNotFound ? ` (all ${n} sources answered not_found)` : ` (all ${n} sources came back empty)`) : ''}`;
         await step({ label, status: 'done' });
-        const why = plan.sources.some((s) => s.kind === 'creators') ? `${n === 1 ? 'The source' : `Every one of the ${n} sources`} came back empty (the vendor answered not_found, or no creator's fetch succeeded)` : `The vendor answered not_found for ${n === 1 ? 'the search' : `every one of the ${n} searches`}`;
+        const why = n === 1
+          ? `The source came back empty — ${empties[0].label}: ${empties[0].why}`
+          : allNotFound && !plan.sources.some((s) => s.kind === 'creators')
+            ? `The vendor answered not_found for every one of the ${n} searches`
+            : `Every one of the ${n} sources came back empty:\n${empties.map((e) => `- ${e.label} — ${e.why}`).join('\n')}\n`;
         await this.agent.finishRun(runId, { status: 'done', resultText: `**${label}.**\n\n${why} — nothing to write, no sheet made, nothing sent${plan.notify.whatsapp ? ' (WhatsApp skipped — nothing to send)' : ''}. ${credits} credit${credits === 1 ? '' : 's'}.` });
       };
       if (!fetched.length) return await nothingFound();
@@ -207,12 +218,15 @@ export class SocialAgentRunService {
         existing = { count: read.count!, header: read.header!, keyed: read.keyed };
       }
 
+      let aiTokens = 0; // what the shaping step really spent — said on the run beside the credits (BEA-1373)
       if (plan.shape) {
+        const shapeStart = new Date();
         await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log', nodeId: 'shape' });
         const shaped = await this.shape(plan.shape.prompt, table, existing?.header?.length ? existing.header : null);
+        try { aiTokens = (await this.llm.tokensSince?.('social-shape', shapeStart)) || 0; } catch { aiTokens = 0; }
         if (!shaped.ok) { await step({ label: `Could not shape the rows: ${shaped.error}`, status: 'failed', nodeId: 'shape' }); return fail(`Could not shape the rows: ${shaped.error}`); }
         table = { columns: shaped.columns!, rows: shaped.rows!, itemCount: table.itemCount };
-        await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}`, status: 'done', nodeId: 'shape' });
+        await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}${aiTokens ? ` · ${fmtTokens(aiTokens)} AI tokens` : ''}`, status: 'done', nodeId: 'shape' });
       }
 
       // ---- 3. output ----------------------------------------------------------------------------
@@ -271,7 +285,7 @@ export class SocialAgentRunService {
       }
 
       const resultText =
-        `**${table.rows.length} row${table.rows.length === 1 ? '' : 's'}** · ${credits} credit${credits === 1 ? '' : 's'}` +
+        `**${table.rows.length} row${table.rows.length === 1 ? '' : 's'}** · ${credits} credit${credits === 1 ? '' : 's'}${aiTokens ? ` · ${fmtTokens(aiTokens)} AI tokens` : ''}` +
         (outputUrl ? ` · [Open the Google Sheet](${outputUrl})` : '') +
         `\n\n${markdownTable(table.columns, table.rows, 10)}`;
       await this.agent.finishRun(runId, { status: 'done', resultText, outputUrl, outputDocId });
@@ -304,7 +318,7 @@ export class SocialAgentRunService {
     step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
     /** " (smarthomeindia)" when several sources share this action (BEA-1374) — so five hashtag steps read as five. */
     hint = '',
-  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; stop?: string }> {
+  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; why?: string; stop?: string }> {
     const id = src.actionId;
     const nodeId = `src:${src.id}`;
     const card = src.pages > 1 ? await this.knowledge?.card?.(id).catch(() => null) : null;
@@ -325,7 +339,7 @@ export class SocialAgentRunService {
       if (!r.ok && p === 1) {
         if (isEmptySearch(id, r)) {
           await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id}${hint} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
-          return { credits, empty: true };
+          return { credits, empty: true, why: `no ${nounOf(id)} found (vendor answered not_found)` };
         }
         const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
         await step({ label: `Could not fetch ${r.serviceName || id}: ${why}`, status: 'failed', nodeId });
@@ -392,7 +406,7 @@ export class SocialAgentRunService {
     guard: (actionId: string) => Promise<string | null>,
     ctx: (id: string, args: Record<string, any>) => any,
     step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
-  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; stop?: string }> {
+  ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; why?: string; stop?: string }> {
     const nodeId = `src:${src.id}`;
     const findId = src.find.actionId;
     const thenId = src.then.actionId;
@@ -408,7 +422,7 @@ export class SocialAgentRunService {
     if (!f.ok) {
       if (isEmptySearch(findId, f)) {
         await step({ label: `${f.serviceName || 'Search'} · ${f.actionName || findId} — no creators found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-        return { credits, empty: true };
+        return { credits, empty: true, why: 'no creators found (vendor answered not_found)' };
       }
       const why = f.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : f.error || 'the fetch failed';
       await step({ label: `Could not find creators (${f.serviceName || findId}): ${why}`, status: 'failed', nodeId });
@@ -418,7 +432,7 @@ export class SocialAgentRunService {
     const found = findList(f.data)?.rows || [];
     if (!found.length) {
       await step({ label: `${f.serviceName || ''}${f.actionName ? ` · ${f.actionName}` : ''} — 0 creators found · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
-      return { credits, empty: true };
+      return { credits, empty: true, why: '0 creators found' };
     }
     // The first N distinct creators (by the field the per-creator call needs).
     const creators: { c: any; args: Record<string, any>; who: string }[] = [];
@@ -443,7 +457,7 @@ export class SocialAgentRunService {
     await step({ label: `${found.length} creator${found.length === 1 ? '' : 's'} found${creators.length < found.length ? ` · taking the first ${creators.length}` : ''}${skippedNoField.length ? ` (${skippedNoField.length} had no ${skippedNoField[0]})` : ''} · ${credits} credit${credits === 1 ? '' : 's'}`, status: 'done', kind: 'log', detail: JSON.stringify(src.find.args).slice(0, 300), nodeId });
     if (!creators.length) {
       await step({ label: `No creator carried the field the per-creator call needs (${mapping.map(([, fld]) => fld).join(', ')}) — nothing to fetch`, status: 'done', nodeId });
-      return { credits, empty: true };
+      return { credits, empty: true, why: `no creator carried the field the per-creator call needs (${mapping.map(([, fld]) => fld).join(', ')})` };
     }
 
     // ---- 2. per creator — fetch them all first, then decide the date field over EVERY item
@@ -490,10 +504,15 @@ export class SocialAgentRunService {
     const label = `${creators.length} creator${creators.length === 1 ? '' : 's'} · fetched ${thenName ? thenName.toLowerCase() : 'items'} for ${okCount}${failNote} · ${keepNote} · ${credits} credit${credits === 1 ? '' : 's'}`;
     if (!okCount) {
       await step({ label: `${label} — no creator's fetch succeeded`, status: 'done', detail: failures.join('\n').slice(0, 1200), nodeId });
-      return { credits, empty: true };
+      return { credits, empty: true, why: `${creators.length} creators found but no creator's fetch succeeded` };
     }
     await step({ label, status: 'done', detail: failures.length ? failures.join('\n').slice(0, 1200) : JSON.stringify(src.find.args).slice(0, 300), nodeId });
+    // Fetched fine but nothing kept (every post older than the window, or every account empty): an
+    // EMPTY source with that reason — not a not_found, and not a silent 0-row table (BEA-1373).
+    // (`why` beside `r`, not `empty`: a Watch still needs the 0-item table to diff and to refresh its
+    // baseline — the caller decides by mode.)
     const r: ServiceRunResult = { ok: true, data: { items }, credits, serviceName, actionName: `${f.actionName || 'Find creators'} → ${thenName || 'their posts'}` };
+    if (!kept) return { r, credits, why: `${creators.length} creator${creators.length === 1 ? '' : 's'} · ${keepNote}` };
     return { r, credits };
   }
 
@@ -885,6 +904,9 @@ export function shapeInput(item: Record<string, any>): Record<string, any> {
  * Google-indexed searches answer `404 not_found` for a query with no posts. A profile or a post
  * lookup that answers not_found still fails the run — that means the thing does not exist.
  */
+/** 38,412 → "38k"; below 1000 the number itself. */
+export function fmtTokens(n: number): string { return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n); }
+
 export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
   if (!r?.notFound) return false;
   const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
