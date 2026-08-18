@@ -430,13 +430,71 @@ const HEALTH_WORDS = /\b(down|failing|failed|fails|not answering|not_found|no po
  * must carry, or '' when nothing is failing or the reply already says so.
  */
 export function healthNote(plan: AgentPlan | null | undefined, cards: Record<string, ToolKnowledge | undefined>, reply: string): string {
-  if (!plan) return '';
-  const bad = planActionIds(plan).map((id) => cards[id]).filter((c) => c && c.health && c.health.known && c.health.ok === false) as ToolKnowledge[];
+  const bad = unhealthySources(plan, cards);
   if (!bad.length) return '';
   if (HEALTH_WORDS.test(String(reply || ''))) return '';
-  const parts = bad.map((c) => `${c.name} is failing at the vendor right now (${oneLine(c.health.note || c.health.lastError || 'every recent call failed', 160)})`);
+  const parts = bad.map((c) => `${c.name} is failing at the vendor right now (${c.note})`);
   return `Note: ${parts.join('; ')}. The plan keeps ${bad.length === 1 ? 'it' : 'them'} so ${bad.length === 1 ? 'it fills' : 'they fill'} in when the vendor repairs it — until then the other sources carry the run.`;
 }
+
+/**
+ * The plan's sources whose card says FAILING (health known and not ok), one entry per action id, with the
+ * card's own note — the plan card marks each such source ("down at the vendor right now — kept so it fills
+ * in later"), and `healthNote()` writes the reply's note from the same list (BEA-1372).
+ */
+export function unhealthySources(plan: AgentPlan | null | undefined, cards: Record<string, ToolKnowledge | undefined>): { actionId: string; name: string; note: string }[] {
+  if (!plan) return [];
+  return planActionIds(plan)
+    .map((id) => cards[id])
+    .filter((c): c is ToolKnowledge => !!(c && c.health && c.health.known && c.health.ok === false))
+    .map((c) => ({ actionId: c.actionId, name: c.name, note: oneLine(c.health.note || c.health.lastError || 'every recent call failed', 160) }));
+}
+
+// ---- the Social hand-off: "Make it an agent" seeds the builder with the call just made (BEA-1372) ------
+
+/** What a Social result hands the builder: the action, the exact arguments, a label, and a compact view of the answer. */
+export type BuilderSeed = {
+  actionId: string;
+  args: Record<string, any>;
+  /** "Instagram · Search Hashtag Posts" — the platform + action names as the Social page shows them. */
+  label?: string;
+  sample?: { count?: number; listKey?: string; credits?: number; notFound?: boolean; fields?: string[] };
+};
+
+/** `{ hashtag: 'smarthomeindia', date_posted: 'last-month' }` → "hashtag: smarthomeindia, date_posted: last-month" (≤ 6, `_`-keys out). */
+export function seedArgsText(args: Record<string, any>): string {
+  return Object.entries(args || {})
+    .filter(([k, v]) => !String(k).startsWith('_') && v !== undefined && v !== null && v !== '')
+    .slice(0, 6)
+    .map(([k, v]) => { const s = typeof v === 'string' ? v : (() => { try { return JSON.stringify(v); } catch { return String(v); } })(); return `${k}: ${s.length > 40 ? `${s.slice(0, 39)}…` : s}`; })
+    .join(', ');
+}
+
+/** The builder's FIRST line after a Social hand-off — scripted, no model call, so it costs nothing and reads the same every time. */
+export function seedLine(seed: BuilderSeed): string {
+  const name = seed.label || shortId(seed.actionId);
+  const args = seedArgsText(seed.args);
+  const head = `You just ran ${name}${args ? ` (${args})` : ''}`;
+  const s = seed.sample || {};
+  const credits = s.credits === undefined ? '' : ` for ${s.credits === 1 ? '1 credit' : `${s.credits} credits`}`;
+  let got: string;
+  if (s.notFound) got = `and it found nothing today (0 credits) — an agent on a schedule keeps asking and writes the rows the day they appear.`;
+  else if (typeof s.count === 'number') got = `and got ${s.count === 0 ? 'nothing back' : `${s.count} ${s.count === 1 ? (s.listKey ? singular(s.listKey) : 'record') : s.listKey ? s.listKey.split('.').pop() : 'items'}`}${credits}.`;
+  else got = `and got an answer${credits}.`;
+  return `${head} ${got} Is this the kind of thing you want, and how much of it? Tell me what the agent should do with it — how often, and where the rows should go — and I'll plan it from there.`;
+}
+
+/** The section the model reads about the hand-off — the exact id and arguments, so the plan starts from THAT call. */
+export function seedText(seed: BuilderSeed | null | undefined): string {
+  if (!seed?.actionId) return '';
+  const s = seed.sample || {};
+  const fields = Array.isArray(s.fields) && s.fields.length ? ` · fields: ${s.fields.slice(0, 8).join(', ')}` : '';
+  const answer = s.notFound ? 'the vendor answered not_found (nothing today, 0 credits)' : typeof s.count === 'number' ? `${s.count} ${s.listKey ? s.listKey.split('.').pop() : 'items'}${fields}${s.credits !== undefined ? ` · ${s.credits} credit${s.credits === 1 ? '' : 's'}` : ''}` : 'an answer';
+  return `The owner came here from the Social page, where they ran ${seed.actionId}${seed.label ? ` (${seed.label})` : ''} by hand with arguments ${JSON.stringify(seed.args || {})} and got ${answer}. Start from that action and those exact arguments — you already know it works — and design around it: ask what they want to do with it (how often, how much, where it goes), add sources or pages only when the ask needs them.`;
+}
+
+const singular = (listKey: string) => { const w = listKey.split('.').pop() || 'item'; return w.endsWith('s') ? w.slice(0, -1) : w; };
+const shortId = (id: string) => String(id || '').replace(/^svc:/, '').replace('.', ' · ').replace(/_/g, ' ');
 
 // ---- small helpers --------------------------------------------------------------------------------
 

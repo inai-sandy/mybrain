@@ -275,10 +275,29 @@ export function planActionIds(plan: AgentPlan): string[] {
 /** What the estimate reads off a know-how card (BEA-1368) — only the two facts it needs. */
 export type CostKnowledge = { cost?: { free?: boolean; credits?: { typical?: number } }; paging?: { pageSize?: number } };
 
-export type PlanCost = { credits: number; aiTokens: number; items: number; how: string };
+export type PlanCost = {
+  credits: number;
+  aiTokens: number;
+  items: number;
+  how: string;
+  /** ≈ ₹ the AI shaping costs per run — `aiTokens` × `RUPEES_PER_1K_AI_TOKENS`, 0 when nothing is shaped (BEA-1372). */
+  aiRupees: number;
+  /** Sources whose know-how card says FAILING right now — the plan card marks them "kept so it fills in later" (BEA-1372). */
+  unhealthy?: { actionId: string; name: string; note: string }[];
+};
 
 /** Tokens the shaping model reads per item — a flattened post with a capped caption, measured on real runs. */
 export const TOKENS_PER_ITEM = 300;
+/**
+ * ≈ ₹ per 1,000 AI tokens for the shaping step (Sonnet through OpenRouter, mostly input tokens; ≈ $3.5 per
+ * million at ≈ ₹85 to the dollar). A stated rate the owner can read in `how` — never a hidden guess.
+ */
+export const RUPEES_PER_1K_AI_TOKENS = 0.3;
+/** ₹ rounded the way the card shows them: under ₹1 to one decimal, else whole rupees. */
+export function rupees(aiTokens: number): number {
+  const r = (Math.max(0, Number(aiTokens) || 0) / 1000) * RUPEES_PER_1K_AI_TOKENS;
+  return r === 0 ? 0 : r < 1 ? Math.round(r * 10) / 10 : Math.round(r);
+}
 /** Items a page usually holds when the card does not say — 12 is what the searches here answer. */
 export const DEFAULT_PAGE_SIZE = 12;
 
@@ -316,11 +335,13 @@ export function estimatePlanCost(plan: AgentPlan, knowledge: Record<string, Cost
     }
   }
   const aiTokens = plan.shape ? items * TOKENS_PER_ITEM : 0;
+  const aiRupees = rupees(aiTokens);
   let how = parts.length ? `${parts.join(' · ')} → ≈ ${plural(credits, 'credit')} per run` : 'No sources yet.';
-  if (plan.shape) how += `; shaping ≈ ${plural(items, 'item')} × ${TOKENS_PER_ITEM} tokens ≈ ${fmt(aiTokens)} AI tokens`;
+  if (plan.shape) how += `; shaping ≈ ${plural(items, 'item')} × ${TOKENS_PER_ITEM} tokens ≈ ${fmt(aiTokens)} AI tokens ≈ ₹${aiRupees} (at ₹${RUPEES_PER_1K_AI_TOKENS} per 1k tokens, Sonnet)`;
   else if (plan.watch) how += '; no AI shaping on a Watch/Alert';
+  else how += '; no AI shaping — rows as fetched';
   how += '. Sheet writes are not Social credits.';
-  return { credits, aiTokens, items, how };
+  return { credits, aiTokens, items, how, aiRupees };
 }
 
 /** `svc:instagram.search_popular` → "Instagram search popular" — for the cost sentence. */

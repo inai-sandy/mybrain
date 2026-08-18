@@ -4,6 +4,8 @@ import { useToast } from '../ui/Toast';
 import { Sheet } from '../ui/Sheet';
 import { ChatInput } from '../ui/ChatInput';
 import { PlanCard, PlanCost } from '../ui/PlanCard';
+import { BuilderLine, BuilderMessage } from '../ui/BuilderMessage';
+import { withCreatedFlag } from './AgentBuilder';
 import { ToolPicker, useCatalog } from '../ui/ToolPicker';
 
 /**
@@ -16,11 +18,13 @@ import { ToolPicker, useCatalog } from '../ui/ToolPicker';
 export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: string; areaName: string; onCreated: (url: string) => void; onClose: () => void }) {
   const toast = useToast();
   const catalog = useCatalog();
-  const [log, setLog] = useState<{ who: 'you' | 'ai'; text: string }[]>([]);
+  const [log, setLog] = useState<BuilderLine[]>([]);
   const [job, setJob] = useState<any>(null);
   // The direct-fetch plan with its cost (BEA-1371) — shown instead of the job when the builder planned one.
   const [plan, setPlan] = useState<any>(null);
   const [cost, setCost] = useState<PlanCost | null>(null);
+  const [planHidden, setPlanHidden] = useState(false); // "Not now" — the plan stays on the server; the next reply shows it again
+  const inputRef = useRef<HTMLDivElement>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -63,10 +67,13 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
       const r = await fetch(`/api/agent/areas/${areaId}/job-builder/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: m }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not reply');
-      setLog((p) => [...p, { who: 'ai', text: d.reply }]);
+      // The server's row has any 🔎 sample lines the turn wrote BEFORE the reply — re-read it so they land in order (BEA-1372).
+      const fresh = await fetch(`/api/agent/areas/${areaId}/job-builder`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+      if (fresh?.log?.length) setLog(fresh.log); else setLog((p) => [...p, { who: 'ai', text: d.reply }]);
       setJob(d.job || null);
       setPlan(d.plan || null);
       setCost(d.cost || null);
+      setPlanHidden(false);
     } catch (e: any) { setLog((p) => [...p, { who: 'ai', text: e?.message || 'Something went wrong — try again.' }]); }
     setBusy(false);
   }
@@ -86,7 +93,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
 
       // A direct job from a plan (BEA-1371) draws its own flow picture on the server (BEA-1366) —
       // planning a second one here would fork it from what runs.
-      if (plan && !job) { toast('success', 'Job created 🎉'); onCreated(d.url); setCreating(false); setStep(''); return; }
+      if (plan && !job) { toast('success', 'Job created 🎉'); onCreated(withCreatedFlag(d.url)); setCreating(false); setStep(''); return; }
 
       setStep('Drawing the steps…');
       try {
@@ -111,7 +118,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
 
   async function reset() {
     await fetch(`/api/agent/areas/${areaId}/job-builder`, { method: 'DELETE' }).catch(() => undefined);
-    setLog([]); setJob(null); setPlan(null); setCost(null);
+    setLog([]); setJob(null); setPlan(null); setCost(null); setPlanHidden(false);
   }
 
   const toolName = (id: string) => (catalog?.tools || []).find((t: any) => t.id === id)?.name || id;
@@ -143,14 +150,13 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
                 Describe the job in your own words — for example: <i>“every Monday, find what changed in Indian EV battery rules and write me a one-page brief with sources.”</i> I'll ask what I need, show you the plan, and only build it when you press Create.
               </p>
             )}
-            {log.map((m, i) => (
-              <div key={i} className={'flex ' + (m.who === 'you' ? 'justify-end' : 'justify-start')}>
-                <div className={'max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm ' + (m.who === 'you' ? 'bg-emerald-600 text-white' : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200')}>{m.text}</div>
-              </div>
-            ))}
+            {log.map((m, i) => <BuilderMessage key={i} m={m} />)}
             {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
 
-            {plan && !job && <PlanCard plan={plan} cost={cost} creating={creating} onCreate={create} createLabel="Create this job" />}
+            {plan && !job && !planHidden && <PlanCard plan={plan} cost={cost} creating={creating} onCreate={create} createLabel="Create this job" onChange={() => inputRef.current?.querySelector('textarea')?.focus()} onDismiss={() => setPlanHidden(true)} />}
+            {plan && !job && planHidden && (
+              <button onClick={() => setPlanHidden(false)} className="text-xs text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-300" data-testid="plan-show-again">Show the plan again</button>
+            )}
 
             {job && (
               <div className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
@@ -240,7 +246,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
             />
           )}
 
-          <div className="border-t border-zinc-100 p-3 dark:border-zinc-800">
+          <div className="border-t border-zinc-100 p-3 dark:border-zinc-800" ref={inputRef}>
             <ChatInput value={msg} onChange={setMsg} onSend={send} busy={busy} autoFocus placeholder={log.length ? 'Reply…' : 'What should this job do?'} />
           </div>
         </div>

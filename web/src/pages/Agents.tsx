@@ -9,7 +9,7 @@ import { DepthDial, type Depth } from '../ui/DepthDial';
 import { STARTERS, type Starter } from '../ui/agentStarters';
 import { enablePush, pushPermission, pushEnabledHere } from '../ui/push';
 import { SchedulePicker, schedText, type Sched } from '../ui/SchedulePicker';
-import { AgentBuilder } from './AgentBuilder';
+import { AgentBuilder, BuilderSeed } from './AgentBuilder';
 import { EMPTY_THRESHOLD, KEEP_AS_FETCHED, OutputDestPicker, ThresholdDraft, ToolArgsEditor, WatchModePicker, thresholdOfDraft } from '../ui/agentJobFields';
 import { AddSourcePanel, SocialSource } from './social/AddSourcePanel';
 import { sourceIdFor, toolArgsOf, toolsOf } from '../ui/toolArgs';
@@ -25,13 +25,27 @@ export function socialAgentName(p: SocialPrefill): string {
 }
 
 /** Read `?builder=1&tool=&args=&label=` off the Agents URL. Null when it is not a Social handoff. */
-export function readSocialPrefill(params: URLSearchParams): SocialPrefill | null {
+export function readSocialPrefill(params: URLSearchParams, builder: string | string[] = '1'): SocialPrefill | null {
   const tool = params.get('tool') || '';
-  if (params.get('builder') !== '1' || !/^svc:[a-z0-9_]+\.[a-z0-9_]+$/.test(tool)) return null;
+  const kinds = Array.isArray(builder) ? builder : [builder];
+  if (!kinds.includes(params.get('builder') || '') || !/^svc:[a-z0-9_]+\.[a-z0-9_]+$/.test(tool)) return null;
   let args: Record<string, any> = {};
   try { const a = JSON.parse(params.get('args') || '{}'); if (a && typeof a === 'object' && !Array.isArray(a)) args = a; } catch { args = {}; }
   const mode = params.get('mode') || '';
   return { tool, args, label: params.get('label') || undefined, ...(mode === 'watch' || mode === 'alert' ? { mode } : {}) };
+}
+
+/**
+ * Read `?builder=chat&tool=&args=&label=&sample=<json>` (BEA-1372) — the Social result → the THINKING
+ * builder, the call just made as its first message. Null unless it is that hand-off. `sample` is the
+ * compact answer ({count, listKey, credits, notFound, fields}); a bad one is simply left out.
+ */
+export function readBuilderSeed(params: URLSearchParams): BuilderSeed | null {
+  const p = readSocialPrefill(params, 'chat');
+  if (!p) return null;
+  let sample: BuilderSeed['sample'];
+  try { const v = JSON.parse(params.get('sample') || 'null'); if (v && typeof v === 'object' && !Array.isArray(v)) sample = v; } catch { sample = undefined; }
+  return { tool: p.tool, args: p.args, label: p.label, ...(sample ? { sample } : {}) };
 }
 
 export type Run = { id: string; title?: string; status: string; startedAt: string; endedAt?: string | null; outputDocId?: string | null };
@@ -616,8 +630,13 @@ export function Agents() {
   const focusId = params.get('focus'); // push-notification deep link (BEA-1088 groundwork)
   // The Social handoff (BEA-1357): `/agent?builder=1&tool=<svc id>&args=<json>&label=…` opens the
   // builder form pre-filled. Read once; the params are cleared when the form closes.
-  const [socialPrefill] = useState<SocialPrefill | null>(() => readSocialPrefill(params));
-  const clearBuilderParams = () => { if (params.get('builder')) { const p = new URLSearchParams(params); ['builder', 'tool', 'args', 'label'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); } };
+  // `builder=chat` (BEA-1372) is the same hand-off into the THINKING builder; the form stays one tap away
+  // ("Repeat exactly this call"), so the prefill is read for both.
+  const [socialPrefill] = useState<SocialPrefill | null>(() => readSocialPrefill(params, ['1', 'chat']));
+  const [builderSeed] = useState<BuilderSeed | null>(() => readBuilderSeed(params));
+  const clearBuilderParams = () => { if (params.get('builder')) { const p = new URLSearchParams(params); ['builder', 'tool', 'args', 'label', 'sample'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); } };
+  // Once the seed is on the server, drop `sample` from the URL — a reload must not start the conversation over.
+  const dropSeedParam = () => { if (params.get('sample')) { const p = new URLSearchParams(params); p.delete('sample'); setParams(p, { replace: true }); } };
   const [engine, setEngine] = useState<{ ok?: boolean; version?: string } | null>(null);
   const [home, setHome] = useState<HomeData | null>(null);
   const [prompt, setPrompt] = useState('');
@@ -637,7 +656,7 @@ export function Agents() {
   const [agentSort, setAgentSort] = useState<'recent' | 'name' | 'jobs'>('recent');
   const [agentPage, setAgentPage] = useState(1);
   const [showImport, setShowImport] = useState(false); // GitHub agent import (BEA-1081)
-  const [showBuilder, setShowBuilder] = useState(params.get('builder') === '1' && !readSocialPrefill(params)); // chat builder (BEA-1104); `?builder=1` alone opens it
+  const [showBuilder, setShowBuilder] = useState((params.get('builder') === '1' && !readSocialPrefill(params)) || params.get('builder') === 'chat'); // chat builder (BEA-1104); `?builder=1` alone opens it; `builder=chat` = the Social hand-off (BEA-1372)
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // big shelf groups expanded (BEA-1083)
   // Slim one-tap push opt-in (BEA-1088) — shown while this device could get notifications but isn't
   // subscribed yet (covers both "never asked" and "allowed but not registered").
@@ -854,7 +873,7 @@ export function Agents() {
           </div>
         </div>
         {showImport && <ImportGithubModal onDone={(url) => { setShowImport(false); loadHome(); loadAreas(); if (url) nav(url); }} onClose={() => setShowImport(false)} />}
-        {showBuilder && <AgentBuilder onCreated={(url) => { setShowBuilder(false); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); setShowNew(true); }} onClose={() => { setShowBuilder(false); clearBuilderParams(); }} />}
+        {showBuilder && <AgentBuilder seed={builderSeed} onSeeded={dropSeedParam} onCreated={(url) => { setShowBuilder(false); clearBuilderParams(); loadHome(); loadAreas(); if (url) nav(url); }} onUseForm={() => { setShowBuilder(false); if (builderSeed) { const p = new URLSearchParams(params); p.set('builder', '1'); p.delete('sample'); setParams(p, { replace: true }); } setShowNew(true); }} onClose={() => { setShowBuilder(false); clearBuilderParams(); }} />}
         {showNew && <NewAgentForm initial={starterPick} social={socialPrefill} onCreated={(id) => { setShowNew(false); setStarterPick(null); clearBuilderParams(); loadHome(); loadAreas(); if (id && socialPrefill) nav(`/agent/a/${id}`); }} onCancel={() => { setShowNew(false); setStarterPick(null); clearBuilderParams(); }} />}
         {areasList === null ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <div key={i} className="h-32 animate-pulse rounded-2xl bg-zinc-100 dark:bg-zinc-800" />)}</div>

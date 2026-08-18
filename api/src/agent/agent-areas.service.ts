@@ -12,6 +12,7 @@ import { BuilderSampleService } from './builder-sample.service';
 import {
   BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
   fillTemplate, healthNote, indexSection, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
+  BuilderSeed, seedLine, seedText, unhealthySources,
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 
@@ -24,7 +25,7 @@ export type AreaTool = { id?: string; kind: 'skill' | 'api' | 'mcp' | 'cli'; gro
  * proposal (`spec` for the top-level builder, `job` for a job builder), the direct-fetch `plan` with
  * its `cost`, the sample counter and the design-budget counter. A reset drops all of it.
  */
-export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter };
+export type BuilderState = { log: any[]; spec?: any | null; job?: any | null; plan?: AgentPlan | null; cost?: PlanCost | null; samples?: any; design?: DesignCounter; seed?: BuilderSeed | null };
 
 function packState(st: BuilderState): string {
   return JSON.stringify({
@@ -35,6 +36,7 @@ function packState(st: BuilderState): string {
     cost: st.cost || null,
     ...(st.samples ? { samples: st.samples } : {}),
     ...(st.design ? { design: st.design } : {}),
+    ...(st.seed ? { seed: st.seed } : {}),
   });
 }
 
@@ -227,6 +229,8 @@ export class AgentAreasService {
         sample: { label: 'Look for yourself', text: SAMPLE_TEXT },
         budget: { label: 'Design budget', text: budgetLine(design) },
         rules: { label: 'Rules', text: RULES_TEXT },
+        // The Social hand-off (BEA-1372): the call the owner just made by hand — an empty text is not appended.
+        seed: { label: 'Where the owner came from', text: seedText(st.seed) },
       }) + previous + extra;
 
       const ask = async (extra: string): Promise<any> => {
@@ -268,11 +272,11 @@ export class AgentAreasService {
         }
         if (check.plan) {
           plan = check.plan;
-          cost = estimatePlanCost(plan, cardsById as any);
+          cost = this.costWithHealth(plan, cardsById);
         }
       }
       // Budget spent and still no plan: keep the best plan so far rather than asking on.
-      if (!plan && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || estimatePlanCost(plan, cardsById as any); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
+      if (!plan && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
       if (!reply) reply = cantDo;
       // Honesty: a plan that leans on a failing source says so, even when the model forgot.
       const note = healthNote(plan, cardsById, reply);
@@ -295,6 +299,13 @@ export class AgentAreasService {
     }
   }
 
+  /** The estimate plus the failing sources it leans on — the plan card marks them (BEA-1372). */
+  private costWithHealth(plan: AgentPlan, cardsById: Record<string, ToolKnowledge>): PlanCost {
+    const cost = estimatePlanCost(plan, cardsById as any);
+    const unhealthy = unhealthySources(plan, cardsById);
+    return unhealthy.length ? { ...cost, unhealthy } : cost;
+  }
+
   /** `id → is it a social-provider action?` for the plan's category, from the cards it was planned with. */
   private async socialTester(plan: AgentPlan): Promise<((id: string) => boolean) | undefined> {
     const ids = [...new Set(plan.sources.flatMap((s) => (s.kind === 'source' ? [s.actionId] : [s.find.actionId, s.then.actionId])))].filter(Boolean);
@@ -311,7 +322,7 @@ export class AgentAreasService {
 
   private async builderLoad(): Promise<BuilderState> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.builderKey() } }).catch(() => null);
-    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
+    try { const v = row ? JSON.parse((row as any).value) : null; return { log: v?.log || [], spec: v?.spec || null, plan: v?.plan || null, cost: v?.cost || null, samples: v?.samples, design: v?.design, seed: v?.seed || null }; } catch { return { log: [], spec: null, plan: null, cost: null }; }
   }
   // `samples` = the sample-call counter (BEA-1370); kept across turns, dropped by `builderReset()`.
   private async builderSave(st: BuilderState) {
@@ -320,6 +331,47 @@ export class AgentAreasService {
 
   async builderState() { return this.builderLoad(); }
   async builderReset() { await this.builderSave({ log: [], spec: null, plan: null, cost: null }); return { ok: true }; }
+
+  /**
+   * "Make it an agent" on a Social result (BEA-1372): a FRESH conversation whose first line is the builder's
+   * own — "You just ran X (args) and got N posts. Is this the kind of thing you want, and how much of it?" —
+   * scripted, so it costs no model call; the seed (id + exact args + compact answer) rides into every later
+   * turn's prompt through `seedText()`. Seeding the same call again is a no-op (a page reload must not wipe
+   * the conversation); a different call starts over.
+   */
+  async builderSeed(input: BuilderSeed) {
+    // Seeds are serialised: two equal POSTs at once (a double tap, two tabs) must not both read "no seed yet" and write twice.
+    const run = this.seedChain.then(() => this.seedOnce(input));
+    this.seedChain = run.catch(() => undefined);
+    return run;
+  }
+  private seedChain: Promise<any> = Promise.resolve();
+
+  private async seedOnce(input: BuilderSeed) {
+    const actionId = String(input?.actionId || '').trim();
+    if (!/^svc:[a-z0-9_]+\.[a-z0-9_]+$/.test(actionId)) throw new BadRequestException('Say which action was run.');
+    const args = input?.args && typeof input.args === 'object' && !Array.isArray(input.args) ? input.args : {};
+    if (JSON.stringify(args).length > 4000) throw new BadRequestException('Those arguments are too long to start from.');
+    const s = input?.sample && typeof input.sample === 'object' ? input.sample : undefined;
+    const seed: BuilderSeed = {
+      actionId,
+      args,
+      ...(input?.label ? { label: String(input.label).slice(0, 120) } : {}),
+      ...(s ? { sample: {
+        ...(typeof s.count === 'number' && Number.isFinite(s.count) ? { count: Math.max(0, Math.floor(s.count)) } : {}),
+        ...(s.listKey ? { listKey: String(s.listKey).slice(0, 60) } : {}),
+        ...(typeof s.credits === 'number' && Number.isFinite(s.credits) ? { credits: Math.max(0, s.credits) } : {}),
+        ...(s.notFound ? { notFound: true } : {}),
+        ...(Array.isArray(s.fields) ? { fields: s.fields.map((f: any) => String(f)).filter(Boolean).slice(0, 12) } : {}),
+      } } : {}),
+    };
+    const current = await this.builderLoad();
+    const same = current.seed && current.seed.actionId === seed.actionId && JSON.stringify(current.seed.args || {}) === JSON.stringify(seed.args) && current.log.length > 0;
+    if (same) return current;
+    const st: BuilderState = { log: [{ who: 'ai', kind: 'seed', text: seedLine(seed), at: new Date().toISOString() }], spec: null, plan: null, cost: null, seed };
+    await this.builderSave(st);
+    return st;
+  }
 
   /** One builder turn: owner's message → the thinking builder's reply (+ the evolving spec or plan). */
   async builderChat(message: string): Promise<{ reply: string; spec: any | null; plan: AgentPlan | null; cost: PlanCost | null }> {
@@ -349,14 +401,14 @@ export class AgentAreasService {
       const input = planToAgentInput(st.plan, await this.socialTester(st.plan));
       const created: any = await this.agentSvc.createAgent(input as any);
       st.log.push({ who: 'ai', text: `Created ✓ — "${created.name}".`, at: new Date().toISOString() });
-      st.plan = null; st.cost = null;
+      st.plan = null; st.cost = null; st.seed = null;
       await this.builderSave(st);
       return { ok: true as const, areaId: created.areaId, agentId: created.id, url: `/agent/a/${created.id}`, jobs: [{ id: created.id, name: created.name }] };
     }
     if (!st.spec) throw new BadRequestException('There is no proposal to create yet — keep chatting.');
     const res = await this.createFromSpec(st.spec);
     st.log.push({ who: 'ai', text: `Created ✓ — "${st.spec.area.name}" with ${res.jobs.length} job(s).`, at: new Date().toISOString() });
-    st.spec = null; st.plan = null; st.cost = null;
+    st.spec = null; st.plan = null; st.cost = null; st.seed = null;
     await this.builderSave(st);
     return res;
   }

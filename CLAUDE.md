@@ -425,6 +425,38 @@ NewJobChat must NOT plan a flow after a plan-create (the server drew it). Traps:
 and `knowledge?` LAST; the recorded-answers test picks its fixture by `OWNER: …` in the conversation, not by words that also appear in
 `BLOCKS_TEXT`; several search terms on the SAME action ARE possible since BEA-1374 (sources are keyed by source id, see the next paragraph).
 
+**The builder's screens (BEA-1372): the plan-with-cost card, sample rows, and every entry point through the builder.**
+`web/src/ui/PlanCard.tsx` is the real card both chat builders draw (`AgentBuilder`, `NewJobChat`): Fetches (one line per source —
+`sourceLine()`: action · args · "× N pages"; creators-first "Find creators with … — the first N → each one's posts, last N days"),
+Keeps (watch/alert words + the shape prompt, else "rows as fetched — no AI step"), Goes to (`outputText()`), When, Tells, then
+`costLine(cost)` = "≈ N credits · ≈ Nk AI tokens ≈ ₹N per run" (or "· no AI cost") with a **how** fold that shows the server's
+`cost.how` — never a client guess. `estimatePlanCost()` now returns `aiRupees` (`rupees(aiTokens)` at `RUPEES_PER_1K_AI_TOKENS`
+= ₹0.30, stated inside `how`). **Unhealthy sources are marked from data**: `think()` puts `unhealthySources(plan, cards)` on
+`cost.unhealthy` (`{actionId,name,note}[]`, `healthNote()` writes the reply's note from the same list) and the card draws
+"<name> is down at the vendor right now — kept so it fills in later" under that source (`data-testid=plan-source-unhealthy`).
+Buttons: **Create** (`plan-create`) · **Change something** (`plan-change`, focuses the chat textarea through a wrapper ref) ·
+**Not now** (`plan-dismiss`, hides the card locally; "Show the plan again" brings it back; the plan stays on the server and
+the next reply un-hides it). Create → `withCreatedFlag(url)` = `/agent/a/<id>?created=1` and `AgentApp` shows a one-time
+"Created. Run it now?" banner (`created-banner`, Run now / Later; both drop the flag). Chat rows: `web/src/ui/BuilderMessage.tsx`
+draws every log line — a `kind:'sample'` line (or a leading 🔎) is its own muted dashed row (`builder-sample-row`, the text as
+the server wrote it, never a JSON wall), a `kind:'seed'` line is the builder's bubble tagged "from your Social run"; after each
+turn both chats RE-READ their state row so the 🔎 lines the turn wrote land in order before the reply. **Entry point (b):**
+"Make it an agent" on a Social result now goes to the THINKING builder — `makeAgentUrl()` in `SocialPlatform.tsx` →
+`/agent?builder=chat&tool=&args=&label=&sample=<{count,listKey,fields,credits,notFound}>` (`readBuilderSeed()` in `Agents.tsx`;
+`readSocialPrefill(params, kinds)` reads the same tool/args for either kind) → `AgentBuilder` with a `seed` POSTs
+`/api/agent/builder/seed` (`AgentAreasService.builderSeed`): a FRESH conversation whose first line is scripted by `seedLine()`
+("You just ran Instagram · Search Hashtag Posts (hashtag: smarthomeindia) and got 8 posts for 1 credit. Is this the kind of
+thing you want, and how much of it? …") — no model call — and `seed` (id + exact args + compact answer) is stored in the
+builder's Setting row and rides into every later turn's prompt as the "Where the owner came from" section (`seedText()`,
+appended by `fillTemplate` — no prompt default change). The same seed again is a no-op (a reload must not wipe the talk;
+`onSeeded` also drops `sample` from the URL), a different call starts over, Create/reset drop the seed. The pre-filled form
+(BEA-1357, `builder=1`) is still one tap away as **"Repeat exactly this call"** (`repeat-exact-call`: sets `builder=1`, opens
+`NewAgentForm` with the same prefill). Entry point (c) — Chat "make this an agent" — is NOT done: the chat's `ToolChip` carries
+`actionId` but not the arguments the model chose (`ChatToolsService.execute` goes through `actions.run()`, not `runDetailed()`),
+so a hand-off there would seed an empty call; it needs the chip to carry args first. Traps: `AgentApp` and the job page still
+read `PlanCost` without `unhealthy` (only the builders' `think()` adds it); the sample re-read after a turn means a test that
+stubs `/api/agent/builder` must return the FULL log, or the reply is appended locally as before.
+
 **Sources are keyed by SOURCE id, so five hashtags on one action are five sources; "keep adding" means append to ONE sheet (BEA-1374).**
 `Agent.toolArgs` is `{ [sourceId]: { actionId, args, _pages? } | { kind:'creators', find, then } }` — the source id is the action id for the
 first source on that action, then `<action id>#2`, `#3`… (`sourceIdFor`; readable in the node id `src:svc:instagram.search_hashtag#2`).

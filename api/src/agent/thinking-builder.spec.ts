@@ -5,7 +5,7 @@ import { PromptsService } from '../prompts/prompts.service';
 import { LlmService } from '../llm/llm.service';
 import {
   BLOCKS_TEXT, DESIGN_BUDGET, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, factsSection, fillTemplate, healthNote, indexSection, namedService, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
-  sampleViewText, validatePlan,
+  sampleViewText, validatePlan, seedLine, seedText, unhealthySources,
 } from './thinking-builder';
 
 /**
@@ -555,5 +555,70 @@ describe('the pieces (BEA-1371)', () => {
       expect(tpl).toContain('"plan": null while something important is still open');
       expect(tpl).toContain('"kind":"creators"');
     }
+  });
+});
+
+// ---- BEA-1372: the screens — what the plan card reads, and the Social hand-off seed ---------------------
+
+describe('the plan card reads the failing sources and the ₹ (BEA-1372)', () => {
+  it('unhealthySources lists each FAILING card once with its note; the reply note is written from the same list', () => {
+    const { plan } = validatePlan(SOCIAL_PLAN, Object.keys(CARDS));
+    const bad = unhealthySources(plan, CARDS);
+    expect(bad).toEqual([{ actionId: 'svc:instagram.search_hashtag', name: 'Instagram · Hashtag Search', note: expect.any(String) }]);
+    expect(healthNote(plan, CARDS, 'plan')).toContain(bad[0].note);
+    expect(unhealthySources(plan, { ...CARDS, 'svc:instagram.search_hashtag': { ...HASHTAG, health: { ...HASHTAG.health, ok: true } } })).toEqual([]);
+    expect(unhealthySources(null, CARDS)).toEqual([]);
+  });
+
+  it('a chat turn hands the card `cost.unhealthy` beside the arithmetic and ≈ ₹ — the UI marks the source from that, not from the reply text', async () => {
+    const { svc, state } = harness({ answer: () => ({ reply: 'Hashtag search is down at the vendor right now — kept so it fills in later.', plan: SOCIAL_PLAN }) });
+    const r = await svc.builderChat('yes');
+    expect(r.cost?.unhealthy?.map((u) => u.actionId)).toEqual(['svc:instagram.search_hashtag']);
+    expect(r.cost?.aiRupees).toBeGreaterThan(0);
+    expect(r.cost?.how).toMatch(/≈ ₹/);
+    expect(state().cost.unhealthy).toHaveLength(1); // survives in the row for a reload
+  });
+});
+
+describe('the Social hand-off seeds the builder (BEA-1372)', () => {
+  const seed = { actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'smarthomeindia', date_posted: 'last-month' }, label: 'Instagram · Search Hashtag Posts', sample: { count: 8, listKey: 'posts', credits: 1, fields: ['id', 'caption', 'owner'] } };
+
+  it('the first line is scripted from the call: name, args, count, credits, and the question', () => {
+    expect(seedLine(seed)).toBe('You just ran Instagram · Search Hashtag Posts (hashtag: smarthomeindia, date_posted: last-month) and got 8 posts for 1 credit. Is this the kind of thing you want, and how much of it? Tell me what the agent should do with it — how often, and where the rows should go — and I\'ll plan it from there.');
+    expect(seedLine({ ...seed, sample: { notFound: true } })).toMatch(/found nothing today \(0 credits\) — an agent on a schedule keeps asking/);
+    expect(seedLine({ ...seed, sample: { count: 1, listKey: 'posts', credits: 2 } })).toMatch(/got 1 post for 2 credits/);
+    expect(seedLine({ actionId: 'svc:tiktok.profile', args: {} })).toMatch(/^You just ran tiktok · profile and got an answer\./);
+    // the model's section carries the exact id + args; empty when there is no seed (so fillTemplate appends nothing)
+    expect(seedText(seed)).toMatch(/ran svc:instagram\.search_hashtag \(Instagram · Search Hashtag Posts\) by hand with arguments \{"hashtag":"smarthomeindia","date_posted":"last-month"\} and got 8 posts · fields: id, caption, owner · 1 credit/);
+    expect(seedText(null)).toBe('');
+  });
+
+  it('POST seed → a FRESH conversation whose first line is the builder\'s (kind seed), no model call; the next turn\'s prompt carries the id + args', async () => {
+    const { svc, llm, prompts, state } = harness({ answer: () => ({ reply: 'How often, and where should the rows go?', plan: null }), state: { log: [{ who: 'you', text: 'old talk' }], spec: { area: { name: 'Old' } } } });
+    const st = await svc.builderSeed(seed as any);
+    expect(llm.completeHelper).not.toHaveBeenCalled();
+    expect(st.log).toHaveLength(1);
+    expect(st.log[0]).toMatchObject({ who: 'ai', kind: 'seed' });
+    expect(st.log[0].text).toMatch(/^You just ran Instagram · Search Hashtag Posts/);
+    expect(st.spec).toBeNull();
+    expect(state().seed.actionId).toBe('svc:instagram.search_hashtag');
+    // the same seed again (a page reload) does NOT wipe the conversation; a different call starts over
+    await svc.builderChat('every Monday, into one sheet');
+    expect(prompts[0]).toMatch(/Where the owner came from/);
+    expect(prompts[0]).toMatch(/svc:instagram\.search_hashtag .* by hand with arguments \{"hashtag":"smarthomeindia"/);
+    const again = await svc.builderSeed(seed as any);
+    expect(again.log.length).toBe(3);
+    const other = await svc.builderSeed({ ...seed, args: { hashtag: 'homeautomation' } } as any);
+    expect(other.log).toHaveLength(1);
+    await expect(svc.builderSeed({ actionId: 'web_search', args: {} } as any)).rejects.toThrow(/which action/);
+    await expect(svc.builderSeed({ actionId: 'svc:instagram.search_hashtag', args: { q: 'x'.repeat(5000) } } as any)).rejects.toThrow(/too long/);
+  });
+
+  it('two equal seeds at ONCE write one line, not two (serialised)', async () => {
+    const { svc } = harness({ answer: () => ({ reply: 'x' }) });
+    const [a, b] = await Promise.all([svc.builderSeed(seed as any), svc.builderSeed(seed as any)]);
+    expect(a.log).toHaveLength(1);
+    expect(b.log).toHaveLength(1);
+    expect((await svc.builderState()).log).toHaveLength(1);
   });
 });

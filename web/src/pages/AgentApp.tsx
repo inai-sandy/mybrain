@@ -65,6 +65,9 @@ export function AgentApp() {
   const initialMode = (raw === 'run' ? 'flow' : raw === 'settings' ? 'flow' : raw) as Mode;
   const [mode, setModeState] = useState<Mode>((['flow', 'chat', 'evals', 'runs'] as string[]).includes(initialMode) ? initialMode : 'flow');
   const [settingsOpen, setSettingsOpen] = useState(raw === 'settings');
+  // Just created by the builder (BEA-1372: `?created=1`) — offer "Run now" once; the flag is dropped either way.
+  const [justCreated, setJustCreated] = useState(params.get('created') === '1');
+  function dropCreated() { setJustCreated(false); if (params.get('created')) { const p = new URLSearchParams(params); p.delete('created'); setParams(p, { replace: true }); } }
   function setMode(m: Mode) { setModeState(m); const p = new URLSearchParams(params); p.delete('tab'); if (m === 'flow') p.delete('mode'); else p.set('mode', m); setParams(p, { replace: true }); }
 
   async function load() {
@@ -238,6 +241,16 @@ export function AgentApp() {
         </div>
         <button onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings" className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><GearIcon className="h-5 w-5" /></button>
       </header>
+
+      {justCreated && (
+        <div role="status" data-testid="created-banner" className="flex flex-col gap-2 rounded-2xl border border-emerald-300/60 bg-emerald-50/70 p-3 text-sm dark:border-emerald-500/30 dark:bg-emerald-500/10 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 text-emerald-900 dark:text-emerald-100"><b>Created.</b> The flow below is what it will do. Run it now to see the first result?</div>
+          <div className="flex shrink-0 gap-2">
+            <button onClick={dropCreated} className="rounded-lg px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-500/10">Later</button>
+            <button onClick={() => { dropCreated(); run(); }} disabled={running} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50" data-testid="created-run-now"><Play className="h-3.5 w-3.5" />Run now</button>
+          </div>
+        </div>
+      )}
 
       {/* The job switched itself off (BEA-1358: the daily Social credit ceiling) — say why, offer the way back. */}
       {!a.enabled && a.pausedReason && (
