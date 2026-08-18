@@ -6,11 +6,11 @@ import { AlertsService } from '../push/alerts.service';
 import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
-import { isServiceToolId } from '../tools/service-provider';
 import { Diff, Threshold, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
 import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
+import { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping } from './social-flow';
 
 /**
  * A Social agent's run (BEA-1357) — design: `specs/SOCIAL.md`.
@@ -42,8 +42,8 @@ import { SocialWatchStore } from './social-watch.store';
  * pauses itself with `pausedReason` and tells the owner.
  */
 
-/** The task text the builder pre-fills. Anything else means "shape the rows as I say". */
-export const KEEP_AS_FETCHED = 'Keep every result as fetched.';
+/** The task text the builder pre-fills — lives in `social-flow.ts` with the picture builder (BEA-1366); re-exported so imports keep working. */
+export { KEEP_AS_FETCHED };
 
 /** How many items one shaping call is shown, and how many calls a run may make. */
 const SHAPE_BATCH = 60;
@@ -61,7 +61,6 @@ export const SHEET_WRITE = 'svc:googlesheets.batch_update';
 export const SHEET_READ = 'svc:googlesheets.batch_get';
 const SHEET_TAB = 'Sheet1';
 
-const norm = (s: string) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 @Injectable()
 export class SocialAgentRunService {
@@ -85,21 +84,20 @@ export class SocialAgentRunService {
    * the toolbox's problem to say, not ours to guess at.
    */
   handles(agent: any): boolean {
-    const tools: string[] = Array.isArray(agent?.tools) ? agent.tools : [];
-    const args = agent?.toolArgs && typeof agent.toolArgs === 'object' ? agent.toolArgs : null;
-    return tools.length > 0 && !!args && tools.every((t) => isServiceToolId(t) && args[t] && typeof args[t] === 'object');
+    return isDirectFetchAgent(agent);
   }
 
-  /** Does the task text ask for anything beyond the rows as fetched? */
+  /** Does the task text ask for anything beyond the rows as fetched? (Shared with the flow picture, BEA-1366.) */
   wantsShaping(prompt?: string | null): boolean {
-    const p = norm(prompt || '');
-    return !!p && p.replace(/[.!]$/, '') !== norm(KEEP_AS_FETCHED).replace(/[.!]$/, '');
+    return wantsShaping(prompt);
   }
 
   /** Run one Social agent job to the end. Never throws — every road finishes the run honestly. */
   async run(runId: string, agent: any, opts: { title?: string } = {}): Promise<void> {
     const title = opts.title || agent?.name || 'Social agent';
-    const step = (s: { label: string; status?: string; detail?: string; kind?: string }) => this.agent.appendStep(runId, s).catch(() => undefined);
+    // `nodeId` names the step's node on the job's drawn flow (BEA-1366: `social-flow.ts` ids —
+    // `src:<svc id>`, `merge`, `shape`, `watch`, `write`, `notify`) so the picture can badge what happened.
+    const step = (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => this.agent.appendStep(runId, s).catch(() => undefined);
     const fail = async (error: string) => {
       await step({ label: error, status: 'failed' });
       await this.agent.finishRun(runId, { status: 'failed', error }).catch(() => undefined);
@@ -134,17 +132,18 @@ export class SocialAgentRunService {
         }
         const r = await this.actions.runDetailed(id, '', { runId, runKind: 'agent', agentId: agent.id, args: args[id], argsPinned: true, label: id });
         if (!r.ok && isEmptySearch(id, r)) {
-          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300) });
+          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300), nodeId: `src:${id}` });
           empties.push(id);
           continue;
         }
         if (!r.ok) {
           const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
+          await step({ label: `Could not fetch ${r.serviceName || id}: ${why}`, status: 'failed', nodeId: `src:${id}` });
           return fail(`Could not fetch ${r.serviceName || id}: ${why}`);
         }
         credits += Number(r.credits) || 0;
         const t = tableOf(r.data);
-        await step({ label: `Fetched ${r.serviceName || ''}${r.actionName ? ` · ${r.actionName}` : ''} — ${t.itemCount} item${t.itemCount === 1 ? '' : 's'} · ${Number(r.credits) || 0} credit${Number(r.credits) === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300) });
+        await step({ label: `Fetched ${r.serviceName || ''}${r.actionName ? ` · ${r.actionName}` : ''} — ${t.itemCount} item${t.itemCount === 1 ? '' : 's'} · ${Number(r.credits) || 0} credit${Number(r.credits) === 1 ? '' : 's'}`, status: 'done', detail: JSON.stringify(args[id]).slice(0, 300), nodeId: `src:${id}` });
         fetched.push({ id, r });
       }
 
@@ -165,6 +164,7 @@ export class SocialAgentRunService {
       // ---- 2. rows — as fetched, or shaped the way the owner asked ----------------------------
       const tables = fetched.map((f) => ({ id: f.id, table: tableOf(f.r.data) }));
       let table = tables.length === 1 ? tables[0].table : mergeTables(tables);
+      if (tables.length > 1) await step({ label: `Merged ${tables.length} sources into ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`, status: 'done', kind: 'log', nodeId: 'merge' });
       if (!table.rows.length) {
         if (empties.length) return await nothingFound();
         return fail('Nothing came back to write — the fetch answered with no items. Check the arguments on the job, or try again later.');
@@ -180,11 +180,11 @@ export class SocialAgentRunService {
       }
 
       if (this.wantsShaping(agent.prompt)) {
-        await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log' });
+        await step({ label: 'Shaping the rows the way you asked', status: 'running', kind: 'log', nodeId: 'shape' });
         const shaped = await this.shape(agent.prompt, table, existing?.header?.length ? existing.header : null);
-        if (!shaped.ok) return fail(`Could not shape the rows: ${shaped.error}`);
+        if (!shaped.ok) { await step({ label: `Could not shape the rows: ${shaped.error}`, status: 'failed', nodeId: 'shape' }); return fail(`Could not shape the rows: ${shaped.error}`); }
         table = { columns: shaped.columns!, rows: shaped.rows!, itemCount: table.itemCount };
-        await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}`, status: 'done' });
+        await step({ label: `Shaped ${shaped.rows!.length} row${shaped.rows!.length === 1 ? '' : 's'} into ${shaped.columns!.length} columns${shaped.note ? ` · ${shaped.note}` : ''}`, status: 'done', nodeId: 'shape' });
       }
 
       // ---- 3. output ----------------------------------------------------------------------------
@@ -193,10 +193,10 @@ export class SocialAgentRunService {
       let headline: string;
       if (dest === 'sheet') {
         const w = await this.writeSheet(runId, agent, title, table, existing);
-        if (!w.ok) return fail(w.error!);
+        if (!w.ok) { await step({ label: w.error!, status: 'failed', nodeId: 'write' }); return fail(w.error!); }
         outputUrl = w.url;
         headline = `${table.rows.length} row${table.rows.length === 1 ? '' : 's'} → ${w.url}`;
-        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`, status: 'done', detail: w.url });
+        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`, status: 'done', detail: w.url, nodeId: 'write' });
       } else {
         // document (the default) — the same place every other run's result lands.
         if (!this.documents) return fail('The documents library is not available on this server.');
@@ -211,7 +211,7 @@ export class SocialAgentRunService {
         headline = `${table.rows.length} row${table.rows.length === 1 ? '' : 's'} saved to Documents`;
         if (outputDocId) {
           await this.agent.attachOutput(runId, outputDocId).catch(() => undefined);
-          await step({ label: 'Saved to Documents', status: 'done', detail: title });
+          await step({ label: 'Saved to Documents', status: 'done', detail: title, nodeId: 'write' });
         }
       }
 
@@ -224,7 +224,7 @@ export class SocialAgentRunService {
       // ---- 4. WhatsApp — the link, through the one path; silence is never an option ------------
       if (agent.notifyWhatsApp) {
         const r = await this.alerts?.runFinished?.(title, headline, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
-        await step(whatsappStepLabel(r)); // "WhatsApp sent (template)" / "WhatsApp failed: <reason>" (BEA-1362)
+        await step({ ...whatsappStepLabel(r), nodeId: 'notify' }); // "WhatsApp sent (template)" / "WhatsApp failed: <reason>" (BEA-1362)
       }
     } catch (e: any) {
       this.log.error(`social run ${runId} crashed: ${e?.message || e}`);
@@ -271,7 +271,7 @@ export class SocialAgentRunService {
     mode: string,
     fetched: { id: string; r: ServiceRunResult }[],
     credits: number,
-    step: (s: { label: string; status?: string; detail?: string; kind?: string }) => Promise<any>,
+    step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
     fail: (error: string) => Promise<void>,
   ): Promise<void> {
     if (!this.watches) return fail('Watching is not available on this server (no watch store).');
@@ -293,9 +293,9 @@ export class SocialAgentRunService {
 
     for (const p of baselines) {
       const t = tableOf(p.r.data);
-      await step({ label: `Watching from now — baseline stored for ${p.r.actionName || p.id} (${describeBaseline(p.r.data, t.itemCount)})`, status: 'done' });
+      await step({ label: `Watching from now — baseline stored for ${p.r.actionName || p.id} (${describeBaseline(p.r.data, t.itemCount)})`, status: 'done', nodeId: 'watch' });
     }
-    for (const p of diffs) await step({ label: `${p.r.actionName || p.id}: ${p.diff.summary}`, status: 'done', kind: 'log' });
+    for (const p of diffs) await step({ label: `${p.r.actionName || p.id}: ${p.diff.summary}`, status: 'done', kind: 'log', nodeId: 'watch' });
 
     // ---- the alert: a threshold (once-only, no model) and/or a plain-English condition ---------
     let fired = false;
@@ -343,8 +343,8 @@ export class SocialAgentRunService {
       const wa = await this.alerts?.runFinished?.(`🔔 ${title}`, `${summary}${why ? ` — ${why}` : ''}`, `/agent/runs/${runId}`, { kind: 'alert' }).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
       const tgSent = !!tg?.sent;
       const waSent = !!wa?.sent;
-      await step({ label: tgSent ? 'Alert sent on Telegram' : `⚠️ Not sent on Telegram — ${tg?.why || 'Telegram is not set up'}`, status: tgSent ? 'done' : 'info' });
-      await step(whatsappStepLabel(wa)); // template first; the label is the template's own verdict (BEA-1362)
+      await step({ label: tgSent ? 'Alert sent on Telegram' : `⚠️ Not sent on Telegram — ${tg?.why || 'Telegram is not set up'}`, status: tgSent ? 'done' : 'info', nodeId: 'notify' });
+      await step({ ...whatsappStepLabel(wa), nodeId: 'notify' }); // template first; the label is the template's own verdict (BEA-1362)
       // An alert nobody received is not a finished alert. Nothing is stored, so it fires again next run.
       if (!tgSent && !waSent) return fail(`The alert fired (${summary}) but could not reach you — Telegram: ${tg?.why || 'not set up'}; WhatsApp: ${wa?.why || 'not set up'}. Link Telegram or add your WhatsApp number in Settings, then run it again.`);
     } else if (alertNote) {
@@ -368,7 +368,7 @@ export class SocialAgentRunService {
         const w = await this.writeSheet(runId, agent, title, table, existing);
         if (!w.ok) return fail(w.error!);
         outputUrl = w.url;
-        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'} — only what changed`, status: 'done', detail: w.url });
+        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'} — only what changed`, status: 'done', detail: w.url, nodeId: 'write' });
       } else {
         if (!this.documents) return fail('The documents library is not available on this server.');
         const doc: any = await this.documents.create({
@@ -381,7 +381,7 @@ export class SocialAgentRunService {
         outputDocId = doc?.id;
         if (outputDocId) {
           await this.agent.attachOutput(runId, outputDocId).catch(() => undefined);
-          await step({ label: 'Saved what changed to Documents', status: 'done', detail: title });
+          await step({ label: 'Saved what changed to Documents', status: 'done', detail: title, nodeId: 'write' });
         }
       }
     }
@@ -406,7 +406,7 @@ export class SocialAgentRunService {
     // A Watch that found something goes out on WhatsApp like any finished job, when the job asks.
     if (mode === 'watch' && changedDiffs.length && agent.notifyWhatsApp) {
       const r = await this.alerts?.runFinished?.(title, summary, `/agent/runs/${runId}`).catch((e: any) => ({ sent: false, why: String(e?.message || e) }));
-      await step(whatsappStepLabel(r));
+      await step({ ...whatsappStepLabel(r), nodeId: 'notify' });
     }
   }
 

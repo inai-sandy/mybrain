@@ -67,14 +67,16 @@ describe('the new-job chat (BEA-1170)', () => {
     expect(created[0].rubric).toBe('one page, with sources');
     expect(created[0].defaultDepth).toBe('deep');
     expect(created[0].evals.map((e: any) => e.input)).toEqual(['must name its sources', 'must cover the last 12 months']);
-    expect(patched[0].patch.tools).toEqual(['web_search']);
-    expect(patched[0].patch.notifyWhatsApp).toBe(true);
+    // Tools + WhatsApp ride on the CREATE (BEA-1366): the flow is planned on save, inside the toolbox.
+    expect(created[0].tools).toEqual(['web_search']);
+    expect(created[0].notifyWhatsApp).toBe(true);
+    expect(patched).toHaveLength(0);
   });
 
   it("uses the owner's ticked tools over the ones it proposed", async () => {
-    const { svc, patched } = build({ job: { name: 'x', task: 'y', tools: [{ id: 'web_search' }] } });
+    const { svc, created } = build({ job: { name: 'x', task: 'y', tools: [{ id: 'web_search' }] } });
     await svc.jobBuilderCreate('ar1', { tools: ['search_brain', 'save_document'] });
-    expect(patched[0].patch.tools).toEqual(['search_brain', 'save_document']);
+    expect(created[0].tools).toEqual(['search_brain', 'save_document']);
   });
 
   it('clears the proposal after building so the next chat starts fresh', async () => {

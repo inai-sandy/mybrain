@@ -20,6 +20,7 @@ import { ContactsModule } from '../contacts/contacts.module';
 // here the whole app refuses to start.
 import { NewsModule } from '../news/news.module';
 import { FlowsService } from './flows.service';
+import { AgentFlowSyncService } from './agent-flow-sync.service';
 import { FlowRunnerService } from './flows-runner.service';
 import { FlowScheduler } from './flow-scheduler.service';
 import { FlowsController } from './flows.controller';
@@ -28,7 +29,9 @@ import { FlowsController } from './flows.controller';
 @Module({
   imports: [SkillsModule, LlmModule, AgentModule, HermesModule, DocumentsModule, MemoryModule, TelegramModule, PushModule, ToolCatalogModule, ItemsModule, TasksModule, ContactsModule, NewsModule],
   controllers: [FlowsController],
-  providers: [FlowsService, FlowRunnerService, FlowScheduler],
+  // AgentFlowSyncService (BEA-1366) registers itself with AgentService at boot — every agent's flow
+  // picture is drawn on save (Social: from settings, no AI; others: the planner, in the background).
+  providers: [FlowsService, AgentFlowSyncService, FlowRunnerService, FlowScheduler],
   exports: [FlowsService, FlowRunnerService], // EMO research builds, saves AND runs a flow (BEA-870/1175)
 })
 export class FlowsModule {}
