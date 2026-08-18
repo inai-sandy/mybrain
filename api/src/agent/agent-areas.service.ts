@@ -7,13 +7,13 @@ import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { shortlistForPrompt } from '../tools/tool-shortlist';
 import { ToolKnowledge, ToolKnowledgeService } from '../tools/tool-knowledge.service';
-import { AgentPlan, PlanCost, estimatePlanCost } from '../social/plan';
-import { TOP_BUILDER_SESSION, builderSettingKey } from './builder-session';
+import { AgentPlan, PlanCost, costLineText, estimatePlanCost, planHasHealthySource } from '../social/plan';
+import { SAMPLE_CAPS, TOP_BUILDER_SESSION, builderSettingKey, readSampleCounter } from './builder-session';
 import { BuilderSampleService } from './builder-sample.service';
 import {
   BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
   fillTemplate, healthNote, indexSection, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
-  BuilderSeed, seedLine, seedText, unhealthySources,
+  BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, noHealthySourceText, sampleFinderText, sampledActionIds, seedLine, seedText, unsampledFinders,
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 
@@ -220,7 +220,8 @@ export class AgentAreasService {
       const index = indexSection(shortlist as any, convo(), cards.map((c) => c.actionId));
       const allowedIds = new Set([...cards.map((c) => c.actionId), ...shortlist.filter((t: any) => isServiceToolId(t.id)).map((t: any) => t.id)]);
 
-      const previous = st.plan ? `\n\nThe plan you last proposed (refine it, don't start over):\n${JSON.stringify(st.plan)}` : st[o.proposalKey] ? `\n\nThe ${o.proposalKey} you last proposed (refine it, don't start over):\n${JSON.stringify(st[o.proposalKey])}` : '';
+      // The last plan rides along with ITS server cost, so a refinement quotes the server's numbers, never its own (BEA-1375).
+      const previous = st.plan ? `\n\nThe plan you last proposed (refine it, don't start over):\n${JSON.stringify(st.plan)}${st.cost ? `\nServer cost of that plan (quote these, not your own): ${costLineText(st.cost)}` : ''}` : st[o.proposalKey] ? `\n\nThe ${o.proposalKey} you last proposed (refine it, don't start over):\n${JSON.stringify(st[o.proposalKey])}` : '';
       const buildPrompt = (extra: string) => fillTemplate(tpl, {
         conversation: { label: 'The conversation so far', text: convo() },
         ...o.vars,
@@ -241,47 +242,81 @@ export class AgentAreasService {
         return parseBuilderJson(text);
       };
 
-      // ---- the loop: sample rounds, then a plan check --------------------------------------------
+      // ---- the loop: sample rounds and plan checks ------------------------------------------------
+      // The model may ask for a sample (≤ SAMPLE_LOOPS_PER_MESSAGE per owner message) and a plan it sends
+      // is checked before it is shown: it must validate (one fix round), it must have a HEALTHY source
+      // (one round to add a fallback), and a creators block's finder must have been sampled in this
+      // conversation (one nudge — the model answers with a sample, which the same loop runs). Each check
+      // sends the model back at most ONCE (BEA-1375); a plan that still fails is not shown — reply only.
       let extra = '';
       let g: any = null;
-      for (let round = 0; round <= SAMPLE_LOOPS_PER_MESSAGE; round++) {
-        g = await ask(extra);
+      let asks = 0;
+      let samplesRun = 0;
+      let plan: AgentPlan | null = null;
+      let refused: AgentPlan | null = null;
+      const nudged = { invalid: false, health: false, finder: false };
+      const canSample = () => !!this.sampler && !overBudget(design) && readSampleCounter(st).used < SAMPLE_CAPS.calls;
+      while (asks < MAX_ASKS_PER_MESSAGE) {
+        g = await ask(extra); asks++;
         const want = sampleRequestOf(g);
-        if (!want) break;
-        if (round === SAMPLE_LOOPS_PER_MESSAGE || overBudget(design) || !this.sampler) {
-          extra += `\n\nNo more samples for this message${!this.sampler ? ' (sampling is not available here)' : ''} — answer the owner now from what you know.`;
-          g = await ask(extra);
-          break;
+        if (want) {
+          if (samplesRun >= SAMPLE_LOOPS_PER_MESSAGE || !canSample()) {
+            if (asks >= MAX_ASKS_PER_MESSAGE) break;
+            extra += `\n\nNo more samples for this message${!this.sampler ? ' (sampling is not available here)' : ''} — answer the owner now from what you know.`;
+            g = await ask(extra); asks++;
+            if (sampleRequestOf(g)) break; // still asking → nothing to show
+          } else {
+            samplesRun++;
+            const view = await this.sampler!.sample(o.sessionKey, want.actionId, want.args);
+            // The sampler wrote its 🔎 line and counter into the SAME row — pick them up, keep our proposal.
+            const fresh = await o.load();
+            st = { ...st, log: fresh.log, samples: fresh.samples };
+            extra += `\n\n${sampleViewText(view)}\nNow continue: another sample only if it settles something the owner would otherwise be asked; else answer.`;
+            continue;
+          }
         }
-        const view = await this.sampler.sample(o.sessionKey, want.actionId, want.args);
-        // The sampler wrote its 🔎 line and counter into the SAME row — pick them up, keep our proposal.
-        const fresh = await o.load();
-        st = { ...st, log: fresh.log, samples: fresh.samples };
-        extra += `\n\n${sampleViewText(view)}\nNow continue: another sample only if it settles something the owner would otherwise be asked; else answer.`;
+        if (!g?.plan || typeof g.plan !== 'object') break;
+        const check = validatePlan(g.plan, allowedIds);
+        if (!check.plan) {
+          if (nudged.invalid) break;
+          nudged.invalid = true;
+          extra += `\n\nYour "plan" did not validate: ${check.errors.join('; ')}. Send the whole JSON again with the plan fixed (same reply is fine).`;
+          continue;
+        }
+        // A plan of only failing sources is an empty sheet today — not shown (BEA-1375).
+        if (!planHasHealthySource(check.plan, cardsById as any)) {
+          refused = check.plan;
+          if (nudged.health) break;
+          nudged.health = true;
+          extra += `\n\n${noHealthySourceText(check.plan, cardsById)}`;
+          continue;
+        }
+        // A creators block on a finder the conversation never looked at → sample it first (BEA-1375).
+        const finders = unsampledFinders(check.plan, sampledActionIds(st));
+        if (finders.length && !nudged.finder && canSample() && samplesRun < SAMPLE_LOOPS_PER_MESSAGE) {
+          nudged.finder = true;
+          extra += `\n\n${sampleFinderText(finders)}`;
+          continue;
+        }
+        plan = check.plan;
+        refused = null;
+        break;
       }
 
+      // `g` is the model's LATEST answer — after a fix round its reply is the one that goes with the plan.
       let reply = String(g?.reply || '').trim().slice(0, 2400);
-      let plan: AgentPlan | null = null;
-      let cost: PlanCost | null = null;
-      if (g?.plan && typeof g.plan === 'object') {
-        let check = validatePlan(g.plan, allowedIds);
-        if (!check.plan) {
-          // Once: tell the model what was wrong; a second miss falls back to the reply alone.
-          const fixed = await ask(`${extra}\n\nYour "plan" did not validate: ${check.errors.join('; ')}. Send the whole JSON again with the plan fixed (same reply is fine).`);
-          if (fixed?.plan && typeof fixed.plan === 'object') check = validatePlan(fixed.plan, allowedIds);
-          if (check.plan && fixed?.reply) reply = String(fixed.reply).trim().slice(0, 2400);
-        }
-        if (check.plan) {
-          plan = check.plan;
-          cost = this.costWithHealth(plan, cardsById);
-        }
-      }
+      let cost: PlanCost | null = plan ? this.costWithHealth(plan, cardsById) : null;
       // Budget spent and still no plan: keep the best plan so far rather than asking on.
-      if (!plan && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
+      if (!plan && !refused && overBudget(design) && st.plan) { plan = st.plan; cost = st.cost || this.costWithHealth(plan, cardsById); if (!reply) reply = 'Here is the best plan I have from what we said — press Create when happy, or tell me one thing to change.'; }
       if (!reply) reply = cantDo;
-      // Honesty: a plan that leans on a failing source says so, even when the model forgot.
-      const note = healthNote(plan, cardsById, reply);
+      // Honesty: a plan that leans on a failing source says so, even when the model forgot; a refused plan
+      // (no healthy source) says why no card came.
+      const note = healthNote(plan || refused, cardsById, reply);
       if (note) reply = `${reply}\n\n${note}`;
+      // The cost line under the reply is the SERVER's — the same figures as the card, both of them while a
+      // source is down — so the reply and the card can never disagree (BEA-1375).
+      const costLine = costReplyLine(cost);
+      if (plan && costLine) reply = `${reply}\n\n${costLine}`;
 
       // One proposal at a time: a plan (direct agent) replaces an ordinary proposal and the other way
       // round, so Create never has to guess which one the owner is looking at.
@@ -305,9 +340,8 @@ export class AgentAreasService {
 
   /** The estimate plus the failing sources it leans on — the plan card marks them (BEA-1372). */
   private costWithHealth(plan: AgentPlan, cardsById: Record<string, ToolKnowledge>): PlanCost {
-    const cost = estimatePlanCost(plan, cardsById as any);
-    const unhealthy = unhealthySources(plan, cardsById);
-    return unhealthy.length ? { ...cost, unhealthy } : cost;
+    // The cards carry name + health, so the estimate itself fills `unhealthy` and `nowCredits` (BEA-1375).
+    return estimatePlanCost(plan, cardsById as any);
   }
 
   /** `id → is it a social-provider action?` for the plan's category, from the cards it was planned with. */

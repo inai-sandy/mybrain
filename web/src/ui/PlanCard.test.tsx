@@ -1,6 +1,6 @@
 import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { PlanCard, costLine, sourceLine } from './PlanCard';
+import { PlanCard, costLine, creditsText, downText, sourceLine } from './PlanCard';
 
 /**
  * BEA-1372 — the plan-with-cost card. Locks: every section is drawn (fetch · keep · output · when ·
@@ -62,6 +62,21 @@ describe('PlanCard (BEA-1372)', () => {
     // no shaping → no AI cost, said plainly
     expect(costLine({ credits: 5, aiTokens: 0, items: 60, how: '' })).toBe('≈ 5 credits per run · no AI cost');
     expect(costLine({ credits: 1, aiTokens: 3600, items: 12, how: '', aiRupees: 1 })).toBe('≈ 1 credit · ≈ 4k AI tokens ≈ ₹1 per run');
+  });
+
+  it('both cost figures while a source is down (BEA-1375): "≈ 28 credits (≈ 20 while Instagram · Hashtag Search is down)" from the server\'s nowCredits, one figure when they agree', () => {
+    render(<PlanCard plan={PLAN} cost={{ ...COST, nowCredits: 20 }} onCreate={() => undefined} />);
+    expect(screen.getByTestId('builder-plan-cost').textContent).toMatch(/≈ 28 credits \(≈ 20 while Instagram · Hashtag Search is down\) · ≈ 60k AI tokens ≈ ₹18 per run/);
+    cleanup();
+    // equal → no parenthesis; no unhealthy names → none either (the server only differs when a card says FAILING)
+    render(<PlanCard plan={PLAN} cost={{ ...COST, nowCredits: 28 }} onCreate={() => undefined} />);
+    expect(screen.getByTestId('builder-plan-cost').textContent).toMatch(/^≈ 28 credits · ≈ 60k/);
+    expect(creditsText({ credits: 19, nowCredits: 11, unhealthy: [{ actionId: 'a', name: 'Search Hashtag Posts', note: '' }] })).toBe('≈ 19 credits (≈ 11 while Search Hashtag Posts is down)');
+    expect(creditsText({ credits: 19, nowCredits: 11 })).toBe('≈ 19 credits'); // no name to say — the server always sends one with a differing nowCredits
+    expect(creditsText({ credits: 1, nowCredits: 1, unhealthy: [] })).toBe('≈ 1 credit');
+    expect(creditsText({ credits: 7 })).toBe('≈ 7 credits'); // an older API answer without nowCredits
+    expect(costLine({ credits: 7, nowCredits: 2, aiTokens: 0, items: 60, how: '', unhealthy: [{ actionId: 'a', name: 'Popular Search', note: '' }] })).toBe('≈ 7 credits (≈ 2 while Popular Search is down) per run · no AI cost');
+    expect(downText(['A', 'B'])).toBe('A and B are down');
   });
 
   it('a Watch plan, a Document output, no notify — the words change; a plan with no sources says so', () => {

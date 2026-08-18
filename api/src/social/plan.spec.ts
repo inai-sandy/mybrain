@@ -1,4 +1,4 @@
-import { KEEP_AS_FETCHED, blockOf, clampPages, creatorField, dateFieldOf, dedupeKey, estimatePlanCost, isDirectFetchAgent, itemDate, nextCursorOf, pagingOf, planActionIds, planFromAgent, rupees, sourceHint, sourceLabel } from './plan';
+import { KEEP_AS_FETCHED, blockOf, clampPages, costLineText, creatorField, creditsText, dateFieldOf, dedupeKey, downText, estimatePlanCost, isDirectFetchAgent, itemDate, nextCursorOf, pagingOf, planActionIds, planFromAgent, planHasHealthySource, rupees, sourceHint, sourceLabel } from './plan';
 import { normaliseToolArgs } from './tool-args';
 
 /**
@@ -176,6 +176,34 @@ describe('estimatePlanCost', () => {
     expect(cc.how).toMatch(/once \(1\) \+ 5 creators × 1 credit = 6/);
     // a watch never shapes
     expect(estimatePlanCost(planFromAgent({ ...digest(), mode: 'watch' })).aiTokens).toBe(0);
+  });
+
+  it('nowCredits (BEA-1375): what the run costs TODAY — a failing source is not counted; a failing finder finds no one; a failing per-creator action leaves the finder only', () => {
+    const failing = { name: 'Popular Search', health: { known: true, ok: false, note: 'not_found for every call since 09:10Z' } };
+    const p = planFromAgent(digest()); // search_hashtag + search_profiles + popular × 5 pages, all 1 credit
+    const all = estimatePlanCost(p, {});
+    expect(all.nowCredits).toBe(all.credits);
+    expect(all.unhealthy).toBeUndefined();
+    const popDown = estimatePlanCost(p, { 'svc:instagram.search_popular': failing });
+    expect(popDown.credits).toBe(7);
+    expect(popDown.nowCredits).toBe(2);
+    expect(popDown.unhealthy).toEqual([{ actionId: 'svc:instagram.search_popular', name: 'Popular Search', note: 'not_found for every call since 09:10Z' }]);
+    expect(popDown.how).toContain('(≈ 2 credits today while Popular Search is down — a failing call answers empty and is not charged)');
+    expect(creditsText(popDown)).toBe('≈ 7 credits (≈ 2 while Popular Search is down)');
+    // no verdict (known:false) is not failing; a name-less card falls back to the short name
+    expect(estimatePlanCost(p, { 'svc:instagram.search_popular': { health: { known: false, ok: false } } }).nowCredits).toBe(7);
+    expect(estimatePlanCost(p, { 'svc:instagram.search_popular': { health: { known: true, ok: false } } }).unhealthy![0]).toEqual({ actionId: 'svc:instagram.search_popular', name: 'Instagram search popular', note: 'every recent call failed' });
+    // creators block: finder failing → 0 today; per-creator action failing → the finder's 1 credit only
+    const c = planFromAgent({ tools: ['svc:instagram.search_profiles'], toolArgs: { 'svc:instagram.search_profiles': { kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: {}, take: 5 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'username' } } } }, prompt: KEEP_AS_FETCHED });
+    expect(estimatePlanCost(c, { 'svc:instagram.search_profiles': failing }).nowCredits).toBe(0);
+    expect(estimatePlanCost(c, { 'svc:instagram.user_posts': failing }).nowCredits).toBe(1);
+    expect(planHasHealthySource(c, { 'svc:instagram.search_profiles': failing })).toBe(false);
+    expect(planHasHealthySource(c, { 'svc:instagram.user_posts': failing })).toBe(false);
+    expect(planHasHealthySource(c, {})).toBe(true);
+    // two down → "X and Y are down"
+    expect(downText(['A', 'B'])).toBe('A and B are down');
+    expect(downText(['A', 'B', 'C'])).toBe('A, B and C are down');
+    expect(costLineText({ ...popDown, aiTokens: 0 })).toBe('≈ 7 credits (≈ 2 while Popular Search is down) per run · no AI cost');
   });
 });
 

@@ -9,7 +9,7 @@ import { AlertTriangle, Bell, CalendarClock, Check, ChevronDown, Columns3, Datab
  * "how" fold showing the server's arithmetic (never a guess). A source whose know-how card says
  * FAILING is marked, kept on purpose. Buttons: Create · Change something · Not now.
  */
-export type PlanCost = { credits: number; aiTokens: number; items: number; how: string; aiRupees?: number; unhealthy?: { actionId: string; name: string; note: string }[] };
+export type PlanCost = { credits: number; aiTokens: number; items: number; how: string; aiRupees?: number; nowCredits?: number; unhealthy?: { actionId: string; name: string; note: string }[] };
 
 /** `svc:instagram.search_hashtag` → "Instagram · search hashtag" */
 export function shortActionName(id: string): string {
@@ -48,8 +48,30 @@ export function outputText(plan: any): string {
 
 const fmtK = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
+/** "Search Hashtag Posts is down" / "X and Y are down" — mirrors `downText` in api/src/social/plan.ts. */
+export function downText(names: string[]): string {
+  const list = names.filter(Boolean);
+  if (!list.length) return '';
+  const who = list.length === 1 ? list[0] : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+  return `${who} ${list.length === 1 ? 'is' : 'are'} down`;
+}
+
+/**
+ * "≈ 19 credits" — or, while a source is down, "≈ 19 credits (≈ 11 while Search Hashtag Posts is down)": the
+ * server's `nowCredits` (healthy sources only) beside the full figure when they differ (BEA-1375). Mirrors
+ * `creditsText` in api/src/social/plan.ts — keep them in step.
+ */
+export function creditsText(cost: Pick<PlanCost, 'credits' | 'nowCredits' | 'unhealthy'>): string {
+  const n = Number(cost.credits || 0);
+  const base = `≈ ${n.toLocaleString('en-US')} credit${n === 1 ? '' : 's'}`;
+  const now = Number(cost.nowCredits);
+  const down = (cost.unhealthy || []).map((u) => u.name);
+  if (!down.length || !Number.isFinite(now) || now === n) return base;
+  return `${base} (≈ ${now.toLocaleString('en-US')} while ${downText(down)})`;
+}
+
 export function costLine(cost: PlanCost): string {
-  const credits = `≈ ${Number(cost.credits || 0).toLocaleString('en-US')} credit${cost.credits === 1 ? '' : 's'}`;
+  const credits = creditsText(cost);
   if (!(cost.aiTokens > 0)) return `${credits} per run · no AI cost`;
   const rupees = typeof cost.aiRupees === 'number' ? ` ≈ ₹${cost.aiRupees}` : '';
   return `${credits} · ≈ ${fmtK(cost.aiTokens)} AI tokens${rupees} per run`;

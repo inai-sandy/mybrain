@@ -2,7 +2,7 @@ import { isServiceToolId } from '../tools/service-provider';
 import type { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { keywords, matchScore } from '../tools/tool-shortlist';
 import {
-  AgentPlan, KEEP_AS_FETCHED, MAX_PAGES, MAX_TAKE, PlanBlock, clampPages, clampTake, keepDaysOf, planActionIds, planFromAgent, plainArgs, sourceActionId, thresholdOf,
+  AgentPlan, KEEP_AS_FETCHED, MAX_PAGES, MAX_TAKE, PlanBlock, PlanCost, clampPages, clampTake, costLineText, failingActions, keepDaysOf, planActionIds, planFromAgent, planHasHealthySource, plainArgs, sourceActionId, thresholdOf,
 } from '../social/plan';
 import { sourceIdFor } from '../social/tool-args';
 import type { SampleView } from './builder-sample.service';
@@ -41,6 +41,9 @@ export const TURN_MAX_TOKENS = 8_000;
 export const TURN_TIMEOUT_MS = 180_000;
 /** Sample rounds per owner message: model asks → sampler → re-prompt, at most this many times. */
 export const SAMPLE_LOOPS_PER_MESSAGE = 3;
+/** Model calls per owner message, all in: the first answer + the sample rounds + one fix round each for an
+ *  invalid plan, a plan with no healthy source, and an unsampled finder (BEA-1375). Over it, what we have is shown. */
+export const MAX_ASKS_PER_MESSAGE = SAMPLE_LOOPS_PER_MESSAGE + 4;
 /** Cards shown to the model — the shortlist cut to the most relevant; the lookup's own cap is 50. */
 export const MAX_CARDS = 50;
 /** The whole facts section stays under this many characters (≈ 15k tokens); one card under its share. */
@@ -210,9 +213,13 @@ export const RULES_TEXT = `RULES:
 - When a fact would silently change what the owner gets — a source whose items carry NO date for a "last N days" ask, a filter that does not exist, a search that is empty today — do not decide it quietly: say it, and ask or state your choice with the default.
 - Never invent a field, a filter, an argument or an action the cards do not list. If the cards say something cannot be done (no location filter, no dates), say so plainly and offer the nearest real thing.
 - If a card's health says FAILING or "answered not_found for every call", you MUST say so in your reply, and say how the plan copes (keep it so it fills in when the vendor repairs it, and add another source — for example a creators block — for volume today).
+- A plan needs at least one HEALTHY source — one that can produce rows TODAY (its card says working or has no verdict). If every source you want is failing, say so plainly and put a working fallback in the plan (a creators block on a working finder, a working search) BEFORE you show any plan; a plan of only failing sources is not shown to the owner — an empty sheet today is not a plan.
+- Before a creators-first block, SAMPLE the finder once (or use the sample the owner already made) and judge the accounts real from what came back — followers, posts, names that fit the topic. Look-alike handles with 0–20 followers and no recent posts are not creators. If they do not look real, try another finder (Popular Search owners, Instagram's own user search) and say what you tried and what you saw.
+- "When it runs" and "where the rows go" are OPEN until the owner has said them, or has accepted your default in so many words. Settle both before the plan — ask ONE plain question with the default ("Run it once now, or on a schedule — every Monday 8am, say? And a new Google Sheet each run, or one sheet kept adding to?"). Never write "runs once now" or "a new sheet" into a plan as if it were agreed.
+- Cost numbers are the SERVER's, never yours: after you answer, it counts ≈ credits and ≈ AI tokens from the cards — today's figure too, while a source is down — and writes the cost line under your reply and on the plan card. Do not put your own ≈ credit or ≈ token figures in the reply; when a "server cost" for your last plan is given below, quote THAT when you must repeat a number.
 - When the owner says keep adding / add to the list / accumulate / grow the list / build up over time (or any wording that means one list that grows run after run), the output MUST be append:true on ONE sheet — never a new sheet per run. New profiles/posts land under the same columns; rows already in the sheet are skipped — so when the task names columns, keep an id, shortcode, link or username column, or nothing can be told apart from what is already there.
 - Plan the flow yourself from the blocks — do not ask the owner to design it.
-- Before the owner presses Create, your reply shows the plan in words: what it fetches (sources × pages, creators), what it keeps, columns, where it goes, when it runs, who is told, and ≈ credits + ≈ AI tokens per run (the server recomputes the cost from the cards; state your arithmetic).
+- Before the owner presses Create, your reply shows the plan in words: what it fetches (sources × pages, creators), what it keeps, columns, where it goes, when it runs, who is told (the cost line comes from the server, under your reply — put your arithmetic in the "cost" JSON field only).
 - Never say the agent was created — the owner presses Create. Plain, everyday English. Short sentences. Keep "reply" under 200 words — detail belongs in the plan JSON, not in prose.`;
 
 /** The `plan` JSON the model writes — the shape it is asked for. */
@@ -432,22 +439,64 @@ const HEALTH_WORDS = /\b(down|failing|failed|fails|not answering|not_found|no po
 export function healthNote(plan: AgentPlan | null | undefined, cards: Record<string, ToolKnowledge | undefined>, reply: string): string {
   const bad = unhealthySources(plan, cards);
   if (!bad.length) return '';
-  if (HEALTH_WORDS.test(String(reply || ''))) return '';
   const parts = bad.map((c) => `${c.name} is failing at the vendor right now (${c.note})`);
+  // No healthy source at all (BEA-1375): never "the other sources carry the run" — there are none. Said even
+  // when the reply already talks about the outage, because the owner has to know why no plan card came.
+  if (!planHasHealthySource(plan!, cards as any)) return `Note: ${parts.join('; ')}. Nothing in this plan can produce rows today — every source in it is failing. It needs a working source beside ${bad.length === 1 ? 'it' : 'them'} before it is worth creating, so I have not shown it as a plan yet.`;
+  if (HEALTH_WORDS.test(String(reply || ''))) return '';
   return `Note: ${parts.join('; ')}. The plan keeps ${bad.length === 1 ? 'it' : 'them'} so ${bad.length === 1 ? 'it fills' : 'they fill'} in when the vendor repairs it — until then the other sources carry the run.`;
 }
 
 /**
  * The plan's sources whose card says FAILING (health known and not ok), one entry per action id, with the
  * card's own note — the plan card marks each such source ("down at the vendor right now — kept so it fills
- * in later"), and `healthNote()` writes the reply's note from the same list (BEA-1372).
+ * in later"), and `healthNote()` writes the reply's note from the same list (BEA-1372). Since BEA-1375 the
+ * same reader (`failingActions` in plan.ts) feeds `estimatePlanCost`, so the card, the cost and the note agree.
  */
 export function unhealthySources(plan: AgentPlan | null | undefined, cards: Record<string, ToolKnowledge | undefined>): { actionId: string; name: string; note: string }[] {
   if (!plan) return [];
-  return planActionIds(plan)
-    .map((id) => cards[id])
-    .filter((c): c is ToolKnowledge => !!(c && c.health && c.health.known && c.health.ok === false))
-    .map((c) => ({ actionId: c.actionId, name: c.name, note: oneLine(c.health.note || c.health.lastError || 'every recent call failed', 160) }));
+  return failingActions(plan, cards as any);
+}
+
+/** The reason handed back to the model when its plan has no source that can produce rows today (BEA-1375). */
+export function noHealthySourceText(plan: AgentPlan, cards: Record<string, ToolKnowledge | undefined>): string {
+  const names = unhealthySources(plan, cards).map((c) => c.name).join(', ');
+  return `Your "plan" was NOT shown to the owner: every source in it is failing at the vendor today (${names}) — nothing in it can produce rows today. Add a working source beside them (a card whose health says working or has no verdict — for example a creators block on a working finder), or say plainly that nothing can produce rows today and ask the owner how to go on. Send the whole JSON again, or a "sample" if you must look first.`;
+}
+
+// ---- a finder is sampled before it is trusted (BEA-1375) --------------------------------------------
+
+/**
+ * The action ids this conversation has already looked at: every sample line the sampler wrote (it carries
+ * `actionId` since BEA-1375; an older line without one is skipped — at worst one extra nudge in a very old
+ * conversation) and the Social hand-off seed (the owner ran that one by hand). A finder in this set has been
+ * seen; a plan on any other finder is sent back once so the model samples it first.
+ */
+export function sampledActionIds(state: { log?: any[]; seed?: { actionId?: string } | null } | null | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const m of state?.log || []) if (m && (m.kind === 'sample' || /^🔎/.test(String(m.text || ''))) && m.actionId) out.add(String(m.actionId));
+  if (state?.seed?.actionId) out.add(String(state.seed.actionId));
+  return out;
+}
+
+/** The creators blocks' finders the conversation has NOT sampled yet — ids, de-duped. */
+export function unsampledFinders(plan: AgentPlan | null | undefined, sampled: Set<string>): string[] {
+  if (!plan) return [];
+  return [...new Set(plan.sources.filter((s) => s.kind === 'creators').map((s: any) => String(s.find?.actionId || '')).filter((id) => id && !sampled.has(id)))];
+}
+
+/** The nudge the model reads when it planned a creators block on a finder it never looked at. */
+export function sampleFinderText(ids: string[]): string {
+  return `Your "plan" was NOT shown to the owner yet: it plans a creators block on ${ids.join(', ')}, and you have not sampled that finder in this conversation. Rule: before a creators-first block, sample the finder once with the arguments you would use (reply with ONLY {"sample": {...}}) and judge the accounts real from what comes back — followers, posts, names that fit the topic. If they look real, send the plan again; if not, try another finder (Popular Search owners, Instagram's own user search) and say what you tried.`;
+}
+
+/**
+ * The line the builder writes under its reply when it shows a plan — the server's own cost figures, both of
+ * them while a source is down: "Cost: ≈ 19 credits (≈ 11 while Search Hashtag Posts is down) · ≈ 65k AI tokens
+ * ≈ ₹19 per run." The reply and the card can never disagree again (BEA-1375).
+ */
+export function costReplyLine(cost: PlanCost | null | undefined): string {
+  return cost ? `Cost: ${costLineText(cost)}.` : '';
 }
 
 // ---- the Social hand-off: "Make it an agent" seeds the builder with the call just made (BEA-1372) ------

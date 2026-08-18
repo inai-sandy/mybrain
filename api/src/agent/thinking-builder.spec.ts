@@ -4,9 +4,10 @@ import type { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { LlmService } from '../llm/llm.service';
 import {
-  BLOCKS_TEXT, DESIGN_BUDGET, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, factsSection, fillTemplate, healthNote, indexSection, namedService, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
-  sampleViewText, validatePlan, seedLine, seedText, unhealthySources,
+  BLOCKS_TEXT, DESIGN_BUDGET, MAX_ASKS_PER_MESSAGE, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, costReplyLine, factsSection, fillTemplate, healthNote, indexSection, namedService, noHealthySourceText, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
+  sampleFinderText, sampleViewText, sampledActionIds, unsampledFinders, validatePlan, seedLine, seedText, unhealthySources,
 } from './thinking-builder';
+import { costLineText, creditsText, planHasHealthySource } from '../social/plan';
 
 /**
  * BEA-1371 — the thinking builder. What these lock:
@@ -448,7 +449,9 @@ describe('several sources on one action + "keep adding" (BEA-1374)', () => {
   });
 
   it('a recorded conversation: five hashtags + "keep adding to one sheet each week" → the plan the model answers is kept as five sources + append', async () => {
-    const { svc } = harness({ answer: (prompt) => (/OWNER: Five hashtags/.test(prompt) ? { reply: 'Five hashtag sources on Search Hashtag Posts, 3 pages each, kept adding to one sheet every Monday. Press Create when happy.', plan: FIVE_HASHTAGS, cost: { credits: 15, aiTokens: 0 } } : { reply: 'Which hashtags?', plan: null }) });
+    // Hashtag search WORKING here — a plan of only failing sources is refused since BEA-1375 (its own tests below).
+    const cards = [{ ...HASHTAG, health: { ...HASHTAG.health, ok: true, note: 'Working.' } }, POPULAR, PROFILES, USER_POSTS, RELEASES];
+    const { svc } = harness({ cards, answer: (prompt) => (/OWNER: Five hashtags/.test(prompt) ? { reply: 'Five hashtag sources on Search Hashtag Posts, 3 pages each, kept adding to one sheet every Monday. Press Create when happy.', plan: FIVE_HASHTAGS, cost: { credits: 15, aiTokens: 0 } } : { reply: 'Which hashtags?', plan: null }) });
     const r = await svc.builderChat('Five hashtags: #smarthomeindia #homeautomationindia #smarthome #homeautomation #smartlighting — 3 pages each, keep adding to one sheet each week');
     expect(r.plan!.sources).toHaveLength(5);
     expect(new Set(r.plan!.sources.map((s: any) => s.actionId)).size).toBe(1);
@@ -620,5 +623,203 @@ describe('the Social hand-off seeds the builder (BEA-1372)', () => {
     expect(a.log).toHaveLength(1);
     expect(b.log).toHaveLength(1);
     expect((await svc.builderState()).log).toHaveLength(1);
+  });
+});
+
+// ---- BEA-1375: lessons from the acceptance run --------------------------------------------------------------
+//
+// The run got there only because the owner pushed four times: (1) the first plan was four hashtag searches on a
+// source the card said was FAILING — an empty sheet today; (2) creators-first on an unsampled finder that answered
+// look-alike dead accounts; (3) "runs once now" as if agreed; (4) ≈19 credits shown, 11 charged. Each is a rule the
+// builder now holds, and where the server can check it, it does.
+
+describe('a plan needs a HEALTHY source (BEA-1375)', () => {
+  const HASHTAGS_ONLY = {
+    name: 'Smart Home India — weekly digest',
+    sources: ['smarthomeindia', 'smarthomeautomationindia', 'homeautomationindia', 'smarthome'].map((h) => ({ kind: 'source', actionId: 'svc:instagram.search_hashtag', args: { hashtag: h, date_posted: 'last-month' }, pages: 2 })),
+    task: 'Keep only posts whose caption mentions India. Columns: hashtag, post url, caption, owner username.', mode: 'run',
+    output: { kind: 'sheet', sheetId: null }, notify: { whatsapp: true },
+    schedule: { every: 'week', dow: 1, at: '08:00' }, scheduleText: 'every Monday at 8am',
+  };
+  const WITH_FALLBACK = { ...HASHTAGS_ONLY, sources: [...HASHTAGS_ONLY.sources, { kind: 'creators', find: { actionId: 'svc:instagram.search_popular', args: { query: 'smart home india' }, take: 10 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'owner.username' }, keepDays: 30 } }] };
+  const OWNER = 'Get me all the Instagram posts related to Smart Home in India from the last 30 days. Fetch it and create a Google Sheet and update the information. Send the copy to my WhatsApp.';
+
+  it('planHasHealthySource: only failing sources → no; a working (or no-verdict) block beside them → yes; a creators block on a failing finder is not healthy', () => {
+    const only = validatePlan(HASHTAGS_ONLY, Object.keys(CARDS)).plan!;
+    expect(planHasHealthySource(only, CARDS)).toBe(false);
+    expect(planHasHealthySource(validatePlan(WITH_FALLBACK, Object.keys(CARDS)).plan!, CARDS)).toBe(true);
+    // no cards at all → nothing is known to fail → healthy
+    expect(planHasHealthySource(only, {})).toBe(true);
+    const badFinder = validatePlan({ ...HASHTAGS_ONLY, sources: [{ kind: 'creators', find: { actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'x' }, take: 5 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'owner.username' } } }] }, Object.keys(CARDS)).plan!;
+    expect(planHasHealthySource(badFinder, CARDS)).toBe(false);
+  });
+
+  it('the health note never says "the other sources carry the run" when there are none — it says nothing in this plan can produce rows today', () => {
+    const only = validatePlan(HASHTAGS_ONLY, Object.keys(CARDS)).plan!;
+    const note = healthNote(only, CARDS, 'Here is the plan. Press Create when happy.');
+    expect(note).toMatch(/Nothing in this plan can produce rows today/);
+    expect(note).not.toMatch(/other sources carry the run/);
+    // said even when the reply already talks about the outage — the owner must know why no plan card came
+    expect(healthNote(only, CARDS, 'Hashtag search is down at the vendor right now.')).toMatch(/Nothing in this plan can produce rows today/);
+    // with a working source beside it, the old wording holds (and a reply that says so gets no second note)
+    const mixed = validatePlan(WITH_FALLBACK, Object.keys(CARDS)).plan!;
+    expect(healthNote(mixed, CARDS, 'plan')).toMatch(/until then the other sources carry the run/);
+    expect(healthNote(mixed, CARDS, 'Hashtag search is down at the vendor right now — kept so it fills in later.')).toBe('');
+  });
+
+  it('the acceptance conversation: a plan of only failing hashtag searches is sent back ONCE; if the model still sends it, no plan is shown (reply only) and the reply says why', async () => {
+    const { svc, prompts, state } = harness({ answer: () => ({ reply: 'Here is the plan: search 4 hashtags, 2 pages each. Press Create when happy.', plan: HASHTAGS_ONLY }) });
+    const r = await svc.builderChat(OWNER);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain('Your "plan" was NOT shown to the owner: every source in it is failing at the vendor today (Instagram · Hashtag Search)');
+    expect(prompts[1]).toContain(noHealthySourceText(validatePlan(HASHTAGS_ONLY, Object.keys(CARDS)).plan!, CARDS));
+    expect(r.plan).toBeNull();
+    expect(r.cost).toBeNull();
+    expect(r.reply).toMatch(/Nothing in this plan can produce rows today/);
+    expect(r.reply).not.toMatch(/other sources carry the run/);
+    expect(r.reply).not.toMatch(/^Cost:/m); // no plan → no cost line
+    expect(state().plan).toBeNull();
+  });
+
+  it('…and when the model adds a working fallback on the send-back, THAT plan is shown, with both cost figures', async () => {
+    const { svc, prompts } = harness({ answer: (prompt) => (/NOT shown to the owner: every source in it is failing/.test(prompt)
+      ? { reply: 'Hashtag search is down at the vendor today, so I add a fallback: Popular Search finds 10 real creators and I pull their own last-30-day posts. Press Create when happy.', plan: WITH_FALLBACK }
+      : { reply: 'Here is the plan: search 4 hashtags, 2 pages each. Press Create when happy.', plan: HASHTAGS_ONLY }) });
+    const r = await svc.builderChat(OWNER);
+    expect(prompts).toHaveLength(2);
+    expect(r.plan!.sources).toHaveLength(5);
+    expect(r.cost!.credits).toBe(19); // 4 × 2 pages + 1 finder + 10 creators
+    expect(r.cost!.nowCredits).toBe(11); // the four failing hashtag searches are not charged today
+    expect(r.cost!.unhealthy!.map((u) => u.name)).toEqual(['Instagram · Hashtag Search']);
+    expect(r.reply).toMatch(/Cost: ≈ 19 credits \(≈ 11 while Instagram · Hashtag Search is down\) · ≈ \d+k AI tokens ≈ ₹\d+ per run\./);
+    expect(r.reply).not.toMatch(/Note: .*Nothing in this plan/); // the model said "down" itself and the plan has a working source
+  });
+
+  it('a plan with a working source is never sent back for health; a plan with no cards known at all is not either', async () => {
+    const { svc, prompts } = harness({ answer: () => ({ reply: 'Popular Search owners → their posts. Press Create when happy.', plan: { ...WITH_FALLBACK, sources: WITH_FALLBACK.sources.slice(4) } }) });
+    const r = await svc.builderChat(OWNER);
+    expect(prompts).toHaveLength(1);
+    expect(r.plan!.sources).toHaveLength(1);
+    expect(r.cost!.nowCredits).toBe(r.cost!.credits);
+    expect(r.cost!.unhealthy).toBeUndefined();
+    expect(r.reply).toMatch(/Cost: ≈ 11 credits · /); // one figure when everything works
+  });
+});
+
+describe('a finder is sampled before a creators block is trusted (BEA-1375)', () => {
+  const view = (actionId: string) => ({ ok: true, actionId, name: 'Instagram · Profile Search', args: { query: 'smart home india' }, count: 10, listKey: 'users', fields: [{ path: 'username', kind: 'text' }, { path: 'follower_count', kind: 'number' }], hasDate: false, items: [{ username: 'smart_home_india', follower_count: 20 }], credits: 1, ms: 300, budget: { used: 1, calls: 3, credits: 1, maxCredits: 5 } });
+  const CREATORS_PLAN = { ...SOCIAL_PLAN, sources: [SOCIAL_PLAN.sources[1]] }; // creators on search_profiles → user_posts, nothing else
+
+  it('sampledActionIds reads the sampler\'s lines (actionId) and the hand-off seed; unsampledFinders names the finders not yet seen', () => {
+    const { plan } = validatePlan(SOCIAL_PLAN, Object.keys(CARDS));
+    expect(unsampledFinders(plan, new Set())).toEqual(['svc:instagram.search_profiles']);
+    expect(unsampledFinders(plan, sampledActionIds({ log: [{ who: 'ai', kind: 'sample', actionId: 'svc:instagram.search_profiles', text: '🔎 I tried…' }] }))).toEqual([]);
+    expect(unsampledFinders(plan, sampledActionIds({ log: [], seed: { actionId: 'svc:instagram.search_profiles' } }))).toEqual([]);
+    expect(unsampledFinders(plan, sampledActionIds({ log: [{ who: 'ai', kind: 'sample', actionId: 'svc:instagram.search_popular', text: '🔎' }] }))).toEqual(['svc:instagram.search_profiles']);
+    expect(unsampledFinders(null, new Set())).toEqual([]);
+    expect(sampleFinderText(['svc:instagram.search_profiles'])).toMatch(/sample the finder once/);
+  });
+
+  it('a plan on an unsampled finder is held back with the rule; the model samples; the sampler runs; the plan that follows is shown', async () => {
+    const sampler = { sample: jest.fn(async (_s: string, id: string) => view(id)) };
+    const { svc, prompts } = harness({ sampler, answer: (prompt) => {
+      if (/SAMPLE RESULT for svc:instagram.search_profiles/.test(prompt)) return { reply: 'I looked: the profiles are name matches with 20 followers — thin. I still keep them, and pull each one\'s own posts. Press Create when happy.', plan: CREATORS_PLAN };
+      if (/you have not sampled that finder in this conversation/.test(prompt)) return { sample: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home india' } } };
+      return { reply: 'Find 20 creators, then their posts. Press Create when happy.', plan: CREATORS_PLAN };
+    } });
+    const r = await svc.builderChat(SOCIAL_ASK);
+    expect(prompts).toHaveLength(3);
+    expect(prompts[1]).toContain(sampleFinderText(['svc:instagram.search_profiles']));
+    expect(sampler.sample).toHaveBeenCalledTimes(1);
+    expect(sampler.sample.mock.calls[0].slice(1)).toEqual(['svc:instagram.search_profiles', { query: 'smart home india' }]);
+    expect(prompts[2]).toContain('SAMPLE RESULT for svc:instagram.search_profiles');
+    expect(r.plan!.sources[0].kind).toBe('creators');
+    expect(r.reply).toMatch(/^I looked:/);
+  });
+
+  it('a finder already sampled in this conversation (or run by hand on the Social page) is not asked for again', async () => {
+    const sampler = { sample: jest.fn(async (_s: string, id: string) => view(id)) };
+    const seen = { log: [{ who: 'you', text: 'hi' }, { who: 'ai', kind: 'sample', actionId: 'svc:instagram.search_profiles', text: '🔎 I tried Instagram · Profile Search (query: smart home india) — 10 users · 1 credit' }], spec: null, plan: null, cost: null, samples: { used: 1, credits: 1 } };
+    const h = harness({ sampler, state: seen, answer: () => ({ reply: 'Plan. Press Create when happy.', plan: CREATORS_PLAN }) });
+    const r = await h.svc.builderChat('go on');
+    expect(sampler.sample).not.toHaveBeenCalled();
+    expect(h.prompts).toHaveLength(1);
+    expect(r.plan).not.toBeNull();
+    const seeded = harness({ sampler, state: { log: [{ who: 'ai', kind: 'seed', text: 'You just ran…' }], seed: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home india' } } }, answer: () => ({ reply: 'Plan. Press Create when happy.', plan: CREATORS_PLAN }) });
+    expect((await seeded.svc.builderChat('yes')).plan).not.toBeNull();
+    expect(sampler.sample).not.toHaveBeenCalled();
+  });
+
+  it('with no sample budget left (or no sampler) the plan is shown as before — the nudge cannot ask for what it cannot run', async () => {
+    const sampler = { sample: jest.fn(async (_s: string, id: string) => view(id)) };
+    const h = harness({ sampler, state: { log: [], spec: null, plan: null, cost: null, samples: { used: 3, credits: 3 } }, answer: () => ({ reply: 'Plan. Press Create when happy.', plan: CREATORS_PLAN }) });
+    expect((await h.svc.builderChat(SOCIAL_ASK)).plan).not.toBeNull();
+    expect(sampler.sample).not.toHaveBeenCalled();
+    expect(h.prompts).toHaveLength(1);
+    const none = harness({ answer: () => ({ reply: 'Plan. Press Create when happy.', plan: CREATORS_PLAN }) });
+    expect((await none.svc.builderChat(SOCIAL_ASK)).plan).not.toBeNull();
+  });
+
+  it(`model calls per owner message are capped at ${MAX_ASKS_PER_MESSAGE} — a model that keeps sending an unhealthy plan or asking is cut off, not looped`, async () => {
+    const sampler = { sample: jest.fn(async (_s: string, id: string) => view(id)) };
+    let n = 0;
+    const { svc, prompts } = harness({ sampler, answer: () => (++n % 2 ? { sample: { actionId: 'svc:instagram.search_profiles', args: { query: `q${n}` } } } : { reply: 'x', plan: { ...CREATORS_PLAN, sources: [{ kind: 'source', actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'a' } }] } }) });
+    const r = await svc.builderChat(SOCIAL_ASK);
+    expect(prompts.length).toBeLessThanOrEqual(MAX_ASKS_PER_MESSAGE);
+    expect(sampler.sample.mock.calls.length).toBeLessThanOrEqual(SAMPLE_LOOPS_PER_MESSAGE);
+    expect(r.plan).toBeNull();
+  });
+});
+
+describe('when it runs and where it goes are settled before the plan; the cost is the server\'s (BEA-1375)', () => {
+  it('the rules say so, in the prompt the model reads: healthy source first, sample the finder, settle when/where, quote the server\'s cost', async () => {
+    expect(RULES_TEXT).toMatch(/A plan needs at least one HEALTHY source — one that can produce rows TODAY/);
+    expect(RULES_TEXT).toMatch(/a plan of only failing sources is not shown to the owner/);
+    expect(RULES_TEXT).toMatch(/Before a creators-first block, SAMPLE the finder once/);
+    expect(RULES_TEXT).toMatch(/Popular Search owners, Instagram's own user search/);
+    expect(RULES_TEXT).toMatch(/"When it runs" and "where the rows go" are OPEN until the owner has said them, or has accepted your default in so many words/);
+    expect(RULES_TEXT).toMatch(/Never write "runs once now" or "a new sheet" into a plan as if it were agreed/);
+    expect(RULES_TEXT).toMatch(/Cost numbers are the SERVER's, never yours/);
+    expect(RULES_TEXT).not.toMatch(/state your arithmetic\)/);
+    const { svc, prompts } = harness({ answer: () => ({ reply: 'ok', plan: null }) });
+    await svc.builderChat('Get me all the Instagram posts related to Smart Home in India from the last 30 days into a Google Sheet.');
+    expect(prompts[0]).toMatch(/Cost numbers are the SERVER's/);
+    expect(prompts[0]).toMatch(/the server writes the ≈ cost line under it/); // the prompt default no longer asks for ≈ figures in prose
+    expect(prompts[0]).not.toMatch(/the plan in words with ≈ credits and ≈ AI tokens/);
+  });
+
+  it('a recorded conversation: schedule + destination unstated → the model asks (no plan); the owner answers → the plan carries them', async () => {
+    const OWNER = 'OWNER: Get me all the Instagram posts related to Smart Home in India from the last 30 days. Fetch it and create a Google Sheet and update the information. Send the copy to my WhatsApp.';
+    const { svc, state } = harness({ answer: (prompt) => (/OWNER: Every Monday 8am, a new sheet each run/.test(prompt)
+      ? { reply: 'Set: every Monday 8am, a new sheet each run, link on WhatsApp. Press Create when happy.', plan: { ...SOCIAL_PLAN, sources: [{ kind: 'source', actionId: 'svc:instagram.search_popular', args: { query: 'smart home india' }, pages: 2 }] } }
+      : new RegExp(OWNER).test(prompt) ? { reply: 'One thing before the plan: run it once now, or on a schedule — every Monday 8am, say? And a new Google Sheet each run, or one sheet kept adding to?', plan: null } : { reply: '?', plan: null }) });
+    const first = await svc.builderChat(OWNER.replace(/^OWNER: /, ''));
+    expect(first.plan).toBeNull();
+    expect(first.reply).toMatch(/every Monday 8am, say\?/);
+    expect(first.reply).not.toMatch(/Cost:/);
+    const second = await svc.builderChat('Every Monday 8am, a new sheet each run');
+    expect(second.plan!.schedule).toEqual({ schedule: { every: 'week', dow: 1, at: '08:00' }, text: 'Every Monday at 08:00' });
+    expect(second.plan!.output).toEqual({ kind: 'sheet', sheetId: null, append: false });
+    expect(second.reply).toMatch(/Cost: ≈ 2 credits · ≈ 7k AI tokens ≈ ₹2 per run\./); // 2 pages × 12 items × 300 tokens = 7,200
+    expect(state().cost.nowCredits).toBe(2);
+  });
+
+  it('the cost line the reply and the card share: both figures while a source is down, one when all is well; a refinement turn is handed the server\'s cost to quote', async () => {
+    const { plan } = validatePlan(SOCIAL_PLAN, Object.keys(CARDS));
+    const cost = estimatePlanCost(plan!, CARDS);
+    expect(cost.credits).toBe(29); // 8 pages + 1 finder + 20 creators
+    expect(cost.nowCredits).toBe(21); // the 8 hashtag pages answer empty today
+    expect(cost.unhealthy?.map((u) => u.name)).toEqual(['Instagram · Hashtag Search']);
+    expect(creditsText(cost)).toBe('≈ 29 credits (≈ 21 while Instagram · Hashtag Search is down)');
+    expect(cost.how).toContain('(≈ 21 credits today while Instagram · Hashtag Search is down — a failing call answers empty and is not charged)');
+    expect(costLineText(cost)).toBe(`≈ 29 credits (≈ 21 while Instagram · Hashtag Search is down) · ≈ ${Math.round(cost.aiTokens / 1000)}k AI tokens ≈ ₹${cost.aiRupees} per run`);
+    expect(costReplyLine(cost)).toBe(`Cost: ${costLineText(cost)}.`);
+    expect(costReplyLine(null)).toBe('');
+    expect(creditsText({ credits: 5, nowCredits: 5, unhealthy: [] })).toBe('≈ 5 credits');
+    expect(creditsText({ credits: 1, nowCredits: 1 })).toBe('≈ 1 credit');
+    // the next turn's prompt carries the server's cost of the last plan, so the model quotes it, not its own
+    const { svc, prompts } = harness({ state: { log: [], spec: null, plan, cost }, answer: () => ({ reply: 'ok', plan: null }) });
+    await svc.builderChat('what does it cost?');
+    expect(prompts[0]).toContain(`Server cost of that plan (quote these, not your own): ${costLineText(cost)}`);
   });
 });

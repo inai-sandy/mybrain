@@ -31,7 +31,8 @@ export class SocialController {
     if (!agent) throw new NotFoundException('No such agent');
     const plan = planFromAgent(agent);
     const cards = await this.knowledge?.lookup?.(planActionIds(plan)).catch(() => []);
-    const knowledge = Object.fromEntries((cards || []).map((c) => [c.actionId, { cost: c.cost, paging: c.paging }]));
+    // name + health too (BEA-1375): the estimate says what the run costs TODAY while a source is down.
+    const knowledge = Object.fromEntries((cards || []).map((c) => [c.actionId, { name: c.name, cost: c.cost, paging: c.paging, health: c.health }]));
     return { plan, cost: estimatePlanCost(plan, knowledge) };
   }
 
