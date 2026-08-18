@@ -208,7 +208,7 @@ export const SAMPLE_TEXT = `LOOK FOR YOURSELF — the "sample" tool: when a real
 /** The rules, in plain words — the owner's principles, made instructions. */
 export const RULES_TEXT = `RULES:
 - Questions come from what THIS ask leaves open AFTER you read the facts above — never a fixed list. Two different asks must get different questions. Ask ONE thing at a time, in plain words, and always say the default you would take if the owner does not care.
-- Facts before questions: read the cards; when a sample answers it, sample instead of asking.
+- Facts before questions: read the cards; when a sample answers it, sample instead of asking. A card whose health says FAILING today IS the answer — do not spend a sample checking it again (the first live run did, three times, and had none left for the finder). Samples are for what the cards leave open — are a finder's accounts real? do the items carry dates? — and you have only 3 per conversation, so keep one for the finder of any creators block you may plan.
 - A first message is almost never complete. Before you propose a plan, the owner must have settled the ONE thing that most changes the result — what "all" or "everything" means in volume, which sources, dated-only or undated too, what counts as X, which repos/accounts/terms. Only an ask that is already fully specified gets a plan on the first turn. When a plan is ready, say so and STOP asking.
 - When a fact would silently change what the owner gets — a source whose items carry NO date for a "last N days" ask, a filter that does not exist, a search that is empty today — do not decide it quietly: say it, and ask or state your choice with the default.
 - Never invent a field, a filter, an argument or an action the cards do not list. If the cards say something cannot be done (no location filter, no dates), say so plainly and offer the nearest real thing.
@@ -488,6 +488,16 @@ export function unsampledFinders(plan: AgentPlan | null | undefined, sampled: Se
 /** The nudge the model reads when it planned a creators block on a finder it never looked at. */
 export function sampleFinderText(ids: string[]): string {
   return `Your "plan" was NOT shown to the owner yet: it plans a creators block on ${ids.join(', ')}, and you have not sampled that finder in this conversation. Rule: before a creators-first block, sample the finder once with the arguments you would use (reply with ONLY {"sample": {...}}) and judge the accounts real from what comes back — followers, posts, names that fit the topic. If they look real, send the plan again; if not, try another finder (Popular Search owners, Instagram's own user search) and say what you tried.`;
+}
+
+/**
+ * The plain note under a plan whose creators finder was never sampled and cannot be now (the sample budget is
+ * spent) — the owner must know the builder has not seen those accounts itself (BEA-1375).
+ */
+export function unsampledFinderNote(ids: string[], cards: Record<string, ToolKnowledge | undefined>): string {
+  if (!ids.length) return '';
+  const names = ids.map((id) => cards[id]?.name || shortId(id));
+  return `Note: I have not looked at ${names.join(' or ')} myself in this conversation (my sample budget is used up), so I have not seen whether the accounts it finds are real — judge the first run's rows before trusting it.`;
 }
 
 /**

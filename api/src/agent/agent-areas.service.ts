@@ -13,7 +13,7 @@ import { BuilderSampleService } from './builder-sample.service';
 import {
   BLOCKS_TEXT, DesignCounter, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, SAMPLE_TEXT, TURN_MAX_TOKENS, TURN_TIMEOUT_MS, budgetLine, estimateTokens, factsSection,
   fillTemplate, healthNote, indexSection, overBudget, parseBuilderJson, pickCardIds, planToAgentInput, readDesignCounter, sampleRequestOf, sampleViewText, validatePlan,
-  BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, noHealthySourceText, sampleFinderText, sampledActionIds, seedLine, seedText, unsampledFinders,
+  BuilderSeed, MAX_ASKS_PER_MESSAGE, costReplyLine, noHealthySourceText, sampleFinderText, sampledActionIds, seedLine, seedText, unsampledFinderNote, unsampledFinders,
 } from './thinking-builder';
 import { isServiceToolId } from '../tools/service-provider';
 
@@ -313,6 +313,9 @@ export class AgentAreasService {
       // (no healthy source) says why no card came.
       const note = healthNote(plan || refused, cardsById, reply);
       if (note) reply = `${reply}\n\n${note}`;
+      // A creators finder the conversation never looked at and cannot look at now (sample budget spent): said plainly.
+      const unseen = plan ? unsampledFinderNote(unsampledFinders(plan, sampledActionIds(st)), cardsById) : '';
+      if (unseen) reply = `${reply}\n\n${unseen}`;
       // The cost line under the reply is the SERVER's — the same figures as the card, both of them while a
       // source is down — so the reply and the card can never disagree (BEA-1375).
       const costLine = costReplyLine(cost);
