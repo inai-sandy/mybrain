@@ -370,6 +370,28 @@ Traps: `SocialAgentRunService`'s constructor gained `knowledge?: ToolKnowledgeSe
 the block's key, so one job holds one creators block per finder action; `_pages` on an action that does not page costs one call and the step
 says "this endpoint does not page (5 pages asked)".
 
+**The builder may look for itself — capped sample calls (BEA-1370, `specs/THINKING-BUILDER.md` §B).** `BuilderSampleService`
+(`api/src/agent/builder-sample.service.ts`): `sample(sessionKey, actionId, args)` → `ServiceActionsService.runDetailed()` with
+`runKind:'builder'`, `argsPinned:true` (the ordinary `ToolCall` row, `runId` = the conversation's Setting key — so the know-how card's
+observed part learns from it with nothing extra) → a **compact view** `{ ok, actionId, name, args, count, listKey?, fields:[{path,kind}]
+(item-relative, the card's own `fieldsOfValue` walker), hasDate, items:[≤3, 700 chars/cell — `tableOf` rows], credits, ms, error?,
+notFound?, refused?, budget }`. **Reads only, decided by the catalog's own rules** (`provider.readOnly` · `action.method==='GET'` ·
+`isReadAction`; `action.risky || isRiskyAction` refuses first): a write, a risky/gated action or an action it cannot load is refused
+BEFORE any call with a plain reason (`refused:true`, no `ToolCall` row) — a `GatePause` can never surface in a builder. **Caps per
+conversation** — `SAMPLE_CAPS` in `builder-session.ts` (3 calls, 5 credits; the credit check uses the action's last cost, else 1):
+over → `sample budget used (3 of 3 samples · N of 5 credits) — ask me instead`. The counter is `samples:{used,credits}` INSIDE the
+builders' own `Setting` row (`builderSettingKey(sessionKey)`: `TOP_BUILDER_SESSION` → `agent.builder`, an area id → `agent.jobBuilder.<id>`),
+reserved BEFORE the call, carried through every chat turn by `AgentAreasService`' load/save, and dropped by the existing reset routes
+(a fresh conversation is a fresh budget). The daily Social ceiling is checked first (`SocialBudgetService.check()`), and it reaches the
+service through `setBudget()` at boot (SocialModule imports AgentModule — the `setFlowSync` pattern). Every ATTEMPT (success or vendor
+failure) appends one `{who:'ai', kind:'sample'}` line the owner reads — `sampleLine(view)` (pure): `🔎 I tried Instagram · Popular
+Search (query: home automation) — 12 posts · fields: id, caption, owner, url… · no date field · 1 credit` / `… — no luck: <plain reason>
+· 0 credits`; refusals are handed back to the caller, not logged. Routes: `POST /api/agent/builder/sample {actionId, args}` and
+`POST /api/agent/areas/:id/job-builder/sample` → the view (HTTP 200 even when refused — it is an answer, not a crash). The builders
+themselves are wired to it in ④ (BEA-1371). Trap: `runDetailed()`'s `keepKnown()` drops any argument the action's schema does not name,
+so a misspelt argument is silently dropped and the sample runs without it — the view's `args` are what was ASKED, the `ToolCall` row's
+`arguments` are what really went out.
+
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.
 

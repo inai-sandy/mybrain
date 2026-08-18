@@ -11,12 +11,13 @@
     {
       "id": "BEA-1369",
       "title": "Planning blocks: pages per source, creators-first, plan JSON",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "c10d442"
     },
     {
       "id": "BEA-1370",
       "title": "Sample calls for the builder (capped)",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1371",
