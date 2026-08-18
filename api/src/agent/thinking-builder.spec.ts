@@ -4,7 +4,7 @@ import type { ToolKnowledge } from '../tools/tool-knowledge.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { LlmService } from '../llm/llm.service';
 import {
-  DESIGN_BUDGET, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, factsSection, fillTemplate, healthNote, indexSection, namedService, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
+  BLOCKS_TEXT, DESIGN_BUDGET, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, factsSection, fillTemplate, healthNote, indexSection, namedService, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
   sampleViewText, validatePlan,
 } from './thinking-builder';
 
@@ -291,8 +291,10 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
     const { plan } = validatePlan(SOCIAL_PLAN, Object.keys(CARDS));
     const input = planToAgentInput(plan!, (id) => CARDS[id]?.provider === 'social');
     expect(input.tools).toEqual(['svc:instagram.search_hashtag', 'svc:instagram.search_profiles']);
-    expect(input.toolArgs['svc:instagram.search_hashtag']).toEqual({ hashtag: 'smarthomeindia', _pages: 8 });
+    // the storage shape is keyed by SOURCE id, each entry naming its action (BEA-1374)
+    expect(input.toolArgs['svc:instagram.search_hashtag']).toEqual({ actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'smarthomeindia' }, _pages: 8 });
     expect(input.toolArgs['svc:instagram.search_profiles'].kind).toBe('creators');
+    expect(input.sheetAppend).toBe(false);
     expect(input.outputDest).toBe('sheet');
     expect(input.notifyWhatsApp).toBe(true);
     expect(input.category).toBe('Social');
@@ -314,9 +316,11 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
     expect(estimatePlanCost(plan!, CARDS).credits).toBe(0); // the card says free — never "≈ 1 credit" for a GitHub read
   });
 
-  it('rejects what the cards do not list, twice-used ids, and creators without a per-creator action', () => {
+  it('rejects what the cards do not list, and creators without a per-creator action; the same action twice is FINE (BEA-1374)', () => {
     expect(validatePlan({ name: 'x', sources: [{ actionId: 'svc:instagram.search_location', args: {} }] }, Object.keys(CARDS)).errors[0]).toMatch(/not one of the actions you were shown/);
-    expect(validatePlan({ name: 'x', sources: [{ actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'a' } }, { actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'b' } }] }, Object.keys(CARDS)).errors[0]).toMatch(/used twice/);
+    const twice = validatePlan({ name: 'x', sources: [{ actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'a' } }, { actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'b' } }] }, Object.keys(CARDS));
+    expect(twice.errors).toEqual([]);
+    expect(twice.plan!.sources.map((s) => s.id)).toEqual(['svc:instagram.search_hashtag', 'svc:instagram.search_hashtag#2']);
     expect(validatePlan({ name: 'x', sources: [{ kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: {} }, then: { argsFrom: { handle: 'username' } } }] }, Object.keys(CARDS)).errors.join(' ')).toMatch(/then\.actionId/);
     expect(validatePlan({ name: '', sources: [] }).errors).toEqual(['plan.name is missing', 'plan.sources must have at least one source']);
     expect(validatePlan(null).errors).toEqual(['plan must be an object']);
@@ -387,6 +391,80 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
 });
 
 // ---- (d) the design budget ---------------------------------------------------------------------------
+
+/**
+ * BEA-1374 — several sources on the SAME action (five hashtags), and "keep adding" means append to
+ * ONE sheet. The builder's text says so, the plan validates and round-trips, Create carries it.
+ */
+describe('several sources on one action + "keep adding" (BEA-1374)', () => {
+  const HASHTAGS = ['smarthomeindia', 'homeautomationindia', 'smarthome', 'homeautomation', 'smartlighting'];
+  const FIVE_HASHTAGS = {
+    name: 'Smart home India — five hashtags',
+    sources: HASHTAGS.map((h) => ({ kind: 'source', actionId: 'svc:instagram.search_hashtag', args: { hashtag: h }, pages: 3 })),
+    task: KEEP_AS_FETCHED, mode: 'run',
+    output: { kind: 'sheet', sheetId: null, append: true },
+    notify: { whatsapp: false },
+    schedule: { every: 'week', dow: 1, at: '08:00' }, scheduleText: 'Every Monday at 08:00',
+  };
+
+  it('a fixture answer with five hashtag sources validates → five sources of the SAME action with their own ids, args and pages', () => {
+    const { plan, errors } = validatePlan(FIVE_HASHTAGS, Object.keys(CARDS));
+    expect(errors).toEqual([]);
+    expect(plan!.sources).toHaveLength(5);
+    expect(plan!.sources.map((s) => s.id)).toEqual(['svc:instagram.search_hashtag', 'svc:instagram.search_hashtag#2', 'svc:instagram.search_hashtag#3', 'svc:instagram.search_hashtag#4', 'svc:instagram.search_hashtag#5']);
+    expect(plan!.sources.map((s: any) => s.actionId)).toEqual(Array(5).fill('svc:instagram.search_hashtag'));
+    expect(plan!.sources.map((s: any) => s.args.hashtag)).toEqual(HASHTAGS);
+    expect(plan!.sources.every((s: any) => s.pages === 3)).toBe(true);
+    expect(estimatePlanCost(plan!, CARDS).credits).toBe(15); // 5 × 3 pages × 1
+  });
+
+  it('…and round-trips through planToAgentInput → planFromAgent exactly; tools lists the action ONCE; toolArgs holds five entries', () => {
+    const { plan } = validatePlan(FIVE_HASHTAGS, Object.keys(CARDS));
+    const input = planToAgentInput(plan!, (id) => CARDS[id]?.provider === 'social');
+    expect(input.tools).toEqual(['svc:instagram.search_hashtag']);
+    expect(Object.keys(input.toolArgs)).toHaveLength(5);
+    expect(input.toolArgs['svc:instagram.search_hashtag#4']).toEqual({ actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'homeautomation' }, _pages: 3 });
+    expect(planFromAgent(input)).toEqual(plan);
+  });
+
+  it('"keep adding" → output.append:true on ONE sheet: the plan says append with no sheet yet, and Create carries sheetAppend:true', async () => {
+    const { plan } = validatePlan(FIVE_HASHTAGS, Object.keys(CARDS));
+    expect(plan!.output).toEqual({ kind: 'sheet', sheetId: null, append: true });
+    const input = planToAgentInput(plan!);
+    expect(input.sheetAppend).toBe(true);
+    expect(input.sheetId).toBeNull();
+    // the owner's own sheet: append too, but nothing to create later
+    const own = validatePlan({ ...FIVE_HASHTAGS, output: { kind: 'sheet', sheetId: 'S1' } }, Object.keys(CARDS)).plan!;
+    expect(own.output).toEqual({ kind: 'sheet', sheetId: 'S1', append: true });
+    expect(planToAgentInput(own).sheetAppend).toBe(false);
+    // a Document output never appends
+    expect(validatePlan({ ...FIVE_HASHTAGS, output: { kind: 'document', append: true } }, Object.keys(CARDS)).plan!.output.append).toBe(false);
+    // Create → createAgent gets the plan's fields, and reads back as the same plan
+    const cost = estimatePlanCost(plan!, CARDS);
+    const { svc, created } = harness({ answer: () => ({}), state: { log: [], spec: null, plan, cost } });
+    await svc.builderCreate();
+    expect(created[0].sheetAppend).toBe(true);
+    expect(planFromAgent(created[0])).toEqual(plan);
+  });
+
+  it('a recorded conversation: five hashtags + "keep adding to one sheet each week" → the plan the model answers is kept as five sources + append', async () => {
+    const { svc } = harness({ answer: (prompt) => (/OWNER: Five hashtags/.test(prompt) ? { reply: 'Five hashtag sources on Search Hashtag Posts, 3 pages each, kept adding to one sheet every Monday. Press Create when happy.', plan: FIVE_HASHTAGS, cost: { credits: 15, aiTokens: 0 } } : { reply: 'Which hashtags?', plan: null }) });
+    const r = await svc.builderChat('Five hashtags: #smarthomeindia #homeautomationindia #smarthome #homeautomation #smartlighting — 3 pages each, keep adding to one sheet each week');
+    expect(r.plan!.sources).toHaveLength(5);
+    expect(new Set(r.plan!.sources.map((s: any) => s.actionId)).size).toBe(1);
+    expect(r.plan!.output).toEqual({ kind: 'sheet', sheetId: null, append: true });
+    expect(r.cost!.credits).toBe(15);
+  });
+
+  it('the builder text: no "one source per action" limit any more; several sources may share an action; keep adding = append to one sheet; the plan shape carries append', () => {
+    expect(BLOCKS_TEXT).not.toMatch(/ONE source per action id/);
+    expect(BLOCKS_TEXT).toMatch(/Several sources may use the SAME action with different arguments/);
+    expect(BLOCKS_TEXT).toMatch(/five hashtags/i);
+    expect(RULES_TEXT).toMatch(/keep adding/i);
+    expect(RULES_TEXT).toMatch(/append:true on ONE sheet/);
+    expect(PLAN_SHAPE_TEXT).toMatch(/"append":true\|false/);
+  });
+});
 
 describe('the design budget (BEA-1371)', () => {
   it('under budget the model is told where it stands; over it, to propose the best plan and stop asking', () => {

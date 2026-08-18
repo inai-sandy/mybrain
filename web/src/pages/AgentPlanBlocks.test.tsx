@@ -94,7 +94,8 @@ describe('pages per source (BEA-1369)', () => {
     fireEvent.click(screen.getByText('Save agent'));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('ag-p'));
     const body = JSON.parse(fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/agent/agents')![1].body);
-    expect(body.toolArgs).toEqual({ 'svc:instagram.search_popular': { query: 'homeautomation', _pages: 5 } });
+    // keyed by source id, `_pages` beside the entry's args (BEA-1374)
+    expect(body.toolArgs).toEqual({ 'svc:instagram.search_popular': { actionId: 'svc:instagram.search_popular', args: { query: 'homeautomation' }, _pages: 5 } });
   });
 });
 
@@ -136,7 +137,8 @@ describe('creators-first (BEA-1369)', () => {
     fireEvent.click(screen.getByText('Save agent'));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('ag-c'));
     const body = JSON.parse(fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/agent/agents')![1].body);
-    expect(body.tools).toEqual(['svc:instagram.search_popular', 'svc:instagram.search_profiles']);
+    // tools = every action the sources call (the finder AND the per-creator action), once each
+    expect(body.tools).toEqual(['svc:instagram.search_popular', 'svc:instagram.search_profiles', 'svc:instagram.user_posts']);
     expect(body.toolArgs['svc:instagram.search_profiles']).toEqual({ kind: 'creators', find: { actionId: 'svc:instagram.search_profiles', args: { query: 'smart home india' }, take: 7 }, then: { actionId: 'svc:instagram.user_posts', argsFrom: { handle: 'username' }, keepDays: 30 } });
   });
 });
@@ -159,5 +161,84 @@ describe('the job page says what a run costs (BEA-1369)', () => {
     await waitFor(() => expect(screen.getByTestId('plan-cost')).toBeTruthy());
     expect(screen.getByTestId('plan-cost')).toHaveTextContent('≈ 5 credits per run');
     expect(screen.getByTestId('plan-cost').getAttribute('title')).toContain('5 pages × 1 credit');
+  });
+});
+
+/**
+ * BEA-1374 — sources keyed by source id on the job's Settings: five sources on ONE action each get
+ * their own editor (args + pages); Remove works per source; adding the same action again makes a
+ * new source with its own id; the save carries the new shape and `tools` = the actions once each.
+ */
+describe('several sources on one action — job Settings (BEA-1374)', () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => cleanup());
+
+  const HASHTAGS = ['smarthomeindia', 'homeautomationindia', 'smarthome', 'homeautomation', 'smartlighting'];
+  const toolArgs: Record<string, any> = {};
+  HASHTAGS.forEach((h, i) => { toolArgs[i ? `svc:instagram.search_popular#${i + 1}` : 'svc:instagram.search_popular'] = { actionId: 'svc:instagram.search_popular', args: { query: h }, _pages: 3 }; });
+  const agent = { id: 'ag5', name: 'Five', description: '', tools: ['svc:instagram.search_popular'], toolArgs, ui: { headline: 'Run', inputs: [], view: 'report', runLabel: 'Run' }, enabled: true, prompt: 'Keep every result as fetched.', outputDest: 'sheet', sheetId: null, sheetAppend: true, mode: 'run' };
+
+  function mount() {
+    const patches: any[] = [];
+    mockApi((url, init) => {
+      if (url === '/api/agent/agents/ag5' && init?.method === 'PATCH') { const body = JSON.parse(init.body); patches.push(body); return { ok: true, json: async () => ({ ...agent, ...body }) }; }
+      if (url === '/api/agent/agents/ag5') return { ok: true, json: async () => agent };
+      if (url === '/api/social/plan/ag5') return { ok: true, json: async () => ({ plan: {}, cost: { credits: 15, aiTokens: 0, how: '5 × 3 pages' } }) };
+      if (url.startsWith('/api/agent/runs')) return { ok: true, json: async () => [] };
+      if (url.startsWith('/api/flows')) return { ok: true, json: async () => ({ flows: [] }) };
+      if (url === '/api/skills') return { ok: true, json: async () => ({ skills: [] }) };
+      return null;
+    });
+    render(<MemoryRouter initialEntries={['/agent/agents/ag5?tab=settings']}><Routes><Route path="/agent/agents/:id" element={<AgentApp />} /></Routes></MemoryRouter>);
+    return patches;
+  }
+
+  it('draws one editor per source with its own query + pages, Remove drops just that one (tools keep the action), and "keep adding" is on', async () => {
+    const patches = mount();
+    await waitFor(() => expect(screen.getAllByTestId('tool-args')).toHaveLength(5));
+    const editors = screen.getAllByTestId('tool-args');
+    expect((within(editors[1]).getByLabelText('query') as HTMLInputElement).value).toBe('homeautomationindia');
+    expect((within(editors[1]).getByLabelText('pages') as HTMLInputElement).value).toBe('3');
+    expect(screen.getAllByLabelText(/Remove source/)).toHaveLength(5);
+    expect((screen.getByLabelText('Keep adding to one sheet') as HTMLInputElement).checked).toBe(true);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getAllByLabelText(/Remove source/)[2]); // the third source (#3, "smarthome")
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0].tools).toEqual(['svc:instagram.search_popular']);
+    expect(Object.keys(patches[0].toolArgs)).toEqual(['svc:instagram.search_popular', 'svc:instagram.search_popular#2', 'svc:instagram.search_popular#4', 'svc:instagram.search_popular#5']);
+    expect(patches[0].toolArgs['svc:instagram.search_popular#4']).toEqual({ actionId: 'svc:instagram.search_popular', args: { query: 'homeautomation' }, _pages: 3 });
+  });
+
+  it('the builder form: "Keep adding to one sheet" → sheetAppend:true on the POST (and it hides once a sheet link is pasted)', async () => {
+    const fetchMock = mockApi((url, init) => (url === '/api/agent/agents' && init?.method === 'POST' ? { ok: true, json: async () => ({ id: 'ag-k' }) } : null));
+    const onCreated = vi.fn();
+    render(<MemoryRouter><NewAgentForm social={{ tool: 'svc:instagram.search_popular', args: { query: 'homeautomation' }, label: 'Instagram · Popular Search' }} onCreated={onCreated} onCancel={() => undefined} /></MemoryRouter>);
+    fireEvent.click(screen.getByLabelText('Keep adding to one sheet'));
+    fireEvent.change(screen.getByLabelText('Append to sheet'), { target: { value: 'S1' } });
+    expect(screen.queryByLabelText('Keep adding to one sheet')).toBeNull(); // a named sheet already appends
+    fireEvent.change(screen.getByLabelText('Append to sheet'), { target: { value: '' } });
+    expect((screen.getByLabelText('Keep adding to one sheet') as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByText('Save agent'));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith('ag-k'));
+    const body = JSON.parse(fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/agent/agents')![1].body);
+    expect(body).toMatchObject({ outputDest: 'sheet', sheetId: null, sheetAppend: true });
+  });
+
+  it('Add another source with the SAME action → a sixth source with its own id (#6); the picker does not grey it out', async () => {
+    const patches = mount();
+    await waitFor(() => expect(screen.getAllByTestId('tool-args')).toHaveLength(5));
+    fireEvent.click(screen.getByText('+ Add another source'));
+    await waitFor(() => expect(screen.getByLabelText('Endpoint')).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('Endpoint'), { target: { value: 'svc:instagram.search_popular' } });
+    const panel = within(screen.getByTestId('add-source'));
+    expect(screen.getByTestId('same-action-note')).toBeTruthy();
+    fireEvent.change(panel.getByLabelText('query'), { target: { value: 'smart switches india' } });
+    const add = panel.getByText('Add source').closest('button') as HTMLButtonElement;
+    expect(add.disabled).toBe(false);
+    fireEvent.click(add);
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0].tools).toEqual(['svc:instagram.search_popular']);
+    expect(patches[0].toolArgs['svc:instagram.search_popular#6']).toEqual({ actionId: 'svc:instagram.search_popular', args: { query: 'smart switches india' } });
+    expect(Object.keys(patches[0].toolArgs)).toHaveLength(6);
   });
 });

@@ -1,4 +1,5 @@
-import { KEEP_AS_FETCHED, blockOf, clampPages, creatorField, dateFieldOf, dedupeKey, estimatePlanCost, itemDate, nextCursorOf, pagingOf, planActionIds, planFromAgent } from './plan';
+import { KEEP_AS_FETCHED, blockOf, clampPages, creatorField, dateFieldOf, dedupeKey, estimatePlanCost, isDirectFetchAgent, itemDate, nextCursorOf, pagingOf, planActionIds, planFromAgent, sourceHint, sourceLabel } from './plan';
+import { normaliseToolArgs } from './tool-args';
 
 /**
  * BEA-1369 — the plan JSON: `planFromAgent` reproduces today's jobs (pages 1, no creators), reads
@@ -61,6 +62,87 @@ describe('planFromAgent', () => {
   it('clampPages: 1..11, defaults to 1', () => {
     expect([clampPages(undefined), clampPages('8'), clampPages(0), clampPages(99), clampPages('abc'), clampPages(3.7)]).toEqual([1, 8, 1, 11, 1, 3]);
     expect(blockOf('svc:a.b', { q: 'x', _pages: 2 })).toEqual({ kind: 'source', id: 'svc:a.b', actionId: 'svc:a.b', args: { q: 'x' }, pages: 2 });
+  });
+});
+
+/**
+ * BEA-1374 — sources are keyed by SOURCE id: several sources may share one action (five hashtags),
+ * the old per-action storage reads unchanged, and the owner's live agent keeps its exact plan.
+ */
+describe('planFromAgent — sources keyed by source id (BEA-1374)', () => {
+  const HASHTAGS = ['smarthomeindia', 'homeautomationindia', 'smarthome', 'homeautomation', 'smartlighting'];
+  const fiveHashtags = () => {
+    const toolArgs: Record<string, any> = {};
+    HASHTAGS.forEach((h, i) => { toolArgs[i ? `svc:instagram.search_hashtag#${i + 1}` : 'svc:instagram.search_hashtag'] = { actionId: 'svc:instagram.search_hashtag', args: { hashtag: h }, _pages: 3 }; });
+    return { id: 'ag5', name: 'Five hashtags', tools: ['svc:instagram.search_hashtag'], toolArgs, prompt: KEEP_AS_FETCHED, outputDest: 'sheet', sheetId: null };
+  };
+
+  it('five hashtag sources on ONE action → five source blocks, each with its own id, args and pages; the job is a direct fetch', () => {
+    const p = planFromAgent(fiveHashtags());
+    expect(p.sources).toHaveLength(5);
+    expect(p.sources.map((s) => s.id)).toEqual(['svc:instagram.search_hashtag', 'svc:instagram.search_hashtag#2', 'svc:instagram.search_hashtag#3', 'svc:instagram.search_hashtag#4', 'svc:instagram.search_hashtag#5']);
+    expect(p.sources.map((s: any) => s.actionId)).toEqual(Array(5).fill('svc:instagram.search_hashtag'));
+    expect(p.sources.map((s: any) => s.args.hashtag)).toEqual(HASHTAGS);
+    expect(p.sources.map((s: any) => s.pages)).toEqual([3, 3, 3, 3, 3]);
+    expect(p.merge).toBe(true);
+    expect(planActionIds(p)).toEqual(['svc:instagram.search_hashtag']);
+    expect(isDirectFetchAgent(fiveHashtags())).toBe(true);
+    // the cost counts every source: 5 × 3 pages × 1 credit
+    expect(estimatePlanCost(p).credits).toBe(15);
+  });
+
+  it('the source column / step hint tell repeated actions apart by their telling argument, and say nothing for a lone action', () => {
+    const p = planFromAgent(fiveHashtags());
+    expect(sourceLabel(p.sources[0], p.sources)).toBe('instagram.search_hashtag · smarthomeindia');
+    expect(sourceLabel(p.sources[1], p.sources)).toBe('instagram.search_hashtag · homeautomationindia');
+    expect(sourceHint(p.sources[4], p.sources)).toBe(' (smartlighting)');
+    const d = planFromAgent(digest());
+    expect(sourceLabel(d.sources[0], d.sources)).toBe('instagram.search_hashtag'); // one source per action — exactly as before
+    expect(sourceHint(d.sources[0], d.sources)).toBe('');
+  });
+
+  it('the OLD shape reads unchanged: the same plan as before, in tools order, and normalising it is what a save writes back', () => {
+    const before = planFromAgent(digest());
+    const stored = normaliseToolArgs(digest().toolArgs);
+    const after = planFromAgent({ ...digest(), toolArgs: stored });
+    expect(after).toEqual(before);
+    // tools order still wins over storage order for one-source-per-action jobs
+    const shuffled = { ...digest(), toolArgs: { 'svc:instagram.search_popular': { query: 'homeautomation', _pages: 5 }, 'svc:instagram.search_hashtag': { hashtag: 'smarthome', date_posted: 'last-month' }, 'svc:instagram.reels_search': { query: 'smarthome', date_posted: 'last-month' } } };
+    expect(planFromAgent(shuffled).sources.map((s) => s.id)).toEqual(before.sources.map((s) => s.id));
+  });
+
+  it("the owner's live agent (83ff0b15…, read before this change) → the exact same plan: 3 sources, popular × 5, Monday 08:00, WhatsApp on", () => {
+    // `GET /api/agent/agents/83ff0b15-0d28-4aea-b771-138251fa944d` on 2026-08-18, before BEA-1374 shipped.
+    const live = {
+      id: '83ff0b15-0d28-4aea-b771-138251fa944d', name: 'Smart Home India — Instagram digest',
+      tools: ['svc:instagram.search_hashtag', 'svc:instagram.reels_search', 'svc:instagram.search_popular'],
+      toolArgs: { 'svc:instagram.search_hashtag': { hashtag: 'smarthome', date_posted: 'last-month' }, 'svc:instagram.reels_search': { query: 'smarthome', date_posted: 'last-month' }, 'svc:instagram.search_popular': { query: 'homeautomation', _pages: 5 } },
+      outputDest: 'sheet', sheetId: null, notifyWhatsApp: true, mode: 'run', schedule: { every: 'week', dow: 1, at: '08:00' }, scheduleText: 'Every Monday at 08:00',
+      prompt: 'Merge all sources into one list and de-duplicate on shortcode (or the post link). Keep only posts related to smart home / home automation in India, from the last 30 days when the post has a date — recall over precision: when unsure whether it is India, keep it. Columns: creator, followers, date, likes, views, paid partnership, location, caption, link. Leave a cell blank when the post does not say.',
+    };
+    const p = planFromAgent(live);
+    expect(p.sources).toEqual([
+      { kind: 'source', id: 'svc:instagram.search_hashtag', actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'smarthome', date_posted: 'last-month' }, pages: 1 },
+      { kind: 'source', id: 'svc:instagram.reels_search', actionId: 'svc:instagram.reels_search', args: { query: 'smarthome', date_posted: 'last-month' }, pages: 1 },
+      { kind: 'source', id: 'svc:instagram.search_popular', actionId: 'svc:instagram.search_popular', args: { query: 'homeautomation' }, pages: 5 },
+    ]);
+    expect(p.output).toEqual({ kind: 'sheet', sheetId: null, append: false });
+    expect(p.notify).toEqual({ whatsapp: true, telegram: false });
+    expect(p.schedule).toEqual({ schedule: { every: 'week', dow: 1, at: '08:00' }, text: 'Every Monday at 08:00' });
+    expect(estimatePlanCost(p).credits).toBe(7);
+    // and the same after a save has rewritten the storage in the new shape
+    expect(planFromAgent({ ...live, toolArgs: normaliseToolArgs(live.toolArgs) })).toEqual(p);
+  });
+
+  it('"keep adding" → append:true on one sheet even before it exists (Agent.sheetAppend); a named sheet still appends', () => {
+    expect(planFromAgent({ ...digest(), sheetAppend: true }).output).toEqual({ kind: 'sheet', sheetId: null, append: true });
+    expect(planFromAgent({ ...digest(), sheetAppend: true, sheetId: 'S9' }).output).toEqual({ kind: 'sheet', sheetId: 'S9', append: true });
+    expect(planFromAgent({ ...digest(), sheetAppend: true, outputDest: 'document' }).output).toEqual({ kind: 'document', sheetId: null, append: false });
+  });
+
+  it('a new-shape value handed to blockOf reads too (the UI-facing helper)', () => {
+    expect(blockOf('svc:a.b#2', { actionId: 'svc:a.b', args: { q: 'y' }, _pages: 4 })).toEqual({ kind: 'source', id: 'svc:a.b#2', actionId: 'svc:a.b', args: { q: 'y' }, pages: 4 });
+    expect(blockOf('svc:a.b#2', { q: 'y' })).toEqual({ kind: 'source', id: 'svc:a.b#2', actionId: 'svc:a.b', args: { q: 'y' }, pages: 1 });
   });
 });
 

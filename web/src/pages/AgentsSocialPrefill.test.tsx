@@ -71,7 +71,8 @@ describe('NewAgentForm with a Social prefill', () => {
       category: 'Social',
       origin: 'social',
       tools: ['svc:instagram.search'],
-      toolArgs: { 'svc:instagram.search': { query: 'legrand', page: 1 } }, // a number stays a number
+      toolArgs: { 'svc:instagram.search': { actionId: 'svc:instagram.search', args: { query: 'legrand', page: 1 } } }, // a number stays a number; keyed by source id (BEA-1374)
+      sheetAppend: false,
       outputDest: 'sheet',
       sheetId: 'SHEET1', // a pasted link is cleaned to its id
       notifyWhatsApp: true,
@@ -148,18 +149,28 @@ describe('NewAgentForm with a Social prefill', () => {
     await waitFor(() => expect(screen.getAllByTestId('tool-args')).toHaveLength(2));
     expect(screen.getAllByTestId('tool-args')[1]).toHaveTextContent('svc:instagram.reels_search');
     expect(screen.getAllByLabelText(/Remove source/)).toHaveLength(2);
-    // the same endpoint cannot be added twice
+    // the same endpoint CAN be added again with other arguments (BEA-1374) — it is said, never blocked
     fireEvent.click(screen.getByText('Add another source'));
     await waitFor(() => expect(screen.getByLabelText('Endpoint')).toBeTruthy());
     fireEvent.change(screen.getByLabelText('Endpoint'), { target: { value: 'svc:instagram.reels_search' } });
-    expect(screen.getByText(/already a source on this job/)).toBeTruthy();
-    fireEvent.click(screen.getByText('Cancel', { selector: '[data-testid="add-source"] button' }));
+    expect(screen.getByTestId('same-action-note')).toHaveTextContent(/already a source on this job — adding it again with different arguments makes another source/);
+    const panel2 = within(screen.getByTestId('add-source'));
+    fireEvent.change(panel2.getByLabelText('query'), { target: { value: 'home automation India' } });
+    const add2 = panel2.getByText('Add source').closest('button') as HTMLButtonElement;
+    expect(add2.disabled).toBe(false);
+    fireEvent.click(add2);
+    await waitFor(() => expect(screen.getAllByTestId('tool-args')).toHaveLength(3));
     fireEvent.click(screen.getByText('Save agent'));
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('ag-two'));
     const post = fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/agent/agents')!;
     const body = JSON.parse(post[1].body);
+    // tools = the allowed ACTIONS, once each; toolArgs = one entry per SOURCE, keyed by source id
     expect(body.tools).toEqual(['svc:instagram.search_hashtag', 'svc:instagram.reels_search']);
-    expect(body.toolArgs).toEqual({ 'svc:instagram.search_hashtag': { hashtag: 'smarthomeindia', date_posted: 'last-month' }, 'svc:instagram.reels_search': { query: 'smart home India', date_posted: 'last-month' } });
+    expect(body.toolArgs).toEqual({
+      'svc:instagram.search_hashtag': { actionId: 'svc:instagram.search_hashtag', args: { hashtag: 'smarthomeindia', date_posted: 'last-month' } },
+      'svc:instagram.reels_search': { actionId: 'svc:instagram.reels_search', args: { query: 'smart home India', date_posted: 'last-month' } },
+      'svc:instagram.reels_search#2': { actionId: 'svc:instagram.reels_search', args: { query: 'home automation India' } },
+    });
     // Remove drops the source before saving
     cleanup();
     fetchMock.mockClear();

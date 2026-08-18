@@ -25,19 +25,26 @@ export function sheetIdFrom(v: string): string {
   return m ? m[1] : s;
 }
 
-export function OutputDestPicker({ dest, sheetId, onChange, onCommitSheetId, compact }: { dest: string; sheetId: string; onChange: (v: { outputDest: string; sheetId: string }) => void; /** Fires when the owner leaves the sheet field, with the cleaned id — the moment to save it. */ onCommitSheetId?: (id: string) => void; compact?: boolean }) {
+export function OutputDestPicker({ dest, sheetId, sheetAppend, onChange, onCommitSheetId, onCommitSheetAppend, compact }: { dest: string; sheetId: string; /** "Keep adding" (BEA-1374): one sheet, made on the first run, then appended to. Only meaningful with no sheetId. */ sheetAppend?: boolean; onChange: (v: { outputDest: string; sheetId: string; sheetAppend: boolean }) => void; /** Fires when the owner leaves the sheet field, with the cleaned id — the moment to save it. */ onCommitSheetId?: (id: string) => void; /** Fires when the keep-adding switch flips — the moment to save it. */ onCommitSheetAppend?: (on: boolean) => void; compact?: boolean }) {
   const nav = useNavigate();
   const cur = OUTPUT_DESTS.find((d) => d.value === dest) || OUTPUT_DESTS[0];
+  const append = !!sheetAppend;
   return (
     <div className="space-y-1.5" data-testid="output-dest">
       <label className="block text-xs font-medium text-zinc-500">Where the result goes
-        <select value={cur.value} onChange={(e) => onChange({ outputDest: e.target.value, sheetId })} aria-label="Where the result goes" className={inp + ' mt-1'}>
+        <select value={cur.value} onChange={(e) => onChange({ outputDest: e.target.value, sheetId, sheetAppend: append })} aria-label="Where the result goes" className={inp + ' mt-1'}>
           {OUTPUT_DESTS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
         </select>
       </label>
       {cur.value === 'sheet' && (
-        <label className="block text-xs text-zinc-500">Append to one sheet <span className="text-zinc-400">(paste its link or id · blank = a new sheet every run)</span>
-          <input value={sheetId} onChange={(e) => onChange({ outputDest: cur.value, sheetId: e.target.value })} onBlur={(e) => { const id = sheetIdFrom(e.target.value); onChange({ outputDest: cur.value, sheetId: id }); onCommitSheetId?.(id); }} placeholder="https://docs.google.com/spreadsheets/d/…" aria-label="Append to sheet" className={inp + ' mt-1'} />
+        <label className="block text-xs text-zinc-500">Append to one sheet <span className="text-zinc-400">(paste its link or id · blank = {append ? 'one sheet, made on the first run' : 'a new sheet every run'})</span>
+          <input value={sheetId} onChange={(e) => onChange({ outputDest: cur.value, sheetId: e.target.value, sheetAppend: append })} onBlur={(e) => { const id = sheetIdFrom(e.target.value); onChange({ outputDest: cur.value, sheetId: id, sheetAppend: append }); onCommitSheetId?.(id); }} placeholder="https://docs.google.com/spreadsheets/d/…" aria-label="Append to sheet" className={inp + ' mt-1'} />
+        </label>
+      )}
+      {cur.value === 'sheet' && !sheetId.trim() && (
+        <label className="flex cursor-pointer items-center justify-between gap-3 py-0.5" data-testid="sheet-append">
+          <span className="text-xs text-zinc-500">Keep adding to one sheet <span className="text-zinc-400">— made on the first run, then every run appends; rows already there (same id / link) are skipped</span></span>
+          <input type="checkbox" checked={append} onChange={(e) => { onChange({ outputDest: cur.value, sheetId, sheetAppend: e.target.checked }); onCommitSheetAppend?.(e.target.checked); }} className="h-5 w-9 shrink-0 accent-emerald-600" aria-label="Keep adding to one sheet" />
         </label>
       )}
       {!compact && (

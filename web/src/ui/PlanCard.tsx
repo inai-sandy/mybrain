@@ -30,7 +30,7 @@ export function sourceLine(s: any): string {
 export function PlanCard({ plan, cost, creating, onCreate, createLabel = 'Create this agent' }: { plan: any; cost?: PlanCost | null; creating?: boolean; onCreate: () => void; createLabel?: string }) {
   if (!plan) return null;
   const mode = plan.mode === 'watch' ? 'Watch — only what is new or changed' : plan.mode === 'alert' ? 'Alert — tells you when the condition is met' : 'Fetch every run';
-  const out = plan.output?.kind === 'sheet' ? (plan.output?.sheetId ? 'appends to your Google Sheet' : 'a new Google Sheet each run') : 'a Document';
+  const out = plan.output?.kind === 'sheet' ? (plan.output?.sheetId ? 'appends to your Google Sheet' : plan.output?.append ? 'one Google Sheet, kept adding to (made on the first run; rows already there are skipped)' : 'a new Google Sheet each run') : 'a Document';
   const who = [plan.notify?.whatsapp ? 'WhatsApp' : '', plan.notify?.telegram ? 'Telegram' : ''].filter(Boolean).join(' + ');
   return (
     <div data-testid="builder-plan" className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { normaliseToolArgs, toolsFor } from '../social/tool-args';
 
 /** The shape of a mid-task question the agent can ask. */
 export type WaitKind = 'choice' | 'free_text' | 'approve_edit_reject' | 'form';
@@ -278,12 +279,16 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
   // ---------- saved agents (BEA-623) ----------
 
   async createAgent(
-    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown },
+    input: { name: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; sourceUrl?: string; origin?: string; tools?: string[]; outputDest?: string; sheetId?: string | null; sheetAppend?: boolean; toolArgs?: unknown; notifyWhatsApp?: boolean; ui?: unknown; mode?: string; alertCondition?: string | null; threshold?: unknown },
     // `drawFlow:false` — the caller draws (and plans) the picture itself, e.g. the voice research
     // job, which links its own flow so it can plan inside the toolbox in one pass (BEA-1366).
     opts: { drawFlow?: boolean } = {},
   ) {
     if (!input?.name?.trim()) throw new BadRequestException('An agent needs a name');
+    // The sources of a direct-fetch job (BEA-1374): stored keyed by SOURCE id, and `tools` always
+    // lists every action they call — a source the toolbox forgot would never run.
+    const sources = input.toolArgs && typeof input.toolArgs === 'object' ? normaliseToolArgs(input.toolArgs) : null;
+    const tools = sources && Object.keys(sources).length ? toolsFor(sources, input.tools) : Array.isArray(input.tools) ? input.tools.filter((t) => typeof t === 'string') : [];
     const a = await this.prisma.agent.create({
       data: {
         category: input.category?.trim() || null,
@@ -303,11 +308,12 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
         enabled: input.enabled ?? true,
         // Where it came from (BEA-1175/1176) — chat, voice, an import, or a Social result (BEA-1357).
         origin: ['chat', 'voice', 'import', 'social'].includes(String(input.origin)) ? String(input.origin) : 'chat',
-        ...(Array.isArray(input.tools) && input.tools.length ? { tools: JSON.stringify(input.tools.filter((t) => typeof t === 'string').slice(0, 60)) } : {}),
+        ...(tools.length ? { tools: JSON.stringify(tools.slice(0, 60)) } : {}),
         // Where the result goes (BEA-1357): document (default) | telegram | task | sheet.
         outputDest: this.normOutputDest(input.outputDest),
         sheetId: this.cleanSheetId(input.sheetId),
-        ...(input.toolArgs && typeof input.toolArgs === 'object' ? { toolArgs: JSON.stringify(input.toolArgs) } : {}),
+        ...(input.sheetAppend !== undefined ? { sheetAppend: !!input.sheetAppend } : {}),
+        ...(sources ? { toolArgs: JSON.stringify(sources) } : {}),
         ...(input.notifyWhatsApp !== undefined ? { notifyWhatsApp: !!input.notifyWhatsApp } : {}),
         // Watch / Alert (BEA-1358): how a direct-fetch job treats its result, and what an Alert judges.
         mode: this.normMode(input.mode),
@@ -447,6 +453,14 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     if (patch.skills !== undefined) data.skills = JSON.stringify(Array.isArray(patch.skills) ? patch.skills.slice(0, 10) : []); // attached skills (BEA-1079)
     // The tools this job may use (BEA-1168) — ids from the one catalog.
     if (patch.tools !== undefined) data.tools = JSON.stringify((Array.isArray(patch.tools) ? patch.tools : []).filter((x: any) => typeof x === 'string' && x).slice(0, 60));
+    // The sources (BEA-1374): written back in the source-id shape; `tools` keeps every action they call.
+    if ((patch as any).toolArgs && typeof (patch as any).toolArgs === 'object') {
+      const sources = normaliseToolArgs((patch as any).toolArgs);
+      if (Object.keys(sources).length) {
+        const base = patch.tools !== undefined ? (Array.isArray(patch.tools) ? patch.tools : []) : this.parse(a.tools, [] as unknown);
+        data.tools = JSON.stringify(toolsFor(sources, base).slice(0, 60));
+      }
+    }
     if (patch.ui !== undefined) data.ui = patch.ui ? JSON.stringify(patch.ui) : null; // mini-interface spec (BEA-1082)
     if (patch.name !== undefined) data.name = patch.name.trim().slice(0, 120);
     if (patch.prompt !== undefined) data.prompt = patch.prompt?.trim() || null;
@@ -471,7 +485,8 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
     // Where the result goes + the pinned fetch arguments (BEA-1357).
     if (p.outputDest !== undefined) data.outputDest = this.normOutputDest(p.outputDest);
     if (p.sheetId !== undefined) data.sheetId = this.cleanSheetId(p.sheetId);
-    if (p.toolArgs !== undefined) data.toolArgs = p.toolArgs && typeof p.toolArgs === 'object' ? JSON.stringify(p.toolArgs) : null;
+    if (p.sheetAppend !== undefined) data.sheetAppend = !!p.sheetAppend;
+    if (p.toolArgs !== undefined) data.toolArgs = p.toolArgs && typeof p.toolArgs === 'object' ? JSON.stringify(normaliseToolArgs(p.toolArgs)) : null;
     // Watch / Alert (BEA-1358).
     if (p.mode !== undefined) data.mode = this.normMode(p.mode);
     if (p.alertCondition !== undefined) data.alertCondition = this.cleanCondition(p.alertCondition);
@@ -545,9 +560,18 @@ export class AgentService implements OnModuleInit, OnModuleDestroy {
       engine: a.engine ? this.parse(a.engine, null) : null, // this job's own model (BEA-1106)
       chatLog: this.parse(a.chatLog, [] as unknown), // persisted change-by-chatting history (BEA-1097)
       tools: this.parse(a.tools, [] as unknown), // catalog tool ids this job may use (BEA-1168)
-      toolArgs: a.toolArgs ? this.parse(a.toolArgs, null) : null, // pinned per-tool arguments of a direct-fetch job (BEA-1357)
+      // The sources of a direct-fetch job (BEA-1357), always in the source-id shape (BEA-1374) whatever is stored.
+      toolArgs: a.toolArgs ? this.shapeToolArgs(a.toolArgs) : null,
       threshold: a.threshold ? this.parse(a.threshold, null) : null, // an Alert's number to cross (BEA-1358)
     };
+  }
+
+  /** `Agent.toolArgs` as the UI reads it: the source-id shape (`normaliseToolArgs`), null when empty or unreadable. */
+  private shapeToolArgs(raw: string): Record<string, any> | null {
+    const parsed = this.parse(raw, null);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const map = normaliseToolArgs(parsed);
+    return Object.keys(map).length ? map : null;
   }
 
   /** run (fetch every time) | watch (only what changed) | alert (watch + a condition → push). BEA-1358. */

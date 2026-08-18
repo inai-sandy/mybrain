@@ -7,9 +7,9 @@ import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { ToolKnowledgeService } from '../tools/tool-knowledge.service';
-import { Diff, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
+import { Diff, KEY_FIELDS, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
 import { LIST_KEYS, findList, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
-import { AgentPlan, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf, planFromAgent, thresholdOf } from './plan';
+import { AgentPlan, PlanCreators, PlanSource, creatorField, dateFieldOf, dedupeKey, itemDate, nextCursorOf, pagingOf, planFromAgent, sourceActionId, sourceHint, sourceLabel, thresholdOf } from './plan';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
 import { KEEP_AS_FETCHED, isDirectFetchAgent, wantsShaping } from './social-flow';
@@ -127,14 +127,18 @@ export class SocialAgentRunService {
 
     try {
       await step({ label: 'Fetching directly — no engine turn for this', status: 'done', kind: 'log' });
-      const tools: string[] = plan.sources.map((s) => s.id);
+      // Sources are keyed by SOURCE id (BEA-1374) — several may call the same action with different
+      // arguments. `tools` = each source's action id, in run order.
+      const tools: string[] = plan.sources.map((s) => sourceActionId(s));
       // The arguments each source is remembered by (a Watch keys its baseline on them): the plain
       // args of a source (`_pages` left out, so more pages does not forget the baseline), the whole
       // block of a creators-first source.
       const args: Record<string, any> = Object.fromEntries(plan.sources.map((s) => [s.id, s.kind === 'source' ? s.args : { kind: 'creators', find: s.find, then: s.then }]));
 
       // ---- 1. fetch — every source, direct, pinned arguments, credits recorded --------------------
-      const fetched: { id: string; r: ServiceRunResult }[] = [];
+      // `label` names the source in the merged table's `source` column: the action, plus its telling
+      // argument when several sources share one action ("instagram.search_hashtag · smarthomeindia").
+      const fetched: { id: string; actionId: string; label: string; hint: string; r: ServiceRunResult }[] = [];
       // Searches the vendor answered "not_found" for (BEA-1359) — empty sources, said on the run,
       // never a failed run: a two-source digest still completes when one search has nothing.
       const empties: string[] = [];
@@ -159,11 +163,11 @@ export class SocialAgentRunService {
       const ctx = (id: string, a: Record<string, any>) => ({ runId, runKind: 'agent', agentId: agent.id, args: a, argsPinned: true, label: id });
 
       for (const src of plan.sources) {
-        const out = src.kind === 'creators' ? await this.fetchCreators(src, guard, ctx, step) : await this.fetchSource(src, guard, ctx, step);
+        const out = src.kind === 'creators' ? await this.fetchCreators(src, guard, ctx, step) : await this.fetchSource(src, guard, ctx, step, sourceHint(src, plan.sources));
         if (out.stop) return fail(out.stop);
         credits += out.credits;
         if (out.empty) { empties.push(src.id); continue; }
-        fetched.push({ id: src.id, r: out.r! });
+        fetched.push({ id: src.id, actionId: sourceActionId(src), label: sourceLabel(src, plan.sources), hint: sourceHint(src, plan.sources), r: out.r! });
       }
 
       // Every source empty (BEA-1359): the run finishes honestly — 0 found, nothing to write, no
@@ -182,9 +186,13 @@ export class SocialAgentRunService {
       if (mode === 'watch' || mode === 'alert') return await this.watch(runId, agent, title, mode, fetched, credits, step, fail, args);
 
       // ---- 2. rows — as fetched, or shaped the way the owner asked ----------------------------
-      const tables = fetched.map((f) => ({ id: f.id, table: tableOf(f.r.data) }));
-      let table = tables.length === 1 ? tables[0].table : mergeTables(tables);
-      if (tables.length > 1) await step({ label: `Merged ${tables.length} sources into ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`, status: 'done', kind: 'log', nodeId: 'merge' });
+      const tables = fetched.map((f) => ({ id: f.label, table: tableOf(f.r.data) }));
+      let table: { columns: string[]; rows: any[][]; itemCount: number; dedupe?: { column: string; dropped: number } } = tables.length === 1 ? tables[0].table : mergeTables(tables);
+      if (tables.length > 1) {
+        const d = table.dedupe;
+        const dup = d ? (d.dropped ? ` · ${d.dropped} duplicate${d.dropped === 1 ? '' : 's'} across sources dropped (matched on "${d.column}")` : ` · de-duped on "${d.column}" — no duplicates across sources`) : '';
+        await step({ label: `Merged ${tables.length} sources into ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}${dup}`, status: 'done', kind: 'log', nodeId: 'merge' });
+      }
       if (!table.rows.length) {
         if (empties.length) return await nothingFound();
         return fail('Nothing came back to write — the fetch answered with no items. Check the arguments on the job, or try again later.');
@@ -192,11 +200,11 @@ export class SocialAgentRunService {
 
       // Append mode reads the sheet FIRST, so the shaping step can be told the columns it must fit.
       const dest = plan.output.kind;
-      let existing: { count: number; header: string[] } | null = null;
+      let existing: SheetState | null = null;
       if (dest === 'sheet' && plan.output.sheetId) {
-        const read = await this.readSheet(runId, agent, plan.output.sheetId);
+        const read = await this.readSheet(runId, agent, plan.output.sheetId, { keys: true });
         if (!read.ok) return fail(read.error!);
-        existing = { count: read.count!, header: read.header! };
+        existing = { count: read.count!, header: read.header!, keyed: read.keyed };
       }
 
       if (plan.shape) {
@@ -212,11 +220,38 @@ export class SocialAgentRunService {
       let outputDocId: string | undefined;
       let headline: string;
       if (dest === 'sheet') {
-        const w = await this.writeSheet(runId, agent, title, table, existing);
+        // "Keep adding" (BEA-1374): rows already in the sheet — same value in its key column (id,
+        // shortcode, url…) — are not appended again. The sheet's own column decides, not a model.
+        let skipped = 0;
+        if (existing?.keyed) {
+          const d = dropSeenRows(table, existing.keyed);
+          skipped = d.skipped;
+          table = d.table;
+        }
+        if (skipped && !table.rows.length) {
+          const url = sheetUrl(plan.output.sheetId!);
+          const label = `Nothing new — all ${skipped} row${skipped === 1 ? ' is' : 's are'} already in the sheet (matched on "${existing!.keyed!.column}")`;
+          await step({ label, status: 'done', detail: url, nodeId: 'write' });
+          await this.agent.finishRun(runId, { status: 'done', resultText: `**${label}.** · ${credits} credit${credits === 1 ? '' : 's'} · [Open the Google Sheet](${url})${plan.notify.whatsapp ? '\n\nWhatsApp skipped — nothing new to send.' : ''}`, outputUrl: url });
+          return;
+        }
+        const w = await this.writeSheet(runId, agent, title, table, existing, { oneSheet: plan.output.append });
         if (!w.ok) { await step({ label: w.error!, status: 'failed', nodeId: 'write' }); return fail(w.error!); }
         outputUrl = w.url;
         headline = `${table.rows.length} row${table.rows.length === 1 ? '' : 's'} → ${w.url}`;
-        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}`, status: 'done', detail: w.url, nodeId: 'write' });
+        const dedupe = skipped ? ` (${skipped} already in the sheet — skipped, matched on "${existing!.keyed!.column}")` : '';
+        await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'}${dedupe}`, status: 'done', detail: w.url, nodeId: 'write' });
+        // "Keep adding" and this was the first run: remember the sheet ON THE JOB, so every later run
+        // appends to this one. Not remembered = the next run would make another sheet, which is not
+        // what the owner asked — so a failure here fails the run, plainly.
+        if (w.created && plan.output.append && w.id) {
+          try {
+            await this.agent.updateAgent(agent.id, { sheetId: w.id } as any);
+            await step({ label: 'Remembered this sheet on the job — the next runs add to it', status: 'done', kind: 'log', nodeId: 'write' });
+          } catch (e: any) {
+            return fail(`The rows were written to ${w.url}, but the sheet could not be remembered on the job (${String(e?.message || e).slice(0, 160)}) — paste its link into "Append to one sheet" in the job's Settings, or the next run makes another sheet.`);
+          }
+        }
       } else {
         // document (the default) — the same place every other run's result lands.
         if (!this.documents) return fail('The documents library is not available on this server.');
@@ -267,6 +302,8 @@ export class SocialAgentRunService {
     guard: (actionId: string) => Promise<string | null>,
     ctx: (id: string, args: Record<string, any>) => any,
     step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
+    /** " (smarthomeindia)" when several sources share this action (BEA-1374) — so five hashtag steps read as five. */
+    hint = '',
   ): Promise<{ r?: ServiceRunResult; credits: number; empty?: boolean; stop?: string }> {
     const id = src.actionId;
     const nodeId = `src:${src.id}`;
@@ -287,7 +324,7 @@ export class SocialAgentRunService {
       const r = await this.actions.runDetailed(id, '', ctx(id, a));
       if (!r.ok && p === 1) {
         if (isEmptySearch(id, r)) {
-          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
+          await step({ label: `${r.serviceName || id.replace(/^svc:/, '').split('.')[0]} · ${r.actionName || id}${hint} — no ${nounOf(id)} found (vendor answered not_found) · 0 credits`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
           return { credits, empty: true };
         }
         const why = r.outOfCredits ? 'Your Scrape Creators credits are out. Top up, then run it again.' : r.error || 'the fetch failed';
@@ -334,7 +371,7 @@ export class SocialAgentRunService {
     // Why fewer pages than asked, in plain words: the vendor does not page this one · that was
     // everything · an empty / repeated page. Nothing when every page asked for was fetched.
     const note = !stopNote || pagesFetched >= src.pages ? '' : /does not page/.test(stopNote) ? ` · ${stopNote} (${src.pages} pages asked)` : /everything/.test(stopNote) ? ` · ${stopNote}` : ` · stopped early: ${stopNote}`;
-    await step({ label: `Fetched ${first!.serviceName || ''}${first!.actionName ? ` · ${first!.actionName}` : ''} — ${count} item${count === 1 ? '' : 's'}${over} · ${credits} credit${credits === 1 ? '' : 's'}${note}`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
+    await step({ label: `Fetched ${first!.serviceName || ''}${first!.actionName ? ` · ${first!.actionName}` : ''}${hint} — ${count} item${count === 1 ? '' : 's'}${over} · ${credits} credit${credits === 1 ? '' : 's'}${note}`, status: 'done', detail: JSON.stringify(src.args).slice(0, 300), nodeId });
     // One page: the vendor's whole answer, as always (a profile stays a profile). Several: the
     // de-duped items under the list's own key — the same shape the rows, watch and shaping read.
     const r: ServiceRunResult = single ? first! : { ...first!, data: { [listKey || 'items']: items }, credits };
@@ -497,33 +534,41 @@ export class SocialAgentRunService {
     agent: any,
     title: string,
     mode: string,
-    fetched: { id: string; r: ServiceRunResult }[],
+    fetched: { id: string; actionId?: string; label?: string; hint?: string; r: ServiceRunResult }[],
     credits: number,
     step: (s: { label: string; status?: string; detail?: string; kind?: string; nodeId?: string }) => Promise<any>,
     fail: (error: string) => Promise<void>,
-    args: Record<string, any> = agent.toolArgs || {},
+    /** The arguments each source is remembered by, keyed by SOURCE id — always the plan's, never raw `toolArgs` (BEA-1374: the stored shape is not the plain args). */
+    args: Record<string, any>,
   ): Promise<void> {
     if (!this.watches) return fail('Watching is not available on this server (no watch store).');
     const threshold = thresholdOf(agent.threshold);
     const condition = String(agent.alertCondition || '').trim();
 
-    // ---- diff every tool against last time ---------------------------------------------------
-    const parts: { id: string; r: ServiceRunResult; row: any; diff: Diff | null }[] = [];
+    // ---- diff every source against last time -------------------------------------------------
+    // A baseline row is keyed by (job, ACTION id, arguments) — the source's action, so a job saved
+    // before BEA-1374 (source id = action id) keeps every baseline it had; two sources on one action
+    // with different arguments are two rows.
+    const parts: { id: string; actionId: string; label: string; r: ServiceRunResult; row: any; diff: Diff | null }[] = [];
     for (const f of fetched) {
-      const row = await this.watches.get(agent.id, f.id, args[f.id]).catch(() => null);
-      parts.push({ id: f.id, r: f.r, row, diff: row ? diffResults(row.lastResult, f.r.data, { threshold }) : null });
+      const actionId = f.actionId || f.id;
+      const row = await this.watches.get(agent.id, actionId, args[f.id]).catch(() => null);
+      parts.push({ id: f.id, actionId, label: f.label || f.id, r: f.r, row, diff: row ? diffResults(row.lastResult, f.r.data, { threshold }) : null });
     }
+    // "Search Hashtag Posts (smarthomeindia)" when several sources share one action, else the action's name.
+    const hints = new Map(fetched.map((f) => [f.id, f.hint || '']));
+    const nameOf = (p: { id: string; r: ServiceRunResult }) => `${p.r.actionName || p.id}${hints.get(p.id) || ''}`;
     const baselines = parts.filter((p) => !p.row);
-    const diffs = parts.filter((p) => p.diff) as { id: string; r: ServiceRunResult; row: any; diff: Diff }[];
+    const diffs = parts.filter((p) => p.diff) as { id: string; actionId: string; label: string; r: ServiceRunResult; row: any; diff: Diff }[];
     const changedDiffs = diffs.filter((p) => p.diff.changed);
     const since = diffs.length ? diffs.map((p) => p.row.lastAt as Date).sort((a, b) => a.getTime() - b.getTime())[0] : null;
     const sinceText = since ? `since ${fmtWhen(since)}` : 'since last time';
 
     for (const p of baselines) {
       const t = tableOf(p.r.data);
-      await step({ label: `Watching from now — baseline stored for ${p.r.actionName || p.id} (${describeBaseline(p.r.data, t.itemCount)})`, status: 'done', nodeId: 'watch' });
+      await step({ label: `Watching from now — baseline stored for ${nameOf(p)} (${describeBaseline(p.r.data, t.itemCount)})`, status: 'done', nodeId: 'watch' });
     }
-    for (const p of diffs) await step({ label: `${p.r.actionName || p.id}: ${p.diff.summary}`, status: 'done', kind: 'log', nodeId: 'watch' });
+    for (const p of diffs) await step({ label: `${nameOf(p)}: ${p.diff.summary}`, status: 'done', kind: 'log', nodeId: 'watch' });
 
     // ---- the alert: a threshold (once-only, no model) and/or a plain-English condition ---------
     let fired = false;
@@ -559,7 +604,7 @@ export class SocialAgentRunService {
       : baselines.length && !diffs.length
         ? 'Watching from now — the first result is stored as the baseline; the next run says only what changed.'
         : `Nothing changed ${sinceText}.`;
-    const detail = changedDiffs.map((p) => (changedDiffs.length > 1 ? `### ${p.r.actionName || p.id}\n\n` : '') + p.diff.detail).filter(Boolean).join('\n\n');
+    const detail = changedDiffs.map((p) => (changedDiffs.length > 1 ? `### ${nameOf(p)}\n\n` : '') + p.diff.detail).filter(Boolean).join('\n\n');
     const creditsLine = `${credits} credit${credits === 1 ? '' : 's'}`;
 
     // ---- the push (an Alert that fired) comes FIRST: Telegram, and WhatsApp through the one path.
@@ -585,18 +630,24 @@ export class SocialAgentRunService {
     let outputDocId: string | undefined;
     if (deliver) {
       const dest = String(agent.outputDest || 'document');
-      const table = diffTable(changedDiffs.map((p) => p.diff), fetched.length > 1 ? changedDiffs.map((p) => p.id) : undefined);
+      const table = diffTable(changedDiffs.map((p) => p.diff), fetched.length > 1 ? changedDiffs.map((p) => p.label) : undefined);
       if (dest === 'sheet' && table.rows.length) {
-        let existing: { count: number; header: string[] } | null = null;
+        let existing: SheetState | null = null;
         if (agent.sheetId) {
+          // A Watch already writes only what is new since last time — no key-column read needed here.
           const read = await this.readSheet(runId, agent, agent.sheetId);
           if (!read.ok) return fail(read.error!);
           existing = { count: read.count!, header: read.header! };
         }
-        const w = await this.writeSheet(runId, agent, title, table, existing);
+        const oneSheet = !!agent.sheetId || !!agent.sheetAppend;
+        const w = await this.writeSheet(runId, agent, title, table, existing, { oneSheet });
         if (!w.ok) return fail(w.error!);
         outputUrl = w.url;
         await step({ label: `${w.created ? 'Created a Google Sheet and wrote' : 'Appended'} ${table.rows.length} row${table.rows.length === 1 ? '' : 's'} — only what changed`, status: 'done', detail: w.url, nodeId: 'write' });
+        if (w.created && agent.sheetAppend && w.id) {
+          try { await this.agent.updateAgent(agent.id, { sheetId: w.id } as any); }
+          catch (e: any) { return fail(`The rows were written to ${w.url}, but the sheet could not be remembered on the job (${String(e?.message || e).slice(0, 160)}) — paste its link into "Append to one sheet" in the job's Settings, or the next run makes another sheet.`); }
+        }
       } else {
         if (!this.documents) return fail('The documents library is not available on this server.');
         const doc: any = await this.documents.create({
@@ -618,7 +669,7 @@ export class SocialAgentRunService {
     for (const p of parts) {
       const t = p.diff?.threshold;
       const state = t ? (t.met ? 'met' : 'unmet') : undefined;
-      await this.watches.save(agent.id, p.id, args[p.id], p.r.data, { state, alertedAt: fired ? new Date() : undefined });
+      await this.watches.save(agent.id, p.actionId, args[p.id], p.r.data, { state, alertedAt: fired ? new Date() : undefined });
     }
     if (baselines.length && !diffs.length) await step({ label: 'Baseline stored — nothing is "new" on a first run', status: 'done', kind: 'log' });
 
@@ -671,22 +722,37 @@ export class SocialAgentRunService {
 
   // ---- the sheet -----------------------------------------------------------------------------
 
-  /** Where to append: how many rows the sheet holds, and its header row (empty on a fresh sheet). */
-  private async readSheet(runId: string, agent: any, sheetId: string): Promise<{ ok: boolean; count?: number; header?: string[]; error?: string }> {
+  /**
+   * What the sheet holds now: the row count (column A), the header, and — when the header has a key
+   * column (`id`, `shortcode`, `url`… — `KEY_FIELDS`) and the sheet has rows — that column's values,
+   * so "keep adding" (BEA-1374) can skip rows the sheet already has. One extra read, only then.
+   */
+  private async readSheet(runId: string, agent: any, sheetId: string, opts: { keys?: boolean } = {}): Promise<{ ok: boolean; count?: number; header?: string[]; keyed?: SheetKey; error?: string }> {
     const r = await this.actions.runDetailed(SHEET_READ, '', { runId, runKind: 'agent', agentId: agent.id, argsPinned: true, label: 'Read the sheet', args: { spreadsheet_id: sheetId, ranges: [`${SHEET_TAB}!A:A`, `${SHEET_TAB}!1:1`] } });
     if (!r.ok) return { ok: false, error: this.sheetsError(r) };
     const grids = valuesGrids(r.data);
     const colA = grids[0] || [];
     const header = (grids[1]?.[0] || []).map((c: any) => String(c ?? ''));
-    return { ok: true, count: colA.length, header: header.some((h: string) => h.trim()) ? header : [] };
+    const out: { ok: boolean; count?: number; header?: string[]; keyed?: SheetKey; error?: string } = { ok: true, count: colA.length, header: header.some((h: string) => h.trim()) ? header : [] };
+    const keyAt = opts.keys ? keyColumnIndex(out.header!) : -1;
+    if (keyAt >= 0 && colA.length > 1) {
+      const col = colLetter(keyAt);
+      const k = await this.actions.runDetailed(SHEET_READ, '', { runId, runKind: 'agent', agentId: agent.id, argsPinned: true, label: 'Read the sheet’s key column', args: { spreadsheet_id: sheetId, ranges: [`${SHEET_TAB}!${col}:${col}`] } });
+      if (!k.ok) return { ok: false, error: this.sheetsError(k) };
+      const values = new Set<string>();
+      for (const row of (valuesGrids(k.data)[0] || []).slice(1)) { const v = keyText(row?.[0]); if (v) values.add(v); }
+      out.keyed = { column: out.header![keyAt], values };
+    }
+    return out;
   }
 
   /** Create + write, or append. Every call is a `ToolCall` row on this run. */
-  private async writeSheet(runId: string, agent: any, title: string, table: { columns: string[]; rows: any[][] }, existing: { count: number; header: string[] } | null): Promise<{ ok: boolean; url?: string; id?: string; created?: boolean; error?: string }> {
+  private async writeSheet(runId: string, agent: any, title: string, table: { columns: string[]; rows: any[][] }, existing: { count: number; header: string[] } | null, opts: { oneSheet?: boolean } = {}): Promise<{ ok: boolean; url?: string; id?: string; created?: boolean; error?: string }> {
     let id: string | null = agent.sheetId || null;
     let created = false;
     if (!id) {
-      const c = await this.actions.runDetailed(SHEET_CREATE, '', { runId, runKind: 'agent', agentId: agent.id, argsPinned: true, label: 'Create a Google Sheet', args: { title: `${title} — ${new Date().toISOString().slice(0, 10)}` } });
+      // A new sheet per run is dated; the ONE sheet a "keep adding" job creates on its first run is not.
+      const c = await this.actions.runDetailed(SHEET_CREATE, '', { runId, runKind: 'agent', agentId: agent.id, argsPinned: true, label: 'Create a Google Sheet', args: { title: opts.oneSheet ? title : `${title} — ${new Date().toISOString().slice(0, 10)}` } });
       if (!c.ok) return { ok: false, error: this.sheetsError(c) };
       id = spreadsheetIdOf(c.data);
       if (!id) return { ok: false, error: 'Google Sheets created the sheet but did not say which — no spreadsheet id came back.' };
@@ -849,16 +915,78 @@ export function nounOf(id: string): string {
   return 'results';
 }
 
-/** Several tools' tables → one: a `source` column first (which tool each row came from), then the columns unioned. */
-export function mergeTables(tables: { id: string; table: { columns: string[]; rows: any[][]; itemCount: number } }[]): { columns: string[]; rows: any[][]; itemCount: number } {
+/** What `readSheet` learned about an existing sheet: rows, header, and its key column's values when it has one. */
+export type SheetKey = { column: string; values: Set<string> };
+type SheetState = { count: number; header: string[]; keyed?: SheetKey };
+
+/**
+ * Fields that name the OWNER of an item, not the item — `KEY_FIELDS` ranks them for single-item
+ * lookups, but for de-duping ROWS across sources / against a sheet they come LAST: two posts by one
+ * creator must never be "the same row" while a post id or link is there to tell them apart.
+ */
+const OWNER_FIELDS = ['uid', 'user_id', 'username'];
+export const ROW_KEY_FIELDS = [...KEY_FIELDS.filter((f) => !OWNER_FIELDS.includes(f)), ...OWNER_FIELDS];
+
+/** The header column that identifies a row (`ROW_KEY_FIELDS` order: id, shortcode… url, link; owner fields last), by name, case-blind; -1 = none. */
+export function keyColumnIndex(header: string[]): number {
+  const names = (header || []).map((h) => String(h ?? '').trim().toLowerCase());
+  for (const f of ROW_KEY_FIELDS) { const i = names.indexOf(f.toLowerCase()); if (i >= 0) return i; }
+  return -1;
+}
+
+/** 0 → A, 25 → Z, 26 → AA. */
+export function colLetter(i: number): string {
+  let n = Math.max(0, Math.floor(i)) + 1;
+  let s = '';
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+/** A key cell as compared: trimmed text; a number is its plain text; blank → ''. */
+export function keyText(v: any): string {
+  if (v === undefined || v === null) return '';
+  return String(typeof v === 'object' ? JSON.stringify(v) : v).trim();
+}
+
+/**
+ * Drop the rows whose key-column value the sheet already has (BEA-1374 "keep adding"): the table's
+ * column of the same name (case-blind), else nothing is dropped — never a guess. Pure.
+ */
+export function dropSeenRows(table: { columns: string[]; rows: any[][]; itemCount: number }, keyed: SheetKey): { table: { columns: string[]; rows: any[][]; itemCount: number }; skipped: number } {
+  const at = (table.columns || []).findIndex((c) => String(c ?? '').trim().toLowerCase() === String(keyed.column ?? '').trim().toLowerCase());
+  if (at < 0 || !keyed.values?.size) return { table, skipped: 0 };
+  const rows = table.rows.filter((r) => { const v = keyText(r[at]); return !v || !keyed.values.has(v); });
+  return { table: { ...table, rows }, skipped: table.rows.length - rows.length };
+}
+
+/**
+ * Several sources' tables → one: a `source` column first (which source each row came from), then the
+ * columns unioned, and — since BEA-1374, when the union has an id column (`KEY_FIELDS`: id, pk,
+ * shortcode, url…) — de-duped on it across sources: five hashtag searches that found the same post
+ * give ONE row (the first source's). Rows with no id are always kept. `dedupe` says what was dropped.
+ */
+export function mergeTables(tables: { id: string; table: { columns: string[]; rows: any[][]; itemCount: number } }[]): { columns: string[]; rows: any[][]; itemCount: number; dedupe?: { column: string; dropped: number } } {
   const columns: string[] = ['source'];
   for (const { table: t } of tables) for (const c of t.columns) if (!columns.includes(c)) columns.push(c);
+  const keyAt = keyColumnIndex(columns.slice(1)) ; // never `source` itself
+  const keyCol = keyAt >= 0 ? columns[keyAt + 1] : '';
+  const seen = new Set<string>();
+  let dropped = 0;
   const rows: any[][] = [];
   for (const { id, table: t } of tables) {
     const source = id.replace(/^svc:/, '');
-    for (const r of t.rows) rows.push(columns.map((c) => { if (c === 'source') return source; const i = t.columns.indexOf(c); return i === -1 ? '' : r[i]; }));
+    for (const r of t.rows) {
+      const row = columns.map((c) => { if (c === 'source') return source; const i = t.columns.indexOf(c); return i === -1 ? '' : r[i]; });
+      if (keyCol) {
+        const k = keyText(row[keyAt + 1]);
+        if (k) { if (seen.has(k)) { dropped++; continue; } seen.add(k); }
+      }
+      rows.push(row);
+    }
   }
-  return { columns, rows: rows.slice(0, MAX_ROWS), itemCount: tables.reduce((n, x) => n + x.table.itemCount, 0) };
+  const out: { columns: string[]; rows: any[][]; itemCount: number; dedupe?: { column: string; dropped: number } } = { columns, rows: rows.slice(0, MAX_ROWS), itemCount: tables.reduce((n, x) => n + x.table.itemCount, 0) };
+  if (keyCol) out.dedupe = { column: keyCol, dropped };
+  return out;
 }
 
 /** "12 items" · "followers 37,570" — what the baseline holds, in a few words. */

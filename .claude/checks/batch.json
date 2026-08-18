@@ -23,6 +23,12 @@
     {
       "id": "BEA-1371",
       "title": "The builder itself (Sonnet 5, facts, plan-with-cost)",
+      "status": "done",
+      "sha": "f749870"
+    },
+    {
+      "id": "BEA-1374",
+      "title": "Several sources on the same action + keep-adding=append (found in 1371 check)",
       "status": "in_progress"
     },
     {
