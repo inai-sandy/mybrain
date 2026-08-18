@@ -359,6 +359,9 @@ picker from `/api/social/platforms/:slug` · argument ← creator field · days)
 has a **Creators first** switch (`creatorParamOf(schema)` guesses `handle`/`user_id`, `creatorFieldFor` → `username`/`id`). The flow node for a
 paged source is "Instagram · Popular Search × 8 pages — … about 8 credits per run (8 pages × 1)"; a creators block is ONE node
 "Find creators → their posts" (`refId` = the finder, `args` = the block); `AgentFlowSyncService` names/costs every id in `planActionIds()`.
+**More pages = more items = a bigger shaping reply:** the first live 5-page run (60 items) came back CUT OFF at the shaping step's
+12k-token ceiling and the run failed honestly — so `SHAPE_BATCH` is 30 items, `SHAPE_MAX_TOKENS` 32k, and a reply that is still cut
+mid-row is salvaged to its complete rows (`salvageRowsJson`, exported + tested) instead of "not the JSON asked for".
 Traps: `SocialAgentRunService`'s constructor gained `knowledge?: ToolKnowledgeService` LAST (positional harnesses); the finder id doubles as
 the block's key, so one job holds one creators block per finder action; `_pages` on an action that does not page costs one call and the step
 says "this endpoint does not page (5 pages asked)".

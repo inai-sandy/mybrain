@@ -49,11 +49,16 @@ export { KEEP_AS_FETCHED };
 /** `Agent.threshold` → a Threshold — lives in `plan.ts` since BEA-1369; re-exported so imports keep working. */
 export { thresholdOf };
 
-/** How many items one shaping call is shown, and how many calls a run may make. */
-const SHAPE_BATCH = 60;
-const SHAPE_MAX_BATCHES = 8;
+/**
+ * How many items one shaping call is shown, and how many calls a run may make. 30 a batch: the
+ * first live 5-page run (60 items, BEA-1369) came back cut off at a 12k-token ceiling — 60 rows ×
+ * 9 columns of captions is more JSON than that — so batches are smaller AND the ceiling is higher,
+ * and a reply that still gets cut is salvaged row by row (`salvageRowsJson`).
+ */
+export const SHAPE_BATCH = 30;
+const SHAPE_MAX_BATCHES = 16;
 const SHAPE_INPUT_CHARS = 60_000;
-const SHAPE_MAX_TOKENS = 12_000;
+export const SHAPE_MAX_TOKENS = 32_000;
 /** One shaping call may take a while (60 items → rows on a Sonnet-class model); the one-turn 60s default cut a 12-item batch off (BEA-1359). */
 const SHAPE_TIMEOUT_MS = 180_000;
 /** The longest a single cell shown to the shaping model may be — a caption is read, not a novel. */
@@ -753,9 +758,7 @@ export class SocialAgentRunService {
       return { ok: false, error: `the shaping model could not be reached — ${String(e?.message || e).slice(0, 120)}` };
     }
     if (!text) return { ok: false, error: 'the shaping model returned nothing (is a model chosen for "Social rows model" in Settings?)' };
-    const m = text.match(/\{[\s\S]*\}/);
-    let parsed: any = null;
-    try { parsed = m ? JSON.parse(m[0]) : null; } catch { parsed = null; }
+    const parsed = salvageRowsJson(text);
     const outCols = Array.isArray(parsed?.columns) ? parsed.columns.map((c: any) => String(c)) : null;
     const outRows = Array.isArray(parsed?.rows) ? parsed.rows.filter((r: any) => Array.isArray(r)) : null;
     if (!outCols || !outRows) return { ok: false, error: 'the shaping model did not answer with rows (its reply was not the JSON asked for)' };
@@ -766,6 +769,35 @@ export class SocialAgentRunService {
       : outRows;
     return { ok: true, columns: finalCols, rows: rowsFixed };
   }
+}
+
+/**
+ * The `{columns, rows}` inside a shaping reply — whole when it parses, else the complete rows of a
+ * reply that was CUT OFF mid-row (a 12k-token ceiling once ate a 60-item batch): the text is cut
+ * back to the last row that closed (`],` / `]`), and closed off. Null when nothing usable is there.
+ */
+export function salvageRowsJson(text: string): { columns?: any; rows?: any } | null {
+  const start = String(text || '').indexOf('{');
+  if (start === -1) return null;
+  const body = String(text).slice(start);
+  const tryParse = (t: string) => { try { const v = JSON.parse(t); return v && typeof v === 'object' ? v : null; } catch { return null; } };
+  const whole = tryParse(body.slice(0, body.lastIndexOf('}') + 1));
+  if (whole && Array.isArray(whole.rows)) return whole;
+  // cut back to the last complete row: the last "]" that is followed (after spaces) by "," or "]" or the end
+  const rowsAt = body.search(/"rows"\s*:\s*\[/);
+  if (rowsAt === -1) return null;
+  const head = body.slice(0, rowsAt) + '"rows":[';
+  let tail = body.slice(rowsAt + body.slice(rowsAt).indexOf('[') + 1);
+  let tries = 0;
+  // `cut` walks back over every "]" — each is a candidate end of the last complete row.
+  for (let cut = tail.lastIndexOf(']'); cut >= 0 && tries < 2000; cut = tail.lastIndexOf(']', cut - 1), tries++) {
+    const v = tryParse(head + tail.slice(0, cut + 1) + ']}');
+    if (v && Array.isArray(v.rows)) return v;
+    if (cut === 0) break;
+  }
+  // no row closed at all → the columns alone, with no rows
+  const v = tryParse(head + ']}');
+  return v && Array.isArray(v.rows) ? v : null;
 }
 
 /**
