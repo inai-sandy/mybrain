@@ -899,14 +899,14 @@ export function shapeInput(item: Record<string, any>): Record<string, any> {
   return out;
 }
 
+/** 38,412 → "38k"; below 1000 the number itself. */
+export function fmtTokens(n: number): string { return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n); }
+
 /**
  * A vendor "not_found" on a SEARCH is an empty source, not a broken one (BEA-1359): Scrape Creators'
  * Google-indexed searches answer `404 not_found` for a query with no posts. A profile or a post
  * lookup that answers not_found still fails the run — that means the thing does not exist.
  */
-/** 38,412 → "38k"; below 1000 the number itself. */
-export function fmtTokens(n: number): string { return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n); }
-
 export function isEmptySearch(id: string, r: ServiceRunResult): boolean {
   if (!r?.notFound) return false;
   const endpoint = String(id || '').replace(/^svc:/, '').split('.')[1] || '';
