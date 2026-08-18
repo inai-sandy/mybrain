@@ -41,6 +41,7 @@ run_container() {
     -e ADMIN_EMAIL="${ADMIN_EMAIL:-}" \
     -e ADMIN_PASSWORD="${ADMIN_PASSWORD:-}" \
     -e SESSION_SECRET="${SESSION_SECRET:-}" \
+    -e NODE_OPTIONS="--dns-result-order=ipv4first" \
     -e CONNECTOR_KEY="${CONNECTOR_KEY:-}" \
     -e SUPERMEMORY_API_KEY="${SUPERMEMORY_API_KEY:-}" \
     -e SUPERMEMORY_PROJECT="${SUPERMEMORY_PROJECT:-}" \
