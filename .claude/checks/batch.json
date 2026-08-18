@@ -1,63 +1,12 @@
 {
-  "startedAt": "2026-08-17T19:20:00Z",
-  "note": "Social batch. Design: specs/SOCIAL.md. BEA-1359 = acceptance test, blocked behind 1355-1358. BEA-1362 added 21:20Z: owner WhatsApp alerts all failing at Meta (24h window); template mybrain_update_v1 submitted, PENDING. 22:55Z: vendor hashtag/reels search still down (404 No posts found, their doc example too) \u2192 BEA-1359 moved LAST; if still down, build+schedule fully, run honestly, park as blocked-on-vendor.",
+  "startedAt": "2026-08-18T12:16:00Z",
+  "note": "Thinking-builder batch. Design: specs/THINKING-BUILDER.md (approved 2026-08-18 'go'). BEA-1373 = acceptance, blocked behind 1368-1372. Order: 1368 → 1369 → 1370 → 1371 → 1372 → 1373. Owner rules: no cheaper models (Sonnet 5 for design), no fixed interview script, honest runs, UI 1180+390 light+dark.",
   "issues": [
-    {
-      "id": "BEA-1355",
-      "title": "ScrapeCreators provider from spec (178, no cap)",
-      "status": "done",
-      "sha": "a06f253"
-    },
-    {
-      "id": "BEA-1356",
-      "title": "Social section: grid + platform page + run-it-now",
-      "status": "done",
-      "sha": "b618951"
-    },
-    {
-      "id": "BEA-1357",
-      "title": "Make it an agent + outputDest:sheet",
-      "status": "done",
-      "sha": "7c814d8"
-    },
-    {
-      "id": "BEA-1358",
-      "title": "Watch + Alert + daily ceiling",
-      "status": "done",
-      "sha": "3531500"
-    },
-    {
-      "id": "BEA-1362",
-      "title": "WhatsApp owner alerts: template-first (found in 1357; needed for 1359's WhatsApp leg)",
-      "status": "done",
-      "sha": "9cdb70e"
-    },
-    {
-      "id": "BEA-1364",
-      "title": "First Social call after deploy fails 'fetch failed' \u2014 cause + one retry (found in 1357/1358/1362)",
-      "status": "done",
-      "sha": "f59ba50"
-    },
-    {
-      "id": "BEA-1354",
-      "title": "Lift Composio 60-cap",
-      "status": "done",
-      "sha": "16c53d0"
-    },
-    {
-      "id": "BEA-1363",
-      "title": "History previews strip markdown (polish, found in 1358)",
-      "status": "done",
-      "sha": "c0ea01a"
-    },
-    {
-      "id": "BEA-1359",
-      "title": "Owner's example live (acceptance)",
-      "status": "parked",
-      "sha": "5bfcf47",
-      "note": "In Review \u2014 all code proven incl. scheduler firing + real sheet; blocked on vendor search outage (last-30-days rows) + Meta WhatsApp pacing"
-    }
-  ],
-  "status": "complete",
-  "finishedAt": "2026-08-18T00:58:00Z"
+    { "id": "BEA-1368", "title": "Know-how layer: ToolKnowledge cards", "status": "in_progress" },
+    { "id": "BEA-1369", "title": "Planning blocks: pages per source, creators-first, plan JSON", "status": "pending" },
+    { "id": "BEA-1370", "title": "Sample calls for the builder (capped)", "status": "pending" },
+    { "id": "BEA-1371", "title": "The builder itself (Sonnet 5, facts, plan-with-cost)", "status": "pending" },
+    { "id": "BEA-1372", "title": "Screens: plan card, samples in chat, entry points", "status": "pending" },
+    { "id": "BEA-1373", "title": "Acceptance: owner's example through the builder", "status": "pending" }
+  ]
 }
