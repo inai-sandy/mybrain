@@ -20,7 +20,10 @@ export const ENVELOPE = new Set(['success', 'credits_remaining', 'credits_charge
 export const LIST_KEYS = ['posts', 'items', 'results', 'videos', 'reels', 'comments', 'users', 'tweets', 'ads', 'data', 'stories', 'threads', 'listings', 'products', 'reviews', 'repositories', 'pins', 'boards', 'episodes', 'tracks', 'songs', 'channels', 'clips', 'events', 'followers', 'following', 'replies', 'hashtags', 'creators', 'search_results', 'edges', 'ideas', 'aweme_list', 'user_list', 'itemList', 'nodes'];
 
 /** Columns a sheet shows first, when the rows have them. */
-const PREFERRED = ['title', 'name', 'username', 'owner_username', 'full_name', 'owner_full_name', 'handle', 'nickname', 'display_name', 'caption', 'text', 'description', 'desc', 'body', 'url', 'link', 'permalink', 'like_count', 'likes', 'diggCount', 'comment_count', 'comments', 'commentCount', 'view_count', 'views', 'playCount', 'video_view_count', 'video_play_count', 'share_count', 'shareCount', 'follower_count', 'owner_follower_count', 'followers', 'followerCount', 'subscriber_count', 'taken_at', 'created_at', 'createTime', 'date', 'published_at', 'publishedAt', 'timestamp', 'location', 'is_paid_partnership', 'is_ad', 'id'];
+// `caption_text` / `user_username` / `code`: the flattened names of Instagram's own post shape (`caption:{text}`,
+// `user:{username}`, `code` = the shortcode) — a v2 post has ~140 flat keys and the caption sat at #75, past
+// the 40-column cap, so 82 live rows had blank captions (BEA-1373).
+const PREFERRED = ['title', 'name', 'username', 'owner_username', 'user_username', 'full_name', 'owner_full_name', 'user_full_name', 'handle', 'nickname', 'display_name', 'caption', 'caption_text', 'text', 'description', 'desc', 'body', 'url', 'link', 'permalink', 'shortcode', 'code', 'like_count', 'likes', 'diggCount', 'comment_count', 'comments', 'commentCount', 'view_count', 'views', 'playCount', 'play_count', 'ig_play_count', 'video_view_count', 'video_play_count', 'share_count', 'shareCount', 'follower_count', 'owner_follower_count', 'followers', 'followerCount', 'subscriber_count', 'taken_at', 'created_at', 'createTime', 'date', 'published_at', 'publishedAt', 'timestamp', 'location', 'location_name', 'is_paid_partnership', 'is_ad', 'id'];
 
 export const MAX_COLUMNS = 40;
 export const MAX_ROWS = 1000;

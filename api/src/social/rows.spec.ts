@@ -2,6 +2,17 @@ import { flatten, markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valu
 
 /** BEA-1357 — a provider's answer becomes spreadsheet rows, whatever shape it came in. */
 describe('rows (BEA-1357)', () => {
+  it("BEA-1373: an Instagram post's own shape keeps its caption, shortcode and owner inside the 40-column cap — caption:{text} at flat key #75 of ~140 was falling off and 82 live rows had blank captions", () => {
+    const junk = Object.fromEntries(Array.from({ length: 70 }, (_, i) => [`flag_${i}`, i % 2 === 0]));
+    const item = { pk: '1', id: '1_2', ...junk, code: 'DcI_hzDAnN', taken_at: 1755000000, caption: { pk: 'c1', text: 'One light. Endless possibilities. #smarthomeindia', type: 1 }, user: { pk: '9', username: 'mmlites', full_name: 'MM Lites' }, like_count: 40, play_count: 1200, ...Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`more_${i}`, `v${i}`])) };
+    const t = tableOf({ items: [item] });
+    expect(t.columns.length).toBeLessThanOrEqual(40);
+    for (const c of ['caption_text', 'code', 'user_username', 'user_full_name', 'like_count', 'play_count', 'taken_at', 'id']) expect(t.columns).toContain(c);
+    const row = Object.fromEntries(t.columns.map((c, i) => [c, t.rows[0][i]]));
+    expect(row.caption_text).toBe('One light. Endless possibilities. #smarthomeindia');
+    expect(row.user_username).toBe('mmlites');
+  });
+
   const posts = {
     success: true,
     credits_charged: 1,
