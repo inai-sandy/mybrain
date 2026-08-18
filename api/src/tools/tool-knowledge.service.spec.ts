@@ -225,14 +225,26 @@ describe('observed part — from ToolCall rows (BEA-1368)', () => {
     expect(card.fields.find((f) => f.path === 'posts[].caption')).toMatchObject({ seen: true, example: 'post 0' });
   });
 
+  it('a one-shot action never gets a page size, even when its answer holds a small list', async () => {
+    const answer = { response_data: { spreadsheet_id: 'abc', sheets: [{ properties: { title: 'Sheet1', sheetId: 0 } }] } };
+    const { svc } = harness({ 'svc:googlesheets.create_google_sheet1': [okRow({ credits: null, result: JSON.stringify(answer) })] });
+    const card = (await svc.card('svc:googlesheets.create_google_sheet1'))!;
+    expect(card.paging).toEqual({ how: 'none', source: 'none' });
+    expect(card.fields.find((f) => f.path === 'response_data.spreadsheet_id')).toMatchObject({ kind: 'id', seen: true });
+  });
+
   it('a mixed day says both numbers and the last error; held-for-approval rows are neither', async () => {
     const rows = [
       okRow({ createdAt: ago(1 * H), credits: null }),
       failRow('GitHub could not do that: Not Found (404)', { createdAt: ago(2 * H), credits: null }),
       failRow('Held for your approval — nothing was sent.', { createdAt: ago(3 * H), gated: true, credits: null }),
+      failRow('You said no, so nothing was done: Delete a repository on GitHub — x/y.', { createdAt: ago(4 * H), gated: true, credits: null }),
     ];
     const health = healthOf('svc:github.list_repositories_for_the_authenticated_user', rows);
     expect(health).toMatchObject({ ok: true, successesLast24h: 1, failuresLast24h: 1, emptyLast24h: 0 });
+    // An APPROVED call that then ran and failed is gated:true too — and it is a real failure.
+    const ran = healthOf('svc:github.delete_a_repository', [failRow('GitHub could not do that: Not Found (404)', { gated: true, credits: null })]);
+    expect(ran).toMatchObject({ ok: false, failuresLast24h: 1 });
     expect(health.note).toMatch(/1 succeeded, 1 failed/);
     expect(health.lastError).toBe('Not Found (404)');
   });

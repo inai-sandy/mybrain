@@ -93,6 +93,8 @@ const ID_KEY_RE = /(^|_)(id|pk|uuid|shortcode|guid|slug)$|_id$|^id_|(^|_)ids$/i;
 const URL_KEY_RE = /url|link|href|uri|permalink/i;
 /** Their "nothing matched" answers on a search — an empty day, not a broken tool. */
 const EMPTY_ANSWER_RE = /not[_ ]found|no (posts|reels|results|videos|items|users|profiles|scrapeable [a-z]+) found|nothing found|does not have a popular page|no .* found/i;
+/** A gate's own rows (BEA-1348): held for approval, or refused — nothing was tried, so neither a success nor a failure. */
+const NOT_TRIED_RE = /^Held for your approval|^You said no, so nothing was done/i;
 /** Fields of the vendor's envelope, not of the answer. Skipped so a card is about the data. */
 const ENVELOPE_KEYS = new Set(['success', 'successful', 'credits_remaining', 'credits_charged', 'error', 'message']);
 const CURSOR_PARAMS = ['cursor', 'next_max_id', 'max_id', 'max_cursor', 'min_time', 'next_page_id', 'page_token', 'pagetoken', 'next_page_token', 'after', 'starting_after', 'end_cursor', 'offset'];
@@ -334,12 +336,13 @@ export function creditsSeen(rows: KnowledgeRow[]): { typical: number; min: numbe
 const HOUR_MIN_Z = (d: Date) => `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}Z`;
 
 /**
- * Health from the rows of the last 30 days (newest first). Held-for-approval rows (`gated` and not
- * ok) are neither a success nor a failure — nothing was tried.
+ * Health from the rows of the last 30 days (newest first). A gate's own rows — held for approval,
+ * or refused — are neither a success nor a failure: nothing was tried. An approved call that then
+ * ran and failed is `gated:true` too, and IS a failure, so the error text decides, not the flag.
  */
 export function healthOf(actionId: string, rows: KnowledgeRow[], now = Date.now()): KnowledgeHealth {
   const tried = rows
-    .filter((r) => !(r.gated && !r.ok))
+    .filter((r) => !(r.gated && !r.ok && NOT_TRIED_RE.test(String(r.error || ''))))
     .map((r) => ({ ...r, at: new Date(r.createdAt).getTime() }))
     .filter((r) => Number.isFinite(r.at))
     .sort((a, b) => b.at - a.at);
@@ -553,8 +556,12 @@ export class ToolKnowledgeService {
         ? { how: noteWithPaging.paging.how, source: 'notes' }
         : { how: 'none', source: 'none' };
     if (paging.cap === undefined && noteWithPaging?.paging?.cap !== undefined) paging.cap = noteWithPaging.paging.cap;
-    if (observedPage !== undefined) { paging.pageSize = observedPage; if (paging.how === 'none') paging.source = 'observed'; }
-    else if (noteWithPaging?.paging?.pageSize !== undefined) paging.pageSize = noteWithPaging.paging.pageSize;
+    // Items per page is only a page size when the action PAGES — a one-shot answer that happens
+    // to hold a list of 1 (a new sheet's `sheets`) is not "1 per page".
+    if (paging.how !== 'none') {
+      if (observedPage !== undefined) paging.pageSize = observedPage;
+      else if (noteWithPaging?.paging?.pageSize !== undefined) paging.pageSize = noteWithPaging.paging.pageSize;
+    }
     if (paging.field === undefined) delete paging.field;
     if (paging.cap === undefined) delete paging.cap;
 
