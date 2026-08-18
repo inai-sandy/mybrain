@@ -40,11 +40,16 @@ export const TURN_MAX_TOKENS = 8_000;
 export const TURN_TIMEOUT_MS = 180_000;
 /** Sample rounds per owner message: model asks → sampler → re-prompt, at most this many times. */
 export const SAMPLE_LOOPS_PER_MESSAGE = 3;
-/** Cards shown to the model — the shortlist cut to the most relevant, and the lookup's own cap is 50. */
-export const MAX_CARDS = 40;
-/** The whole facts section stays under this many characters (≈ 9k tokens); one card under its share. */
-export const FACTS_CHAR_BUDGET = 36_000;
+/** Cards shown to the model — the shortlist cut to the most relevant; the lookup's own cap is 50. */
+export const MAX_CARDS = 50;
+/** The whole facts section stays under this many characters (≈ 15k tokens); one card under its share. */
+export const FACTS_CHAR_BUDGET = 60_000;
 export const CARD_CHAR_BUDGET = 1_800;
+/** Beyond the cards, the model is shown an INDEX of the other shortlisted actions (id — name), at most this many. */
+export const MAX_INDEX_LINES = 150;
+/** Score added to an action whose service the owner NAMED ("instagram", "github") — the first live turn
+ *  lost Instagram's own "user posts" to Google Sheets actions that matched "sheet" and "link". */
+export const NAMED_SERVICE_BOOST = 8;
 
 /** What the conversation remembers about its design spend. Missing = a fresh conversation. */
 export type DesignCounter = { turns: number; tokens: number };
@@ -113,7 +118,7 @@ export function factsSection(cards: ToolKnowledge[], convo: string, budget = FAC
   if (!cards.length) return '(no connected outside-service actions match this conversation yet — say so if the ask needs one)';
   const words = keywords(convo);
   const ranked = cards
-    .map((c, i) => ({ c, i, s: matchScore({ id: c.actionId, name: c.name, description: [c.description, ...(c.notes || [])].join(' ') }, words) }))
+    .map((c, i) => ({ c, i, s: matchScore({ id: c.actionId, name: c.name, description: [c.description, ...(c.notes || [])].join(' ') }, words) + (namedService(c.actionId, words) ? NAMED_SERVICE_BOOST : 0) }))
     .sort((a, b) => b.s - a.s || Number(!!a.c.retired) - Number(!!b.c.retired) || a.i - b.i)
     .map((x) => x.c);
   const out: string[] = [];
@@ -125,19 +130,56 @@ export function factsSection(cards: ToolKnowledge[], convo: string, budget = FAC
     out.push(t);
     used += t.length + 2;
   }
-  if (left) out.push(`(${left} more action${left === 1 ? '' : 's'} left out for space — ask for one by id if you need its card)`);
+  if (left) out.push(`(${left} more action${left === 1 ? '' : 's'} left out for space — they are in the index below; sample one to learn its facts)`);
   return out.join('\n\n');
 }
 
-/** Rank the shortlisted service ids for a card lookup — the same score, cut to `MAX_CARDS`. */
-export function pickCardIds(tools: { id: string; name?: string; description?: string; retired?: boolean }[], convo: string, max = MAX_CARDS): string[] {
+/** How many of ONE service's actions may be cards — so Google Sheets' 36 cannot crowd Instagram's 19 out. */
+export const CARDS_PER_SERVICE = 20;
+
+/** Did the owner name this action's service? `svc:instagram.x` + the word "instagram" → yes (exact slug only —
+ *  "sheet" must not light up every googlesheets action; the Sheet is the plan's output block, not a source). */
+export function namedService(id: string, words: string[]): boolean {
+  const slug = String(id || '').replace(/^svc:/, '').split('.')[0];
+  return !!slug && words.some((w) => w === slug || `${w}s` === slug);
+}
+
+/** Rank the shortlisted service ids for a card lookup — keyword score + a boost for a NAMED service, cut to `max`. */
+export function rankServiceIds(tools: { id: string; name?: string; description?: string; retired?: boolean }[], convo: string): string[] {
   const words = keywords(convo);
   return (tools || [])
     .filter((t) => isServiceToolId(t.id))
-    .map((t, i) => ({ t, i, s: matchScore({ id: t.id, name: t.name || '', description: t.description }, words) }))
-    .sort((a, b) => Number(!!a.t.retired) - Number(!!b.t.retired) || b.s - a.s || a.i - b.i)
-    .slice(0, max)
+    .map((t, i) => ({ t, i, s: matchScore({ id: t.id, name: t.name || '', description: t.description }, words) + (namedService(t.id, words) ? NAMED_SERVICE_BOOST : 0) }))
+    .sort((a, b) => Number(!!a.t.retired) - Number(!!b.t.retired) || b.s - a.s || Number(!!(b.t as any).important) - Number(!!(a.t as any).important) || a.i - b.i)
     .map((x) => x.t.id);
+}
+
+export function pickCardIds(tools: { id: string; name?: string; description?: string; retired?: boolean }[], convo: string, max = MAX_CARDS, perService = CARDS_PER_SERVICE): string[] {
+  const out: string[] = [];
+  const per = new Map<string, number>();
+  for (const id of rankServiceIds(tools, convo)) {
+    if (out.length >= max) break;
+    const slug = id.replace(/^svc:/, '').split('.')[0];
+    const n = per.get(slug) || 0;
+    if (n >= perService) continue;
+    per.set(slug, n + 1);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * The index of the shortlisted actions that got no card — id and name only — so the model knows they
+ * EXIST (it may sample one to learn its facts, or use it in a plan); ranked like the cards.
+ */
+export function indexSection(tools: { id: string; name?: string; retired?: boolean }[], convo: string, cardIds: string[], max = MAX_INDEX_LINES): string {
+  const carded = new Set(cardIds);
+  const byId = new Map((tools || []).map((t) => [t.id, t]));
+  const rest = rankServiceIds(tools, convo).filter((id) => !carded.has(id));
+  if (!rest.length) return '';
+  const lines = rest.slice(0, max).map((id) => { const t = byId.get(id); return `- ${id} — ${t?.name || ''}${t?.retired ? ' (retired)' : ''}`; });
+  if (rest.length > max) lines.push(`(+${rest.length - max} more)`);
+  return lines.join('\n');
 }
 
 // ---- the planning blocks --------------------------------------------------------------------------

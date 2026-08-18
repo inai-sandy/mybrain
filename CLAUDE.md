@@ -396,9 +396,13 @@ so a misspelt argument is silently dropped and the sample runs without it — th
 `AgentAreasService.builderChat` / `jobBuilderChat` share ONE turn engine (`think()`), and every design turn runs on
 `completeHelper('agent-builder')` — Sonnet 5 via OpenRouter, Settings → Agents & Engines "Agent builder model" — never Codex
 (Codex only delivers) and never a cheaper model (the owner's rule). The pure parts live in `api/src/agent/thinking-builder.ts`:
-the prompt gets (a) the conversation, (b) the **facts section** — `shortlistForPrompt` → `pickCardIds` (≤40 most relevant `svc:` ids)
-→ `ToolKnowledgeService.lookup` → `cardText()` per card in FULL (params, fields with kinds, has-a-date, paging, cost, health, notes),
-most relevant first under `FACTS_CHAR_BUDGET`; non-service tools stay one-liners in `{{tools}}`, (c) `BLOCKS_TEXT` (the BEA-1369
+the prompt gets (a) the conversation, (b) the **facts section** — `shortlistForPrompt` → `pickCardIds` (≤50 `svc:` ids: keyword score
++ `NAMED_SERVICE_BOOST` for a service the owner NAMED by exact slug, ≤20 per service — the first live turn lost Instagram's own
+`user_posts` to 36 Google Sheets actions that matched "sheet"; the Sheet is the plan's output block, not a source) →
+`ToolKnowledgeService.lookup` → `cardText()` per card in FULL (params, fields with kinds, has-a-date, paging, cost, health, notes),
+most relevant first under `FACTS_CHAR_BUDGET`, then `indexSection()` — the other shortlisted ids as "id — name" so the model knows
+they exist and can sample one; a plan may use any id it was shown (card or index), never one it made up; non-service tools stay
+one-liners in `{{tools}}`, (c) `BLOCKS_TEXT` (the BEA-1369
 blocks + cost rules, incl. "ONE source per action id per agent"), (d) `SAMPLE_TEXT` — the model may answer `{sample:{actionId,args}}`
 and the server runs `BuilderSampleService.sample()` (③'s caps hold, the 🔎 line lands in the log because the sampler writes the same
 row — `think()` re-loads the row after each sample) and re-prompts with `sampleViewText()`; at most `SAMPLE_LOOPS_PER_MESSAGE` (3)
