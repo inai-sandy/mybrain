@@ -402,8 +402,10 @@ most relevant first under `FACTS_CHAR_BUDGET`; non-service tools stay one-liners
 blocks + cost rules, incl. "ONE source per action id per agent"), (d) `SAMPLE_TEXT` — the model may answer `{sample:{actionId,args}}`
 and the server runs `BuilderSampleService.sample()` (③'s caps hold, the 🔎 line lands in the log because the sampler writes the same
 row — `think()` re-loads the row after each sample) and re-prompts with `sampleViewText()`; at most `SAMPLE_LOOPS_PER_MESSAGE` (3)
-rounds per owner message, then a forced answer, (e) `RULES_TEXT`, and the design budget line. **Budget:** `DESIGN_BUDGET` (12 turns /
-150k ≈ tokens per conversation, `design:{turns,tokens}` in the builders' Setting row, dropped by reset) — over it the prompt says
+rounds per owner message, then a forced answer, (e) `RULES_TEXT`, and the design budget line. **Budget:** `DESIGN_BUDGET` (12 turns / 400k ≈ tokens per
+conversation — a sampled turn is ~50k ≈ tokens live, 5 model calls over the facts; `TURN_MAX_TOKENS` 8k out because the first live
+turn was CUT OFF at 4k and a cut JSON is a lost turn — `parseBuilderJson` salvages the reply; `design:{turns,tokens}` in the builders'
+Setting row, dropped by reset) — over it the prompt says
 "DESIGN BUDGET SPENT … give the plan now" and, if the model still asks, the last saved plan comes back as the reply. **Output** is
 `{reply, sample?, plan?, cost?, spec?|job?}`; a `plan` goes through `validatePlan(raw, allowedIds)` (ids outside the shown cards are
 "invented" and refused; one bad plan is sent back ONCE with the reasons, then reply-only) and is made canonical by

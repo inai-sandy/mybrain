@@ -370,6 +370,7 @@ describe('the plan validates and round-trips into an Agent (BEA-1371 ↔ BEA-136
 describe('the design budget (BEA-1371)', () => {
   it('under budget the model is told where it stands; over it, to propose the best plan and stop asking', () => {
     expect(budgetLine({ turns: 2, tokens: 9_000 })).toContain('turn 3 of 12');
+    expect(DESIGN_BUDGET.tokens).toBeGreaterThanOrEqual(400_000); // a sampled turn is ~50k ≈ tokens live (5 model calls over the facts)
     expect(overBudget({ turns: DESIGN_BUDGET.turns, tokens: 0 })).toBe(true);
     expect(overBudget({ turns: 0, tokens: DESIGN_BUDGET.tokens })).toBe(true);
     expect(budgetLine({ turns: 12, tokens: 20_000 })).toMatch(/DESIGN BUDGET SPENT[\s\S]*Do NOT ask another question/);
@@ -443,6 +444,8 @@ describe('the pieces (BEA-1371)', () => {
     expect(parseBuilderJson('```json\n{"reply":"hi","plan":null}\n```')).toEqual({ reply: 'hi', plan: null });
     expect(parseBuilderJson('{"reply":"hi","plan":{"name":"x"')).toEqual({ reply: 'hi', plan: { name: 'x' } });
     expect(parseBuilderJson('nothing')).toBeNull();
+    // Cut inside a string (the first live turn): the reply survives, marked cut off.
+    expect(parseBuilderJson('{"reply":"Here is the plan.\\nIt fetches a lot","plan":{"name":"x","sources":[{"kind":"sou')).toEqual({ reply: 'Here is the plan.\nIt fetches a lot', cutOff: true });
   });
 
   it('both prompt defaults carry the facts, blocks, sample, budget and rules slots and the plan shape', async () => {

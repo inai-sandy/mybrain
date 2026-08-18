@@ -29,9 +29,13 @@ import type { SampleView } from './builder-sample.service';
 // ---- the caps, in one place ----------------------------------------------------------------------
 
 /** How much design one conversation may spend before the builder must propose what it has. */
-export const DESIGN_BUDGET = { turns: 12, tokens: 150_000 } as const;
-/** The most one reply may be (output tokens). */
-export const TURN_MAX_TOKENS = 4_000;
+export const DESIGN_BUDGET = { turns: 12, tokens: 400_000 } as const;
+/**
+ * The most one reply may be (output tokens). The first live turn was CUT OFF at 4,000 — a plan with
+ * its arguments plus a few paragraphs of reply — and a cut-off JSON is a lost turn; an unused ceiling
+ * costs nothing. `RULES_TEXT` still asks for a short reply.
+ */
+export const TURN_MAX_TOKENS = 8_000;
 /** How long one design turn may wait — a Sonnet reply over 10k tokens of facts is not 60 s work. */
 export const TURN_TIMEOUT_MS = 180_000;
 /** Sample rounds per owner message: model asks → sampler → re-prompt, at most this many times. */
@@ -162,7 +166,7 @@ export const RULES_TEXT = `RULES:
 - If a card's health says FAILING or "answered not_found for every call", say so, and say how the plan copes (keep it so it fills in when the vendor repairs it, and add another source for volume today).
 - Plan the flow yourself from the blocks — do not ask the owner to design it. Once nothing important is open, propose the plan and STOP asking.
 - Before the owner presses Create, your reply shows the plan in words: what it fetches (sources × pages, creators), what it keeps, columns, where it goes, when it runs, who is told, and ≈ credits + ≈ AI tokens per run (the server recomputes the cost from the cards; state your arithmetic).
-- Never say the agent was created — the owner presses Create. Plain, everyday English. Short sentences.`;
+- Never say the agent was created — the owner presses Create. Plain, everyday English. Short sentences. Keep "reply" under 200 words — detail belongs in the plan JSON, not in prose.`;
 
 /** The `plan` JSON the model writes — the shape it is asked for. */
 export const PLAN_SHAPE_TEXT = `"plan": null while something important is still open, else the COMPLETE plan:
@@ -196,6 +200,9 @@ export function parseBuilderJson(text: string | null | undefined): any | null {
     t += t.match(/\[[^\]]*$/) ? ']' : '}';
     try { return JSON.parse(t); } catch { /* keep closing */ }
   }
+  // Cut inside a string: at least the reply survives, so the owner reads words, not "I couldn't work that out".
+  const r = s.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (r && r[1]) { try { return { reply: JSON.parse(`"${r[1]}"`), cutOff: true }; } catch { return { reply: r[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'), cutOff: true }; } }
   return null;
 }
 
