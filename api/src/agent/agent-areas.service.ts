@@ -5,6 +5,7 @@ import { LlmService } from '../llm/llm.service';
 import { PromptsService } from '../prompts/prompts.service';
 import { ToolCatalogService } from '../tools/tool-catalog.service';
 import { shortlistForPrompt } from '../tools/tool-shortlist';
+import { TOP_BUILDER_SESSION, builderSettingKey } from './builder-session';
 
 // `id` is the catalog id (BEA-1167) — present when the tool was picked from the one catalog, absent
 // on the older hand-typed entries. It is what makes a toolbox mean something at run time.
@@ -56,14 +57,16 @@ export class AgentAreasService {
   // is a real conversation instead — it asks until it understands, and only then builds the job.
   // Kept per area so two half-finished chats can't overwrite each other.
 
-  private jobKey(areaId: string) { return `agent.jobBuilder.${areaId}`; }
+  private jobKey(areaId: string) { return builderSettingKey(areaId); }
 
-  private async jobLoad(areaId: string): Promise<{ log: any[]; job: any | null }> {
+  // `samples` is the sample-call counter (BEA-1370, `BuilderSampleService`) — carried through untouched
+  // here so a chat turn never forgets what was already tried; a reset drops it on purpose.
+  private async jobLoad(areaId: string): Promise<{ log: any[]; job: any | null; samples?: any }> {
     const row = await this.prisma.setting.findUnique({ where: { key: this.jobKey(areaId) } }).catch(() => null);
-    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null }; } catch { return { log: [], job: null }; }
+    try { const v = row ? JSON.parse(row.value) : null; return { log: v?.log || [], job: v?.job || null, samples: v?.samples }; } catch { return { log: [], job: null }; }
   }
-  private async jobSave(areaId: string, st: { log: any[]; job: any | null }) {
-    const value = JSON.stringify({ log: st.log.slice(-40), job: st.job });
+  private async jobSave(areaId: string, st: { log: any[]; job: any | null; samples?: any }) {
+    const value = JSON.stringify({ log: st.log.slice(-40), job: st.job, ...(st.samples ? { samples: st.samples } : {}) });
     await this.prisma.setting.upsert({ where: { key: this.jobKey(areaId) }, create: { key: this.jobKey(areaId), value }, update: { value } });
   }
   async jobBuilderState(areaId: string) { return this.jobLoad(areaId); }
@@ -153,13 +156,16 @@ export class AgentAreasService {
 
   // ---- The in-app chat builder (BEA-1104): a persisted conversation that designs a new agent. ----
 
-  private async builderLoad(): Promise<{ log: any[]; spec: any | null }> {
-    const row = await this.prisma.setting.findUnique({ where: { key: 'agent.builder' } }).catch(() => null);
+  private builderKey() { return builderSettingKey(TOP_BUILDER_SESSION); }
+
+  private async builderLoad(): Promise<{ log: any[]; spec: any | null; samples?: any }> {
+    const row = await this.prisma.setting.findUnique({ where: { key: this.builderKey() } }).catch(() => null);
     try { return row ? JSON.parse((row as any).value) : { log: [], spec: null }; } catch { return { log: [], spec: null }; }
   }
-  private async builderSave(st: { log: any[]; spec: any | null }) {
-    const value = JSON.stringify({ log: st.log.slice(-40), spec: st.spec });
-    await this.prisma.setting.upsert({ where: { key: 'agent.builder' }, create: { key: 'agent.builder', value }, update: { value } });
+  // `samples` = the sample-call counter (BEA-1370); kept across turns, dropped by `builderReset()`.
+  private async builderSave(st: { log: any[]; spec: any | null; samples?: any }) {
+    const value = JSON.stringify({ log: st.log.slice(-40), spec: st.spec, ...(st.samples ? { samples: st.samples } : {}) });
+    await this.prisma.setting.upsert({ where: { key: this.builderKey() }, create: { key: this.builderKey(), value }, update: { value } });
   }
 
   async builderState() { return this.builderLoad(); }

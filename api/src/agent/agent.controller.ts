@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, Patch, Put, Delete, Post, Query, BadReque
 import { AgentService, AskInput } from './agent.service';
 import { AgentsImportService } from './agents-import.service';
 import { AgentAreasService, AreaTool } from './agent-areas.service';
+import { BuilderSampleService } from './builder-sample.service';
+import { TOP_BUILDER_SESSION } from './builder-session';
 
 type AgentInput = { name?: string; prompt?: string; rubric?: string; evals?: unknown[]; icon?: string; description?: string; autonomy?: string; schedule?: unknown; scheduleText?: string; collectionId?: string | null; enabled?: boolean; defaultDepth?: string; category?: string; color?: string; skills?: unknown[]; tools?: unknown[] };
 
@@ -16,6 +18,8 @@ export class AgentController {
     private readonly agent: AgentService,
     private readonly agentsImport: AgentsImportService,
     private readonly areas: AgentAreasService,
+    // Optional + LAST — spec files build this positionally with fewer args.
+    private readonly samples?: BuilderSampleService,
   ) {}
 
   // ---- agent AREAS (BEA-1095): agent = area, job = the real unit ----
@@ -53,6 +57,13 @@ export class AgentController {
     return this.areas.builderReset();
   }
 
+  /** "Look for yourself" — one capped, reads-only sample call charged to the top-level builder conversation (BEA-1370). */
+  @Post('builder/sample')
+  builderSample(@Body() body: { actionId?: string; args?: Record<string, any> }) {
+    if (!this.samples) throw new BadRequestException('Sampling is not available on this server.');
+    return this.samples.sample(TOP_BUILDER_SESSION, String(body?.actionId || ''), body?.args || {});
+  }
+
   @Post('areas')
   createArea(@Body() body: { name?: string; icon?: string; color?: string; description?: string; outcome?: string; tools?: AreaTool[]; sourceUrl?: string }) {
     return this.areas.create(body || {});
@@ -77,6 +88,13 @@ export class AgentController {
   @Delete('areas/:id/job-builder')
   jobBuilderReset(@Param('id') id: string) {
     return this.areas.jobBuilderReset(id);
+  }
+
+  /** The same sample call, charged to this area's job-builder conversation (BEA-1370). */
+  @Post('areas/:id/job-builder/sample')
+  jobBuilderSample(@Param('id') id: string, @Body() body: { actionId?: string; args?: Record<string, any> }) {
+    if (!this.samples) throw new BadRequestException('Sampling is not available on this server.');
+    return this.samples.sample(id, String(body?.actionId || ''), body?.args || {});
   }
 
   @Get('areas/:id')

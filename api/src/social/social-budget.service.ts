@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BuilderSampleService } from '../agent/builder-sample.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { ScrapeCreatorsProvider } from '../tools/scrapecreators.provider';
@@ -21,7 +22,7 @@ import { SocialService } from './social.service';
 export type BudgetCheck = { ok: boolean; spent: number; ceiling: number | null; estimate: number; reason?: string };
 
 @Injectable()
-export class SocialBudgetService {
+export class SocialBudgetService implements OnModuleInit {
   private readonly log = new Logger('SocialBudget');
 
   constructor(
@@ -30,7 +31,14 @@ export class SocialBudgetService {
     // Optional + LAST — spec files build this positionally with fewer args.
     private readonly prisma?: PrismaService,
     private readonly telegram?: TelegramService,
+    // The builder's sample calls (BEA-1370) live in AgentModule, which this module imports — so the
+    // ceiling hands itself in here (the `setFlowSync` pattern) instead of being injected there.
+    private readonly sample?: BuilderSampleService,
   ) {}
+
+  onModuleInit() {
+    this.sample?.setBudget?.(this);
+  }
 
   /** The ceiling in force: the Setting, else the default (`CEILING_DEFAULT`). Null = no limit (the owner set 0). */
   ceiling(): Promise<number | null> {
