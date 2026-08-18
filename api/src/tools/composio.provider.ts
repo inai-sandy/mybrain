@@ -189,7 +189,7 @@ export class ComposioProvider implements ServiceProvider {
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
     try {
       const t = await this.get(`/tools/${encodeURIComponent(slug)}`);
-      const action = t?.slug ? this.toAction(parsed.service, t) : null;
+      const action = t?.slug ? this.toAction(parsed.service, t, true) : null;
       this.cache.set(key, { at: Date.now(), value: action });
       this.prune();
       return action;
@@ -531,7 +531,7 @@ export class ComposioProvider implements ServiceProvider {
     };
   }
 
-  private toAction(service: string, t: any): ServiceAction {
+  private toAction(service: string, t: any, withResponse = false): ServiceAction {
     const slug = String(t?.slug || '');
     // The vendor's shortlist mark rides on the tool's own tags (verified live: the 36 GitHub tools
     // `important=true` returns are exactly the ones tagged "important"), so no second request.
@@ -545,6 +545,9 @@ export class ComposioProvider implements ServiceProvider {
       service,
       ...(t?.is_deprecated ? { retired: true } : {}),
       ...(important ? { important: true } : {}),
+      // The exact answer shape, when the vendor states one — for the know-how card (BEA-1368). Only
+      // on the exact fetch: the list endpoint carries it too, and the catalog is heavy enough already.
+      ...(withResponse && t?.output_parameters && typeof t.output_parameters === 'object' ? { responseSchema: t.output_parameters } : {}),
     };
   }
 

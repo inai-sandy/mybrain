@@ -7,6 +7,7 @@ import { Column, DataTable, Filter, SortOption } from '../ui/DataTable';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { RetiredTag } from '../ui/ServiceFolds';
 import { Sheet } from '../ui/Sheet';
+import { ToolFacts } from '../ui/ToolFacts';
 import { Skeleton } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
 import { useUrlState } from '../ui/useUrlState';
@@ -393,12 +394,14 @@ function Gates({ slug, name }: { slug: string; name: string }) {
           />
         </div>
       )}
-      <ul className="max-h-64 space-y-1.5 overflow-y-auto">
+      <ul className="max-h-96 space-y-1.5 overflow-y-auto">
         {shown.map((g) => (
           <li key={g.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
             <div className="min-w-0 flex-1">
               <p className="flex min-w-0 items-center gap-1.5 text-sm font-medium"><span className="truncate">{g.name}</span>{g.retired && <RetiredTag />}</p>
               <p className="truncate text-[11px] text-zinc-400">{g.released ? 'Runs without asking' : 'Asks you first'}</p>
+              {/* The know-how card for this action (BEA-1368) — fields, paging, cost, health, notes. */}
+              <ToolFacts actionId={g.id} className="-ml-1.5 mt-0.5" />
             </div>
             <button
               onClick={() => set(g, !g.released)}

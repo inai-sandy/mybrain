@@ -7,6 +7,7 @@ import { useToast } from '../ui/Toast';
 import { useUrlState } from '../ui/useUrlState';
 import { CHIP, CreditStrip, Endpoint, FieldInput, argsOf, GHOST_BTN, INPUT, NoKeyNotice, Notice, Platform, PlatformLogo, PRIMARY_BTN, RunResult, Spend, fieldsOf, num, plural } from './social/socialShared';
 import { cell, format, heading, pickColumns, shapeOf, toMarkdown } from './social/resultShape';
+import { ToolFacts } from '../ui/ToolFacts';
 
 /**
  * `/social/:platform` — one platform, EVERY endpoint, run any of them right there (BEA-1356).
@@ -281,6 +282,8 @@ function EndpointCard({ e, platform, open, onToggle, noKey, topUpUrl, onRan }: {
         <div className="border-t border-zinc-100 p-3 dark:border-zinc-800 sm:p-4">
           {e.description && <p className="mb-3 break-words text-sm text-zinc-500 dark:text-zinc-400">{e.description}</p>}
           {e.costHint && <p className="mb-3 text-xs text-zinc-400"><Coins size={11} className="mr-1 inline" />{e.costHint}</p>}
+          {/* What we KNOW about this endpoint — fields, paging, cost, health, traps (BEA-1368). Read only when opened. */}
+          <ToolFacts actionId={e.id} className="mb-3" />
           <RunPanel e={e} platform={platform} noKey={noKey} topUpUrl={topUpUrl} onRan={onRan} />
         </div>
       )}
