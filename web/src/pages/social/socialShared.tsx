@@ -54,6 +54,8 @@ export type RunResult = {
   credits?: number;
   ms?: number;
   outOfCredits?: boolean;
+  /** The vendor said "nothing matches" (a search with no posts) — an empty answer, not a broken one (BEA-1359). */
+  notFound?: boolean;
   topUpUrl?: string;
   actionName?: string;
 };

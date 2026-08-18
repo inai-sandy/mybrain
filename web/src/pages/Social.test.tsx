@@ -286,6 +286,25 @@ describe('the platform page (/social/:platform)', () => {
     expect(within(panel).queryByTestId('run-result')).toBeNull();
   });
 
+  it('their "No posts found" (notFound) is a calm empty state, 0 credits, and "Make it an agent" is still there (BEA-1359)', async () => {
+    mockFetch({ run: () => ({ ok: false, error: 'TikTok could not do that: No posts found', credits: 0, ms: 200, notFound: true, status: 404 }) });
+    drawPlatform();
+    await waitFor(() => screen.getAllByTestId('endpoint-card'));
+    fireEvent.click(screen.getByRole('button', { name: /Get profile/ }));
+    const panel = screen.getByTestId('run-panel');
+    fireEvent.change(within(panel).getByLabelText('handle'), { target: { value: 'smarthomeindia' } });
+    fireEvent.click(within(panel).getByTestId('run-button'));
+    await waitFor(() => expect(within(panel).getByTestId('run-empty')).toBeTruthy());
+    expect(within(panel).queryByRole('alert')).toBeNull(); // not a red error
+    expect(within(panel).getByTestId('run-empty').textContent).toMatch(/Nothing found for that/);
+    expect(within(panel).getByTestId('run-empty').textContent).toMatch(/No posts found/);
+    expect(within(panel).getByTestId('run-empty').textContent).toMatch(/0 credits/);
+    expect(within(panel).queryByTestId('run-result')).toBeNull();
+    // the arguments just used ride into the builder — a schedule is how you keep asking
+    fireEvent.click(within(panel).getByRole('button', { name: /Make it an agent/ }));
+    await waitFor(() => expect(screen.getByTestId('agent-page')).toBeTruthy());
+  });
+
   it('out of credits: "credits are out" with a top-up link — never the raw refusal', async () => {
     mockFetch({ run: () => ({ ok: false, error: 'Your Scrape Creators credits are out. Top up, then run it again.', outOfCredits: true, topUpUrl: 'https://scrapecreators.com', credits: 0 }) });
     drawPlatform();
