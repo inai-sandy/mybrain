@@ -18,7 +18,24 @@ import { ChevronDown, Search } from 'lucide-react';
  * the "GitHub: " prefix, since the fold's header already says which service it is).
  */
 
-export type FoldItem = { id: string; name: string; description?: string; service?: string };
+export type FoldItem = { id: string; name: string; description?: string; service?: string; retired?: boolean };
+
+/** The muted "retired" tag (BEA-1365) — the vendor retired the action; it is still offered. */
+export function RetiredTag() {
+  return (
+    <span
+      title="The service has retired this action. It is still listed so nothing is skipped."
+      className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+    >
+      retired
+    </span>
+  );
+}
+
+/** Live actions first, retired after — a stable partition, so nothing else about the order moves. */
+export function liveFirst<T extends { retired?: boolean }>(items: T[]): T[] {
+  return [...items.filter((it) => !it.retired), ...items.filter((it) => it.retired)];
+}
 
 /** How many rows one fold shows before "Show more". Small on purpose — this is read on a phone. */
 export const FOLD_PAGE = 40;
@@ -49,7 +66,8 @@ export function matchesWords(text: string, needle: string): boolean {
   return String(needle || '').toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
 }
 
-const matches = (it: FoldItem, needle: string) => !needle || matchesWords(`${it.name} ${it.description || ''} ${it.id}`, needle);
+// A retired action is searched like any other — and typing "retired" lists exactly those.
+const matches = (it: FoldItem, needle: string) => !needle || matchesWords(`${it.name} ${it.description || ''} ${it.id}${it.retired ? ' retired' : ''}`, needle);
 
 export function ServiceFolds<T extends FoldItem>({
   items,
@@ -66,7 +84,8 @@ export function ServiceFolds<T extends FoldItem>({
   pageSize?: number;
   renderItem: (item: T, label: string) => ReactNode;
 }) {
-  const groups = useMemo(() => groupByService(items), [items]);
+  // Inside each fold the live actions come first and the retired ones after (BEA-1365).
+  const groups = useMemo(() => groupByService(items).map((g) => ({ ...g, items: liveFirst(g.items) })), [items]);
   const needle = query.trim().toLowerCase();
   const picked = useMemo(() => new Set(pickedIds || []), [pickedIds]);
   return (
@@ -96,6 +115,7 @@ function ServiceFold<T extends FoldItem>({
   const page = hits.slice(0, shown);
   const left = hits.length - page.length;
   const one = (n: number, w: string) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
+  const retired = items.filter((it) => it.retired).length;
 
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800">
@@ -109,6 +129,7 @@ function ServiceFold<T extends FoldItem>({
           <span className="block truncate text-sm font-medium">{title}</span>
           <span className="block truncate text-[11px] text-zinc-500">
             {needle && hits.length !== items.length ? `${one(hits.length, 'match')} of ${one(items.length, 'action')}` : one(items.length, 'action')}
+            {retired > 0 && !needle && <span className="text-zinc-400"> · {retired} retired</span>}
             {pickedHere > 0 && <span className="text-emerald-600 dark:text-emerald-400"> · {pickedHere} picked</span>}
           </span>
         </span>

@@ -40,7 +40,18 @@ export type CatalogTool = {
    * A hint for prompts and pickers; the catalog itself holds every action regardless.
    */
   important?: boolean;
+  /**
+   * Set on Services / Social entries only, and only when true — the vendor has retired the action
+   * (BEA-1365). It stays in the catalog (nothing skipped); pickers tag it and list it after the live
+   * ones, prompt shortlists rank it last.
+   */
+  retired?: boolean;
 };
+
+/** Live actions first, retired after — a stable partition, so nothing else about the order moves. */
+export function liveFirst<T extends { retired?: boolean }>(actions: T[]): T[] {
+  return [...actions.filter((a) => !a.retired), ...actions.filter((a) => a.retired)];
+}
 
 /** Shorten to a whole word — a description cut mid-word ("deployed so t") reads like a bug. */
 export function clip(s: string | null | undefined, max: number): string {
@@ -286,8 +297,8 @@ export class ToolCatalogService implements OnModuleInit {
       const tools: CatalogTool[] = [];
       for (const { service, actions } of perService) {
         const live = service.accounts.some((a) => a.status === 'ACTIVE');
-        for (const a of actions) {
-          if (a.deprecated) continue;
+        // Retired actions stay in (BEA-1365) — tagged, and after the live ones.
+        for (const a of liveFirst(actions)) {
           // The catalog's promise is that every service id has exactly one shape. Anything else a
           // provider hands back is dropped rather than let loose among the load-bearing ids.
           if (!isServiceToolId(a.id)) continue;
@@ -301,6 +312,7 @@ export class ToolCatalogService implements OnModuleInit {
             service: service.slug,
             risky: a.risky,
             ...(a.important ? { important: true } : {}),
+            ...(a.retired ? { retired: true } : {}),
             connectHint: live ? undefined : `Your ${service.name} login needs finishing`,
             connectPath: live ? undefined : '/tools',
           });
@@ -344,8 +356,7 @@ export class ToolCatalogService implements OnModuleInit {
       );
       const tools: CatalogTool[] = [];
       for (const { service, actions } of perService) {
-        for (const a of actions) {
-          if (a.deprecated) continue;
+        for (const a of liveFirst(actions)) {
           if (!isServiceToolId(a.id)) continue;
           tools.push({
             id: a.id,
@@ -356,6 +367,7 @@ export class ToolCatalogService implements OnModuleInit {
             description: clip(a.description, 160) || `${a.name} on ${service.name}`,
             service: service.slug,
             risky: false,
+            ...(a.retired ? { retired: true } : {}),
           });
         }
       }

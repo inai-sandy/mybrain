@@ -166,7 +166,9 @@ failed `ToolCall`, 0 credits, and `ExecuteResult.notFound` rides through `runDet
 **Every action of every connected service is in the catalog — no shortlist, no cap (BEA-1354).**
 The owner's rule: "do not skip any action from providers." `ComposioProvider.listActions()` walks the
 whole cursor-paged list (`limit=1000` is honoured — GitHub's 823 in one ~1.4s page; the toolkit's
-`meta.tools_count` says 871 and the list is what counts; 42 are `is_deprecated` and dropped), cached 5
+`meta.tools_count` says 871 and the list is what counts; 42 are `is_deprecated` and since BEA-1365 they STAY,
+as `ServiceAction.retired: true` — pickers show a muted "retired" tag after the live ones, `tool-shortlist.ts`
+ranks them last, the `/tools` sheet says "823 actions (42 retired)"; nothing filters on it), cached 5
 min; the vendor's "important" mark rides on each action from its `tags` as a HINT only. The catalog
 serves its last good copy at once and re-reads BEHIND the answer when old (`serviceTools()`,
 generation-aware so a connect/disconnect is seen at once, warmed at boot); the 8s budget + last-good
@@ -179,7 +181,9 @@ sheet shows `availableActionCount` for a connected service. Trap: `MAX_ACTIONS` 
 prompt cap, not a catalog cap — putting `important`/`limit` back on any `listActions()` call reopens this.
 
 **The Social section is where that data gets USED (BEA-1356).** Sidebar entry **Social** under Automation
-→ `/social` (platform grid: every platform from `provider.listServices()`, mark by slug with an initial-tile
+→ `/social` (platform grid: every platform from `provider.listServices()` MINUS the vendor's own `account`
+platform — `VENDOR_PLATFORMS` in `social.service.ts`, a display choice only, `svc:account.*` stays in the seam
+(BEA-1365) — mark by slug with an initial-tile
 fallback, endpoint count, header with credit balance · today's spend · daily ceiling) and `/social/:platform`
 (EVERY endpoint from `provider.listActions()`, grouped by the spec's own tags, a form generated from each
 action's JSON schema, and **Run** right there). It talks only to `/api/social*` (`api/src/social/`):

@@ -28,6 +28,16 @@ export const CEILING_DEFAULT = 500;
 /** Where to top up. Shown when the provider answers 402 — never a raw error. */
 export const TOP_UP_URL = 'https://scrapecreators.com';
 
+/**
+ * The vendor's own "platforms" that are not social platforms (BEA-1365): `account` is their
+ * balance/usage endpoints, and the header already shows balance and spend. The grid leaves these
+ * out; the provider and the catalog still own `svc:account.*` — nothing is removed from the seam,
+ * this is a display choice made here and nowhere else.
+ */
+export const VENDOR_PLATFORMS = new Set(['account']);
+/** The platforms the grid draws — the provider's list minus the vendor's own. */
+export const isGridPlatform = (s: { slug: string }) => !VENDOR_PLATFORMS.has(String(s.slug || '').toLowerCase());
+
 /** One platform as the grid draws it. */
 export type SocialPlatform = {
   slug: string;
@@ -86,10 +96,12 @@ export class SocialService {
       this.social.status().catch((e: any) => ({ configured: false, reachable: false, message: String(e?.message || e) })),
       this.social.listServices().catch(() => [] as ServiceInfo[]),
     ]);
-    const platforms = await Promise.all(services.map((s) => this.platformRow(s)));
+    // The grid is the provider's list minus the vendor's own `account` (BEA-1365); spend is still
+    // summed over EVERY platform the provider has, so the header's numbers do not move.
+    const platforms = await Promise.all(services.filter(isGridPlatform).map((s) => this.platformRow(s)));
     const [balance, spentToday, ceiling] = await Promise.all([
       status.configured && status.reachable ? this.social.creditBalance().catch(() => null) : Promise.resolve(null),
-      this.spentToday(platforms.map((p) => p.slug)),
+      this.spentToday(services.map((s) => s.slug)),
       this.ceiling(),
     ]);
     return {

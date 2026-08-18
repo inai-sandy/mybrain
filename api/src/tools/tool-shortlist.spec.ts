@@ -45,4 +45,23 @@ describe('tool-shortlist', () => {
     expect(out[2].id).toBe('svc:github.a700'); // the one that matched is first of its service
     expect(out.length).toBe(43);
   });
+
+  /** A retired action is still offered, but never ahead of a live one (BEA-1365). */
+  it('ranks retired actions last, however well their name matches', () => {
+    const list = [
+      { ...act('star_repo_old', 'Star a repository (old)', 'Star a repository'), retired: true },
+      act('accept_invite', 'Accept a repository invitation'),
+      act('star_repo', 'Star a repository', 'Star a repository for the authenticated user'),
+      { ...act('legacy_thing', 'Legacy thing'), retired: true },
+    ];
+    const ranked = rankActions(list, 'star this repo').map((t) => t.id);
+    expect(ranked).toEqual(['svc:github.star_repo', 'svc:github.accept_invite', 'svc:github.star_repo_old', 'svc:github.legacy_thing']);
+    // With no words at all the retired ones still sit after every live one, in their own order.
+    expect(rankActions(list, '').map((t) => t.id)).toEqual(['svc:github.accept_invite', 'svc:github.star_repo', 'svc:github.star_repo_old', 'svc:github.legacy_thing']);
+    // And a cut shortlist fills up with live ones before it reaches a retired one.
+    const many = Array.from({ length: 50 }, (_, i) => act(`a${i}`, `Action ${i}`));
+    const out = shortlistForPrompt([{ ...act('r', 'Action retired'), retired: true }, ...many], 'action', 40);
+    expect(out.length).toBe(40);
+    expect(out.some((t) => (t as any).retired)).toBe(false);
+  });
 });

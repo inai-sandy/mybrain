@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useGoBack } from '../ui/useGoBack';
-import { ServiceFolds, matchesWords } from '../ui/ServiceFolds';
+import { ServiceFolds, RetiredTag, matchesWords } from '../ui/ServiceFolds';
 import { FlowProcess } from '../ui/FlowProcess';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, Handle, Position,
@@ -13,7 +13,7 @@ import '@xyflow/react/dist/style.css';
 import { ArrowLeft, Save, Loader2, Sparkles, Search, Wand2, Server, Plus, X, Boxes, Play, Trash2, Bot, History, CheckCircle2, AlertCircle, MinusCircle, Clock, ListOrdered } from 'lucide-react';
 import { useToast } from '../ui/Toast';
 
-type PaletteItem = { type: 'skill' | 'tool' | 'generic'; kind?: string; id: string; name: string; description?: string; group?: string; connected?: boolean; connectHint?: string; connectPath?: string; service?: string };
+type PaletteItem = { type: 'skill' | 'tool' | 'generic'; kind?: string; id: string; name: string; description?: string; group?: string; connected?: boolean; connectHint?: string; connectPath?: string; service?: string; retired?: boolean };
 type Palette = { generics: PaletteItem[]; tools: PaletteItem[]; skills: PaletteItem[] };
 
 const KIND_STYLE: Record<string, string> = {
@@ -618,6 +618,7 @@ function PickerGroup({ icon, title, items, onPick, folded, query = '' }: { icon:
         <Plus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-300" />
         <span className="min-w-0 flex-1">
           <span className="font-medium">{label}</span>
+          {it.retired && <span className="ml-1.5"><RetiredTag /></span>}
           {off && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs connecting</span>}
           {it.description && <span className="ml-1 text-xs text-zinc-500">— {it.description}</span>}
         </span>

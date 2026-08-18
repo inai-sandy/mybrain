@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Check, Search, X, Plug, Loader2, Wrench } from 'lucide-react';
 import { Sheet } from './Sheet';
-import { ServiceFolds, matchesWords } from './ServiceFolds';
+import { ServiceFolds, RetiredTag, matchesWords } from './ServiceFolds';
 
 /**
  * The one tool picker (BEA-1167). Reads the single catalog so the agent toolbox, the builder chat's
@@ -22,6 +22,8 @@ export type CatalogTool = {
   connectPath?: string;
   /** Services / Social entries only — which outside service the action belongs to. */
   service?: string;
+  /** Services / Social entries only — the vendor retired it; still offered, tagged (BEA-1365). */
+  retired?: boolean;
 };
 
 /**
@@ -121,6 +123,7 @@ export function ToolPicker({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-1.5">
             <span className={'text-sm font-medium ' + (t.connected ? '' : 'text-zinc-500')}>{label}</span>
+            {t.retired && <RetiredTag />}
             {!t.connected && (
               <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">needs connecting</span>
             )}

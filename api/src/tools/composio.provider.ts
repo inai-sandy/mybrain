@@ -152,8 +152,9 @@ export class ComposioProvider implements ServiceProvider {
    * Until BEA-1354 this asked for Composio's own `important` shortlist (GitHub 36 of 871, Gmail 13)
    * and stopped at 60, which quietly hid ~95% of what a connected service can do. Now the whole
    * cursor-paged list is walked (`total_items` is the API's own count — 823 for GitHub on
-   * 2026-08-17, of which 42 are marked deprecated) and cached for the usual five minutes. The
-   * vendor's "important" mark is kept on each action as a hint for prompts, never as a filter.
+   * 2026-08-17, of which 42 are marked `is_deprecated` — those ride along as `retired: true`, never
+   * dropped, BEA-1365) and cached for the usual five minutes. The vendor's "important" mark is kept
+   * on each action as a hint for prompts, never as a filter.
    * `important` / `limit` remain as opt-ins for a caller that really wants the short list.
    */
   async listActions(service: string, opts: { important?: boolean; limit?: number; search?: string } = {}): Promise<ServiceAction[]> {
@@ -542,7 +543,7 @@ export class ComposioProvider implements ServiceProvider {
       schema: t?.input_parameters || { type: 'object', properties: {} },
       risky: isRiskyAction(slug, service),
       service,
-      deprecated: !!t?.is_deprecated,
+      ...(t?.is_deprecated ? { retired: true } : {}),
       ...(important ? { important: true } : {}),
     };
   }

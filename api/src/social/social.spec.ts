@@ -50,8 +50,10 @@ describe('the platform grid — every platform, counted by the provider (BEA-135
     global.fetch = jest.fn(async () => jsonResponse(200, { success: true, creditCount: 25100 })) as any;
     const o = await svc.overview();
     const theirs = await provider.listServices();
-    expect(o.platforms.length).toBe(theirs.length);
-    expect(o.platforms.length).toBe(29);
+    // The grid is the provider's list minus the vendor's own `account` (BEA-1365): 28 of 29.
+    expect(theirs.length).toBe(29);
+    expect(o.platforms.length).toBe(28);
+    expect(o.platforms.map((p) => p.slug)).not.toContain('account');
     for (const p of o.platforms) {
       const t = theirs.find((x) => x.slug === p.slug)!;
       expect(t).toBeTruthy();
@@ -67,13 +69,35 @@ describe('the platform grid — every platform, counted by the provider (BEA-135
     expect(o.topUpUrl).toBe(TOP_UP_URL);
   });
 
+  /**
+   * The vendor's `account` platform (balance/usage endpoints) is not a social platform and the header
+   * already shows balance and spend (BEA-1365). The GRID leaves it out; the provider and the run path
+   * still own `svc:account.*` — nothing is removed from the seam.
+   */
+  it('hides the vendor’s own `account` platform from the grid, and the provider still owns svc:account.*', async () => {
+    const { svc, provider } = harness({ apiKey: 'k' });
+    global.fetch = jest.fn(async () => jsonResponse(200, { success: true, creditCount: 25100 })) as any;
+    const o = await svc.overview();
+    expect(o.platforms.some((p) => p.slug === 'account')).toBe(false);
+    // The header numbers are the provider's over EVERY platform, so they do not move.
+    expect(o.platforms.reduce((n, p) => n + p.actionCount, 0)).toBe(178 - 4);
+    expect(o.spec.opCount).toBe(178);
+    expect(o.balance).toBe(25100);
+    // Still in the seam: the provider knows the platform and its endpoints.
+    expect(await provider.owns('svc:account.credit_balance')).toBe(true);
+    const account = await provider.getService('account');
+    expect(account?.actionCount).toBe(4);
+    expect((await provider.listActions('account')).length).toBe(4);
+    expect(o.spec.platformCount).toBe(29);
+  });
+
   it('with no key: says so, and still names the platforms rather than drawing an empty grid', async () => {
     const { svc } = harness({});
     const o = await svc.overview();
     expect(o.status.configured).toBe(false);
     expect(o.status.message).toMatch(/key/i);
     expect(o.balance).toBeNull();
-    expect(o.platforms.length).toBe(29);
+    expect(o.platforms.length).toBe(28);
     expect(o.platforms.every((p) => p.connected === false)).toBe(true);
   });
 
@@ -87,7 +111,7 @@ describe('the platform grid — every platform, counted by the provider (BEA-135
     const o = await svc.overview(true);
     expect(specFetches).toBe(1);
     expect(o.spec.lastError).toContain('503');
-    expect(o.platforms.length).toBe(29); // the last good list stays
+    expect(o.platforms.length).toBe(28); // the last good list stays (29 minus the vendor's own `account`)
     expect(provider.specState().opCount).toBe(178);
   });
 

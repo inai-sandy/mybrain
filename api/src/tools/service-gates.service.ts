@@ -247,23 +247,25 @@ export class ServiceGatesService {
    * he cannot release. Any action released earlier is listed too, even if it has since disappeared
    * from the vendor's list.
    */
-  async listForService(slug: string): Promise<{ service: string; actions: { id: string; name: string; description?: string; released: boolean }[] }> {
+  async listForService(slug: string): Promise<{ service: string; actions: { id: string; name: string; description?: string; released: boolean; retired?: boolean }[] }> {
     const service = String(slug || '').toLowerCase();
     const p: ServiceProvider = this.provider as any;
     const actions: ServiceAction[] = p?.listActions ? await p.listActions(service).catch(() => [] as ServiceAction[]) : [];
     const releasedRows = (await this.prisma?.serviceGate?.findMany?.({ where: { service, scope: 'always' } }).catch(() => [])) || [];
     const released = new Set<string>(releasedRows.map((r: any) => r.action));
 
+    // Retired actions are listed too (BEA-1365) — tagged, and after the live ones: a retired
+    // action can still be picked, so it can still pause.
     const out = actions
-      .filter((a) => !a.deprecated && (a.risky || isRiskyAction(a.id, service)))
-      .map((a) => ({ id: a.id, name: a.name, description: a.description, released: released.has(a.id) }));
+      .filter((a) => a.risky || isRiskyAction(a.id, service))
+      .map((a) => ({ id: a.id, name: a.name, description: a.description, released: released.has(a.id), ...(a.retired ? { retired: true } : {}) }));
 
     for (const id of released) {
       if (out.some((a) => a.id === id)) continue;
       const bare = parseServiceToolId(id)?.action?.replace(/_/g, ' ') || id;
       out.push({ id, name: bare.charAt(0).toUpperCase() + bare.slice(1), description: '', released: true });
     }
-    return { service, actions: out.sort((a, b) => a.name.localeCompare(b.name)) };
+    return { service, actions: out.sort((a, b) => Number(!!a.retired) - Number(!!b.retired) || a.name.localeCompare(b.name)) };
   }
 
   /** Turn this gate off for good — for the service, never per agent. */
