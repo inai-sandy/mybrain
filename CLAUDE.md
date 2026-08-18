@@ -513,6 +513,10 @@ next turn's prompt carries "Server cost of that plan (quote these, not your own)
 "Matches names/handles, not topics — many look-alike/dead accounts … Sample before trusting", `search_popular` "Owners of popular posts are
 a good creators finder … argsFrom { handle: owner.username }". Traps: the five-hashtags recorded test now runs on a WORKING hashtag card
 (a plan of only failing sources is refused by design); a harness with no `sampler` never nudges for a finder (it cannot run one).
+The first live re-run after this shipped spent all 3 samples re-checking hashtag/reels search the cards already said were FAILING, then
+planned creators-first on an unsampled `search_profiles` with no budget left — so `RULES_TEXT` now says a FAILING card IS the answer (keep a
+sample for the finder), and when a plan's finder was never sampled and cannot be now, `think()` appends `unsampledFinderNote` ("I have not
+looked at X myself … judge the first run's rows") — the builder never claims accounts are real that it has not seen.
 
 **The agent engine**
 Agent runs execute on **Codex directly** via a host runner at `http://172.18.0.1:8765` (`/home/sandy/codex-runner/server.js`) — Hermes was removed in 2026-06. The runner only takes a prompt; it offers **no per-run tool gating**, which is why the toolbox is enforced on our side (`flows-runner` refuses a step, the prompt declares the allowed set). My Brain's own tools reach the model as a host **MCP server** (`~/.codex/config.toml [mcp_servers.mybrain]`), mounted statically for every run.

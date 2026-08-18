@@ -5,7 +5,7 @@ import { PromptsService } from '../prompts/prompts.service';
 import { LlmService } from '../llm/llm.service';
 import {
   BLOCKS_TEXT, DESIGN_BUDGET, MAX_ASKS_PER_MESSAGE, PLAN_SHAPE_TEXT, RULES_TEXT, SAMPLE_LOOPS_PER_MESSAGE, budgetLine, cardText, costReplyLine, factsSection, fillTemplate, healthNote, indexSection, namedService, noHealthySourceText, overBudget, parseBuilderJson, pickCardIds, planToAgentInput,
-  sampleFinderText, sampleViewText, sampledActionIds, unsampledFinders, validatePlan, seedLine, seedText, unhealthySources,
+  sampleFinderText, sampleViewText, sampledActionIds, unsampledFinderNote, unsampledFinders, validatePlan, seedLine, seedText, unhealthySources,
 } from './thinking-builder';
 import { costLineText, creditsText, planHasHealthySource } from '../social/plan';
 
@@ -750,14 +750,20 @@ describe('a finder is sampled before a creators block is trusted (BEA-1375)', ()
     expect(sampler.sample).not.toHaveBeenCalled();
   });
 
-  it('with no sample budget left (or no sampler) the plan is shown as before — the nudge cannot ask for what it cannot run', async () => {
+  it('with no sample budget left (or no sampler) the plan is shown as before — the nudge cannot ask for what it cannot run — and the reply says the finder was not looked at', async () => {
     const sampler = { sample: jest.fn(async (_s: string, id: string) => view(id)) };
     const h = harness({ sampler, state: { log: [], spec: null, plan: null, cost: null, samples: { used: 3, credits: 3 } }, answer: () => ({ reply: 'Plan. Press Create when happy.', plan: CREATORS_PLAN }) });
-    expect((await h.svc.builderChat(SOCIAL_ASK)).plan).not.toBeNull();
+    const r = await h.svc.builderChat(SOCIAL_ASK);
+    expect(r.plan).not.toBeNull();
     expect(sampler.sample).not.toHaveBeenCalled();
     expect(h.prompts).toHaveLength(1);
+    expect(r.reply).toContain('Note: I have not looked at Instagram · Profile Search myself in this conversation (my sample budget is used up)');
+    expect(unsampledFinderNote([], CARDS)).toBe('');
     const none = harness({ answer: () => ({ reply: 'Plan. Press Create when happy.', plan: CREATORS_PLAN }) });
     expect((await none.svc.builderChat(SOCIAL_ASK)).plan).not.toBeNull();
+    // the rule the first live run needed: a FAILING card is the answer — samples are kept for the finder
+    expect(RULES_TEXT).toMatch(/A card whose health says FAILING today IS the answer — do not spend a sample checking it again/);
+    expect(RULES_TEXT).toMatch(/keep one for the finder of any creators block you may plan/);
   });
 
   it(`model calls per owner message are capped at ${MAX_ASKS_PER_MESSAGE} — a model that keeps sending an unhealthy plan or asking is cut off, not looped`, async () => {
