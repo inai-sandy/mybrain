@@ -217,6 +217,7 @@ describe('run it right there — through the one run path, and written down with
     expect(r.outOfCredits).toBeUndefined();
     expect(r.error).toContain('No posts found');
     expect(r.credits).toBe(0);
+    expect(r.notFound).toBe(true); // the page draws this as "nothing found", not as a red error, and still offers "Make it an agent" (BEA-1359)
   });
 
   it('an id that is not one of ours is refused before anything runs', async () => {

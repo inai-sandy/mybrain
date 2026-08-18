@@ -317,6 +317,8 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ text: string; outOfCredits?: boolean; topUpUrl?: string } | null>(null);
+  /** The vendor answered "nothing found" for these arguments (BEA-1359) — drawn calmly, and still worth an agent. */
+  const [empty, setEmpty] = useState<{ text: string; args: Record<string, any> } | null>(null);
   /** Every page fetched so far. One entry for a plain run; more after "load more". */
   const [pages, setPages] = useState<{ data: any; credits?: number; ms?: number; args: Record<string, any> }[]>([]);
   const [showRaw, setShowRaw] = useState(false);
@@ -333,13 +335,19 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
     }
     setBusy(true);
     setError(null);
+    setEmpty(null);
     const args: Record<string, any> = argsOf(fields, values);
     Object.assign(args, extra);
     try {
       const r = await fetch('/api/social/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actionId: e.id, args }) });
       const body: RunResult = await r.json().catch(() => ({ ok: false, error: 'The server did not answer properly.' }));
       if (!r.ok && !body.error) body.error = 'The server did not answer properly.';
-      if (!body.ok) {
+      if (!body.ok && body.notFound && !append) {
+        // Their "No posts found": nothing matches TODAY — not an error. An agent on a schedule is
+        // exactly how you keep asking, so "Make it an agent" stays on offer (BEA-1359).
+        setEmpty({ text: body.error || 'Nothing found for that.', args });
+        setPages([]);
+      } else if (!body.ok) {
         setError({ text: body.error || 'That did not work.', outOfCredits: body.outOfCredits, topUpUrl: body.topUpUrl || topUpUrl });
         if (!append) setPages([]);
       } else {
@@ -429,7 +437,7 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
 
   /** Hand the tool, the exact arguments just used and a label to the agent builder (BEA-1357). */
   function makeAgent() {
-    const args = last?.args || {};
+    const args = last?.args || empty?.args || {};
     navigate(`/agent?builder=1&tool=${encodeURIComponent(e.id)}&args=${encodeURIComponent(JSON.stringify(args))}&label=${encodeURIComponent(`${platform.name} · ${e.name}`)}`);
   }
 
@@ -450,6 +458,17 @@ function RunPanel({ e, platform, noKey, topUpUrl, onRan }: { e: Endpoint; platfo
         {noKey && <span className="text-xs text-zinc-400">Add the key in Settings to run this.</span>}
         {missing.length > 0 && !noKey && <span className="text-xs text-zinc-400">Needs {missing.join(', ')}</span>}
       </div>
+
+      {empty && (
+        <div className="space-y-3" data-testid="run-empty">
+          <Notice
+            icon={<Search size={20} />}
+            title="Nothing found for that — right now"
+            body={<>{empty.text.replace(/^.*could not do that: /i, '')} <span className="text-zinc-400">(0 credits)</span>. Their Google-indexed searches sometimes answer this for every query for a while. An agent on a schedule keeps asking and writes the rows the day they appear.</>}
+            action={<button onClick={makeAgent} className={GHOST_BTN}><Bot size={15} /> Make it an agent</button>}
+          />
+        </div>
+      )}
 
       {error && (
         error.outOfCredits ? (

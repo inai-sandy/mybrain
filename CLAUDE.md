@@ -241,6 +241,8 @@ fires in `tasks.tz`, default IST). Inside `SocialAgentRunService.run()` a fetch 
 a not_found on a profile/post lookup, a transport error, 401/402/429/5xx or any other `success:false`
 still FAILS the run. Every source empty → the run finishes done and honest ("0 posts found — nothing to
 write, no sheet made"), no sheet, no WhatsApp. The sheet is titled `<job name> — <YYYY-MM-DD>` per run.
+The Social page draws the same `notFound` as a calm "Nothing found for that — right now" (0 credits)
+instead of a red error, and STILL offers "Make it an agent" — a schedule is how you keep asking.
 
 **Watch and Alert remember last time (BEA-1358).** `Agent.mode` = `run` (fetch every time) | `watch` |
 `alert`, chosen on the Social builder form and the job's Settings (`WatchModePicker` in
