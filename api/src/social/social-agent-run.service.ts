@@ -7,7 +7,7 @@ import { whatsappStepLabel } from '../contacts/owner-alert';
 import { PushService } from '../push/push.service';
 import { ServiceActionsService, ServiceRunResult } from '../tools/service-actions.service';
 import { isServiceToolId } from '../tools/service-provider';
-import { Diff, Threshold, diffResults, label as fieldLabel } from './diff';
+import { Diff, Threshold, diffResults, isVolatileUrl, label as fieldLabel } from './diff';
 import { markdownTable, remap, sheetUrl, spreadsheetIdOf, tableOf, valuesGrids, cell, flatten, MAX_ROWS } from './rows';
 import { BudgetCheck, SocialBudgetService } from './social-budget.service';
 import { SocialWatchStore } from './social-watch.store';
@@ -50,6 +50,10 @@ const SHAPE_BATCH = 60;
 const SHAPE_MAX_BATCHES = 8;
 const SHAPE_INPUT_CHARS = 60_000;
 const SHAPE_MAX_TOKENS = 12_000;
+/** One shaping call may take a while (60 items → rows on a Sonnet-class model); the one-turn 60s default cut a 12-item batch off (BEA-1359). */
+const SHAPE_TIMEOUT_MS = 180_000;
+/** The longest a single cell shown to the shaping model may be — a caption is read, not a novel. */
+const SHAPE_CELL_CHARS = 700;
 
 /** The Sheets actions this uses — the seam ids, never a vendor's name (verified live 2026-08-17). */
 export const SHEET_CREATE = 'svc:googlesheets.create_google_sheet1';
@@ -486,7 +490,7 @@ export class SocialAgentRunService {
    * columns, later batches fill them. Recall over precision: when unsure, keep the item.
    */
   private async shape(prompt: string, table: { columns: string[]; rows: any[][] }, header: string[] | null): Promise<{ ok: boolean; columns?: string[]; rows?: any[][]; note?: string; error?: string }> {
-    const items = table.rows.map((r) => Object.fromEntries(table.columns.map((c, i) => [c, r[i]]).filter(([, v]) => v !== '' && v !== null && v !== undefined)));
+    const items = table.rows.map((r) => shapeInput(Object.fromEntries(table.columns.map((c, i) => [c, r[i]]))));
     const batches: any[][] = [];
     for (let i = 0; i < items.length && batches.length < SHAPE_MAX_BATCHES; i += SHAPE_BATCH) batches.push(items.slice(i, i + SHAPE_BATCH));
     let columns: string[] | null = header && header.length ? header : null;
@@ -519,7 +523,7 @@ export class SocialAgentRunService {
       `Reply with ONLY JSON: {"columns":["…"],"rows":[["…"],…]}`;
     let text: string | null;
     try {
-      text = await this.llm.completeHelper('social-shape', p, SHAPE_MAX_TOKENS, 'social-shape');
+      text = await this.llm.completeHelper('social-shape', p, SHAPE_MAX_TOKENS, 'social-shape', { timeoutMs: SHAPE_TIMEOUT_MS });
     } catch (e: any) {
       return { ok: false, error: `the shaping model could not be reached — ${String(e?.message || e).slice(0, 120)}` };
     }
@@ -537,6 +541,22 @@ export class SocialAgentRunService {
       : outRows;
     return { ok: true, columns: finalCols, rows: rowsFixed };
   }
+}
+
+/**
+ * One fetched item as the shaping model should see it (BEA-1359): signed CDN links dropped (a
+ * `display_url`/`video_url`/`profile_pic_url` with `?oh=…&oe=…` is hundreds of characters, expires
+ * in hours and can never be a sheet column — half of a 12-post answer was these), blanks dropped,
+ * long text capped. The post's own link (`/p/ABC/`) is not volatile and stays.
+ */
+export function shapeInput(item: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(item || {})) {
+    if (v === '' || v === null || v === undefined) continue;
+    if (isVolatileUrl(v)) continue;
+    out[k] = typeof v === 'string' && v.length > SHAPE_CELL_CHARS ? v.slice(0, SHAPE_CELL_CHARS) + '…' : v;
+  }
+  return out;
 }
 
 /**

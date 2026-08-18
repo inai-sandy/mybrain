@@ -1,4 +1,4 @@
-import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunService, isEmptySearch, mergeTables, nounOf } from './social-agent-run.service';
+import { KEEP_AS_FETCHED, SHEET_CREATE, SHEET_READ, SHEET_WRITE, SocialAgentRunService, isEmptySearch, mergeTables, nounOf, shapeInput } from './social-agent-run.service';
 
 /**
  * BEA-1357 — a Social agent's run: direct fetch (no engine turn), rows → a Google Sheet through the
@@ -319,5 +319,35 @@ describe('BEA-1359 — a vendor not_found on a search is an empty source, not a 
     await h.svc.run('run1', job({ tools: ['svc:instagram.profile'], toolArgs: { 'svc:instagram.profile': { handle: 'nobody_here_x' } } }));
     expect(h.finish[0].status).toBe('failed');
     expect(h.finish[0].error).toMatch(/No posts found/);
+  });
+});
+
+describe('BEA-1359 — what the shaping model is shown, and how long it may take', () => {
+  const CDN = 'https://scontent-lga3-2.cdninstagram.com/v/t51.82787-15/554420070_n.jpg?stp=dst-jpg_e35&_nc_cat=100&ccb=7-5&_nc_sid=18de74&oh=00_AQEse9YM4KsE&oe=6A896C01';
+  it('shapeInput drops signed CDN links and blanks, keeps the post link, caps long text', () => {
+    const item = { shortcode: 'DO_b2nVjB5O', url: 'https://www.instagram.com/reel/DO_b2nVjB5O/', display_url: CDN, video_url: CDN.replace('.jpg', '.mp4'), owner_profile_pic_url: CDN, caption: 'x'.repeat(2000), like_count: 0, play_count: 44078, empty: '', nothing: null };
+    const out = shapeInput(item);
+    expect(out.url).toBe('https://www.instagram.com/reel/DO_b2nVjB5O/');
+    expect(out.display_url).toBeUndefined();
+    expect(out.video_url).toBeUndefined();
+    expect(out.owner_profile_pic_url).toBeUndefined();
+    expect(out.caption.length).toBe(701); // 700 + the ellipsis
+    expect(out.like_count).toBe(0); // a real zero is kept
+    expect(out.play_count).toBe(44078);
+    expect('empty' in out).toBe(false);
+    expect('nothing' in out).toBe(false);
+  });
+
+  it('the shaping call is made with a longer timeout than a one-turn helper, and the model never sees a CDN link', async () => {
+    const h = harness({ perTool: { 'svc:instagram.search_popular': { ok: true, data: { success: true, credits_charged: 1, posts: [{ shortcode: 'A', url: 'https://www.instagram.com/p/A/', display_url: CDN, caption: 'Smart switches, Kalyan' }] }, credits: 1, serviceName: 'Instagram', actionName: 'Popular Search' } } });
+    await h.svc.run('run1', job({ tools: ['svc:instagram.search_popular'], toolArgs: { 'svc:instagram.search_popular': { query: 'smart home india' } }, prompt: 'Columns: creator, link' }));
+    expect(h.llm.completeHelper).toHaveBeenCalledTimes(1);
+    const [key, prompt, , label, opts] = h.llm.completeHelper.mock.calls[0] as any[];
+    expect(key).toBe('social-shape');
+    expect(label).toBe('social-shape');
+    expect(opts).toEqual({ timeoutMs: 180_000 });
+    expect(prompt).not.toContain('cdninstagram');
+    expect(prompt).toContain('https://www.instagram.com/p/A/');
+    expect(h.finish[0].status).toBe('done');
   });
 });

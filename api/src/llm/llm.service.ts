@@ -13,6 +13,11 @@ export type LlmConfig = { provider: 'anthropic' | 'openrouter' | 'codex' | 'gemi
 /** Ceiling for a single chat completion. Generous enough for a long answer, short enough that a
  *  stalled provider fails fast instead of holding a voice turn open forever. (BEA-1012) */
 const LLM_TIMEOUT_MS = 60_000;
+/** The most any one call may ask to wait (`LlmCallOpts.timeoutMs`), whatever the caller says. */
+const LLM_TIMEOUT_MAX_MS = 300_000;
+
+/** Per-call knobs a caller may pass; everything is optional and the defaults are the old behaviour. */
+export type LlmCallOpts = { timeoutMs?: number };
 const CODEX_RUNNER = process.env.CODEX_RUNNER_URL || 'http://172.18.0.1:8765';
 const GEMINI_RUNNER = process.env.GEMINI_RUNNER_URL || 'http://172.18.0.1:8767';
 const CLAUDE_RUNNER = process.env.CLAUDE_RUNNER_URL || 'http://172.18.0.1:8768';
@@ -313,18 +318,18 @@ export class LlmService {
    * Only a helper with no model at all falls through to the app default, which is what "no opinion"
    * genuinely means.
    */
-  async completeHelper(key: string, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
+  async completeHelper(key: string, prompt: string, maxTokens = 400, label = 'other', opts: LlmCallOpts = {}): Promise<string | null> {
     const cfg = await this.helperModel(key);
     if (cfg) {
-      const { text } = await this.completeWithModel(cfg, prompt, maxTokens, label);
+      const { text } = await this.completeWithModel(cfg, prompt, maxTokens, label, opts);
       return text || null;
     }
-    return this.complete(prompt, maxTokens, label);
+    return this.complete(prompt, maxTokens, label, opts);
   }
 
   /** Single-shot completion via the app's default provider+model. Returns text, or null if unavailable. */
-  async complete(prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
-    return this.completeWith(await this.getConfig(), prompt, maxTokens, label);
+  async complete(prompt: string, maxTokens = 400, label = 'other', opts: LlmCallOpts = {}): Promise<string | null> {
+    return this.completeWith(await this.getConfig(), prompt, maxTokens, label, opts);
   }
 
   /**
@@ -460,7 +465,7 @@ export class LlmService {
    * Like completeWith, but also reports which model ACTUALLY produced the text — so a feature that
    * records its engine (e.g. the Story of the Day) shows the truth after an agent→Sonnet fallback.
    */
-  async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<{ text: string | null; model: string | null; provider?: string; flatRate?: boolean }> {
+  async completeWithModel(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other', opts: LlmCallOpts = {}): Promise<{ text: string | null; model: string | null; provider?: string; flatRate?: boolean }> {
     if (!cfg?.provider || !cfg?.model) return { text: null, model: null };
     if (isFlatRate(cfg.provider)) {
       // Charged up front like any engine turn — it reports nothing until it finishes (BEA-1204).
@@ -481,15 +486,18 @@ export class LlmService {
       } finally {
         release();
       }
-      const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
+      const fb = await this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`, opts);
       return { text: fb, model: fb ? AGENT_FALLBACK_LABEL : cfg.model, provider: 'openrouter', flatRate: false };
     }
-    return { text: await this.completeWith(cfg, prompt, maxTokens, label), model: cfg.model, provider: cfg.provider, flatRate: isFlatRate(cfg.provider) };
+    return { text: await this.completeWith(cfg, prompt, maxTokens, label, opts), model: cfg.model, provider: cfg.provider, flatRate: isFlatRate(cfg.provider) };
   }
 
   /** Single-shot completion forcing a specific provider+model (e.g. the Tasks engine's Sonnet). */
-  async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other'): Promise<string | null> {
+  async completeWith(cfg: LlmConfig | null, prompt: string, maxTokens = 400, label = 'other', opts: LlmCallOpts = {}): Promise<string | null> {
     if (!cfg?.provider || !cfg?.model) return null;
+    // A batch job that legitimately takes minutes (shaping 60 social items into rows) may ask for
+    // longer than the one-turn default; the ceiling stays a ceiling (BEA-1359).
+    const timeoutMs = Math.min(Math.max(Number(opts?.timeoutMs) || LLM_TIMEOUT_MS, 1_000), LLM_TIMEOUT_MAX_MS);
     // The ceiling is checked BEFORE the call, never after (BEA-1204). A call that would begin past
     // the budget does not begin — which is exactly "finish the step in flight, then start nothing
     // new". A subscription engine turn is charged its measured average up front, because it reports
@@ -509,7 +517,7 @@ export class LlmService {
         const text = await this.runAgent(cfg, prompt, label);
         if (text) return text;
         this.log.warn(`${label}: ${cfg.provider} could not answer — falling back to the paid API`);
-        return this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`);
+        return this.completeWith(AGENT_FALLBACK, prompt, maxTokens, `${label}-fallback`, opts);
       }
       if (cfg.provider === 'anthropic') {
         const c = await this.connectors.get<{ apiKey: string }>('anthropic');
@@ -519,7 +527,7 @@ export class LlmService {
           headers: { 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
           body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
           // Bounded so one stalled model call can't own the whole turn (BEA-1012).
-          signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
         if (!r.ok) return null;
         const d: any = await r.json();
@@ -535,7 +543,7 @@ export class LlmService {
           // usage.include → OpenRouter returns the exact cost of THIS request in the response
           body: JSON.stringify({ model: cfg.model, max_tokens: maxTokens, usage: { include: true }, messages: [{ role: 'user', content: prompt }] }),
           // Bounded so one stalled model call can't own the whole turn (BEA-1012).
-          signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs),
         });
         if (!r.ok) return null;
         const d: any = await r.json();

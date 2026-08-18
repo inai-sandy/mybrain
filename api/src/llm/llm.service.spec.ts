@@ -92,3 +92,33 @@ describe('a reply that hits its ceiling is never silent (BEA-1179)', () => {
     expect(h.said).toHaveLength(1); // and it still warned
   });
 });
+
+/**
+ * BEA-1359 — a caller may ask one call to wait longer than the one-turn default (a Social shaping
+ * batch on Sonnet took over 60s and was cut off), through `LlmCallOpts.timeoutMs`; the ceiling is
+ * still a ceiling. Nothing changes for callers that pass nothing.
+ */
+describe('LlmCallOpts.timeoutMs (BEA-1359)', () => {
+  const origFetch = global.fetch;
+  afterEach(() => { global.fetch = origFetch; });
+  const build = () => new LlmService({ get: async () => ({ apiKey: 'k' }) } as any, { setting: { findUnique: async () => null }, usageLog: { create: async () => undefined } } as any);
+
+  it('passes the asked timeout to the provider call, capped at 5 minutes; the default is 60s', async () => {
+    const seen: number[] = [];
+    // The AbortSignal is created from the timeout; watch which value was asked for.
+    const origTimeout = AbortSignal.timeout;
+    (AbortSignal as any).timeout = (ms: number) => { seen.push(ms); return origTimeout.call(AbortSignal, ms); };
+    global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }], usage: {} }) })) as any;
+    try {
+      const s = build();
+      const cfg = { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' } as any;
+      expect(await s.completeWith(cfg, 'p', 10, 'x')).toBe('ok');
+      expect(await s.completeWith(cfg, 'p', 10, 'x', { timeoutMs: 180_000 })).toBe('ok');
+      expect(await s.completeWith(cfg, 'p', 10, 'x', { timeoutMs: 999_999_999 })).toBe('ok');
+      expect(await s.completeWithModel(cfg, 'p', 10, 'x', { timeoutMs: 120_000 })).toMatchObject({ text: 'ok' });
+    } finally {
+      (AbortSignal as any).timeout = origTimeout;
+    }
+    expect(seen).toEqual([60_000, 180_000, 300_000, 120_000]);
+  });
+});

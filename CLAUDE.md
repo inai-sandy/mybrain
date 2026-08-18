@@ -243,6 +243,11 @@ still FAILS the run. Every source empty → the run finishes done and honest ("0
 write, no sheet made"), no sheet, no WhatsApp. The sheet is titled `<job name> — <YYYY-MM-DD>` per run.
 The Social page draws the same `notFound` as a calm "Nothing found for that — right now" (0 credits)
 instead of a red error, and STILL offers "Make it an agent" — a schedule is how you keep asking.
+The shaping model is shown `shapeInput()` items — signed CDN links (`isVolatileUrl`) and blanks
+dropped, cells capped at 700 chars (half of a 12-post answer was expiring picture URLs) — and its
+call asks for `{ timeoutMs: 180_000 }` through the new `LlmCallOpts` on `completeHelper/complete/
+completeWith/completeWithModel` (default 60s, ceiling 5 min): the first live shaping batch on Sonnet
+was cut off at the one-turn 60s and the run failed "the shaping model returned nothing".
 
 **Watch and Alert remember last time (BEA-1358).** `Agent.mode` = `run` (fetch every time) | `watch` |
 `alert`, chosen on the Social builder form and the job's Settings (`WatchModePicker` in
