@@ -153,7 +153,7 @@ describe('builder (BEA-1104)', () => {
       agentArea: { create: jest.fn(async ({ data }: any) => ({ id: 'ar-b', tools: data.tools ?? '[]', createdAt: new Date(), ...data })) },
     };
     const agentSvc: any = { createAgent: jest.fn(async (i: any) => ({ id: 'j1', name: i.name })), updateAgent: jest.fn(async () => ({})) };
-    const llm: any = { completeWithModel: jest.fn(async () => ({ text: llmText, model: 'codex' })) };
+    const llm: any = { completeHelper: jest.fn(async () => llmText) };
     const prompts: any = { get: jest.fn(async () => 'CONVO={{conversation}}') };
     const { AgentAreasService } = require('./agent-areas.service');
     return { svc: new (AgentAreasService as any)(prisma, agentSvc, llm, prompts), store, llm };
@@ -165,7 +165,8 @@ describe('builder (BEA-1104)', () => {
     const r = await svc.builderChat('daily news agent, mornings');
     expect(r.reply).toBe('Here is the plan.');
     expect(r.spec.area.name).toBe('Daily News');
-    expect((llm.completeWithModel.mock.calls[0][0])).toEqual({ provider: 'codex', model: 'codex' }); // flat-rate first
+    // The thinking builder (BEA-1371): design turns run on the named 'agent-builder' helper (Sonnet 5), never Codex.
+    expect(llm.completeHelper.mock.calls[0][0]).toBe('agent-builder');
     const st = await svc.builderState();
     expect(st.log.length).toBe(2); // you + ai, persisted
   });

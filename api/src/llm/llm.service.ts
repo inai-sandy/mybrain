@@ -251,6 +251,11 @@ export class LlmService {
     // mentions a price", "followers dropped". Reads real captions, answers yes/no — Sonnet-class,
     // and never the engine (a CLI turn for a yes/no is the ~25,000-token tax again).
     'social-alert': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
+    // The thinking builder (BEA-1371): the two chat builders' design turns — reads the know-how
+    // cards, decides what is still open, plans the flow. Design work, so Sonnet 5 on the API — never
+    // Codex (Codex only delivers, and a CLI turn cannot carry a sample loop), never a cheaper model
+    // (the owner's rule: the questions decide everything downstream).
+    'agent-builder': { provider: 'openrouter', model: 'anthropic/claude-sonnet-5' },
     // Small extraction jobs: a few example inputs, a few durable facts. Haiku is plenty.
     'suggest-evals': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },
     'agent-learn': { provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' },

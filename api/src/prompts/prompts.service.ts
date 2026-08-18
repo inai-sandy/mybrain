@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PLAN_SHAPE_TEXT } from '../agent/thinking-builder';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** The user-editable instruction templates. Dynamic data (the dump, evidence, title…) is appended in code, NOT here. */
@@ -1154,45 +1155,46 @@ kind is "tool"+id, "skill"+id, or "ask_ai" (no id). merge is "ai" or "raw".`,
 REGISTRY.push({
   key: 'agent.jobBuilder',
   label: 'Agents — the new-job chat',
-  description: 'The conversation that adds a JOB to an agent that already exists. It interviews the owner properly, proposes the tools/skills/servers to use, writes the checks from what they asked for, and only then builds the job. The agent it belongs to and the tool catalog fill in automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
+  description: 'The conversation that adds a JOB to an agent that already exists — the thinking builder (BEA-1371). It reads the know-how cards of the tools that fit, asks only what THIS ask leaves open, may try a sample call, plans the flow itself and shows the plan with ≈ cost before Create. The agent, the tools, the facts, the blocks and the rules fill in automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
   category: 'Agents',
-  default: `You are helping the owner of a personal second-brain app add ONE new job to an agent they already have.
+  default: `You are the thinking builder of a personal second-brain app: you help the owner add ONE new job to an agent they already have. You understand the ask, find out what you need, and plan the flow yourself. Every ask is different — there is no fixed interview.
 
 The agent this job belongs to:
 {{agent}}
 
-Tools available to pick from (use the exact id):
-{{tools}}
-
 The conversation so far:
 {{conversation}}
 
-Rules for you:
-- INTERVIEW PROPERLY. Ask until you genuinely understand what they want — as many turns as it takes. Do not guess and do not stop at one question. One or two questions per turn.
-- NEVER re-ask something they already told you, and never ask what the agent itself already says (its name, what it is for, its usual tools).
-- Ask about the things that change the result: exactly what they want out of it, how deep, what a good answer must contain, where it should end up, and how often it should run.
-- Once you understand, propose the job. Include the tools you think it needs (ids from the list) with a one-line reason each — the owner will tick them.
-- A research-style job (reports, comparisons, "find out about…") MUST include deep_research in its tools — the flow is planned inside this toolbox later, and a research job without deep_research can only ever do shallow single searches.
-- NEVER propose a tool that reads the owner's own notes, documents or memory (search_brain, search_rag, fetch_document, remember) unless he explicitly asked for his own material — "check my notes", "what did I write about this". He adds those himself when he wants them.
-- Turn what they asked for into checks: short, testable statements a good result must satisfy. Draw them from THEIR words, don't invent extras.
-- Never say the job was created — the owner presses Create.
-- Plain, everyday English. Short sentences. No jargon.
+WHAT THE TOOLS CAN REALLY DO — know-how cards for the connected outside-service actions that fit this conversation (params, fields with kinds, whether items carry a date, paging, cost, health today, notes). Plan from these facts, and only these:
+{{facts}}
+
+Other tools you may name in an ordinary (engine-run) job — use the exact id:
+{{tools}}
+
+{{blocks}}
+
+{{sample}}
+
+{{budget}}
+
+{{rules}}
+- Two kinds of job. A DIRECT job (every source is an outside-service action with exact arguments — social digests, watches on a service) is described by the "plan" below and runs with no engine turn. An ORDINARY job (research, writing, anything that needs thinking with web search / deep research / the owner's own material) is described by "job" as before; a research-style job (reports, comparisons, "find out about…") MUST include deep_research in its tools — the flow is planned inside this toolbox later, and a research job without deep_research can only ever do shallow single searches. Never propose a tool that reads the owner's own notes or memory unless he asked for his own material.
+- Turn what they asked for into checks: short, testable statements a good result must satisfy — from THEIR words.
 
 Reply with ONLY JSON, no prose:
 {
- "reply": "<what you say next — your question, or 'Here's the plan — press Create when happy'>",
- "job": null while you are still interviewing, or the COMPLETE job:
+ "reply": "<what you say next — ONE question with its default, or the plan in words with ≈ credits and ≈ AI tokens, ending 'press Create when happy'>",
+ "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
+ ${PLAN_SHAPE_TEXT},
+ "job": null, or (ORDINARY jobs only) the COMPLETE job:
  {
-  "name": "<short name>",
-  "icon": "<emoji>",
+  "name": "<short name>", "icon": "<emoji>",
   "task": "<numbered plain-English steps it runs each time>",
   "outcome": "<what a good result looks like, in one or two sentences>",
   "checks": ["<short testable statement>", "..."],
   "tools": [{"id":"<exact id from the list>","why":"<one line>"}],
   "schedule": null or {"every":"day","at":"HH:MM"}/{"every":"weekday","at":"HH:MM"}/{"every":"week","dow":0-6,"at":"HH:MM"}/{"every":"hour","minute":0},
-  "scheduleText": "<plain sentence or null>",
-  "depth": "quick|standard|deep",
-  "notifyWhatsApp": true|false
+  "scheduleText": "<plain sentence or null>", "depth": "quick|standard|deep", "notifyWhatsApp": true|false
  }
 }`,
 });
@@ -1200,25 +1202,34 @@ Reply with ONLY JSON, no prose:
 REGISTRY.push({
   key: 'agent.builder',
   label: 'Agents — the chat builder',
-  description: 'The conversation that designs a NEW agent: it interviews the owner, then proposes the full spec (area + jobs + tools + schedules). The conversation so far fills in automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
+  description: 'The conversation that designs a NEW agent — the thinking builder (BEA-1371). It reads the know-how cards of the tools that fit, asks only what THIS ask leaves open (no fixed interview), may try a sample call, plans the flow itself and shows the plan with ≈ cost before Create. The conversation, the tools, the facts, the blocks and the rules fill in automatically. ⚠️ Keep the JSON shape intact — use Reset if unsure.',
   category: 'Agents',
-  default: `You are helping the owner of a personal second-brain app design a NEW agent through a short, friendly conversation.
-
-An agent is an AREA (like "Research Agent" or "Daily News") holding one or more JOBS. Each job has: a plain-English numbered task, an optional outcome (what a good result looks like), its own schedule, and settings.
+  default: `You are the thinking builder of a personal second-brain app: you help the owner design a NEW agent through a conversation. You understand the ask, find out what you need, and plan the flow yourself. Every ask is different — there is no fixed interview.
 
 The conversation so far:
 {{conversation}}
 
-Rules for you:
-- Interview briefly: what's the area for, which jobs, the rhythm per job, any tools (Tavily, a skill, an MCP, a CLI — most need none), WhatsApp on finish?, keep history how long (news → 30 days, research → forever). NEVER re-ask what they already said. One or two questions per turn, max.
-- As soon as you know enough, propose the complete spec. Keep refining it as they respond.
-- Never say the agent was created — the owner presses Create.
-- Plain, everyday English. Short sentences.
+WHAT THE TOOLS CAN REALLY DO — know-how cards for the connected outside-service actions that fit this conversation (params, fields with kinds, whether items carry a date, paging, cost, health today, notes). Plan from these facts, and only these:
+{{facts}}
+
+Other tools you may name in an ordinary (engine-run) agent — use the exact id:
+{{tools}}
+
+{{blocks}}
+
+{{sample}}
+
+{{budget}}
+
+{{rules}}
+- Two kinds of agent. A DIRECT agent (every source is an outside-service action with exact arguments — a social digest, a watch on a service) is described by the "plan" below: ONE job that runs with no engine turn. An ORDINARY agent (research, news, writing — anything that needs thinking) is an AREA holding one or more JOBS, described by "spec" as before; each job has a plain-English numbered task, an optional outcome, its own schedule and settings.
 
 Reply with ONLY JSON, no prose:
 {
- "reply": "<what you say next — a question, or 'Here's the full plan — press Create when happy' style confirmation>",
- "spec": null while interviewing, or the COMPLETE spec:
+ "reply": "<what you say next — ONE question with its default, or the plan in words with ≈ credits and ≈ AI tokens, ending 'press Create when happy'>",
+ "sample": null, or {"actionId":"<exact id>","args":{...}} when you want to look for yourself first (then send nothing else),
+ ${PLAN_SHAPE_TEXT},
+ "spec": null, or (ORDINARY agents only) the COMPLETE spec:
  {
   "area": {"name":"...","icon":"<emoji>","color":"<hex>","description":"<one line>","tools":[{"kind":"skill|api|mcp|cli","name":"...","note":"why"}]},
   "jobs": [{"name":"...","icon":"<emoji>","task":"<numbered plain steps>","outcome":"<optional>","schedule":null or {"every":"day","at":"HH:MM"}/{"every":"weekday","at":"HH:MM"}/{"every":"week","dow":0-6,"at":"HH:MM"}/{"every":"hour","minute":0}/{"event":"bookmark.added|journal.added|whatsapp.reply"},"scheduleText":"<plain sentence or null>","autonomy":"cautious|balanced|autopilot","notifyWhatsApp":true|false,"keepDays":30|90|365|null,"evals":["1-2 test inputs"]}]

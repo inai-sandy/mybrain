@@ -17,12 +17,13 @@
     {
       "id": "BEA-1370",
       "title": "Sample calls for the builder (capped)",
-      "status": "in_progress"
+      "status": "done",
+      "sha": "89a3f11"
     },
     {
       "id": "BEA-1371",
       "title": "The builder itself (Sonnet 5, facts, plan-with-cost)",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "id": "BEA-1372",

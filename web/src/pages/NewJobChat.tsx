@@ -3,6 +3,7 @@ import { Loader2, Sparkles, X, CalendarClock, Check, ListChecks, Wrench } from '
 import { useToast } from '../ui/Toast';
 import { Sheet } from '../ui/Sheet';
 import { ChatInput } from '../ui/ChatInput';
+import { PlanCard, PlanCost } from '../ui/PlanCard';
 import { ToolPicker, useCatalog } from '../ui/ToolPicker';
 
 /**
@@ -17,6 +18,9 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   const catalog = useCatalog();
   const [log, setLog] = useState<{ who: 'you' | 'ai'; text: string }[]>([]);
   const [job, setJob] = useState<any>(null);
+  // The direct-fetch plan with its cost (BEA-1371) — shown instead of the job when the builder planned one.
+  const [plan, setPlan] = useState<any>(null);
+  const [cost, setCost] = useState<PlanCost | null>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -33,7 +37,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`/api/agent/areas/${areaId}/job-builder`).then((r) => r.json()).then((d) => { setLog(d.log || []); setJob(d.job || null); }).catch(() => undefined);
+    fetch(`/api/agent/areas/${areaId}/job-builder`).then((r) => r.json()).then((d) => { setLog(d.log || []); setJob(d.job || null); setPlan(d.plan || null); setCost(d.cost || null); }).catch(() => undefined);
   }, [areaId]);
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [log, job]);
 
@@ -61,6 +65,8 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
       if (!r.ok) throw new Error(d.message || 'Could not reply');
       setLog((p) => [...p, { who: 'ai', text: d.reply }]);
       setJob(d.job || null);
+      setPlan(d.plan || null);
+      setCost(d.cost || null);
     } catch (e: any) { setLog((p) => [...p, { who: 'ai', text: e?.message || 'Something went wrong — try again.' }]); }
     setBusy(false);
   }
@@ -70,13 +76,17 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
    * what was wrong before, so the flow is part of pressing Create — not a button to find later.
    */
   async function create() {
-    if (!job || creating) return;
+    if ((!job && !plan) || creating) return;
     setCreating(true);
     try {
       setStep('Building the job…');
       const r = await fetch(`/api/agent/areas/${areaId}/job-builder/create`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools: picked, checks }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.message || 'Could not create');
+
+      // A direct job from a plan (BEA-1371) draws its own flow picture on the server (BEA-1366) —
+      // planning a second one here would fork it from what runs.
+      if (plan && !job) { toast('success', 'Job created 🎉'); onCreated(d.url); setCreating(false); setStep(''); return; }
 
       setStep('Drawing the steps…');
       try {
@@ -101,7 +111,7 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
 
   async function reset() {
     await fetch(`/api/agent/areas/${areaId}/job-builder`, { method: 'DELETE' }).catch(() => undefined);
-    setLog([]); setJob(null);
+    setLog([]); setJob(null); setPlan(null); setCost(null);
   }
 
   const toolName = (id: string) => (catalog?.tools || []).find((t: any) => t.id === id)?.name || id;
@@ -139,6 +149,8 @@ export function NewJobChat({ areaId, areaName, onCreated, onClose }: { areaId: s
               </div>
             ))}
             {busy && <div className="flex items-center gap-2 text-xs text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" />thinking…</div>}
+
+            {plan && !job && <PlanCard plan={plan} cost={cost} creating={creating} onCreate={create} createLabel="Create this job" />}
 
             {job && (
               <div className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
